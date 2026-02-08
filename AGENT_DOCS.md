@@ -21,6 +21,11 @@ Priority chain (highest wins): CLI args > env vars (`CVAT_HOST`, `CVAT_TOKEN`, e
 
 Config file uses TOML format, parsed with stdlib `tomllib` (Python 3.11+). The `[cvat]` section maps directly to `CvatConfig` fields.
 
+## CLI commands
+
+- `setup` — interactive wizard that prompts for host and auth (token or username/password), saves to `~/.config/cveta2/config.toml` via `CvatConfig.save_to_file()`. Prefills defaults from existing config if present.
+- `fetch` — fetches bbox annotations and deleted images from a CVAT project.
+
 ## Implicit decisions
 
 - `_RECTANGLE = "rectangle"` in `client.py` — only rectangle/box shapes are extracted; other shape types are silently skipped.

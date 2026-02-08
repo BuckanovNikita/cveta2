@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import getpass
 import os
-import sys
 from pathlib import Path
 
-if sys.version_info >= (3, 11):
+try:
     import tomllib
-else:
-    import tomli as tomllib
+except ImportError:
+    import tomli as tomllib  # pyright: ignore[reportMissingImports]
 
 from loguru import logger
 from pydantic import BaseModel
@@ -81,6 +80,21 @@ class CvatConfig(BaseModel):
         )
         # file < env < cli
         return file_cfg.merge(env_cfg).merge(cli_cfg)
+
+    def save_to_file(self, path: Path = CONFIG_PATH) -> Path:
+        """Write config to a TOML file under the ``[cvat]`` section."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines = ["[cvat]", f'host = "{self.host}"']
+        if self.token:
+            lines.append(f'token = "{self.token}"')
+        if self.username:
+            lines.append(f'username = "{self.username}"')
+        if self.password:
+            lines.append(f'password = "{self.password}"')
+        lines.append("")  # trailing newline
+        path.write_text("\n".join(lines))
+        logger.info(f"Config saved to {path}")
+        return path
 
     def ensure_credentials(self) -> CvatConfig:
         """Prompt interactively for missing credentials.  Returns updated copy."""

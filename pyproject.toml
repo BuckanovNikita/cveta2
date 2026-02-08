@@ -32,14 +32,11 @@ line-length = 88
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "D",       # pydocstyle - no mandatory docstrings for this utility project
-    "ANN",     # flake8-annotations - mypy handles type checking
     "COM812",  # missing-trailing-comma - conflicts with ruff formatter
     "ISC001",  # single-line-implicit-string-concatenation - conflicts with formatter
-    "T20",     # flake8-print - project uses print for CLI output
-    "FBT",     # flake8-boolean-trap - too restrictive for CLI tools
     "EM",      # flake8-errmsg - overly pedantic for small projects
     "TRY003",  # raise-vanilla-args - same as EM
+    "RUF001",  # ambiguous-unicode-character - project uses Russian (Cyrillic) strings
 ]
 fixable = ["ALL"]
 
@@ -58,6 +55,10 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 module = ["cvat_sdk.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["tomli", "tomllib"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
