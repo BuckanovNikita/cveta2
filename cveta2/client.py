@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import cvat_sdk
 from cvat_sdk import make_client
 from loguru import logger
 
@@ -58,7 +59,7 @@ class _TaskContext:
 
 
 def _build_label_maps(
-    project: Any,
+    project: cvat_sdk.Project,
 ) -> tuple[dict[int, str], dict[int, str]]:
     """Build label_id -> label_name and attr spec_id -> name mappings."""
     label_names: dict[int, str] = {}

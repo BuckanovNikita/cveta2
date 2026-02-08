@@ -36,6 +36,8 @@ ignore = [
     "ISC001",  # single-line-implicit-string-concatenation - conflicts with formatter
     "EM",      # flake8-errmsg - overly pedantic for small projects
     "TRY003",  # raise-vanilla-args - same as EM
+    "D213",
+    "D203",
     "RUF001",  # ambiguous-unicode-character - project uses Russian (Cyrillic) strings
 ]
 fixable = ["ALL"]

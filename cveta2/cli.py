@@ -88,7 +88,7 @@ def _run_setup(config_path: Path) -> None:
     host_default = existing.host or "https://app.cvat.ai"
     host = input(f"CVAT host [{host_default}]: ").strip() or host_default
 
-    print("\nАутентификация: токен (t) или логин/пароль (p)?")
+    logger.info("Аутентификация: токен (t) или логин/пароль (p)?")
     auth_choice = ""
     while auth_choice not in ("t", "p"):
         auth_choice = input("Выберите [t/p]: ").strip().lower()
@@ -125,11 +125,11 @@ def _run_setup(config_path: Path) -> None:
         password=password,
     )
     saved_path = cfg.save_to_file(config_path)
-    print(f"\nГотово! Конфигурация сохранена в {saved_path}")
+    logger.info(f"Готово! Конфигурация сохранена в {saved_path}")
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Main CLI entry point."""
+    """Run the CLI with the given arguments."""
     args = _parse_args(argv)
 
     if args.command == "setup":
