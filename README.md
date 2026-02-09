@@ -1,13 +1,13 @@
 # cveta2
 
-Утилита для получения аннотаций из проектов CVAT в виде структурированных Python-объектов (Pydantic-моделей).
+Утилита для получения аннотаций из проектов CVAT в виде структурированных Python-объектов (Pydantic-моделей). Доступна как CLI и как Python-API через класс `CvatClient` (есть и удобная функция-обёртка).
 
 ## Возможности
 
 - Получение **всех bounding-box аннотаций** проекта в плоском формате (одна запись на каждый bbox)
 - Получение **списка удалённых изображений** по всем задачам проекта
 - Всё за **один вызов** — без промежуточных XML/ZIP файлов
-- **Конфигурация через файл** — настройки CVAT хранятся в `~/.config/cveta2/config.toml`
+- **Конфигурация через файл** — настройки CVAT хранятся в `~/.config/cveta2/config.yaml`
 
 ## Установка
 
@@ -23,7 +23,7 @@ uv sync
 uv run cveta2 setup
 ```
 
-Команда задаст несколько вопросов (адрес сервера, способ аутентификации) и сохранит конфигурацию в `~/.config/cveta2/config.toml`.
+Команда задаст несколько вопросов (адрес сервера, способ аутентификации) и сохранит конфигурацию в `~/.config/cveta2/config.yaml`.
 
 Если конфиг уже существует, текущие значения будут предложены по умолчанию — можно просто нажать Enter, чтобы оставить их.
 
@@ -31,21 +31,21 @@ uv run cveta2 setup
 
 ### Файл конфигурации
 
-Создайте файл `~/.config/cveta2/config.toml` (или используйте `cveta2 setup`):
+Создайте файл `~/.config/cveta2/config.yaml` (или используйте `cveta2 setup`):
 
-```toml
-[cvat]
-host = "https://app.cvat.ai"
-token = "your-personal-access-token"
+```yaml
+cvat:
+  host: "https://app.cvat.ai"
+  token: "your-personal-access-token"
 ```
 
 Или с логином/паролем:
 
-```toml
-[cvat]
-host = "https://app.cvat.ai"
-username = "your-username"
-password = "your-password"
+```yaml
+cvat:
+  host: "https://app.cvat.ai"
+  username: "your-username"
+  password: "your-password"
 ```
 
 ### Приоритет настроек
@@ -54,7 +54,7 @@ password = "your-password"
 
 1. **CLI-аргументы** (`--host`, `--token` и т.д.) — наивысший приоритет
 2. **Переменные окружения** (`CVAT_HOST`, `CVAT_TOKEN` и т.д.)
-3. **Файл конфигурации** (`~/.config/cveta2/config.toml`)
+3. **Файл конфигурации** (`~/.config/cveta2/config.yaml`)
 4. **Интерактивный ввод** — если не указаны логин/пароль/токен
 
 ### Переменные окружения
@@ -90,7 +90,7 @@ uv run cveta2 fetch --project-id 123 --annotations-csv annotations.csv --deleted
 uv run cveta2 fetch --project-id 123 --completed-only
 
 # Указать альтернативный конфиг-файл
-uv run cveta2 fetch --project-id 123 --config /path/to/config.toml
+uv run cveta2 fetch --project-id 123 --config /path/to/config.yaml
 
 # Также работает как python-модуль
 uv run python -m cveta2 fetch --project-id 123
@@ -99,13 +99,17 @@ uv run python -m cveta2 fetch --project-id 123
 ### Как Python-библиотека
 
 ```python
-from cveta2 import fetch_annotations
+from cveta2 import CvatClient, fetch_annotations
 from cveta2.config import CvatConfig
 
 # Конфиг загрузится из файла + env автоматически
 cfg = CvatConfig.load(cli_host="https://app.cvat.ai", cli_token="your-token")
 
-result = fetch_annotations(cfg, project_id=123)
+client = CvatClient(cfg)
+result = client.fetch_annotations(project_id=123)
+
+# Или короче через функцию-обёртку
+# result = fetch_annotations(cfg, project_id=123)
 
 # Аннотации bbox — список BBoxAnnotation
 for ann in result.annotations:

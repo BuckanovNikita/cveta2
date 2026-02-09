@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from pydantic import BaseModel
@@ -31,6 +32,13 @@ class BBoxAnnotation(BaseModel):
     source: str
     annotation_id: int | None
     attributes: dict[str, str]
+
+    def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
+        """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON)."""
+        row = self.model_dump()
+        attrs = row.pop("attributes")
+        row["attributes"] = json.dumps(attrs, ensure_ascii=False)
+        return row
 
 
 class DeletedImage(BaseModel):

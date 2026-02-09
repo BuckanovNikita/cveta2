@@ -6,16 +6,13 @@ import getpass
 import os
 from pathlib import Path
 
-try:
-    import tomllib
-except ImportError:
-    import tomli as tomllib  # pyright: ignore[reportMissingImports]
+import yaml
 
 from loguru import logger
 from pydantic import BaseModel
 
 CONFIG_DIR = Path.home() / ".config" / "cveta2"
-CONFIG_PATH = CONFIG_DIR / "config.toml"
+CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 
 class CvatConfig(BaseModel):
@@ -28,13 +25,19 @@ class CvatConfig(BaseModel):
 
     @classmethod
     def from_file(cls, path: Path = CONFIG_PATH) -> CvatConfig:
-        """Load config from a TOML file.  Returns empty config if file is missing."""
+        """Load config from a YAML file.  Returns empty config if file is missing."""
         if not path.is_file():
             return cls()
         logger.debug(f"Loading config from {path}")
-        with path.open("rb") as fh:
-            data = tomllib.load(fh)
+        with path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+        if not isinstance(data, dict):
+            logger.warning(f"Invalid config format in {path}; expected mapping.")
+            return cls()
         cvat_section = data.get("cvat", {})
+        if not isinstance(cvat_section, dict):
+            logger.warning(f"Invalid config section in {path}; expected 'cvat' mapping.")
+            return cls()
         return cls(**{k: v for k, v in cvat_section.items() if k in cls.model_fields})
 
     @classmethod
@@ -82,17 +85,23 @@ class CvatConfig(BaseModel):
         return file_cfg.merge(env_cfg).merge(cli_cfg)
 
     def save_to_file(self, path: Path = CONFIG_PATH) -> Path:
-        """Write config to a TOML file under the ``[cvat]`` section."""
+        """Write config to a YAML file under the ``cvat`` key."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        lines = ["[cvat]", f'host = "{self.host}"']
+        cvat_data: dict[str, str] = {"host": self.host}
         if self.token:
-            lines.append(f'token = "{self.token}"')
+            cvat_data["token"] = self.token
         if self.username:
-            lines.append(f'username = "{self.username}"')
+            cvat_data["username"] = self.username
         if self.password:
-            lines.append(f'password = "{self.password}"')
-        lines.append("")  # trailing newline
-        path.write_text("\n".join(lines))
+            cvat_data["password"] = self.password
+        content = yaml.safe_dump(
+            {"cvat": cvat_data},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+        if not content.endswith("\n"):
+            content += "\n"
+        path.write_text(content, encoding="utf-8")
         logger.info(f"Config saved to {path}")
         return path
 
