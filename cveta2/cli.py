@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import sys
 from pathlib import Path
+
+import pandas as pd
 
 from loguru import logger
 
 from cveta2.client import fetch_annotations
 from cveta2.config import CONFIG_PATH, CvatConfig
+from cveta2.models import BBoxAnnotation
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -66,6 +70,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Output JSON file path. Prints to stdout if omitted.",
     )
+    fetch_parser.add_argument(
+        "--annotations-csv",
+        default=None,
+        help="Path to save all annotations as CSV.",
+    )
+    fetch_parser.add_argument(
+        "--deleted-txt",
+        default=None,
+        help="Path to save deleted image names (one per line).",
+    )
+    fetch_parser.add_argument(
+        "--completed-only",
+        action="store_true",
+        help="Process only tasks with status 'completed'.",
+    )
 
     # --- setup ---------------------------------------------------------------
     setup_parser = subparsers.add_parser(
@@ -79,6 +98,27 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     return parser.parse_args(argv)
+
+
+def _annotation_to_csv_row(a: BBoxAnnotation) -> dict[str, str | int | float | bool]:
+    """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON string)."""
+    row = a.model_dump()
+    attrs = row.pop("attributes")
+    row["attributes"] = json.dumps(attrs, ensure_ascii=False)
+    return row
+
+
+def _write_annotations_csv(annotations: list[BBoxAnnotation], path: Path) -> None:
+    """Write all annotations to a CSV file using pandas."""
+    df = pd.DataFrame([_annotation_to_csv_row(a) for a in annotations])
+    df.to_csv(path, index=False, encoding="utf-8")
+    logger.info(f"Annotations CSV saved to {path} ({len(annotations)} rows)")
+
+
+def _write_deleted_txt(deleted_image_names: list[str], path: Path) -> None:
+    """Write deleted image names to a text file, one per line."""
+    path.write_text("\n".join(deleted_image_names) + ("\n" if deleted_image_names else ""), encoding="utf-8")
+    logger.info(f"Deleted images list saved to {path} ({len(deleted_image_names)} names)")
 
 
 def _run_setup(config_path: Path) -> None:
@@ -156,13 +196,24 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     if args.command == "fetch":
-        result = fetch_annotations(cfg, project_id=args.project_id)
+        result = fetch_annotations(
+            cfg,
+            project_id=args.project_id,
+            completed_only=args.completed_only,
+        )
         json_output = result.model_dump_json(indent=2)
         if args.output:
             Path(args.output).write_text(json_output)
             logger.info(f"Output saved to {args.output}")
         else:
             sys.stdout.write(json_output + "\n")
+        if args.annotations_csv:
+            _write_annotations_csv(result.annotations, Path(args.annotations_csv))
+        if args.deleted_txt:
+            _write_deleted_txt(
+                [d.image_name for d in result.deleted_images],
+                Path(args.deleted_txt),
+            )
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ Config file uses TOML format, parsed with stdlib `tomllib` (Python 3.11+). The `
 ## CLI commands
 
 - `setup` — interactive wizard that prompts for host and auth (token or username/password), saves to `~/.config/cveta2/config.toml` via `CvatConfig.save_to_file()`. Prefills defaults from existing config if present.
-- `fetch` — fetches bbox annotations and deleted images from a CVAT project.
+- `fetch` — fetches bbox annotations and deleted images from a CVAT project. Optional `--annotations-csv` and `--deleted-txt` write CSV (all bbox rows) and one-per-line deleted image names respectively. `--completed-only` limits processing to tasks with status `"completed"`.
 
 ## Implicit decisions
 

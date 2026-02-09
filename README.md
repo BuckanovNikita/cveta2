@@ -83,6 +83,12 @@ uv run cveta2 fetch --host https://app.cvat.ai --project-id 123 --token YOUR_TOK
 # Сохранить в файл
 uv run cveta2 fetch --project-id 123 -o result.json
 
+# Сохранить аннотации в CSV и имена удалённых изображений в текстовый файл
+uv run cveta2 fetch --project-id 123 --annotations-csv annotations.csv --deleted-txt deleted.txt
+
+# Только задачи со статусом «completed»
+uv run cveta2 fetch --project-id 123 --completed-only
+
 # Указать альтернативный конфиг-файл
 uv run cveta2 fetch --project-id 123 --config /path/to/config.toml
 
@@ -127,6 +133,7 @@ for img in result.deleted_images:
 | `bbox_y_br`     | `float`      | Y нижнего правого угла                       |
 | `task_id`        | `int`        | ID задачи в CVAT                             |
 | `task_name`      | `str`        | Название задачи                              |
+| `task_status`    | `str`        | Статус задачи (completed, annotation, …)     |
 | `frame_id`       | `int`        | Индекс кадра внутри задачи                   |
 | `subset`         | `str`        | Подмножество (train/val/test/default)        |
 | `occluded`       | `bool`       | Объект перекрыт                              |

@@ -55,6 +55,7 @@ class _TaskContext:
     attr_names: dict[int, str]
     task_id: int
     task_name: str
+    task_status: str
     subset: str
 
 
@@ -100,6 +101,7 @@ def _collect_shapes(
                 bbox_y_br=shape.points[3],
                 task_id=ctx.task_id,
                 task_name=ctx.task_name,
+                task_status=ctx.task_status,
                 frame_id=shape.frame,
                 subset=ctx.subset,
                 occluded=shape.occluded,
@@ -141,6 +143,7 @@ def _collect_track_shapes(
                     bbox_y_br=tracked_shape.points[3],
                     task_id=ctx.task_id,
                     task_name=ctx.task_name,
+                    task_status=ctx.task_status,
                     frame_id=tracked_shape.frame,
                     subset=ctx.subset,
                     occluded=tracked_shape.occluded,
@@ -164,11 +167,15 @@ def _collect_track_shapes(
 def fetch_annotations(
     cfg: CvatConfig,
     project_id: int,
+    *,
+    completed_only: bool = False,
 ) -> ProjectAnnotations:
     """Fetch all bounding-box annotations and deleted images from a CVAT project.
 
     Returns a ``ProjectAnnotations`` with one ``BBoxAnnotation`` per bounding
     box and a flat list of ``DeletedImage`` records.
+
+    If ``completed_only`` is True, only tasks with status "completed" are processed.
     """
     resolved = cfg.ensure_credentials()
     client_kwargs = _build_client_kwargs(resolved)
@@ -180,6 +187,9 @@ def fetch_annotations(
         label_names, attr_names = _build_label_maps(project)
 
         tasks = project.get_tasks()
+        if completed_only:
+            tasks = [t for t in tasks if getattr(t, "status", None) == "completed"]
+            logger.info(f"Filtered to {len(tasks)} completed task(s)")
         if not tasks:
             logger.warning("No tasks in this project.")
             return ProjectAnnotations(annotations=[], deleted_images=[])
@@ -209,12 +219,14 @@ def fetch_annotations(
 
             # Annotations
             labeled_data, _ = client.api_client.tasks_api.retrieve_annotations(task.id)
+            task_status = str(getattr(task, "status", "") or "")
             ctx = _TaskContext(
                 frames=frames,
                 label_names=label_names,
                 attr_names=attr_names,
                 task_id=task.id,
                 task_name=task.name,
+                task_status=task_status,
                 subset=task.subset or "",
             )
 

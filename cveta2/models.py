@@ -22,6 +22,7 @@ class BBoxAnnotation(BaseModel):
     # Extra fields
     task_id: int
     task_name: str
+    task_status: str = ""
     frame_id: int
     subset: str
     occluded: bool
