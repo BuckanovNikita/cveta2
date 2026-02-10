@@ -9,8 +9,12 @@ cveta2/
   __init__.py   - public API re-exports: fetch_annotations, BBoxAnnotation, DeletedImage, ProjectAnnotations
   models.py     - Pydantic models for annotation data (BBoxAnnotation, DeletedImage, ProjectAnnotations)
   config.py     - CvatConfig pydantic model; loads and merges settings from CLI > env > config file
-  client.py     - CVAT SDK interaction: CvatClient class + fetch_annotations() wrapper
-  cli.py        - argparse CLI entry point; CliApp class with setup/fetch handlers
+  client.py     - public CVAT client facade: CvatClient class + fetch_annotations() wrapper
+  _client/      - internal implementation details split from client.py
+    context.py  - _TaskContext + extraction constants
+    mapping.py  - helper functions for label/attribute/user mapping
+    extractors.py - shape/track conversion into BBoxAnnotation models
+  cli.py        - argparse CLI entry point; CliApp class with setup/fetch handlers and optional CSV/TXT exports
   __main__.py   - enables `python -m cveta2`
 main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()
 ```
@@ -24,11 +28,19 @@ Config file uses YAML format, parsed with `pyyaml`. The `cvat` mapping maps dire
 ## CLI commands
 
 - `setup` — interactive wizard that prompts for host and auth (token or username/password), saves to `~/.config/cveta2/config.yaml` via `CvatConfig.save_to_file()`. Prefills defaults from existing config if present.
-- `fetch` — fetches bbox annotations and deleted images from a CVAT project. Optional `--annotations-csv` and `--deleted-txt` write CSV (all bbox rows) and one-per-line deleted image names respectively. `--completed-only` limits processing to tasks with status `"completed"`.
+- `fetch` — fetches bbox annotations and deleted images from a CVAT project. Optional `--annotations-csv` and `--deleted-txt` write CSV (all bbox rows) and one-per-line deleted image names respectively. `--completed-only` limits processing to tasks with status `"completed"`. JSON output is written to stdout unless `--output` is set.
+
+## Data model notes
+
+- `BBoxAnnotation` includes task metadata (`task_id`, `task_name`, `task_status`, `task_updated_date`), source metadata (`created_by_username`, `source`, `annotation_id`), and frame metadata (`frame_id`, `subset`, image size).
+- `BBoxAnnotation.to_csv_row()` serializes `attributes` as a JSON string (`ensure_ascii=False`) so non-ASCII attribute values remain readable in CSV.
+- `ProjectAnnotations` consistently contains two lists: `annotations` and `deleted_images` (possibly empty).
 
 ## Implicit decisions
 
-- `_RECTANGLE = "rectangle"` in `client.py` — only rectangle/box shapes are extracted; other shape types are silently skipped.
-- `fetch_annotations()` is a thin wrapper over `CvatClient.fetch_annotations()` and accepts `CvatConfig` to decouple credential resolution from CVAT API calls.
+- `_RECTANGLE = "rectangle"` in `cveta2/_client/context.py` — only rectangle/box shapes are extracted; other shape types are skipped.
+- Track extraction ignores shapes with `outside=True`; only visible track boxes are converted into `BBoxAnnotation`.
+- `fetch_annotations()` is a thin wrapper over `CvatClient.fetch_annotations()` and returns `ProjectAnnotations`.
 - `ensure_credentials()` on `CvatConfig` returns a new copy with prompted values — it never mutates in place.
+- If `token` is present, `ensure_credentials()` does not prompt for username/password.
 - `main.py` kept at project root for backwards compatibility with `python main.py fetch ...` invocations.
