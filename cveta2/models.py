@@ -24,6 +24,8 @@ class BBoxAnnotation(BaseModel):
     task_id: int
     task_name: str
     task_status: str = ""
+    task_updated_date: str = ""
+    created_by_username: str = ""
     frame_id: int
     subset: str
     occluded: bool

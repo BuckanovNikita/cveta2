@@ -33,6 +33,7 @@ class _TaskContext:
     task_id: int
     task_name: str
     task_status: str
+    task_updated_date: str
     subset: str
 
 
@@ -67,13 +68,16 @@ class CvatClient:
         with self._client_factory(**client_kwargs) as client:
             project = client.projects.retrieve(project_id)
             logger.info(f"Project: {project.name} (id={project.id})")
+            logger.debug(f"Project structure from API: {project}")
 
             label_names, attr_names = self._build_label_maps(project)
 
             tasks = project.get_tasks()
+            logger.debug(f"Tasks structure from API: {tasks}")
             if completed_only:
                 tasks = [t for t in tasks if getattr(t, "status", None) == "completed"]
                 logger.info(f"Filtered to {len(tasks)} completed task(s)")
+                logger.debug(f"Completed tasks structure from API: {tasks}")
             if not tasks:
                 logger.warning("No tasks in this project.")
                 return ProjectAnnotations(annotations=[], deleted_images=[])
@@ -83,13 +87,22 @@ class CvatClient:
 
             for task in tasks:
                 logger.info(f"Processing task {task.id} ({task.name})")
+                logger.trace(f"Task structure from API: {task}")
 
                 data_meta, _ = client.api_client.tasks_api.retrieve_data_meta(
                     task.id,
                 )
+                logger.debug(f"Task data_meta structure from API: {data_meta}")
                 frames: dict[int, Any] = dict(enumerate(data_meta.frames or []))
+                logger.trace(
+                    f"Task frames structure from API: {data_meta.frames or []}",
+                )
 
                 # Deleted frames
+                logger.trace(
+                    f"Task deleted_frames structure from API: "
+                    f"{data_meta.deleted_frames or []}",
+                )
                 for frame_id in data_meta.deleted_frames or []:
                     frame_info = frames.get(frame_id)
                     all_deleted.append(
@@ -105,7 +118,19 @@ class CvatClient:
                 labeled_data, _ = client.api_client.tasks_api.retrieve_annotations(
                     task.id,
                 )
+                logger.debug(
+                    f"Task annotations structure from API: {labeled_data}",
+                )
                 task_status = str(getattr(task, "status", "") or "")
+                task_updated_date_raw = getattr(task, "updated_date", None) or getattr(
+                    task, "updated_at", None
+                )
+                if task_updated_date_raw is None:
+                    task_updated_date = ""
+                elif hasattr(task_updated_date_raw, "isoformat"):
+                    task_updated_date = task_updated_date_raw.isoformat()
+                else:
+                    task_updated_date = str(task_updated_date_raw)
                 ctx = _TaskContext(
                     frames=frames,
                     label_names=label_names,
@@ -113,6 +138,7 @@ class CvatClient:
                     task_id=task.id,
                     task_name=task.name,
                     task_status=task_status,
+                    task_updated_date=task_updated_date,
                     subset=task.subset or "",
                 )
 
@@ -147,10 +173,27 @@ class CvatClient:
         attr_names: dict[int, str],
     ) -> dict[str, str]:
         """Map AttributeVal list to {attr_name: value} dict."""
+        logger.trace(f"Raw attributes structure from API: {raw_attrs}")
         return {
             attr_names.get(a.spec_id, str(a.spec_id)): a.value
             for a in (raw_attrs or [])
         }
+
+    def _resolve_creator_username(self, item: object) -> str:
+        """Extract creator username from CVAT entity metadata."""
+        user_obj = getattr(item, "created_by", None) or getattr(item, "owner", None)
+        if user_obj is None:
+            return ""
+
+        username = getattr(user_obj, "username", None) or getattr(
+            user_obj, "name", None
+        )
+        if username is not None:
+            return str(username)
+
+        if isinstance(user_obj, dict):
+            return str(user_obj.get("username") or user_obj.get("name") or "")
+        return ""
 
     def _build_label_maps(
         self,
@@ -159,9 +202,13 @@ class CvatClient:
         """Build label_id -> label_name and attr spec_id -> name mappings."""
         label_names: dict[int, str] = {}
         attr_names: dict[int, str] = {}
-        for label in project.get_labels():
+        labels = project.get_labels()
+        logger.debug(f"Project labels structure from API: {labels}")
+        for label in labels:
+            logger.trace(f"Label structure from API: {label}")
             label_names[label.id] = label.name
             for attr in label.attributes or []:
+                logger.trace(f"Label attribute structure from API: {attr}")
                 attr_names[attr.id] = attr.name
         return label_names, attr_names
 
@@ -173,7 +220,11 @@ class CvatClient:
         """Extract BBoxAnnotations from direct shapes."""
         result: list[BBoxAnnotation] = []
         for shape in shapes:
+            logger.trace(f"Shape structure from API: {shape}")
             if shape.type.value != _RECTANGLE:
+                logger.warning(
+                    f"Skipping shape type {shape.type.value} as it's not supported."
+                )
                 continue
             frame_info = ctx.frames.get(shape.frame)
             if frame_info is None:
@@ -191,6 +242,8 @@ class CvatClient:
                     task_id=ctx.task_id,
                     task_name=ctx.task_name,
                     task_status=ctx.task_status,
+                    task_updated_date=ctx.task_updated_date,
+                    created_by_username=self._resolve_creator_username(shape),
                     frame_id=shape.frame,
                     subset=ctx.subset,
                     occluded=shape.occluded,
@@ -213,8 +266,10 @@ class CvatClient:
         """Extract BBoxAnnotations from track shapes (interpolated/linked bboxes)."""
         result: list[BBoxAnnotation] = []
         for track in tracks:
+            logger.trace(f"Track structure from API: {track}")
             track_label = ctx.label_names.get(track.label_id, "<unknown>")
             for tracked_shape in track.shapes or []:
+                logger.trace(f"Tracked shape structure from API: {tracked_shape}")
                 if tracked_shape.type.value != _RECTANGLE:
                     continue
                 if tracked_shape.outside:
@@ -222,6 +277,9 @@ class CvatClient:
                 frame_info = ctx.frames.get(tracked_shape.frame)
                 if frame_info is None:
                     continue
+                creator_username = self._resolve_creator_username(
+                    tracked_shape,
+                ) or self._resolve_creator_username(track)
                 result.append(
                     BBoxAnnotation(
                         image_name=frame_info.name,
@@ -235,6 +293,8 @@ class CvatClient:
                         task_id=ctx.task_id,
                         task_name=ctx.task_name,
                         task_status=ctx.task_status,
+                        task_updated_date=ctx.task_updated_date,
+                        created_by_username=creator_username,
                         frame_id=tracked_shape.frame,
                         subset=ctx.subset,
                         occluded=tracked_shape.occluded,
