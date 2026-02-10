@@ -9,7 +9,7 @@
 - Возвращает список удаленных кадров/изображений как `DeletedImage`
 - Отдает результат сразу в JSON (и при желании сохраняет CSV/TXT)
 - Поддерживает фильтр по задачам со статусом `completed`
-- Работает через единый конфиг: CLI аргументы + env + YAML
+- Работает через конфиг: env-переменные и/или YAML (рекомендуется `cveta2 setup`)
 
 ## Установка
 
@@ -58,19 +58,18 @@ cvat:
 
 ### Приоритет источников
 
-1. CLI аргументы (`--host`, `--organization`, `--token`, `--username`, `--password`)
-2. Переменные окружения (`CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN`, `CVAT_USERNAME`, `CVAT_PASSWORD`)
-3. YAML-конфиг (`~/.config/cveta2/config.yaml`)
-4. Интерактивный ввод (если не хватает кредов и токен не задан)
+1. Переменные окружения (`CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN`, `CVAT_USERNAME`, `CVAT_PASSWORD`) переопределяют файл.
+2. YAML-конфиг по умолчанию: `~/.config/cveta2/config.yaml` (путь можно задать через `CVETA2_CONFIG`).
+3. Если хост не задан — выводится подсказка: выполните `cveta2 setup` или задайте env.
+4. Интерактивный ввод (если не хватает кредов и токен не задан) при первом запросе к API.
 
 ## CLI: примеры
 
-```bash
-# Базовый fetch (host/creds берутся из env или config)
-uv run cveta2 fetch --project-id 123
+Сначала настройте доступ: `uv run cveta2 setup` или задайте переменные окружения (см. Конфигурация).
 
-# Явно передать host + токен
-uv run cveta2 fetch --host https://app.cvat.ai --project-id 123 --token YOUR_TOKEN
+```bash
+# Базовый fetch (host/creds из env или ~/.config/cveta2/config.yaml)
+uv run cveta2 fetch --project-id 123
 
 # Сохранить JSON в файл
 uv run cveta2 fetch --project-id 123 -o result.json
@@ -84,8 +83,8 @@ uv run cveta2 fetch --project-id 123 --deleted-txt deleted.txt
 # Обрабатывать только задачи со статусом completed
 uv run cveta2 fetch --project-id 123 --completed-only
 
-# Использовать альтернативный конфиг
-uv run cveta2 fetch --project-id 123 --config /path/to/config.yaml
+# Путь к конфигу через env
+CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch --project-id 123
 
 # Вариант запуска как модуля
 uv run python -m cveta2 fetch --project-id 123
@@ -97,7 +96,8 @@ uv run python -m cveta2 fetch --project-id 123
 from cveta2 import CvatClient, fetch_annotations
 from cveta2.config import CvatConfig
 
-cfg = CvatConfig.load(cli_host="https://app.cvat.ai", cli_token="your-token")
+# Конфиг из файла + env (или задайте CVAT_HOST, CVAT_TOKEN в окружении)
+cfg = CvatConfig.load()
 
 client = CvatClient(cfg)
 result = client.fetch_annotations(project_id=123, completed_only=True)
@@ -257,8 +257,8 @@ uv run cveta2 fetch --project-id 123 --annotations-csv annotations.csv --deleted
 # Только задачи со статусом «completed»
 uv run cveta2 fetch --project-id 123 --completed-only
 
-# Указать альтернативный конфиг-файл
-uv run cveta2 fetch --project-id 123 --config /path/to/config.yaml
+# Указать альтернативный конфиг-файл через env
+CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch --project-id 123
 
 # Также работает как python-модуль
 uv run python -m cveta2 fetch --project-id 123
@@ -270,8 +270,8 @@ uv run python -m cveta2 fetch --project-id 123
 from cveta2 import CvatClient, fetch_annotations
 from cveta2.config import CvatConfig
 
-# Конфиг загрузится из файла + env автоматически
-cfg = CvatConfig.load(cli_host="https://app.cvat.ai", cli_token="your-token")
+# Конфиг загрузится из файла и env (или выполните cveta2 setup)
+cfg = CvatConfig.load()
 
 client = CvatClient(cfg)
 result = client.fetch_annotations(project_id=123)

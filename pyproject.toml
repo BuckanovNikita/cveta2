@@ -31,6 +31,7 @@ dev = [
     "types-openpyxl>=3.1.5.20250919",
     "types-python-dateutil>=2.9.0.20260124",
     "types-xlrd>=2.0.0.20251020",
+    "vulture>=2.14",
 ]
 
 [tool.ruff]
@@ -70,3 +71,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-v", "--tb=short"]
+
+[tool.vulture]
+min_confidence = 80
+paths = ["cveta2", "main.py"]

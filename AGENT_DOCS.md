@@ -21,9 +21,7 @@ main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()
 
 ## Config resolution
 
-Priority chain (highest wins): CLI args > env vars (`CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN`, etc.) > `~/.config/cveta2/config.yaml` > interactive prompt.
-
-Config file uses YAML format, parsed with `pyyaml`. The `cvat` mapping maps directly to `CvatConfig` fields, including optional `organization` (CVAT organization slug). Organization is applied to the SDK client by setting `client.organization_slug` after creation (cvat_sdk's `make_client` does not accept an organization argument), so all API requests run in that organization context.
+Priority: env vars override config file. No CVAT settings/credentials on CLI. Env: `CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN`, `CVAT_USERNAME`, `CVAT_PASSWORD`. Config file path: `CVETA2_CONFIG` or default `~/.config/cveta2/config.yaml`. If host is missing, CLI suggests running `cveta2 setup` or setting env. Config file uses YAML with `cvat` mapping to `CvatConfig` fields. Organization is applied via `client.organization_slug` after client creation.
 
 ## CLI commands
 

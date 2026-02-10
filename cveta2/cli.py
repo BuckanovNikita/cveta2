@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,7 +46,12 @@ class CliApp:
             "fetch",
             help="Fetch project bbox annotations and deleted images.",
         )
-        self._add_common_args(parser)
+        parser.add_argument(
+            "--project-id",
+            type=int,
+            required=True,
+            help="ID of the CVAT project.",
+        )
         parser.add_argument(
             "--output",
             "-o",
@@ -80,49 +86,10 @@ class CliApp:
         parser.add_argument(
             "--config",
             default=None,
-            help="Path to YAML config file (default: ~/.config/cveta2/config.yaml).",
-        )
-
-    def _add_common_args(self, parser: argparse.ArgumentParser) -> None:
-        """Add connection / auth arguments shared by all sub-commands."""
-        parser.add_argument(
-            "--host",
-            default="",
-            help="CVAT server URL (or set CVAT_HOST env var, or config file).",
-        )
-        parser.add_argument(
-            "--organization",
-            default=None,
             help=(
-                "CVAT organization slug (or set CVAT_ORGANIZATION env var, "
-                "or config file)."
+                "Path to YAML config (default: ~/.config/cveta2/config.yaml "
+                "or CVETA2_CONFIG)."
             ),
-        )
-        parser.add_argument(
-            "--project-id",
-            type=int,
-            required=True,
-            help="ID of the CVAT project.",
-        )
-        parser.add_argument(
-            "--token",
-            default=None,
-            help="Personal Access Token (or set CVAT_TOKEN env var, or config file).",
-        )
-        parser.add_argument(
-            "--username",
-            default=None,
-            help="CVAT username (or set CVAT_USERNAME env var, or config file).",
-        )
-        parser.add_argument(
-            "--password",
-            default=None,
-            help="CVAT password (or set CVAT_PASSWORD env var, or config file).",
-        )
-        parser.add_argument(
-            "--config",
-            default=None,
-            help="Path to YAML config file (default: ~/.config/cveta2/config.yaml).",
         )
 
     def _write_annotations_csv(
@@ -199,31 +166,24 @@ class CliApp:
         saved_path = cfg.save_to_file(config_path)
         logger.info(f"Готово! Конфигурация сохранена в {saved_path}")
 
-    def _load_config(self, args: argparse.Namespace) -> CvatConfig:
-        if args.config:
-            return CvatConfig.load(
-                cli_host=args.host,
-                cli_organization=args.organization,
-                cli_token=args.token,
-                cli_username=args.username,
-                cli_password=args.password,
-                config_path=Path(args.config),
-            )
-        return CvatConfig.load(
-            cli_host=args.host,
-            cli_organization=args.organization,
-            cli_token=args.token,
-            cli_username=args.username,
-            cli_password=args.password,
-        )
+    def _load_config(self, config_path: Path | None = None) -> CvatConfig:
+        """Load config from file and env. Path from CVETA2_CONFIG or argument."""
+        if config_path is not None:
+            return CvatConfig.load(config_path=config_path)
+        path_env = os.environ.get("CVETA2_CONFIG")
+        path = Path(path_env) if path_env else None
+        return CvatConfig.load(config_path=path)
 
     def _require_host(self, cfg: CvatConfig) -> None:
         """Abort with a friendly message when host is not configured."""
         if cfg.host:
             return
+        config_path = os.environ.get("CVETA2_CONFIG", str(CONFIG_PATH))
         sys.exit(
-            "Error: CVAT host is required. "
-            "Provide --host, set CVAT_HOST, or add it to ~/.config/cveta2/config.yaml."
+            "Error: CVAT host is not configured.\n"
+            "Run setup to save credentials:\n  cveta2 setup\n"
+            "Or set env: CVAT_HOST and (CVAT_TOKEN or CVAT_USERNAME/CVAT_PASSWORD).\n"
+            f"Config file path: {config_path}"
         )
 
     def _write_json_output(self, content: str, output_path: str | None) -> None:
@@ -236,7 +196,7 @@ class CliApp:
 
     def _run_fetch(self, args: argparse.Namespace) -> None:
         """Run the ``fetch`` command."""
-        cfg = self._load_config(args)
+        cfg = self._load_config()
         self._require_host(cfg)
 
         client = CvatClient(cfg)
@@ -257,7 +217,11 @@ class CliApp:
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""
         if args.command == "setup":
-            setup_path = Path(args.config) if args.config else CONFIG_PATH
+            if args.config:
+                setup_path = Path(args.config)
+            else:
+                path_env = os.environ.get("CVETA2_CONFIG")
+                setup_path = Path(path_env) if path_env else CONFIG_PATH
             self._run_setup(setup_path)
             return
         if args.command == "fetch":

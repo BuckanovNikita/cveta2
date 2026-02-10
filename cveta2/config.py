@@ -1,4 +1,4 @@
-"""Configuration loading with priority: CLI > env > config file > interactive."""
+"""Configuration loading with priority: env > config file > defaults."""
 
 from __future__ import annotations
 
@@ -12,6 +12,12 @@ from pydantic import BaseModel
 
 CONFIG_DIR = Path.home() / ".config" / "cveta2"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
+
+
+# Override config file path with CVETA2_CONFIG (e.g. /path/to/config.yaml).
+def _config_path() -> Path:
+    path = os.environ.get("CVETA2_CONFIG")
+    return Path(path) if path else CONFIG_PATH
 
 
 class CvatConfig(BaseModel):
@@ -67,28 +73,12 @@ class CvatConfig(BaseModel):
         )
 
     @classmethod
-    def load(  # noqa: PLR0913
-        cls,
-        *,
-        cli_host: str = "",
-        cli_organization: str | None = None,
-        cli_token: str | None = None,
-        cli_username: str | None = None,
-        cli_password: str | None = None,
-        config_path: Path = CONFIG_PATH,
-    ) -> CvatConfig:
-        """Merge all sources respecting priority: CLI > env > file > defaults."""
-        file_cfg = cls.from_file(config_path)
+    def load(cls, config_path: Path | None = None) -> CvatConfig:
+        """Merge env and file: file < env. Config path from CVETA2_CONFIG or default."""
+        path = config_path if config_path is not None else _config_path()
+        file_cfg = cls.from_file(path)
         env_cfg = cls.from_env()
-        cli_cfg = cls(
-            host=cli_host,
-            organization=cli_organization,
-            token=cli_token,
-            username=cli_username,
-            password=cli_password,
-        )
-        # file < env < cli
-        return file_cfg.merge(env_cfg).merge(cli_cfg)
+        return file_cfg.merge(env_cfg)
 
     def save_to_file(self, path: Path = CONFIG_PATH) -> Path:
         """Write config to a YAML file under the ``cvat`` key."""
