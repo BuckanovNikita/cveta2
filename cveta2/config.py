@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import yaml
-
 from loguru import logger
 from pydantic import BaseModel
 
@@ -36,7 +35,9 @@ class CvatConfig(BaseModel):
             return cls()
         cvat_section = data.get("cvat", {})
         if not isinstance(cvat_section, dict):
-            logger.warning(f"Invalid config section in {path}; expected 'cvat' mapping.")
+            logger.warning(
+                f"Invalid config section in {path}; expected 'cvat' mapping."
+            )
             return cls()
         return cls(**{k: v for k, v in cvat_section.items() if k in cls.model_fields})
 

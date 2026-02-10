@@ -1,0 +1,30 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format (all files)
+        entry: uv run ruff format .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ruff-check
+        name: ruff check (all files)
+        entry: uv run ruff check .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: mypy
+        name: mypy (all files)
+        entry: uv run mypy .
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: uv-lock
+        name: uv lock
+        entry: uv lock
+        language: system
+        pass_filenames: false
+        always_run: true

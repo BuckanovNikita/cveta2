@@ -5,8 +5,8 @@ from cveta2.models import BBoxAnnotation, DeletedImage, ProjectAnnotations
 
 __all__ = [
     "BBoxAnnotation",
+    "CvatClient",
     "DeletedImage",
     "ProjectAnnotations",
-    "CvatClient",
     "fetch_annotations",
 ]

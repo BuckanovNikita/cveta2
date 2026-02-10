@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import cvat_sdk
 from cvat_sdk import make_client
@@ -11,6 +11,9 @@ from loguru import logger
 
 from cveta2.config import CvatConfig
 from cveta2.models import BBoxAnnotation, DeletedImage, ProjectAnnotations
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _RECTANGLE = "rectangle"
 
@@ -41,6 +44,7 @@ class CvatClient:
         cfg: CvatConfig,
         client_factory: Callable[..., Any] | None = None,
     ) -> None:
+        """Store client configuration and optional SDK client factory."""
         self._cfg = cfg
         self._client_factory = client_factory or make_client
 
