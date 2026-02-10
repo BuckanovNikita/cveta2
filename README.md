@@ -42,6 +42,7 @@ uv run cveta2 fetch --project-id 123 -o result.json
 ```yaml
 cvat:
   host: "https://app.cvat.ai"
+  organization: "my-team"
   token: "your-personal-access-token"
 ```
 
@@ -50,14 +51,15 @@ cvat:
 ```yaml
 cvat:
   host: "https://app.cvat.ai"
+  organization: "my-team"
   username: "your-username"
   password: "your-password"
 ```
 
 ### Приоритет источников
 
-1. CLI аргументы (`--host`, `--token`, `--username`, `--password`)
-2. Переменные окружения (`CVAT_HOST`, `CVAT_TOKEN`, `CVAT_USERNAME`, `CVAT_PASSWORD`)
+1. CLI аргументы (`--host`, `--organization`, `--token`, `--username`, `--password`)
+2. Переменные окружения (`CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN`, `CVAT_USERNAME`, `CVAT_PASSWORD`)
 3. YAML-конфиг (`~/.config/cveta2/config.yaml`)
 4. Интерактивный ввод (если не хватает кредов и токен не задан)
 
@@ -199,6 +201,7 @@ uv run cveta2 setup
 ```yaml
 cvat:
   host: "https://app.cvat.ai"
+  organization: "my-team"
   token: "your-personal-access-token"
 ```
 
@@ -207,6 +210,7 @@ cvat:
 ```yaml
 cvat:
   host: "https://app.cvat.ai"
+  organization: "my-team"
   username: "your-username"
   password: "your-password"
 ```
@@ -215,8 +219,8 @@ cvat:
 
 Настройки загружаются из нескольких источников (в порядке приоритета):
 
-1. **CLI-аргументы** (`--host`, `--token` и т.д.) — наивысший приоритет
-2. **Переменные окружения** (`CVAT_HOST`, `CVAT_TOKEN` и т.д.)
+1. **CLI-аргументы** (`--host`, `--organization`, `--token` и т.д.) — наивысший приоритет
+2. **Переменные окружения** (`CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN` и т.д.)
 3. **Файл конфигурации** (`~/.config/cveta2/config.yaml`)
 4. **Интерактивный ввод** — если не указаны логин/пароль/токен
 
@@ -225,6 +229,7 @@ cvat:
 | Переменная     | Описание                          |
 |----------------|-----------------------------------|
 | `CVAT_HOST`    | URL сервера CVAT                  |
+| `CVAT_ORGANIZATION` | Slug организации CVAT      |
 | `CVAT_TOKEN`   | Personal Access Token             |
 | `CVAT_USERNAME`| Имя пользователя                  |
 | `CVAT_PASSWORD`| Пароль                            |

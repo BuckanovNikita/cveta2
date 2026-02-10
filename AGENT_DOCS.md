@@ -21,9 +21,9 @@ main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()
 
 ## Config resolution
 
-Priority chain (highest wins): CLI args > env vars (`CVAT_HOST`, `CVAT_TOKEN`, etc.) > `~/.config/cveta2/config.yaml` > interactive prompt.
+Priority chain (highest wins): CLI args > env vars (`CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN`, etc.) > `~/.config/cveta2/config.yaml` > interactive prompt.
 
-Config file uses YAML format, parsed with `pyyaml`. The `cvat` mapping maps directly to `CvatConfig` fields.
+Config file uses YAML format, parsed with `pyyaml`. The `cvat` mapping maps directly to `CvatConfig` fields, including optional `organization` (CVAT organization slug). Organization is applied to the SDK client by setting `client.organization_slug` after creation (cvat_sdk's `make_client` does not accept an organization argument), so all API requests run in that organization context.
 
 ## CLI commands
 
@@ -34,7 +34,7 @@ Config file uses YAML format, parsed with `pyyaml`. The `cvat` mapping maps dire
 
 - `BBoxAnnotation` includes task metadata (`task_id`, `task_name`, `task_status`, `task_updated_date`), source metadata (`created_by_username`, `source`, `annotation_id`), and frame metadata (`frame_id`, `subset`, image size).
 - `BBoxAnnotation.to_csv_row()` serializes `attributes` as a JSON string (`ensure_ascii=False`) so non-ASCII attribute values remain readable in CSV.
-- `ProjectAnnotations` consistently contains two lists: `annotations` and `deleted_images` (possibly empty).
+- `ProjectAnnotations` contains `annotations`, `deleted_images`, and `images_without_annotations` (frames that have no bbox; included in CSV with None for bbox/annotation fields).
 
 ## Implicit decisions
 

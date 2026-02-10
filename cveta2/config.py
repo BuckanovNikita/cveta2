@@ -18,6 +18,7 @@ class CvatConfig(BaseModel):
     """CVAT connection settings."""
 
     host: str = ""
+    organization: str | None = None
     token: str | None = None
     username: str | None = None
     password: str | None = None
@@ -46,6 +47,7 @@ class CvatConfig(BaseModel):
         """Build config from environment variables."""
         return cls(
             host=os.environ.get("CVAT_HOST", ""),
+            organization=os.environ.get("CVAT_ORGANIZATION"),
             token=os.environ.get("CVAT_TOKEN"),
             username=os.environ.get("CVAT_USERNAME"),
             password=os.environ.get("CVAT_PASSWORD"),
@@ -58,16 +60,18 @@ class CvatConfig(BaseModel):
         """
         return CvatConfig(
             host=override.host or self.host,
+            organization=override.organization or self.organization,
             token=override.token or self.token,
             username=override.username or self.username,
             password=override.password or self.password,
         )
 
     @classmethod
-    def load(
+    def load(  # noqa: PLR0913
         cls,
         *,
         cli_host: str = "",
+        cli_organization: str | None = None,
         cli_token: str | None = None,
         cli_username: str | None = None,
         cli_password: str | None = None,
@@ -78,6 +82,7 @@ class CvatConfig(BaseModel):
         env_cfg = cls.from_env()
         cli_cfg = cls(
             host=cli_host,
+            organization=cli_organization,
             token=cli_token,
             username=cli_username,
             password=cli_password,
@@ -89,6 +94,8 @@ class CvatConfig(BaseModel):
         """Write config to a YAML file under the ``cvat`` key."""
         path.parent.mkdir(parents=True, exist_ok=True)
         cvat_data: dict[str, str] = {"host": self.host}
+        if self.organization:
+            cvat_data["organization"] = self.organization
         if self.token:
             cvat_data["token"] = self.token
         if self.username:

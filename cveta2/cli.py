@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from loguru import logger
 
-from cveta2.client import CvatClient
+from cveta2.client import CvatClient, _project_annotations_to_csv_rows
 from cveta2.config import CONFIG_PATH, CvatConfig
 
 if TYPE_CHECKING:
-    from cveta2.models import BBoxAnnotation
+    from cveta2.models import ProjectAnnotations
 
 
 class CliApp:
@@ -91,6 +91,14 @@ class CliApp:
             help="CVAT server URL (or set CVAT_HOST env var, or config file).",
         )
         parser.add_argument(
+            "--organization",
+            default=None,
+            help=(
+                "CVAT organization slug (or set CVAT_ORGANIZATION env var, "
+                "or config file)."
+            ),
+        )
+        parser.add_argument(
             "--project-id",
             type=int,
             required=True,
@@ -119,13 +127,14 @@ class CliApp:
 
     def _write_annotations_csv(
         self,
-        annotations: list[BBoxAnnotation],
+        result: ProjectAnnotations,
         path: Path,
     ) -> None:
-        """Write all annotations to a CSV file using pandas."""
-        df = pd.DataFrame([a.to_csv_row() for a in annotations])
+        """Write rows to CSV with None values for missing fields."""
+        rows = _project_annotations_to_csv_rows(result)
+        df = pd.DataFrame(rows)
         df.to_csv(path, index=False, encoding="utf-8")
-        logger.info(f"Annotations CSV saved to {path} ({len(annotations)} rows)")
+        logger.info(f"Annotations CSV saved to {path} ({len(rows)} rows)")
 
     def _write_deleted_txt(self, deleted_image_names: list[str], path: Path) -> None:
         """Write deleted image names to a text file, one per line."""
@@ -143,6 +152,12 @@ class CliApp:
 
         host_default = existing.host or "https://app.cvat.ai"
         host = input(f"CVAT host [{host_default}]: ").strip() or host_default
+        org_default = existing.organization or ""
+        org_prompt = "Organization slug (optional)"
+        if org_default:
+            org_prompt += f" [{org_default}]"
+        org_prompt += ": "
+        organization = input(org_prompt).strip() or org_default
 
         logger.info("Аутентификация: токен (t) или логин/пароль (p)?")
         auth_choice = ""
@@ -176,6 +191,7 @@ class CliApp:
 
         cfg = CvatConfig(
             host=host,
+            organization=organization or None,
             token=token,
             username=username,
             password=password,
@@ -187,6 +203,7 @@ class CliApp:
         if args.config:
             return CvatConfig.load(
                 cli_host=args.host,
+                cli_organization=args.organization,
                 cli_token=args.token,
                 cli_username=args.username,
                 cli_password=args.password,
@@ -194,6 +211,7 @@ class CliApp:
             )
         return CvatConfig.load(
             cli_host=args.host,
+            cli_organization=args.organization,
             cli_token=args.token,
             cli_username=args.username,
             cli_password=args.password,
@@ -229,10 +247,7 @@ class CliApp:
         self._write_json_output(result.model_dump_json(indent=2), args.output)
 
         if args.annotations_csv:
-            self._write_annotations_csv(
-                result.annotations,
-                Path(args.annotations_csv),
-            )
+            self._write_annotations_csv(result, Path(args.annotations_csv))
         if args.deleted_txt:
             self._write_deleted_txt(
                 [d.image_name for d in result.deleted_images],
