@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING
 
 import pandas as pd
-from cvat_sdk import make_client
 from loguru import logger
 from tqdm import tqdm
 
 from cveta2._client.context import _TaskContext
 from cveta2._client.extractors import _collect_shapes, _collect_track_shapes
 from cveta2._client.mapping import _build_label_maps
+from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.config import CvatConfig
 from cveta2.models import (
     BBoxAnnotation,
@@ -22,21 +22,8 @@ from cveta2.models import (
 from cveta2.projects_cache import ProjectInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-class _TasksApiProtocol(Protocol):
-    def retrieve_data_meta(self, task_id: int) -> tuple[object, object]: ...
-    def retrieve_annotations(self, task_id: int) -> tuple[object, object]: ...
-
-
-class _TaskProtocol(Protocol):
-    id: int
-    name: str
-    status: object
-    subset: str | None
-    updated_date: object | None
-    updated_at: object | None
+    from cveta2._client.dtos import RawFrame, RawTask
+    from cveta2._client.ports import CvatApiPort
 
 
 class CvatClient:
@@ -45,24 +32,26 @@ class CvatClient:
     def __init__(
         self,
         cfg: CvatConfig,
-        client_factory: Callable[..., Any] | None = None,
+        api: CvatApiPort | None = None,
     ) -> None:
-        """Store client configuration and optional SDK client factory."""
+        """Store client configuration and optional API adapter.
+
+        Parameters
+        ----------
+        cfg:
+            CVAT connection settings.
+        api:
+            An object satisfying ``CvatApiPort``.  When *None* (the default),
+            a ``SdkCvatApiAdapter`` backed by the real CVAT SDK is created.
+
+        """
         self._cfg = cfg
-        self._client_factory = client_factory or make_client
+        self._api: CvatApiPort = api or SdkCvatApiAdapter(cfg)
 
     def list_projects(self) -> list[ProjectInfo]:
         """Fetch list of projects from CVAT (id and name)."""
-        resolved = self._cfg.ensure_credentials()
-        client_kwargs = self._build_client_kwargs(resolved)
-        with self._client_factory(**client_kwargs) as client:
-            if resolved.organization:
-                client.organization_slug = resolved.organization
-            raw = client.projects.list()
-            return [
-                ProjectInfo(id=getattr(p, "id", 0), name=getattr(p, "name", "") or "")
-                for p in raw
-            ]
+        raw = self._api.list_projects()
+        return [ProjectInfo(id=p.id, name=p.name) for p in raw]
 
     def resolve_project_id(
         self,
@@ -104,104 +93,70 @@ class CvatClient:
 
         If ``completed_only`` is True, only tasks with status "completed" are processed.
         """
-        resolved = self._cfg.ensure_credentials()
-        client_kwargs = self._build_client_kwargs(resolved)
+        labels = self._api.get_project_labels(project_id)
+        label_names, attr_names = _build_label_maps(labels)
 
-        with self._client_factory(**client_kwargs) as client:
-            if resolved.organization:
-                client.organization_slug = resolved.organization
-                logger.trace(f"Using organization: {resolved.organization}")
-            project = client.projects.retrieve(project_id)
-            logger.trace(f"Project: {project.name} (id={project.id})")
-            logger.trace(f"Project structure from API: {project}")
+        tasks = self._api.get_project_tasks(project_id)
+        if completed_only:
+            tasks = [t for t in tasks if t.status == "completed"]
+            logger.trace(f"Filtered to {len(tasks)} completed task(s)")
+        if not tasks:
+            logger.warning("No tasks in this project.")
+            return ProjectAnnotations(annotations=[], deleted_images=[])
 
-            label_names, attr_names = _build_label_maps(project)
+        all_annotations: list[BBoxAnnotation] = []
+        all_deleted: list[DeletedImage] = []
+        all_without_annotations: list[ImageWithoutAnnotations] = []
 
-            tasks = project.get_tasks()
-            logger.trace(f"Tasks structure from API: {tasks}")
-            if completed_only:
-                tasks = [t for t in tasks if getattr(t, "status", None) == "completed"]
-                logger.trace(f"Filtered to {len(tasks)} completed task(s)")
-                logger.trace(f"Completed tasks structure from API: {tasks}")
-            if not tasks:
-                logger.warning("No tasks in this project.")
-                return ProjectAnnotations(annotations=[], deleted_images=[])
-
-            all_annotations: list[BBoxAnnotation] = []
-            all_deleted: list[DeletedImage] = []
-            all_without_annotations: list[ImageWithoutAnnotations] = []
-
-            for task in tqdm(tasks, desc="Processing tasks", unit="task"):
-                task_annotations, task_deleted, task_without_annotations = (
-                    self._process_task(
-                        tasks_api_obj=client.api_client.tasks_api,
-                        task=task,
-                        label_names=label_names,
-                        attr_names=attr_names,
-                    )
+        for task in tqdm(tasks, desc="Processing tasks", unit="task"):
+            task_annotations, task_deleted, task_without_annotations = (
+                self._process_task(
+                    task=task,
+                    label_names=label_names,
+                    attr_names=attr_names,
                 )
-                all_annotations.extend(task_annotations)
-                all_deleted.extend(task_deleted)
-                all_without_annotations.extend(task_without_annotations)
+            )
+            all_annotations.extend(task_annotations)
+            all_deleted.extend(task_deleted)
+            all_without_annotations.extend(task_without_annotations)
 
-            logger.trace(
-                f"Fetched {len(all_annotations)} bbox annotation(s), "
-                f"{len(all_deleted)} deleted image(s), "
-                f"{len(all_without_annotations)} image(s) without annotations",
-            )
-            return ProjectAnnotations(
-                annotations=all_annotations,
-                deleted_images=all_deleted,
-                images_without_annotations=all_without_annotations,
-            )
+        logger.trace(
+            f"Fetched {len(all_annotations)} bbox annotation(s), "
+            f"{len(all_deleted)} deleted image(s), "
+            f"{len(all_without_annotations)} image(s) without annotations",
+        )
+        return ProjectAnnotations(
+            annotations=all_annotations,
+            deleted_images=all_deleted,
+            images_without_annotations=all_without_annotations,
+        )
 
     def _process_task(
         self,
-        tasks_api_obj: object,
-        task: object,
+        task: RawTask,
         label_names: dict[int, str],
         attr_names: dict[int, str],
     ) -> tuple[list[BBoxAnnotation], list[DeletedImage], list[ImageWithoutAnnotations]]:
-        task_ref = cast("_TaskProtocol", task)
-        task_id = task_ref.id
-        task_name = task_ref.name
-        logger.trace(f"Processing task {task_id} ({task_name})")
-        logger.trace(f"Task structure from API: {task}")
+        logger.trace(f"Processing task {task.id} ({task.name})")
 
-        tasks_api = cast("_TasksApiProtocol", tasks_api_obj)
-        data_meta, _ = tasks_api.retrieve_data_meta(task_id)
-        logger.trace(f"Task data_meta structure from API: {data_meta}")
-        frames_raw = cast("list[object] | None", getattr(data_meta, "frames", None))
-        frames: dict[int, object] = dict(enumerate(frames_raw or []))
-        logger.trace(f"Task frames structure from API: {frames_raw or []}")
-        deleted_frame_ids = (
-            cast(
-                "list[int] | None",
-                getattr(data_meta, "deleted_frames", None),
-            )
-            or []
-        )
-        logger.trace(
-            f"Task deleted_frames structure from API: {deleted_frame_ids}",
-        )
+        data_meta = self._api.get_task_data_meta(task.id)
+        frames: dict[int, RawFrame] = dict(enumerate(data_meta.frames))
+        deleted_frame_ids = data_meta.deleted_frames
 
-        labeled_data, _ = tasks_api.retrieve_annotations(task_id)
-        logger.trace(f"Task annotations structure from API: {labeled_data}")
-        shapes = cast("list[object] | None", getattr(labeled_data, "shapes", None))
-        tracks = cast("list[object] | None", getattr(labeled_data, "tracks", None))
+        annotations_data = self._api.get_task_annotations(task.id)
 
         ctx = _TaskContext(
             frames=frames,
             label_names=label_names,
             attr_names=attr_names,
-            task_id=task_id,
-            task_name=task_name,
-            task_status=str(task_ref.status or ""),
-            task_updated_date=self._task_updated_date(task_ref),
-            subset=str(task_ref.subset or ""),
+            task_id=task.id,
+            task_name=task.name,
+            task_status=task.status,
+            task_updated_date=task.updated_date,
+            subset=task.subset,
         )
-        task_annotations = _collect_shapes(shapes or [], ctx)
-        task_annotations.extend(_collect_track_shapes(tracks or [], ctx))
+        task_annotations = _collect_shapes(annotations_data.shapes, ctx)
+        task_annotations.extend(_collect_track_shapes(annotations_data.tracks, ctx))
         task_deleted = self._collect_deleted_images(
             task=task,
             frames=frames,
@@ -215,33 +170,32 @@ class CvatClient:
         )
         return task_annotations, task_deleted, task_without_annotations
 
+    @staticmethod
     def _collect_deleted_images(
-        self,
-        task: object,
-        frames: dict[int, object],
+        task: RawTask,
+        frames: dict[int, RawFrame],
         deleted_frame_ids: list[int],
     ) -> list[DeletedImage]:
         deleted_images: list[DeletedImage] = []
-        task_ref = cast("_TaskProtocol", task)
         for frame_id in deleted_frame_ids:
             frame_info = frames.get(frame_id)
-            image_name_raw = getattr(frame_info, "name", None) if frame_info else None
+            image_name = frame_info.name if frame_info else "<unknown>"
             deleted_images.append(
                 DeletedImage(
-                    task_id=task_ref.id,
-                    task_name=task_ref.name,
-                    task_status=str(task_ref.status or ""),
-                    task_updated_date=self._task_updated_date(task_ref),
+                    task_id=task.id,
+                    task_name=task.name,
+                    task_status=task.status,
+                    task_updated_date=task.updated_date,
                     frame_id=frame_id,
-                    image_name=str(image_name_raw) if image_name_raw else "<unknown>",
+                    image_name=image_name,
                 ),
             )
         return deleted_images
 
+    @staticmethod
     def _collect_without_annotations(
-        self,
         ctx: _TaskContext,
-        frames: dict[int, object],
+        frames: dict[int, RawFrame],
         deleted_frame_ids: set[int],
         annotated_frame_ids: set[int],
     ) -> list[ImageWithoutAnnotations]:
@@ -249,20 +203,11 @@ class CvatClient:
         for frame_id, frame_info in frames.items():
             if frame_id in deleted_frame_ids or frame_id in annotated_frame_ids:
                 continue
-            name_raw = getattr(frame_info, "name", None)
-            width_raw = getattr(frame_info, "width", None)
-            height_raw = getattr(frame_info, "height", None)
-            if not isinstance(width_raw, (int, float)) or not isinstance(
-                height_raw,
-                (int, float),
-            ):
-                logger.trace(f"Skipping frame {frame_id}: missing width/height")
-                continue
             result.append(
                 ImageWithoutAnnotations(
-                    image_name=str(name_raw) if name_raw else "<unknown>",
-                    image_width=int(width_raw),
-                    image_height=int(height_raw),
+                    image_name=frame_info.name,
+                    image_width=frame_info.width,
+                    image_height=frame_info.height,
                     task_id=ctx.task_id,
                     task_name=ctx.task_name,
                     task_status=ctx.task_status,
@@ -272,32 +217,6 @@ class CvatClient:
                 ),
             )
         return result
-
-    @staticmethod
-    def _task_updated_date(task: _TaskProtocol) -> str:
-        task_updated_date_raw: object | None = task.updated_date
-        if task_updated_date_raw is None:
-            task_updated_date_raw = task.updated_at
-        if task_updated_date_raw is None:
-            return ""
-        isoformat = getattr(task_updated_date_raw, "isoformat", None)
-        if callable(isoformat):
-            return str(isoformat())
-        return str(task_updated_date_raw)
-
-    def _build_client_kwargs(self, cfg: CvatConfig) -> dict[str, Any]:
-        """Build keyword arguments for ``make_client`` from a resolved config.
-
-        Note: ``organization`` is not passed to ``make_client`` (SDK does not
-        accept it). It is set on the client instance as ``organization_slug``
-        after creation so API requests use the organization context.
-        """
-        kwargs: dict[str, Any] = {"host": cfg.host}
-        if cfg.token:
-            kwargs["access_token"] = cfg.token
-        elif cfg.username and cfg.password:
-            kwargs["credentials"] = (cfg.username, cfg.password)
-        return kwargs
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,121 @@
+"""Typed data-transfer objects for CVAT API responses.
+
+These simple dataclasses represent the data consumed from the CVAT SDK,
+providing a typed boundary that is trivial to construct in tests.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True, slots=True)
+class RawFrame:
+    """Single frame (image) metadata from a CVAT task."""
+
+    name: str
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
+class RawAttribute:
+    """Attribute value attached to a shape or tracked shape."""
+
+    spec_id: int
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class RawShape:
+    """A single shape (annotation) from CVAT labeled data."""
+
+    id: int
+    type: str
+    frame: int
+    label_id: int
+    points: list[float]
+    occluded: bool
+    z_order: int
+    rotation: float
+    source: str
+    attributes: list[RawAttribute]
+    created_by: str
+
+
+@dataclass(frozen=True, slots=True)
+class RawTrackedShape:
+    """A single shape within a track (interpolated/linked bbox)."""
+
+    type: str
+    frame: int
+    points: list[float]
+    outside: bool
+    occluded: bool
+    z_order: int
+    rotation: float
+    attributes: list[RawAttribute]
+    created_by: str
+
+
+@dataclass(frozen=True, slots=True)
+class RawTrack:
+    """An annotation track containing multiple tracked shapes."""
+
+    id: int
+    label_id: int
+    source: str
+    shapes: list[RawTrackedShape]
+    created_by: str
+
+
+@dataclass(frozen=True, slots=True)
+class RawLabelAttribute:
+    """Attribute spec defined on a label."""
+
+    id: int
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class RawLabel:
+    """Project label with its attribute specs."""
+
+    id: int
+    name: str
+    attributes: list[RawLabelAttribute]
+
+
+@dataclass(frozen=True, slots=True)
+class RawTask:
+    """CVAT task metadata."""
+
+    id: int
+    name: str
+    status: str
+    subset: str
+    updated_date: str
+
+
+@dataclass(frozen=True, slots=True)
+class RawDataMeta:
+    """Frame list and deleted frame IDs for a task."""
+
+    frames: list[RawFrame]
+    deleted_frames: list[int] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class RawAnnotations:
+    """Shapes and tracks for a task."""
+
+    shapes: list[RawShape] = field(default_factory=list)
+    tracks: list[RawTrack] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class RawProject:
+    """Minimal project info from CVAT."""
+
+    id: int
+    name: str

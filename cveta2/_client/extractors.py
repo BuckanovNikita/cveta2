@@ -1,28 +1,28 @@
-"""Internal conversion helpers from CVAT SDK entities to pydantic models."""
+"""Internal conversion helpers from typed DTOs to pydantic annotation models."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from cveta2._client.context import _RECTANGLE, _TaskContext
-from cveta2._client.mapping import _resolve_attributes, _resolve_creator_username
+from cveta2._client.mapping import _resolve_attributes
 from cveta2.models import BBoxAnnotation
+
+if TYPE_CHECKING:
+    from cveta2._client.dtos import RawShape, RawTrack
 
 
 def _collect_shapes(
-    shapes: list[Any],
+    shapes: list[RawShape],
     ctx: _TaskContext,
 ) -> list[BBoxAnnotation]:
     """Extract BBoxAnnotations from direct shapes."""
     result: list[BBoxAnnotation] = []
     for shape in shapes:
-        logger.trace(f"Shape structure from API: {shape}")
-        if shape.type.value != _RECTANGLE:
-            logger.warning(
-                f"Skipping shape type {shape.type.value} as it's not supported."
-            )
+        if shape.type != _RECTANGLE:
+            logger.warning(f"Skipping shape type {shape.type} as it's not supported.")
             continue
         frame_info = ctx.frames.get(shape.frame)
         if frame_info is None:
@@ -41,13 +41,13 @@ def _collect_shapes(
                 task_name=ctx.task_name,
                 task_status=ctx.task_status,
                 task_updated_date=ctx.task_updated_date,
-                created_by_username=_resolve_creator_username(shape),
+                created_by_username=shape.created_by,
                 frame_id=shape.frame,
                 subset=ctx.subset,
                 occluded=shape.occluded,
                 z_order=shape.z_order,
                 rotation=shape.rotation,
-                source=shape.source or "",
+                source=shape.source,
                 annotation_id=shape.id,
                 attributes=_resolve_attributes(shape.attributes, ctx.attr_names),
             ),
@@ -56,26 +56,22 @@ def _collect_shapes(
 
 
 def _collect_track_shapes(
-    tracks: list[Any],
+    tracks: list[RawTrack],
     ctx: _TaskContext,
 ) -> list[BBoxAnnotation]:
     """Extract BBoxAnnotations from track shapes (interpolated/linked bboxes)."""
     result: list[BBoxAnnotation] = []
     for track in tracks:
-        logger.trace(f"Track structure from API: {track}")
         track_label = ctx.label_names.get(track.label_id, "<unknown>")
-        for tracked_shape in track.shapes or []:
-            logger.trace(f"Tracked shape structure from API: {tracked_shape}")
-            if tracked_shape.type.value != _RECTANGLE:
+        for tracked_shape in track.shapes:
+            if tracked_shape.type != _RECTANGLE:
                 continue
             if tracked_shape.outside:
                 continue
             frame_info = ctx.frames.get(tracked_shape.frame)
             if frame_info is None:
                 continue
-            creator_username = _resolve_creator_username(
-                tracked_shape,
-            ) or _resolve_creator_username(track)
+            creator_username = tracked_shape.created_by or track.created_by
             result.append(
                 BBoxAnnotation(
                     image_name=frame_info.name,
@@ -96,7 +92,7 @@ def _collect_track_shapes(
                     occluded=tracked_shape.occluded,
                     z_order=tracked_shape.z_order,
                     rotation=tracked_shape.rotation,
-                    source=track.source or "",
+                    source=track.source,
                     annotation_id=track.id,
                     attributes=_resolve_attributes(
                         tracked_shape.attributes, ctx.attr_names

@@ -11,11 +11,14 @@ cveta2/
   dataset_partition.py - partition_annotations_df(): pandas-based partitioning of annotation DataFrame into dataset/obsolete/in_progress; PartitionResult dataclass
   config.py     - CvatConfig pydantic model; loads/merges env > config file; get_projects_cache_path(); is_interactive_disabled() / require_interactive() guards
   projects_cache.py - YAML cache of project id/name list (load_projects_cache, save_projects_cache); path next to config (projects.yaml)
-  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations) + fetch_annotations() DataFrame wrapper + _project_annotations_to_csv_rows()
+  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations) + fetch_annotations() DataFrame wrapper + _project_annotations_to_csv_rows(); accepts CvatApiPort for DI
   _client/      - internal implementation details split from client.py
-    context.py  - _TaskContext + extraction constants
-    mapping.py  - helper functions for label/attribute mapping
-    extractors.py - shape/track conversion into BBoxAnnotation models
+    dtos.py     - frozen dataclass DTOs for CVAT API responses (RawFrame, RawShape, RawTrack, RawTask, RawLabel, etc.)
+    ports.py    - CvatApiPort Protocol defining the API boundary; the single seam for mocking
+    sdk_adapter.py - SdkCvatApiAdapter: CvatApiPort implementation using cvat_sdk; all getattr/cast on SDK objects lives here
+    context.py  - _TaskContext + extraction constants; frames typed as dict[int, RawFrame]
+    mapping.py  - helper functions for label/attribute mapping; takes typed DTOs (RawLabel, RawAttribute)
+    extractors.py - shape/track conversion into BBoxAnnotation models; takes typed DTOs (RawShape, RawTrack)
   cli.py        - argparse CLI entry point; CliApp class with setup/fetch handlers and CSV/TXT exports
   __main__.py   - enables `python -m cveta2`
 main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()
@@ -59,6 +62,10 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 1. For each `image_name`, the **latest task** (max `task_updated_date`) is found across both df rows and `deleted_images`.
 2. If the image is **deleted in its latest task** → all rows for that image go to **obsolete**, filename goes to `deleted_names`.
 3. Otherwise: rows from non-completed tasks → **in_progress**; rows from the latest completed task → **dataset**; rows from older completed tasks → **obsolete**.
+
+## API abstraction and testability
+
+`CvatClient` accepts an optional `api: CvatApiPort` parameter. In production, if not provided, it creates a `SdkCvatApiAdapter(cfg)` that uses the real CVAT SDK. In tests, any object satisfying the `CvatApiPort` protocol can be injected — typically a simple fake that returns pre-built DTO fixtures (dataclasses from `_client/dtos.py`). All CVAT SDK interaction is isolated inside `SdkCvatApiAdapter`; no other module imports `cvat_sdk`. The DTOs (`RawFrame`, `RawShape`, `RawTrack`, `RawTask`, `RawLabel`, etc.) are frozen dataclasses — easy to construct in test fixtures without any SDK dependency.
 
 ## Implicit decisions
 
