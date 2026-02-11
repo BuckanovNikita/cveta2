@@ -113,6 +113,35 @@ class CliApp:
         path.write_text(content, encoding="utf-8")
         logger.info(f"Deleted images list saved to {path} ({len(deleted_names)} names)")
 
+    def _resolve_output_dir(self, output_dir: Path) -> Path:
+        """Resolve output directory, prompting on overwrite if interactive."""
+        if not output_dir.exists():
+            return output_dir
+        if is_interactive_disabled():
+            logger.info(
+                f"Output directory {output_dir} already exists "
+                f"— overwriting (non-interactive mode)."
+            )
+            return output_dir
+        answer = questionary.select(
+            f"Папка {output_dir} уже существует. Что делать?",
+            choices=[
+                questionary.Choice(title="Перезаписать", value="overwrite"),
+                questionary.Choice(title="Указать другой путь", value="change"),
+                questionary.Choice(title="Отмена", value="cancel"),
+            ],
+            use_shortcuts=False,
+            use_indicator=True,
+        ).ask()
+        if answer is None or answer == "cancel":
+            sys.exit("Отменено.")
+        if answer == "change":
+            new_path = input("Новый путь: ").strip()
+            if not new_path:
+                sys.exit("Путь не указан.")
+            return Path(new_path)
+        return output_dir
+
     def _write_partition_result(
         self,
         partition: PartitionResult,
@@ -191,11 +220,7 @@ class CliApp:
 
     def _load_config(self, config_path: Path | None = None) -> CvatConfig:
         """Load config from file and env. Path from CVETA2_CONFIG or argument."""
-        if config_path is not None:
-            return CvatConfig.load(config_path=config_path)
-        path_env = os.environ.get("CVETA2_CONFIG")
-        path = Path(path_env) if path_env else None
-        return CvatConfig.load(config_path=path)
+        return CvatConfig.load(config_path=config_path)
 
     def _require_host(self, cfg: CvatConfig) -> None:
         """Abort with a friendly message when host is not configured."""
@@ -281,31 +306,7 @@ class CliApp:
             completed_only=args.completed_only,
         )
 
-        output_dir = Path(args.output_dir)
-        if output_dir.exists():
-            if is_interactive_disabled():
-                logger.info(
-                    f"Output directory {output_dir} already exists "
-                    f"— overwriting (non-interactive mode)."
-                )
-            else:
-                answer = questionary.select(
-                    f"Папка {output_dir} уже существует. Что делать?",
-                    choices=[
-                        questionary.Choice(title="Перезаписать", value="overwrite"),
-                        questionary.Choice(title="Указать другой путь", value="change"),
-                        questionary.Choice(title="Отмена", value="cancel"),
-                    ],
-                    use_shortcuts=False,
-                    use_indicator=True,
-                ).ask()
-                if answer is None or answer == "cancel":
-                    sys.exit("Отменено.")
-                if answer == "change":
-                    new_path = input("Новый путь: ").strip()
-                    if not new_path:
-                        sys.exit("Путь не указан.")
-                    output_dir = Path(new_path)
+        output_dir = self._resolve_output_dir(Path(args.output_dir))
 
         rows = _project_annotations_to_csv_rows(result)
         df = pd.DataFrame(rows)

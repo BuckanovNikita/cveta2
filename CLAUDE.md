@@ -2,7 +2,7 @@
 1. always use loguru for logging not print
 1. Use pydantic schemas for all configs
 1. prefer f-strings to loguru structured output
-
+1. avoid using getattr, hasattr, direct access to the __dict__ 
 
 # Documentation guidelines 
 1. always write to README.md in russian

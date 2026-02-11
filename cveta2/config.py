@@ -43,10 +43,7 @@ def _config_path() -> Path:
 
 def get_projects_cache_path() -> Path:
     """Path to projects cache YAML (same directory as config file)."""
-    path = os.environ.get("CVETA2_CONFIG")
-    if path:
-        return Path(path).parent / "projects.yaml"
-    return CONFIG_DIR / "projects.yaml"
+    return _config_path().parent / "projects.yaml"
 
 
 class CvatConfig(BaseModel):

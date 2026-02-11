@@ -49,19 +49,11 @@ class SdkCvatApiAdapter:
             raw = client.projects.list()
             return [RawProject(id=p.id, name=p.name or "") for p in raw]
 
-    def get_project(self, project_id: int) -> RawProject:
-        """Return a single project by ID."""
-        with self._open_client() as client:
-            p = client.projects.retrieve(project_id)
-            return RawProject(id=p.id, name=p.name or "")
-
     def get_project_tasks(self, project_id: int) -> list[RawTask]:
         """Return tasks belonging to a project."""
         with self._open_client() as client:
             project = client.projects.retrieve(project_id)
-            logger.trace(f"Project structure from API: {project}")
             tasks = project.get_tasks()
-            logger.trace(f"Tasks structure from API: {tasks}")
             return [self._convert_task(t) for t in tasks]
 
     def get_project_labels(self, project_id: int) -> list[RawLabel]:
@@ -69,7 +61,6 @@ class SdkCvatApiAdapter:
         with self._open_client() as client:
             project = client.projects.retrieve(project_id)
             labels = project.get_labels()
-            logger.trace(f"Project labels structure from API: {labels}")
             return [self._convert_label(lbl) for lbl in labels]
 
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
@@ -77,7 +68,6 @@ class SdkCvatApiAdapter:
         with self._open_client() as client:
             tasks_api = client.api_client.tasks_api
             data_meta, _ = tasks_api.retrieve_data_meta(task_id)
-            logger.trace(f"Task data_meta structure from API: {data_meta}")
             return self._convert_data_meta(data_meta)
 
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
@@ -85,7 +75,6 @@ class SdkCvatApiAdapter:
         with self._open_client() as client:
             tasks_api = client.api_client.tasks_api
             labeled_data, _ = tasks_api.retrieve_annotations(task_id)
-            logger.trace(f"Task annotations structure from API: {labeled_data}")
             return self._convert_annotations(labeled_data)
 
     # ------------------------------------------------------------------
@@ -113,7 +102,6 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _convert_task(task: cvat_models.TaskRead) -> RawTask:
-        logger.trace(f"Task structure from API: {task}")
         return RawTask(
             id=task.id,
             name=task.name or "",
@@ -137,7 +125,6 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _convert_label(label: cvat_models.Label) -> RawLabel:
-        logger.trace(f"Label structure from API: {label}")
         raw_attrs = label.attributes or []
         attrs = [RawLabelAttribute(id=a.id, name=a.name or "") for a in raw_attrs]
         return RawLabel(id=label.id, name=label.name, attributes=attrs)
@@ -145,7 +132,6 @@ class SdkCvatApiAdapter:
     @staticmethod
     def _convert_data_meta(data_meta: cvat_models.DataMetaRead) -> RawDataMeta:
         frames_raw = data_meta.frames or []
-        logger.trace(f"Task frames structure from API: {frames_raw}")
         frames = [
             RawFrame(
                 name=f.name or "",
@@ -155,7 +141,6 @@ class SdkCvatApiAdapter:
             for f in frames_raw
         ]
         deleted = list(data_meta.deleted_frames or [])
-        logger.trace(f"Task deleted_frames structure from API: {deleted}")
         return RawDataMeta(frames=frames, deleted_frames=deleted)
 
     @staticmethod
@@ -169,7 +154,6 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _convert_shape(shape: cvat_models.LabeledShape) -> RawShape:
-        logger.trace(f"Shape structure from API: {shape}")
         type_val = shape.type.value if shape.type else str(shape.type)
         return RawShape(
             id=shape.id or 0,
@@ -187,7 +171,6 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _convert_tracked_shape(ts: cvat_models.TrackedShape) -> RawTrackedShape:
-        logger.trace(f"Tracked shape structure from API: {ts}")
         type_str = ts.type.value if ts.type else str(ts.type)
         return RawTrackedShape(
             type=type_str,
@@ -203,7 +186,6 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _convert_track(track: cvat_models.LabeledTrack) -> RawTrack:
-        logger.trace(f"Track structure from API: {track}")
         raw_shapes = track.shapes or []
         return RawTrack(
             id=track.id or 0,
@@ -219,7 +201,6 @@ class SdkCvatApiAdapter:
     ) -> list[RawAttribute]:
         if not raw_attrs:
             return []
-        logger.trace(f"Raw attributes structure from API: {raw_attrs}")
         return [
             RawAttribute(spec_id=a.spec_id, value=str(a.value or "")) for a in raw_attrs
         ]

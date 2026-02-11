@@ -26,10 +26,6 @@ class CvatApiPort(Protocol):
         """Return all accessible projects."""
         ...
 
-    def get_project(self, project_id: int) -> RawProject:
-        """Return a single project by ID."""
-        ...
-
     def get_project_tasks(self, project_id: int) -> list[RawTask]:
         """Return tasks belonging to a project."""
         ...

@@ -61,30 +61,15 @@ class ImageWithoutAnnotations(BaseModel):
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Return a row matching `BBoxAnnotation.to_csv_row` keys."""
-        return {
-            "image_name": self.image_name,
-            "image_width": self.image_width,
-            "image_height": self.image_height,
-            "instance_shape": None,
-            "instance_label": None,
-            "bbox_x_tl": None,
-            "bbox_y_tl": None,
-            "bbox_x_br": None,
-            "bbox_y_br": None,
-            "task_id": self.task_id,
-            "task_name": self.task_name,
-            "task_status": self.task_status,
-            "task_updated_date": self.task_updated_date,
-            "created_by_username": None,
-            "frame_id": self.frame_id,
-            "subset": self.subset,
-            "occluded": None,
-            "z_order": None,
-            "rotation": None,
-            "source": None,
-            "annotation_id": None,
-            "attributes": json.dumps({}, ensure_ascii=False),
-        }
+        row: dict[str, str | int | float | bool | None] = dict.fromkeys(
+            BBoxAnnotation.model_fields, None
+        )
+        our = self.model_dump()
+        for k in our:
+            if k in row:
+                row[k] = our[k]
+        row["attributes"] = json.dumps({}, ensure_ascii=False)
+        return row
 
 
 class DeletedImage(BaseModel):
