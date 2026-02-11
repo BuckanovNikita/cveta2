@@ -10,13 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
+import questionary
 from loguru import logger
 
 from cveta2.client import CvatClient, _project_annotations_to_csv_rows
 from cveta2.config import CONFIG_PATH, CvatConfig
+from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_projects_cache
 
 if TYPE_CHECKING:
     from cveta2.models import ProjectAnnotations
+
+_RESCAN_VALUE = "__rescan__"
 
 
 class CliApp:
@@ -47,16 +51,14 @@ class CliApp:
             help="Fetch project bbox annotations and deleted images.",
         )
         parser.add_argument(
-            "--project-id",
-            type=int,
-            required=True,
-            help="ID of the CVAT project.",
-        )
-        parser.add_argument(
-            "--output",
-            "-o",
+            "--project",
+            "-p",
+            type=str,
             default=None,
-            help="Output JSON file path. Prints to stdout if omitted.",
+            help=(
+                "Project ID or name. If omitted, "
+                "interactive project selection is shown."
+            ),
         )
         parser.add_argument(
             "--annotations-csv",
@@ -186,13 +188,54 @@ class CliApp:
             f"Config file path: {config_path}"
         )
 
-    def _write_json_output(self, content: str, output_path: str | None) -> None:
-        """Write command JSON output to file or stdout."""
-        if output_path:
-            Path(output_path).write_text(content, encoding="utf-8")
-            logger.info(f"Output saved to {output_path}")
-            return
-        sys.stdout.write(content + "\n")
+    def _build_project_choices(
+        self,
+        projects: list[ProjectInfo],
+    ) -> list[questionary.Choice]:
+        """Build questionary choices: project list + rescan option last."""
+        choices: list[questionary.Choice] = [
+            questionary.Choice(title=f"{p.name} (id={p.id})", value=p.id)
+            for p in projects
+        ]
+        choices.append(
+            questionary.Choice(
+                title="↻ Обновить список проектов с CVAT",
+                value=_RESCAN_VALUE,
+            ),
+        )
+        return choices
+
+    def _run_fetch_tui_select_project(self, cfg: CvatConfig) -> int:
+        """Interactive project selection via TUI list.
+
+        Arrow keys to pick, with an option to rescan CVAT.
+        """
+        client = CvatClient(cfg)
+        projects = load_projects_cache()
+        while True:
+            if not projects:
+                logger.info("Кэш проектов пуст. Загружаю список с CVAT...")
+                projects = client.list_projects()
+                save_projects_cache(projects)
+                if not projects:
+                    sys.exit("Нет доступных проектов.")
+            choices = self._build_project_choices(projects)
+            answer = questionary.select(
+                "Выберите проект:",
+                choices=choices,
+                use_shortcuts=False,
+                use_indicator=True,
+                use_search_filter=True,
+                use_jk_keys=False,
+            ).ask()
+            if answer is None:
+                sys.exit("Выбор отменён.")
+            if answer == _RESCAN_VALUE:
+                projects = client.list_projects()
+                save_projects_cache(projects)
+                logger.info(f"Загружено проектов: {len(projects)}")
+                continue
+            return int(answer)
 
     def _run_fetch(self, args: argparse.Namespace) -> None:
         """Run the ``fetch`` command."""
@@ -200,11 +243,21 @@ class CliApp:
         self._require_host(cfg)
 
         client = CvatClient(cfg)
+        if args.project is not None:
+            cached = load_projects_cache()
+            try:
+                project_id = client.resolve_project_id(
+                    args.project.strip(), cached=cached
+                )
+            except ValueError as e:
+                sys.exit(str(e))
+        else:
+            project_id = self._run_fetch_tui_select_project(cfg)
+
         result = client.fetch_annotations(
-            project_id=args.project_id,
+            project_id=project_id,
             completed_only=args.completed_only,
         )
-        self._write_json_output(result.model_dump_json(indent=2), args.output)
 
         if args.annotations_csv:
             self._write_annotations_csv(result, Path(args.annotations_csv))

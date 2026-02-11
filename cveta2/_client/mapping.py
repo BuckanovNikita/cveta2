@@ -43,7 +43,7 @@ def _build_label_maps(
     label_names: dict[int, str] = {}
     attr_names: dict[int, str] = {}
     labels = project.get_labels()
-    logger.debug(f"Project labels structure from API: {labels}")
+    logger.trace(f"Project labels structure from API: {labels}")
     for label in labels:
         logger.trace(f"Label structure from API: {label}")
         label_names[label.id] = label.name

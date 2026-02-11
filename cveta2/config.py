@@ -20,6 +20,14 @@ def _config_path() -> Path:
     return Path(path) if path else CONFIG_PATH
 
 
+def get_projects_cache_path() -> Path:
+    """Path to projects cache YAML (same directory as config file)."""
+    path = os.environ.get("CVETA2_CONFIG")
+    if path:
+        return Path(path).parent / "projects.yaml"
+    return CONFIG_DIR / "projects.yaml"
+
+
 class CvatConfig(BaseModel):
     """CVAT connection settings."""
 
@@ -34,7 +42,7 @@ class CvatConfig(BaseModel):
         """Load config from a YAML file.  Returns empty config if file is missing."""
         if not path.is_file():
             return cls()
-        logger.debug(f"Loading config from {path}")
+        logger.trace(f"Loading config from {path}")
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
         if not isinstance(data, dict):

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import pandas as pd
 from cvat_sdk import make_client
 from loguru import logger
+from tqdm import tqdm
 
 from cveta2._client.context import _TaskContext
 from cveta2._client.extractors import _collect_shapes, _collect_track_shapes
@@ -18,6 +19,7 @@ from cveta2.models import (
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
+from cveta2.projects_cache import ProjectInfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -49,6 +51,46 @@ class CvatClient:
         self._cfg = cfg
         self._client_factory = client_factory or make_client
 
+    def list_projects(self) -> list[ProjectInfo]:
+        """Fetch list of projects from CVAT (id and name)."""
+        resolved = self._cfg.ensure_credentials()
+        client_kwargs = self._build_client_kwargs(resolved)
+        with self._client_factory(**client_kwargs) as client:
+            if resolved.organization:
+                client.organization_slug = resolved.organization
+            raw = client.projects.list()
+            return [
+                ProjectInfo(id=getattr(p, "id", 0), name=getattr(p, "name", "") or "")
+                for p in raw
+            ]
+
+    def resolve_project_id(
+        self,
+        project_spec: int | str,
+        *,
+        cached: list[ProjectInfo] | None = None,
+    ) -> int:
+        """Resolve project id from numeric id or project name.
+
+        If project_spec is int or digit string, returns it as int.
+        If it is a name, looks in cached list first, then in list_projects() from API.
+        """
+        if isinstance(project_spec, int):
+            return project_spec
+        s = str(project_spec).strip()
+        if s.isdigit():
+            return int(s)
+        search = s.casefold()
+        if cached:
+            for p in cached:
+                if (p.name or "").casefold() == search:
+                    return p.id
+        projects = self.list_projects()
+        for p in projects:
+            if (p.name or "").casefold() == search:
+                return p.id
+        raise ValueError(f"Project not found: {s!r}")
+
     def fetch_annotations(
         self,
         project_id: int,
@@ -68,19 +110,19 @@ class CvatClient:
         with self._client_factory(**client_kwargs) as client:
             if resolved.organization:
                 client.organization_slug = resolved.organization
-                logger.debug(f"Using organization: {resolved.organization}")
+                logger.trace(f"Using organization: {resolved.organization}")
             project = client.projects.retrieve(project_id)
-            logger.info(f"Project: {project.name} (id={project.id})")
-            logger.debug(f"Project structure from API: {project}")
+            logger.trace(f"Project: {project.name} (id={project.id})")
+            logger.trace(f"Project structure from API: {project}")
 
             label_names, attr_names = _build_label_maps(project)
 
             tasks = project.get_tasks()
-            logger.debug(f"Tasks structure from API: {tasks}")
+            logger.trace(f"Tasks structure from API: {tasks}")
             if completed_only:
                 tasks = [t for t in tasks if getattr(t, "status", None) == "completed"]
-                logger.info(f"Filtered to {len(tasks)} completed task(s)")
-                logger.debug(f"Completed tasks structure from API: {tasks}")
+                logger.trace(f"Filtered to {len(tasks)} completed task(s)")
+                logger.trace(f"Completed tasks structure from API: {tasks}")
             if not tasks:
                 logger.warning("No tasks in this project.")
                 return ProjectAnnotations(annotations=[], deleted_images=[])
@@ -89,7 +131,7 @@ class CvatClient:
             all_deleted: list[DeletedImage] = []
             all_without_annotations: list[ImageWithoutAnnotations] = []
 
-            for task in tasks:
+            for task in tqdm(tasks, desc="Processing tasks", unit="task"):
                 task_annotations, task_deleted, task_without_annotations = (
                     self._process_task(
                         tasks_api_obj=client.api_client.tasks_api,
@@ -102,7 +144,7 @@ class CvatClient:
                 all_deleted.extend(task_deleted)
                 all_without_annotations.extend(task_without_annotations)
 
-            logger.info(
+            logger.trace(
                 f"Fetched {len(all_annotations)} bbox annotation(s), "
                 f"{len(all_deleted)} deleted image(s), "
                 f"{len(all_without_annotations)} image(s) without annotations",
@@ -123,12 +165,12 @@ class CvatClient:
         task_ref = cast("_TaskProtocol", task)
         task_id = task_ref.id
         task_name = task_ref.name
-        logger.info(f"Processing task {task_id} ({task_name})")
+        logger.trace(f"Processing task {task_id} ({task_name})")
         logger.trace(f"Task structure from API: {task}")
 
         tasks_api = cast("_TasksApiProtocol", tasks_api_obj)
         data_meta, _ = tasks_api.retrieve_data_meta(task_id)
-        logger.debug(f"Task data_meta structure from API: {data_meta}")
+        logger.trace(f"Task data_meta structure from API: {data_meta}")
         frames_raw = cast("list[object] | None", getattr(data_meta, "frames", None))
         frames: dict[int, object] = dict(enumerate(frames_raw or []))
         logger.trace(f"Task frames structure from API: {frames_raw or []}")
@@ -144,7 +186,7 @@ class CvatClient:
         )
 
         labeled_data, _ = tasks_api.retrieve_annotations(task_id)
-        logger.debug(f"Task annotations structure from API: {labeled_data}")
+        logger.trace(f"Task annotations structure from API: {labeled_data}")
         shapes = cast("list[object] | None", getattr(labeled_data, "shapes", None))
         tracks = cast("list[object] | None", getattr(labeled_data, "tracks", None))
 

@@ -25,13 +25,17 @@ uv sync
 uv run cveta2 setup
 ```
 
-2. Выгрузите проект:
+2. Выгрузите проект (можно указать ID, имя проекта или запустить без `--project` — откроется выбор из списка):
 
 ```bash
-uv run cveta2 fetch --project-id 123 -o result.json
+uv run cveta2 fetch --project 123 --annotations-csv result.csv
+# или по имени проекта:
+uv run cveta2 fetch --project "Мой проект" --annotations-csv result.csv
+# или интерактивный выбор проекта:
+uv run cveta2 fetch --annotations-csv result.csv
 ```
 
-Если `--output` не передан, JSON печатается в `stdout`.
+Список проектов кэшируется в `projects.yaml` рядом с конфигом; в интерактивном режиме можно нажать `0`, чтобы обновить список с CVAT.
 
 ## Конфигурация
 
@@ -69,25 +73,26 @@ cvat:
 
 ```bash
 # Базовый fetch (host/creds из env или ~/.config/cveta2/config.yaml)
-uv run cveta2 fetch --project-id 123
+uv run cveta2 fetch --project 123
+uv run cveta2 fetch -p "Имя проекта"
 
-# Сохранить JSON в файл
-uv run cveta2 fetch --project-id 123 -o result.json
+# Интерактивный выбор проекта (из кэша; 0 — обновить список с CVAT)
+uv run cveta2 fetch
 
-# Дополнительно сохранить все bbox в CSV
-uv run cveta2 fetch --project-id 123 --annotations-csv annotations.csv
+# Сохранить все bbox в CSV
+uv run cveta2 fetch -p 123 --annotations-csv result.csv
 
 # Дополнительно сохранить только имена удаленных изображений (по одному на строку)
-uv run cveta2 fetch --project-id 123 --deleted-txt deleted.txt
+uv run cveta2 fetch -p 123 --deleted-txt deleted.txt
 
 # Обрабатывать только задачи со статусом completed
-uv run cveta2 fetch --project-id 123 --completed-only
+uv run cveta2 fetch -p 123 --completed-only
 
-# Путь к конфигу через env
-CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch --project-id 123
+# Путь к конфигу через env (кэш проектов будет в той же папке: projects.yaml)
+CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch -p 123
 
 # Вариант запуска как модуля
-uv run python -m cveta2 fetch --project-id 123
+uv run python -m cveta2 fetch -p 123
 ```
 
 ## Python API
@@ -247,9 +252,6 @@ uv run cveta2 fetch --project-id 123
 
 # Явный host и токен через CLI
 uv run cveta2 fetch --host https://app.cvat.ai --project-id 123 --token YOUR_TOKEN
-
-# Сохранить в файл
-uv run cveta2 fetch --project-id 123 -o result.json
 
 # Сохранить аннотации в CSV и имена удалённых изображений в текстовый файл
 uv run cveta2 fetch --project-id 123 --annotations-csv annotations.csv --deleted-txt deleted.txt
