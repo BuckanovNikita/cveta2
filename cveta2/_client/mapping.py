@@ -10,13 +10,18 @@ if TYPE_CHECKING:
     from cveta2._client.dtos import RawAttribute, RawLabel
 
 
+def _attr_display_name(attr_names: dict[int, str], spec_id: int) -> str:
+    """Return attribute display name by spec_id, or str(spec_id) if unknown."""
+    return attr_names.get(spec_id, str(spec_id))
+
+
 def _resolve_attributes(
     raw_attrs: list[RawAttribute],
     attr_names: dict[int, str],
 ) -> dict[str, str]:
     """Map RawAttribute list to {attr_name: value} dict."""
     logger.trace(f"Resolving attributes: {raw_attrs}")
-    return {attr_names.get(a.spec_id, str(a.spec_id)): a.value for a in raw_attrs}
+    return {_attr_display_name(attr_names, a.spec_id): a.value for a in raw_attrs}
 
 
 def _build_label_maps(

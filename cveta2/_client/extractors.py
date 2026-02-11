@@ -24,7 +24,7 @@ def _collect_shapes(
         if shape.type != _RECTANGLE:
             logger.warning(f"Skipping shape type {shape.type} as it's not supported.")
             continue
-        frame_info = ctx.frames.get(shape.frame)
+        frame_info = ctx.get_frame(shape.frame)
         if frame_info is None:
             continue
         result.append(
@@ -32,7 +32,7 @@ def _collect_shapes(
                 image_name=frame_info.name,
                 image_width=frame_info.width,
                 image_height=frame_info.height,
-                instance_label=ctx.label_names.get(shape.label_id, "<unknown>"),
+                instance_label=ctx.get_label_name(shape.label_id),
                 bbox_x_tl=shape.points[0],
                 bbox_y_tl=shape.points[1],
                 bbox_x_br=shape.points[2],
@@ -62,13 +62,13 @@ def _collect_track_shapes(
     """Extract BBoxAnnotations from track shapes (interpolated/linked bboxes)."""
     result: list[BBoxAnnotation] = []
     for track in tracks:
-        track_label = ctx.label_names.get(track.label_id, "<unknown>")
+        track_label = ctx.get_label_name(track.label_id)
         for tracked_shape in track.shapes:
             if tracked_shape.type != _RECTANGLE:
                 continue
             if tracked_shape.outside:
                 continue
-            frame_info = ctx.frames.get(tracked_shape.frame)
+            frame_info = ctx.get_frame(tracked_shape.frame)
             if frame_info is None:
                 continue
             creator_username = tracked_shape.created_by or track.created_by
