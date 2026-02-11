@@ -30,6 +30,13 @@ repos:
         always_run: true
         verbose: true
 
+      - id: uv-build
+        name: uv build (check project is buildable)
+        entry: bash -c 'uv build --quiet && rm -rf dist'
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: uv-lock
         name: uv lock
         entry: uv lock

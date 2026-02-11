@@ -14,8 +14,8 @@ __all__ = [
     "CvatClient",
     "DeletedImage",
     "ImageWithoutAnnotations",
-    "ProjectAnnotations",
     "PartitionResult",
+    "ProjectAnnotations",
     "fetch_annotations",
     "partition_annotations_df",
 ]

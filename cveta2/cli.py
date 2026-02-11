@@ -66,7 +66,8 @@ class CliApp:
             "--output-dir",
             "-o",
             required=True,
-            help="Directory to save partitioned CSV files (dataset, obsolete, in_progress).",
+            help="Directory to save partitioned CSV files "
+            " (dataset, obsolete, in_progress).",
         )
         parser.add_argument(
             "--raw",
@@ -120,7 +121,9 @@ class CliApp:
         """Write all partition DataFrames and deleted.txt into *output_dir*."""
         output_dir.mkdir(parents=True, exist_ok=True)
         self._write_df_csv(partition.dataset, output_dir / "dataset.csv", "Dataset CSV")
-        self._write_df_csv(partition.obsolete, output_dir / "obsolete.csv", "Obsolete CSV")
+        self._write_df_csv(
+            partition.obsolete, output_dir / "obsolete.csv", "Obsolete CSV"
+        )
         self._write_df_csv(
             partition.in_progress,
             output_dir / "in_progress.csv",

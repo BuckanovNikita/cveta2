@@ -13,7 +13,7 @@
 ## Установка
 
 ```bash
-uv sync
+pip install cveta2-0.1.0-py3-none-any.whl
 ```
 
 ## Быстрый старт
@@ -21,20 +21,20 @@ uv sync
 1. Запустите интерактивную настройку:
 
 ```bash
-uv run cveta2 setup
+cveta2 setup
 ```
 
 2. Выгрузите проект:
 
 ```bash
 # По ID проекта
-uv run cveta2 fetch --project 123 -o output/
+cveta2 fetch --project 123 -o output/
 
 # По имени проекта
-uv run cveta2 fetch --project "Мой проект" -o output/
+cveta2 fetch --project "Мой проект" -o output/
 
 # Интерактивный выбор проекта из списка
-uv run cveta2 fetch -o output/
+cveta2 fetch -o output/
 ```
 
 В папке `output/` появятся файлы:
@@ -108,33 +108,30 @@ export CVAT_HOST="https://app.cvat.ai"
 export CVAT_TOKEN="your-token"
 export CVETA2_NO_INTERACTIVE=true
 
-uv run cveta2 fetch -p 123 -o output/
+cveta2 fetch -p 123 -o output/
 ```
 
 ## CLI: примеры
 
 ```bash
 # Первоначальная настройка
-uv run cveta2 setup
+cveta2 setup
 
 # Базовый fetch
-uv run cveta2 fetch --project 123 -o output/
-uv run cveta2 fetch -p "Имя проекта" -o output/
+cveta2 fetch --project 123 -o output/
+cveta2 fetch -p "Имя проекта" -o output/
 
 # Интерактивный выбор проекта (из кэша; в списке есть опция обновить с CVAT)
-uv run cveta2 fetch -o output/
+cveta2 fetch -o output/
 
 # Дополнительно сохранить полный (необработанный) CSV
-uv run cveta2 fetch -p 123 -o output/ --raw
+cveta2 fetch -p 123 -o output/ --raw
 
 # Обрабатывать только задачи со статусом completed
-uv run cveta2 fetch -p 123 -o output/ --completed-only
+cveta2 fetch -p 123 -o output/ --completed-only
 
 # Путь к конфигу через env (кэш проектов — projects.yaml в той же папке)
-CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch -p 123 -o output/
-
-# Запуск как модуля
-uv run python -m cveta2 fetch -p 123 -o output/
+CVETA2_CONFIG=/path/to/config.yaml cveta2 fetch -p 123 -o output/
 ```
 
 ## Python API
