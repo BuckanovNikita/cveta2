@@ -7,19 +7,20 @@ import getpass
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pandas as pd
 import questionary
 from loguru import logger
 
 from cveta2.client import CvatClient, _project_annotations_to_csv_rows
-from cveta2.config import CONFIG_PATH, CvatConfig
+from cveta2.config import (
+    CONFIG_PATH,
+    CvatConfig,
+    is_interactive_disabled,
+    require_interactive,
+)
+from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_projects_cache
-from cveta2.split import SplitResult, split_annotations_df
-
-if TYPE_CHECKING:
-    from cveta2.models import ProjectAnnotations
 
 _RESCAN_VALUE = "__rescan__"
 
@@ -65,7 +66,7 @@ class CliApp:
             "--output-dir",
             "-o",
             required=True,
-            help="Directory to save split CSV files (dataset, obsolete, in_progress).",
+            help="Directory to save partitioned CSV files (dataset, obsolete, in_progress).",
         )
         parser.add_argument(
             "--raw",
@@ -111,22 +112,29 @@ class CliApp:
         path.write_text(content, encoding="utf-8")
         logger.info(f"Deleted images list saved to {path} ({len(deleted_names)} names)")
 
-    def _write_split_result(
+    def _write_partition_result(
         self,
-        split: SplitResult,
+        partition: PartitionResult,
         output_dir: Path,
     ) -> None:
-        """Write all split DataFrames and deleted.txt into *output_dir*."""
+        """Write all partition DataFrames and deleted.txt into *output_dir*."""
         output_dir.mkdir(parents=True, exist_ok=True)
-        self._write_df_csv(split.dataset, output_dir / "dataset.csv", "Dataset CSV")
-        self._write_df_csv(split.obsolete, output_dir / "obsolete.csv", "Obsolete CSV")
+        self._write_df_csv(partition.dataset, output_dir / "dataset.csv", "Dataset CSV")
+        self._write_df_csv(partition.obsolete, output_dir / "obsolete.csv", "Obsolete CSV")
         self._write_df_csv(
-            split.in_progress, output_dir / "in_progress.csv", "In-progress CSV",
+            partition.in_progress,
+            output_dir / "in_progress.csv",
+            "In-progress CSV",
         )
-        self._write_deleted_txt(split.deleted_names, output_dir / "deleted.txt")
+        self._write_deleted_txt(partition.deleted_names, output_dir / "deleted.txt")
 
     def _run_setup(self, config_path: Path) -> None:
         """Interactively ask user for CVAT settings and save them to config file."""
+        require_interactive(
+            "The 'setup' command is fully interactive. "
+            "Configure via env vars (CVAT_HOST, CVAT_TOKEN, etc.) "
+            "or edit the config file directly."
+        )
         existing = CvatConfig.from_file(config_path)
 
         host_default = existing.host or "https://app.cvat.ai"
@@ -220,6 +228,7 @@ class CliApp:
 
         Arrow keys to pick, with an option to rescan CVAT.
         """
+        require_interactive("Pass --project / -p to specify the project ID or name.")
         client = CvatClient(cfg)
         projects = load_projects_cache()
         while True:
@@ -270,6 +279,31 @@ class CliApp:
         )
 
         output_dir = Path(args.output_dir)
+        if output_dir.exists():
+            if is_interactive_disabled():
+                logger.info(
+                    f"Output directory {output_dir} already exists "
+                    f"— overwriting (non-interactive mode)."
+                )
+            else:
+                answer = questionary.select(
+                    f"Папка {output_dir} уже существует. Что делать?",
+                    choices=[
+                        questionary.Choice(title="Перезаписать", value="overwrite"),
+                        questionary.Choice(title="Указать другой путь", value="change"),
+                        questionary.Choice(title="Отмена", value="cancel"),
+                    ],
+                    use_shortcuts=False,
+                    use_indicator=True,
+                ).ask()
+                if answer is None or answer == "cancel":
+                    sys.exit("Отменено.")
+                if answer == "change":
+                    new_path = input("Новый путь: ").strip()
+                    if not new_path:
+                        sys.exit("Путь не указан.")
+                    output_dir = Path(new_path)
+
         rows = _project_annotations_to_csv_rows(result)
         df = pd.DataFrame(rows)
 
@@ -277,8 +311,8 @@ class CliApp:
             output_dir.mkdir(parents=True, exist_ok=True)
             self._write_df_csv(df, output_dir / "raw.csv", "Raw CSV")
 
-        split = split_annotations_df(df, result.deleted_images)
-        self._write_split_result(split, output_dir)
+        partition = partition_annotations_df(df, result.deleted_images)
+        self._write_partition_result(partition, output_dir)
 
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""

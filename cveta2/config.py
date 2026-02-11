@@ -14,6 +14,27 @@ CONFIG_DIR = Path.home() / ".config" / "cveta2"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 
+def is_interactive_disabled() -> bool:
+    """Return True when CVETA2_NO_INTERACTIVE is set to 'true' (case-insensitive)."""
+    return os.environ.get("CVETA2_NO_INTERACTIVE", "").lower() == "true"
+
+
+def require_interactive(hint: str) -> None:
+    """Raise if interactive prompts are disabled.
+
+    Parameters
+    ----------
+    hint:
+        Human-readable explanation of which CLI flag / env var the caller
+        should use instead of an interactive prompt.
+
+    """
+    if is_interactive_disabled():
+        raise RuntimeError(
+            f"Interactive prompt required but CVETA2_NO_INTERACTIVE=true. {hint}"
+        )
+
+
 # Override config file path with CVETA2_CONFIG (e.g. /path/to/config.yaml).
 def _config_path() -> Path:
     path = os.environ.get("CVETA2_CONFIG")
@@ -121,9 +142,13 @@ class CvatConfig(BaseModel):
             return self
 
         if not username:
+            require_interactive(
+                "Set CVAT_TOKEN or CVAT_USERNAME/CVAT_PASSWORD env vars."
+            )
             logger.info("No credentials provided. Please enter your CVAT login:")
             username = input("Username: ")
         if not password:
+            require_interactive("Set CVAT_TOKEN or CVAT_PASSWORD env vars.")
             password = getpass.getpass(f"Password for {username}: ")
 
         return self.model_copy(update={"username": username, "password": password})

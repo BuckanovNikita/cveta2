@@ -1,4 +1,4 @@
-"""Split annotation DataFrame into dataset / obsolete / in_progress partitions."""
+"""Partition annotation DataFrame into dataset / obsolete / in_progress parts."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class SplitResult:
-    """Three-way split of the annotation DataFrame."""
+class PartitionResult:
+    """Three-way partition of the annotation DataFrame."""
 
     dataset: pd.DataFrame
     obsolete: pd.DataFrame
@@ -22,11 +22,11 @@ class SplitResult:
     deleted_names: list[str] = field(default_factory=list)
 
 
-def split_annotations_df(
+def partition_annotations_df(
     df: pd.DataFrame,
     deleted_images: list[DeletedImage],
-) -> SplitResult:
-    """Split an annotation DataFrame into dataset, obsolete and in-progress parts.
+) -> PartitionResult:
+    """Partition an annotation DataFrame into dataset, obsolete and in-progress parts.
 
     Algorithm
     ---------
@@ -45,7 +45,9 @@ def split_annotations_df(
     """
     if df.empty:
         empty = df.copy()
-        return SplitResult(dataset=empty, obsolete=empty.copy(), in_progress=empty.copy())
+        return PartitionResult(
+            dataset=empty, obsolete=empty.copy(), in_progress=empty.copy()
+        )
 
     # ------------------------------------------------------------------
     # 1. Build deleted registry: image_name → [(task_id, task_updated_date)]
@@ -60,9 +62,8 @@ def split_annotations_df(
     # 2. Per-image latest task (across df rows + deleted records)
     # ------------------------------------------------------------------
     # Latest task_updated_date per (image_name, task_id) from df rows
-    latest_from_df = (
-        df[["image_name", "task_id", "task_updated_date"]]
-        .drop_duplicates(subset=["image_name", "task_id"])
+    latest_from_df = df[["image_name", "task_id", "task_updated_date"]].drop_duplicates(
+        subset=["image_name", "task_id"]
     )
 
     # Build a parallel frame from deleted records
@@ -101,10 +102,12 @@ def split_annotations_df(
     deleted_names_sorted = sorted(deleted_image_names)
 
     if deleted_names_sorted:
-        logger.debug(f"Images deleted in their latest task: {len(deleted_names_sorted)}")
+        logger.debug(
+            f"Images deleted in their latest task: {len(deleted_names_sorted)}"
+        )
 
     # ------------------------------------------------------------------
-    # 4. Split the DataFrame
+    # 4. Partition the DataFrame
     # ------------------------------------------------------------------
     is_deleted = df["image_name"].isin(deleted_image_names)
     is_completed = df["task_status"] == "completed"
@@ -115,7 +118,7 @@ def split_annotations_df(
     # 4b. Non-deleted, non-completed → in_progress
     in_progress = df[~is_deleted & ~is_completed]
 
-    # 4c. Non-deleted, completed → split into dataset vs obsolete
+    # 4c. Non-deleted, completed → partition into dataset vs obsolete
     completed_non_deleted = df[~is_deleted & is_completed]
 
     if completed_non_deleted.empty:
@@ -124,27 +127,28 @@ def split_annotations_df(
     else:
         # For each image_name, find the latest completed task_id
         latest_completed = (
-            completed_non_deleted
-            .sort_values("task_updated_date", ascending=False)
+            completed_non_deleted.sort_values("task_updated_date", ascending=False)
             .drop_duplicates(subset=["image_name"], keep="first")[
                 ["image_name", "task_id"]
             ]
             .rename(columns={"task_id": "_latest_task_id"})
         )
-        merged = completed_non_deleted.merge(latest_completed, on="image_name", how="left")
+        merged = completed_non_deleted.merge(
+            latest_completed, on="image_name", how="left"
+        )
         is_latest = merged["task_id"] == merged["_latest_task_id"]
 
-        dataset = completed_non_deleted[is_latest.values]
-        obsolete_stale = completed_non_deleted[~is_latest.values]
+        dataset = completed_non_deleted[is_latest.to_numpy()]
+        obsolete_stale = completed_non_deleted[~is_latest.to_numpy()]
 
     obsolete = pd.concat([obsolete_deleted, obsolete_stale], ignore_index=True)
 
     logger.debug(
-        f"Split result: dataset={len(dataset)}, obsolete={len(obsolete)}, "
+        f"Partition result: dataset={len(dataset)}, obsolete={len(obsolete)}, "
         f"in_progress={len(in_progress)}, deleted_names={len(deleted_names_sorted)}",
     )
 
-    return SplitResult(
+    return PartitionResult(
         dataset=dataset.reset_index(drop=True),
         obsolete=obsolete.reset_index(drop=True),
         in_progress=in_progress.reset_index(drop=True),

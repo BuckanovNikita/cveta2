@@ -1,13 +1,13 @@
 """cveta2 -- CVAT project annotation utilities."""
 
 from cveta2.client import CvatClient, fetch_annotations
+from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.models import (
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
-from cveta2.split import SplitResult, split_annotations_df
 
 __all__ = [
     "BBoxAnnotation",
@@ -15,7 +15,7 @@ __all__ = [
     "DeletedImage",
     "ImageWithoutAnnotations",
     "ProjectAnnotations",
-    "SplitResult",
+    "PartitionResult",
     "fetch_annotations",
-    "split_annotations_df",
+    "partition_annotations_df",
 ]

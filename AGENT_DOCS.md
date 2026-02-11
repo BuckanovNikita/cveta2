@@ -6,10 +6,10 @@ Short descriptions of project internals and implicit design decisions.
 
 ```
 cveta2/
-  __init__.py   - public API re-exports: CvatClient, fetch_annotations, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations, split_annotations_df, SplitResult
+  __init__.py   - public API re-exports: CvatClient, fetch_annotations, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations, partition_annotations_df, PartitionResult
   models.py     - Pydantic models: BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations
-  split.py      - split_annotations_df(): pandas-based splitting of annotation DataFrame into dataset/obsolete/in_progress; SplitResult dataclass
-  config.py     - CvatConfig pydantic model; loads/merges env > config file; get_projects_cache_path()
+  dataset_partition.py - partition_annotations_df(): pandas-based partitioning of annotation DataFrame into dataset/obsolete/in_progress; PartitionResult dataclass
+  config.py     - CvatConfig pydantic model; loads/merges env > config file; get_projects_cache_path(); is_interactive_disabled() / require_interactive() guards
   projects_cache.py - YAML cache of project id/name list (load_projects_cache, save_projects_cache); path next to config (projects.yaml)
   client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations) + fetch_annotations() DataFrame wrapper + _project_annotations_to_csv_rows()
   _client/      - internal implementation details split from client.py
@@ -24,6 +24,10 @@ main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()
 ## Config resolution
 
 Priority: env vars override config file. No CVAT settings/credentials on CLI. Env: `CVAT_HOST`, `CVAT_ORGANIZATION`, `CVAT_TOKEN`, `CVAT_USERNAME`, `CVAT_PASSWORD`. Config file path: `CVETA2_CONFIG` or default `~/.config/cveta2/config.yaml`. If host is missing, CLI suggests running `cveta2 setup` or setting env. Config file uses YAML with `cvat` mapping to `CvatConfig` fields. Organization is applied via `client.organization_slug` after client creation.
+
+## Non-interactive mode
+
+Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive prompts. When set, any operation that would require user input raises `RuntimeError` with a hint about which CLI flag or env var to use instead. The variable can be unset or empty — defaults to interactive mode enabled. Guarded locations: `cveta2 setup` (entire command), TUI project selection in `fetch` (use `--project`), credential prompts in `ensure_credentials()` (use `CVAT_TOKEN` / `CVAT_USERNAME` + `CVAT_PASSWORD`). The output-dir overwrite prompt silently overwrites in non-interactive mode instead of raising. Helper functions: `is_interactive_disabled()` and `require_interactive(hint)` in `config.py`.
 
 ## CLI commands
 
@@ -48,9 +52,9 @@ Priority: env vars override config file. No CVAT settings/credentials on CLI. En
 - `ProjectAnnotations` contains `annotations`, `deleted_images`, and `images_without_annotations`.
 - `DeletedImage` — record of a deleted frame: `task_id`, `task_name`, `task_status`, `task_updated_date`, `frame_id`, `image_name`.
 
-## CSV splitting logic (`split.py`)
+## CSV partitioning logic (`dataset_partition.py`)
 
-`split_annotations_df(df, deleted_images)` splits the full annotation DataFrame into three parts:
+`partition_annotations_df(df, deleted_images)` partitions the full annotation DataFrame into three parts:
 
 1. For each `image_name`, the **latest task** (max `task_updated_date`) is found across both df rows and `deleted_images`.
 2. If the image is **deleted in its latest task** → all rows for that image go to **obsolete**, filename goes to `deleted_names`.
