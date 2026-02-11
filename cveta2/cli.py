@@ -16,6 +16,7 @@ from loguru import logger
 from cveta2.client import CvatClient, _project_annotations_to_csv_rows
 from cveta2.config import CONFIG_PATH, CvatConfig
 from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_projects_cache
+from cveta2.split import SplitResult, split_annotations_df
 
 if TYPE_CHECKING:
     from cveta2.models import ProjectAnnotations
@@ -61,14 +62,15 @@ class CliApp:
             ),
         )
         parser.add_argument(
-            "--annotations-csv",
-            default=None,
-            help="Path to save all annotations as CSV.",
+            "--output-dir",
+            "-o",
+            required=True,
+            help="Directory to save split CSV files (dataset, obsolete, in_progress).",
         )
         parser.add_argument(
-            "--deleted-txt",
-            default=None,
-            help="Path to save deleted image names (one per line).",
+            "--raw",
+            action="store_true",
+            help="Additionally save unprocessed full CSV as raw.csv.",
         )
         parser.add_argument(
             "--completed-only",
@@ -94,26 +96,34 @@ class CliApp:
             ),
         )
 
-    def _write_annotations_csv(
-        self,
-        result: ProjectAnnotations,
-        path: Path,
-    ) -> None:
-        """Write rows to CSV with None values for missing fields."""
-        rows = _project_annotations_to_csv_rows(result)
-        df = pd.DataFrame(rows)
+    @staticmethod
+    def _write_df_csv(df: pd.DataFrame, path: Path, label: str) -> None:
+        """Write a DataFrame to CSV and log the result."""
         df.to_csv(path, index=False, encoding="utf-8")
-        logger.info(f"Annotations CSV saved to {path} ({len(rows)} rows)")
+        logger.info(f"{label} saved to {path} ({len(df)} rows)")
 
-    def _write_deleted_txt(self, deleted_image_names: list[str], path: Path) -> None:
+    @staticmethod
+    def _write_deleted_txt(deleted_names: list[str], path: Path) -> None:
         """Write deleted image names to a text file, one per line."""
-        content = "\n".join(deleted_image_names)
-        if deleted_image_names:
+        content = "\n".join(deleted_names)
+        if deleted_names:
             content += "\n"
         path.write_text(content, encoding="utf-8")
-        logger.info(
-            f"Deleted images list saved to {path} ({len(deleted_image_names)} names)"
+        logger.info(f"Deleted images list saved to {path} ({len(deleted_names)} names)")
+
+    def _write_split_result(
+        self,
+        split: SplitResult,
+        output_dir: Path,
+    ) -> None:
+        """Write all split DataFrames and deleted.txt into *output_dir*."""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        self._write_df_csv(split.dataset, output_dir / "dataset.csv", "Dataset CSV")
+        self._write_df_csv(split.obsolete, output_dir / "obsolete.csv", "Obsolete CSV")
+        self._write_df_csv(
+            split.in_progress, output_dir / "in_progress.csv", "In-progress CSV",
         )
+        self._write_deleted_txt(split.deleted_names, output_dir / "deleted.txt")
 
     def _run_setup(self, config_path: Path) -> None:
         """Interactively ask user for CVAT settings and save them to config file."""
@@ -259,13 +269,16 @@ class CliApp:
             completed_only=args.completed_only,
         )
 
-        if args.annotations_csv:
-            self._write_annotations_csv(result, Path(args.annotations_csv))
-        if args.deleted_txt:
-            self._write_deleted_txt(
-                [d.image_name for d in result.deleted_images],
-                Path(args.deleted_txt),
-            )
+        output_dir = Path(args.output_dir)
+        rows = _project_annotations_to_csv_rows(result)
+        df = pd.DataFrame(rows)
+
+        if args.raw:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            self._write_df_csv(df, output_dir / "raw.csv", "Raw CSV")
+
+        split = split_annotations_df(df, result.deleted_images)
+        self._write_split_result(split, output_dir)
 
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""

@@ -7,6 +7,7 @@ from cveta2.models import (
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
+from cveta2.split import SplitResult, split_annotations_df
 
 __all__ = [
     "BBoxAnnotation",
@@ -14,5 +15,7 @@ __all__ = [
     "DeletedImage",
     "ImageWithoutAnnotations",
     "ProjectAnnotations",
+    "SplitResult",
     "fetch_annotations",
+    "split_annotations_df",
 ]

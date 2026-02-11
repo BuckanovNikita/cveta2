@@ -6,8 +6,9 @@ Short descriptions of project internals and implicit design decisions.
 
 ```
 cveta2/
-  __init__.py   - public API re-exports: CvatClient, fetch_annotations, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations
+  __init__.py   - public API re-exports: CvatClient, fetch_annotations, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations, split_annotations_df, SplitResult
   models.py     - Pydantic models: BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations
+  split.py      - split_annotations_df(): pandas-based splitting of annotation DataFrame into dataset/obsolete/in_progress; SplitResult dataclass
   config.py     - CvatConfig pydantic model; loads/merges env > config file; get_projects_cache_path()
   projects_cache.py - YAML cache of project id/name list (load_projects_cache, save_projects_cache); path next to config (projects.yaml)
   client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations) + fetch_annotations() DataFrame wrapper + _project_annotations_to_csv_rows()
@@ -27,12 +28,11 @@ Priority: env vars override config file. No CVAT settings/credentials on CLI. En
 ## CLI commands
 
 - `setup` — interactive wizard that prompts for host and auth (token or username/password), saves to `~/.config/cveta2/config.yaml` via `CvatConfig.save_to_file()`. Prefills defaults from existing config if present. Optional `--config` to override config path.
-- `fetch` — fetches bbox annotations and deleted images from a CVAT project. Arguments:
+- `fetch` — fetches bbox annotations and deleted images from a CVAT project, splits them into three CSVs. Arguments:
   - `--project` / `-p` — project ID (number) or project name; if omitted, TUI shows cached project list with arrow-key selection and search filter; "↻ Обновить список" rescans CVAT and refreshes cache.
-  - `--annotations-csv` — save annotations + images-without-annotations as CSV.
-  - `--deleted-txt` — save deleted image names (one per line).
-  - `--completed-only` — process only tasks with status "completed".
-  - No `-o`/`--output` flag. Full JSON is written to stdout only when `LOGURU_LEVEL=DEBUG` (hidden at INFO to keep output clean).
+  - `--output-dir` / `-o` (required) — directory for output files: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.txt`.
+  - `--raw` — additionally save unprocessed full DataFrame as `raw.csv` in the output dir.
+  - `--completed-only` — process only tasks with status "completed" (in_progress.csv will be empty).
 
 ## Logging levels
 
@@ -46,7 +46,15 @@ Priority: env vars override config file. No CVAT settings/credentials on CLI. En
 - `BBoxAnnotation.to_csv_row()` serializes `attributes` as a JSON string (`ensure_ascii=False`) so non-ASCII attribute values remain readable in CSV.
 - `ImageWithoutAnnotations` — frames with no bbox annotations; included in CSV via `to_csv_row()` with None for bbox/annotation fields.
 - `ProjectAnnotations` contains `annotations`, `deleted_images`, and `images_without_annotations`.
-- `DeletedImage` — minimal record: `task_id`, `task_name`, `frame_id`, `image_name`.
+- `DeletedImage` — record of a deleted frame: `task_id`, `task_name`, `task_status`, `task_updated_date`, `frame_id`, `image_name`.
+
+## CSV splitting logic (`split.py`)
+
+`split_annotations_df(df, deleted_images)` splits the full annotation DataFrame into three parts:
+
+1. For each `image_name`, the **latest task** (max `task_updated_date`) is found across both df rows and `deleted_images`.
+2. If the image is **deleted in its latest task** → all rows for that image go to **obsolete**, filename goes to `deleted_names`.
+3. Otherwise: rows from non-completed tasks → **in_progress**; rows from the latest completed task → **dataset**; rows from older completed tasks → **obsolete**.
 
 ## Implicit decisions
 

@@ -230,6 +230,8 @@ class CvatClient:
                 DeletedImage(
                     task_id=task_ref.id,
                     task_name=task_ref.name,
+                    task_status=str(task_ref.status or ""),
+                    task_updated_date=self._task_updated_date(task_ref),
                     frame_id=frame_id,
                     image_name=str(image_name_raw) if image_name_raw else "<unknown>",
                 ),

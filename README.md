@@ -7,7 +7,7 @@
 
 - Собирает все `bbox` аннотации проекта в плоский список `BBoxAnnotation`
 - Возвращает список удаленных кадров/изображений как `DeletedImage`
-- Отдает результат сразу в JSON (и при желании сохраняет CSV/TXT)
+- Автоматически разделяет результат на три CSV: актуальный датасет, устаревшие данные и данные в работе
 - Поддерживает фильтр по задачам со статусом `completed`
 - Работает через конфиг: env-переменные и/или YAML (рекомендуется `cveta2 setup`)
 
@@ -28,12 +28,14 @@ uv run cveta2 setup
 2. Выгрузите проект (можно указать ID, имя проекта или запустить без `--project` — откроется выбор из списка):
 
 ```bash
-uv run cveta2 fetch --project 123 --annotations-csv result.csv
+uv run cveta2 fetch --project 123 -o output/
 # или по имени проекта:
-uv run cveta2 fetch --project "Мой проект" --annotations-csv result.csv
+uv run cveta2 fetch --project "Мой проект" -o output/
 # или интерактивный выбор проекта:
-uv run cveta2 fetch --annotations-csv result.csv
+uv run cveta2 fetch -o output/
 ```
+
+В папке `output/` появятся три CSV-файла (`dataset.csv`, `obsolete.csv`, `in_progress.csv`) и `deleted.txt`.
 
 Список проектов кэшируется в `projects.yaml` рядом с конфигом; в интерактивном режиме можно нажать `0`, чтобы обновить список с CVAT.
 
@@ -72,28 +74,35 @@ cvat:
 Сначала настройте доступ: `uv run cveta2 setup` или задайте переменные окружения (см. Конфигурация).
 
 ```bash
-# Базовый fetch (host/creds из env или ~/.config/cveta2/config.yaml)
-uv run cveta2 fetch --project 123
-uv run cveta2 fetch -p "Имя проекта"
+# Базовый fetch — результат в папку output/
+uv run cveta2 fetch --project 123 -o output/
+uv run cveta2 fetch -p "Имя проекта" -o output/
 
 # Интерактивный выбор проекта (из кэша; 0 — обновить список с CVAT)
-uv run cveta2 fetch
+uv run cveta2 fetch -o output/
 
-# Сохранить все bbox в CSV
-uv run cveta2 fetch -p 123 --annotations-csv result.csv
-
-# Дополнительно сохранить только имена удаленных изображений (по одному на строку)
-uv run cveta2 fetch -p 123 --deleted-txt deleted.txt
+# Дополнительно сохранить полный (необработанный) CSV
+uv run cveta2 fetch -p 123 -o output/ --raw
 
 # Обрабатывать только задачи со статусом completed
-uv run cveta2 fetch -p 123 --completed-only
+uv run cveta2 fetch -p 123 -o output/ --completed-only
 
 # Путь к конфигу через env (кэш проектов будет в той же папке: projects.yaml)
-CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch -p 123
+CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch -p 123 -o output/
 
 # Вариант запуска как модуля
-uv run python -m cveta2 fetch -p 123
+uv run python -m cveta2 fetch -p 123 -o output/
 ```
+
+### Выходные файлы
+
+| Файл | Описание |
+|---|---|
+| `dataset.csv` | Данные из последней завершённой задачи для каждого неудалённого изображения |
+| `obsolete.csv` | Данные из старых завершённых задач + данные для изображений, удалённых в последней задаче |
+| `in_progress.csv` | Данные из незавершённых задач |
+| `deleted.txt` | Имена изображений, удалённых в их последней задаче (по одному на строку) |
+| `raw.csv` | (только с `--raw`) Полный необработанный CSV со всеми строками |
 
 ## Python API
 
@@ -161,6 +170,8 @@ for img in result.deleted_images:
 |---|---|---|
 | `task_id` | `int` | ID задачи |
 | `task_name` | `str` | Название задачи |
+| `task_status` | `str` | Статус задачи |
+| `task_updated_date` | `str` | Дата/время последнего обновления задачи |
 | `frame_id` | `int` | Индекс удаленного кадра |
 | `image_name` | `str` | Имя файла изображения |
 
@@ -176,6 +187,7 @@ for img in result.deleted_images:
 
 - Получение **всех bounding-box аннотаций** проекта в плоском формате (одна запись на каждый bbox)
 - Получение **списка удалённых изображений** по всем задачам проекта
+- **Автоматическое разделение** результата на актуальный датасет, устаревшие данные и данные в работе
 - Всё за **один вызов** — без промежуточных XML/ZIP файлов
 - **Конфигурация через файл** — настройки CVAT хранятся в `~/.config/cveta2/config.yaml`
 
@@ -247,23 +259,20 @@ cvat:
 # Первоначальная настройка
 uv run cveta2 setup
 
-# Если host указан в конфиге — достаточно project-id
-uv run cveta2 fetch --project-id 123
+# Базовый fetch — результат в папку output/
+uv run cveta2 fetch -p 123 -o output/
 
-# Явный host и токен через CLI
-uv run cveta2 fetch --host https://app.cvat.ai --project-id 123 --token YOUR_TOKEN
-
-# Сохранить аннотации в CSV и имена удалённых изображений в текстовый файл
-uv run cveta2 fetch --project-id 123 --annotations-csv annotations.csv --deleted-txt deleted.txt
+# Дополнительно сохранить полный (необработанный) CSV
+uv run cveta2 fetch -p 123 -o output/ --raw
 
 # Только задачи со статусом «completed»
-uv run cveta2 fetch --project-id 123 --completed-only
+uv run cveta2 fetch -p 123 -o output/ --completed-only
 
 # Указать альтернативный конфиг-файл через env
-CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch --project-id 123
+CVETA2_CONFIG=/path/to/config.yaml uv run cveta2 fetch -p 123 -o output/
 
 # Также работает как python-модуль
-uv run python -m cveta2 fetch --project-id 123
+uv run python -m cveta2 fetch -p 123 -o output/
 ```
 
 ### Как Python-библиотека
@@ -324,5 +333,7 @@ for img in result.deleted_images:
 |--------------|-------|---------------------------|
 | `task_id`    | `int` | ID задачи                 |
 | `task_name`  | `str` | Название задачи           |
+| `task_status` | `str` | Статус задачи            |
+| `task_updated_date` | `str` | Дата обновления задачи |
 | `frame_id`   | `int` | Индекс кадра              |
 | `image_name` | `str` | Имя файла изображения     |

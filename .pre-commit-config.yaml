@@ -22,6 +22,14 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: count-lines
+        name: count lines of code
+        entry: bash -c 'echo "Lines of code:"; find cveta2 -name "*.py" | xargs wc -l | tail -1'
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
       - id: uv-lock
         name: uv lock
         entry: uv lock

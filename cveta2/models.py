@@ -92,6 +92,8 @@ class DeletedImage(BaseModel):
 
     task_id: int
     task_name: str
+    task_status: str = ""
+    task_updated_date: str = ""
     frame_id: int
     image_name: str
 
