@@ -224,6 +224,8 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 
 По умолчанию вывод пишется в `tests/fixtures/cvat/coco8-dev/`. Другой каталог: `--output-dir path`. Подробнее — в `scripts/README.md`.
 
+Для тестов можно собирать **фейковые проекты** из базовых фикстур: произвольный набор задач в любом порядке, с повторами, случайными или заданными именами и статусами. Модуль `tests/fixtures/fake_cvat_project.py`: `FakeProjectConfig` (pydantic) и `build_fake_project(base_fixtures, config)`. Пример: три задачи «normal» подряд с id 100, 101, 102 или случайный набор из 5 задач с `count=5`, `seed=42`. Тесты — в `tests/test_fake_cvat_project.py`.
+
 ## Ограничения
 
 - Извлекаются только фигуры типа `rectangle` (в выходе это `instance_shape="box"`). Другие типы фигур CVAT (`polygon`, `polyline`, `points` и т.д.) пропускаются.

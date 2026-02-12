@@ -56,7 +56,7 @@ fixable = ["ALL"]
 exclude = ["scripts/**"]  # lint only; format still runs on scripts
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004"]
+"tests/**" = ["S101", "PLR2004", "PLC0415", "D103", "S311"]
 "main.py" = ["F401"]  # re-export wrapper
 
 [tool.ruff.format]
