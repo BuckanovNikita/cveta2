@@ -11,17 +11,15 @@ cveta2/
   dataset_partition.py - partition_annotations_df(): pandas-based partitioning of annotation DataFrame into dataset/obsolete/in_progress; PartitionResult dataclass
   config.py     - CvatConfig pydantic model; loads/merges env > config file; get_projects_cache_path(); is_interactive_disabled() / require_interactive() guards
   projects_cache.py - YAML cache of project id/name list (load_projects_cache, save_projects_cache); path next to config (projects.yaml)
-  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations) + fetch_annotations() DataFrame wrapper + _project_annotations_to_csv_rows(); accepts CvatApiPort for DI
+  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations) + fetch_annotations() DataFrame wrapper + _project_annotations_to_csv_rows(); all paths go through CvatApiPort
   _client/      - internal implementation details split from client.py
     dtos.py     - frozen dataclass DTOs for CVAT API responses (RawFrame, RawShape, RawTrack, RawTask, RawLabel, etc.)
     ports.py    - CvatApiPort Protocol defining the API boundary; the single seam for mocking
-    sdk_adapter.py - SdkCvatApiAdapter: CvatApiPort implementation using cvat_sdk; conversion uses CVAT SDK types and dot access; only _extract_updated_date and _extract_creator_username use getattr for optional/legacy fields
-    context.py  - _TaskContext + extraction constants; frames typed as dict[int, RawFrame]; get_frame() and get_label_name() for extractors
+    sdk_adapter.py - SdkCvatApiAdapter: CvatApiPort implementation wrapping an open cvat_sdk client; thin stateless converter (SDK objects in, DTOs out); only _extract_updated_date and _extract_creator_username use getattr for optional/legacy fields
+    context.py  - _TaskContext + extraction constants; frames typed as dict[int, RawFrame]; get_frame() and get_label_name() for extractors; from_raw(task, data_meta, label_names, attr_names) classmethod builds context from DTOs
     mapping.py  - helper functions for label/attribute mapping; takes typed DTOs (RawLabel, RawAttribute)
     extractors.py - shape/track conversion into BBoxAnnotation models; takes typed DTOs (RawShape, RawTrack)
-    context.py  - _TaskContext + extraction constants
-    mapping.py  - helper functions for label/attribute mapping
-    extractors.py - shape conversion into BBoxAnnotation models
+    (context.py, mapping.py, extractors.py entries above — no duplicates)
 
   cli.py        - argparse CLI entry point; CliApp class with setup/fetch handlers and CSV/TXT exports
   __main__.py   - enables `python -m cveta2`
@@ -69,15 +67,18 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 
 ## API abstraction and testability
 
-`CvatClient` accepts an optional `api: CvatApiPort` parameter. In production, if not provided, it creates a `SdkCvatApiAdapter(cfg)` that uses the real CVAT SDK. In tests, any object satisfying the `CvatApiPort` protocol can be injected — typically a simple fake that returns pre-built DTO fixtures (dataclasses from `_client/dtos.py`). All CVAT SDK interaction is isolated inside `SdkCvatApiAdapter`; no other module imports `cvat_sdk`. The DTOs (`RawFrame`, `RawShape`, `RawTrack`, `RawTask`, `RawLabel`, etc.) are frozen dataclasses — easy to construct in test fixtures without any SDK dependency.
+`CvatClient` has a **single code path** for annotation logic (`_fetch_annotations` static method) that works through `CvatApiPort` with typed DTOs. When `api` is injected (tests), the provided implementation is used directly. When `api` is `None` (production), `CvatClient` opens an SDK client via `client_factory` and wraps it in `SdkCvatApiAdapter` on the fly (via `_open_sdk_adapter` context manager), so the same `_fetch_annotations` code runs in both cases. All CVAT SDK interaction is isolated inside `SdkCvatApiAdapter`; no other module imports `cvat_sdk` (except `client.py` which imports `make_client` as the default factory). `SdkCvatApiAdapter` accepts an already-opened SDK client; `CvatClient` owns the client lifecycle. The DTOs are frozen dataclasses — easy to construct in test fixtures without any SDK dependency.
 
 ## Test fixtures (CVAT)
 
 - **Layout**: `tests/fixtures/cvat/<project_name>/` contains `project.json` (id, name, labels) and `tasks/<task_id>_<slug>.json` (task meta, data_meta, annotations). JSON shape mirrors `_client/dtos.py` (RawTask, RawDataMeta, RawAnnotations, etc.).
 - **Generator**: `scripts/export_cvat_fixtures.py` — uses only cvat_sdk (no cveta2 client). Reads `CVAT_HOST`, `CVAT_USERNAME`, `CVAT_PASSWORD` from env; `--project`, `--output-dir`. Fetches project by name, then for each task retrieves data_meta and annotations, converts to JSON-serializable dicts, writes to output dir. Do not import cveta2._client so fixtures are independent of library under test.
-- **Loader**: `tests/fixtures/load_cvat_fixtures.py` — `load_cvat_fixtures(project_dir)` reads `project.json` and all `tasks/*.json`, returns `(RawProject, list[RawTask], list[RawLabel], dict[task_id, (RawDataMeta, RawAnnotations)])` using `cveta2._client.dtos`. Used by tests and (later) by a FakeCvatApi.
+- **Loader**: `tests/fixtures/load_cvat_fixtures.py` — `load_cvat_fixtures(project_dir)` reads `project.json` and all `tasks/*.json`, returns `(RawProject, list[RawTask], list[RawLabel], dict[task_id, (RawDataMeta, RawAnnotations)])` using `cveta2._client.dtos`. Used by tests and by `FakeCvatApi`.
+- **FakeCvatApi**: `tests/fixtures/fake_cvat_api.py` — implements `CvatApiPort` protocol, backed by `LoadedFixtures` tuple (canonical definition in `fake_cvat_project.py`, imported everywhere else). Injected into `CvatClient(cfg, api=FakeCvatApi(fixtures))` for integration tests without SDK.
 - **Tests**: `tests/test_cvat_fixtures.py` — loads coco8-dev fixtures, runs name-based consistency checks per task (e.g. task "all-removed" → every frame in deleted_frames; "normal" → at least one frame not deleted). No CvatClient; assertions on DTOs only. Task name → assertion registry: normal, all-empty, all-removed, zero-frame-empty-last-removed, all-bboxes-moved, all-except-first-empty, frames-1-2-removed.
 - **Fake projects**: `tests/fixtures/fake_cvat_project.py` — build fake projects from base fixtures (e.g. coco8-dev) for tests. `FakeProjectConfig` (pydantic): `task_indices` (which base tasks, in order; can repeat), or `count` + random sampling; `task_id_order` ("asc" | "random"); `task_names` ("keep" | "random" | "enumerated" | list); `task_statuses` ("keep" | "random" | list); `seed` for reproducibility. `build_fake_project(base_fixtures, config)` returns the same `(RawProject, list[RawTask], list[RawLabel], task_id -> (RawDataMeta, RawAnnotations))` structure. `task_indices_by_names(base_tasks, ["normal", "all-removed"])` resolves names to indices. Tests in `tests/test_fake_cvat_project.py`.
+- **Shared fixtures**: `tests/conftest.py` — session-scoped `coco8_fixtures`, `coco8_label_maps`, `coco8_tasks_by_name` for use across all test modules.
+- **Pipeline tests**: `test_mapping.py` (label/attribute mapping), `test_extractors.py` (_collect_shapes unit tests), `test_partition.py` (partition_annotations_df), `test_pipeline_integration.py` (full pipeline via FakeCvatApi + CvatClient).
 
 ## Dev tools (scripts/)
 
@@ -87,6 +88,7 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 ## Implicit decisions
 
 - `_RECTANGLE = "rectangle"` in `cveta2/_client/context.py` — only rectangle/box shapes are extracted; other shape types are skipped.
+- `_collect_shapes` processes shapes regardless of frame deletion status — shapes on deleted frames are still extracted as `BBoxAnnotation`. Deletion filtering is handled later by `partition_annotations_df` via the `deleted_images` list.
 - `fetch_annotations()` wrapper returns a `pd.DataFrame` (not `ProjectAnnotations`); for structured output use `CvatClient.fetch_annotations()`.
 - `_project_annotations_to_csv_rows()` merges `BBoxAnnotation` and `ImageWithoutAnnotations` rows into a single flat list for CSV.
 - `ensure_credentials()` on `CvatConfig` returns a new copy with prompted values — it never mutates in place.

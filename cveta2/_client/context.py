@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawFrame
+    from cveta2._client.dtos import RawDataMeta, RawFrame, RawTask
 
 _RECTANGLE = "rectangle"
 
@@ -23,6 +23,26 @@ class _TaskContext:
     task_status: str
     task_updated_date: str
     subset: str
+
+    @classmethod
+    def from_raw(
+        cls,
+        task: RawTask,
+        data_meta: RawDataMeta,
+        label_names: dict[int, str],
+        attr_names: dict[int, str],
+    ) -> _TaskContext:
+        """Build context from DTO objects."""
+        return cls(
+            frames=dict(enumerate(data_meta.frames)),
+            label_names=label_names,
+            attr_names=attr_names,
+            task_id=task.id,
+            task_name=task.name,
+            task_status=task.status,
+            task_updated_date=task.updated_date,
+            subset=task.subset,
+        )
 
     def get_frame(self, frame_id: int) -> RawFrame | None:
         """Return frame metadata by index, or None if missing."""

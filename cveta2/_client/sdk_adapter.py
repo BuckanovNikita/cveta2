@@ -8,9 +8,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from cvat_sdk import make_client  # type: ignore[import-untyped]
-from loguru import logger
-
 from cveta2._client.dtos import (
     RawAnnotations,
     RawAttribute,
@@ -30,14 +27,17 @@ if TYPE_CHECKING:
         models as cvat_models,
     )
 
-    from cveta2.config import CvatConfig
-
 
 class SdkCvatApiAdapter:
-    """``CvatApiPort`` implementation backed by the real CVAT SDK."""
+    """``CvatApiPort`` implementation backed by an open CVAT SDK client.
 
-    def __init__(self, cfg: CvatConfig) -> None:
-        self._cfg = cfg
+    The caller is responsible for opening and closing the SDK client.
+    This adapter is a thin stateless converter: SDK objects in, DTOs out.
+    """
+
+    def __init__(self, client: Any) -> None:  # noqa: ANN401
+        """Wrap an already-opened ``cvat_sdk`` client."""
+        self._client = client
 
     # ------------------------------------------------------------------
     # Public API (satisfies CvatApiPort)
@@ -45,59 +45,35 @@ class SdkCvatApiAdapter:
 
     def list_projects(self) -> list[RawProject]:
         """Return all accessible projects."""
-        with self._open_client() as client:
-            raw = client.projects.list()
-            return [RawProject(id=p.id, name=p.name or "") for p in raw]
+        raw = self._client.projects.list()
+        return [RawProject(id=p.id, name=p.name or "") for p in raw]
 
     def get_project_tasks(self, project_id: int) -> list[RawTask]:
         """Return tasks belonging to a project."""
-        with self._open_client() as client:
-            project = client.projects.retrieve(project_id)
-            tasks = project.get_tasks()
-            return [self._convert_task(t) for t in tasks]
+        project = self._client.projects.retrieve(project_id)
+        tasks = project.get_tasks()
+        return [self._convert_task(t) for t in tasks]
 
     def get_project_labels(self, project_id: int) -> list[RawLabel]:
         """Return label definitions for a project."""
-        with self._open_client() as client:
-            project = client.projects.retrieve(project_id)
-            labels = project.get_labels()
-            return [self._convert_label(lbl) for lbl in labels]
+        project = self._client.projects.retrieve(project_id)
+        labels = project.get_labels()
+        return [self._convert_label(lbl) for lbl in labels]
 
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
         """Return frame metadata and deleted frame IDs for a task."""
-        with self._open_client() as client:
-            tasks_api = client.api_client.tasks_api
-            data_meta, _ = tasks_api.retrieve_data_meta(task_id)
-            return self._convert_data_meta(data_meta)
+        tasks_api = self._client.api_client.tasks_api
+        data_meta, _ = tasks_api.retrieve_data_meta(task_id)
+        return self._convert_data_meta(data_meta)
 
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
         """Return shapes and tracks for a task."""
-        with self._open_client() as client:
-            tasks_api = client.api_client.tasks_api
-            labeled_data, _ = tasks_api.retrieve_annotations(task_id)
-            return self._convert_annotations(labeled_data)
+        tasks_api = self._client.api_client.tasks_api
+        labeled_data, _ = tasks_api.retrieve_annotations(task_id)
+        return self._convert_annotations(labeled_data)
 
     # ------------------------------------------------------------------
-    # SDK client lifecycle
-    # ------------------------------------------------------------------
-
-    def _open_client(self) -> Any:  # noqa: ANN401
-        """Create and return a context-managed SDK client."""
-        resolved = self._cfg.ensure_credentials()
-        kwargs: dict[str, Any] = {"host": resolved.host}
-        if resolved.token:
-            kwargs["access_token"] = resolved.token
-        elif resolved.username and resolved.password:
-            kwargs["credentials"] = (resolved.username, resolved.password)
-
-        client = make_client(**kwargs)
-        if resolved.organization:
-            client.organization_slug = resolved.organization
-            logger.trace(f"Using organization: {resolved.organization}")
-        return client
-
-    # ------------------------------------------------------------------
-    # Conversion helpers (SDK objects → DTOs)
+    # Conversion helpers (SDK objects -> DTOs)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -112,7 +88,7 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _extract_updated_date(task: cvat_models.TaskRead) -> str:
-        """Normalize ``updated_date`` / ``updated_at`` to an ISO string."""
+        """Normalize ``updated_date`` / ``updated_at`` to ISO string."""
         raw: object | None = getattr(task, "updated_date", None)
         if raw is None:
             raw = getattr(task, "updated_at", None)
@@ -130,7 +106,9 @@ class SdkCvatApiAdapter:
         return RawLabel(id=label.id, name=label.name, attributes=attrs)
 
     @staticmethod
-    def _convert_data_meta(data_meta: cvat_models.DataMetaRead) -> RawDataMeta:
+    def _convert_data_meta(
+        data_meta: cvat_models.DataMetaRead,
+    ) -> RawDataMeta:
         frames_raw = data_meta.frames or []
         frames = [
             RawFrame(
@@ -144,7 +122,9 @@ class SdkCvatApiAdapter:
         return RawDataMeta(frames=frames, deleted_frames=deleted)
 
     @staticmethod
-    def _convert_annotations(labeled_data: cvat_models.LabeledData) -> RawAnnotations:
+    def _convert_annotations(
+        labeled_data: cvat_models.LabeledData,
+    ) -> RawAnnotations:
         raw_shapes = labeled_data.shapes or []
         raw_tracks = labeled_data.tracks or []
         return RawAnnotations(
@@ -153,7 +133,9 @@ class SdkCvatApiAdapter:
         )
 
     @staticmethod
-    def _convert_shape(shape: cvat_models.LabeledShape) -> RawShape:
+    def _convert_shape(
+        shape: cvat_models.LabeledShape,
+    ) -> RawShape:
         type_val = shape.type.value if shape.type else str(shape.type)
         return RawShape(
             id=shape.id or 0,
@@ -165,12 +147,18 @@ class SdkCvatApiAdapter:
             z_order=int(shape.z_order or 0),
             rotation=float(shape.rotation or 0.0),
             source=str(shape.source or ""),
-            attributes=SdkCvatApiAdapter._convert_attributes(shape.attributes),
-            created_by=SdkCvatApiAdapter._extract_creator_username(shape),
+            attributes=SdkCvatApiAdapter._convert_attributes(
+                shape.attributes,
+            ),
+            created_by=SdkCvatApiAdapter._extract_creator_username(
+                shape,
+            ),
         )
 
     @staticmethod
-    def _convert_tracked_shape(ts: cvat_models.TrackedShape) -> RawTrackedShape:
+    def _convert_tracked_shape(
+        ts: cvat_models.TrackedShape,
+    ) -> RawTrackedShape:
         type_str = ts.type.value if ts.type else str(ts.type)
         return RawTrackedShape(
             type=type_str,
@@ -180,19 +168,27 @@ class SdkCvatApiAdapter:
             occluded=bool(ts.occluded),
             z_order=int(ts.z_order or 0),
             rotation=float(ts.rotation or 0.0),
-            attributes=SdkCvatApiAdapter._convert_attributes(ts.attributes),
-            created_by=SdkCvatApiAdapter._extract_creator_username(ts),
+            attributes=SdkCvatApiAdapter._convert_attributes(
+                ts.attributes,
+            ),
+            created_by=SdkCvatApiAdapter._extract_creator_username(
+                ts,
+            ),
         )
 
     @staticmethod
-    def _convert_track(track: cvat_models.LabeledTrack) -> RawTrack:
+    def _convert_track(
+        track: cvat_models.LabeledTrack,
+    ) -> RawTrack:
         raw_shapes = track.shapes or []
         return RawTrack(
             id=track.id or 0,
             label_id=track.label_id,
             source=str(track.source or ""),
             shapes=[SdkCvatApiAdapter._convert_tracked_shape(s) for s in raw_shapes],
-            created_by=SdkCvatApiAdapter._extract_creator_username(track),
+            created_by=SdkCvatApiAdapter._extract_creator_username(
+                track,
+            ),
         )
 
     @staticmethod
@@ -217,5 +213,7 @@ class SdkCvatApiAdapter:
         if username is not None:
             return str(username)
         if isinstance(user_obj, dict):
-            return str(user_obj.get("username") or user_obj.get("name") or "")
+            return str(
+                user_obj.get("username") or user_obj.get("name") or "",
+            )
         return ""
