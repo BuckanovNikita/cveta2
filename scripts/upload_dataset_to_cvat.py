@@ -131,6 +131,11 @@ def parse_yolo_label_file(path: Path) -> list[tuple[int, float, float, float, fl
             h = float(parts[4])
             rows.append((cid, xc, yc, w, h))
         except (ValueError, IndexError):
+            logger.warning(
+                "Skipping malformed YOLO line in {}: {!r}",
+                path,
+                line,
+            )
             continue
     return rows
 

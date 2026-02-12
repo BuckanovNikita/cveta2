@@ -42,7 +42,13 @@ def load_projects_cache(path: Path | None = None) -> list[ProjectInfo]:
         if isinstance(item, dict) and "id" in item and "name" in item:
             try:
                 result.append(ProjectInfo(id=int(item["id"]), name=str(item["name"])))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as e:
+                logger.warning(
+                    "Skipping invalid projects cache entry (id=%r, name=%r): %s",
+                    item.get("id"),
+                    item.get("name"),
+                    e,
+                )
                 continue
     return result
 
