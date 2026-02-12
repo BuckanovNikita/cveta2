@@ -19,6 +19,10 @@ cveta2/
     context.py  - _TaskContext + extraction constants; frames typed as dict[int, RawFrame]; get_frame() and get_label_name() for extractors
     mapping.py  - helper functions for label/attribute mapping; takes typed DTOs (RawLabel, RawAttribute)
     extractors.py - shape/track conversion into BBoxAnnotation models; takes typed DTOs (RawShape, RawTrack)
+    context.py  - _TaskContext + extraction constants
+    mapping.py  - helper functions for label/attribute mapping
+    extractors.py - shape conversion into BBoxAnnotation models
+
   cli.py        - argparse CLI entry point; CliApp class with setup/fetch handlers and CSV/TXT exports
   __main__.py   - enables `python -m cveta2`
 main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()
@@ -45,7 +49,7 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 
 - **INFO** — file save confirmations (`Annotations CSV saved`, `Deleted images list saved`, `Config saved`), interactive prompts, cache status messages.
 - **DEBUG** — API result summaries (project info, task counts, annotation/deleted/without-annotations counts, processing task progress), full JSON to stdout, API structure dumps (project, tasks, data_meta, annotations).
-- **TRACE** — raw API object dumps (individual shapes, tracks, tracked shapes, frames, deleted_frames, labels, attributes).
+- **TRACE** — raw API object dumps (individual shapes, frames, deleted_frames, labels, attributes).
 
 ## Data model notes
 
@@ -67,10 +71,13 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 
 `CvatClient` accepts an optional `api: CvatApiPort` parameter. In production, if not provided, it creates a `SdkCvatApiAdapter(cfg)` that uses the real CVAT SDK. In tests, any object satisfying the `CvatApiPort` protocol can be injected — typically a simple fake that returns pre-built DTO fixtures (dataclasses from `_client/dtos.py`). All CVAT SDK interaction is isolated inside `SdkCvatApiAdapter`; no other module imports `cvat_sdk`. The DTOs (`RawFrame`, `RawShape`, `RawTrack`, `RawTask`, `RawLabel`, etc.) are frozen dataclasses — easy to construct in test fixtures without any SDK dependency.
 
+## Dev tools
+
+- `scripts/upload_dataset_to_cvat.py` — creates a CVAT project and several tasks from a dataset YAML (e.g. coco8). Reads `path`, `train`, `val`, `names`; creates one project with labels from `names` and N tasks each with the same images (train+val). Uses `cveta2.config.CvatConfig` and cvat_sdk directly (no CvatApiPort). Run from repo root: `uv run python scripts/upload_dataset_to_cvat.py [--yaml path] [--project name] [--tasks N]`.
+
 ## Implicit decisions
 
 - `_RECTANGLE = "rectangle"` in `cveta2/_client/context.py` — only rectangle/box shapes are extracted; other shape types are skipped.
-- Track extraction ignores shapes with `outside=True`; only visible track boxes are converted into `BBoxAnnotation`.
 - `fetch_annotations()` wrapper returns a `pd.DataFrame` (not `ProjectAnnotations`); for structured output use `CvatClient.fetch_annotations()`.
 - `_project_annotations_to_csv_rows()` merges `BBoxAnnotation` and `ImageWithoutAnnotations` rows into a single flat list for CSV.
 - `ensure_credentials()` on `CvatConfig` returns a new copy with prompted values — it never mutates in place.

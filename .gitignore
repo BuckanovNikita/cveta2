@@ -8,3 +8,5 @@ wheels/
 
 # Virtual environments
 .venv
+cveta2/_client/extractors.py
+.cursor/worktrees.json

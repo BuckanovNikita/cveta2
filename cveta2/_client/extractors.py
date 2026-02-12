@@ -11,7 +11,7 @@ from cveta2._client.mapping import _resolve_attributes
 from cveta2.models import BBoxAnnotation
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawShape, RawTrack
+    from cveta2._client.dtos import RawShape
 
 
 def _collect_shapes(
@@ -52,51 +52,4 @@ def _collect_shapes(
                 attributes=_resolve_attributes(shape.attributes, ctx.attr_names),
             ),
         )
-    return result
-
-
-def _collect_track_shapes(
-    tracks: list[RawTrack],
-    ctx: _TaskContext,
-) -> list[BBoxAnnotation]:
-    """Extract BBoxAnnotations from track shapes (interpolated/linked bboxes)."""
-    result: list[BBoxAnnotation] = []
-    for track in tracks:
-        track_label = ctx.get_label_name(track.label_id)
-        for tracked_shape in track.shapes:
-            if tracked_shape.type != _RECTANGLE:
-                continue
-            if tracked_shape.outside:
-                continue
-            frame_info = ctx.get_frame(tracked_shape.frame)
-            if frame_info is None:
-                continue
-            creator_username = tracked_shape.created_by or track.created_by
-            result.append(
-                BBoxAnnotation(
-                    image_name=frame_info.name,
-                    image_width=frame_info.width,
-                    image_height=frame_info.height,
-                    instance_label=track_label,
-                    bbox_x_tl=tracked_shape.points[0],
-                    bbox_y_tl=tracked_shape.points[1],
-                    bbox_x_br=tracked_shape.points[2],
-                    bbox_y_br=tracked_shape.points[3],
-                    task_id=ctx.task_id,
-                    task_name=ctx.task_name,
-                    task_status=ctx.task_status,
-                    task_updated_date=ctx.task_updated_date,
-                    created_by_username=creator_username,
-                    frame_id=tracked_shape.frame,
-                    subset=ctx.subset,
-                    occluded=tracked_shape.occluded,
-                    z_order=tracked_shape.z_order,
-                    rotation=tracked_shape.rotation,
-                    source=track.source,
-                    annotation_id=track.id,
-                    attributes=_resolve_attributes(
-                        tracked_shape.attributes, ctx.attr_names
-                    ),
-                ),
-            )
     return result
