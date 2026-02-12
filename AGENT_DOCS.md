@@ -71,9 +71,17 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 
 `CvatClient` accepts an optional `api: CvatApiPort` parameter. In production, if not provided, it creates a `SdkCvatApiAdapter(cfg)` that uses the real CVAT SDK. In tests, any object satisfying the `CvatApiPort` protocol can be injected — typically a simple fake that returns pre-built DTO fixtures (dataclasses from `_client/dtos.py`). All CVAT SDK interaction is isolated inside `SdkCvatApiAdapter`; no other module imports `cvat_sdk`. The DTOs (`RawFrame`, `RawShape`, `RawTrack`, `RawTask`, `RawLabel`, etc.) are frozen dataclasses — easy to construct in test fixtures without any SDK dependency.
 
-## Dev tools
+## Test fixtures (CVAT)
+
+- **Layout**: `tests/fixtures/cvat/<project_name>/` contains `project.json` (id, name, labels) and `tasks/<task_id>_<slug>.json` (task meta, data_meta, annotations). JSON shape mirrors `_client/dtos.py` (RawTask, RawDataMeta, RawAnnotations, etc.).
+- **Generator**: `scripts/export_cvat_fixtures.py` — uses only cvat_sdk (no cveta2 client). Reads `CVAT_HOST`, `CVAT_USERNAME`, `CVAT_PASSWORD` from env; `--project`, `--output-dir`. Fetches project by name, then for each task retrieves data_meta and annotations, converts to JSON-serializable dicts, writes to output dir. Do not import cveta2._client so fixtures are independent of library under test.
+- **Loader**: `tests/fixtures/load_cvat_fixtures.py` — `load_cvat_fixtures(project_dir)` reads `project.json` and all `tasks/*.json`, returns `(RawProject, list[RawTask], list[RawLabel], dict[task_id, (RawDataMeta, RawAnnotations)])` using `cveta2._client.dtos`. Used by tests and (later) by a FakeCvatApi.
+- **Tests**: `tests/test_cvat_fixtures.py` — loads coco8-dev fixtures, runs name-based consistency checks per task (e.g. task "all-removed" → every frame in deleted_frames; "normal" → at least one frame not deleted). No CvatClient; assertions on DTOs only. Task name → assertion registry: normal, all-empty, all-removed, zero-frame-empty-last-removed, all-bboxes-moved, all-except-first-empty, frames-1-2-removed.
+
+## Dev tools (scripts/)
 
 - `scripts/upload_dataset_to_cvat.py` — creates a CVAT project and several tasks from a dataset YAML (e.g. coco8). Reads `path`, `train`, `val`, `names`; creates one project with labels from `names` and N tasks each with the same images (train+val). Uses `cveta2.config.CvatConfig` and cvat_sdk directly (no CvatApiPort). Run from repo root: `uv run python scripts/upload_dataset_to_cvat.py [--yaml path] [--project name] [--tasks N]`.
+- `scripts/export_cvat_fixtures.py` — exports a CVAT project to JSON fixtures for tests. Uses only cvat_sdk; credentials via env. See "Test fixtures (CVAT)" above and `scripts/README.md`.
 
 ## Implicit decisions
 

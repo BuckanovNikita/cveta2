@@ -1,0 +1,406 @@
+{
+  "id": 3,
+  "name": "coco8-dev",
+  "labels": [
+    {
+      "id": 85,
+      "name": "person",
+      "attributes": []
+    },
+    {
+      "id": 86,
+      "name": "bicycle",
+      "attributes": []
+    },
+    {
+      "id": 87,
+      "name": "car",
+      "attributes": []
+    },
+    {
+      "id": 88,
+      "name": "motorcycle",
+      "attributes": []
+    },
+    {
+      "id": 89,
+      "name": "airplane",
+      "attributes": []
+    },
+    {
+      "id": 90,
+      "name": "bus",
+      "attributes": []
+    },
+    {
+      "id": 91,
+      "name": "train",
+      "attributes": []
+    },
+    {
+      "id": 92,
+      "name": "truck",
+      "attributes": []
+    },
+    {
+      "id": 93,
+      "name": "boat",
+      "attributes": []
+    },
+    {
+      "id": 94,
+      "name": "traffic light",
+      "attributes": []
+    },
+    {
+      "id": 95,
+      "name": "fire hydrant",
+      "attributes": []
+    },
+    {
+      "id": 96,
+      "name": "stop sign",
+      "attributes": []
+    },
+    {
+      "id": 97,
+      "name": "parking meter",
+      "attributes": []
+    },
+    {
+      "id": 98,
+      "name": "bench",
+      "attributes": []
+    },
+    {
+      "id": 99,
+      "name": "bird",
+      "attributes": []
+    },
+    {
+      "id": 100,
+      "name": "cat",
+      "attributes": []
+    },
+    {
+      "id": 101,
+      "name": "dog",
+      "attributes": []
+    },
+    {
+      "id": 102,
+      "name": "horse",
+      "attributes": []
+    },
+    {
+      "id": 103,
+      "name": "sheep",
+      "attributes": []
+    },
+    {
+      "id": 104,
+      "name": "cow",
+      "attributes": []
+    },
+    {
+      "id": 105,
+      "name": "elephant",
+      "attributes": []
+    },
+    {
+      "id": 106,
+      "name": "bear",
+      "attributes": []
+    },
+    {
+      "id": 107,
+      "name": "zebra",
+      "attributes": []
+    },
+    {
+      "id": 108,
+      "name": "giraffe",
+      "attributes": []
+    },
+    {
+      "id": 109,
+      "name": "backpack",
+      "attributes": []
+    },
+    {
+      "id": 110,
+      "name": "umbrella",
+      "attributes": []
+    },
+    {
+      "id": 111,
+      "name": "handbag",
+      "attributes": []
+    },
+    {
+      "id": 112,
+      "name": "tie",
+      "attributes": []
+    },
+    {
+      "id": 113,
+      "name": "suitcase",
+      "attributes": []
+    },
+    {
+      "id": 114,
+      "name": "frisbee",
+      "attributes": []
+    },
+    {
+      "id": 115,
+      "name": "skis",
+      "attributes": []
+    },
+    {
+      "id": 116,
+      "name": "snowboard",
+      "attributes": []
+    },
+    {
+      "id": 117,
+      "name": "sports ball",
+      "attributes": []
+    },
+    {
+      "id": 118,
+      "name": "kite",
+      "attributes": []
+    },
+    {
+      "id": 119,
+      "name": "baseball bat",
+      "attributes": []
+    },
+    {
+      "id": 120,
+      "name": "baseball glove",
+      "attributes": []
+    },
+    {
+      "id": 121,
+      "name": "skateboard",
+      "attributes": []
+    },
+    {
+      "id": 122,
+      "name": "surfboard",
+      "attributes": []
+    },
+    {
+      "id": 123,
+      "name": "tennis racket",
+      "attributes": []
+    },
+    {
+      "id": 124,
+      "name": "bottle",
+      "attributes": []
+    },
+    {
+      "id": 125,
+      "name": "wine glass",
+      "attributes": []
+    },
+    {
+      "id": 126,
+      "name": "cup",
+      "attributes": []
+    },
+    {
+      "id": 127,
+      "name": "fork",
+      "attributes": []
+    },
+    {
+      "id": 128,
+      "name": "knife",
+      "attributes": []
+    },
+    {
+      "id": 129,
+      "name": "spoon",
+      "attributes": []
+    },
+    {
+      "id": 130,
+      "name": "bowl",
+      "attributes": []
+    },
+    {
+      "id": 131,
+      "name": "banana",
+      "attributes": []
+    },
+    {
+      "id": 132,
+      "name": "apple",
+      "attributes": []
+    },
+    {
+      "id": 133,
+      "name": "sandwich",
+      "attributes": []
+    },
+    {
+      "id": 134,
+      "name": "orange",
+      "attributes": []
+    },
+    {
+      "id": 135,
+      "name": "broccoli",
+      "attributes": []
+    },
+    {
+      "id": 136,
+      "name": "carrot",
+      "attributes": []
+    },
+    {
+      "id": 137,
+      "name": "hot dog",
+      "attributes": []
+    },
+    {
+      "id": 138,
+      "name": "pizza",
+      "attributes": []
+    },
+    {
+      "id": 139,
+      "name": "donut",
+      "attributes": []
+    },
+    {
+      "id": 140,
+      "name": "cake",
+      "attributes": []
+    },
+    {
+      "id": 141,
+      "name": "chair",
+      "attributes": []
+    },
+    {
+      "id": 142,
+      "name": "couch",
+      "attributes": []
+    },
+    {
+      "id": 143,
+      "name": "potted plant",
+      "attributes": []
+    },
+    {
+      "id": 144,
+      "name": "bed",
+      "attributes": []
+    },
+    {
+      "id": 145,
+      "name": "dining table",
+      "attributes": []
+    },
+    {
+      "id": 146,
+      "name": "toilet",
+      "attributes": []
+    },
+    {
+      "id": 147,
+      "name": "tv",
+      "attributes": []
+    },
+    {
+      "id": 148,
+      "name": "laptop",
+      "attributes": []
+    },
+    {
+      "id": 149,
+      "name": "mouse",
+      "attributes": []
+    },
+    {
+      "id": 150,
+      "name": "remote",
+      "attributes": []
+    },
+    {
+      "id": 151,
+      "name": "keyboard",
+      "attributes": []
+    },
+    {
+      "id": 152,
+      "name": "cell phone",
+      "attributes": []
+    },
+    {
+      "id": 153,
+      "name": "microwave",
+      "attributes": []
+    },
+    {
+      "id": 154,
+      "name": "oven",
+      "attributes": []
+    },
+    {
+      "id": 155,
+      "name": "toaster",
+      "attributes": []
+    },
+    {
+      "id": 156,
+      "name": "sink",
+      "attributes": []
+    },
+    {
+      "id": 157,
+      "name": "refrigerator",
+      "attributes": []
+    },
+    {
+      "id": 158,
+      "name": "book",
+      "attributes": []
+    },
+    {
+      "id": 159,
+      "name": "clock",
+      "attributes": []
+    },
+    {
+      "id": 160,
+      "name": "vase",
+      "attributes": []
+    },
+    {
+      "id": 161,
+      "name": "scissors",
+      "attributes": []
+    },
+    {
+      "id": 162,
+      "name": "teddy bear",
+      "attributes": []
+    },
+    {
+      "id": 163,
+      "name": "hair drier",
+      "attributes": []
+    },
+    {
+      "id": 164,
+      "name": "toothbrush",
+      "attributes": []
+    }
+  ]
+}

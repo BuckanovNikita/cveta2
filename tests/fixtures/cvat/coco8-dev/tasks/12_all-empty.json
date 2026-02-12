@@ -1,0 +1,58 @@
+{
+  "task": {
+    "id": 12,
+    "name": "all-empty",
+    "status": "annotation",
+    "subset": "",
+    "updated_date": "2026-02-12T18:16:59.829657+00:00"
+  },
+  "data_meta": {
+    "frames": [
+      {
+        "name": "000000000009.jpg",
+        "width": 640,
+        "height": 480
+      },
+      {
+        "name": "000000000025.jpg",
+        "width": 640,
+        "height": 426
+      },
+      {
+        "name": "000000000030.jpg",
+        "width": 640,
+        "height": 428
+      },
+      {
+        "name": "000000000034.jpg",
+        "width": 640,
+        "height": 425
+      },
+      {
+        "name": "000000000036.jpg",
+        "width": 481,
+        "height": 640
+      },
+      {
+        "name": "000000000042.jpg",
+        "width": 640,
+        "height": 478
+      },
+      {
+        "name": "000000000049.jpg",
+        "width": 381,
+        "height": 500
+      },
+      {
+        "name": "000000000061.jpg",
+        "width": 640,
+        "height": 488
+      }
+    ],
+    "deleted_frames": []
+  },
+  "annotations": {
+    "shapes": [],
+    "tracks": []
+  }
+}

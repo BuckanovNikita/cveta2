@@ -1,0 +1,203 @@
+{
+  "task": {
+    "id": 16,
+    "name": "all-except-first-empty",
+    "status": "annotation",
+    "subset": "",
+    "updated_date": "2026-02-12T18:24:25.748191+00:00"
+  },
+  "data_meta": {
+    "frames": [
+      {
+        "name": "000000000009.jpg",
+        "width": 640,
+        "height": 480
+      },
+      {
+        "name": "000000000025.jpg",
+        "width": 640,
+        "height": 426
+      },
+      {
+        "name": "000000000030.jpg",
+        "width": 640,
+        "height": 428
+      },
+      {
+        "name": "000000000034.jpg",
+        "width": 640,
+        "height": 425
+      },
+      {
+        "name": "000000000036.jpg",
+        "width": 481,
+        "height": 640
+      },
+      {
+        "name": "000000000042.jpg",
+        "width": 640,
+        "height": 478
+      },
+      {
+        "name": "000000000049.jpg",
+        "width": 381,
+        "height": 500
+      },
+      {
+        "name": "000000000061.jpg",
+        "width": 640,
+        "height": 488
+      }
+    ],
+    "deleted_frames": []
+  },
+  "annotations": {
+    "shapes": [
+      {
+        "id": 163,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 130,
+        "points": [
+          1.0799999999999699,
+          187.69008,
+          612.66976,
+          473.53008
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      },
+      {
+        "id": 164,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 130,
+        "points": [
+          311.73024,
+          4.310160000000001,
+          631.01024,
+          232.99032
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      },
+      {
+        "id": 165,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 135,
+        "points": [
+          249.60032000000007,
+          229.27032,
+          565.84032,
+          474.35016
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      },
+      {
+        "id": 166,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 130,
+        "points": [
+          0.0003200000000092018,
+          13.510080000000002,
+          434.48032,
+          388.63007999999996
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      },
+      {
+        "id": 167,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 134,
+        "points": [
+          376.2,
+          40.35996,
+          451.75007999999997,
+          86.88996
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      },
+      {
+        "id": 168,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 134,
+        "points": [
+          465.7797119999999,
+          38.969952,
+          523.849728,
+          85.63996800000001
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      },
+      {
+        "id": 169,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 134,
+        "points": [
+          385.70016000000004,
+          73.65983999999999,
+          469.72,
+          144.16992
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      },
+      {
+        "id": 170,
+        "type": "rectangle",
+        "frame": 0,
+        "label_id": 134,
+        "points": [
+          364.04959999999994,
+          2.4900960000000016,
+          458.80992,
+          73.559856
+        ],
+        "occluded": false,
+        "z_order": 0,
+        "rotation": 0.0,
+        "source": "manual",
+        "attributes": [],
+        "created_by": ""
+      }
+    ],
+    "tracks": []
+  }
+}

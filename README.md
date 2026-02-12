@@ -209,6 +209,21 @@ for img in result.deleted_images:
 | `frame_id` | `int` | Индекс кадра |
 | `image_name` | `str` | Имя файла изображения |
 
+## Тесты и фикстуры CVAT
+
+Тесты в `tests/test_cvat_fixtures.py` проверяют фикстуры проекта `coco8-dev`: загрузку JSON и соответствие данных именам задач (например, задача `all-removed` — все кадры в `deleted_frames`, `normal` — есть кадры не в удалённых).
+
+Фикстуры лежат в `tests/fixtures/cvat/coco8-dev/` (`project.json` и `tasks/*.json`). Чтобы пересоздать их из реального CVAT:
+
+```bash
+export CVAT_HOST="http://localhost:8080"  # или ваш URL CVAT
+export CVAT_USERNAME="admin"
+export CVAT_PASSWORD="ваш_пароль"
+uv run python scripts/export_cvat_fixtures.py --project coco8-dev
+```
+
+По умолчанию вывод пишется в `tests/fixtures/cvat/coco8-dev/`. Другой каталог: `--output-dir path`. Подробнее — в `scripts/README.md`.
+
 ## Ограничения
 
 - Извлекаются только фигуры типа `rectangle` (в выходе это `instance_shape="box"`). Другие типы фигур CVAT (`polygon`, `polyline`, `points` и т.д.) пропускаются.
