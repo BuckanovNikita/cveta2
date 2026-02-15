@@ -157,14 +157,28 @@ export CVETA2_NO_INTERACTIVE=true
 cveta2 fetch -p 123 -o output/ --images-dir /data/images
 ```
 
-## CLI: примеры
+## Команды CLI
+
+### `cveta2 setup`
+
+Интерактивный мастер настройки подключения к CVAT: хост, авторизация (токен или логин/пароль), пути для кэша изображений. Результат сохраняется в `~/.config/cveta2/config.yaml`.
 
 ```bash
-# Первоначальная настройка
 cveta2 setup
 
-# Базовый fetch
+# Указать другой путь к конфигу
+cveta2 setup --config /path/to/config.yaml
+```
+
+### `cveta2 fetch`
+
+Выгрузка bbox-аннотаций и удалённых изображений из проекта CVAT. Результат разбивается на три CSV-файла + список удалённых.
+
+```bash
+# По ID проекта
 cveta2 fetch --project 123 -o output/
+
+# По имени проекта
 cveta2 fetch -p "Имя проекта" -o output/
 
 # Интерактивный выбор проекта (из кэша; в списке есть опция обновить с CVAT)
@@ -173,15 +187,60 @@ cveta2 fetch -o output/
 # Дополнительно сохранить полный (необработанный) CSV
 cveta2 fetch -p 123 -o output/ --raw
 
-# Обрабатывать только задачи со статусом completed
+# Только задачи со статусом completed
 cveta2 fetch -p 123 -o output/ --completed-only
 
-# Без изображений
+# Без загрузки изображений
 cveta2 fetch -p 123 -o output/ --no-images
 
 # С указанием директории для изображений
 cveta2 fetch -p "coco8-dev" -o output/ --images-dir /mnt/data/coco8
+```
 
+### `cveta2 s3-sync`
+
+Синхронизация изображений из S3 cloud storage в локальный кэш для всех настроенных в `image_cache` проектов. Скачивает только отсутствующие файлы — никогда не загружает и не удаляет ничего на S3.
+
+```bash
+# Синхронизировать все настроенные проекты
+cveta2 s3-sync
+
+# Только один конкретный проект
+cveta2 s3-sync -p coco8-dev
+```
+
+### `cveta2 upload`
+
+Создание задачи в CVAT из `dataset.csv`: интерактивный выбор классов, загрузка изображений на S3 и создание задачи с cloud storage. Аннотации из CSV автоматически переносятся в новую задачу.
+
+```bash
+# Минимальный вызов — проект и CSV обязательны
+cveta2 upload -p "Мой проект" -d output/dataset.csv
+
+# Исключить изображения, которые уже в работе
+cveta2 upload -p "Мой проект" -d output/dataset.csv --in-progress output/in_progress.csv
+
+# Указать директорию с изображениями и имя задачи
+cveta2 upload -p "Мой проект" -d output/dataset.csv --image-dir /mnt/data --name "Партия 3"
+```
+
+Количество изображений на job настраивается через `upload.images_per_job` в конфиге (по умолчанию 100).
+
+### `cveta2 doctor`
+
+Диагностика конфигурации и окружения. Проверяет:
+
+- Наличие и корректность файла конфигурации (хост, креды)
+- Доступность AWS/S3-учётных данных (boto3)
+- Group-права на директории кэша изображений (чтобы все пользователи группы имели доступ)
+
+```bash
+cveta2 doctor
+```
+
+## Примеры использования
+
+```bash
 # Путь к конфигу через env (кэш проектов — projects.yaml в той же папке)
 CVETA2_CONFIG=/path/to/config.yaml cveta2 fetch -p 123 -o output/
 ```

@@ -32,6 +32,7 @@ cveta2/
     setup.py    - run_setup(): interactive wizard for CVAT connection settings; _setup_image_cache() for per-project image cache dirs
     fetch.py    - run_fetch(): fetch annotations + download images; _select_project_tui() for interactive project selection; _resolve_images_dir() for image cache resolution; _resolve_output_dir() for overwrite prompt; _write_partition_result() for CSV/TXT export
     s3_sync.py  - run_s3_sync(): sync images from S3 cloud storage to local cache for configured projects
+    doctor.py   - run_doctor(): health checks for config, AWS credentials, and image cache group permissions; check_config(), check_aws_credentials(), check_cache_permissions()
   cli.py        - slim argparse CLI entry point; CliApp class with parser definitions and dispatch to commands/ modules; all command logic lives in commands/
   __main__.py   - enables `python -m cveta2`
 main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()

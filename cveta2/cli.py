@@ -7,11 +7,12 @@ import os
 import sys
 from pathlib import Path
 
+from cveta2.commands.doctor import run_doctor
 from cveta2.commands.fetch import run_fetch
 from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup
+from cveta2.commands.upload import run_upload
 from cveta2.config import CONFIG_PATH
-from cveta2.doctor import run_doctor
 
 
 class CliApp:
@@ -30,6 +31,7 @@ class CliApp:
         self._add_fetch_parser(subparsers)
         self._add_setup_parser(subparsers)
         self._add_s3_sync_parser(subparsers)
+        self._add_upload_parser(subparsers)
         self._add_doctor_parser(subparsers)
 
         return parser
@@ -126,6 +128,56 @@ class CliApp:
             ),
         )
 
+    def _add_upload_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``upload`` command parser."""
+        parser = subparsers.add_parser(
+            "upload",
+            help=(
+                "Create a CVAT task from dataset.csv: filter classes, "
+                "upload images to S3, create task with cloud storage."
+            ),
+        )
+        parser.add_argument(
+            "--project",
+            "-p",
+            type=str,
+            default=None,
+            help=(
+                "Project ID or name. If omitted, "
+                "interactive project selection is shown."
+            ),
+        )
+        parser.add_argument(
+            "--dataset",
+            "-d",
+            required=True,
+            help="Path to dataset.csv produced by the fetch command.",
+        )
+        parser.add_argument(
+            "--in-progress",
+            type=str,
+            default=None,
+            help=(
+                "Path to in_progress.csv — images listed there "
+                "will be excluded from the upload."
+            ),
+        )
+        parser.add_argument(
+            "--image-dir",
+            type=str,
+            default=None,
+            help="Additional directory to search for image files.",
+        )
+        parser.add_argument(
+            "--name",
+            type=str,
+            default=None,
+            help="Task name. If omitted, prompted interactively.",
+        )
+
     def _add_doctor_parser(
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
@@ -151,6 +203,9 @@ class CliApp:
             return
         if args.command == "s3-sync":
             run_s3_sync(args)
+            return
+        if args.command == "upload":
+            run_upload(args)
             return
         if args.command == "doctor":
             run_doctor()
