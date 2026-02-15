@@ -248,7 +248,6 @@ def run_upload(args: argparse.Namespace) -> None:
         num_shapes = client.upload_task_annotations(
             task_id=task_id,
             annotations_df=filtered,
-            image_names=task_image_names,
         )
 
         ipj = upload_cfg.images_per_job

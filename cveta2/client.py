@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -25,6 +26,12 @@ from cveta2.models import (
     ProjectAnnotations,
 )
 from cveta2.projects_cache import ProjectInfo
+
+_DATA_PROCESSING_TIMEOUT = int(os.environ.get("CVETA2_DATA_TIMEOUT", "60"))
+"""Max seconds to wait for CVAT to finish processing cloud storage data.
+
+Configurable via ``CVETA2_DATA_TIMEOUT`` env var (default 60).
+"""
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -395,7 +402,10 @@ class CvatClient:
         """Create a CVAT task backed by cloud storage images.
 
         Creates one task with ``segment_size`` controlling how many images
-        go into each job (CVAT splits automatically).
+        go into each job (CVAT splits automatically).  After attaching data
+        the method **waits** for CVAT to finish processing the cloud storage
+        files (up to ``_DATA_PROCESSING_TIMEOUT`` seconds) so that subsequent
+        annotation uploads land on the correct frames.
 
         Parameters
         ----------
@@ -418,6 +428,8 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
+        import time  # noqa: PLC0415
+
         sdk = self._require_sdk("create_upload_task")
 
         from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
@@ -435,14 +447,33 @@ class CvatClient:
             server_files=image_names,
             cloud_storage_id=cloud_storage_id,
             use_cache=True,
+            sorting_method=cvat_models.SortingMethod("natural"),
         )
         sdk.api_client.tasks_api.create_data(
             task.id,
             data_request=data_request,
         )
+
+        # Wait for CVAT to finish processing cloud storage data.
+        # Without this, annotation uploads arrive before frames are indexed
+        # and are silently discarded.
+        task_obj = None
+        for _ in range(_DATA_PROCESSING_TIMEOUT):
+            time.sleep(1)
+            task_obj = sdk.tasks.retrieve(int(task.id))
+            if task_obj.size and task_obj.size > 0:
+                break
+        else:
+            logger.warning(
+                f"Задача {task.id}: обработка данных не завершилась "
+                f"за {_DATA_PROCESSING_TIMEOUT}с — аннотации могут быть потеряны"
+            )
+
+        size_info = f", size={task_obj.size}" if task_obj else ""
         logger.info(
             f"Привязано {len(image_names)} изображений к задаче {task.id} "
-            f"(cloud_storage_id={cloud_storage_id}, segment_size={segment_size})"
+            f"(cloud_storage_id={cloud_storage_id}, "
+            f"segment_size={segment_size}{size_info})"
         )
         return int(task.id)
 
@@ -450,9 +481,11 @@ class CvatClient:
         self,
         task_id: int,
         annotations_df: pd.DataFrame,
-        image_names: list[str],
     ) -> int:
         """Upload bbox annotations from a DataFrame to an existing task.
+
+        Frame indices are read from CVAT ``data_meta`` so the mapping is
+        always correct regardless of how CVAT sorted the images.
 
         Parameters
         ----------
@@ -463,9 +496,6 @@ class CvatClient:
             ``image_name``, ``instance_label``, ``bbox_x_tl``,
             ``bbox_y_tl``, ``bbox_x_br``, ``bbox_y_br``).
             Rows with NaN in ``instance_label`` are skipped.
-        image_names:
-            Ordered list of image names as passed to ``create_upload_task``
-            (frame index = position in this list).
 
         Returns
         -------
@@ -482,8 +512,14 @@ class CvatClient:
             AnnotationUpdateAction,
         )
 
-        # Build frame index lookup from sorted image names
-        name_to_frame = {name: idx for idx, name in enumerate(image_names)}
+        # Read actual frame mapping from CVAT (authoritative source).
+        # Frame index = position in the data_meta.frames list.
+        data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
+        name_to_frame: dict[str, int] = {
+            frame.name: idx for idx, frame in enumerate(data_meta.frames)
+        }
+
+        logger.debug(f"Задача {task_id}: получено {len(name_to_frame)} фреймов из CVAT")
 
         # Get label name -> label_id mapping from the task
         task_obj = sdk.tasks.retrieve(task_id)
@@ -498,10 +534,12 @@ class CvatClient:
         ann_rows = annotations_df[has_annotation]
 
         shapes: list[cvat_models.LabeledShapeRequest] = []
+        skipped = 0
         for _, row in ann_rows.iterrows():
             img_name = str(row["image_name"])
             label_name = str(row["instance_label"])
             if img_name not in name_to_frame:
+                skipped += 1
                 continue
             if label_name not in label_name_to_id:
                 logger.warning(
@@ -520,6 +558,11 @@ class CvatClient:
                         float(row["bbox_y_br"]),
                     ],
                 ),
+            )
+
+        if skipped:
+            logger.warning(
+                f"{skipped} аннотаций пропущено: изображение не найдено в задаче"
             )
 
         if shapes:

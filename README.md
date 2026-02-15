@@ -1,6 +1,6 @@
 # cveta2
 
-Утилита для выгрузки аннотаций из CVAT-проектов. Доступна как CLI (`cveta2 fetch`) и как Python API (`CvatClient`, `fetch_annotations`).
+Утилита для работы с аннотациями CVAT-проектов: выгрузка (`cveta2 fetch`), создание задач с переносом аннотаций (`cveta2 upload`), синхронизация изображений (`cveta2 s3-sync`). Доступна как CLI и как Python API (`CvatClient`, `fetch_annotations`).
 
 ## Что умеет
 
@@ -8,6 +8,7 @@
 - Возвращает **список удалённых изображений** по всем задачам проекта
 - **Автоматически разделяет** результат на актуальный датасет, устаревшие данные и данные в работе
 - **Скачивает изображения** из S3 cloud storage, подключённого к CVAT (boto3, с кэшированием)
+- **Создаёт задачи в CVAT** из `dataset.csv` — загружает изображения на S3, создаёт задачу с cloud storage и автоматически переносит bbox-аннотации
 - Поддерживает фильтр по задачам со статусом `completed`
 - Всё за один вызов — без промежуточных XML/ZIP файлов
 
@@ -112,6 +113,22 @@ cvat:
   password: "your-password"
 ```
 
+Полный пример конфига со всеми секциями:
+
+```yaml
+cvat:
+  host: "https://app.cvat.ai"
+  organization: "my-team"
+  token: "your-personal-access-token"
+
+image_cache:
+  coco8-dev: /mnt/disk01/data/project_coco_8_dev
+  my-other-project: /home/user/datasets/other
+
+upload:
+  images_per_job: 100
+```
+
 ### Пресет по умолчанию
 
 cveta2 содержит встроенный пресет (`cveta2/presets/default.yaml`), который задаёт `host: http://localhost:8080`. Если вы работаете с локальным CVAT — достаточно добавить только креды.
@@ -134,6 +151,7 @@ cveta2 содержит встроенный пресет (`cveta2/presets/defau
 | `CVAT_PASSWORD` | Пароль |
 | `CVETA2_CONFIG` | Путь к файлу конфигурации (по умолчанию `~/.config/cveta2/config.yaml`) |
 | `CVETA2_NO_INTERACTIVE` | Установите `true`, чтобы отключить все интерактивные промпты (см. ниже) |
+| `CVETA2_DATA_TIMEOUT` | Таймаут (в секундах) ожидания обработки данных при создании задачи через `upload` (по умолчанию `60`) |
 
 ### Неинтерактивный режим
 
@@ -145,6 +163,7 @@ cveta2 содержит встроенный пресет (`cveta2/presets/defau
 - Если не хватает учётных данных — ошибка (задайте `CVAT_TOKEN` или `CVAT_USERNAME`/`CVAT_PASSWORD`)
 - Если путь к изображениям не настроен — ошибка (укажите `--images-dir`, `--no-images` или `image_cache` в конфиге)
 - Если выходная директория уже существует — перезаписывается без вопросов
+- Команда `upload` недоступна — выбор классов требует интерактивного режима
 
 Переменная может быть не установлена вообще — по умолчанию интерактивный режим включён.
 
@@ -211,20 +230,33 @@ cveta2 s3-sync -p coco8-dev
 
 ### `cveta2 upload`
 
-Создание задачи в CVAT из `dataset.csv`: интерактивный выбор классов, загрузка изображений на S3 и создание задачи с cloud storage. Аннотации из CSV автоматически переносятся в новую задачу.
+Создание задачи в CVAT из `dataset.csv`: интерактивный выбор классов, загрузка изображений на S3 и создание задачи с cloud storage. Bbox-аннотации из CSV автоматически переносятся в новую задачу (фрейм-маппинг читается из CVAT `data_meta`, а не из порядка файлов).
 
 ```bash
 # Минимальный вызов — проект и CSV обязательны
 cveta2 upload -p "Мой проект" -d output/dataset.csv
+
+# По ID проекта
+cveta2 upload -p 123 -d output/dataset.csv
 
 # Исключить изображения, которые уже в работе
 cveta2 upload -p "Мой проект" -d output/dataset.csv --in-progress output/in_progress.csv
 
 # Указать директорию с изображениями и имя задачи
 cveta2 upload -p "Мой проект" -d output/dataset.csv --image-dir /mnt/data --name "Партия 3"
+
+# Интерактивный выбор проекта (без -p)
+cveta2 upload -d output/dataset.csv
 ```
 
-Количество изображений на job настраивается через `upload.images_per_job` в конфиге (по умолчанию 100).
+Процесс:
+1. Чтение `dataset.csv` и (опционально) `in_progress.csv` для исключения занятых изображений
+2. Интерактивный выбор классов (`instance_label`) через checkbox — изображения без аннотаций тоже можно включить
+3. Загрузка недостающих изображений на S3 (уже загруженные пропускаются)
+4. Создание задачи в CVAT с cloud storage и автоматическим разбиением на jobs
+5. Загрузка bbox-аннотаций в новую задачу (привязка по `image_name` → `frame_id` из CVAT)
+
+Количество изображений на job настраивается через `upload.images_per_job` в конфиге (по умолчанию 100). Таймаут ожидания обработки данных CVAT — через переменную `CVETA2_DATA_TIMEOUT` (по умолчанию 60 секунд).
 
 ### `cveta2 doctor`
 
@@ -246,6 +278,8 @@ CVETA2_CONFIG=/path/to/config.yaml cveta2 fetch -p 123 -o output/
 ```
 
 ## Python API
+
+### Выгрузка аннотаций
 
 ```python
 from cveta2 import CvatClient, fetch_annotations
@@ -278,6 +312,39 @@ for ann in result.annotations[:3]:
 # Удалённые изображения — список DeletedImage
 for img in result.deleted_images:
     print(f"Удалено: {img.image_name} (task={img.task_id}, frame={img.frame_id})")
+```
+
+### Создание задачи и загрузка аннотаций
+
+```python
+from pathlib import Path
+from cveta2 import CvatClient
+from cveta2.config import CvatConfig
+
+cfg = CvatConfig.load()
+
+with CvatClient(cfg) as client:
+    project_id = client.resolve_project_id("Мой проект")
+
+    # Определить cloud storage проекта
+    cs_info = client.detect_project_cloud_storage(project_id)
+    print(f"Cloud storage: s3://{cs_info.bucket}/{cs_info.prefix}")
+
+    # Создать задачу с изображениями из cloud storage
+    task_id = client.create_upload_task(
+        project_id=project_id,
+        name="Партия 3",
+        image_names=["img001.jpg", "img002.jpg", "img003.jpg"],
+        cloud_storage_id=cs_info.id,
+        segment_size=100,  # изображений на job
+    )
+    print(f"Задача создана: id={task_id}")
+
+    # Загрузить bbox-аннотации из DataFrame
+    import pandas as pd
+    df = pd.read_csv("output/dataset.csv")
+    num_shapes = client.upload_task_annotations(task_id=task_id, annotations_df=df)
+    print(f"Загружено аннотаций: {num_shapes}")
 ```
 
 ## Формат данных
@@ -333,6 +400,15 @@ for img in result.deleted_images:
 | `downloaded` | `int` | Количество скачанных файлов |
 | `cached` | `int` | Пропущено (уже существовали локально) |
 | `failed` | `int` | Ошибки при скачивании |
+| `total` | `int` | Общее количество изображений |
+
+### UploadStats
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `uploaded` | `int` | Количество загруженных файлов на S3 |
+| `skipped_existing` | `int` | Пропущено (уже существовали на S3) |
+| `failed` | `int` | Ошибки при загрузке |
 | `total` | `int` | Общее количество изображений |
 
 ## Тесты и фикстуры CVAT
