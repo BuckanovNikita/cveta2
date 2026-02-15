@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cveta2.commands.doctor import run_doctor
 from cveta2.commands.fetch import run_fetch
+from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup
 from cveta2.commands.upload import run_upload
@@ -32,6 +33,7 @@ class CliApp:
         self._add_setup_parser(subparsers)
         self._add_s3_sync_parser(subparsers)
         self._add_upload_parser(subparsers)
+        self._add_merge_parser(subparsers)
         self._add_doctor_parser(subparsers)
 
         return parser
@@ -178,6 +180,51 @@ class CliApp:
             help="Task name. If omitted, prompted interactively.",
         )
 
+    def _add_merge_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``merge`` command parser."""
+        parser = subparsers.add_parser(
+            "merge",
+            help=(
+                "Merge two dataset CSV files. For images in both, new annotations win."
+            ),
+        )
+        parser.add_argument(
+            "--old",
+            required=True,
+            help="Path to the old (base) dataset CSV.",
+        )
+        parser.add_argument(
+            "--new",
+            required=True,
+            help="Path to the new dataset CSV.",
+        )
+        parser.add_argument(
+            "--deleted",
+            type=str,
+            default=None,
+            help=(
+                "Path to deleted.txt — images listed there "
+                "will be removed from the merged result."
+            ),
+        )
+        parser.add_argument(
+            "--output",
+            "-o",
+            required=True,
+            help="Path for the merged output CSV.",
+        )
+        parser.add_argument(
+            "--by-time",
+            action="store_true",
+            help=(
+                "Resolve conflicts by task_updated_date instead "
+                "of argument order (requires task_updated_date column)."
+            ),
+        )
+
     def _add_doctor_parser(
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
@@ -206,6 +253,9 @@ class CliApp:
             return
         if args.command == "upload":
             run_upload(args)
+            return
+        if args.command == "merge":
+            run_merge(args)
             return
         if args.command == "doctor":
             run_doctor()
