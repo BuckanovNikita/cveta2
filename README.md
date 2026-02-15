@@ -7,6 +7,7 @@
 - Собирает **все bbox-аннотации** проекта в плоский список — одна запись на каждый bounding box
 - Возвращает **список удалённых изображений** по всем задачам проекта
 - **Автоматически разделяет** результат на актуальный датасет, устаревшие данные и данные в работе
+- **Скачивает изображения** из S3 cloud storage, подключённого к CVAT (boto3, с кэшированием)
 - Поддерживает фильтр по задачам со статусом `completed`
 - Всё за один вызов — без промежуточных XML/ZIP файлов
 
@@ -47,6 +48,45 @@ cveta2 fetch -o output/
 | `deleted.txt` | Имена изображений, удалённых в их последней задаче (по одному на строку) |
 | `raw.csv` | (только с `--raw`) Полный необработанный CSV со всеми строками |
 
+## Загрузка изображений из S3
+
+При `fetch` cveta2 автоматически скачивает изображения проекта из S3 cloud storage, подключённого к CVAT. Cloud storage определяется из метаданных задач (`source_storage`).
+
+### Где хранятся изображения
+
+Для каждого проекта вы задаёте директорию вручную — либо при `cveta2 setup`, либо при первом `fetch`. Пути хранятся в конфиге:
+
+```yaml
+image_cache:
+  coco8-dev: /mnt/disk01/data/project_coco_8_dev
+  my-other-project: /home/user/datasets/other
+```
+
+Изображения сохраняются прямо в указанную директорию (`/mnt/disk01/data/project_coco_8_dev/image.jpg`), без дополнительных подпапок.
+
+### S3-креды
+
+Для загрузки используется `boto3` со стандартной цепочкой авторизации — `~/.aws/credentials`, переменные `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, IAM-роли. В конфиге cveta2 S3-креды не хранятся.
+
+### Управление загрузкой
+
+```bash
+# Обычный fetch — изображения скачиваются (путь из конфига или интерактивный ввод)
+cveta2 fetch -p coco8-dev -o output/
+
+# Пропустить загрузку изображений
+cveta2 fetch -p coco8-dev -o output/ --no-images
+
+# Указать/переопределить директорию для изображений на этот запуск
+cveta2 fetch -p coco8-dev -o output/ --images-dir /tmp/my-images
+```
+
+Уже скачанные файлы не загружаются повторно.
+
+### Неинтерактивный режим и изображения
+
+В неинтерактивном режиме (`CVETA2_NO_INTERACTIVE=true`) если путь для изображений не настроен — `fetch` завершается с ошибкой. Решение: укажите `--images-dir`, `--no-images`, или добавьте `image_cache.<project>` в конфиг.
+
 ## Конфигурация
 
 ### Файл конфигурации
@@ -72,11 +112,16 @@ cvat:
   password: "your-password"
 ```
 
+### Пресет по умолчанию
+
+cveta2 содержит встроенный пресет (`cveta2/presets/default.yaml`), который задаёт `host: http://localhost:8080`. Если вы работаете с локальным CVAT — достаточно добавить только креды.
+
 ### Приоритет источников
 
-1. **Переменные окружения** — переопределяют файл
+1. **Переменные окружения** — переопределяют файл и пресет
 2. **Файл конфигурации** (`~/.config/cveta2/config.yaml`)
-3. **Интерактивный ввод** — если не указаны логин/пароль/токен
+3. **Встроенный пресет** — базовые значения по умолчанию
+4. **Интерактивный ввод** — если не указаны логин/пароль/токен
 
 ### Переменные окружения
 
@@ -98,6 +143,7 @@ cvat:
 - Команда `setup` недоступна — настраивайте через env-переменные или редактируя файл конфигурации напрямую
 - При `fetch` без `--project` — ошибка (укажите `-p`)
 - Если не хватает учётных данных — ошибка (задайте `CVAT_TOKEN` или `CVAT_USERNAME`/`CVAT_PASSWORD`)
+- Если путь к изображениям не настроен — ошибка (укажите `--images-dir`, `--no-images` или `image_cache` в конфиге)
 - Если выходная директория уже существует — перезаписывается без вопросов
 
 Переменная может быть не установлена вообще — по умолчанию интерактивный режим включён.
@@ -108,7 +154,7 @@ export CVAT_HOST="https://app.cvat.ai"
 export CVAT_TOKEN="your-token"
 export CVETA2_NO_INTERACTIVE=true
 
-cveta2 fetch -p 123 -o output/
+cveta2 fetch -p 123 -o output/ --images-dir /data/images
 ```
 
 ## CLI: примеры
@@ -130,6 +176,12 @@ cveta2 fetch -p 123 -o output/ --raw
 # Обрабатывать только задачи со статусом completed
 cveta2 fetch -p 123 -o output/ --completed-only
 
+# Без изображений
+cveta2 fetch -p 123 -o output/ --no-images
+
+# С указанием директории для изображений
+cveta2 fetch -p "coco8-dev" -o output/ --images-dir /mnt/data/coco8
+
 # Путь к конфигу через env (кэш проектов — projects.yaml в той же папке)
 CVETA2_CONFIG=/path/to/config.yaml cveta2 fetch -p 123 -o output/
 ```
@@ -143,8 +195,14 @@ from cveta2.config import CvatConfig
 # Конфиг загрузится из файла и env (или выполните cveta2 setup)
 cfg = CvatConfig.load()
 
-client = CvatClient(cfg)
-result = client.fetch_annotations(project_id=123, completed_only=True)
+# Для загрузки изображений нужен контекстный менеджер
+with CvatClient(cfg) as client:
+    result = client.fetch_annotations(project_id=123, completed_only=True)
+
+    # Скачать изображения из S3 в указанную директорию
+    from pathlib import Path
+    stats = client.download_images(result, Path("/mnt/data/my-project"))
+    print(f"Загружено: {stats.downloaded}, из кэша: {stats.cached}, ошибок: {stats.failed}")
 
 # Или короче через функцию-обёртку: сразу DataFrame
 df = fetch_annotations(project_id=123, cfg=cfg)
@@ -208,6 +266,15 @@ for img in result.deleted_images:
 | `task_updated_date` | `str` | Дата обновления задачи |
 | `frame_id` | `int` | Индекс кадра |
 | `image_name` | `str` | Имя файла изображения |
+
+### DownloadStats
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `downloaded` | `int` | Количество скачанных файлов |
+| `cached` | `int` | Пропущено (уже существовали локально) |
+| `failed` | `int` | Ошибки при скачивании |
+| `total` | `int` | Общее количество изображений |
 
 ## Тесты и фикстуры CVAT
 

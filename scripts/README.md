@@ -67,3 +67,35 @@ uv run python scripts/export_cvat_fixtures.py --project other-project --output-d
 | `--output-dir` | Каталог для вывода (по умолчанию `tests/fixtures/cvat/coco8-dev`). |
 
 **Результат:** в `output-dir` создаются `project.json` (id, name, labels) и `tasks/<task_id>_<slug>.json` (task, data_meta, annotations). Эти файлы читает `tests.fixtures.load_cvat_fixtures.load_cvat_fixtures()` и проверяют тесты в `tests/test_cvat_fixtures.py`.
+
+---
+
+## clone_project_to_s3.py
+
+Клонирует CVAT-проект, перенося изображения задач в S3 cloud storage.
+
+**Назначение:** создать копию проекта, в которой все изображения хранятся в S3 (а не загружены напрямую в CVAT). Используется для подготовки тестовых проектов с cloud storage backend.
+
+**Зависимости:** `cveta2.config.CvatConfig`, cvat_sdk, boto3. CVAT-креды — из конфига (`~/.config/cveta2/config.yaml`). S3-креды — из стандартной цепочки boto3 (`~/.aws/credentials`, env-переменные и т.д.).
+
+**Примеры:**
+
+```bash
+# Клонировать coco8-dev → coco8-dev-s3, используя cloud storage #1
+uv run python scripts/clone_project_to_s3.py --source coco8-dev --dest coco8-dev-s3 --cloud-storage-id 1
+```
+
+**Аргументы:**
+
+| Аргумент | Описание |
+|----------|----------|
+| `--source` | Имя исходного проекта в CVAT (обязательно). |
+| `--dest` | Имя нового проекта (обязательно). |
+| `--cloud-storage-id` | ID cloud storage в CVAT, куда загружать изображения (обязательно). |
+
+**Что делает:**
+
+1. Скачивает кадры из первой задачи исходного проекта через CVAT API.
+2. Загружает их в S3-бакет, указанный в cloud storage (`prefix/dest_name/filename`).
+3. Создаёт новый проект с теми же метками.
+4. Для каждой задачи создаёт новую задачу с cloud storage data source, копирует аннотации и удалённые кадры.

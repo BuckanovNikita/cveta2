@@ -16,6 +16,7 @@ from cveta2._client.mapping import _build_label_maps
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.config import CvatConfig
 from cveta2.exceptions import ProjectNotFoundError
+from cveta2.image_downloader import ImageDownloader
 from cveta2.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
@@ -28,9 +29,11 @@ from cveta2.projects_cache import ProjectInfo
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from contextlib import AbstractContextManager
+    from pathlib import Path
     from types import TracebackType
 
     from cveta2._client.ports import CvatApiPort
+    from cveta2.image_downloader import DownloadStats
 
 
 class _SdkClientFactory(Protocol):
@@ -295,6 +298,42 @@ class CvatClient:
             deleted_images=all_deleted,
             images_without_annotations=all_without,
         )
+
+    # ------------------------------------------------------------------
+    # Image download
+    # ------------------------------------------------------------------
+
+    def download_images(
+        self,
+        annotations: ProjectAnnotations,
+        target_dir: Path,
+    ) -> DownloadStats:
+        """Download project images from S3 cloud storage into *target_dir*.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+        Uses the raw SDK client to detect cloud storage and boto3 for S3.
+        Images are saved directly as ``target_dir / image_name`` — no
+        additional subdirectories are created.  Already-cached files are
+        skipped.
+        """
+        if self._sdk_client is None:
+            msg = (
+                "download_images() requires a context manager. "
+                "Use: with CvatClient(cfg) as client: ..."
+            )
+            raise RuntimeError(msg)
+
+        # The persistent SDK client __enter__ already returned the raw client;
+        # we stored it via __enter__ -> sdk = self._sdk_client.__enter__().
+        # The _persistent_api wraps it. Access the underlying SDK client from
+        # the adapter.
+        sdk = self._persistent_api._client if self._persistent_api else None  # noqa: SLF001
+        if sdk is None:
+            msg = "SDK client not available — cannot download images."
+            raise RuntimeError(msg)
+
+        downloader = ImageDownloader(target_dir)
+        return downloader.download(sdk, annotations)
 
     # ------------------------------------------------------------------
     # Internal helpers

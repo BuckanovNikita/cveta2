@@ -16,8 +16,11 @@ from cveta2.client import CvatClient
 from cveta2.config import (
     CONFIG_PATH,
     CvatConfig,
+    ImageCacheConfig,
     is_interactive_disabled,
+    load_image_cache_config,
     require_interactive,
+    save_image_cache_config,
 )
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
@@ -79,6 +82,20 @@ class CliApp:
             "--completed-only",
             action="store_true",
             help="Process only tasks with status 'completed'.",
+        )
+        parser.add_argument(
+            "--no-images",
+            action="store_true",
+            help="Skip downloading images from S3 cloud storage.",
+        )
+        parser.add_argument(
+            "--images-dir",
+            type=str,
+            default=None,
+            help=(
+                "Override image cache directory for this run "
+                "(takes precedence over config mapping)."
+            ),
         )
 
     def _add_setup_parser(
@@ -216,8 +233,29 @@ class CliApp:
             username=username,
             password=password,
         )
-        saved_path = cfg.save_to_file(config_path)
+
+        image_cache = self._setup_image_cache(config_path)
+        saved_path = cfg.save_to_file(config_path, image_cache=image_cache)
         logger.info(f"Готово! Конфигурация сохранена в {saved_path}")
+
+    @staticmethod
+    def _setup_image_cache(config_path: Path) -> ImageCacheConfig:
+        """Interactively configure per-project image cache directories."""
+        image_cache = load_image_cache_config(config_path)
+        setup_images = (
+            input("Настроить пути для кэширования изображений? [y/n]: ").strip().lower()
+        )
+        if setup_images != "y":
+            return image_cache
+        while True:
+            proj_name = input("Имя проекта (пустая строка — завершить): ").strip()
+            if not proj_name:
+                break
+            proj_path = input(f"Путь для изображений проекта {proj_name!r}: ").strip()
+            if proj_path:
+                image_cache.set_cache_dir(proj_name, Path(proj_path))
+                logger.info(f"  {proj_name} -> {proj_path}")
+        return image_cache
 
     def _load_config(self, config_path: Path | None = None) -> CvatConfig:
         """Load config from file and env. Path from CVETA2_CONFIG or argument."""
@@ -285,10 +323,55 @@ class CliApp:
                 continue
             return int(answer)
 
+    def _resolve_images_dir(
+        self,
+        args: argparse.Namespace,
+        project_name: str,
+    ) -> Path | None:
+        """Resolve image cache directory for the given project.
+
+        Returns None if ``--no-images`` or download should be skipped.
+        """
+        if args.no_images:
+            return None
+
+        # --images-dir takes top priority
+        if args.images_dir:
+            return Path(args.images_dir)
+
+        # Look up per-project mapping in config
+        ic_cfg = load_image_cache_config()
+        cached_dir = ic_cfg.get_cache_dir(project_name)
+        if cached_dir is not None:
+            return cached_dir
+
+        # Not configured — interactive prompt or error
+        if is_interactive_disabled():
+            sys.exit(
+                f"Ошибка: путь кэширования изображений для проекта "
+                f"{project_name!r} не настроен.\n"
+                f"Укажите --images-dir, --no-images или добавьте "
+                f"image_cache.{project_name} в конфигурацию."
+            )
+
+        path_str = input(
+            f"Укажите путь для кэширования изображений проекта {project_name!r}: "
+        ).strip()
+        if not path_str:
+            logger.warning("Путь не указан — загрузка изображений пропущена.")
+            return None
+
+        new_path = Path(path_str)
+        ic_cfg.set_cache_dir(project_name, new_path)
+        save_image_cache_config(ic_cfg)
+        return new_path
+
     def _run_fetch(self, args: argparse.Namespace) -> None:
         """Run the ``fetch`` command."""
         cfg = self._load_config()
         self._require_host(cfg)
+
+        project_name: str | None = None
 
         with CvatClient(cfg) as client:
             if args.project is not None:
@@ -299,13 +382,33 @@ class CliApp:
                     )
                 except Cveta2Error as e:
                     sys.exit(str(e))
+                project_name = args.project.strip()
             else:
                 project_id = self._run_fetch_tui_select_project(client)
+
+            # Try to resolve human-readable project name from cache
+            if project_name is None or project_name.isdigit():
+                for p in load_projects_cache():
+                    if p.id == project_id:
+                        project_name = p.name
+                        break
+
+            if project_name is None:
+                project_name = str(project_id)
 
             result = client.fetch_annotations(
                 project_id=project_id,
                 completed_only=args.completed_only,
             )
+
+            # Image download (within the CvatClient context)
+            images_dir = self._resolve_images_dir(args, project_name)
+            if images_dir is not None:
+                stats = client.download_images(result, images_dir)
+                logger.info(
+                    f"Изображения: {stats.downloaded} загружено, "
+                    f"{stats.cached} из кэша, {stats.failed} ошибок"
+                )
 
         output_dir = self._resolve_output_dir(Path(args.output_dir))
 
