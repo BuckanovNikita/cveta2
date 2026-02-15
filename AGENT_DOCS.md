@@ -11,9 +11,13 @@ cveta2/
   exceptions.py - Custom exception hierarchy: Cveta2Error (base), ProjectNotFoundError, InteractiveModeRequiredError
   dataset_partition.py - partition_annotations_df(): pandas-based partitioning of annotation DataFrame into dataset/obsolete/in_progress; PartitionResult dataclass; dates parsed via pd.to_datetime(utc=True) for robust comparison
   config.py     - CvatConfig pydantic model; loads/merges preset < config file < env; ImageCacheConfig pydantic model (per-project image cache directory mapping); load_image_cache_config() / save_image_cache_config(); get_projects_cache_path(); is_interactive_disabled() / require_interactive() guards; raises InteractiveModeRequiredError; _load_preset_data() loads bundled preset from cveta2/presets/default.yaml via importlib.resources
-  image_downloader.py - CloudStorageInfo pydantic model; parse_cloud_storage() extracts bucket/prefix/endpoint from CVAT SDK cloud storage object; ImageDownloader class downloads images from S3 via boto3 into a flat target directory (no subdirs); DownloadStats pydantic model (downloaded/cached/failed/total); auto-detects cloud_storage_id from task source_storage; _build_s3_key() handles prefix logic; tenacity retry on S3 errors; tqdm progress bar
+  image_downloader.py - CloudStorageInfo pydantic model; parse_cloud_storage() extracts bucket/prefix/endpoint from CVAT SDK cloud storage object; ImageDownloader class downloads images from S3 via boto3 into a flat target directory (no subdirs); S3Syncer class lists all objects under an S3 prefix and downloads missing ones locally (never deletes, never uploads); _list_s3_objects() lists S3 objects with prefix stripping; _download_one_s3() shared download helper with tenacity retry; DownloadStats pydantic model (downloaded/cached/failed/total); auto-detects cloud_storage_id from task source_storage; _build_s3_key() handles prefix logic; tqdm progress bar
   projects_cache.py - YAML cache of project id/name list (load_projects_cache, save_projects_cache); path next to config (projects.yaml)
-  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations, download_images; usable as context manager for connection reuse) + fetch_annotations() DataFrame wrapper; _SdkClientFactory Protocol for typed client_factory parameter; all paths go through CvatApiPort for annotations; download_images() uses raw SDK client directly (not CvatApiPort) for cloud storage detection + delegates to ImageDownloader; tqdm progress bar on task loop
+<<<<<<< Current (Your changes)
+  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations, download_images; usable as context manager for connection reuse) + fetch_annotations() DataFrame wrapper; _SdkClientFactory Protocol for typed client_factory parameter; all paths go through CvatApiPort for annotations; download_images() uses _raw_sdk (stored in __enter__) for cloud storage detection + delegates to ImageDownloader; tqdm progress bar on task loop
+=======
+  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations, download_images, detect_project_cloud_storage, sync_project_images; usable as context manager for connection reuse) + fetch_annotations() DataFrame wrapper; _SdkClientFactory Protocol for typed client_factory parameter; all paths go through CvatApiPort for annotations; download_images() uses raw SDK client directly (not CvatApiPort) for cloud storage detection + delegates to ImageDownloader; sync_project_images() detects cloud storage then delegates to S3Syncer; _require_sdk() shared helper for methods needing the raw SDK; tqdm progress bar on task loop
+>>>>>>> Incoming (Background Agent changes)
   presets/      - bundled preset configurations
     __init__.py - package marker
     default.yaml - default preset: cvat.host = http://localhost:8080 (no credentials)
@@ -44,6 +48,42 @@ image_cache:
 ```
 Images are saved directly into the mapped directory (e.g. `/mnt/disk01/data/project_coco_8_dev/image.jpg`) — **no subdirectories are created**. `ImageCacheConfig` pydantic model wraps `dict[str, Path]`; `get_cache_dir(project_name)` returns `Path | None`; `set_cache_dir()` adds/updates. `load_image_cache_config()` and `save_image_cache_config()` read/write only the `image_cache` section, preserving the rest of the YAML. `CvatConfig.save_to_file()` accepts an optional `image_cache` parameter to persist both sections atomically.
 
+## CVAT image storage and download flow
+
+### CVAT cloud storage data model
+
+CVAT stores images in **S3-compatible cloud storages** (AWS S3, MinIO, etc.), registered as CVAT entities via the REST API. Each cloud storage object exposed by the CVAT SDK has the following fields relevant to image downloading:
+
+- `id` (int) — unique identifier of the cloud storage in CVAT.
+- `resource` (str) — the S3 bucket name.
+- `specific_attributes` (str) — URL-encoded query string containing `prefix` (path prefix inside the bucket, e.g. `project1/images`) and `endpoint_url` (S3-compatible endpoint, e.g. `http://minio:9000` for a local MinIO instance). Parsed via `urllib.parse.parse_qs()`.
+
+Cloud storage is retrieved via the SDK: `sdk_client.api_client.cloudstorages_api.retrieve(cloud_storage_id)` which returns the raw cloud storage object. `parse_cloud_storage()` in `image_downloader.py` extracts `bucket`, `prefix`, and `endpoint_url` into a `CloudStorageInfo` pydantic model using `getattr` (SDK objects are opaque and vary across versions).
+
+Tasks reference their cloud storage via the `source_storage` field on the CVAT task object. This field contains `cloud_storage_id` (the integer ID linking to the cloud storage entity). Depending on CVAT SDK version, `source_storage` may be a `dict` (with key `"cloud_storage_id"`) or a typed SDK model (with attribute `cloud_storage_id`). `_detect_cloud_storage()` handles both variants.
+
+Frame names from `data_meta.frames` correspond to S3 object keys relative to the bucket root and may or may not include the cloud storage prefix depending on CVAT version. `_build_s3_key()` handles this: if `frame_name` already starts with `prefix`, it is used as-is; otherwise `prefix/frame_name` is constructed; if prefix is empty, just `frame_name`.
+
+### Download pipeline (end-to-end)
+
+Image download is a separate step after annotation fetching, reusing the same `CvatClient` SDK connection. The pipeline in `ImageDownloader.download()`:
+
+1. **Collect frames** — gather unique `(task_id, frame_id, image_name)` tuples from `annotations.annotations` and `annotations.images_without_annotations`. Deleted images are excluded.
+2. **Partition cached** — for each frame, check if `target_dir/image_name` already exists on disk. If so, increment `stats.cached` and skip. Group remaining frames by `task_id`.
+3. **Resolve cloud storages** — for each task with pending downloads: call `sdk_client.tasks.retrieve(task_id)`, read `source_storage`, extract `cloud_storage_id`. Then `cloudstorages_api.retrieve(cs_id)` → `parse_cloud_storage()` → `CloudStorageInfo`. Results are cached per `cloud_storage_id` within the session. Tasks without `source_storage` are counted as `failed`.
+4. **Create S3 clients** — one `boto3.Session().client("s3", endpoint_url=...)` per unique `(endpoint_url, bucket)` pair. S3 credentials come from the standard boto3 chain (`~/.aws/credentials`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars, IAM roles). No S3 credentials are stored in the cveta2 config.
+5. **Execute downloads** — for each pending frame: construct the S3 key via `_build_s3_key(prefix, image_name)`, call `s3.get_object(Bucket=bucket, Key=s3_key)`, write bytes to `target_dir/image_name`. Each download is retried up to 3 times with exponential backoff via tenacity. Progress displayed via tqdm.
+
+### Image path resolution in CLI
+
+The `_resolve_images_dir()` method in `cli.py` resolves the target directory for image downloads with this priority chain:
+
+1. `--no-images` flag → skip download entirely (return None).
+2. `--images-dir` CLI argument → use this path directly (highest priority override).
+3. `image_cache` config mapping → look up `project_name` in `ImageCacheConfig.projects`.
+4. **Interactive mode** → prompt the user for a path, then save it to config for future runs.
+5. **Non-interactive mode** → exit with error instructing user to set `--images-dir`, `--no-images`, or configure `image_cache.<project_name>` in config.
+
 ## Non-interactive mode
 
 Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive prompts. When set, any operation that would require user input raises `RuntimeError` with a hint about which CLI flag or env var to use instead. The variable can be unset or empty — defaults to interactive mode enabled. Guarded locations: `cveta2 setup` (entire command), TUI project selection in `fetch` (use `--project`), credential prompts in `ensure_credentials()` (use `CVAT_TOKEN` / `CVAT_USERNAME` + `CVAT_PASSWORD`), image cache path prompt in `fetch` (use `--images-dir` / `--no-images` or configure `image_cache` in config). The output-dir overwrite prompt silently overwrites in non-interactive mode instead of raising. In non-interactive mode, if image cache path is not configured for the project, `fetch` **fails with error** (does not silently skip). Helper functions: `is_interactive_disabled()` and `require_interactive(hint)` in `config.py`.
@@ -58,6 +98,10 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
   - `--completed-only` — process only tasks with status "completed" (in_progress.csv will be empty).
   - `--no-images` — skip downloading images from S3 cloud storage entirely.
   - `--images-dir` — override the image cache directory for this run (takes precedence over `image_cache` config mapping; path used directly, no subdirectories created).
+
+- `s3-sync` — syncs all images from S3 cloud storage to local cache for every project configured in `image_cache`. Lists all objects under each project's cloud storage prefix and downloads those missing locally. Never deletes from S3 or syncs in reverse. Arguments:
+  - `--project` / `-p` — sync only this project (name must exist in `image_cache` config). If omitted, syncs all configured projects.
+  - Flow: loads `image_cache` from config → for each project resolves project ID via CVAT → gets project tasks → detects cloud storage from first task with `source_storage` → lists S3 objects under prefix → downloads missing files to the configured cache directory. Continues to next project on errors (project not found, no cloud storage).
 
 ## Logging levels
 
@@ -96,7 +140,7 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 - **Fake projects**: `tests/fixtures/fake_cvat_project.py` — build fake projects from base fixtures (e.g. coco8-dev) for tests. `FakeProjectConfig` (pydantic): `task_indices` (which base tasks, in order; can repeat), or `count` + random sampling; `task_id_order` ("asc" | "random"); `task_names` ("keep" | "random" | "enumerated" | list); `task_statuses` ("keep" | "random" | list); `seed` for reproducibility. `build_fake_project(base_fixtures, config)` returns the same `(RawProject, list[RawTask], list[RawLabel], task_id -> (RawDataMeta, RawAnnotations))` structure. `task_indices_by_names(base_tasks, ["normal", "all-removed"])` resolves names to indices. Tests in `tests/test_fake_cvat_project.py`.
 - **Shared fixtures**: `tests/conftest.py` — session-scoped `coco8_fixtures`, `coco8_label_maps`, `coco8_tasks_by_name` for use across all test modules.
 - **Pipeline tests**: `test_mapping.py` (label/attribute mapping), `test_extractors.py` (_collect_shapes unit tests), `test_partition.py` (partition_annotations_df), `test_pipeline_integration.py` (full pipeline via FakeCvatApi + CvatClient).
-- **Image download tests**: `test_image_downloader.py` (unit tests with fake SDK and S3 clients — flat saving, caching, deleted images filtering, S3 key construction, stats), `test_image_cache_config.py` (load/save/get/set of ImageCacheConfig), `test_cli_images.py` (CLI integration: --no-images, --images-dir, non-interactive error, configured path), `test_preset_config.py` (priority: preset < user config < env).
+- **Image download tests**: `test_image_downloader.py` (unit tests with fake SDK and S3 clients — flat saving, caching, deleted images filtering, S3 key construction, stats; also S3Syncer tests — _list_s3_objects, full sync, skip cached, empty bucket, never deletes local files), `test_image_cache_config.py` (load/save/get/set of ImageCacheConfig), `test_cli_images.py` (CLI integration: --no-images, --images-dir, non-interactive error, configured path), `test_cli_s3_sync.py` (CLI integration: s3-sync with all projects, single project, no image_cache error, unknown project error, continues on resolve failure), `test_preset_config.py` (priority: preset < user config < env).
 
 ## Dev tools (scripts/)
 
@@ -115,7 +159,9 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 - If `token` is present, `ensure_credentials()` does not prompt for username/password.
 - `main.py` kept at project root for backwards compatibility with `python main.py fetch ...` invocations.
 - `_write_json_output()` in CLI uses `logger._core.min_level` (private loguru API) to check whether debug logging is enabled before printing JSON to stdout.
-- **Image download is orthogonal to annotations.** `CvatClient.download_images()` uses the raw SDK client (not `CvatApiPort`) because cloud storage detection and S3 download are a separate concern from annotation fetching. The method requires an active context manager (`with CvatClient(cfg) as c:`). `parse_cloud_storage()` in `image_downloader.py` uses `getattr` on the CVAT SDK cloud storage object (intentional exception to style rule — SDK objects are opaque).
+- **Image download is orthogonal to annotations.** `CvatClient.download_images()` uses `_raw_sdk` (stored directly in `__enter__`, not extracted from `_persistent_api`) because cloud storage detection and S3 download are a separate concern from annotation fetching. The method requires an active context manager (`with CvatClient(cfg) as c:`). `parse_cloud_storage()` in `image_downloader.py` uses `getattr` on the CVAT SDK cloud storage object (intentional exception to style rule — SDK objects are opaque). The `ImageDownloader` pipeline: `_collect_unique_images()` (dict[str,int]) -> `_filter_cached()` -> `_download_all()` (resolves cloud storages, creates S3 clients, downloads).
 - **S3 key construction** in `_build_s3_key()`: if `frame_name` already starts with `prefix`, it's used as-is; otherwise `prefix/frame_name`; if prefix is empty, just `frame_name`. This handles different CVAT versions where frame names may or may not include the cloud storage prefix.
 - **Cloud storage auto-detection**: `ImageDownloader._detect_cloud_storage()` reads `source_storage` from the CVAT task object to get `cloud_storage_id`, then retrieves full cloud storage details via `cloudstorages_api.retrieve()`. Results are cached per `cloud_storage_id` within a download session. If a task has no `source_storage`, its images are counted as `failed` in `DownloadStats`.
 - **S3 credentials** for image download rely on the standard boto3 credential chain (`~/.aws/credentials`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars, IAM roles, etc.). No S3 credentials are stored in the cveta2 config.
+- **S3 sync is one-directional.** `S3Syncer` and the `s3-sync` CLI command only download from S3 to local storage. They never upload to S3 and never delete S3 objects. Local files not present in S3 are preserved (not deleted). `_list_s3_objects()` uses `list_objects_v2` with pagination support for large buckets.
+- **`s3-sync` cloud storage detection** reuses `ImageDownloader._detect_cloud_storage()` via `CvatClient.detect_project_cloud_storage()`. It probes project tasks in order and returns the first `CloudStorageInfo` found. If no task has a `source_storage`, the project is skipped with a warning.

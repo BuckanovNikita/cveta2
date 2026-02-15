@@ -16,7 +16,7 @@ from cveta2._client.mapping import _build_label_maps
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.config import CvatConfig
 from cveta2.exceptions import ProjectNotFoundError
-from cveta2.image_downloader import ImageDownloader
+from cveta2.image_downloader import DownloadStats, ImageDownloader, S3Syncer
 from cveta2.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from cveta2._client.ports import CvatApiPort
-    from cveta2.image_downloader import DownloadStats
+    from cveta2.image_downloader import CloudStorageInfo
 
 
 class _SdkClientFactory(Protocol):
@@ -316,28 +316,87 @@ class CvatClient:
         additional subdirectories are created.  Already-cached files are
         skipped.
         """
-        if self._sdk_client is None:
-            msg = (
-                "download_images() requires a context manager. "
-                "Use: with CvatClient(cfg) as client: ..."
-            )
-            raise RuntimeError(msg)
-
-        # The persistent SDK client __enter__ already returned the raw client;
-        # we stored it via __enter__ -> sdk = self._sdk_client.__enter__().
-        # The _persistent_api wraps it. Access the underlying SDK client from
-        # the adapter.
-        sdk = self._persistent_api._client if self._persistent_api else None  # noqa: SLF001
-        if sdk is None:
-            msg = "SDK client not available — cannot download images."
-            raise RuntimeError(msg)
-
+        sdk = self._require_sdk("download_images")
         downloader = ImageDownloader(target_dir)
         return downloader.download(sdk, annotations)
 
     # ------------------------------------------------------------------
+    # S3 sync
+    # ------------------------------------------------------------------
+
+    def detect_project_cloud_storage(
+        self,
+        project_id: int,
+    ) -> CloudStorageInfo | None:
+        """Detect cloud storage for a project by probing its tasks.
+
+        Returns the :class:`CloudStorageInfo` from the first task that has
+        a ``source_storage`` with a ``cloud_storage_id``, or ``None`` if
+        no task has one.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+        """
+        sdk = self._require_sdk("detect_project_cloud_storage")
+        api = self._get_api()
+        if api is None:
+            msg = "API port not available."
+            raise RuntimeError(msg)
+
+        tasks = api.get_project_tasks(project_id)
+        cs_cache: dict[int, CloudStorageInfo] = {}
+        for task in tasks:
+            cs_info = ImageDownloader._detect_cloud_storage(  # noqa: SLF001
+                sdk, task.id, cs_cache
+            )
+            if cs_info is not None:
+                return cs_info
+        return None
+
+    def sync_project_images(
+        self,
+        project_id: int,
+        target_dir: Path,
+    ) -> DownloadStats:
+        """Sync all S3 objects for *project_id* into *target_dir*.
+
+        Lists every object under the project's cloud storage prefix and
+        downloads those missing locally.  Never deletes from S3 or syncs
+        in reverse.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+        """
+        cs_info = self.detect_project_cloud_storage(project_id)
+        if cs_info is None:
+            logger.warning(
+                f"Проект {project_id}: cloud storage не найден — "
+                f"пропускаем синхронизацию."
+            )
+            return DownloadStats(total=0)
+
+        logger.info(
+            f"Проект {project_id}: синхронизация из "
+            f"s3://{cs_info.bucket}/{cs_info.prefix} → {target_dir}"
+        )
+        syncer = S3Syncer(target_dir)
+        return syncer.sync(cs_info)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _require_sdk(self, method_name: str) -> Any:  # noqa: ANN401
+        """Return the raw SDK client or raise with a helpful message."""
+        if self._sdk_client is None:
+            msg = (
+                f"{method_name}() requires a context manager. "
+                "Use: with CvatClient(cfg) as client: ..."
+            )
+            raise RuntimeError(msg)
+        sdk = self._persistent_api._client if self._persistent_api else None  # noqa: SLF001
+        if sdk is None:
+            msg = "SDK client not available."
+            raise RuntimeError(msg)
+        return sdk
 
     def _build_client_kwargs(self, cfg: CvatConfig) -> dict[str, Any]:
         """Build keyword arguments for ``make_client``.

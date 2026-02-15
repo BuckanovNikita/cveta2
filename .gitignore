@@ -9,3 +9,4 @@ wheels/
 # Virtual environments
 .venv
 .cursor/worktrees.json
+.cache/coco8-dev-s3/coco8-dev-s3/000000000009.jpg

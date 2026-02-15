@@ -44,6 +44,7 @@ class CliApp:
 
         self._add_fetch_parser(subparsers)
         self._add_setup_parser(subparsers)
+        self._add_s3_sync_parser(subparsers)
 
         return parser
 
@@ -113,6 +114,29 @@ class CliApp:
             help=(
                 "Path to YAML config (default: ~/.config/cveta2/config.yaml "
                 "or CVETA2_CONFIG)."
+            ),
+        )
+
+    def _add_s3_sync_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``s3-sync`` command parser."""
+        parser = subparsers.add_parser(
+            "s3-sync",
+            help=(
+                "Sync images from S3 cloud storage to local cache "
+                "for all configured projects."
+            ),
+        )
+        parser.add_argument(
+            "--project",
+            "-p",
+            type=str,
+            default=None,
+            help=(
+                "Sync only this project (name from image_cache config). "
+                "If omitted, syncs every configured project."
             ),
         )
 
@@ -253,8 +277,9 @@ class CliApp:
                 break
             proj_path = input(f"Путь для изображений проекта {proj_name!r}: ").strip()
             if proj_path:
-                image_cache.set_cache_dir(proj_name, Path(proj_path))
-                logger.info(f"  {proj_name} -> {proj_path}")
+                resolved = Path(proj_path).resolve()
+                image_cache.set_cache_dir(proj_name, resolved)
+                logger.info(f"  {proj_name} -> {resolved}")
         return image_cache
 
     def _load_config(self, config_path: Path | None = None) -> CvatConfig:
@@ -337,7 +362,7 @@ class CliApp:
 
         # --images-dir takes top priority
         if args.images_dir:
-            return Path(args.images_dir)
+            return Path(args.images_dir).resolve()
 
         # Look up per-project mapping in config
         ic_cfg = load_image_cache_config()
@@ -361,7 +386,7 @@ class CliApp:
             logger.warning("Путь не указан — загрузка изображений пропущена.")
             return None
 
-        new_path = Path(path_str)
+        new_path = Path(path_str).resolve()
         ic_cfg.set_cache_dir(project_name, new_path)
         save_image_cache_config(ic_cfg)
         return new_path
@@ -422,6 +447,52 @@ class CliApp:
         partition = partition_annotations_df(df, result.deleted_images)
         self._write_partition_result(partition, output_dir)
 
+    def _run_s3_sync(self, args: argparse.Namespace) -> None:
+        """Run the ``s3-sync`` command."""
+        cfg = self._load_config()
+        self._require_host(cfg)
+
+        ic_cfg = load_image_cache_config()
+        if not ic_cfg.projects:
+            sys.exit(
+                "Ошибка: image_cache не настроен — нет проектов для синхронизации.\n"
+                "Добавьте секцию image_cache в конфигурацию или запустите: cveta2 setup"
+            )
+
+        # Filter to a single project if --project was given
+        if args.project:
+            project_name = args.project.strip()
+            cache_dir = ic_cfg.get_cache_dir(project_name)
+            if cache_dir is None:
+                sys.exit(
+                    f"Ошибка: проект {project_name!r} не найден в image_cache.\n"
+                    f"Настроенные проекты: "
+                    f"{', '.join(ic_cfg.projects) or '(нет)'}"
+                )
+            projects_to_sync = {project_name: cache_dir}
+        else:
+            projects_to_sync = dict(ic_cfg.projects)
+
+        cached = load_projects_cache()
+
+        with CvatClient(cfg) as client:
+            for project_name, cache_dir in projects_to_sync.items():
+                logger.info(f"--- Синхронизация проекта: {project_name} ---")
+                try:
+                    project_id = client.resolve_project_id(project_name, cached=cached)
+                except Cveta2Error as e:
+                    logger.error(
+                        f"Проект {project_name!r}: не удалось определить ID — {e}"
+                    )
+                    continue
+
+                stats = client.sync_project_images(project_id, cache_dir)
+                logger.info(
+                    f"Проект {project_name!r}: {stats.downloaded} загружено, "
+                    f"{stats.cached} из кэша, {stats.failed} ошибок "
+                    f"(всего {stats.total})"
+                )
+
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""
         if args.command == "setup":
@@ -434,6 +505,9 @@ class CliApp:
             return
         if args.command == "fetch":
             self._run_fetch(args)
+            return
+        if args.command == "s3-sync":
+            self._run_s3_sync(args)
             return
         sys.exit(f"Неизвестная команда: {args.command}")
 

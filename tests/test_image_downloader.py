@@ -6,8 +6,11 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 from cveta2.image_downloader import (
+    CloudStorageInfo,
     ImageDownloader,
+    S3Syncer,
     _build_s3_key,
+    _list_s3_objects,
     parse_cloud_storage,
 )
 from cveta2.models import (
@@ -384,3 +387,263 @@ def test_download_no_cloud_storage_marks_failed(tmp_path: Path) -> None:
     assert stats.total == 1
     assert stats.failed == 1
     assert stats.downloaded == 0
+
+
+# ======================================================================
+# S3 sync tests
+# ======================================================================
+
+
+def _make_list_s3_client(
+    objects: dict[str, bytes],
+) -> MagicMock:
+    """Build a mock S3 client that supports list_objects_v2 and get_object."""
+
+    def list_objects_v2(
+        Bucket: str = "",  # noqa: N803, ARG001
+        Prefix: str = "",  # noqa: N803
+        **_kwargs: object,
+    ) -> dict[str, Any]:
+        contents = []
+        for key, data in objects.items():
+            if key.startswith(Prefix):
+                contents.append({"Key": key, "Size": len(data)})
+        return {"Contents": contents, "IsTruncated": False}
+
+    def get_object(Bucket: str = "", Key: str = "") -> dict[str, Any]:  # noqa: N803, ARG001
+        if Key not in objects:
+            msg = f"NoSuchKey: {Key}"
+            raise KeyError(msg)
+        body = MagicMock()
+        body.read.return_value = objects[Key]
+        return {"Body": body}
+
+    mock = MagicMock()
+    mock.list_objects_v2.side_effect = list_objects_v2
+    mock.get_object.side_effect = get_object
+    return mock
+
+
+def _patch_boto_sync(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_s3: MagicMock,
+) -> None:
+    """Patch boto3.Session to return the fake S3 client (for sync tests)."""
+    monkeypatch.setattr(
+        "cveta2.image_downloader.boto3.Session",
+        lambda: MagicMock(client=lambda *_a, **_kw: fake_s3),
+    )
+
+
+# --- _list_s3_objects tests ---
+
+
+def test_list_s3_objects_returns_keys_stripped_of_prefix() -> None:
+    """_list_s3_objects strips the prefix from keys."""
+    s3_objects = {
+        "images/a.jpg": b"data-a",
+        "images/b.jpg": b"data-b",
+    }
+    fake_s3 = _make_list_s3_client(s3_objects)
+    result = _list_s3_objects(fake_s3, "test-bucket", "images")
+    assert sorted(result) == [("images/a.jpg", "a.jpg"), ("images/b.jpg", "b.jpg")]
+
+
+def test_list_s3_objects_no_prefix() -> None:
+    """_list_s3_objects with empty prefix returns keys as-is."""
+    s3_objects = {
+        "cat.jpg": b"cat",
+        "dog.jpg": b"dog",
+    }
+    fake_s3 = _make_list_s3_client(s3_objects)
+    result = _list_s3_objects(fake_s3, "bucket", "")
+    assert sorted(result) == [("cat.jpg", "cat.jpg"), ("dog.jpg", "dog.jpg")]
+
+
+def test_list_s3_objects_empty_bucket() -> None:
+    """_list_s3_objects returns empty list for empty bucket."""
+    fake_s3 = _make_list_s3_client({})
+    result = _list_s3_objects(fake_s3, "bucket", "prefix")
+    assert result == []
+
+
+def test_list_s3_objects_skips_prefix_marker() -> None:
+    """_list_s3_objects skips the prefix directory marker (empty name after strip)."""
+    s3_objects = {
+        "images/": b"",  # directory marker
+        "images/a.jpg": b"data",
+    }
+    fake_s3 = _make_list_s3_client(s3_objects)
+    result = _list_s3_objects(fake_s3, "bucket", "images/")
+    assert result == [("images/a.jpg", "a.jpg")]
+
+
+# --- S3Syncer tests ---
+
+
+def test_s3_syncer_downloads_all_objects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer downloads all objects from the prefix."""
+    s3_objects = {
+        "images/a.jpg": b"data-a",
+        "images/b.jpg": b"data-b",
+        "images/c.png": b"data-c",
+    }
+    fake_s3 = _make_list_s3_client(s3_objects)
+    _patch_boto_sync(monkeypatch, fake_s3)
+
+    cs_info = CloudStorageInfo(
+        id=1,
+        bucket="test-bucket",
+        prefix="images",
+        endpoint_url="http://minio:9000",
+    )
+    target = tmp_path / "sync-dir"
+    syncer = S3Syncer(target)
+    stats = syncer.sync(cs_info)
+
+    assert stats.total == 3
+    assert stats.downloaded == 3
+    assert stats.cached == 0
+    assert stats.failed == 0
+    assert (target / "a.jpg").read_bytes() == b"data-a"
+    assert (target / "b.jpg").read_bytes() == b"data-b"
+    assert (target / "c.png").read_bytes() == b"data-c"
+
+
+def test_s3_syncer_skips_already_cached(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer skips files that already exist locally."""
+    s3_objects = {
+        "images/a.jpg": b"data-a",
+        "images/b.jpg": b"data-b",
+    }
+    target = tmp_path / "sync-dir"
+    target.mkdir(parents=True)
+    (target / "a.jpg").write_bytes(b"old-data-a")
+
+    fake_s3 = _make_list_s3_client(s3_objects)
+    _patch_boto_sync(monkeypatch, fake_s3)
+
+    cs_info = CloudStorageInfo(
+        id=1,
+        bucket="test-bucket",
+        prefix="images",
+        endpoint_url="http://minio:9000",
+    )
+    syncer = S3Syncer(target)
+    stats = syncer.sync(cs_info)
+
+    assert stats.total == 2
+    assert stats.cached == 1
+    assert stats.downloaded == 1
+    assert stats.failed == 0
+    # Cached file should NOT be overwritten
+    assert (target / "a.jpg").read_bytes() == b"old-data-a"
+    assert (target / "b.jpg").read_bytes() == b"data-b"
+
+
+def test_s3_syncer_all_cached(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer reports all cached when everything is already local."""
+    s3_objects = {
+        "images/a.jpg": b"data-a",
+    }
+    target = tmp_path / "sync-dir"
+    target.mkdir(parents=True)
+    (target / "a.jpg").write_bytes(b"existing")
+
+    fake_s3 = _make_list_s3_client(s3_objects)
+    _patch_boto_sync(monkeypatch, fake_s3)
+
+    cs_info = CloudStorageInfo(
+        id=1,
+        bucket="test-bucket",
+        prefix="images",
+        endpoint_url="http://minio:9000",
+    )
+    syncer = S3Syncer(target)
+    stats = syncer.sync(cs_info)
+
+    assert stats.total == 1
+    assert stats.cached == 1
+    assert stats.downloaded == 0
+
+
+def test_s3_syncer_empty_bucket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer handles empty bucket gracefully."""
+    fake_s3 = _make_list_s3_client({})
+    _patch_boto_sync(monkeypatch, fake_s3)
+
+    cs_info = CloudStorageInfo(
+        id=1,
+        bucket="test-bucket",
+        prefix="images",
+        endpoint_url="http://minio:9000",
+    )
+    syncer = S3Syncer(tmp_path / "sync-dir")
+    stats = syncer.sync(cs_info)
+
+    assert stats.total == 0
+    assert stats.downloaded == 0
+
+
+def test_s3_syncer_creates_target_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer creates the target directory if it doesn't exist."""
+    s3_objects = {"prefix/img.jpg": b"data"}
+    fake_s3 = _make_list_s3_client(s3_objects)
+    _patch_boto_sync(monkeypatch, fake_s3)
+
+    cs_info = CloudStorageInfo(
+        id=1,
+        bucket="bucket",
+        prefix="prefix",
+        endpoint_url="http://s3:9000",
+    )
+    target = tmp_path / "deep" / "nested" / "dir"
+    syncer = S3Syncer(target)
+    stats = syncer.sync(cs_info)
+
+    assert stats.downloaded == 1
+    assert target.exists()
+    assert (target / "img.jpg").read_bytes() == b"data"
+
+
+def test_s3_syncer_never_deletes_local_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer never deletes files that exist locally but not in S3."""
+    s3_objects = {"images/a.jpg": b"data-a"}
+    target = tmp_path / "sync-dir"
+    target.mkdir(parents=True)
+    (target / "a.jpg").write_bytes(b"existing-a")
+    (target / "local-only.jpg").write_bytes(b"local-data")
+
+    fake_s3 = _make_list_s3_client(s3_objects)
+    _patch_boto_sync(monkeypatch, fake_s3)
+
+    cs_info = CloudStorageInfo(
+        id=1,
+        bucket="test-bucket",
+        prefix="images",
+        endpoint_url="http://minio:9000",
+    )
+    syncer = S3Syncer(target)
+    syncer.sync(cs_info)
+
+    # Local-only file must still exist
+    assert (target / "local-only.jpg").read_bytes() == b"local-data"
+    assert (target / "a.jpg").read_bytes() == b"existing-a"

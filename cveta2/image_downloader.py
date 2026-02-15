@@ -130,22 +130,20 @@ class ImageDownloader:
 
         Returns counters of downloaded / cached / failed images.
         """
-        frames = self._collect_frames(annotations)
-        if not frames:
+        image_tasks = self._collect_unique_images(annotations)
+        if not image_tasks:
             return DownloadStats(total=0)
 
-        stats = DownloadStats(total=len(frames))
-        to_download = self._partition_cached(frames, stats)
-        if not to_download:
+        stats = DownloadStats(total=len(image_tasks))
+        pending = self._filter_cached(image_tasks, stats)
+        if not pending:
             logger.info(
                 f"Все {stats.cached} изображений уже загружены в {self._target_dir}"
             )
             return stats
 
-        task_cs = self._resolve_cloud_storages(sdk_client, to_download, stats)
-        s3_clients = self._create_s3_clients(task_cs)
         self._target_dir.mkdir(parents=True, exist_ok=True)
-        self._execute_downloads(to_download, task_cs, s3_clients, stats)
+        self._download_all(sdk_client, pending, stats)
 
         logger.info(
             f"Загрузка изображений: {stats.downloaded} новых, "
@@ -158,113 +156,88 @@ class ImageDownloader:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _partition_cached(
-        self,
-        frames: list[tuple[int, int, str]],
-        stats: DownloadStats,
-    ) -> dict[int, list[tuple[int, str]]]:
-        """Split frames into cached (update stats) and to-download groups."""
-        to_download: dict[int, list[tuple[int, str]]] = {}
-        for task_id, frame_id, image_name in frames:
-            dest = self._target_dir / image_name
-            if dest.exists():
-                stats.cached += 1
-                continue
-            to_download.setdefault(task_id, []).append((frame_id, image_name))
-        return to_download
-
     @staticmethod
-    def _resolve_cloud_storages(
-        sdk_client: Any,  # noqa: ANN401
-        to_download: dict[int, list[tuple[int, str]]],
+    def _collect_unique_images(
+        annotations: ProjectAnnotations,
+    ) -> dict[str, int]:
+        """Return ``{image_name: task_id}`` for unique images.
+
+        First occurrence wins (keeps a stable task_id per image).
+        Deleted images are not included (they are not in
+        ``annotations`` or ``images_without_annotations``).
+        """
+        result: dict[str, int] = {}
+        for ann in annotations.annotations:
+            if ann.image_name not in result:
+                result[ann.image_name] = ann.task_id
+        for img in annotations.images_without_annotations:
+            if img.image_name not in result:
+                result[img.image_name] = img.task_id
+        return result
+
+    def _filter_cached(
+        self,
+        image_tasks: dict[str, int],
         stats: DownloadStats,
-    ) -> dict[int, CloudStorageInfo]:
-        """Detect cloud storage for each task, updating *stats* on failure."""
+    ) -> dict[str, int]:
+        """Remove already-cached images, updating *stats*. Return pending."""
+        pending: dict[str, int] = {}
+        for image_name, task_id in image_tasks.items():
+            if (self._target_dir / image_name).exists():
+                stats.cached += 1
+            else:
+                pending[image_name] = task_id
+        return pending
+
+    def _download_all(
+        self,
+        sdk_client: Any,  # noqa: ANN401
+        pending: dict[str, int],
+        stats: DownloadStats,
+    ) -> None:
+        """Resolve cloud storages, create S3 clients, download pending images."""
+        # 1. Resolve cloud storage per unique task_id
         cs_cache: dict[int, CloudStorageInfo] = {}
-        task_cs: dict[int, CloudStorageInfo] = {}
-        for task_id, frame_list in to_download.items():
-            cs_info = ImageDownloader._detect_cloud_storage(
-                sdk_client, task_id, cs_cache
-            )
+        task_cs: dict[int, CloudStorageInfo | None] = {}
+        for task_id in set(pending.values()):
+            cs_info = self._detect_cloud_storage(sdk_client, task_id, cs_cache)
+            task_cs[task_id] = cs_info
             if cs_info is None:
+                count = sum(1 for t in pending.values() if t == task_id)
                 logger.warning(
                     f"Task {task_id} не имеет cloud storage — "
-                    f"пропускаем {len(frame_list)} изображений"
+                    f"пропускаем {count} изображений"
                 )
-                stats.failed += len(frame_list)
-                continue
-            task_cs[task_id] = cs_info
-        return task_cs
 
-    @staticmethod
-    def _create_s3_clients(
-        task_cs: dict[int, CloudStorageInfo],
-    ) -> dict[str, Any]:
-        """Create one boto3 S3 client per unique (endpoint, bucket) pair."""
+        # 2. Create one boto3 S3 client per unique (endpoint, bucket)
         s3_clients: dict[str, Any] = {}
         for cs_info in task_cs.values():
+            if cs_info is None:
+                continue
             key = f"{cs_info.endpoint_url}|{cs_info.bucket}"
             if key not in s3_clients:
                 s3_clients[key] = boto3.Session().client(
                     "s3",
                     endpoint_url=cs_info.endpoint_url or None,
                 )
-        return s3_clients
 
-    def _execute_downloads(
-        self,
-        to_download: dict[int, list[tuple[int, str]]],
-        task_cs: dict[int, CloudStorageInfo],
-        s3_clients: dict[str, Any],
-        stats: DownloadStats,
-    ) -> None:
-        """Download all pending images, updating *stats* in place."""
-        items: list[tuple[str, str, str, str]] = []
-        for task_id, frame_list in to_download.items():
+        # 3. Download
+        for image_name, task_id in tqdm(
+            pending.items(), desc="Downloading images", unit="img", leave=False
+        ):
             cs_info = task_cs.get(task_id)
             if cs_info is None:
+                stats.failed += 1
                 continue
             ep_key = f"{cs_info.endpoint_url}|{cs_info.bucket}"
-            for _fid, image_name in frame_list:
-                s3_key = _build_s3_key(cs_info.prefix, image_name)
-                items.append((s3_key, cs_info.bucket, ep_key, image_name))
-
-        for s3_key, bucket, ep_key, image_name in tqdm(
-            items, desc="Downloading images", unit="img", leave=False
-        ):
-            s3 = s3_clients[ep_key]
+            s3_key = _build_s3_key(cs_info.prefix, image_name)
             dest = self._target_dir / image_name
             try:
-                self._download_one(s3, bucket, s3_key, dest)
+                self._download_one(s3_clients[ep_key], cs_info.bucket, s3_key, dest)
                 stats.downloaded += 1
             except (OSError, ConnectionError, KeyError):
                 logger.exception(f"Не удалось загрузить {image_name} (key={s3_key})")
                 stats.failed += 1
-
-    @staticmethod
-    def _collect_frames(
-        annotations: ProjectAnnotations,
-    ) -> list[tuple[int, int, str]]:
-        """Return deduplicated (task_id, frame_id, image_name) list.
-
-        Deleted images are excluded.
-        """
-        seen: set[tuple[int, int]] = set()
-        result: list[tuple[int, int, str]] = []
-
-        for ann in annotations.annotations:
-            key = (ann.task_id, ann.frame_id)
-            if key not in seen:
-                seen.add(key)
-                result.append((ann.task_id, ann.frame_id, ann.image_name))
-
-        for img in annotations.images_without_annotations:
-            key = (img.task_id, img.frame_id)
-            if key not in seen:
-                seen.add(key)
-                result.append((img.task_id, img.frame_id, img.image_name))
-
-        return result
 
     @staticmethod
     def _detect_cloud_storage(
@@ -315,7 +288,117 @@ class ImageDownloader:
         dest: Path,
     ) -> None:
         """Download a single S3 object to *dest*."""
-        resp = s3_client.get_object(Bucket=bucket, Key=key)
-        data: bytes = resp["Body"].read()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
+        _download_one_s3(s3_client, bucket, key, dest)
+
+
+# ---------------------------------------------------------------------------
+# Shared S3 helpers
+# ---------------------------------------------------------------------------
+
+
+@_s3_retry
+def _download_one_s3(
+    s3_client: Any,  # noqa: ANN401
+    bucket: str,
+    key: str,
+    dest: Path,
+) -> None:
+    """Download a single S3 object to *dest*."""
+    resp = s3_client.get_object(Bucket=bucket, Key=key)
+    data: bytes = resp["Body"].read()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+
+
+def _list_s3_objects(
+    s3_client: Any,  # noqa: ANN401
+    bucket: str,
+    prefix: str,
+) -> list[tuple[str, str]]:
+    """List all S3 objects under *prefix* and return ``(key, local_name)`` pairs.
+
+    The *local_name* is the object key with the prefix stripped, suitable
+    for saving as a flat file name.  Empty names (the prefix directory
+    marker itself) are skipped.
+    """
+    objects: list[tuple[str, str]] = []
+    kwargs: dict[str, str] = {"Bucket": bucket}
+    if prefix:
+        kwargs["Prefix"] = prefix
+    while True:
+        resp = s3_client.list_objects_v2(**kwargs)
+        for obj in resp.get("Contents", []):
+            key: str = obj["Key"]
+            # Strip prefix to get local file name
+            name = key[len(prefix) :].lstrip("/") if prefix else key
+            if name:  # skip empty (the prefix directory marker itself)
+                objects.append((key, name))
+        if not resp.get("IsTruncated"):
+            break
+        kwargs["ContinuationToken"] = resp["NextContinuationToken"]
+    return objects
+
+
+# ---------------------------------------------------------------------------
+# S3 sync (full prefix → local directory)
+# ---------------------------------------------------------------------------
+
+
+class S3Syncer:
+    """Sync all objects under an S3 cloud storage prefix to a local directory.
+
+    Unlike :class:`ImageDownloader` which downloads only images referenced
+    in annotations, this class lists **all** objects in the S3 prefix and
+    downloads any that are missing locally.  It never deletes local files
+    and never uploads to S3.
+    """
+
+    def __init__(self, target_dir: Path) -> None:
+        """Store the target directory for synced files."""
+        self._target_dir = target_dir
+
+    def sync(self, cs_info: CloudStorageInfo) -> DownloadStats:
+        """List all objects under *cs_info* prefix and download missing ones.
+
+        Returns counters of downloaded / cached / failed files.
+        """
+        s3 = boto3.Session().client(
+            "s3",
+            endpoint_url=cs_info.endpoint_url or None,
+        )
+        objects = _list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
+        if not objects:
+            logger.info(f"Нет объектов в s3://{cs_info.bucket}/{cs_info.prefix}")
+            return DownloadStats(total=0)
+
+        stats = DownloadStats(total=len(objects))
+        to_download: list[tuple[str, str]] = []
+        for key, name in objects:
+            dest = self._target_dir / name
+            if dest.exists():
+                stats.cached += 1
+            else:
+                to_download.append((key, name))
+
+        if not to_download:
+            logger.info(f"Все {stats.cached} файлов уже загружены в {self._target_dir}")
+            return stats
+
+        self._target_dir.mkdir(parents=True, exist_ok=True)
+        for key, name in tqdm(
+            to_download, desc="Syncing from S3", unit="file", leave=False
+        ):
+            dest = self._target_dir / name
+            try:
+                _download_one_s3(s3, cs_info.bucket, key, dest)
+                stats.downloaded += 1
+            except (OSError, ConnectionError, KeyError):
+                logger.exception(f"Не удалось загрузить {name} (key={key})")
+                stats.failed += 1
+
+        logger.info(
+            f"S3 sync: {stats.downloaded} загружено, "
+            f"{stats.cached} из кэша, {stats.failed} ошибок "
+            f"(всего {stats.total})"
+        )
+        return stats
