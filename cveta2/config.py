@@ -10,6 +10,8 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel
 
+from cveta2.exceptions import InteractiveModeRequiredError
+
 CONFIG_DIR = Path.home() / ".config" / "cveta2"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
@@ -30,7 +32,7 @@ def require_interactive(hint: str) -> None:
 
     """
     if is_interactive_disabled():
-        raise RuntimeError(
+        raise InteractiveModeRequiredError(
             f"Interactive prompt required but CVETA2_NO_INTERACTIVE=true. {hint}"
         )
 
@@ -139,13 +141,11 @@ class CvatConfig(BaseModel):
             return self
 
         if not username:
-            require_interactive(
-                "Set CVAT_TOKEN or CVAT_USERNAME/CVAT_PASSWORD env vars."
-            )
-            logger.info("No credentials provided. Please enter your CVAT login:")
-            username = input("Username: ")
+            require_interactive("Задайте CVAT_TOKEN или CVAT_USERNAME/CVAT_PASSWORD.")
+            logger.info("Учётные данные не указаны. Введите логин CVAT:")
+            username = input("Имя пользователя: ")
         if not password:
-            require_interactive("Set CVAT_TOKEN or CVAT_PASSWORD env vars.")
-            password = getpass.getpass(f"Password for {username}: ")
+            require_interactive("Задайте CVAT_TOKEN или CVAT_PASSWORD.")
+            password = getpass.getpass(f"Пароль для {username}: ")
 
         return self.model_copy(update={"username": username, "password": password})

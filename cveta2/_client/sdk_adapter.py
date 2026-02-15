@@ -8,6 +8,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
 from cveta2._client.dtos import (
     RawAnnotations,
     RawAttribute,
@@ -28,11 +36,30 @@ if TYPE_CHECKING:
     )
 
 
+def _log_retry(retry_state: Any) -> None:  # noqa: ANN401
+    """Log a warning before each retry attempt."""
+    logger.warning(
+        f"CVAT API call failed (attempt {retry_state.attempt_number}), "
+        f"retrying: {retry_state.outcome.exception()!r}"
+    )
+
+
+# Retry on network / server errors with exponential backoff.
+_api_retry = retry(
+    retry=retry_if_exception_type((OSError, ConnectionError)),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    before_sleep=_log_retry,
+    reraise=True,
+)
+
+
 class SdkCvatApiAdapter:
     """``CvatApiPort`` implementation backed by an open CVAT SDK client.
 
     The caller is responsible for opening and closing the SDK client.
     This adapter is a thin stateless converter: SDK objects in, DTOs out.
+    All public methods are wrapped with retry logic for transient errors.
     """
 
     def __init__(self, client: Any) -> None:  # noqa: ANN401
@@ -43,29 +70,34 @@ class SdkCvatApiAdapter:
     # Public API (satisfies CvatApiPort)
     # ------------------------------------------------------------------
 
+    @_api_retry
     def list_projects(self) -> list[RawProject]:
         """Return all accessible projects."""
         raw = self._client.projects.list()
         return [RawProject(id=p.id, name=p.name or "") for p in raw]
 
+    @_api_retry
     def get_project_tasks(self, project_id: int) -> list[RawTask]:
         """Return tasks belonging to a project."""
         project = self._client.projects.retrieve(project_id)
         tasks = project.get_tasks()
         return [self._convert_task(t) for t in tasks]
 
+    @_api_retry
     def get_project_labels(self, project_id: int) -> list[RawLabel]:
         """Return label definitions for a project."""
         project = self._client.projects.retrieve(project_id)
         labels = project.get_labels()
         return [self._convert_label(lbl) for lbl in labels]
 
+    @_api_retry
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
         """Return frame metadata and deleted frame IDs for a task."""
         tasks_api = self._client.api_client.tasks_api
         data_meta, _ = tasks_api.retrieve_data_meta(task_id)
         return self._convert_data_meta(data_meta)
 
+    @_api_retry
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
         """Return shapes and tracks for a task."""
         tasks_api = self._client.api_client.tasks_api
@@ -88,7 +120,14 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _extract_updated_date(task: cvat_models.TaskRead) -> str:
-        """Normalize ``updated_date`` / ``updated_at`` to ISO string."""
+        """Normalize ``updated_date`` / ``updated_at`` to ISO string.
+
+        Uses ``getattr`` because the CVAT SDK renamed ``updated_date`` to
+        ``updated_at`` between versions, and the returned value may be a
+        ``datetime`` (with ``.isoformat()``) or a plain string depending on
+        the SDK release.  This is an intentional exception to the project
+        style rule "avoid getattr" (see CLAUDE.md).
+        """
         raw: object | None = getattr(task, "updated_date", None)
         if raw is None:
             raw = getattr(task, "updated_at", None)
@@ -203,12 +242,26 @@ class SdkCvatApiAdapter:
 
     @staticmethod
     def _extract_creator_username(item: object) -> str:
-        """Extract creator username from a CVAT SDK entity."""
-        user_obj = getattr(item, "created_by", None) or getattr(item, "owner", None)
+        """Extract creator username from a CVAT SDK entity.
+
+        Uses ``getattr`` because the CVAT SDK represents the creator
+        inconsistently across entity types and versions: ``created_by`` may
+        be a user object, a dict, or absent (in which case ``owner`` is
+        used).  The user object itself may expose ``username`` or ``name``.
+        This is an intentional exception to the project style rule
+        "avoid getattr" (see CLAUDE.md).
+        """
+        user_obj = getattr(item, "created_by", None) or getattr(
+            item,
+            "owner",
+            None,
+        )
         if user_obj is None:
             return ""
         username = getattr(user_obj, "username", None) or getattr(
-            user_obj, "name", None
+            user_obj,
+            "name",
+            None,
         )
         if username is not None:
             return str(username)

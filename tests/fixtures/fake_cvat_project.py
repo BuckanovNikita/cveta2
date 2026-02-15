@@ -7,7 +7,7 @@ with repeated tasks, custom/random task names, and variable task statuses.
 from __future__ import annotations
 
 import random
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
@@ -19,13 +19,15 @@ from cveta2._client.dtos import (
     RawTask,
 )
 
-# Same tuple type as load_cvat_fixtures()
-LoadedFixtures = tuple[
-    RawProject,
-    list[RawTask],
-    list[RawLabel],
-    dict[int, tuple[RawDataMeta, RawAnnotations]],
-]
+
+class LoadedFixtures(NamedTuple):
+    """Loaded CVAT fixture data: project, tasks, labels, and per-task data."""
+
+    project: RawProject
+    tasks: list[RawTask]
+    labels: list[RawLabel]
+    task_data: dict[int, tuple[RawDataMeta, RawAnnotations]]
+
 
 # CVAT task statuses for random choice
 DEFAULT_TASK_STATUSES: tuple[str, ...] = (
@@ -166,11 +168,10 @@ def build_fake_project(
     - task_names: "keep" | "random" | "enumerated" | list (cycled).
     - task_statuses: "keep" | "random" | list (cycled).
     """
-    _base_project, base_tasks, labels, task_data_map = base_fixtures
-    if not base_tasks:
+    if not base_fixtures.tasks:
         raise ValueError("base_fixtures has no tasks")
 
-    indices = _resolve_task_indices(base_tasks, config)
+    indices = _resolve_task_indices(base_fixtures.tasks, config)
     task_ids = _resolve_task_ids(len(indices), config)
     rng = random.Random(config.seed)
 
@@ -179,8 +180,8 @@ def build_fake_project(
     new_task_data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {}
 
     for pos, (idx, new_id) in enumerate(zip(indices, task_ids, strict=True)):
-        base_task = base_tasks[idx]
-        data_meta, annotations = task_data_map[base_task.id]
+        base_task = base_fixtures.tasks[idx]
+        data_meta, annotations = base_fixtures.task_data[base_task.id]
 
         name = _resolve_name(pos, base_task, config, rng)
         status = _resolve_status(pos, base_task, config, rng)
@@ -195,4 +196,9 @@ def build_fake_project(
         new_tasks.append(new_task)
         new_task_data[new_id] = (data_meta, annotations)
 
-    return (new_project, new_tasks, labels, new_task_data)
+    return LoadedFixtures(
+        project=new_project,
+        tasks=new_tasks,
+        labels=base_fixtures.labels,
+        task_data=new_task_data,
+    )

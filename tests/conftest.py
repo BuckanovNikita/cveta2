@@ -28,8 +28,7 @@ def coco8_label_maps(
     coco8_fixtures: LoadedFixtures,
 ) -> tuple[dict[int, str], dict[int, str]]:
     """Pre-built (label_names, attr_names) dicts from coco8-dev labels."""
-    _project, _tasks, labels, _task_data = coco8_fixtures
-    return _build_label_maps(labels)
+    return _build_label_maps(coco8_fixtures.labels)
 
 
 @pytest.fixture(scope="session")
@@ -37,10 +36,9 @@ def coco8_tasks_by_name(
     coco8_fixtures: LoadedFixtures,
 ) -> dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]]:
     """Map task slug -> (RawTask, RawDataMeta, RawAnnotations)."""
-    _project, tasks, _labels, task_data_map = coco8_fixtures
     result: dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]] = {}
-    for task in tasks:
+    for task in coco8_fixtures.tasks:
         key = task.name.strip().lower()
-        data_meta, annotations = task_data_map[task.id]
+        data_meta, annotations = coco8_fixtures.task_data[task.id]
         result[key] = (task, data_meta, annotations)
     return result

@@ -17,6 +17,7 @@ dependencies = [
     "types-pyyaml>=6.0.12.20250915",
     "questionary>=2.0.0",
     "tqdm>=4.66.0",
+    "tenacity>=9.1.4",
 ]
 
 [project.scripts]
@@ -29,12 +30,14 @@ dev = [
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",
     "ruff>=0.15.0",
-    "scipy-stubs>=1.15.3.0",
-    "types-openpyxl>=3.1.5.20250919",
-    "types-python-dateutil>=2.9.0.20260124",
     "types-tqdm>=4.66.0.20240417",
-    "types-xlrd>=2.0.0.20251020",
     "vulture>=2.14",
+    # pandas-stubs may require these transitive type stubs; re-add if mypy
+    # reports missing stubs for openpyxl / xlrd / scipy / python-dateutil:
+    # "scipy-stubs>=1.15.3.0",
+    # "types-openpyxl>=3.1.5.20250919",
+    # "types-python-dateutil>=2.9.0.20260124",
+    # "types-xlrd>=2.0.0.20251020",
 ]
 
 [tool.ruff]

@@ -26,8 +26,11 @@ class FakeCvatApi:
     """
 
     def __init__(self, fixtures: LoadedFixtures) -> None:
-        """Unpack fixture tuple into internal stores."""
-        self._project, self._tasks, self._labels, self._task_data = fixtures
+        """Unpack fixture data into internal stores."""
+        self._project = fixtures.project
+        self._tasks = fixtures.tasks
+        self._labels = fixtures.labels
+        self._task_data = fixtures.task_data
 
     def list_projects(self) -> list[RawProject]:
         """Return the single fixture project."""

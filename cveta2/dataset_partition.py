@@ -90,8 +90,14 @@ def partition_annotations_df(
     latest_from_df["_is_deleted"] = 0
 
     combined = pd.concat([latest_from_df, deleted_df], ignore_index=True)
+    # Parse dates properly so comparisons work regardless of format/timezone.
+    combined["_parsed_date"] = pd.to_datetime(
+        combined["task_updated_date"],
+        errors="coerce",
+        utc=True,
+    )
     # For each image, find the row with the maximum task_updated_date
-    idx_latest = combined.groupby("image_name")["task_updated_date"].idxmax()
+    idx_latest = combined.groupby("image_name")["_parsed_date"].idxmax()
     latest_per_image = combined.loc[idx_latest].set_index("image_name")
 
     # ------------------------------------------------------------------
@@ -126,8 +132,14 @@ def partition_annotations_df(
         obsolete_stale = completed_non_deleted.copy()
     else:
         # For each image_name, find the latest completed task_id
+        cnd = completed_non_deleted.copy()
+        cnd["_parsed_date"] = pd.to_datetime(
+            cnd["task_updated_date"],
+            errors="coerce",
+            utc=True,
+        )
         latest_completed = (
-            completed_non_deleted.sort_values("task_updated_date", ascending=False)
+            cnd.sort_values("_parsed_date", ascending=False)
             .drop_duplicates(subset=["image_name"], keep="first")[
                 ["image_name", "task_id"]
             ]

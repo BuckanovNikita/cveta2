@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from cveta2.client import CvatClient, _project_annotations_to_csv_rows
+from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
-from cveta2.models import BBoxAnnotation, DeletedImage, ProjectAnnotations
+from cveta2.models import CSV_COLUMNS, DeletedImage, ProjectAnnotations
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
@@ -51,8 +51,7 @@ def _build(
     **kwargs: object,
 ) -> LoadedFixtures:
     """Build a fake project from named base tasks with optional statuses."""
-    _project, base_tasks, _labels, _task_data = base
-    indices = task_indices_by_names(base_tasks, task_names)
+    indices = task_indices_by_names(base.tasks, task_names)
     config = FakeProjectConfig(
         task_indices=indices,
         task_statuses=statuses if statuses is not None else "keep",
@@ -66,23 +65,22 @@ def _with_dates(
     dates: dict[int, str],
 ) -> LoadedFixtures:
     """Return fixtures with updated_date overrides by task position."""
-    project, tasks, labels, task_data = fixtures
     new_tasks = [
         replace(task, updated_date=dates[i]) if i in dates else task
-        for i, task in enumerate(tasks)
+        for i, task in enumerate(fixtures.tasks)
     ]
     new_data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {
-        t.id: task_data[tasks[i].id] for i, t in enumerate(new_tasks)
+        t.id: fixtures.task_data[fixtures.tasks[i].id] for i, t in enumerate(new_tasks)
     }
-    return (project, new_tasks, labels, new_data)
+    return fixtures._replace(tasks=new_tasks, task_data=new_data)
 
 
 def _fetch_and_partition(
     fake: LoadedFixtures,
 ) -> tuple[ProjectAnnotations, PartitionResult]:
     """Fetch annotations and partition them."""
-    result = _client(fake).fetch_annotations(fake[0].id)
-    rows = _project_annotations_to_csv_rows(result)
+    result = _client(fake).fetch_annotations(fake.project.id)
+    rows = result.to_csv_rows()
     df = pd.DataFrame(rows)
     partition = partition_annotations_df(df, result.deleted_images)
     return result, partition
@@ -96,7 +94,7 @@ def _fetch_and_partition(
 def test_normal_project_annotations(coco8_fixtures: LoadedFixtures) -> None:
     """Normal task produces the expected number of annotations."""
     fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
-    result = _client(fake).fetch_annotations(fake[0].id)
+    result = _client(fake).fetch_annotations(fake.project.id)
 
     assert len(result.annotations) == 30
     assert len(result.deleted_images) == 0
@@ -110,7 +108,7 @@ def test_all_empty_images_without_annotations(
 ) -> None:
     """all-empty task: no annotations, all frames without."""
     fake = _build(coco8_fixtures, ["all-empty"], statuses=["completed"])
-    result = _client(fake).fetch_annotations(fake[0].id)
+    result = _client(fake).fetch_annotations(fake.project.id)
 
     assert len(result.annotations) == 0
     assert len(result.deleted_images) == 0
@@ -122,7 +120,7 @@ def test_all_empty_images_without_annotations(
 def test_all_removed_only_deleted(coco8_fixtures: LoadedFixtures) -> None:
     """all-removed task: all 8 frames in deleted_images."""
     fake = _build(coco8_fixtures, ["all-removed"], statuses=["completed"])
-    result = _client(fake).fetch_annotations(fake[0].id)
+    result = _client(fake).fetch_annotations(fake.project.id)
 
     assert len(result.deleted_images) == 8
     assert {d.image_name for d in result.deleted_images} == set(_IMAGE_NAMES)
@@ -134,7 +132,7 @@ def test_all_removed_only_deleted(coco8_fixtures: LoadedFixtures) -> None:
 def test_frames_1_2_removed(coco8_fixtures: LoadedFixtures) -> None:
     """frames-1-2-removed: frames 1,2 deleted; others have annotations or not."""
     fake = _build(coco8_fixtures, ["frames-1-2-removed"], statuses=["completed"])
-    result = _client(fake).fetch_annotations(fake[0].id)
+    result = _client(fake).fetch_annotations(fake.project.id)
 
     deleted_frame_ids = {d.frame_id for d in result.deleted_images}
     assert deleted_frame_ids == {1, 2}
@@ -156,7 +154,7 @@ def test_zero_frame_empty_last_removed(
         ["zero-frame-empty-last-removed"],
         statuses=["completed"],
     )
-    result = _client(fake).fetch_annotations(fake[0].id)
+    result = _client(fake).fetch_annotations(fake.project.id)
 
     assert result.deleted_images[0].frame_id == 7
     without_frame_ids = {w.frame_id for w in result.images_without_annotations}
@@ -172,7 +170,7 @@ def test_mixed_tasks_aggregation(coco8_fixtures: LoadedFixtures) -> None:
         ["normal", "all-empty", "all-removed"],
         statuses=["completed", "completed", "completed"],
     )
-    result = _client(fake).fetch_annotations(fake[0].id)
+    result = _client(fake).fetch_annotations(fake.project.id)
 
     assert len(result.annotations) == 60  # 30 + 0 + 30
     assert len(result.deleted_images) == 8  # only from all-removed
@@ -198,9 +196,9 @@ def test_deleted_then_restored(coco8_fixtures: LoadedFixtures) -> None:
 
     assert partition.deleted_names == []
     assert len(partition.dataset) > 0
-    assert fake[1][1].id in set(partition.dataset["task_id"].unique())
+    assert fake.tasks[1].id in set(partition.dataset["task_id"].unique())
     assert len(partition.obsolete) > 0
-    assert fake[1][0].id in set(partition.obsolete["task_id"].unique())
+    assert fake.tasks[0].id in set(partition.obsolete["task_id"].unique())
     assert len(partition.in_progress) == 0
 
 
@@ -211,7 +209,7 @@ def test_completed_only_filter(coco8_fixtures: LoadedFixtures) -> None:
         ["normal", "all-empty"],
         statuses=["completed", "annotation"],
     )
-    result = _client(fake).fetch_annotations(fake[0].id, completed_only=True)
+    result = _client(fake).fetch_annotations(fake.project.id, completed_only=True)
 
     # Only the "normal" (completed) task processed; "all-empty" skipped entirely
     assert len(result.annotations) == 30
@@ -222,14 +220,14 @@ def test_completed_only_filter(coco8_fixtures: LoadedFixtures) -> None:
 
 
 def test_csv_rows_structure(coco8_fixtures: LoadedFixtures) -> None:
-    """_project_annotations_to_csv_rows output has all BBoxAnnotation fields."""
+    """to_csv_rows() output has all CSV_COLUMNS keys."""
     fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
-    result = _client(fake).fetch_annotations(fake[0].id)
+    result = _client(fake).fetch_annotations(fake.project.id)
 
-    rows = _project_annotations_to_csv_rows(result)
+    rows = result.to_csv_rows()
     assert len(rows) > 0
 
-    expected_keys = set(BBoxAnnotation.model_fields.keys())
+    expected_keys = set(CSV_COLUMNS)
     for row in rows:
         assert set(row.keys()) == expected_keys
         assert isinstance(row["attributes"], str)
@@ -254,8 +252,8 @@ def test_full_pipeline_fetch_to_partition(
 
     _result, partition = _fetch_and_partition(fake)
 
-    assert fake[1][0].id in set(partition.dataset["task_id"].unique())
-    assert fake[1][1].id in set(partition.obsolete["task_id"].unique())
+    assert fake.tasks[0].id in set(partition.dataset["task_id"].unique())
+    assert fake.tasks[1].id in set(partition.obsolete["task_id"].unique())
 
 
 def test_partition_with_deleted_and_in_progress(
@@ -275,8 +273,8 @@ def test_partition_with_deleted_and_in_progress(
         },
     )
 
-    result = _client(fake).fetch_annotations(fake[0].id)
-    rows = _project_annotations_to_csv_rows(result)
+    result = _client(fake).fetch_annotations(fake.project.id)
+    rows = result.to_csv_rows()
     df = pd.DataFrame(rows)
 
     # Inject synthetic deletions newer than both tasks

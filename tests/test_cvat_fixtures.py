@@ -8,25 +8,20 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from cveta2._client.dtos import (
     RawAnnotations,
     RawDataMeta,
-    RawLabel,
-    RawProject,
     RawTask,
 )
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
 
-# Return type of load_cvat_fixtures()
-LoadedFixtures = tuple[
-    RawProject,
-    list[RawTask],
-    list[RawLabel],
-    dict[int, tuple[RawDataMeta, RawAnnotations]],
-]
+if TYPE_CHECKING:
+    from tests.fixtures.fake_cvat_project import LoadedFixtures
+
 # Assertion: (task, data_meta, annotations) -> None
 TaskAssertion = Callable[[RawTask, RawDataMeta, RawAnnotations], None]
 
@@ -186,22 +181,20 @@ def loaded_fixtures() -> LoadedFixtures:
 
 def test_fixtures_load(loaded_fixtures: LoadedFixtures) -> None:
     """Fixtures directory loads and returns project, tasks, labels, task data."""
-    project, tasks, labels, task_data_map = loaded_fixtures
-    assert project.name == "coco8-dev"
-    assert len(tasks) >= 1
-    assert len(labels) >= 1
-    for task in tasks:
-        assert task.id in task_data_map
+    assert loaded_fixtures.project.name == "coco8-dev"
+    assert len(loaded_fixtures.tasks) >= 1
+    assert len(loaded_fixtures.labels) >= 1
+    for task in loaded_fixtures.tasks:
+        assert task.id in loaded_fixtures.task_data
 
 
 def test_task_name_consistency(loaded_fixtures: LoadedFixtures) -> None:
     """Each task with a known name satisfies its name-based assertion."""
-    _project, tasks, _labels, task_data_map = loaded_fixtures
-    for task in tasks:
+    for task in loaded_fixtures.tasks:
         assert_func: TaskAssertion | None = TASK_ASSERTIONS.get(
             task.name.strip().lower()
         )
         if assert_func is None:
             continue
-        data_meta, annotations = task_data_map[task.id]
+        data_meta, annotations = loaded_fixtures.task_data[task.id]
         assert_func(task, data_meta, annotations)

@@ -7,6 +7,33 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+# Canonical CSV column order shared by BBoxAnnotation and ImageWithoutAnnotations.
+# Both ``to_csv_row()`` implementations must produce dicts with exactly these keys.
+CSV_COLUMNS: tuple[str, ...] = (
+    "image_name",
+    "image_width",
+    "image_height",
+    "instance_shape",
+    "instance_label",
+    "bbox_x_tl",
+    "bbox_y_tl",
+    "bbox_x_br",
+    "bbox_y_br",
+    "task_id",
+    "task_name",
+    "task_status",
+    "task_updated_date",
+    "created_by_username",
+    "frame_id",
+    "subset",
+    "occluded",
+    "z_order",
+    "rotation",
+    "source",
+    "annotation_id",
+    "attributes",
+)
+
 
 class BBoxAnnotation(BaseModel):
     """Single bounding-box annotation record."""
@@ -60,14 +87,14 @@ class ImageWithoutAnnotations(BaseModel):
     subset: str = ""
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
-        """Return a row matching `BBoxAnnotation.to_csv_row` keys."""
+        """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""
         row: dict[str, str | int | float | bool | None] = dict.fromkeys(
-            BBoxAnnotation.model_fields, None
+            CSV_COLUMNS,
+            None,
         )
-        our = self.model_dump()
-        for k in our:
-            if k in row:
-                row[k] = our[k]
+        for key, value in self.model_dump().items():
+            if key in row:
+                row[key] = value
         row["attributes"] = json.dumps({}, ensure_ascii=False)
         return row
 
@@ -89,3 +116,12 @@ class ProjectAnnotations(BaseModel):
     annotations: list[BBoxAnnotation]
     deleted_images: list[DeletedImage]
     images_without_annotations: list[ImageWithoutAnnotations] = []
+
+    def to_csv_rows(self) -> list[dict[str, str | int | float | bool | None]]:
+        """Build flat CSV rows (annotations + images-without-annotations).
+
+        Each row has the keys from ``CSV_COLUMNS``.
+        """
+        rows = [ann.to_csv_row() for ann in self.annotations]
+        rows.extend(img.to_csv_row() for img in self.images_without_annotations)
+        return rows

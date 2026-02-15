@@ -12,7 +12,7 @@ import pandas as pd
 import questionary
 from loguru import logger
 
-from cveta2.client import CvatClient, _project_annotations_to_csv_rows
+from cveta2.client import CvatClient
 from cveta2.config import (
     CONFIG_PATH,
     CvatConfig,
@@ -20,6 +20,7 @@ from cveta2.config import (
     require_interactive,
 )
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
+from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_projects_cache
 
 _RESCAN_VALUE = "__rescan__"
@@ -119,8 +120,8 @@ class CliApp:
             return output_dir
         if is_interactive_disabled():
             logger.info(
-                f"Output directory {output_dir} already exists "
-                f"— overwriting (non-interactive mode)."
+                f"Папка {output_dir} уже существует "
+                f"— перезапись (неинтерактивный режим)."
             )
             return output_dir
         answer = questionary.select(
@@ -170,9 +171,9 @@ class CliApp:
         existing = CvatConfig.from_file(config_path)
 
         host_default = existing.host or "https://app.cvat.ai"
-        host = input(f"CVAT host [{host_default}]: ").strip() or host_default
+        host = input(f"Хост CVAT [{host_default}]: ").strip() or host_default
         org_default = existing.organization or ""
-        org_prompt = "Organization slug (optional)"
+        org_prompt = "Slug организации (необязательно)"
         if org_default:
             org_prompt += f" [{org_default}]"
         org_prompt += ": "
@@ -189,7 +190,7 @@ class CliApp:
 
         if auth_choice == "t":
             token_default = existing.token or ""
-            prompt = "Personal Access Token"
+            prompt = "Персональный токен доступа"
             if token_default:
                 prompt += f" [{token_default[:6]}...]"
             prompt += ": "
@@ -228,10 +229,11 @@ class CliApp:
             return
         config_path = os.environ.get("CVETA2_CONFIG", str(CONFIG_PATH))
         sys.exit(
-            "Error: CVAT host is not configured.\n"
-            "Run setup to save credentials:\n  cveta2 setup\n"
-            "Or set env: CVAT_HOST and (CVAT_TOKEN or CVAT_USERNAME/CVAT_PASSWORD).\n"
-            f"Config file path: {config_path}"
+            "Ошибка: хост CVAT не настроен.\n"
+            "Запустите setup для сохранения настроек:\n  cveta2 setup\n"
+            "Или задайте переменные окружения: CVAT_HOST и "
+            "(CVAT_TOKEN или CVAT_USERNAME/CVAT_PASSWORD).\n"
+            f"Файл конфигурации: {config_path}"
         )
 
     def _build_project_choices(
@@ -251,13 +253,12 @@ class CliApp:
         )
         return choices
 
-    def _run_fetch_tui_select_project(self, cfg: CvatConfig) -> int:
+    def _run_fetch_tui_select_project(self, client: CvatClient) -> int:
         """Interactive project selection via TUI list.
 
         Arrow keys to pick, with an option to rescan CVAT.
         """
         require_interactive("Pass --project / -p to specify the project ID or name.")
-        client = CvatClient(cfg)
         projects = load_projects_cache()
         while True:
             if not projects:
@@ -289,26 +290,26 @@ class CliApp:
         cfg = self._load_config()
         self._require_host(cfg)
 
-        client = CvatClient(cfg)
-        if args.project is not None:
-            cached = load_projects_cache()
-            try:
-                project_id = client.resolve_project_id(
-                    args.project.strip(), cached=cached
-                )
-            except ValueError as e:
-                sys.exit(str(e))
-        else:
-            project_id = self._run_fetch_tui_select_project(cfg)
+        with CvatClient(cfg) as client:
+            if args.project is not None:
+                cached = load_projects_cache()
+                try:
+                    project_id = client.resolve_project_id(
+                        args.project.strip(), cached=cached
+                    )
+                except Cveta2Error as e:
+                    sys.exit(str(e))
+            else:
+                project_id = self._run_fetch_tui_select_project(client)
 
-        result = client.fetch_annotations(
-            project_id=project_id,
-            completed_only=args.completed_only,
-        )
+            result = client.fetch_annotations(
+                project_id=project_id,
+                completed_only=args.completed_only,
+            )
 
         output_dir = self._resolve_output_dir(Path(args.output_dir))
 
-        rows = _project_annotations_to_csv_rows(result)
+        rows = result.to_csv_rows()
         df = pd.DataFrame(rows)
 
         if args.raw:
@@ -331,7 +332,7 @@ class CliApp:
         if args.command == "fetch":
             self._run_fetch(args)
             return
-        sys.exit(f"Unknown command: {args.command}")
+        sys.exit(f"Неизвестная команда: {args.command}")
 
     def run(self, argv: list[str] | None = None) -> None:
         """Run the CLI with the given arguments."""

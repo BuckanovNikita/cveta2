@@ -14,8 +14,7 @@ def test_build_label_maps_from_fixtures(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
     """80 COCO labels from coco8-dev are mapped id -> name correctly."""
-    _project, _tasks, labels, _task_data = coco8_fixtures
-    label_names, _attr_names = _build_label_maps(labels)
+    label_names, _attr_names = _build_label_maps(coco8_fixtures.labels)
 
     assert len(label_names) == 80
     # Spot-check a few well-known COCO classes

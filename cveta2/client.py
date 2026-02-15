@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
 from cvat_sdk import make_client  # type: ignore[import-untyped]
 from loguru import logger
+from tqdm import tqdm
 
 from cveta2._client.context import _TaskContext
 from cveta2._client.extractors import _collect_shapes
 from cveta2._client.mapping import _build_label_maps
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.config import CvatConfig
+from cveta2.exceptions import ProjectNotFoundError
 from cveta2.models import (
+    CSV_COLUMNS,
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
@@ -23,18 +26,43 @@ from cveta2.models import (
 from cveta2.projects_cache import ProjectInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+    from types import TracebackType
 
     from cveta2._client.ports import CvatApiPort
 
 
+class _SdkClientFactory(Protocol):
+    """Protocol for the SDK client factory (e.g. ``cvat_sdk.make_client``).
+
+    The factory must accept keyword arguments (``host``, optionally
+    ``access_token`` or ``credentials``) and return a context manager
+    that yields an SDK client.
+    """
+
+    def __call__(self, **kwargs: Any) -> AbstractContextManager[Any]:  # noqa: ANN401
+        ...
+
+
 class CvatClient:
-    """High-level CVAT client that fetches bbox annotations."""
+    """High-level CVAT client that fetches bbox annotations.
+
+    Can be used as a context manager to keep the SDK connection open
+    across multiple calls::
+
+        with CvatClient(cfg) as client:
+            projects = client.list_projects()
+            result = client.fetch_annotations(project_id)
+
+    Without the context manager, each public method opens and closes
+    its own connection (backward-compatible behaviour).
+    """
 
     def __init__(
         self,
         cfg: CvatConfig,
-        client_factory: Callable[..., Any] | None = None,
+        client_factory: _SdkClientFactory | None = None,
         *,
         api: CvatApiPort | None = None,
     ) -> None:
@@ -45,8 +73,42 @@ class CvatClient:
         opened via *client_factory*.
         """
         self._cfg = cfg
-        self._client_factory = client_factory or make_client
+        self._client_factory: _SdkClientFactory = client_factory or make_client
         self._api = api
+        # Persistent adapter opened by __enter__, closed by __exit__.
+        self._persistent_api: SdkCvatApiAdapter | None = None
+        self._sdk_client: Any = None
+
+    # ------------------------------------------------------------------
+    # Context manager (optional connection reuse)
+    # ------------------------------------------------------------------
+
+    def __enter__(self) -> CvatClient:  # noqa: PYI034
+        """Open a persistent SDK connection for the lifetime of this block."""
+        if self._api is not None:
+            # DI api provided -- nothing to open.
+            return self
+        resolved = self._cfg.ensure_credentials()
+        kwargs = self._build_client_kwargs(resolved)
+        self._sdk_client = self._client_factory(**kwargs)
+        sdk = self._sdk_client.__enter__()
+        if resolved.organization:
+            sdk.organization_slug = resolved.organization
+            logger.trace(f"Using organization: {resolved.organization}")
+        self._persistent_api = SdkCvatApiAdapter(sdk)
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Close the persistent SDK connection."""
+        self._persistent_api = None
+        if self._sdk_client is not None:
+            self._sdk_client.__exit__(exc_type, exc_val, exc_tb)
+            self._sdk_client = None
 
     # ------------------------------------------------------------------
     # SDK client lifecycle
@@ -65,17 +127,22 @@ class CvatClient:
                 )
             yield SdkCvatApiAdapter(sdk_client)
 
+    def _get_api(self) -> CvatApiPort | None:
+        """Return the best available API port (injected > persistent > None)."""
+        return self._api or self._persistent_api
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def list_projects(self) -> list[ProjectInfo]:
         """Fetch list of projects from CVAT (id and name)."""
-        if self._api is not None:
-            raw = self._api.list_projects()
-            return [ProjectInfo(id=p.id, name=p.name) for p in raw]
-        with self._open_sdk_adapter() as api:
+        api = self._get_api()
+        if api is not None:
             raw = api.list_projects()
+            return [ProjectInfo(id=p.id, name=p.name) for p in raw]
+        with self._open_sdk_adapter() as adapter:
+            raw = adapter.list_projects()
             return [ProjectInfo(id=p.id, name=p.name) for p in raw]
 
     def resolve_project_id(
@@ -103,7 +170,7 @@ class CvatClient:
         for p in projects:
             if (p.name or "").casefold() == search:
                 return p.id
-        raise ValueError(f"Project not found: {s!r}")
+        raise ProjectNotFoundError(f"Project not found: {s!r}")
 
     def fetch_annotations(
         self,
@@ -115,15 +182,16 @@ class CvatClient:
 
         If ``completed_only`` is True, only completed tasks are processed.
         """
-        if self._api is not None:
+        api = self._get_api()
+        if api is not None:
             return self._fetch_annotations(
-                self._api,
+                api,
                 project_id,
                 completed_only=completed_only,
             )
-        with self._open_sdk_adapter() as api:
+        with self._open_sdk_adapter() as adapter:
             return self._fetch_annotations(
-                api,
+                adapter,
                 project_id,
                 completed_only=completed_only,
             )
@@ -158,9 +226,18 @@ class CvatClient:
         all_deleted: list[DeletedImage] = []
         all_without: list[ImageWithoutAnnotations] = []
 
-        for task in tasks:
+        for task in tqdm(tasks, desc="Processing tasks", unit="task", leave=False):
             data_meta = api.get_task_data_meta(task.id)
             annotations = api.get_task_annotations(task.id)
+
+            # NOTE: Only direct shapes are processed. Track-based annotations
+            # (interpolated/linked bboxes) are intentionally skipped — cveta2
+            # targets per-frame bbox exports, not temporal tracking data.
+            if annotations.tracks:
+                logger.warning(
+                    f"Task {task.name!r} has {len(annotations.tracks)} track(s) "
+                    f"that will be skipped (only direct shapes are extracted)"
+                )
 
             ctx = _TaskContext.from_raw(
                 task,
@@ -245,10 +322,12 @@ class CvatClient:
 def _project_annotations_to_csv_rows(
     result: ProjectAnnotations,
 ) -> list[dict[str, str | int | float | bool | None]]:
-    """Build CSV rows with the same columns as `BBoxAnnotation`."""
-    rows = [ann.to_csv_row() for ann in result.annotations]
-    rows.extend(e.to_csv_row() for e in result.images_without_annotations)
-    return rows
+    """Build CSV rows — thin wrapper around ``ProjectAnnotations.to_csv_rows``.
+
+    .. deprecated::
+        Use ``result.to_csv_rows()`` directly instead.
+    """
+    return result.to_csv_rows()
 
 
 def fetch_annotations(
@@ -268,7 +347,7 @@ def fetch_annotations(
         project_id,
         completed_only=completed_only,
     )
-    rows = _project_annotations_to_csv_rows(result)
+    rows = result.to_csv_rows()
     if not rows:
-        return pd.DataFrame(columns=list(BBoxAnnotation.model_fields.keys()))
+        return pd.DataFrame(columns=list(CSV_COLUMNS))
     return pd.DataFrame(rows)

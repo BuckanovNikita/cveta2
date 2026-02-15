@@ -24,6 +24,7 @@ from cveta2._client.dtos import (
     RawTrack,
     RawTrackedShape,
 )
+from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
 def _dict_to_frame(d: dict[str, Any]) -> RawFrame:
@@ -118,12 +119,7 @@ def _dict_to_label(d: dict[str, Any]) -> RawLabel:
 
 def load_cvat_fixtures(
     project_dir: Path,
-) -> tuple[
-    RawProject,
-    list[RawTask],
-    list[RawLabel],
-    dict[int, tuple[RawDataMeta, RawAnnotations]],
-]:
+) -> LoadedFixtures:
     """Load project and task fixtures from a project directory.
 
     project_dir should contain project.json and a tasks/ subdir with
@@ -161,4 +157,9 @@ def load_cvat_fixtures(
         tasks.append(task)
         task_data_map[task.id] = (data_meta, annotations)
 
-    return (project, tasks, labels, task_data_map)
+    return LoadedFixtures(
+        project=project,
+        tasks=tasks,
+        labels=labels,
+        task_data=task_data_map,
+    )
