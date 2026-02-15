@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
-from cvat_sdk import make_client  # type: ignore[import-untyped]
+from cvat_sdk import make_client
 from loguru import logger
 from tqdm import tqdm
 
@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from pathlib import Path
     from types import TracebackType
+
+    from typing_extensions import Self
 
     from cveta2._client.ports import CvatApiPort
     from cveta2.image_downloader import CloudStorageInfo
@@ -86,7 +88,7 @@ class CvatClient:
     # Context manager (optional connection reuse)
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> CvatClient:  # noqa: PYI034
+    def __enter__(self) -> Self:
         """Open a persistent SDK connection for the lifetime of this block."""
         if self._api is not None:
             # DI api provided -- nothing to open.
@@ -345,9 +347,7 @@ class CvatClient:
         tasks = api.get_project_tasks(project_id)
         cs_cache: dict[int, CloudStorageInfo] = {}
         for task in tasks:
-            cs_info = ImageDownloader._detect_cloud_storage(  # noqa: SLF001
-                sdk, task.id, cs_cache
-            )
+            cs_info = ImageDownloader.detect_cloud_storage(sdk, task.id, cs_cache)
             if cs_info is not None:
                 return cs_info
         return None
@@ -381,6 +381,159 @@ class CvatClient:
         return syncer.sync(cs_info)
 
     # ------------------------------------------------------------------
+    # Task creation
+    # ------------------------------------------------------------------
+
+    def create_upload_task(
+        self,
+        project_id: int,
+        name: str,
+        image_names: list[str],
+        cloud_storage_id: int,
+        segment_size: int = 100,
+    ) -> int:
+        """Create a CVAT task backed by cloud storage images.
+
+        Creates one task with ``segment_size`` controlling how many images
+        go into each job (CVAT splits automatically).
+
+        Parameters
+        ----------
+        project_id:
+            CVAT project to attach the task to.
+        name:
+            Human-readable task name.
+        image_names:
+            File names inside the cloud storage to include in the task.
+        cloud_storage_id:
+            CVAT cloud storage ID to read images from.
+        segment_size:
+            Maximum frames per job (CVAT auto-creates multiple jobs).
+
+        Returns
+        -------
+        int
+            The newly created task ID.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+
+        """
+        sdk = self._require_sdk("create_upload_task")
+
+        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
+
+        task_spec = cvat_models.TaskWriteRequest(
+            name=name,
+            project_id=project_id,
+            segment_size=segment_size,
+        )
+        task, _ = sdk.api_client.tasks_api.create(task_spec)
+        logger.info(f"Создана задача: {task.name} (id={task.id})")
+
+        data_request = cvat_models.DataRequest(
+            image_quality=70,
+            server_files=image_names,
+            cloud_storage_id=cloud_storage_id,
+            use_cache=True,
+        )
+        sdk.api_client.tasks_api.create_data(
+            task.id,
+            data_request=data_request,
+        )
+        logger.info(
+            f"Привязано {len(image_names)} изображений к задаче {task.id} "
+            f"(cloud_storage_id={cloud_storage_id}, segment_size={segment_size})"
+        )
+        return int(task.id)
+
+    def upload_task_annotations(
+        self,
+        task_id: int,
+        annotations_df: pd.DataFrame,
+        image_names: list[str],
+    ) -> int:
+        """Upload bbox annotations from a DataFrame to an existing task.
+
+        Parameters
+        ----------
+        task_id:
+            CVAT task to upload annotations to.
+        annotations_df:
+            DataFrame with columns from ``dataset.csv`` (must include
+            ``image_name``, ``instance_label``, ``bbox_x_tl``,
+            ``bbox_y_tl``, ``bbox_x_br``, ``bbox_y_br``).
+            Rows with NaN in ``instance_label`` are skipped.
+        image_names:
+            Ordered list of image names as passed to ``create_upload_task``
+            (frame index = position in this list).
+
+        Returns
+        -------
+        int
+            Number of shapes uploaded.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+
+        """
+        sdk = self._require_sdk("upload_task_annotations")
+
+        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
+        from cvat_sdk.core.proxies.annotations import (  # noqa: PLC0415
+            AnnotationUpdateAction,
+        )
+
+        # Build frame index lookup from sorted image names
+        name_to_frame = {name: idx for idx, name in enumerate(image_names)}
+
+        # Get label name -> label_id mapping from the task
+        task_obj = sdk.tasks.retrieve(task_id)
+        task_labels = task_obj.get_labels()
+        label_name_to_id: dict[str, int] = {lbl.name: lbl.id for lbl in task_labels}
+
+        # Filter to rows with actual annotations (non-NaN label + bbox)
+        bbox_cols = ["bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"]
+        has_annotation = annotations_df["instance_label"].notna() & annotations_df[
+            bbox_cols
+        ].notna().all(axis=1)
+        ann_rows = annotations_df[has_annotation]
+
+        shapes: list[cvat_models.LabeledShapeRequest] = []
+        for _, row in ann_rows.iterrows():
+            img_name = str(row["image_name"])
+            label_name = str(row["instance_label"])
+            if img_name not in name_to_frame:
+                continue
+            if label_name not in label_name_to_id:
+                logger.warning(
+                    f"Метка {label_name!r} не найдена в задаче {task_id} — пропускаем"
+                )
+                continue
+            shapes.append(
+                cvat_models.LabeledShapeRequest(
+                    type=cvat_models.ShapeType("rectangle"),
+                    frame=name_to_frame[img_name],
+                    label_id=label_name_to_id[label_name],
+                    points=[
+                        float(row["bbox_x_tl"]),
+                        float(row["bbox_y_tl"]),
+                        float(row["bbox_x_br"]),
+                        float(row["bbox_y_br"]),
+                    ],
+                ),
+            )
+
+        if shapes:
+            task_obj.update_annotations(
+                cvat_models.PatchedLabeledDataRequest(shapes=shapes),
+                action=AnnotationUpdateAction.CREATE,
+            )
+            logger.info(f"Загружено {len(shapes)} аннотаций в задачу {task_id}")
+        else:
+            logger.info(f"Нет аннотаций для загрузки в задачу {task_id}")
+
+        return len(shapes)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -392,7 +545,7 @@ class CvatClient:
                 "Use: with CvatClient(cfg) as client: ..."
             )
             raise RuntimeError(msg)
-        sdk = self._persistent_api._client if self._persistent_api else None  # noqa: SLF001
+        sdk = self._persistent_api.client if self._persistent_api else None
         if sdk is None:
             msg = "SDK client not available."
             raise RuntimeError(msg)

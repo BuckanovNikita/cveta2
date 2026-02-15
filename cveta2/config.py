@@ -222,6 +222,23 @@ def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig
     return ImageCacheConfig(projects={k: Path(str(v)) for k, v in raw_ic.items()})
 
 
+class UploadConfig(BaseModel):
+    """Settings for the ``upload`` command."""
+
+    images_per_job: int = 100
+
+
+def load_upload_config(config_path: Path | None = None) -> UploadConfig:
+    """Load the ``upload`` section from the config YAML."""
+    path = config_path if config_path is not None else _config_path()
+    data = _load_raw_yaml(path)
+    raw_upload = data.get("upload")
+    if not isinstance(raw_upload, dict):
+        return UploadConfig()
+    filtered = {k: v for k, v in raw_upload.items() if k in UploadConfig.model_fields}
+    return UploadConfig(**filtered)
+
+
 def save_image_cache_config(
     image_cache: ImageCacheConfig,
     config_path: Path | None = None,

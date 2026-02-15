@@ -100,4 +100,4 @@ def test_preset_does_not_override_credentials(
 
     cfg = CvatConfig.load(config_path=cfg_path)
     assert cfg.username == "admin"
-    assert cfg.password == "secret"  # noqa: S105
+    assert cfg.password == "secret"

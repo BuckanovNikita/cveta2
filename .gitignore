@@ -1,12 +1,44 @@
-# Python-generated files
+# Python bytecode / compiled files
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
 build/
 dist/
 wheels/
-*.egg-info
+*.egg-info/
+*.egg
 
 # Virtual environments
-.venv
+.venv/
+
+# Environment variables
+.env
+.env.*
+
+# Linters / type checkers / formatters cache
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Testing
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE / editors
+.vscode/
+.idea/
+
+# Cursor
 .cursor/worktrees.json
-.cache/coco8-dev-s3/coco8-dev-s3/000000000009.jpg
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Project cache
+.cache/

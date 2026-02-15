@@ -63,8 +63,8 @@ def test_fetch_no_images_flag_skips_download(
 
     mock_client = _mock_client_ctx()
     with (
-        patch("cveta2.cli.CvatClient", return_value=mock_client),
-        patch("cveta2.cli.load_projects_cache", return_value=[]),
+        patch("cveta2.commands.fetch.CvatClient", return_value=mock_client),
+        patch("cveta2.commands.fetch.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         app.run(
@@ -96,8 +96,8 @@ def test_fetch_images_dir_overrides_config(
 
     mock_client = _mock_client_ctx()
     with (
-        patch("cveta2.cli.CvatClient", return_value=mock_client),
-        patch("cveta2.cli.load_projects_cache", return_value=[]),
+        patch("cveta2.commands.fetch.CvatClient", return_value=mock_client),
+        patch("cveta2.commands.fetch.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         app.run(
@@ -131,8 +131,8 @@ def test_fetch_noninteractive_no_path_errors(
 
     mock_client = _mock_client_ctx()
     with (
-        patch("cveta2.cli.CvatClient", return_value=mock_client),
-        patch("cveta2.cli.load_projects_cache", return_value=[]),
+        patch("cveta2.commands.fetch.CvatClient", return_value=mock_client),
+        patch("cveta2.commands.fetch.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         with pytest.raises(SystemExit):
@@ -160,8 +160,8 @@ def test_fetch_configured_path_downloads(
 
     mock_client = _mock_client_ctx()
     with (
-        patch("cveta2.cli.CvatClient", return_value=mock_client),
-        patch("cveta2.cli.load_projects_cache", return_value=[]),
+        patch("cveta2.commands.fetch.CvatClient", return_value=mock_client),
+        patch("cveta2.commands.fetch.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         app.run(
@@ -193,8 +193,8 @@ def test_fetch_noninteractive_no_images_skips(
 
     mock_client = _mock_client_ctx()
     with (
-        patch("cveta2.cli.CvatClient", return_value=mock_client),
-        patch("cveta2.cli.load_projects_cache", return_value=[]),
+        patch("cveta2.commands.fetch.CvatClient", return_value=mock_client),
+        patch("cveta2.commands.fetch.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         app.run(

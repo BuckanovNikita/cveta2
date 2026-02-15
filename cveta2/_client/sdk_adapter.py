@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from tenacity import (
+    RetryCallState,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -31,16 +32,17 @@ from cveta2._client.dtos import (
 )
 
 if TYPE_CHECKING:
-    from cvat_sdk.api_client import (  # type: ignore[import-untyped]
+    from cvat_sdk.api_client import (
         models as cvat_models,
     )
 
 
-def _log_retry(retry_state: Any) -> None:  # noqa: ANN401
+def _log_retry(retry_state: RetryCallState) -> None:
     """Log a warning before each retry attempt."""
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
     logger.warning(
         f"CVAT API call failed (attempt {retry_state.attempt_number}), "
-        f"retrying: {retry_state.outcome.exception()!r}"
+        f"retrying: {exc!r}"
     )
 
 
@@ -64,7 +66,7 @@ class SdkCvatApiAdapter:
 
     def __init__(self, client: Any) -> None:  # noqa: ANN401
         """Wrap an already-opened ``cvat_sdk`` client."""
-        self._client = client
+        self.client = client
 
     # ------------------------------------------------------------------
     # Public API (satisfies CvatApiPort)
@@ -73,34 +75,34 @@ class SdkCvatApiAdapter:
     @_api_retry
     def list_projects(self) -> list[RawProject]:
         """Return all accessible projects."""
-        raw = self._client.projects.list()
+        raw = self.client.projects.list()
         return [RawProject(id=p.id, name=p.name or "") for p in raw]
 
     @_api_retry
     def get_project_tasks(self, project_id: int) -> list[RawTask]:
         """Return tasks belonging to a project."""
-        project = self._client.projects.retrieve(project_id)
+        project = self.client.projects.retrieve(project_id)
         tasks = project.get_tasks()
         return [self._convert_task(t) for t in tasks]
 
     @_api_retry
     def get_project_labels(self, project_id: int) -> list[RawLabel]:
         """Return label definitions for a project."""
-        project = self._client.projects.retrieve(project_id)
+        project = self.client.projects.retrieve(project_id)
         labels = project.get_labels()
         return [self._convert_label(lbl) for lbl in labels]
 
     @_api_retry
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
         """Return frame metadata and deleted frame IDs for a task."""
-        tasks_api = self._client.api_client.tasks_api
+        tasks_api = self.client.api_client.tasks_api
         data_meta, _ = tasks_api.retrieve_data_meta(task_id)
         return self._convert_data_meta(data_meta)
 
     @_api_retry
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
         """Return shapes and tracks for a task."""
-        tasks_api = self._client.api_client.tasks_api
+        tasks_api = self.client.api_client.tasks_api
         labeled_data, _ = tasks_api.retrieve_annotations(task_id)
         return self._convert_annotations(labeled_data)
 

@@ -200,7 +200,7 @@ class ImageDownloader:
         cs_cache: dict[int, CloudStorageInfo] = {}
         task_cs: dict[int, CloudStorageInfo | None] = {}
         for task_id in set(pending.values()):
-            cs_info = self._detect_cloud_storage(sdk_client, task_id, cs_cache)
+            cs_info = self.detect_cloud_storage(sdk_client, task_id, cs_cache)
             task_cs[task_id] = cs_info
             if cs_info is None:
                 count = sum(1 for t in pending.values() if t == task_id)
@@ -240,7 +240,7 @@ class ImageDownloader:
                 stats.failed += 1
 
     @staticmethod
-    def _detect_cloud_storage(
+    def detect_cloud_storage(
         sdk_client: Any,  # noqa: ANN401
         task_id: int,
         cs_cache: dict[int, CloudStorageInfo],

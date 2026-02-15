@@ -36,11 +36,11 @@ class FakeCvatApi:
         """Return the single fixture project."""
         return [self._project]
 
-    def get_project_tasks(self, project_id: int) -> list[RawTask]:  # noqa: ARG002
+    def get_project_tasks(self, _project_id: int) -> list[RawTask]:
         """Return tasks from fixture data."""
         return list(self._tasks)
 
-    def get_project_labels(self, project_id: int) -> list[RawLabel]:  # noqa: ARG002
+    def get_project_labels(self, _project_id: int) -> list[RawLabel]:
         """Return labels from fixture data."""
         return list(self._labels)
 
