@@ -358,11 +358,17 @@ def main() -> None:
         for src_task in src_tasks:
             logger.info(f"Cloning task: {src_task.name} (id={src_task.id})...")
 
-            # Create task (empty)
+            # Create task with source_storage pointing at the cloud storage.
+            # Without this, cveta2 fetch cannot auto-detect cloud storage
+            # for image download (it reads task.source_storage.cloud_storage_id).
             task_write = cvat_models.TaskWriteRequest(
                 name=src_task.name,
                 project_id=dst_project.id,
                 subset=src_task.subset or "",
+                source_storage=cvat_models.StorageRequest(
+                    cloud_storage_id=cs_info.id,
+                    location=cvat_models.LocationEnum("cloud_storage"),
+                ),
             )
             dst_task_raw, _ = tasks_api.create(task_write)
             dst_task_id = dst_task_raw.id
