@@ -31,6 +31,7 @@ cveta2/
     _helpers.py - shared helpers for CLI commands: load_config(), require_host(), write_df_csv(), write_deleted_txt()
     setup.py    - run_setup(): interactive wizard for CVAT credentials and core settings (host, org, auth); run_setup_cache(): interactive per-project image cache directory setup for all known projects (fetches project list from CVAT if cache is empty); _ensure_projects_list() helper loads or fetches projects
     fetch.py    - run_fetch(): fetch annotations + download images; _select_project_tui() for interactive project selection; _resolve_images_dir() for image cache resolution; _resolve_output_dir() for overwrite prompt; _write_partition_result() for CSV/TXT export
+    ignore.py   - run_ignore(): manage per-project task ignore lists (add/remove/list); reads and writes the `ignore` section of config YAML
     s3_sync.py  - run_s3_sync(): sync images from S3 cloud storage to local cache for configured projects
     doctor.py   - run_doctor(): health checks for config, AWS credentials, and image cache group permissions; check_config(), check_aws_credentials(), check_cache_permissions()
   cli.py        - slim argparse CLI entry point; CliApp class with parser definitions and dispatch to commands/ modules; all command logic lives in commands/
@@ -108,6 +109,13 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
   - `--project` / `-p` — sync only this project (name must exist in `image_cache` config). If omitted, syncs all configured projects.
   - Flow: loads `image_cache` from config → for each project resolves project ID via CVAT → gets project tasks → detects cloud storage from first task with `source_storage` → lists S3 objects under prefix → downloads missing files to the configured cache directory. Continues to next project on errors (project not found, no cloud storage).
 
+- `ignore` — manage per-project task ignore lists. Ignored tasks are always treated as in-progress and skipped during `fetch`. Arguments:
+  - `--project` / `-p` (required) — project name (as used in config).
+  - `--add TASK_ID [TASK_ID ...]` — add task ID(s) to the ignore list.
+  - `--remove TASK_ID [TASK_ID ...]` — remove task ID(s) from the ignore list.
+  - If neither `--add` nor `--remove` is given, lists the currently ignored tasks.
+  - `--add` and `--remove` are mutually exclusive.
+
 - `upload` — creates a CVAT task from `dataset.csv`: reads the CSV, filters by class labels interactively, uploads images directly to S3 (skipping existing), and creates one task with multiple jobs (controlled by `segment_size`). Arguments:
   - `--project` / `-p` — project ID or name; if omitted, interactive TUI selection.
   - `--dataset` / `-d` (required) — path to `dataset.csv` produced by `fetch`.
@@ -117,6 +125,17 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
   - Flow: read dataset.csv → read in_progress.csv (optional) → interactive `questionary.checkbox` for `instance_label` filtering → prompt task name → resolve image files on disk (search in `--image-dir` + project cache from `image_cache` config) → detect project cloud storage → upload missing images to S3 via `S3Uploader` → create CVAT task via `create_upload_task()` with `segment_size` from `UploadConfig` → log task URL.
   - Images per job (`segment_size`) controlled by `upload.images_per_job` in config (default 100). CVAT automatically splits the task into jobs of that size.
   - Always requires interactive mode (class selection is mandatory).
+
+## Ignore config
+
+Config YAML has an `ignore` top-level section — a mapping of project name to a list of task IDs to ignore:
+```yaml
+ignore:
+  my-project:
+    - 123
+    - 456
+```
+`IgnoreConfig` pydantic model wraps `dict[str, list[int]]`; `get_ignored_tasks(project_name)` returns `list[int]`; `add_task()` / `remove_task()` modify the list. `load_ignore_config()` and `save_ignore_config()` read/write only the `ignore` section, preserving the rest of the YAML. During `fetch`, ignored tasks are skipped entirely (not fetched from CVAT). A warning with task links (`{host}/tasks/{id}`) is logged at the start of fetch when the project has an ignore list. `CvatClient.fetch_annotations()` accepts `ignore_task_ids: set[int] | None` to filter tasks at the API level.
 
 ## Upload config
 

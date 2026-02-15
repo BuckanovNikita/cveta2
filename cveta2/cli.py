@@ -9,6 +9,7 @@ from pathlib import Path
 
 from cveta2.commands.doctor import run_doctor
 from cveta2.commands.fetch import run_fetch
+from cveta2.commands.ignore import run_ignore
 from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup, run_setup_cache
@@ -35,6 +36,7 @@ class CliApp:
         self._add_s3_sync_parser(subparsers)
         self._add_upload_parser(subparsers)
         self._add_merge_parser(subparsers)
+        self._add_ignore_parser(subparsers)
         self._add_doctor_parser(subparsers)
 
         return parser
@@ -244,6 +246,44 @@ class CliApp:
             ),
         )
 
+    def _add_ignore_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``ignore`` command parser."""
+        parser = subparsers.add_parser(
+            "ignore",
+            help=(
+                "Manage the per-project ignore list of tasks "
+                "(always treated as in-progress during fetch)."
+            ),
+        )
+        parser.add_argument(
+            "--project",
+            "-p",
+            type=str,
+            default=None,
+            help=(
+                "Project name (as used in config). "
+                "If omitted, interactive project selection is shown."
+            ),
+        )
+        group = parser.add_mutually_exclusive_group()
+        group.add_argument(
+            "--add",
+            nargs="+",
+            type=int,
+            metavar="TASK_ID",
+            help="Add task ID(s) to the ignore list.",
+        )
+        group.add_argument(
+            "--remove",
+            nargs="+",
+            type=int,
+            metavar="TASK_ID",
+            help="Remove task ID(s) from the ignore list.",
+        )
+
     def _add_doctor_parser(
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
@@ -267,22 +307,19 @@ class CliApp:
             else:
                 run_setup_cache(setup_path)
             return
-        if args.command == "fetch":
-            run_fetch(args)
-            return
-        if args.command == "s3-sync":
-            run_s3_sync(args)
-            return
-        if args.command == "upload":
-            run_upload(args)
-            return
-        if args.command == "merge":
-            run_merge(args)
-            return
-        if args.command == "doctor":
-            run_doctor()
-            return
-        sys.exit(f"Неизвестная команда: {args.command}")
+
+        dispatch: dict[str, object] = {
+            "fetch": lambda: run_fetch(args),
+            "s3-sync": lambda: run_s3_sync(args),
+            "upload": lambda: run_upload(args),
+            "merge": lambda: run_merge(args),
+            "ignore": lambda: run_ignore(args),
+            "doctor": run_doctor,
+        }
+        handler = dispatch.get(args.command)
+        if handler is None:
+            sys.exit(f"Неизвестная команда: {args.command}")
+        handler()  # type: ignore[operator]
 
     def run(self, argv: list[str] | None = None) -> None:
         """Run the CLI with the given arguments."""

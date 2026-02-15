@@ -222,6 +222,81 @@ def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig
     return ImageCacheConfig(projects={k: Path(str(v)) for k, v in raw_ic.items()})
 
 
+class IgnoreConfig(BaseModel):
+    """Per-project mapping of task IDs to ignore during fetch.
+
+    Ignored tasks are treated as permanently in-progress and skipped entirely.
+    """
+
+    projects: dict[str, list[int]] = {}
+
+    def get_ignored_tasks(self, project_name: str) -> list[int]:
+        """Return the list of ignored task IDs for *project_name*."""
+        return list(self.projects.get(project_name, []))
+
+    def add_task(self, project_name: str, task_id: int) -> None:
+        """Add *task_id* to the ignore list for *project_name*."""
+        tasks = self.projects.setdefault(project_name, [])
+        if task_id not in tasks:
+            tasks.append(task_id)
+
+    def remove_task(self, project_name: str, task_id: int) -> bool:
+        """Remove *task_id* from the ignore list for *project_name*.
+
+        Returns True if the task was found and removed.
+        """
+        tasks = self.projects.get(project_name, [])
+        if task_id in tasks:
+            tasks.remove(task_id)
+            if not tasks:
+                del self.projects[project_name]
+            return True
+        return False
+
+
+def load_ignore_config(config_path: Path | None = None) -> IgnoreConfig:
+    """Load the ``ignore`` section from the config YAML."""
+    path = config_path if config_path is not None else _config_path()
+    data = _load_raw_yaml(path)
+    raw_ignore = data.get("ignore")
+    if not isinstance(raw_ignore, dict):
+        return IgnoreConfig()
+    projects: dict[str, list[int]] = {}
+    for project_name, task_ids in raw_ignore.items():
+        if isinstance(task_ids, list):
+            projects[str(project_name)] = [int(tid) for tid in task_ids]
+    return IgnoreConfig(projects=projects)
+
+
+def save_ignore_config(
+    ignore: IgnoreConfig,
+    config_path: Path | None = None,
+) -> Path:
+    """Update only the ``ignore`` section of the config YAML.
+
+    Preserves the existing ``cvat``, ``image_cache`` and other sections.
+    """
+    path = config_path if config_path is not None else _config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    existing = _load_raw_yaml(path)
+    if ignore.projects:
+        existing["ignore"] = dict(ignore.projects)
+    else:
+        existing.pop("ignore", None)
+
+    content = yaml.safe_dump(
+        existing,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    if not content.endswith("\n"):
+        content += "\n"
+    path.write_text(content, encoding="utf-8")
+    logger.info(f"Ignore config saved to {path}")
+    return path
+
+
 class UploadConfig(BaseModel):
     """Settings for the ``upload`` command."""
 

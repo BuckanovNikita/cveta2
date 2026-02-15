@@ -189,10 +189,12 @@ class CvatClient:
         project_id: int,
         *,
         completed_only: bool = False,
+        ignore_task_ids: set[int] | None = None,
     ) -> ProjectAnnotations:
         """Fetch all bbox annotations and deleted images from a project.
 
         If ``completed_only`` is True, only completed tasks are processed.
+        Tasks whose IDs are in ``ignore_task_ids`` are silently skipped.
         """
         api = self._get_api()
         if api is not None:
@@ -200,12 +202,14 @@ class CvatClient:
                 api,
                 project_id,
                 completed_only=completed_only,
+                ignore_task_ids=ignore_task_ids,
             )
         with self._open_sdk_adapter() as adapter:
             return self._fetch_annotations(
                 adapter,
                 project_id,
                 completed_only=completed_only,
+                ignore_task_ids=ignore_task_ids,
             )
 
     # ------------------------------------------------------------------
@@ -218,11 +222,21 @@ class CvatClient:
         project_id: int,
         *,
         completed_only: bool = False,
+        ignore_task_ids: set[int] | None = None,
     ) -> ProjectAnnotations:
         """Fetch annotations through a ``CvatApiPort`` implementation."""
         tasks = api.get_project_tasks(project_id)
         labels = api.get_project_labels(project_id)
         label_names, attr_names = _build_label_maps(labels)
+
+        if ignore_task_ids:
+            skipped = [t for t in tasks if t.id in ignore_task_ids]
+            if skipped:
+                logger.debug(
+                    f"Ignoring {len(skipped)} task(s): "
+                    f"{', '.join(str(t.id) for t in skipped)}"
+                )
+            tasks = [t for t in tasks if t.id not in ignore_task_ids]
 
         if completed_only:
             tasks = [t for t in tasks if t.status == "completed"]
@@ -629,6 +643,7 @@ def fetch_annotations(
     cfg: CvatConfig | None = None,
     *,
     completed_only: bool = False,
+    ignore_task_ids: set[int] | None = None,
 ) -> pd.DataFrame:
     """Fetch project annotations as a pandas DataFrame.
 
@@ -640,6 +655,7 @@ def fetch_annotations(
     result = CvatClient(resolved_cfg).fetch_annotations(
         project_id,
         completed_only=completed_only,
+        ignore_task_ids=ignore_task_ids,
     )
     rows = result.to_csv_rows()
     if not rows:

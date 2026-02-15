@@ -19,6 +19,7 @@ from cveta2.commands._helpers import (
 )
 from cveta2.config import (
     is_interactive_disabled,
+    load_ignore_config,
     load_image_cache_config,
     require_interactive,
     save_image_cache_config,
@@ -63,9 +64,12 @@ def run_fetch(args: argparse.Namespace) -> None:
         if project_name is None:
             project_name = str(project_id)
 
+        ignore_set = _warn_ignored_tasks(project_name, cfg.host)
+
         result = client.fetch_annotations(
             project_id=project_id,
             completed_only=args.completed_only,
+            ignore_task_ids=ignore_set,
         )
 
         # Image download (within the CvatClient context)
@@ -182,6 +186,23 @@ def _select_project_tui(client: CvatClient) -> int:
             logger.info(f"Загружено проектов: {len(projects)}")
             continue
         return int(answer)
+
+
+def _warn_ignored_tasks(project_name: str, host: str) -> set[int] | None:
+    """Load ignore config, warn about ignored tasks, return their IDs as a set."""
+    ignore_cfg = load_ignore_config()
+    ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
+    if not ignored_ids:
+        return None
+    clean_host = host.rstrip("/")
+    logger.warning(
+        f"Проект {project_name!r}: "
+        f"{len(ignored_ids)} задач(а) в ignore-списке "
+        f"(будут пропущены):"
+    )
+    for tid in ignored_ids:
+        logger.warning(f"  - {clean_host}/tasks/{tid}")
+    return set(ignored_ids)
 
 
 def _resolve_images_dir(
