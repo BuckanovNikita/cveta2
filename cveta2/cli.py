@@ -11,7 +11,7 @@ from cveta2.commands.doctor import run_doctor
 from cveta2.commands.fetch import run_fetch
 from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
-from cveta2.commands.setup import run_setup
+from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.commands.upload import run_upload
 from cveta2.config import CONFIG_PATH
 
@@ -31,6 +31,7 @@ class CliApp:
 
         self._add_fetch_parser(subparsers)
         self._add_setup_parser(subparsers)
+        self._add_setup_cache_parser(subparsers)
         self._add_s3_sync_parser(subparsers)
         self._add_upload_parser(subparsers)
         self._add_merge_parser(subparsers)
@@ -97,6 +98,24 @@ class CliApp:
         parser = subparsers.add_parser(
             "setup",
             help="Interactively configure CVAT connection settings.",
+        )
+        parser.add_argument(
+            "--config",
+            default=None,
+            help=(
+                "Path to YAML config (default: ~/.config/cveta2/config.yaml "
+                "or CVETA2_CONFIG)."
+            ),
+        )
+
+    def _add_setup_cache_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``setup-cache`` command parser."""
+        parser = subparsers.add_parser(
+            "setup-cache",
+            help="Interactively configure image cache directories for all projects.",
         )
         parser.add_argument(
             "--config",
@@ -237,13 +256,16 @@ class CliApp:
 
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""
-        if args.command == "setup":
+        if args.command in ("setup", "setup-cache"):
             if args.config:
                 setup_path = Path(args.config)
             else:
                 path_env = os.environ.get("CVETA2_CONFIG")
                 setup_path = Path(path_env) if path_env else CONFIG_PATH
-            run_setup(setup_path)
+            if args.command == "setup":
+                run_setup(setup_path)
+            else:
+                run_setup_cache(setup_path)
             return
         if args.command == "fetch":
             run_fetch(args)
