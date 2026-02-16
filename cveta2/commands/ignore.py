@@ -31,8 +31,36 @@ _ACTION_REMOVE = "remove"
 _ACTION_EXIT = "exit"
 
 
+def run_ignore_list() -> None:
+    """Print ignored tasks for every project in the config."""
+    ignore_cfg = load_ignore_config()
+
+    if not ignore_cfg.projects:
+        logger.info("Ignore-списки пусты — нет игнорируемых задач ни в одном проекте")
+        return
+
+    total = 0
+    for project_name in sorted(ignore_cfg.projects):
+        entries = ignore_cfg.get_ignored_entries(project_name)
+        if not entries:
+            continue
+        total += len(entries)
+        logger.info(f"Проект {project_name!r} ({len(entries)} задач):")
+        for entry in entries:
+            logger.info(f"  - {_format_ignored_entry(entry)}")
+
+    if total == 0:
+        logger.info("Ignore-списки пусты — нет игнорируемых задач ни в одном проекте")
+    else:
+        logger.info(f"Всего игнорируемых задач: {total}")
+
+
 def run_ignore(args: argparse.Namespace) -> None:
-    """Run the ``ignore`` command: add, remove, or interactive menu."""
+    """Run the ``ignore`` command: add, remove, list-all, or interactive menu."""
+    if args.list_all:
+        run_ignore_list()
+        return
+
     cfg = load_config()
     require_host(cfg)
     ignore_cfg = load_ignore_config()

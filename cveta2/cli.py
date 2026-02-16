@@ -331,6 +331,16 @@ class CliApp:
             metavar="TASK",
             help="Remove task(s) from the ignore list (ID or name).",
         )
+        group.add_argument(
+            "--list",
+            action="store_true",
+            default=False,
+            dest="list_all",
+            help=(
+                "List ignored tasks for all projects. "
+                "Does not require a CVAT connection."
+            ),
+        )
         parser.add_argument(
             "--description",
             "-d",

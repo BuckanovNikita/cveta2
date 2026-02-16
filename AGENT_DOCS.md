@@ -116,11 +116,12 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
   - Flow: loads `image_cache` from config → for each project resolves project ID via CVAT → gets project tasks → detects cloud storage from first task with `source_storage` → lists S3 objects under prefix → downloads missing files to the configured cache directory. Continues to next project on errors (project not found, no cloud storage).
 
 - `ignore` — manage per-project task ignore lists. Ignored tasks are always treated as in-progress and skipped during `fetch`. Arguments:
-  - `--project` / `-p` (required) — project name (as used in config).
+  - `--project` / `-p` (required unless `--list`) — project name (as used in config).
   - `--add TASK_ID [TASK_ID ...]` — add task ID(s) to the ignore list.
   - `--remove TASK_ID [TASK_ID ...]` — remove task ID(s) from the ignore list.
-  - If neither `--add` nor `--remove` is given, lists the currently ignored tasks.
-  - `--add` and `--remove` are mutually exclusive.
+  - `--list` — list ignored tasks for **all** projects. Does not require `--project` or a CVAT connection; reads only the local config. Output is grouped by project name with task id, name, and description.
+  - If neither `--add`, `--remove`, nor `--list` is given, opens interactive TUI for the selected project.
+  - `--add`, `--remove`, and `--list` are mutually exclusive.
 
 - `upload` — creates a CVAT task from `dataset.csv`: reads the CSV, filters by class labels interactively, uploads images directly to S3 (skipping existing), and creates one task with multiple jobs (controlled by `segment_size`). Arguments:
   - `--project` / `-p` — project ID or name; if omitted, interactive TUI selection.
