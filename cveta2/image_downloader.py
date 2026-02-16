@@ -6,6 +6,7 @@ then downloads images directly via boto3.  Already-cached files are skipped.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs
 
@@ -21,8 +22,6 @@ from tenacity import (
 from tqdm import tqdm
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from cveta2.models import ProjectAnnotations
 
 
@@ -125,10 +124,13 @@ class ImageDownloader:
         self,
         sdk_client: Any,  # noqa: ANN401
         annotations: ProjectAnnotations,
+        project_cloud_storage: CloudStorageInfo | None = None,
     ) -> DownloadStats:
         """Download images referenced in *annotations*.
 
         Returns counters of downloaded / cached / failed images.
+        If *project_cloud_storage* is set, images from tasks without
+        their own storage are searched in the project storage by name.
         """
         image_tasks = self._collect_unique_images(annotations)
         if not image_tasks:
@@ -143,7 +145,7 @@ class ImageDownloader:
             return stats
 
         self._target_dir.mkdir(parents=True, exist_ok=True)
-        self._download_all(sdk_client, pending, stats)
+        self._download_all(sdk_client, pending, stats, project_cloud_storage)
 
         logger.info(
             f"Загрузка изображений: {stats.downloaded} новых, "
@@ -191,22 +193,46 @@ class ImageDownloader:
         sdk_client: Any,  # noqa: ANN401
         pending: dict[str, int],
         stats: DownloadStats,
+        project_cloud_storage: CloudStorageInfo | None = None,
     ) -> None:
         """Resolve cloud storages, create S3 clients, download pending images."""
-        # 1. Resolve cloud storage per unique task_id
+        task_cs = self._resolve_task_cloud_storages(
+            sdk_client, pending, project_cloud_storage
+        )
+        s3_clients = self._build_s3_clients(task_cs, project_cloud_storage)
+        fallback_pending = self._download_from_task_storage(
+            pending, task_cs, s3_clients, stats
+        )
+        self._download_from_project_fallback(
+            fallback_pending, project_cloud_storage, s3_clients, stats
+        )
+
+    def _resolve_task_cloud_storages(
+        self,
+        sdk_client: Any,  # noqa: ANN401
+        pending: dict[str, int],
+        project_cloud_storage: CloudStorageInfo | None,
+    ) -> dict[int, CloudStorageInfo | None]:
+        """Resolve cloud storage per task_id; warn when no storage and no fallback."""
         cs_cache: dict[int, CloudStorageInfo] = {}
         task_cs: dict[int, CloudStorageInfo | None] = {}
         for task_id in set(pending.values()):
             cs_info = self.detect_cloud_storage(sdk_client, task_id, cs_cache)
             task_cs[task_id] = cs_info
-            if cs_info is None:
+            if cs_info is None and project_cloud_storage is None:
                 count = sum(1 for t in pending.values() if t == task_id)
                 logger.warning(
                     f"Task {task_id} не имеет cloud storage — "
                     f"пропускаем {count} изображений"
                 )
+        return task_cs
 
-        # 2. Create one boto3 S3 client per unique (endpoint, bucket)
+    def _build_s3_clients(
+        self,
+        task_cs: dict[int, CloudStorageInfo | None],
+        project_cloud_storage: CloudStorageInfo | None,
+    ) -> dict[str, Any]:
+        """Build one boto3 S3 client per unique (endpoint, bucket)."""
         s3_clients: dict[str, Any] = {}
         for cs_info in task_cs.values():
             if cs_info is None:
@@ -217,14 +243,30 @@ class ImageDownloader:
                     "s3",
                     endpoint_url=cs_info.endpoint_url or None,
                 )
+        if project_cloud_storage is not None:
+            ep_key = (
+                f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
+            )
+            if ep_key not in s3_clients:
+                s3_clients[ep_key] = boto3.Session().client(
+                    "s3",
+                    endpoint_url=project_cloud_storage.endpoint_url or None,
+                )
+        return s3_clients
 
-        # 3. Download
-        for image_name, task_id in tqdm(
-            pending.items(), desc="Downloading images", unit="img", leave=False
-        ):
+    def _download_from_task_storage(
+        self,
+        pending: dict[str, int],
+        task_cs: dict[int, CloudStorageInfo | None],
+        s3_clients: dict[str, Any],
+        stats: DownloadStats,
+    ) -> dict[str, int]:
+        """Download from task-level storage; return remaining as fallback_pending."""
+        fallback_pending: dict[str, int] = {}
+        for image_name, task_id in pending.items():
             cs_info = task_cs.get(task_id)
             if cs_info is None:
-                stats.failed += 1
+                fallback_pending[image_name] = task_id
                 continue
             ep_key = f"{cs_info.endpoint_url}|{cs_info.bucket}"
             s3_key = _build_s3_key(cs_info.prefix, image_name)
@@ -235,6 +277,68 @@ class ImageDownloader:
             except (OSError, ConnectionError, KeyError):
                 logger.exception(f"Не удалось загрузить {image_name} (key={s3_key})")
                 stats.failed += 1
+        return fallback_pending
+
+    def _download_from_project_fallback(
+        self,
+        fallback_pending: dict[str, int],
+        project_cloud_storage: CloudStorageInfo | None,
+        s3_clients: dict[str, Any],
+        stats: DownloadStats,
+    ) -> None:
+        """Download fallback images from project storage by name lookup."""
+        if project_cloud_storage is None:
+            for _ in fallback_pending:
+                stats.failed += 1
+            return
+        if not fallback_pending:
+            return
+        ep_key = f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
+        name_to_key = self._build_project_storage_name_map(
+            s3_clients[ep_key],
+            project_cloud_storage.bucket,
+            project_cloud_storage.prefix,
+        )
+        for image_name in tqdm(
+            fallback_pending,
+            desc="Downloading from project storage",
+            unit="img",
+            leave=False,
+        ):
+            s3_key: str | None = name_to_key.get(image_name) or name_to_key.get(
+                Path(image_name).name
+            )
+            if s3_key is None:
+                stats.failed += 1
+                continue
+            dest = self._target_dir / image_name
+            try:
+                self._download_one(
+                    s3_clients[ep_key],
+                    project_cloud_storage.bucket,
+                    s3_key,
+                    dest,
+                )
+                stats.downloaded += 1
+            except (OSError, ConnectionError, KeyError):
+                logger.exception(f"Не удалось загрузить {image_name} (key={s3_key})")
+                stats.failed += 1
+
+    @staticmethod
+    def _build_project_storage_name_map(
+        s3_client: Any,  # noqa: ANN401
+        bucket: str,
+        prefix: str,
+    ) -> dict[str, str]:
+        """List objects under prefix; return name -> S3 key (full name + basename)."""
+        pairs = _list_s3_objects(s3_client, bucket, prefix)
+        name_to_key: dict[str, str] = {}
+        for key, name in pairs:
+            name_to_key[name] = key
+            base = Path(name).name
+            if base not in name_to_key:
+                name_to_key[base] = key
+        return name_to_key
 
     @staticmethod
     def detect_cloud_storage(

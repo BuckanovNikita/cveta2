@@ -58,7 +58,7 @@ def run_fetch(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        _download_images(args, project_name, client, result)
+        _download_images(args, project_id, project_name, client, result)
 
     _write_output(args, result)
 
@@ -84,7 +84,7 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        _download_images(args, project_name, client, result)
+        _download_images(args, project_id, project_name, client, result)
 
     write_dataset_and_deleted(result, Path(args.output_dir))
 
@@ -115,6 +115,7 @@ def _resolve_project(
 
 def _download_images(
     args: argparse.Namespace,
+    project_id: int,
     project_name: str,
     client: CvatClient,
     result: ProjectAnnotations,
@@ -122,7 +123,7 @@ def _download_images(
     """Download images if requested (within the CvatClient context)."""
     images_dir = _resolve_images_dir(args, project_name)
     if images_dir is not None:
-        stats = client.download_images(result, images_dir)
+        stats = client.download_images(result, images_dir, project_id=project_id)
         logger.info(
             f"Изображения: {stats.downloaded} загружено, "
             f"{stats.cached} из кэша, {stats.failed} ошибок"

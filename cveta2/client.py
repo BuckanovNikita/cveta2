@@ -396,6 +396,7 @@ class CvatClient:
         self,
         annotations: ProjectAnnotations,
         target_dir: Path,
+        project_id: int | None = None,
     ) -> DownloadStats:
         """Download project images from S3 cloud storage into *target_dir*.
 
@@ -404,10 +405,20 @@ class CvatClient:
         Images are saved directly as ``target_dir / image_name`` — no
         additional subdirectories are created.  Already-cached files are
         skipped.
+
+        If *project_id* is given, tasks without their own ``source_storage``
+        will try to find images in the project's cloud storage (if any).
         """
         sdk = self._require_sdk("download_images")
+        project_cloud_storage = (
+            self.detect_project_cloud_storage(project_id)
+            if project_id is not None
+            else None
+        )
         downloader = ImageDownloader(target_dir)
-        return downloader.download(sdk, annotations)
+        return downloader.download(
+            sdk, annotations, project_cloud_storage=project_cloud_storage
+        )
 
     # ------------------------------------------------------------------
     # S3 sync

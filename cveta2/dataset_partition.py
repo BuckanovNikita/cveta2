@@ -28,6 +28,9 @@ def partition_annotations_df(
 ) -> PartitionResult:
     """Partition an annotation DataFrame into dataset, obsolete and in-progress parts.
 
+    Required columns in *df*: ``image_name``, ``task_id``, ``task_updated_date``,
+    ``task_status``.
+
     Algorithm
     ---------
     1. Build a *deleted registry* — ``{image_name: [(task_id, task_updated_date)]}``

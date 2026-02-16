@@ -24,7 +24,7 @@ def resolve_project_from_args(
     """Resolve project ID and name from CLI project argument.
 
     When *project_arg* is non-empty, resolves via cache and returns
-    ``(project_id, project_name)``. When *project_name* is a digit string,
+    ``(project_id, project_name)``. When *project_arg* is a digit string,
     looks up human-readable name from cache. Returns ``None`` when
     *project_arg* is None or empty (caller should run interactive TUI).
 

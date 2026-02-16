@@ -385,6 +385,63 @@ def test_download_no_cloud_storage_marks_failed(tmp_path: Path) -> None:
     assert stats.downloaded == 0
 
 
+def test_download_fallback_project_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No task storage + project_cloud_storage -> images loaded from project."""
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "img.jpg")],
+        deleted_images=[],
+    )
+    task_storages: dict[int, dict[str, Any] | None] = {10: None}
+    sdk = _FakeSdkClient(
+        task_storages=task_storages,
+        cloud_storages={},
+        s3_objects={},
+    )
+    project_cs = CloudStorageInfo(
+        id=1,
+        bucket="test-bucket",
+        prefix="proj/",
+        endpoint_url="http://minio:9000",
+    )
+    # S3 keys under project prefix; get_object receives Key as S3 key
+    s3_objects_by_key: dict[str, bytes] = {"proj/img.jpg": b"project-data"}
+
+    def list_objects_v2(
+        Bucket: str = "",  # noqa: N803, ARG001
+        Prefix: str = "",  # noqa: N803
+        **_kwargs: object,
+    ) -> dict[str, Any]:
+        contents = [
+            {"Key": k, "Size": len(v)}
+            for k, v in s3_objects_by_key.items()
+            if k.startswith(Prefix)
+        ]
+        return {"Contents": contents, "IsTruncated": False}
+
+    def get_object(Bucket: str = "", Key: str = "") -> dict[str, Any]:  # noqa: N803, ARG001
+        if Key not in s3_objects_by_key:
+            raise KeyError(f"NoSuchKey: {Key}")
+        body = MagicMock()
+        body.read.return_value = s3_objects_by_key[Key]
+        return {"Body": body}
+
+    fake_s3 = MagicMock()
+    fake_s3.list_objects_v2.side_effect = list_objects_v2
+    fake_s3.get_object.side_effect = get_object
+    _patch_boto(monkeypatch, fake_s3)
+
+    downloader = ImageDownloader(tmp_path / "images")
+    stats = downloader.download(sdk, annotations, project_cloud_storage=project_cs)
+
+    assert stats.total == 1
+    assert stats.downloaded == 1
+    assert stats.failed == 0
+    assert (tmp_path / "images" / "img.jpg").read_bytes() == b"project-data"
+
+
 # ======================================================================
 # S3 sync tests
 # ======================================================================
