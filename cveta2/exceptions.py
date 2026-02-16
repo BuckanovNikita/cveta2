@@ -13,5 +13,9 @@ class ProjectNotFoundError(Cveta2Error):
     """Raised when a requested project cannot be found."""
 
 
+class TaskNotFoundError(Cveta2Error):
+    """Raised when a requested task cannot be found."""
+
+
 class InteractiveModeRequiredError(Cveta2Error):
     """Raised when interactive input is needed but disabled."""

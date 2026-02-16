@@ -1,6 +1,6 @@
 # cveta2
 
-Утилита для работы с аннотациями CVAT-проектов: выгрузка (`cveta2 fetch`), создание задач с переносом аннотаций (`cveta2 upload`), синхронизация изображений (`cveta2 s3-sync`). Доступна как CLI и как Python API (`CvatClient`, `fetch_annotations`).
+Утилита для работы с аннотациями CVAT-проектов: выгрузка проекта (`cveta2 fetch`), выгрузка отдельных задач (`cveta2 fetch-task`), создание задач с переносом аннотаций (`cveta2 upload`), синхронизация изображений (`cveta2 s3-sync`). Доступна как CLI и как Python API (`CvatClient`, `fetch_annotations`).
 
 ## Что умеет
 
@@ -9,6 +9,7 @@
 - **Автоматически разделяет** результат на актуальный датасет, устаревшие данные и данные в работе
 - **Скачивает изображения** из S3 cloud storage, подключённого к CVAT (boto3, с кэшированием)
 - **Создаёт задачи в CVAT** из `dataset.csv` — загружает изображения на S3, создаёт задачу с cloud storage и автоматически переносит bbox-аннотации
+- **Выгрузка отдельных задач** (`fetch-task`) — по ID, имени или через интерактивный выбор из списка (одну или несколько)
 - Поддерживает фильтр по задачам со статусом `completed`
 - Всё за один вызов — без промежуточных XML/ZIP файлов
 
@@ -32,7 +33,7 @@ cveta2 setup
 cveta2 setup-cache
 ```
 
-3. Выгрузите проект:
+3. Выгрузите проект (все задачи):
 
 ```bash
 # По ID проекта
@@ -43,6 +44,19 @@ cveta2 fetch --project "Мой проект" -o output/
 
 # Интерактивный выбор проекта из списка
 cveta2 fetch -o output/
+```
+
+4. Или выгрузите конкретные задачи:
+
+```bash
+# По ID или имени задачи (можно несколько)
+cveta2 fetch-task -p 123 -t 456 -o output/
+cveta2 fetch-task -p 123 -t 456 -t 789 -o output/
+cveta2 fetch-task -p 123 -t "Партия 3" -o output/
+
+# Интерактивный выбор задач из списка (checkbox)
+cveta2 fetch-task -p 123 -t -o output/
+cveta2 fetch-task -p 123 -o output/
 ```
 
 В папке `output/` появятся файлы:
@@ -165,7 +179,8 @@ cveta2 содержит встроенный пресет (`cveta2/presets/defau
 
 - Все интерактивные промпты заменяются на ошибки с подсказкой, какой флаг или переменную окружения нужно использовать
 - Команды `setup` и `setup-cache` недоступны — настраивайте через env-переменные или редактируя файл конфигурации напрямую
-- При `fetch` без `--project` — ошибка (укажите `-p`)
+- При `fetch` / `fetch-task` без `--project` — ошибка (укажите `-p`)
+- При `fetch-task` без `-t` или с `-t` без значения — ошибка (укажите `-t VALUE`)
 - Если не хватает учётных данных — ошибка (задайте `CVAT_TOKEN` или `CVAT_USERNAME`/`CVAT_PASSWORD`)
 - Если путь к изображениям не настроен — ошибка (укажите `--images-dir`, `--no-images` или `image_cache` в конфиге)
 - Если выходная директория уже существует — перезаписывается без вопросов
@@ -210,7 +225,7 @@ cveta2 setup-cache --config /path/to/config.yaml
 
 ### `cveta2 fetch`
 
-Выгрузка bbox-аннотаций и удалённых изображений из проекта CVAT. Результат разбивается на три CSV-файла + список удалённых.
+Выгрузка **всех** bbox-аннотаций и удалённых изображений из проекта CVAT. Результат разбивается на три CSV-файла + список удалённых.
 
 ```bash
 # По ID проекта
@@ -234,6 +249,37 @@ cveta2 fetch -p 123 -o output/ --no-images
 # С указанием директории для изображений
 cveta2 fetch -p "coco8-dev" -o output/ --images-dir /mnt/data/coco8
 ```
+
+### `cveta2 fetch-task`
+
+Выгрузка bbox-аннотаций для **конкретных задач** проекта. В отличие от `fetch`, не разбивает результат на dataset/obsolete/in_progress — записывает единый `dataset.csv` и `deleted.txt` в указанную директорию. Задачи указываются по ID или имени через `-t`, либо выбираются интерактивно (checkbox с поиском).
+
+```bash
+# Одна задача по ID
+cveta2 fetch-task -p 123 -t 456 -o output/
+
+# Несколько задач
+cveta2 fetch-task -p 123 -t 456 -t 789 -o output/
+
+# По имени задачи (регистр не важен)
+cveta2 fetch-task -p 123 -t "Партия 3" -t "Партия 4" -o output/
+
+# Интерактивный выбор задач из списка (checkbox с мульти-выбором и поиском)
+cveta2 fetch-task -p 123 -t -o output/
+
+# Без -t — тоже интерактивный выбор
+cveta2 fetch-task -p 123 -o output/
+
+# Фильтры и изображения работают так же, как в fetch
+cveta2 fetch-task -p 123 -t 456 -o output/ --completed-only --no-images
+```
+
+В директории `output/` появятся:
+
+| Файл | Описание |
+|---|---|
+| `dataset.csv` | Все аннотации выбранных задач (без разбиения) |
+| `deleted.txt` | Имена удалённых изображений (по одному на строку) |
 
 ### `cveta2 s3-sync`
 
@@ -310,6 +356,10 @@ cfg = CvatConfig.load()
 # Для загрузки изображений нужен контекстный менеджер
 with CvatClient(cfg) as client:
     result = client.fetch_annotations(project_id=123, completed_only=True)
+
+    # Только конкретные задачи — по ID или имени (список)
+    result = client.fetch_annotations(project_id=123, task_selector=[456])
+    result = client.fetch_annotations(project_id=123, task_selector=[456, "Партия 3"])
 
     # Скачать изображения из S3 в указанную директорию
     from pathlib import Path

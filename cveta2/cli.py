@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from cveta2.commands.doctor import run_doctor
-from cveta2.commands.fetch import run_fetch
+from cveta2.commands.fetch import run_fetch, run_fetch_task
 from cveta2.commands.ignore import run_ignore
 from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
@@ -31,6 +31,7 @@ class CliApp:
         subparsers = parser.add_subparsers(dest="command", required=True)
 
         self._add_fetch_parser(subparsers)
+        self._add_fetch_task_parser(subparsers)
         self._add_setup_parser(subparsers)
         self._add_setup_cache_parser(subparsers)
         self._add_s3_sync_parser(subparsers)
@@ -48,7 +49,7 @@ class CliApp:
         """Add the ``fetch`` command parser."""
         parser = subparsers.add_parser(
             "fetch",
-            help="Fetch project bbox annotations and deleted images.",
+            help="Fetch all project bbox annotations and deleted images.",
         )
         parser.add_argument(
             "--project",
@@ -72,6 +73,53 @@ class CliApp:
             action="store_true",
             help="Additionally save unprocessed full CSV as raw.csv.",
         )
+        self._add_common_fetch_args(parser)
+
+    def _add_fetch_task_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``fetch-task`` command parser."""
+        parser = subparsers.add_parser(
+            "fetch-task",
+            help="Fetch bbox annotations for specific task(s) in a project.",
+        )
+        parser.add_argument(
+            "--project",
+            "-p",
+            type=str,
+            default=None,
+            help=(
+                "Project ID or name. If omitted, "
+                "interactive project selection is shown."
+            ),
+        )
+        parser.add_argument(
+            "--task",
+            "-t",
+            type=str,
+            nargs="?",
+            const="",
+            action="append",
+            default=None,
+            help=(
+                "Task ID or name to fetch. "
+                "Can be repeated: -t 42 -t 43. "
+                "If passed without a value (-t), interactive "
+                "multi-select is shown."
+            ),
+        )
+        parser.add_argument(
+            "--output-dir",
+            "-o",
+            required=True,
+            help="Directory to save dataset.csv and deleted.txt.",
+        )
+        self._add_common_fetch_args(parser)
+
+    @staticmethod
+    def _add_common_fetch_args(parser: argparse.ArgumentParser) -> None:
+        """Add arguments shared between ``fetch`` and ``fetch-task``."""
         parser.add_argument(
             "--completed-only",
             action="store_true",
@@ -310,6 +358,7 @@ class CliApp:
 
         dispatch: dict[str, object] = {
             "fetch": lambda: run_fetch(args),
+            "fetch-task": lambda: run_fetch_task(args),
             "s3-sync": lambda: run_s3_sync(args),
             "upload": lambda: run_upload(args),
             "merge": lambda: run_merge(args),

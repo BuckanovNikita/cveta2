@@ -7,6 +7,7 @@ from cveta2.exceptions import (
     Cveta2Error,
     InteractiveModeRequiredError,
     ProjectNotFoundError,
+    TaskNotFoundError,
 )
 from cveta2.models import (
     CSV_COLUMNS,
@@ -28,6 +29,7 @@ __all__ = [
     "PartitionResult",
     "ProjectAnnotations",
     "ProjectNotFoundError",
+    "TaskNotFoundError",
     "fetch_annotations",
     "partition_annotations_df",
 ]

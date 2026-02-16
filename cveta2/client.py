@@ -16,7 +16,7 @@ from cveta2._client.extractors import _collect_shapes
 from cveta2._client.mapping import _build_label_maps
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.config import CvatConfig
-from cveta2.exceptions import ProjectNotFoundError
+from cveta2.exceptions import ProjectNotFoundError, TaskNotFoundError
 from cveta2.image_downloader import DownloadStats, ImageDownloader, S3Syncer
 from cveta2.models import (
     CSV_COLUMNS,
@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
+    from cveta2._client.dtos import RawTask
     from cveta2._client.ports import CvatApiPort
     from cveta2.image_downloader import CloudStorageInfo
 
@@ -157,6 +158,14 @@ class CvatClient:
             raw = adapter.list_projects()
             return [ProjectInfo(id=p.id, name=p.name) for p in raw]
 
+    def list_project_tasks(self, project_id: int) -> list[RawTask]:
+        """Fetch the list of tasks for a project from CVAT."""
+        api = self._get_api()
+        if api is not None:
+            return api.get_project_tasks(project_id)
+        with self._open_sdk_adapter() as adapter:
+            return adapter.get_project_tasks(project_id)
+
     def resolve_project_id(
         self,
         project_spec: int | str,
@@ -190,11 +199,14 @@ class CvatClient:
         *,
         completed_only: bool = False,
         ignore_task_ids: set[int] | None = None,
+        task_selector: list[int | str] | None = None,
     ) -> ProjectAnnotations:
         """Fetch all bbox annotations and deleted images from a project.
 
         If ``completed_only`` is True, only completed tasks are processed.
         Tasks whose IDs are in ``ignore_task_ids`` are silently skipped.
+        If ``task_selector`` is given (list of task IDs or names), only
+        matching tasks are processed.
         """
         api = self._get_api()
         if api is not None:
@@ -203,6 +215,7 @@ class CvatClient:
                 project_id,
                 completed_only=completed_only,
                 ignore_task_ids=ignore_task_ids,
+                task_selector=task_selector,
             )
         with self._open_sdk_adapter() as adapter:
             return self._fetch_annotations(
@@ -210,11 +223,56 @@ class CvatClient:
                 project_id,
                 completed_only=completed_only,
                 ignore_task_ids=ignore_task_ids,
+                task_selector=task_selector,
             )
 
     # ------------------------------------------------------------------
     # Core annotation logic (single code path for all API backends)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_one_task_selector(
+        tasks: list[RawTask],
+        selector: int | str,
+    ) -> RawTask:
+        """Resolve a single task selector (ID or name) to a task.
+
+        Numeric strings and ints match by task ID first, then by name.
+        Non-numeric strings match by name (case-insensitive).
+        Raises ``TaskNotFoundError`` when no task matches.
+        """
+        s = str(selector).strip()
+        if s.isdigit():
+            task_id = int(s)
+            for t in tasks:
+                if t.id == task_id:
+                    return t
+        search = s.casefold()
+        for t in tasks:
+            if t.name.casefold() == search:
+                return t
+        available = ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
+        raise TaskNotFoundError(f"Task not found: {s!r}. Available tasks: {available}")
+
+    @staticmethod
+    def _resolve_task_selectors(
+        tasks: list[RawTask],
+        selectors: list[int | str],
+    ) -> list[RawTask]:
+        """Resolve a list of task selectors to matching tasks.
+
+        Each selector is resolved independently via
+        ``_resolve_one_task_selector``.  Duplicates (same task matched
+        by different selectors) are removed, preserving order.
+        """
+        seen_ids: set[int] = set()
+        matched: list[RawTask] = []
+        for sel in selectors:
+            task = CvatClient._resolve_one_task_selector(tasks, sel)
+            if task.id not in seen_ids:
+                seen_ids.add(task.id)
+                matched.append(task)
+        return matched
 
     @staticmethod
     def _fetch_annotations(
@@ -223,6 +281,7 @@ class CvatClient:
         *,
         completed_only: bool = False,
         ignore_task_ids: set[int] | None = None,
+        task_selector: list[int | str] | None = None,
     ) -> ProjectAnnotations:
         """Fetch annotations through a ``CvatApiPort`` implementation."""
         tasks = api.get_project_tasks(project_id)
@@ -232,11 +291,17 @@ class CvatClient:
         if ignore_task_ids:
             skipped = [t for t in tasks if t.id in ignore_task_ids]
             if skipped:
-                logger.debug(
-                    f"Ignoring {len(skipped)} task(s): "
-                    f"{', '.join(str(t.id) for t in skipped)}"
-                )
+                logger.warning(f"Пропускаем {len(skipped)} задач(а) из ignore-списка:")
+                for t in skipped:
+                    logger.warning(
+                        f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})"
+                    )
             tasks = [t for t in tasks if t.id not in ignore_task_ids]
+
+        if task_selector is not None:
+            tasks = CvatClient._resolve_task_selectors(tasks, task_selector)
+            names = ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
+            logger.info(f"Selected {len(tasks)} task(s): {names}")
 
         if completed_only:
             tasks = [t for t in tasks if t.status == "completed"]
@@ -644,6 +709,7 @@ def fetch_annotations(
     *,
     completed_only: bool = False,
     ignore_task_ids: set[int] | None = None,
+    task_selector: list[int | str] | None = None,
 ) -> pd.DataFrame:
     """Fetch project annotations as a pandas DataFrame.
 
@@ -656,6 +722,7 @@ def fetch_annotations(
         project_id,
         completed_only=completed_only,
         ignore_task_ids=ignore_task_ids,
+        task_selector=task_selector,
     )
     rows = result.to_csv_rows()
     if not rows:

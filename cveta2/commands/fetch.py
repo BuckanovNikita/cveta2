@@ -1,4 +1,4 @@
-"""Implementation of the ``cveta2 fetch`` command."""
+"""Implementation of the ``cveta2 fetch`` and ``cveta2 fetch-task`` commands."""
 
 from __future__ import annotations
 
@@ -31,56 +31,130 @@ from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_project
 if TYPE_CHECKING:
     import argparse
 
+    from cveta2._client.dtos import RawTask
+    from cveta2.models import ProjectAnnotations
+
 _RESCAN_VALUE = "__rescan__"
 
 
+# ------------------------------------------------------------------
+# Public command entry points
+# ------------------------------------------------------------------
+
+
 def run_fetch(args: argparse.Namespace) -> None:
-    """Run the ``fetch`` command."""
+    """Run the ``fetch`` command (all project tasks)."""
     cfg = load_config()
     require_host(cfg)
 
-    project_name: str | None = None
+    with CvatClient(cfg) as client:
+        project_id, project_name = _resolve_project(args, client)
+        ignore_set = _warn_ignored_tasks(project_name)
+
+        try:
+            result = client.fetch_annotations(
+                project_id=project_id,
+                completed_only=args.completed_only,
+                ignore_task_ids=ignore_set,
+            )
+        except Cveta2Error as e:
+            sys.exit(str(e))
+
+        _download_images(args, project_name, client, result)
+
+    _write_output(args, result)
+
+
+def run_fetch_task(args: argparse.Namespace) -> None:
+    """Run the ``fetch-task`` command (selected task(s) only)."""
+    cfg = load_config()
+    require_host(cfg)
 
     with CvatClient(cfg) as client:
-        if args.project is not None:
-            cached = load_projects_cache()
-            try:
-                project_id = client.resolve_project_id(
-                    args.project.strip(), cached=cached
-                )
-            except Cveta2Error as e:
-                sys.exit(str(e))
-            project_name = args.project.strip()
-        else:
-            project_id = _select_project_tui(client)
+        project_id, project_name = _resolve_project(args, client)
+        ignore_set = _warn_ignored_tasks(project_name)
 
-        # Try to resolve human-readable project name from cache
-        if project_name is None or project_name.isdigit():
-            for p in load_projects_cache():
-                if p.id == project_id:
-                    project_name = p.name
-                    break
+        task_sel = _resolve_task_selector(args, client, project_id, ignore_set)
 
-        if project_name is None:
-            project_name = str(project_id)
+        try:
+            result = client.fetch_annotations(
+                project_id=project_id,
+                completed_only=args.completed_only,
+                ignore_task_ids=ignore_set,
+                task_selector=task_sel,
+            )
+        except Cveta2Error as e:
+            sys.exit(str(e))
 
-        ignore_set = _warn_ignored_tasks(project_name, cfg.host)
+        _download_images(args, project_name, client, result)
 
-        result = client.fetch_annotations(
-            project_id=project_id,
-            completed_only=args.completed_only,
-            ignore_task_ids=ignore_set,
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows = result.to_csv_rows()
+    df = pd.DataFrame(rows)
+    write_df_csv(df, output_dir / "dataset.csv", "Dataset CSV")
+    deleted_names = [img.image_name for img in result.deleted_images]
+    write_deleted_txt(deleted_names, output_dir / "deleted.txt")
+
+
+# ------------------------------------------------------------------
+# Shared helpers (project resolution, output, images)
+# ------------------------------------------------------------------
+
+
+def _resolve_project(
+    args: argparse.Namespace,
+    client: CvatClient,
+) -> tuple[int, str]:
+    """Resolve project ID and human-readable name from CLI args.
+
+    Returns ``(project_id, project_name)``.
+    """
+    project_name: str | None = None
+
+    if args.project is not None:
+        cached = load_projects_cache()
+        try:
+            project_id = client.resolve_project_id(args.project.strip(), cached=cached)
+        except Cveta2Error as e:
+            sys.exit(str(e))
+        project_name = args.project.strip()
+    else:
+        project_id = _select_project_tui(client)
+
+    if project_name is None or project_name.isdigit():
+        for p in load_projects_cache():
+            if p.id == project_id:
+                project_name = p.name
+                break
+
+    if project_name is None:
+        project_name = str(project_id)
+
+    return project_id, project_name
+
+
+def _download_images(
+    args: argparse.Namespace,
+    project_name: str,
+    client: CvatClient,
+    result: ProjectAnnotations,
+) -> None:
+    """Download images if requested (within the CvatClient context)."""
+    images_dir = _resolve_images_dir(args, project_name)
+    if images_dir is not None:
+        stats = client.download_images(result, images_dir)
+        logger.info(
+            f"Изображения: {stats.downloaded} загружено, "
+            f"{stats.cached} из кэша, {stats.failed} ошибок"
         )
 
-        # Image download (within the CvatClient context)
-        images_dir = _resolve_images_dir(args, project_name)
-        if images_dir is not None:
-            stats = client.download_images(result, images_dir)
-            logger.info(
-                f"Изображения: {stats.downloaded} загружено, "
-                f"{stats.cached} из кэша, {stats.failed} ошибок"
-            )
 
+def _write_output(
+    args: argparse.Namespace,
+    result: ProjectAnnotations,
+) -> None:
+    """Partition annotations and write output files."""
     output_dir = _resolve_output_dir(Path(args.output_dir))
 
     rows = result.to_csv_rows()
@@ -188,20 +262,74 @@ def _select_project_tui(client: CvatClient) -> int:
         return int(answer)
 
 
-def _warn_ignored_tasks(project_name: str, host: str) -> set[int] | None:
+def _resolve_task_selector(
+    args: argparse.Namespace,
+    client: CvatClient,
+    project_id: int,
+    ignore_task_ids: set[int] | None,
+) -> list[int | str]:
+    """Turn ``args.task`` into a task selector list.
+
+    Returns a list of task IDs/names.
+    When ``-t`` is omitted or passed without a value, launches
+    interactive TUI.
+    """
+    raw: list[str] | None = args.task
+    if raw is not None:
+        explicit: list[int | str] = [v.strip() for v in raw if v.strip()]
+        if explicit:
+            return explicit
+    return _select_tasks_tui(client, project_id, ignore_task_ids)
+
+
+def _select_tasks_tui(
+    client: CvatClient,
+    project_id: int,
+    ignore_task_ids: set[int] | None,
+) -> list[int | str]:
+    """Interactive multi-task selection via TUI checkbox."""
+    require_interactive(
+        "Pass task ID(s) or name(s) with --task / -t to specify task(s)."
+    )
+    tasks = client.list_project_tasks(project_id)
+    if ignore_task_ids:
+        tasks = [t for t in tasks if t.id not in ignore_task_ids]
+    if not tasks:
+        sys.exit("Нет доступных задач в этом проекте.")
+    choices = _build_task_choices(tasks)
+    answer = questionary.checkbox(
+        "Выберите задачу (задачи):",
+        choices=choices,
+        use_jk_keys=False,
+        use_search_filter=True,
+    ).ask()
+    if answer is None:
+        sys.exit("Выбор отменён.")
+    selected: list[int | str] = [int(v) for v in answer]
+    if not selected:
+        sys.exit("Задачи не выбраны.")
+    return selected
+
+
+def _build_task_choices(
+    tasks: list[RawTask],
+) -> list[questionary.Choice]:
+    """Build questionary choices from a task list."""
+    return [
+        questionary.Choice(
+            title=f"{t.name} (id={t.id}, {t.status})",
+            value=t.id,
+        )
+        for t in tasks
+    ]
+
+
+def _warn_ignored_tasks(project_name: str) -> set[int] | None:
     """Load ignore config, warn about ignored tasks, return their IDs as a set."""
     ignore_cfg = load_ignore_config()
     ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
     if not ignored_ids:
         return None
-    clean_host = host.rstrip("/")
-    logger.warning(
-        f"Проект {project_name!r}: "
-        f"{len(ignored_ids)} задач(а) в ignore-списке "
-        f"(будут пропущены):"
-    )
-    for tid in ignored_ids:
-        logger.warning(f"  - {clean_host}/tasks/{tid}")
     return set(ignored_ids)
 
 

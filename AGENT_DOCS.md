@@ -6,14 +6,14 @@ Short descriptions of project internals and implicit design decisions.
 
 ```
 cveta2/
-  __init__.py   - public API re-exports: CvatClient, fetch_annotations, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations, partition_annotations_df, PartitionResult, CSV_COLUMNS, Cveta2Error, ProjectNotFoundError, InteractiveModeRequiredError
+  __init__.py   - public API re-exports: CvatClient, fetch_annotations, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations, partition_annotations_df, PartitionResult, CSV_COLUMNS, Cveta2Error, ProjectNotFoundError, TaskNotFoundError, InteractiveModeRequiredError
   models.py     - Pydantic models: BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations; CSV_COLUMNS tuple defining the canonical CSV column order; ProjectAnnotations.to_csv_rows() method
-  exceptions.py - Custom exception hierarchy: Cveta2Error (base), ProjectNotFoundError, InteractiveModeRequiredError
+  exceptions.py - Custom exception hierarchy: Cveta2Error (base), ProjectNotFoundError, TaskNotFoundError, InteractiveModeRequiredError
   dataset_partition.py - partition_annotations_df(): pandas-based partitioning of annotation DataFrame into dataset/obsolete/in_progress; PartitionResult dataclass; dates parsed via pd.to_datetime(utc=True) for robust comparison
   config.py     - CvatConfig pydantic model; loads/merges preset < config file < env; ImageCacheConfig pydantic model (per-project image cache directory mapping); load_image_cache_config() / save_image_cache_config(); UploadConfig pydantic model (images_per_job default 100); load_upload_config(); get_projects_cache_path(); is_interactive_disabled() / require_interactive() guards; raises InteractiveModeRequiredError; _load_preset_data() loads bundled preset from cveta2/presets/default.yaml via importlib.resources
   image_downloader.py - CloudStorageInfo pydantic model; parse_cloud_storage() extracts bucket/prefix/endpoint from CVAT SDK cloud storage object; ImageDownloader class downloads images from S3 via boto3 into a flat target directory (no subdirs); S3Syncer class lists all objects under an S3 prefix and downloads missing ones locally (never deletes, never uploads); _list_s3_objects() lists S3 objects with prefix stripping; _download_one_s3() shared download helper with tenacity retry; DownloadStats pydantic model (downloaded/cached/failed/total); auto-detects cloud_storage_id from task source_storage; _build_s3_key() handles prefix logic; tqdm progress bar
   projects_cache.py - YAML cache of project id/name list (load_projects_cache, save_projects_cache); path next to config (projects.yaml)
-  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations, download_images, detect_project_cloud_storage, sync_project_images, create_upload_task; usable as context manager for connection reuse) + fetch_annotations() DataFrame wrapper; _SdkClientFactory Protocol for typed client_factory parameter; all paths go through CvatApiPort for annotations; download_images() uses raw SDK client directly (not CvatApiPort) for cloud storage detection + delegates to ImageDownloader; sync_project_images() detects cloud storage then delegates to S3Syncer; create_upload_task() creates a CVAT task backed by cloud storage images with segment_size controlling job size; _require_sdk() shared helper for methods needing the raw SDK; tqdm progress bar on task loop
+  client.py     - CvatClient class (list_projects, resolve_project_id, fetch_annotations, download_images, detect_project_cloud_storage, sync_project_images, create_upload_task; usable as context manager for connection reuse) + fetch_annotations() DataFrame wrapper; _SdkClientFactory Protocol for typed client_factory parameter; all paths go through CvatApiPort for annotations; fetch_annotations() accepts optional task_selector (list[int|str]) to fetch specific tasks by ID or name via _resolve_task_selectors(); download_images() uses raw SDK client directly (not CvatApiPort) for cloud storage detection + delegates to ImageDownloader; sync_project_images() detects cloud storage then delegates to S3Syncer; create_upload_task() creates a CVAT task backed by cloud storage images with segment_size controlling job size; _require_sdk() shared helper for methods needing the raw SDK; tqdm progress bar on task loop
   image_uploader.py - S3Uploader class uploads images to S3, skipping already-existing files; UploadStats pydantic model (uploaded/skipped_existing/failed/total); resolve_images() searches directories for image files by name; reuses CloudStorageInfo, _build_s3_key, _list_s3_objects, _s3_retry from image_downloader.py
   presets/      - bundled preset configurations
     __init__.py - package marker
@@ -30,11 +30,11 @@ cveta2/
     __init__.py - package marker
     _helpers.py - shared helpers for CLI commands: load_config(), require_host(), write_df_csv(), write_deleted_txt()
     setup.py    - run_setup(): interactive wizard for CVAT credentials and core settings (host, org, auth); run_setup_cache(): interactive per-project image cache directory setup for all known projects (fetches project list from CVAT if cache is empty); _ensure_projects_list() helper loads or fetches projects
-    fetch.py    - run_fetch(): fetch annotations + download images; _select_project_tui() for interactive project selection; _resolve_images_dir() for image cache resolution; _resolve_output_dir() for overwrite prompt; _write_partition_result() for CSV/TXT export
+    fetch.py    - run_fetch(): fetch all project annotations + download images; run_fetch_task(): fetch annotations for selected task(s), writes dataset.csv + deleted.txt to output dir; shared helpers: _resolve_project() for project ID/name resolution, _download_images(), _write_output(); _select_project_tui() for interactive project selection (with search filter); _resolve_task_selector() + _select_tasks_tui() for interactive multi-task selection (checkbox with search filter); _resolve_images_dir() for image cache resolution; _resolve_output_dir() for overwrite prompt; _write_partition_result() for CSV/TXT export
     ignore.py   - run_ignore(): manage per-project task ignore lists (add/remove/list); reads and writes the `ignore` section of config YAML
     s3_sync.py  - run_s3_sync(): sync images from S3 cloud storage to local cache for configured projects
     doctor.py   - run_doctor(): health checks for config, AWS credentials, and image cache group permissions; check_config(), check_aws_credentials(), check_cache_permissions()
-  cli.py        - slim argparse CLI entry point; CliApp class with parser definitions and dispatch to commands/ modules; all command logic lives in commands/
+  cli.py        - slim argparse CLI entry point; CliApp class with parser definitions (fetch, fetch-task, setup, setup-cache, s3-sync, upload, merge, ignore, doctor) and dispatch to commands/ modules; shared fetch args extracted into _add_common_fetch_args(); all command logic lives in commands/
   __main__.py   - enables `python -m cveta2`
 main.py         - thin backwards-compat wrapper delegating to cveta2.cli.main()
 ```
@@ -97,13 +97,19 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 
 - `setup` — interactive wizard that prompts for host, organization, and auth (token or username/password). Saves credentials to `~/.config/cveta2/config.yaml` via `CvatConfig.save_to_file()`. Prefills defaults from existing config if present. Optional `--config` to override config path.
 - `setup-cache` — interactive wizard that iterates over all known CVAT projects and prompts for an image cache directory for each. Shows current path if already configured; press Enter to skip/keep. If the projects cache is empty, connects to CVAT to fetch the project list first. Saves updated `image_cache` section via `save_image_cache_config()`. Optional `--config` to override config path.
-- `fetch` — fetches bbox annotations and deleted images from a CVAT project, splits them into three CSVs, and optionally downloads project images from S3 cloud storage. Arguments:
+- `fetch` — fetches **all** bbox annotations and deleted images from a CVAT project, splits them into three CSVs, and optionally downloads project images from S3 cloud storage. Arguments:
   - `--project` / `-p` — project ID (number) or project name; if omitted, TUI shows cached project list with arrow-key selection and search filter; "↻ Обновить список" rescans CVAT and refreshes cache.
   - `--output-dir` / `-o` (required) — directory for output files: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.txt`.
   - `--raw` — additionally save unprocessed full DataFrame as `raw.csv` in the output dir.
   - `--completed-only` — process only tasks with status "completed" (in_progress.csv will be empty).
   - `--no-images` — skip downloading images from S3 cloud storage entirely.
   - `--images-dir` — override the image cache directory for this run (takes precedence over `image_cache` config mapping; path used directly, no subdirectories created).
+
+- `fetch-task` — fetches bbox annotations for **specific task(s)** in a project. Unlike `fetch`, does not partition into dataset/obsolete/in_progress — writes a single `dataset.csv` and `deleted.txt` into the output directory. Arguments:
+  - `--project` / `-p` — same as `fetch`.
+  - `--task` / `-t` — task ID or name. Can be repeated (`-t 42 -t 43`). Numeric values match by task ID first, then by name; non-numeric strings match by name (case-insensitive). If passed without a value (`-t` alone) or omitted entirely, shows interactive TUI with checkbox multi-select (with search filter). Raises `TaskNotFoundError` if any selector doesn't match.
+  - `--output-dir` / `-o` (required) — directory for output files: `dataset.csv`, `deleted.txt`.
+  - `--completed-only`, `--no-images`, `--images-dir` — same as `fetch`.
 
 - `s3-sync` — syncs all images from S3 cloud storage to local cache for every project configured in `image_cache`. Lists all objects under each project's cloud storage prefix and downloads those missing locally. Never deletes from S3 or syncs in reverse. Arguments:
   - `--project` / `-p` — sync only this project (name must exist in `image_cache` config). If omitted, syncs all configured projects.
@@ -135,7 +141,7 @@ ignore:
     - 123
     - 456
 ```
-`IgnoreConfig` pydantic model wraps `dict[str, list[int]]`; `get_ignored_tasks(project_name)` returns `list[int]`; `add_task()` / `remove_task()` modify the list. `load_ignore_config()` and `save_ignore_config()` read/write only the `ignore` section, preserving the rest of the YAML. During `fetch`, ignored tasks are skipped entirely (not fetched from CVAT). A warning with task links (`{host}/tasks/{id}`) is logged at the start of fetch when the project has an ignore list. `CvatClient.fetch_annotations()` accepts `ignore_task_ids: set[int] | None` to filter tasks at the API level.
+`IgnoreConfig` pydantic model wraps `dict[str, list[int]]`; `get_ignored_tasks(project_name)` returns `list[int]`; `add_task()` / `remove_task()` modify the list. `load_ignore_config()` and `save_ignore_config()` read/write only the `ignore` section, preserving the rest of the YAML. During `fetch`, ignored tasks are skipped entirely (not fetched from CVAT). A warning listing each skipped task's ID, name, and updated date is logged by `CvatClient._fetch_annotations()` when tasks match the ignore set. `CvatClient.fetch_annotations()` accepts `ignore_task_ids: set[int] | None` to filter tasks at the API level.
 
 ## Upload config
 
