@@ -20,6 +20,7 @@ from cveta2.exceptions import ProjectNotFoundError, TaskNotFoundError
 from cveta2.image_downloader import DownloadStats, ImageDownloader, S3Syncer
 from cveta2.models import (
     CSV_COLUMNS,
+    AnnotationRecord,
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
@@ -313,9 +314,8 @@ class CvatClient:
                 deleted_images=[],
             )
 
-        all_annotations: list[BBoxAnnotation] = []
+        all_records: list[AnnotationRecord] = []
         all_deleted: list[DeletedImage] = []
-        all_without: list[ImageWithoutAnnotations] = []
 
         for task in tqdm(tasks, desc="Processing tasks", unit="task", leave=False):
             data_meta = api.get_task_data_meta(task.id)
@@ -372,19 +372,20 @@ class CvatClient:
                 if fid not in deleted_ids and fid not in annotated_ids
             ]
 
-            all_annotations.extend(task_annotations)
+            all_records.extend(task_annotations)
+            all_records.extend(task_without)
             all_deleted.extend(task_deleted)
-            all_without.extend(task_without)
 
+        bbox_count = sum(1 for r in all_records if isinstance(r, BBoxAnnotation))
+        without_count = len(all_records) - bbox_count
         logger.trace(
-            f"Fetched {len(all_annotations)} bbox annotation(s), "
+            f"Fetched {bbox_count} bbox annotation(s), "
             f"{len(all_deleted)} deleted image(s), "
-            f"{len(all_without)} image(s) without annotations",
+            f"{without_count} image(s) without annotations",
         )
         return ProjectAnnotations(
-            annotations=all_annotations,
+            annotations=all_records,
             deleted_images=all_deleted,
-            images_without_annotations=all_without,
         )
 
     # ------------------------------------------------------------------

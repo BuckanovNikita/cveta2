@@ -163,16 +163,13 @@ class ImageDownloader:
         """Return ``{image_name: task_id}`` for unique images.
 
         First occurrence wins (keeps a stable task_id per image).
-        Deleted images are not included (they are not in
-        ``annotations`` or ``images_without_annotations``).
+        Deleted images are not included (they live in
+        ``deleted_images``, not ``annotations``).
         """
         result: dict[str, int] = {}
-        for ann in annotations.annotations:
-            if ann.image_name not in result:
-                result[ann.image_name] = ann.task_id
-        for img in annotations.images_without_annotations:
-            if img.image_name not in result:
-                result[img.image_name] = img.task_id
+        for record in annotations.annotations:
+            if record.image_name not in result:
+                result[record.image_name] = record.task_id
         return result
 
     def _filter_cached(

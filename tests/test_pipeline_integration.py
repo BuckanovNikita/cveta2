@@ -10,7 +10,13 @@ import pandas as pd
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
-from cveta2.models import CSV_COLUMNS, DeletedImage, ProjectAnnotations
+from cveta2.models import (
+    CSV_COLUMNS,
+    BBoxAnnotation,
+    DeletedImage,
+    ImageWithoutAnnotations,
+    ProjectAnnotations,
+)
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
@@ -96,10 +102,14 @@ def test_normal_project_annotations(coco8_fixtures: LoadedFixtures) -> None:
     fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
     result = _client(fake).fetch_annotations(fake.project.id)
 
-    assert len(result.annotations) == 30
+    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    without_records = [
+        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
+    ]
+    assert len(bbox_records) == 30
     assert len(result.deleted_images) == 0
-    annotated_frames = {a.frame_id for a in result.annotations}
-    without_frames = {w.frame_id for w in result.images_without_annotations}
+    annotated_frames = {a.frame_id for a in bbox_records}
+    without_frames = {w.frame_id for w in without_records}
     assert annotated_frames | without_frames == set(range(8))
 
 
@@ -110,10 +120,13 @@ def test_all_empty_images_without_annotations(
     fake = _build(coco8_fixtures, ["all-empty"], statuses=["completed"])
     result = _client(fake).fetch_annotations(fake.project.id)
 
-    assert len(result.annotations) == 0
+    without_records = [
+        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
+    ]
+    assert len(result.annotations) == 8
     assert len(result.deleted_images) == 0
-    assert len(result.images_without_annotations) == 8
-    without_names = {w.image_name for w in result.images_without_annotations}
+    assert len(without_records) == 8
+    without_names = {w.image_name for w in without_records}
     assert without_names == set(_IMAGE_NAMES)
 
 
@@ -125,8 +138,12 @@ def test_all_removed_only_deleted(coco8_fixtures: LoadedFixtures) -> None:
     assert len(result.deleted_images) == 8
     assert {d.image_name for d in result.deleted_images} == set(_IMAGE_NAMES)
     # Shapes exist but reference deleted frames -- still extracted
-    assert len(result.annotations) == 30
-    assert len(result.images_without_annotations) == 0
+    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    without_records = [
+        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
+    ]
+    assert len(bbox_records) == 30
+    assert len(without_records) == 0
 
 
 def test_frames_1_2_removed(coco8_fixtures: LoadedFixtures) -> None:
@@ -137,8 +154,12 @@ def test_frames_1_2_removed(coco8_fixtures: LoadedFixtures) -> None:
     deleted_frame_ids = {d.frame_id for d in result.deleted_images}
     assert deleted_frame_ids == {1, 2}
 
-    annotated_frames = {a.frame_id for a in result.annotations}
-    without_frames = {w.frame_id for w in result.images_without_annotations}
+    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    without_records = [
+        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
+    ]
+    annotated_frames = {a.frame_id for a in bbox_records}
+    without_frames = {w.frame_id for w in without_records}
     # Together they cover all 8 frames
     assert (annotated_frames | without_frames | deleted_frame_ids) == set(range(8))
     # without_annotations has no overlap with deleted or annotated
@@ -157,10 +178,14 @@ def test_zero_frame_empty_last_removed(
     result = _client(fake).fetch_annotations(fake.project.id)
 
     assert result.deleted_images[0].frame_id == 7
-    without_frame_ids = {w.frame_id for w in result.images_without_annotations}
+    without_records = [
+        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
+    ]
+    without_frame_ids = {w.frame_id for w in without_records}
     assert 0 in without_frame_ids
-    assert 0 not in {a.frame_id for a in result.annotations}
-    assert len(result.annotations) == 17
+    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    assert 0 not in {a.frame_id for a in bbox_records}
+    assert len(bbox_records) == 17
 
 
 def test_mixed_tasks_aggregation(coco8_fixtures: LoadedFixtures) -> None:
@@ -172,9 +197,13 @@ def test_mixed_tasks_aggregation(coco8_fixtures: LoadedFixtures) -> None:
     )
     result = _client(fake).fetch_annotations(fake.project.id)
 
-    assert len(result.annotations) == 60  # 30 + 0 + 30
+    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    without_records = [
+        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
+    ]
+    assert len(bbox_records) == 60  # 30 + 0 + 30
     assert len(result.deleted_images) == 8  # only from all-removed
-    assert len(result.images_without_annotations) == 8  # only from all-empty
+    assert len(without_records) == 8  # only from all-empty
 
 
 def test_deleted_then_restored(coco8_fixtures: LoadedFixtures) -> None:
@@ -212,10 +241,14 @@ def test_completed_only_filter(coco8_fixtures: LoadedFixtures) -> None:
     result = _client(fake).fetch_annotations(fake.project.id, completed_only=True)
 
     # Only the "normal" (completed) task processed; "all-empty" skipped entirely
-    assert len(result.annotations) == 30
+    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    without_records = [
+        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
+    ]
+    assert len(bbox_records) == 30
     # All 8 frames accounted for across annotations + without_annotations
-    annotated_frames = {a.frame_id for a in result.annotations}
-    without_frames = {w.frame_id for w in result.images_without_annotations}
+    annotated_frames = {a.frame_id for a in bbox_records}
+    without_frames = {w.frame_id for w in without_records}
     assert annotated_frames | without_frames == set(range(8))
 
 

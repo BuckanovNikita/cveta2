@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Discriminator
 
-# Canonical CSV column order shared by BBoxAnnotation and ImageWithoutAnnotations.
-# Both ``to_csv_row()`` implementations must produce dicts with exactly these keys.
+# Canonical CSV column order shared by all AnnotationRecord variants.
+# Every ``to_csv_row()`` implementation must produce dicts with exactly these keys.
 CSV_COLUMNS: tuple[str, ...] = (
     "image_name",
     "image_width",
@@ -74,11 +74,13 @@ class ImageWithoutAnnotations(BaseModel):
     """Image without bbox annotations.
 
     The row is still included in CSV with empty bbox-related fields.
+    Discriminated from ``BBoxAnnotation`` via ``instance_shape="none"``.
     """
 
     image_name: str
     image_width: int
     image_height: int
+    instance_shape: Literal["none"] = "none"
     task_id: int
     task_name: str
     task_status: str = ""
@@ -110,18 +112,23 @@ class DeletedImage(BaseModel):
     image_name: str
 
 
+AnnotationRecord = Annotated[
+    BBoxAnnotation | ImageWithoutAnnotations,
+    Discriminator("instance_shape"),
+]
+"""Discriminated union: ``BBoxAnnotation`` (``instance_shape="box"``) or
+``ImageWithoutAnnotations`` (``instance_shape="none"``)."""
+
+
 class ProjectAnnotations(BaseModel):
     """Result of fetching annotations from a CVAT project."""
 
-    annotations: list[BBoxAnnotation]
+    annotations: list[AnnotationRecord]
     deleted_images: list[DeletedImage]
-    images_without_annotations: list[ImageWithoutAnnotations] = []
 
     def to_csv_rows(self) -> list[dict[str, str | int | float | bool | None]]:
-        """Build flat CSV rows (annotations + images-without-annotations).
+        """Build flat CSV rows from all annotation records.
 
         Each row has the keys from ``CSV_COLUMNS``.
         """
-        rows = [ann.to_csv_row() for ann in self.annotations]
-        rows.extend(img.to_csv_row() for img in self.images_without_annotations)
-        return rows
+        return [record.to_csv_row() for record in self.annotations]

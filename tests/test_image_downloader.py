@@ -145,10 +145,8 @@ def _make_downloader_env(
 ) -> tuple[ImageDownloader, _FakeSdkClient]:
     """Build an ImageDownloader + fake SDK for testing."""
     task_ids = set()
-    for ann in annotations.annotations:
-        task_ids.add(ann.task_id)
-    for img in annotations.images_without_annotations:
-        task_ids.add(img.task_id)
+    for record in annotations.annotations:
+        task_ids.add(record.task_id)
 
     cloud_storage = _FakeCloudStorage(
         cs_id=1,
@@ -343,11 +341,9 @@ def test_download_stats_counts(
         annotations=[
             _ann(10, 0, "new.jpg"),
             _ann(10, 1, "cached.jpg"),
-        ],
-        deleted_images=[],
-        images_without_annotations=[
             _img_no_ann(10, 2, "also-new.jpg"),
         ],
+        deleted_images=[],
     )
     target = tmp_path / "images"
     target.mkdir(parents=True)

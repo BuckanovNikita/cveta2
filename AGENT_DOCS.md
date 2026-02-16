@@ -6,8 +6,8 @@ Short descriptions of project internals and implicit design decisions.
 
 ```
 cveta2/
-  __init__.py   - public API re-exports: CvatClient, fetch_annotations, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations, partition_annotations_df, PartitionResult, CSV_COLUMNS, Cveta2Error, ProjectNotFoundError, TaskNotFoundError, InteractiveModeRequiredError
-  models.py     - Pydantic models: BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations; CSV_COLUMNS tuple defining the canonical CSV column order; ProjectAnnotations.to_csv_rows() method
+  __init__.py   - public API re-exports: CvatClient, fetch_annotations, AnnotationRecord, BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations, partition_annotations_df, PartitionResult, CSV_COLUMNS, Cveta2Error, ProjectNotFoundError, TaskNotFoundError, InteractiveModeRequiredError
+  models.py     - Pydantic models: BBoxAnnotation, DeletedImage, ImageWithoutAnnotations, ProjectAnnotations; AnnotationRecord discriminated union (BBoxAnnotation | ImageWithoutAnnotations, discriminator=instance_shape); CSV_COLUMNS tuple defining the canonical CSV column order; ProjectAnnotations.to_csv_rows() method
   exceptions.py - Custom exception hierarchy: Cveta2Error (base), ProjectNotFoundError, TaskNotFoundError, InteractiveModeRequiredError
   dataset_partition.py - partition_annotations_df(): pandas-based partitioning of annotation DataFrame into dataset/obsolete/in_progress; PartitionResult dataclass; dates parsed via pd.to_datetime(utc=True) for robust comparison
   config.py     - CvatConfig pydantic model; loads/merges preset < config file < env; ImageCacheConfig pydantic model (per-project image cache directory mapping); load_image_cache_config() / save_image_cache_config(); UploadConfig pydantic model (images_per_job default 100); load_upload_config(); get_projects_cache_path(); is_interactive_disabled() / require_interactive() guards; raises InteractiveModeRequiredError; _load_preset_data() loads bundled preset from cveta2/presets/default.yaml via importlib.resources
@@ -73,7 +73,7 @@ Frame names from `data_meta.frames` correspond to S3 object keys relative to the
 
 Image download is a separate step after annotation fetching, reusing the same `CvatClient` SDK connection. The pipeline in `ImageDownloader.download()`:
 
-1. **Collect frames** — gather unique `(task_id, frame_id, image_name)` tuples from `annotations.annotations` and `annotations.images_without_annotations`. Deleted images are excluded.
+1. **Collect frames** — gather unique `(image_name, task_id)` pairs from `annotations.annotations` (which contains both `BBoxAnnotation` and `ImageWithoutAnnotations` records). Deleted images are excluded.
 2. **Partition cached** — for each frame, check if `target_dir/image_name` already exists on disk. If so, increment `stats.cached` and skip. Group remaining frames by `task_id`.
 3. **Resolve cloud storages** — for each task with pending downloads: call `sdk_client.tasks.retrieve(task_id)`, read `source_storage`, extract `cloud_storage_id`. Then `cloudstorages_api.retrieve(cs_id)` → `parse_cloud_storage()` → `CloudStorageInfo`. Results are cached per `cloud_storage_id` within the session. Tasks without `source_storage` are counted as `failed`.
 4. **Create S3 clients** — one `boto3.Session().client("s3", endpoint_url=...)` per unique `(endpoint_url, bucket)` pair. S3 credentials come from the standard boto3 chain (`~/.aws/credentials`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars, IAM roles). No S3 credentials are stored in the cveta2 config.
@@ -160,10 +160,11 @@ upload:
 
 ## Data model notes
 
+- `AnnotationRecord` — Pydantic discriminated union (`Annotated[BBoxAnnotation | ImageWithoutAnnotations, Discriminator("instance_shape")]`). `BBoxAnnotation` has `instance_shape="box"`, `ImageWithoutAnnotations` has `instance_shape="none"`. Both share `image_name`, `task_id`, `frame_id` and implement `to_csv_row()`.
 - `BBoxAnnotation` includes task metadata (`task_id`, `task_name`, `task_status`, `task_updated_date`), source metadata (`created_by_username`, `source`, `annotation_id`), and frame metadata (`frame_id`, `subset`, image size).
 - `BBoxAnnotation.to_csv_row()` serializes `attributes` as a JSON string (`ensure_ascii=False`) so non-ASCII attribute values remain readable in CSV.
 - `ImageWithoutAnnotations` — frames with no bbox annotations; included in CSV via `to_csv_row()` with None for bbox/annotation fields.
-- `ProjectAnnotations` contains `annotations`, `deleted_images`, and `images_without_annotations`.
+- `ProjectAnnotations` contains `annotations: list[AnnotationRecord]` (single list holding both `BBoxAnnotation` and `ImageWithoutAnnotations`) and `deleted_images: list[DeletedImage]`.
 - `DeletedImage` — record of a deleted frame: `task_id`, `task_name`, `task_status`, `task_updated_date`, `frame_id`, `image_name`.
 - `DownloadStats` — result counters for an image download run: `downloaded`, `cached`, `failed`, `total`.
 
@@ -203,7 +204,7 @@ upload:
 - **Tracks are intentionally not processed.** Track-based annotations (interpolated/linked bboxes in `RawAnnotations.tracks`) are fetched from CVAT but skipped during extraction. cveta2 targets per-frame bbox exports, not temporal tracking data. A warning is logged when tracks are present. The `RawTrack`/`RawTrackedShape` DTOs are retained because the fixture infrastructure and export scripts need the complete CVAT data model.
 - `_collect_shapes` processes shapes regardless of frame deletion status — shapes on deleted frames are still extracted as `BBoxAnnotation`. Deletion filtering is handled later by `partition_annotations_df` via the `deleted_images` list.
 - `fetch_annotations()` wrapper returns a `pd.DataFrame` (not `ProjectAnnotations`); for structured output use `CvatClient.fetch_annotations()`.
-- `ProjectAnnotations.to_csv_rows()` merges `BBoxAnnotation` and `ImageWithoutAnnotations` rows into a single flat list for CSV. The legacy `_project_annotations_to_csv_rows()` wrapper in `client.py` delegates to this method.
+- `ProjectAnnotations.to_csv_rows()` iterates the single `annotations` list (which contains both `BBoxAnnotation` and `ImageWithoutAnnotations` via `AnnotationRecord` union) and calls `to_csv_row()` on each. The legacy `_project_annotations_to_csv_rows()` wrapper in `client.py` delegates to this method.
 - `ensure_credentials()` on `CvatConfig` returns a new copy with prompted values — it never mutates in place.
 - If `token` is present, `ensure_credentials()` does not prompt for username/password.
 - `main.py` kept at project root for backwards compatibility with `python main.py fetch ...` invocations.

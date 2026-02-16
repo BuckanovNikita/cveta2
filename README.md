@@ -420,9 +420,10 @@ with CvatClient(cfg) as client:
 
 `CvatClient.fetch_annotations()` возвращает `ProjectAnnotations`:
 
-- `annotations: list[BBoxAnnotation]`
+- `annotations: list[AnnotationRecord]` — единый список из `BBoxAnnotation` и `ImageWithoutAnnotations` (discriminated union по полю `instance_shape`)
 - `deleted_images: list[DeletedImage]`
-- `images_without_annotations: list[ImageWithoutAnnotations]`
+
+`AnnotationRecord` — это `BBoxAnnotation` (`instance_shape="box"`) или `ImageWithoutAnnotations` (`instance_shape="none"`). Оба типа содержат `image_name`, `task_id`, `frame_id` и реализуют `to_csv_row()`.
 
 ### BBoxAnnotation
 
@@ -431,7 +432,7 @@ with CvatClient(cfg) as client:
 | `image_name` | `str` | Имя файла изображения |
 | `image_width` | `int` | Ширина изображения (px) |
 | `image_height` | `int` | Высота изображения (px) |
-| `instance_shape` | `"box"` | Тип фигуры (всегда `"box"`) |
+| `instance_shape` | `"box"` | Тип фигуры (дискриминатор) |
 | `instance_label` | `str` | Название метки |
 | `bbox_x_tl` | `float` | X верхнего левого угла |
 | `bbox_y_tl` | `float` | Y верхнего левого угла |

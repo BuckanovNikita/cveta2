@@ -11,6 +11,7 @@ from cveta2.exceptions import (
 )
 from cveta2.models import (
     CSV_COLUMNS,
+    AnnotationRecord,
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
@@ -19,6 +20,7 @@ from cveta2.models import (
 
 __all__ = [
     "CSV_COLUMNS",
+    "AnnotationRecord",
     "BBoxAnnotation",
     "CvatApiPort",
     "CvatClient",
