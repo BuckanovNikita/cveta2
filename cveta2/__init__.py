@@ -16,6 +16,7 @@ from cveta2.models import (
     DeletedImage,
     ImageWithoutAnnotations,
     ProjectAnnotations,
+    Split,
 )
 
 __all__ = [
@@ -31,6 +32,7 @@ __all__ = [
     "PartitionResult",
     "ProjectAnnotations",
     "ProjectNotFoundError",
+    "Split",
     "TaskNotFoundError",
     "fetch_annotations",
     "partition_annotations_df",

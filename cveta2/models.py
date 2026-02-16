@@ -7,6 +7,9 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Discriminator
 
+Split = Literal["train", "val", "test"]
+"""Allowed values for the ``split`` field (our convention for dataset splits)."""
+
 # Canonical CSV column order shared by all AnnotationRecord variants.
 # Every ``to_csv_row()`` implementation must produce dicts with exactly these keys.
 CSV_COLUMNS: tuple[str, ...] = (
@@ -25,6 +28,7 @@ CSV_COLUMNS: tuple[str, ...] = (
     "task_updated_date",
     "created_by_username",
     "frame_id",
+    "split",
     "subset",
     "occluded",
     "z_order",
@@ -54,6 +58,7 @@ class BBoxAnnotation(BaseModel):
     task_updated_date: str = ""
     created_by_username: str = ""
     frame_id: int
+    split: Split | None = None
     subset: str
     occluded: bool
     z_order: int
@@ -86,6 +91,7 @@ class ImageWithoutAnnotations(BaseModel):
     task_status: str = ""
     task_updated_date: str = ""
     frame_id: int
+    split: Split | None = None
     subset: str = ""
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:

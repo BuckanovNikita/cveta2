@@ -162,7 +162,8 @@ upload:
 ## Data model notes
 
 - `AnnotationRecord` — Pydantic discriminated union (`Annotated[BBoxAnnotation | ImageWithoutAnnotations, Discriminator("instance_shape")]`). `BBoxAnnotation` has `instance_shape="box"`, `ImageWithoutAnnotations` has `instance_shape="none"`. Both share `image_name`, `task_id`, `frame_id` and implement `to_csv_row()`.
-- `BBoxAnnotation` includes task metadata (`task_id`, `task_name`, `task_status`, `task_updated_date`), source metadata (`created_by_username`, `source`, `annotation_id`), and frame metadata (`frame_id`, `subset`, image size).
+- `BBoxAnnotation` includes task metadata (`task_id`, `task_name`, `task_status`, `task_updated_date`), source metadata (`created_by_username`, `source`, `annotation_id`), frame metadata (`frame_id`, `subset`, image size), and dataset metadata (`split`).
+- `split` field (`Split | None`, default `None`) — our convention for dataset splits (`train`/`val`/`test`). Semantically equivalent to CVAT's `subset` but named differently by project convention. Filled with `None` on download, ignored on upload. The `Split` type alias is `Literal["train", "val", "test"]` defined in `models.py` and re-exported from `__init__.py`.
 - `BBoxAnnotation.to_csv_row()` serializes `attributes` as a JSON string (`ensure_ascii=False`) so non-ASCII attribute values remain readable in CSV.
 - `ImageWithoutAnnotations` — frames with no bbox annotations; included in CSV via `to_csv_row()` with None for bbox/annotation fields.
 - `ProjectAnnotations` contains `annotations: list[AnnotationRecord]` (single list holding both `BBoxAnnotation` and `ImageWithoutAnnotations`) and `deleted_images: list[DeletedImage]`.
