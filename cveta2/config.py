@@ -222,50 +222,109 @@ def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig
     return ImageCacheConfig(projects={k: Path(str(v)) for k, v in raw_ic.items()})
 
 
+class IgnoredTask(BaseModel):
+    """A single ignored task entry (id + cached name + optional description)."""
+
+    id: int
+    name: str
+    description: str = ""
+
+
 class IgnoreConfig(BaseModel):
-    """Per-project mapping of task IDs to ignore during fetch.
+    """Per-project mapping of ignored tasks.
 
     Ignored tasks are treated as permanently in-progress and skipped entirely.
+    Each entry stores both the task ID and its human-readable name.
     """
 
-    projects: dict[str, list[int]] = {}
+    projects: dict[str, list[IgnoredTask]] = {}
 
     def get_ignored_tasks(self, project_name: str) -> list[int]:
         """Return the list of ignored task IDs for *project_name*."""
+        return [t.id for t in self.projects.get(project_name, [])]
+
+    def get_ignored_entries(self, project_name: str) -> list[IgnoredTask]:
+        """Return the full ignored-task entries for *project_name*."""
         return list(self.projects.get(project_name, []))
 
-    def add_task(self, project_name: str, task_id: int) -> None:
-        """Add *task_id* to the ignore list for *project_name*."""
-        tasks = self.projects.setdefault(project_name, [])
-        if task_id not in tasks:
-            tasks.append(task_id)
+    def add_task(
+        self,
+        project_name: str,
+        task_id: int,
+        task_name: str,
+        description: str = "",
+    ) -> None:
+        """Add a task to the ignore list for *project_name*."""
+        entries = self.projects.setdefault(project_name, [])
+        if not any(e.id == task_id for e in entries):
+            entries.append(
+                IgnoredTask(id=task_id, name=task_name, description=description)
+            )
 
     def remove_task(self, project_name: str, task_id: int) -> bool:
-        """Remove *task_id* from the ignore list for *project_name*.
+        """Remove a task from the ignore list for *project_name*.
 
         Returns True if the task was found and removed.
         """
-        tasks = self.projects.get(project_name, [])
-        if task_id in tasks:
-            tasks.remove(task_id)
-            if not tasks:
-                del self.projects[project_name]
-            return True
+        entries = self.projects.get(project_name, [])
+        for i, e in enumerate(entries):
+            if e.id == task_id:
+                entries.pop(i)
+                if not entries:
+                    del self.projects[project_name]
+                return True
         return False
 
 
+def _parse_ignore_entry(raw: object) -> IgnoredTask | None:
+    """Parse a single ignore entry (new dict format or legacy bare int)."""
+    if isinstance(raw, dict) and "id" in raw:
+        try:
+            return IgnoredTask(
+                id=int(raw["id"]),
+                name=str(raw.get("name", "")),
+                description=str(raw.get("description", "")),
+            )
+        except (TypeError, ValueError):
+            return None
+    if isinstance(raw, int):
+        return IgnoredTask(id=raw, name="")
+    if isinstance(raw, str) and raw.strip().isdigit():
+        return IgnoredTask(id=int(raw), name="")
+    return None
+
+
 def load_ignore_config(config_path: Path | None = None) -> IgnoreConfig:
-    """Load the ``ignore`` section from the config YAML."""
+    """Load the ``ignore`` section from the config YAML.
+
+    Supports both the new format (list of ``{id, name}`` dicts) and the
+    legacy format (list of bare ints).
+    """
     path = config_path if config_path is not None else _config_path()
     data = _load_raw_yaml(path)
     raw_ignore = data.get("ignore")
     if not isinstance(raw_ignore, dict):
         return IgnoreConfig()
-    projects: dict[str, list[int]] = {}
-    for project_name, task_ids in raw_ignore.items():
-        if isinstance(task_ids, list):
-            projects[str(project_name)] = [int(tid) for tid in task_ids]
+    projects: dict[str, list[IgnoredTask]] = {}
+    for project_name, entries in raw_ignore.items():
+        if not isinstance(entries, list):
+            continue
+        parsed: list[IgnoredTask] = []
+        for item in entries:
+            entry = _parse_ignore_entry(item)
+            if entry is not None:
+                parsed.append(entry)
+        if parsed:
+            projects[str(project_name)] = parsed
     return IgnoreConfig(projects=projects)
+
+
+def _serialize_ignore_entry(entry: IgnoredTask) -> dict[str, object]:
+    """Serialize an ``IgnoredTask`` to a dict for YAML output."""
+    data: dict[str, object] = {"id": entry.id, "name": entry.name}
+    if entry.description:
+        data["description"] = entry.description
+    return data
 
 
 def save_ignore_config(
@@ -274,6 +333,7 @@ def save_ignore_config(
 ) -> Path:
     """Update only the ``ignore`` section of the config YAML.
 
+    Always writes the new ``{id, name}`` dict format.
     Preserves the existing ``cvat``, ``image_cache`` and other sections.
     """
     path = config_path if config_path is not None else _config_path()
@@ -281,7 +341,10 @@ def save_ignore_config(
 
     existing = _load_raw_yaml(path)
     if ignore.projects:
-        existing["ignore"] = dict(ignore.projects)
+        existing["ignore"] = {
+            proj: [_serialize_ignore_entry(e) for e in entries]
+            for proj, entries in ignore.projects.items()
+        }
     else:
         existing.pop("ignore", None)
 

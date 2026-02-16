@@ -35,7 +35,7 @@ Configurable via ``CVETA2_DATA_TIMEOUT`` env var (default 60).
 """
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
     from contextlib import AbstractContextManager
     from pathlib import Path
     from types import TracebackType
@@ -256,9 +256,9 @@ class CvatClient:
         raise TaskNotFoundError(f"Task not found: {s!r}. Available tasks: {available}")
 
     @staticmethod
-    def _resolve_task_selectors(
+    def resolve_task_selectors(
         tasks: list[RawTask],
-        selectors: list[int | str],
+        selectors: Sequence[int | str],
     ) -> list[RawTask]:
         """Resolve a list of task selectors to matching tasks.
 
@@ -300,7 +300,7 @@ class CvatClient:
             tasks = [t for t in tasks if t.id not in ignore_task_ids]
 
         if task_selector is not None:
-            tasks = CvatClient._resolve_task_selectors(tasks, task_selector)
+            tasks = CvatClient.resolve_task_selectors(tasks, task_selector)
             names = ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
             logger.info(f"Selected {len(tasks)} task(s): {names}")
 

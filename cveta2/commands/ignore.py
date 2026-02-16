@@ -8,16 +8,23 @@ from typing import TYPE_CHECKING
 import questionary
 from loguru import logger
 
+from cveta2.client import CvatClient
+from cveta2.commands._helpers import load_config, require_host
+from cveta2.commands._task_selector import build_task_choices
 from cveta2.config import (
     IgnoreConfig,
+    IgnoredTask,
     load_ignore_config,
     require_interactive,
     save_ignore_config,
 )
+from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import ProjectInfo, load_projects_cache
 
 if TYPE_CHECKING:
     import argparse
+
+    from cveta2._client.dtos import RawTask
 
 _ACTION_ADD = "add"
 _ACTION_REMOVE = "remove"
@@ -26,48 +33,80 @@ _ACTION_EXIT = "exit"
 
 def run_ignore(args: argparse.Namespace) -> None:
     """Run the ``ignore`` command: add, remove, or interactive menu."""
+    cfg = load_config()
+    require_host(cfg)
     ignore_cfg = load_ignore_config()
 
-    if args.project is not None:
-        project_name = args.project.strip()
-    else:
-        project_name = _select_project(ignore_cfg)
+    with CvatClient(cfg) as client:
+        project_id, project_name = _resolve_project(args, client, ignore_cfg)
 
-    # Non-interactive path: --add / --remove flags
-    if args.add:
-        for task_id in args.add:
-            ignore_cfg.add_task(project_name, task_id)
-            logger.info(
-                f"Задача {task_id} добавлена в ignore-список проекта {project_name!r}"
-            )
-        save_ignore_config(ignore_cfg)
-        return
-
-    if args.remove:
-        for task_id in args.remove:
-            removed = ignore_cfg.remove_task(project_name, task_id)
-            if removed:
+        if args.add:
+            description = (args.description or "").strip()
+            resolved = _resolve_selectors(client, project_id, args.add)
+            for task in resolved:
+                ignore_cfg.add_task(project_name, task.id, task.name, description)
                 logger.info(
-                    f"Задача {task_id} удалена из ignore-списка "
-                    f"проекта {project_name!r}"
+                    f"Задача {task.name!r} (id={task.id}) добавлена "
+                    f"в ignore-список проекта {project_name!r}"
                 )
-            else:
-                logger.warning(
-                    f"Задача {task_id} не найдена в ignore-списке "
-                    f"проекта {project_name!r}"
-                )
-        save_ignore_config(ignore_cfg)
-        return
+            save_ignore_config(ignore_cfg)
+            return
 
-    # Interactive mode
-    _interactive_loop(ignore_cfg, project_name)
+        if args.remove:
+            resolved = _resolve_selectors(client, project_id, args.remove)
+            for task in resolved:
+                removed = ignore_cfg.remove_task(project_name, task.id)
+                if removed:
+                    logger.info(
+                        f"Задача {task.name!r} (id={task.id}) удалена "
+                        f"из ignore-списка проекта {project_name!r}"
+                    )
+                else:
+                    logger.warning(
+                        f"Задача {task.name!r} (id={task.id}) не найдена "
+                        f"в ignore-списке проекта {project_name!r}"
+                    )
+            save_ignore_config(ignore_cfg)
+            return
+
+        _interactive_loop(client, project_id, project_name, ignore_cfg)
 
 
-def _select_project(ignore_cfg: IgnoreConfig) -> str:
-    """Interactive project selection from cache and existing ignore entries."""
+# ------------------------------------------------------------------
+# Project resolution
+# ------------------------------------------------------------------
+
+
+def _resolve_project(
+    args: argparse.Namespace,
+    client: CvatClient,
+    ignore_cfg: IgnoreConfig,
+) -> tuple[int, str]:
+    """Resolve project ID and name from CLI args or interactive TUI."""
+    if args.project is not None:
+        cached = load_projects_cache()
+        try:
+            project_id = client.resolve_project_id(args.project.strip(), cached=cached)
+        except Cveta2Error as e:
+            sys.exit(str(e))
+        project_name = args.project.strip()
+        if project_name.isdigit():
+            for p in load_projects_cache():
+                if p.id == project_id:
+                    project_name = p.name
+                    break
+        return project_id, project_name
+
+    return _select_project_tui(client, ignore_cfg)
+
+
+def _select_project_tui(
+    client: CvatClient,
+    ignore_cfg: IgnoreConfig,
+) -> tuple[int, str]:
+    """Interactive project selection, returning ``(project_id, project_name)``."""
     require_interactive("Pass --project / -p to specify the project name.")
 
-    # Collect known project names from the projects cache and the ignore config
     cached_projects = load_projects_cache()
     known_names = _build_project_names(cached_projects, ignore_cfg)
 
@@ -89,7 +128,14 @@ def _select_project(ignore_cfg: IgnoreConfig) -> str:
 
     if answer is None:
         sys.exit("Выбор отменён.")
-    return answer
+
+    project_name = answer
+    cached = load_projects_cache()
+    try:
+        project_id = client.resolve_project_id(project_name, cached=cached)
+    except Cveta2Error as e:
+        sys.exit(str(e))
+    return project_id, project_name
 
 
 def _build_project_names(
@@ -105,32 +151,65 @@ def _build_project_names(
     return sorted(names)
 
 
+# ------------------------------------------------------------------
+# Selector resolution
+# ------------------------------------------------------------------
+
+
+def _resolve_selectors(
+    client: CvatClient,
+    project_id: int,
+    selectors: list[str],
+) -> list[RawTask]:
+    """Fetch project tasks and resolve selectors to ``RawTask`` objects."""
+    tasks = client.list_project_tasks(project_id)
+    return CvatClient.resolve_task_selectors(tasks, selectors)
+
+
+# ------------------------------------------------------------------
+# Interactive loop
+# ------------------------------------------------------------------
+
+
+def _format_ignored_entry(e: IgnoredTask) -> str:
+    """Build a human-readable label for an ignored task entry."""
+    label = f"{e.name!r} (id={e.id})" if e.name else f"id={e.id}"
+    if e.description:
+        label += f" — {e.description}"
+    return label
+
+
 def _print_ignored_list(ignore_cfg: IgnoreConfig, project_name: str) -> None:
     """Display the current ignore list for *project_name*."""
-    ignored = ignore_cfg.get_ignored_tasks(project_name)
-    if not ignored:
+    entries = ignore_cfg.get_ignored_entries(project_name)
+    if not entries:
         logger.info(f"Проект {project_name!r}: ignore-список пуст")
     else:
-        logger.info(f"Проект {project_name!r}: игнорируемые задачи ({len(ignored)}):")
-        for task_id in ignored:
-            logger.info(f"  - task {task_id}")
+        logger.info(f"Проект {project_name!r}: игнорируемые задачи ({len(entries)}):")
+        for e in entries:
+            logger.info(f"  - {_format_ignored_entry(e)}")
 
 
-def _interactive_loop(ignore_cfg: IgnoreConfig, project_name: str) -> None:
+def _interactive_loop(
+    client: CvatClient,
+    project_id: int,
+    project_name: str,
+    ignore_cfg: IgnoreConfig,
+) -> None:
     """Run the interactive TUI loop for managing the ignore list."""
     changed = False
 
     while True:
         _print_ignored_list(ignore_cfg, project_name)
 
-        ignored = ignore_cfg.get_ignored_tasks(project_name)
+        ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
         choices = [
             questionary.Choice(
                 title="Добавить задачи в ignore-список",
                 value=_ACTION_ADD,
             ),
         ]
-        if ignored:
+        if ignored_ids:
             choices.append(
                 questionary.Choice(
                     title="Убрать задачи из ignore-списка",
@@ -152,37 +231,60 @@ def _interactive_loop(ignore_cfg: IgnoreConfig, project_name: str) -> None:
             break
 
         if action == _ACTION_ADD:
-            _interactive_add(ignore_cfg, project_name)
-            changed = True
+            added = _interactive_add(client, project_id, project_name, ignore_cfg)
+            if added:
+                changed = True
 
         elif action == _ACTION_REMOVE:
-            removed_any = _interactive_remove(ignore_cfg, project_name)
-            if removed_any:
+            removed = _interactive_remove(ignore_cfg, project_name)
+            if removed:
                 changed = True
 
     if changed:
         save_ignore_config(ignore_cfg)
 
 
-def _interactive_add(ignore_cfg: IgnoreConfig, project_name: str) -> None:
-    """Prompt the user to enter task IDs to add."""
-    raw = questionary.text(
-        "Введите ID задач через пробел:",
-    ).ask()
-    if not raw:
-        return
+def _interactive_add(
+    client: CvatClient,
+    project_id: int,
+    project_name: str,
+    ignore_cfg: IgnoreConfig,
+) -> bool:
+    """Show TUI checkbox of project tasks to add to the ignore list.
 
-    for token in raw.split():
-        cleaned = token.strip().rstrip(",")
-        if not cleaned:
-            continue
-        try:
-            task_id = int(cleaned)
-        except ValueError:
-            logger.warning(f"Пропущено: {cleaned!r} — не число")
-            continue
-        ignore_cfg.add_task(project_name, task_id)
-        logger.info(f"Задача {task_id} добавлена")
+    Unlike ``select_tasks_tui``, a cancel or empty selection here returns
+    False instead of terminating the program, so the interactive loop can
+    continue.
+    """
+    ignored_ids = set(ignore_cfg.get_ignored_tasks(project_name))
+    tasks = client.list_project_tasks(project_id)
+    if ignored_ids:
+        tasks = [t for t in tasks if t.id not in ignored_ids]
+    if not tasks:
+        logger.info("Нет доступных задач для добавления.")
+        return False
+
+    choices = build_task_choices(tasks)
+    answer = questionary.checkbox(
+        "Выберите задачи для добавления в ignore-список:",
+        choices=choices,
+        use_jk_keys=False,
+        use_search_filter=True,
+    ).ask()
+    if not answer:
+        return False
+
+    description = (
+        questionary.text("Описание / причина (Enter — пропустить):").ask() or ""
+    ).strip()
+
+    tasks_by_id = {t.id: t for t in tasks}
+    for val in answer:
+        task = tasks_by_id.get(int(val))
+        if task is not None:
+            ignore_cfg.add_task(project_name, task.id, task.name, description)
+            logger.info(f"Задача {task.name!r} (id={task.id}) добавлена")
+    return True
 
 
 def _interactive_remove(
@@ -190,15 +292,23 @@ def _interactive_remove(
     project_name: str,
 ) -> bool:
     """Show a checkbox list of ignored tasks to remove. Returns True if any removed."""
-    ignored = ignore_cfg.get_ignored_tasks(project_name)
-    if not ignored:
+    entries = ignore_cfg.get_ignored_entries(project_name)
+    if not entries:
         logger.info("Ignore-список пуст — нечего удалять.")
         return False
 
-    choices = [questionary.Choice(title=f"task {tid}", value=tid) for tid in ignored]
+    choices = [
+        questionary.Choice(
+            title=_format_ignored_entry(e),
+            value=e.id,
+        )
+        for e in entries
+    ]
     selected: list[int] | None = questionary.checkbox(
         "Выберите задачи для удаления из ignore-списка:",
         choices=choices,
+        use_jk_keys=False,
+        use_search_filter=True,
     ).ask()
 
     if not selected:
@@ -206,6 +316,6 @@ def _interactive_remove(
 
     for task_id in selected:
         ignore_cfg.remove_task(project_name, task_id)
-        logger.info(f"Задача {task_id} удалена")
+        logger.info(f"Задача id={task_id} удалена")
 
     return True

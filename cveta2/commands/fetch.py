@@ -17,6 +17,7 @@ from cveta2.commands._helpers import (
     write_deleted_txt,
     write_df_csv,
 )
+from cveta2.commands._task_selector import select_tasks_tui
 from cveta2.config import (
     is_interactive_disabled,
     load_ignore_config,
@@ -31,7 +32,6 @@ from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_project
 if TYPE_CHECKING:
     import argparse
 
-    from cveta2._client.dtos import RawTask
     from cveta2.models import ProjectAnnotations
 
 _RESCAN_VALUE = "__rescan__"
@@ -279,49 +279,8 @@ def _resolve_task_selector(
         explicit: list[int | str] = [v.strip() for v in raw if v.strip()]
         if explicit:
             return explicit
-    return _select_tasks_tui(client, project_id, ignore_task_ids)
-
-
-def _select_tasks_tui(
-    client: CvatClient,
-    project_id: int,
-    ignore_task_ids: set[int] | None,
-) -> list[int | str]:
-    """Interactive multi-task selection via TUI checkbox."""
-    require_interactive(
-        "Pass task ID(s) or name(s) with --task / -t to specify task(s)."
-    )
-    tasks = client.list_project_tasks(project_id)
-    if ignore_task_ids:
-        tasks = [t for t in tasks if t.id not in ignore_task_ids]
-    if not tasks:
-        sys.exit("Нет доступных задач в этом проекте.")
-    choices = _build_task_choices(tasks)
-    answer = questionary.checkbox(
-        "Выберите задачу (задачи):",
-        choices=choices,
-        use_jk_keys=False,
-        use_search_filter=True,
-    ).ask()
-    if answer is None:
-        sys.exit("Выбор отменён.")
-    selected: list[int | str] = [int(v) for v in answer]
-    if not selected:
-        sys.exit("Задачи не выбраны.")
-    return selected
-
-
-def _build_task_choices(
-    tasks: list[RawTask],
-) -> list[questionary.Choice]:
-    """Build questionary choices from a task list."""
-    return [
-        questionary.Choice(
-            title=f"{t.name} (id={t.id}, {t.status})",
-            value=t.id,
-        )
-        for t in tasks
-    ]
+    selected = select_tasks_tui(client, project_id, exclude_ids=ignore_task_ids)
+    return [t.id for t in selected]
 
 
 def _warn_ignored_tasks(project_name: str) -> set[int] | None:

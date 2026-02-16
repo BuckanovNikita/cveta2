@@ -16,7 +16,7 @@ from cveta2.commands.fetch import (
     _warn_ignored_tasks,
     run_fetch_task,
 )
-from cveta2.config import CvatConfig, IgnoreConfig, ImageCacheConfig
+from cveta2.config import CvatConfig, IgnoreConfig, IgnoredTask, ImageCacheConfig
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import CSV_COLUMNS
 from tests.fixtures.fake_cvat_api import FakeCvatApi
@@ -157,7 +157,7 @@ class TestResolveTaskSelector:
 
         with (
             patch(
-                f"{_MODULE}.require_interactive",
+                "cveta2.commands._task_selector.require_interactive",
                 side_effect=InteractiveModeRequiredError("non-interactive"),
             ),
             pytest.raises(InteractiveModeRequiredError),
@@ -172,7 +172,7 @@ class TestResolveTaskSelector:
 
         with (
             patch(
-                f"{_MODULE}.require_interactive",
+                "cveta2.commands._task_selector.require_interactive",
                 side_effect=InteractiveModeRequiredError("non-interactive"),
             ),
             pytest.raises(InteractiveModeRequiredError),
@@ -214,7 +214,15 @@ class TestWarnIgnoredTasks:
 
     def test_returns_set_of_ignored_ids(self) -> None:
         """Returns a set of task IDs from the ignore config."""
-        ignore_cfg = IgnoreConfig(projects={"my-project": [10, 20, 30]})
+        ignore_cfg = IgnoreConfig(
+            projects={
+                "my-project": [
+                    IgnoredTask(id=10, name="t10"),
+                    IgnoredTask(id=20, name="t20"),
+                    IgnoredTask(id=30, name="t30"),
+                ],
+            },
+        )
         with patch(
             f"{_MODULE}.load_ignore_config",
             return_value=ignore_cfg,
@@ -225,7 +233,9 @@ class TestWarnIgnoredTasks:
 
     def test_different_project_returns_none(self) -> None:
         """Returns None when the project is not in the ignore config."""
-        ignore_cfg = IgnoreConfig(projects={"other-project": [10]})
+        ignore_cfg = IgnoreConfig(
+            projects={"other-project": [IgnoredTask(id=10, name="t10")]},
+        )
         with patch(
             f"{_MODULE}.load_ignore_config",
             return_value=ignore_cfg,
@@ -437,7 +447,11 @@ class TestRunFetchTaskIntegration:
             statuses=["completed", "completed"],
         )
         ignored_task_id = fake.tasks[1].id
-        ignore_cfg = IgnoreConfig(projects={fake.project.name: [ignored_task_id]})
+        ignore_cfg = IgnoreConfig(
+            projects={
+                fake.project.name: [IgnoredTask(id=ignored_task_id, name="ignored")],
+            },
+        )
         args = _make_args(
             project=str(fake.project.id),
             task=[fake.tasks[0].name],

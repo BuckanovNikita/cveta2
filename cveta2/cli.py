@@ -320,16 +320,23 @@ class CliApp:
         group.add_argument(
             "--add",
             nargs="+",
-            type=int,
-            metavar="TASK_ID",
-            help="Add task ID(s) to the ignore list.",
+            type=str,
+            metavar="TASK",
+            help="Add task(s) to the ignore list (ID or name).",
         )
         group.add_argument(
             "--remove",
             nargs="+",
-            type=int,
-            metavar="TASK_ID",
-            help="Remove task ID(s) from the ignore list.",
+            type=str,
+            metavar="TASK",
+            help="Remove task(s) from the ignore list (ID or name).",
+        )
+        parser.add_argument(
+            "--description",
+            "-d",
+            type=str,
+            default=None,
+            help="Description / reason for ignoring (used with --add).",
         )
 
     def _add_doctor_parser(
