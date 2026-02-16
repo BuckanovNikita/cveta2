@@ -32,6 +32,7 @@ cveta2/
     setup.py    - run_setup(): interactive wizard for CVAT credentials and core settings (host, org, auth); run_setup_cache(): interactive per-project image cache directory setup for all known projects (fetches project list from CVAT if cache is empty); _ensure_projects_list() helper loads or fetches projects
     fetch.py    - run_fetch(): fetch all project annotations + download images; run_fetch_task(): fetch annotations for selected task(s), uses write_dataset_and_deleted() for output; _resolve_project() uses resolve_project_from_args() and select_project_tui() from _helpers; _download_images(), _write_output(); _resolve_task_selector() + select_tasks_tui for multi-task selection; _resolve_images_dir() for image cache resolution; _resolve_output_dir() for overwrite prompt; _write_partition_result() for partitioned CSV/TXT export
     ignore.py   - run_ignore(): manage per-project task ignore lists (add/remove/list); reads and writes the `ignore` section of config YAML
+    merge.py    - run_merge(): merge two dataset CSVs (old + new) with conflict resolution (new-wins or by-time); _propagate_splits() copies split values from old to merged rows with null split; warns when old has no split data or when both sides have non-null split for common images
     s3_sync.py  - run_s3_sync(): sync images from S3 cloud storage to local cache for configured projects
     doctor.py   - run_doctor(): health checks for config, AWS credentials, and image cache group permissions; check_config(), check_aws_credentials(), check_cache_permissions()
   cli.py        - slim argparse CLI entry point; CliApp class with parser definitions (fetch, fetch-task, setup, setup-cache, s3-sync, upload, merge, ignore, doctor) and dispatch to commands/ modules; shared fetch args extracted into _add_common_fetch_args(); all command logic lives in commands/
@@ -133,6 +134,14 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
   - Images per job (`segment_size`) controlled by `upload.images_per_job` in config (default 100). CVAT automatically splits the task into jobs of that size.
   - Always requires interactive mode (class selection is mandatory).
 
+- `merge` — merges two dataset CSVs (`--old` and `--new`) into one output CSV. Images unique to either side are kept; for images in both, `--new` wins by default. Arguments:
+  - `--old` (required) — path to the old (existing) dataset CSV.
+  - `--new` (required) — path to the new (freshly downloaded) dataset CSV.
+  - `--output` / `-o` (required) — path for the merged output CSV.
+  - `--deleted` — path to `deleted.txt`; listed images are excluded from output.
+  - `--by-time` — for conflicting images, compare `task_updated_date` and keep the more recent side (instead of always preferring new).
+  - **Split propagation**: after merging, the `split` field from the old dataset is propagated to merged rows where `split` is null. This preserves manually assigned splits (`train`/`val`/`test`) across re-downloads. Warnings are logged when: (a) the old dataset has no `split` data at all; (b) both datasets have non-null `split` for the same common images (the winning side's value is kept).
+
 ## Ignore config
 
 Config YAML has an `ignore` top-level section — a mapping of project name to a list of task IDs to ignore:
@@ -221,4 +230,5 @@ upload:
 - **`s3-sync` cloud storage detection** reuses `ImageDownloader._detect_cloud_storage()` via `CvatClient.detect_project_cloud_storage()`. It probes project tasks in order and returns the first `CloudStorageInfo` found. If no task has a `source_storage`, the project is skipped with a warning.
 - **`upload` reuses S3 infrastructure from `image_downloader.py`**: `CloudStorageInfo`, `_build_s3_key`, `_list_s3_objects`, `_s3_retry` are imported and reused by `image_uploader.py` for S3 upload operations. Cloud storage detection reuses `CvatClient.detect_project_cloud_storage()`.
 - **`upload` creates tasks via CVAT low-level API**: Uses `tasks_api.create()` + `tasks_api.create_data()` with `DataRequest(server_files=..., cloud_storage_id=..., use_cache=True, sorting_method="natural")` to create a task backed by cloud storage. The `segment_size` parameter on `TaskWriteRequest` controls how CVAT auto-splits the task into jobs. After `create_data`, the method **polls CVAT** (up to `data_processing_timeout` seconds, default 60) waiting for `task.size > 0` — without this wait, annotation uploads arrive before frames are indexed and are silently discarded. Annotation frame indices are read from CVAT `data_meta.frames` (not assumed from the input list order) to ensure correct mapping.
+- **`merge` split propagation** runs after `pd.concat` in `_merge_datasets()`. It builds a `{image_name: split}` lookup from old rows with non-null `split`, then fills null splits in the merged result via `DataFrame.map()`. Conflict detection compares common images where both datasets have non-null split values. The winner's split is never overwritten — only null slots are filled. If the old dataset has no `split` column or all split values are NaN, a warning is logged and propagation is skipped.
 - **`upload` sends all filtered image names to CVAT** regardless of whether they were found locally. Images already on S3 (but not found locally) will still be included in the task. Missing images that are neither local nor on S3 produce a warning but do not block task creation.

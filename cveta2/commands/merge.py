@@ -62,6 +62,61 @@ def _read_deleted_names(path: Path | None) -> set[str]:
     return names
 
 
+def _propagate_splits(
+    merged: pd.DataFrame,
+    old: pd.DataFrame,
+    new: pd.DataFrame,
+    common_images: set[str],
+) -> pd.DataFrame:
+    """Propagate ``split`` values from *old* into *merged* rows that lack them.
+
+    For images present in both datasets where **new** won the merge, the
+    ``split`` from *old* is copied over when the merged row has no split.
+
+    Warnings are emitted when:
+    - *old* has no ``split`` data at all (column missing or all NaN).
+    - Both *old* and *new* have non-null ``split`` for the same common images.
+    """
+    if "split" not in old.columns or old["split"].isna().all():
+        logger.warning("В old-датасете нет данных split — пропагация split невозможна")
+        return merged
+
+    old_splits: dict[str, str] = (
+        old[old["split"].notna()]
+        .drop_duplicates("image_name")
+        .set_index("image_name")["split"]
+        .to_dict()
+    )
+
+    if "split" in new.columns:
+        new_split_images = set(
+            new.loc[
+                new["split"].notna() & new["image_name"].isin(common_images),
+                "image_name",
+            ]
+        )
+        conflict_images = new_split_images & set(old_splits.keys())
+        if conflict_images:
+            logger.warning(
+                f"split задан в обоих датасетах для {len(conflict_images)} "
+                f"изображений — используется значение из победившей стороны"
+            )
+
+    if "split" not in merged.columns:
+        return merged
+
+    mask = merged["split"].isna() & merged["image_name"].isin(old_splits.keys())
+    merged.loc[mask, "split"] = merged.loc[mask, "image_name"].map(old_splits)
+
+    propagated_count = int(mask.sum())
+    if propagated_count > 0:
+        logger.info(
+            f"Пропагация split: заполнено {propagated_count} строк из old-датасета"
+        )
+
+    return merged
+
+
 def _merge_datasets(
     old: pd.DataFrame,
     new: pd.DataFrame,
@@ -102,6 +157,9 @@ def _merge_datasets(
     new_filtered = new[new_keep_mask]
 
     merged: pd.DataFrame = pd.concat([old_filtered, new_filtered], ignore_index=True)
+
+    # --- propagate split from old to new ------------------------------------
+    merged = _propagate_splits(merged, old, new, common_images)
 
     # --- log summary --------------------------------------------------------
     only_old = old_images - new_images - deleted
