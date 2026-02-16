@@ -97,7 +97,7 @@ def _run_fetch_task_with_fake(
     with (
         patch(f"{_MODULE}.load_config", return_value=_CFG),
         patch(f"{_MODULE}.require_host"),
-        patch(f"{_MODULE}.load_projects_cache", return_value=[]),
+        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         patch(f"{_MODULE}.load_ignore_config", return_value=ic),
         patch(f"{_MODULE}.CvatClient", side_effect=make_client),
     ):

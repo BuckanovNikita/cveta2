@@ -6,12 +6,18 @@ import getpass
 import importlib.resources
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, TypeVar
 
 import yaml
 from loguru import logger
 from pydantic import BaseModel
 
 from cveta2.exceptions import InteractiveModeRequiredError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+_T = TypeVar("_T")
 
 CONFIG_DIR = Path.home() / ".config" / "cveta2"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
@@ -38,15 +44,21 @@ def require_interactive(hint: str) -> None:
         )
 
 
-# Override config file path with CVETA2_CONFIG (e.g. /path/to/config.yaml).
-def _config_path() -> Path:
+def get_config_path(config_path: Path | None = None) -> Path:
+    """Return path to config file.
+
+    Uses *config_path* if provided, otherwise CVETA2_CONFIG env var,
+    otherwise default CONFIG_PATH.
+    """
+    if config_path is not None:
+        return config_path
     path = os.environ.get("CVETA2_CONFIG")
     return Path(path) if path else CONFIG_PATH
 
 
-def get_projects_cache_path() -> Path:
+def get_projects_cache_path(config_path: Path | None = None) -> Path:
     """Path to projects cache YAML (same directory as config file)."""
-    return _config_path().parent / "projects.yaml"
+    return get_config_path(config_path).parent / "projects.yaml"
 
 
 def _load_preset_data() -> dict[str, object]:
@@ -69,6 +81,52 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
         logger.warning(f"Invalid config format in {path}; expected mapping.")
         return {}
     return data
+
+
+def _load_section(
+    section_key: str,
+    parse_fn: Callable[[object], _T],
+    config_path: Path | None = None,
+) -> _T:
+    """Load a config section: path, raw YAML, then parse with *parse_fn*."""
+    path = get_config_path(config_path)
+    data = _load_raw_yaml(path)
+    return parse_fn(data.get(section_key))
+
+
+def _save_section(
+    section_key: str,
+    value: _T,
+    serialize_fn: Callable[[_T], object | None],
+    config_path: Path | None = None,
+    *,
+    log_message: str | None = None,
+) -> Path:
+    """Update one section of the config YAML.
+
+    If *serialize_fn* returns None, the section key is removed.
+    """
+    path = get_config_path(config_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_raw_yaml(path)
+    serialized = serialize_fn(value)
+    if serialized is None:
+        existing.pop(section_key, None)
+    else:
+        existing[section_key] = serialized
+    content = yaml.safe_dump(
+        existing,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+    if not content.endswith("\n"):
+        content += "\n"
+    path.write_text(content, encoding="utf-8")
+    if log_message and "{path}" in log_message:
+        logger.info(log_message.format(path=path))
+    else:
+        logger.info(log_message or f"Config saved to {path}")
+    return path
 
 
 class CvatConfig(BaseModel):
@@ -126,7 +184,7 @@ class CvatConfig(BaseModel):
         """Merge preset, file, and env: preset < file < env."""
         preset_data = _load_preset_data()
         preset_cfg = cls._from_cvat_section(preset_data)
-        path = config_path if config_path is not None else _config_path()
+        path = get_config_path(config_path)
         file_cfg = cls.from_file(path)
         env_cfg = cls.from_env()
         return preset_cfg.merge(file_cfg).merge(env_cfg)
@@ -212,14 +270,16 @@ class ImageCacheConfig(BaseModel):
         self.projects[project_name] = path
 
 
+def _parse_image_cache_section(raw: object) -> ImageCacheConfig:
+    """Parse ``image_cache`` section from raw YAML value."""
+    if not isinstance(raw, dict):
+        return ImageCacheConfig()
+    return ImageCacheConfig(projects={k: Path(str(v)) for k, v in raw.items()})
+
+
 def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig:
     """Load the ``image_cache`` section from the config YAML."""
-    path = config_path if config_path is not None else _config_path()
-    data = _load_raw_yaml(path)
-    raw_ic = data.get("image_cache")
-    if not isinstance(raw_ic, dict):
-        return ImageCacheConfig()
-    return ImageCacheConfig(projects={k: Path(str(v)) for k, v in raw_ic.items()})
+    return _load_section("image_cache", _parse_image_cache_section, config_path)
 
 
 class IgnoredTask(BaseModel):
@@ -294,19 +354,12 @@ def _parse_ignore_entry(raw: object) -> IgnoredTask | None:
     return None
 
 
-def load_ignore_config(config_path: Path | None = None) -> IgnoreConfig:
-    """Load the ``ignore`` section from the config YAML.
-
-    Supports both the new format (list of ``{id, name}`` dicts) and the
-    legacy format (list of bare ints).
-    """
-    path = config_path if config_path is not None else _config_path()
-    data = _load_raw_yaml(path)
-    raw_ignore = data.get("ignore")
-    if not isinstance(raw_ignore, dict):
+def _parse_ignore_section(raw: object) -> IgnoreConfig:
+    """Parse ``ignore`` section from raw YAML value (supports dict of lists format)."""
+    if not isinstance(raw, dict):
         return IgnoreConfig()
     projects: dict[str, list[IgnoredTask]] = {}
-    for project_name, entries in raw_ignore.items():
+    for project_name, entries in raw.items():
         if not isinstance(entries, list):
             continue
         parsed: list[IgnoredTask] = []
@@ -319,12 +372,31 @@ def load_ignore_config(config_path: Path | None = None) -> IgnoreConfig:
     return IgnoreConfig(projects=projects)
 
 
+def load_ignore_config(config_path: Path | None = None) -> IgnoreConfig:
+    """Load the ``ignore`` section from the config YAML.
+
+    Supports both the new format (list of ``{id, name}`` dicts) and the
+    legacy format (list of bare ints).
+    """
+    return _load_section("ignore", _parse_ignore_section, config_path)
+
+
 def _serialize_ignore_entry(entry: IgnoredTask) -> dict[str, object]:
     """Serialize an ``IgnoredTask`` to a dict for YAML output."""
     data: dict[str, object] = {"id": entry.id, "name": entry.name}
     if entry.description:
         data["description"] = entry.description
     return data
+
+
+def _serialize_ignore_section(ignore: IgnoreConfig) -> dict[str, object] | None:
+    """Serialize ignore config to YAML-friendly dict, or None if empty."""
+    if not ignore.projects:
+        return None
+    return {
+        proj: [_serialize_ignore_entry(e) for e in entries]
+        for proj, entries in ignore.projects.items()
+    }
 
 
 def save_ignore_config(
@@ -336,28 +408,13 @@ def save_ignore_config(
     Always writes the new ``{id, name}`` dict format.
     Preserves the existing ``cvat``, ``image_cache`` and other sections.
     """
-    path = config_path if config_path is not None else _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    existing = _load_raw_yaml(path)
-    if ignore.projects:
-        existing["ignore"] = {
-            proj: [_serialize_ignore_entry(e) for e in entries]
-            for proj, entries in ignore.projects.items()
-        }
-    else:
-        existing.pop("ignore", None)
-
-    content = yaml.safe_dump(
-        existing,
-        default_flow_style=False,
-        sort_keys=False,
+    return _save_section(
+        "ignore",
+        ignore,
+        _serialize_ignore_section,
+        config_path,
+        log_message="Ignore config saved to {path}",
     )
-    if not content.endswith("\n"):
-        content += "\n"
-    path.write_text(content, encoding="utf-8")
-    logger.info(f"Ignore config saved to {path}")
-    return path
 
 
 class UploadConfig(BaseModel):
@@ -366,15 +423,22 @@ class UploadConfig(BaseModel):
     images_per_job: int = 100
 
 
+def _parse_upload_section(raw: object) -> UploadConfig:
+    """Parse ``upload`` section from raw YAML value."""
+    if not isinstance(raw, dict):
+        return UploadConfig()
+    filtered = {k: v for k, v in raw.items() if k in UploadConfig.model_fields}
+    return UploadConfig(**filtered)
+
+
 def load_upload_config(config_path: Path | None = None) -> UploadConfig:
     """Load the ``upload`` section from the config YAML."""
-    path = config_path if config_path is not None else _config_path()
-    data = _load_raw_yaml(path)
-    raw_upload = data.get("upload")
-    if not isinstance(raw_upload, dict):
-        return UploadConfig()
-    filtered = {k: v for k, v in raw_upload.items() if k in UploadConfig.model_fields}
-    return UploadConfig(**filtered)
+    return _load_section("upload", _parse_upload_section, config_path)
+
+
+def _serialize_image_cache_section(image_cache: ImageCacheConfig) -> dict[str, str]:
+    """Serialize image cache config to YAML-friendly dict."""
+    return {k: str(v) for k, v in image_cache.projects.items()}
 
 
 def save_image_cache_config(
@@ -385,19 +449,10 @@ def save_image_cache_config(
 
     Preserves the existing ``cvat`` and any other sections.
     """
-    path = config_path if config_path is not None else _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    existing = _load_raw_yaml(path)
-    existing["image_cache"] = {k: str(v) for k, v in image_cache.projects.items()}
-
-    content = yaml.safe_dump(
-        existing,
-        default_flow_style=False,
-        sort_keys=False,
+    return _save_section(
+        "image_cache",
+        image_cache,
+        _serialize_image_cache_section,
+        config_path,
+        log_message="Image cache config saved to {path}",
     )
-    if not content.endswith("\n"):
-        content += "\n"
-    path.write_text(content, encoding="utf-8")
-    logger.info(f"Image cache config saved to {path}")
-    return path

@@ -14,6 +14,9 @@ from cveta2.client import CvatClient
 from cveta2.commands._helpers import (
     load_config,
     require_host,
+    resolve_project_from_args,
+    select_project_tui,
+    write_dataset_and_deleted,
     write_deleted_txt,
     write_df_csv,
 )
@@ -22,20 +25,15 @@ from cveta2.config import (
     is_interactive_disabled,
     load_ignore_config,
     load_image_cache_config,
-    require_interactive,
     save_image_cache_config,
 )
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
-from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_projects_cache
 
 if TYPE_CHECKING:
     import argparse
 
     from cveta2.models import ProjectAnnotations
-
-_RESCAN_VALUE = "__rescan__"
-
 
 # ------------------------------------------------------------------
 # Public command entry points
@@ -88,13 +86,7 @@ def run_fetch_task(args: argparse.Namespace) -> None:
 
         _download_images(args, project_name, client, result)
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    rows = result.to_csv_rows()
-    df = pd.DataFrame(rows)
-    write_df_csv(df, output_dir / "dataset.csv", "Dataset CSV")
-    deleted_names = [img.image_name for img in result.deleted_images]
-    write_deleted_txt(deleted_names, output_dir / "deleted.txt")
+    write_dataset_and_deleted(result, Path(args.output_dir))
 
 
 # ------------------------------------------------------------------
@@ -110,28 +102,15 @@ def _resolve_project(
 
     Returns ``(project_id, project_name)``.
     """
-    project_name: str | None = None
+    try:
+        resolved = resolve_project_from_args(args.project, client)
+    except Cveta2Error as e:
+        sys.exit(str(e))
 
-    if args.project is not None:
-        cached = load_projects_cache()
-        try:
-            project_id = client.resolve_project_id(args.project.strip(), cached=cached)
-        except Cveta2Error as e:
-            sys.exit(str(e))
-        project_name = args.project.strip()
-    else:
-        project_id = _select_project_tui(client)
+    if resolved is not None:
+        return resolved
 
-    if project_name is None or project_name.isdigit():
-        for p in load_projects_cache():
-            if p.id == project_id:
-                project_name = p.name
-                break
-
-    if project_name is None:
-        project_name = str(project_id)
-
-    return project_id, project_name
+    return select_project_tui(client)
 
 
 def _download_images(
@@ -211,55 +190,6 @@ def _write_partition_result(
         "In-progress CSV",
     )
     write_deleted_txt(partition.deleted_names, output_dir / "deleted.txt")
-
-
-def _build_project_choices(
-    projects: list[ProjectInfo],
-) -> list[questionary.Choice]:
-    """Build questionary choices: project list + rescan option last."""
-    choices: list[questionary.Choice] = [
-        questionary.Choice(title=f"{p.name} (id={p.id})", value=p.id) for p in projects
-    ]
-    choices.append(
-        questionary.Choice(
-            title="↻ Обновить список проектов с CVAT",
-            value=_RESCAN_VALUE,
-        ),
-    )
-    return choices
-
-
-def _select_project_tui(client: CvatClient) -> int:
-    """Interactive project selection via TUI list.
-
-    Arrow keys to pick, with an option to rescan CVAT.
-    """
-    require_interactive("Pass --project / -p to specify the project ID or name.")
-    projects = load_projects_cache()
-    while True:
-        if not projects:
-            logger.info("Кэш проектов пуст. Загружаю список с CVAT...")
-            projects = client.list_projects()
-            save_projects_cache(projects)
-            if not projects:
-                sys.exit("Нет доступных проектов.")
-        choices = _build_project_choices(projects)
-        answer = questionary.select(
-            "Выберите проект:",
-            choices=choices,
-            use_shortcuts=False,
-            use_indicator=True,
-            use_search_filter=True,
-            use_jk_keys=False,
-        ).ask()
-        if answer is None:
-            sys.exit("Выбор отменён.")
-        if answer == _RESCAN_VALUE:
-            projects = client.list_projects()
-            save_projects_cache(projects)
-            logger.info(f"Загружено проектов: {len(projects)}")
-            continue
-        return int(answer)
 
 
 def _resolve_task_selector(

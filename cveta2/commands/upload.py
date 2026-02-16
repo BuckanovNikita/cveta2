@@ -11,7 +11,13 @@ import questionary
 from loguru import logger
 
 from cveta2.client import CvatClient
-from cveta2.commands._helpers import load_config, require_host
+from cveta2.commands._helpers import (
+    load_config,
+    read_dataset_csv,
+    require_host,
+    resolve_project_from_args,
+    select_project_tui,
+)
 from cveta2.config import (
     load_image_cache_config,
     load_upload_config,
@@ -19,7 +25,6 @@ from cveta2.config import (
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.image_uploader import S3Uploader, resolve_images
-from cveta2.projects_cache import load_projects_cache
 
 if TYPE_CHECKING:
     import argparse
@@ -32,18 +37,7 @@ _NO_ANNOTATION_LABEL = "__no_annotation__"
 # ---------------------------------------------------------------------------
 
 
-def _read_dataset_csv(path: Path) -> pd.DataFrame:
-    """Read and validate a dataset CSV file."""
-    if not path.is_file():
-        sys.exit(f"Ошибка: файл не найден: {path}")
-    df = pd.read_csv(path, encoding="utf-8")
-    if "image_name" not in df.columns or "instance_label" not in df.columns:
-        sys.exit(
-            "Ошибка: dataset.csv должен содержать столбцы "
-            "'image_name' и 'instance_label'."
-        )
-    logger.info(f"Загружен {path}: {len(df)} строк")
-    return df
+_UPLOAD_REQUIRED_COLUMNS: set[str] = {"image_name", "instance_label"}
 
 
 def _read_exclude_names(in_progress_path: str | None) -> set[str]:
@@ -139,31 +133,14 @@ def _resolve_upload_project(
     project_arg: str | None,
 ) -> tuple[int, str]:
     """Resolve project ID and name for the upload command."""
-    if project_arg is not None:
-        cached = load_projects_cache()
-        try:
-            project_id = client.resolve_project_id(
-                project_arg.strip(),
-                cached=cached,
-            )
-        except Cveta2Error as exc:
-            sys.exit(str(exc))
-        project_name = project_arg.strip()
-    else:
-        # Reuse the interactive project selector from the fetch command
-        from cveta2.commands.fetch import (  # noqa: PLC0415
-            _select_project_tui,
-        )
+    try:
+        resolved = resolve_project_from_args(project_arg, client)
+    except Cveta2Error as exc:
+        sys.exit(str(exc))
 
-        project_id = _select_project_tui(client)
-        project_name = str(project_id)
-
-    if project_name.isdigit():
-        for p in load_projects_cache():
-            if p.id == project_id:
-                project_name = p.name
-                break
-    return project_id, project_name
+    if resolved is not None:
+        return resolved
+    return select_project_tui(client)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +154,7 @@ def run_upload(args: argparse.Namespace) -> None:
     require_host(cfg)
     upload_cfg = load_upload_config()
 
-    df = _read_dataset_csv(Path(args.dataset))
+    df = read_dataset_csv(Path(args.dataset), _UPLOAD_REQUIRED_COLUMNS)
     exclude_names = _read_exclude_names(args.in_progress)
     selected_labels = _select_labels(df)
 

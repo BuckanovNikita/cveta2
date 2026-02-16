@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -14,7 +13,7 @@ from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.commands.upload import run_upload
-from cveta2.config import CONFIG_PATH
+from cveta2.config import get_config_path
 
 
 class CliApp:
@@ -362,11 +361,7 @@ class CliApp:
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""
         if args.command in ("setup", "setup-cache"):
-            if args.config:
-                setup_path = Path(args.config)
-            else:
-                path_env = os.environ.get("CVETA2_CONFIG")
-                setup_path = Path(path_env) if path_env else CONFIG_PATH
+            setup_path = Path(args.config) if args.config else get_config_path()
             if args.command == "setup":
                 run_setup(setup_path)
             else:

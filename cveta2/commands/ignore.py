@@ -9,7 +9,11 @@ import questionary
 from loguru import logger
 
 from cveta2.client import CvatClient
-from cveta2.commands._helpers import load_config, require_host
+from cveta2.commands._helpers import (
+    load_config,
+    require_host,
+    resolve_project_from_args,
+)
 from cveta2.commands._task_selector import build_task_choices
 from cveta2.config import (
     IgnoreConfig,
@@ -111,20 +115,13 @@ def _resolve_project(
     ignore_cfg: IgnoreConfig,
 ) -> tuple[int, str]:
     """Resolve project ID and name from CLI args or interactive TUI."""
-    if args.project is not None:
-        cached = load_projects_cache()
-        try:
-            project_id = client.resolve_project_id(args.project.strip(), cached=cached)
-        except Cveta2Error as e:
-            sys.exit(str(e))
-        project_name = args.project.strip()
-        if project_name.isdigit():
-            for p in load_projects_cache():
-                if p.id == project_id:
-                    project_name = p.name
-                    break
-        return project_id, project_name
+    try:
+        resolved = resolve_project_from_args(args.project, client)
+    except Cveta2Error as e:
+        sys.exit(str(e))
 
+    if resolved is not None:
+        return resolved
     return _select_project_tui(client, ignore_cfg)
 
 

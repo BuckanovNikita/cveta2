@@ -13,7 +13,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from cveta2.config import CONFIG_PATH, CvatConfig, load_image_cache_config
+from cveta2.config import CvatConfig, get_config_path, load_image_cache_config
 
 
 def run_doctor() -> None:
@@ -44,7 +44,7 @@ def check_config() -> bool:
     """
     logger.info("doctor: checking configuration …")
 
-    config_path = Path(os.environ.get("CVETA2_CONFIG", str(CONFIG_PATH)))
+    config_path = get_config_path()
 
     # --- Config file existence ---
     if not config_path.is_file():

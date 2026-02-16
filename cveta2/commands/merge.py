@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from loguru import logger
 
-from cveta2.commands._helpers import write_df_csv
+from cveta2.commands._helpers import read_dataset_csv, write_df_csv
 
 if TYPE_CHECKING:
     import argparse
@@ -40,22 +40,11 @@ def _read_dataset_csv(path: Path, *, by_time: bool = False) -> pd.DataFrame:
     When *by_time* is ``True`` the ``task_updated_date`` column is also
     required.
     """
-    if not path.is_file():
-        sys.exit(f"Ошибка: файл не найден: {path}")
-    df = pd.read_csv(path, encoding="utf-8")
-    missing = _REQUIRED_COLUMNS - set(df.columns)
-    if missing:
-        sys.exit(
-            f"Ошибка: в {path} отсутствуют обязательные столбцы: "
-            f"{', '.join(sorted(missing))}"
-        )
-    if by_time and _TIME_COLUMN not in df.columns:
-        sys.exit(
-            f"Ошибка: --by-time требует столбец '{_TIME_COLUMN}' "
-            f"в {path}, но он отсутствует."
-        )
-    logger.info(f"Загружен {path}: {len(df)} строк")
-    return df
+    return read_dataset_csv(
+        path,
+        _REQUIRED_COLUMNS,
+        require_time_column=by_time,
+    )
 
 
 def _read_deleted_names(path: Path | None) -> set[str]:
