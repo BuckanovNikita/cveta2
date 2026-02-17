@@ -21,7 +21,7 @@ cveta2/
   _client/      - internal implementation details split from client.py
     dtos.py     - frozen dataclass DTOs for CVAT API responses (RawFrame, RawShape, RawTrack, RawTask, RawLabel, etc.)
     ports.py    - CvatApiPort Protocol defining the API boundary; the single seam for mocking
-    sdk_adapter.py - SdkCvatApiAdapter: CvatApiPort implementation wrapping an open cvat_sdk client; thin stateless converter (SDK objects in, DTOs out); tenacity retry with exponential backoff on all public methods; _extract_updated_date and _extract_creator_username use getattr for SDK version compat (intentional exception to style rule, documented inline)
+    sdk_adapter.py - SdkCvatApiAdapter: CvatApiPort implementation wrapping an open cvat_sdk client; thin stateless converter (SDK objects in, DTOs out); tenacity retry with exponential backoff on all public methods; _extract_updated_date and _extract_creator_username use getattr for SDK version compat (intentional exception to style rule, documented inline). get_task_data_meta catches ApiTypeError for chunks_updated_date (CVAT can return null, SDK expects datetime) and falls back to raw GET + _data_meta_from_dict.
     context.py  - _TaskContext + extraction constants; frames typed as dict[int, RawFrame]; get_frame() and get_label_name() for extractors; from_raw(task, data_meta, label_names, attr_names) classmethod builds context from DTOs
     mapping.py  - helper functions for label/attribute mapping; takes typed DTOs (RawLabel, RawAttribute)
     extractors.py - shape conversion into BBoxAnnotation models; takes typed DTOs (RawShape); only direct shapes processed (tracks intentionally skipped)

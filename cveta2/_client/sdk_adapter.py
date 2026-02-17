@@ -6,6 +6,7 @@ It converts opaque SDK objects into typed DTOs from ``dtos.py``.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -32,9 +33,9 @@ from cveta2._client.dtos import (
 )
 
 if TYPE_CHECKING:
-    from cvat_sdk.api_client import (
-        models as cvat_models,
-    )
+    from cvat_sdk.api_client import models as cvat_models
+
+from cvat_sdk.api_client.exceptions import ApiTypeError
 
 
 def _log_retry(retry_state: RetryCallState) -> None:
@@ -96,8 +97,22 @@ class SdkCvatApiAdapter:
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
         """Return frame metadata and deleted frame IDs for a task."""
         tasks_api = self.client.api_client.tasks_api
-        data_meta, _ = tasks_api.retrieve_data_meta(task_id)
-        return self._convert_data_meta(data_meta)
+        try:
+            data_meta, _ = tasks_api.retrieve_data_meta(task_id)
+            return self._convert_data_meta(data_meta)
+        except ApiTypeError as e:
+            if "chunks_updated_date" not in str(e):
+                raise
+            # CVAT can return null for chunks_updated_date; SDK expects datetime.
+            # Fallback: raw GET + build RawDataMeta from JSON (no SDK deserialization).
+            _, response = tasks_api.retrieve_data_meta(task_id, _parse_response=False)
+            body = (
+                response.read()
+                if hasattr(response, "read")
+                else getattr(response, "data", b"")
+            )
+            data = json.loads(body.decode("utf-8"))
+            return self._data_meta_from_dict(data)
 
     @_api_retry
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
@@ -160,6 +175,21 @@ class SdkCvatApiAdapter:
             for f in frames_raw
         ]
         deleted = list(data_meta.deleted_frames or [])
+        return RawDataMeta(frames=frames, deleted_frames=deleted)
+
+    @staticmethod
+    def _data_meta_from_dict(data: dict[str, Any]) -> RawDataMeta:
+        """Build RawDataMeta from API response dict when SDK deserialization fails."""
+        frames_raw = data.get("frames") or []
+        frames = [
+            RawFrame(
+                name=f.get("name") or "",
+                width=int(f.get("width") or 0),
+                height=int(f.get("height") or 0),
+            )
+            for f in frames_raw
+        ]
+        deleted = list(data.get("deleted_frames") or [])
         return RawDataMeta(frames=frames, deleted_frames=deleted)
 
     @staticmethod
