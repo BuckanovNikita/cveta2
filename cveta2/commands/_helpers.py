@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path  # noqa: TC003
 from typing import TYPE_CHECKING
 
 import pandas as pd
 import questionary
 from loguru import logger
 
-from cveta2.client import CvatClient  # noqa: TC001
 from cveta2.config import CvatConfig, get_config_path, require_interactive
-from cveta2.models import ProjectAnnotations  # noqa: TC001
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
+    from cveta2.models import ProjectAnnotations
 
 _RESCAN_VALUE = "__rescan__"
 

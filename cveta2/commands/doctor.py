@@ -106,7 +106,6 @@ def check_aws_credentials() -> bool:
 
     try:
         import boto3  # noqa: PLC0415
-        import botocore.exceptions  # noqa: PLC0415, F401
     except ImportError:
         logger.error("AWS: boto3 is not installed — S3 operations will fail")
         return False

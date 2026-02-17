@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,7 +66,11 @@ def run_fetch(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        _download_images(args, project_id, project_name, client, result, cs_info)
+        _download_images(
+            _DownloadImagesParams(
+                args, project_id, project_name, client, result, cs_info
+            )
+        )
 
     _write_output(args, result)
 
@@ -98,7 +103,11 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        _download_images(args, project_id, project_name, client, result, cs_info)
+        _download_images(
+            _DownloadImagesParams(
+                args, project_id, project_name, client, result, cs_info
+            )
+        )
 
     write_dataset_and_deleted(result, Path(args.output_dir))
 
@@ -108,22 +117,27 @@ def run_fetch_task(args: argparse.Namespace) -> None:
 # ------------------------------------------------------------------
 
 
-def _download_images(  # noqa: PLR0913
-    args: argparse.Namespace,
-    project_id: int,
-    project_name: str,
-    client: CvatClient,
-    result: ProjectAnnotations,
-    project_cloud_storage: CloudStorageInfo | None = None,
-) -> None:
+@dataclass(frozen=True)
+class _DownloadImagesParams:
+    """Arguments for _download_images (avoids PLR0913)."""
+
+    args: argparse.Namespace
+    project_id: int
+    project_name: str
+    client: CvatClient
+    result: ProjectAnnotations
+    project_cloud_storage: CloudStorageInfo | None = None
+
+
+def _download_images(params: _DownloadImagesParams) -> None:
     """Download images if requested (within the CvatClient context)."""
-    images_dir = _resolve_images_dir(args, project_name)
+    images_dir = _resolve_images_dir(params.args, params.project_name)
     if images_dir is not None:
-        stats = client.download_images(
-            result,
+        stats = params.client.download_images(
+            params.result,
             images_dir,
-            project_id=project_id,
-            project_cloud_storage=project_cloud_storage,
+            project_id=params.project_id,
+            project_cloud_storage=params.project_cloud_storage,
         )
         logger.info(
             f"Изображения: {stats.downloaded} загружено, "

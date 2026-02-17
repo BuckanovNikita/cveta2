@@ -5,8 +5,12 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from cveta2.commands.doctor import run_doctor
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 from cveta2.commands.fetch import run_fetch, run_fetch_task
 from cveta2.commands.ignore import run_ignore
 from cveta2.commands.merge import run_merge
@@ -386,7 +390,7 @@ class CliApp:
                 )
             return
 
-        dispatch: dict[str, object] = {
+        dispatch: dict[str, Callable[[], None]] = {
             "fetch": lambda: run_fetch(args),
             "fetch-task": lambda: run_fetch_task(args),
             "s3-sync": lambda: run_s3_sync(args),
@@ -398,7 +402,7 @@ class CliApp:
         handler = dispatch.get(args.command)
         if handler is None:
             sys.exit(f"Неизвестная команда: {args.command}")
-        handler()  # type: ignore[operator]
+        handler()
 
     def run(self, argv: list[str] | None = None) -> None:
         """Run the CLI with the given arguments."""
