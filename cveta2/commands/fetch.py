@@ -14,8 +14,7 @@ from cveta2.client import CvatClient
 from cveta2.commands._helpers import (
     load_config,
     require_host,
-    resolve_project_from_args,
-    select_project_tui,
+    resolve_project_and_cloud_storage,
     write_dataset_and_deleted,
     write_deleted_txt,
     write_df_csv,
@@ -33,6 +32,7 @@ from cveta2.exceptions import Cveta2Error
 if TYPE_CHECKING:
     import argparse
 
+    from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import ProjectAnnotations
 
 # ------------------------------------------------------------------
@@ -46,7 +46,13 @@ def run_fetch(args: argparse.Namespace) -> None:
     require_host(cfg)
 
     with CvatClient(cfg) as client:
-        project_id, project_name = _resolve_project(args, client)
+        try:
+            project_id, project_name, cs_info = resolve_project_and_cloud_storage(
+                client, getattr(args, "project", None)
+            )
+        except Cveta2Error as e:
+            sys.exit(str(e))
+
         ignore_set = _warn_ignored_tasks(project_name)
 
         try:
@@ -58,7 +64,7 @@ def run_fetch(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        _download_images(args, project_id, project_name, client, result)
+        _download_images(args, project_id, project_name, client, result, cs_info)
 
     _write_output(args, result)
 
@@ -69,7 +75,13 @@ def run_fetch_task(args: argparse.Namespace) -> None:
     require_host(cfg)
 
     with CvatClient(cfg) as client:
-        project_id, project_name = _resolve_project(args, client)
+        try:
+            project_id, project_name, cs_info = resolve_project_and_cloud_storage(
+                client, getattr(args, "project", None)
+            )
+        except Cveta2Error as e:
+            sys.exit(str(e))
+
         ignore_set = _warn_ignored_tasks(project_name)
 
         task_sel = _resolve_task_selector(args, client, project_id, ignore_set)
@@ -84,7 +96,7 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        _download_images(args, project_id, project_name, client, result)
+        _download_images(args, project_id, project_name, client, result, cs_info)
 
     write_dataset_and_deleted(result, Path(args.output_dir))
 
@@ -94,36 +106,23 @@ def run_fetch_task(args: argparse.Namespace) -> None:
 # ------------------------------------------------------------------
 
 
-def _resolve_project(
-    args: argparse.Namespace,
-    client: CvatClient,
-) -> tuple[int, str]:
-    """Resolve project ID and human-readable name from CLI args.
-
-    Returns ``(project_id, project_name)``.
-    """
-    try:
-        resolved = resolve_project_from_args(args.project, client)
-    except Cveta2Error as e:
-        sys.exit(str(e))
-
-    if resolved is not None:
-        return resolved
-
-    return select_project_tui(client)
-
-
-def _download_images(
+def _download_images(  # noqa: PLR0913
     args: argparse.Namespace,
     project_id: int,
     project_name: str,
     client: CvatClient,
     result: ProjectAnnotations,
+    project_cloud_storage: CloudStorageInfo | None = None,
 ) -> None:
     """Download images if requested (within the CvatClient context)."""
     images_dir = _resolve_images_dir(args, project_name)
     if images_dir is not None:
-        stats = client.download_images(result, images_dir, project_id=project_id)
+        stats = client.download_images(
+            result,
+            images_dir,
+            project_id=project_id,
+            project_cloud_storage=project_cloud_storage,
+        )
         logger.info(
             f"Изображения: {stats.downloaded} загружено, "
             f"{stats.cached} из кэша, {stats.failed} ошибок"

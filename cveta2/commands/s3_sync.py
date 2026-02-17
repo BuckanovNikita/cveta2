@@ -8,10 +8,13 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cveta2.client import CvatClient
-from cveta2.commands._helpers import load_config, require_host
+from cveta2.commands._helpers import (
+    load_config,
+    require_host,
+    resolve_project_and_cloud_storage,
+)
 from cveta2.config import load_image_cache_config
 from cveta2.exceptions import Cveta2Error
-from cveta2.projects_cache import load_projects_cache
 
 if TYPE_CHECKING:
     import argparse
@@ -43,18 +46,26 @@ def run_s3_sync(args: argparse.Namespace) -> None:
     else:
         projects_to_sync = dict(ic_cfg.projects)
 
-    cached = load_projects_cache()
-
     with CvatClient(cfg) as client:
         for project_name, cache_dir in projects_to_sync.items():
             logger.info(f"--- Синхронизация проекта: {project_name} ---")
             try:
-                project_id = client.resolve_project_id(project_name, cached=cached)
+                project_id, _name, cs_info = resolve_project_and_cloud_storage(
+                    client, project_name
+                )
             except Cveta2Error as e:
                 logger.error(f"Проект {project_name!r}: не удалось определить ID — {e}")
                 continue
 
-            stats = client.sync_project_images(project_id, cache_dir)
+            if cs_info is None:
+                logger.warning(
+                    f"Проект {project_name!r}: cloud storage не найден — пропускаем."
+                )
+                continue
+
+            stats = client.sync_project_images(
+                project_id, cache_dir, project_cloud_storage=cs_info
+            )
             logger.info(
                 f"Проект {project_name!r}: {stats.downloaded} загружено, "
                 f"{stats.cached} из кэша, {stats.failed} ошибок "

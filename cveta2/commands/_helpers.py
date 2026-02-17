@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import questionary
@@ -13,6 +14,9 @@ from cveta2.client import CvatClient  # noqa: TC001
 from cveta2.config import CvatConfig, get_config_path, require_interactive
 from cveta2.models import ProjectAnnotations  # noqa: TC001
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
+
+if TYPE_CHECKING:
+    from cveta2.image_downloader import CloudStorageInfo
 
 _RESCAN_VALUE = "__rescan__"
 
@@ -93,6 +97,36 @@ def select_project_tui(client: CvatClient) -> tuple[int, str]:
                 project_name = p.name
                 break
         return (project_id, project_name)
+
+
+def resolve_project_and_cloud_storage(
+    client: CvatClient,
+    project_spec: str | None,
+) -> tuple[int, str, CloudStorageInfo | None]:
+    """Resolve project ID, name, and project cloud storage from a spec.
+
+    When *project_spec* is None or empty, uses interactive TUI to get
+    (project_id, project_name). Otherwise uses :func:`resolve_project_from_args`.
+    Then calls :meth:`CvatClient.detect_project_cloud_storage` and returns
+    (project_id, project_name, cs_info). cs_info may be None if the project
+    has no source_storage.
+
+    Raises
+    ------
+    Cveta2Error
+        When project_spec is set but project is not found.
+
+    """
+    if project_spec and project_spec.strip():
+        resolved = resolve_project_from_args(project_spec.strip(), client)
+        if resolved is None:
+            project_id, project_name = select_project_tui(client)
+        else:
+            project_id, project_name = resolved
+    else:
+        project_id, project_name = select_project_tui(client)
+    cs_info = client.detect_project_cloud_storage(project_id)
+    return (project_id, project_name, cs_info)
 
 
 def load_config(config_path: Path | None = None) -> CvatConfig:

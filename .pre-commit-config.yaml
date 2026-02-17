@@ -22,6 +22,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: vulture
+        name: vulture (dead code)
+        entry: uv run vulture
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: pytest
         name: pytest
         entry: uv run pytest

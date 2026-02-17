@@ -38,6 +38,7 @@ def _mock_client_ctx() -> MagicMock:
     client.__enter__ = MagicMock(return_value=client)
     client.__exit__ = MagicMock(return_value=False)
     client.resolve_project_id.return_value = 1
+    client.detect_project_cloud_storage.return_value = MagicMock()
     client.sync_project_images.return_value = DownloadStats(
         downloaded=5, cached=10, failed=0, total=15
     )
@@ -83,7 +84,7 @@ def test_s3_sync_all_projects(
 
     with (
         patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
-        patch("cveta2.commands.s3_sync.load_projects_cache", return_value=[]),
+        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         app.run(["s3-sync"])
@@ -115,7 +116,7 @@ def test_s3_sync_single_project(
     mock_client = _mock_client_ctx()
     with (
         patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
-        patch("cveta2.commands.s3_sync.load_projects_cache", return_value=[]),
+        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         app.run(["s3-sync", "--project", "project-a"])
@@ -174,7 +175,7 @@ def test_s3_sync_continues_on_resolve_error(
 
     with (
         patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
-        patch("cveta2.commands.s3_sync.load_projects_cache", return_value=[]),
+        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
         app.run(["s3-sync"])

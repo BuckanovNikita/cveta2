@@ -77,7 +77,11 @@ class _FakeSdkClient:
 
 
 def _make_s3_client(objects: dict[str, bytes]) -> MagicMock:
-    """Build a mock S3 client backed by a dict."""
+    """Build a mock S3 client backed by a dict.
+
+    Keys in *objects* are "bucket/key" (e.g. "test-bucket/images/a.jpg").
+    Implements get_object and list_objects_v2 for project-storage name lookup.
+    """
 
     def get_object(Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
         full_key = f"{Bucket}/{Key}"
@@ -88,8 +92,26 @@ def _make_s3_client(objects: dict[str, bytes]) -> MagicMock:
         body.read.return_value = objects[full_key]
         return {"Body": body}
 
+    def list_objects_v2(
+        Bucket: str = "",  # noqa: N803
+        Prefix: str = "",  # noqa: N803
+        **_kwargs: object,
+    ) -> dict[str, Any]:
+        contents = []
+        for full_key, value in objects.items():
+            if "/" not in full_key:
+                continue
+            bucket_part, key_part = full_key.split("/", 1)
+            if bucket_part != Bucket:
+                continue
+            if Prefix and not key_part.startswith(Prefix):
+                continue
+            contents.append({"Key": key_part, "Size": len(value)})
+        return {"Contents": contents, "IsTruncated": False}
+
     mock = MagicMock()
     mock.get_object.side_effect = get_object
+    mock.list_objects_v2.side_effect = list_objects_v2
     return mock
 
 
@@ -134,6 +156,20 @@ def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: MagicMock) -> None:
     monkeypatch.setattr(
         "cveta2.image_downloader.boto3.Session",
         lambda: MagicMock(client=lambda *_a, **_kw: fake_s3),
+    )
+
+
+def _project_cs(
+    bucket: str = "test-bucket",
+    prefix: str = "images",
+    endpoint_url: str = "http://minio:9000",
+) -> CloudStorageInfo:
+    """CloudStorageInfo matching the default fake S3 layout in tests."""
+    return CloudStorageInfo(
+        id=1,
+        bucket=bucket,
+        prefix=prefix,
+        endpoint_url=endpoint_url,
     )
 
 
@@ -214,10 +250,10 @@ def test_download_saves_to_target_dir_flat(
         "test-bucket/images/a.jpg": b"data-a",
         "test-bucket/images/b.jpg": b"data-b",
     }
-    downloader, sdk = _make_downloader_env(tmp_path, annotations, s3_data)
+    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
     _patch_boto(monkeypatch, _make_s3_client(s3_data))
 
-    stats = downloader.download(sdk, annotations)
+    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.downloaded == 2
     assert stats.cached == 0
@@ -244,10 +280,10 @@ def test_download_skips_already_cached(
     target.mkdir(parents=True)
     (target / "a.jpg").write_bytes(b"old-data-a")
 
-    downloader, sdk = _make_downloader_env(tmp_path, annotations, s3_data)
+    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
     _patch_boto(monkeypatch, _make_s3_client(s3_data))
 
-    stats = downloader.download(sdk, annotations)
+    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.cached == 1
     assert stats.downloaded == 1
@@ -273,7 +309,7 @@ def test_download_creates_target_dir(
         specific_attributes="prefix=images&endpoint_url=http://minio:9000",
     )
     task_storages: dict[int, dict[str, Any] | None] = {10: {"cloud_storage_id": 1}}
-    sdk = _FakeSdkClient(
+    _ = _FakeSdkClient(
         task_storages=task_storages,
         cloud_storages={1: cloud_storage},
         s3_objects=s3_data,
@@ -281,7 +317,7 @@ def test_download_creates_target_dir(
     _patch_boto(monkeypatch, _make_s3_client(s3_data))
 
     downloader = ImageDownloader(target)
-    stats = downloader.download(sdk, annotations)
+    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.downloaded == 1
     assert target.exists()
@@ -294,7 +330,7 @@ def test_download_empty_annotations(tmp_path: Path) -> None:
         deleted_images=[],
     )
     downloader = ImageDownloader(tmp_path / "images")
-    stats = downloader.download(MagicMock(), annotations)
+    stats = downloader.download(annotations)
     assert stats.total == 0
     assert stats.downloaded == 0
     assert stats.cached == 0
@@ -320,10 +356,10 @@ def test_download_skips_deleted_images(
         "test-bucket/images/alive.jpg": b"data",
         "test-bucket/images/dead.jpg": b"should-not-download",
     }
-    downloader, sdk = _make_downloader_env(tmp_path, annotations, s3_data)
+    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
     _patch_boto(monkeypatch, _make_s3_client(s3_data))
 
-    stats = downloader.download(sdk, annotations)
+    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.total == 1
     assert stats.downloaded == 1
@@ -353,10 +389,10 @@ def test_download_stats_counts(
         "test-bucket/images/new.jpg": b"data-new",
         "test-bucket/images/also-new.jpg": b"data-also-new",
     }
-    downloader, sdk = _make_downloader_env(tmp_path, annotations, s3_data)
+    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
     _patch_boto(monkeypatch, _make_s3_client(s3_data))
 
-    stats = downloader.download(sdk, annotations)
+    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.total == 3
     assert stats.cached == 1
@@ -365,20 +401,20 @@ def test_download_stats_counts(
 
 
 def test_download_no_cloud_storage_marks_failed(tmp_path: Path) -> None:
-    """When task has no source_storage, images are counted as failed."""
+    """When project_cloud_storage is not provided, all pending images are failed."""
     annotations = ProjectAnnotations(
         annotations=[_ann(10, 0, "img.jpg")],
         deleted_images=[],
     )
     task_storages: dict[int, dict[str, Any] | None] = {10: None}
-    sdk = _FakeSdkClient(
+    _ = _FakeSdkClient(
         task_storages=task_storages,
         cloud_storages={},
         s3_objects={},
     )
     downloader = ImageDownloader(tmp_path / "images")
 
-    stats = downloader.download(sdk, annotations)
+    stats = downloader.download(annotations)
 
     assert stats.total == 1
     assert stats.failed == 1
@@ -395,7 +431,7 @@ def test_download_fallback_project_storage(
         deleted_images=[],
     )
     task_storages: dict[int, dict[str, Any] | None] = {10: None}
-    sdk = _FakeSdkClient(
+    _ = _FakeSdkClient(
         task_storages=task_storages,
         cloud_storages={},
         s3_objects={},
@@ -434,7 +470,7 @@ def test_download_fallback_project_storage(
     _patch_boto(monkeypatch, fake_s3)
 
     downloader = ImageDownloader(tmp_path / "images")
-    stats = downloader.download(sdk, annotations, project_cloud_storage=project_cs)
+    stats = downloader.download(annotations, project_cloud_storage=project_cs)
 
     assert stats.total == 1
     assert stats.downloaded == 1

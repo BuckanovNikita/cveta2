@@ -100,6 +100,10 @@ def _run_fetch_task_with_fake(
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         patch(f"{_MODULE}.load_ignore_config", return_value=ic),
         patch(f"{_MODULE}.CvatClient", side_effect=make_client),
+        patch(
+            "cveta2.client.CvatClient.detect_project_cloud_storage",
+            return_value=None,
+        ),
     ):
         run_fetch_task(args)
 

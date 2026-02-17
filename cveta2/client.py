@@ -17,7 +17,13 @@ from cveta2._client.mapping import _build_label_maps
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.config import CvatConfig
 from cveta2.exceptions import ProjectNotFoundError, TaskNotFoundError
-from cveta2.image_downloader import DownloadStats, ImageDownloader, S3Syncer
+from cveta2.image_downloader import (
+    CloudStorageInfo,
+    DownloadStats,
+    ImageDownloader,
+    S3Syncer,
+    parse_cloud_storage,
+)
 from cveta2.models import (
     CSV_COLUMNS,
     AnnotationRecord,
@@ -44,7 +50,6 @@ if TYPE_CHECKING:
 
     from cveta2._client.dtos import RawTask
     from cveta2._client.ports import CvatApiPort
-    from cveta2.image_downloader import CloudStorageInfo
 
 
 class _SdkClientFactory(Protocol):
@@ -395,6 +400,7 @@ class CvatClient:
         annotations: ProjectAnnotations,
         target_dir: Path,
         project_id: int | None = None,
+        project_cloud_storage: CloudStorageInfo | None = None,
     ) -> DownloadStats:
         """Download project images from S3 cloud storage into *target_dir*.
 
@@ -404,18 +410,17 @@ class CvatClient:
         additional subdirectories are created.  Already-cached files are
         skipped.
 
-        If *project_id* is given, tasks without their own ``source_storage``
-        will try to find images in the project's cloud storage (if any).
+        Images are always downloaded from the **project** cloud storage
+        (project's ``source_storage`` via :meth:`detect_project_cloud_storage`
+        when *project_id* is given). Per-task storage is not used. If
+        *project_id* is not given, project storage cannot be resolved and
+        all images will be reported as failed.
         """
-        sdk = self._require_sdk("download_images")
-        project_cloud_storage = (
-            self.detect_project_cloud_storage(project_id)
-            if project_id is not None
-            else None
-        )
+        if project_cloud_storage is None and project_id is not None:
+            project_cloud_storage = self.detect_project_cloud_storage(project_id)
         downloader = ImageDownloader(target_dir)
         return downloader.download(
-            sdk, annotations, project_cloud_storage=project_cloud_storage
+            annotations, project_cloud_storage=project_cloud_storage
         )
 
     # ------------------------------------------------------------------
@@ -426,28 +431,34 @@ class CvatClient:
         self,
         project_id: int,
     ) -> CloudStorageInfo | None:
-        """Detect cloud storage for a project by probing its tasks.
+        """Detect cloud storage for a project from the project's source_storage.
 
-        Returns the :class:`CloudStorageInfo` from the first task that has
-        a ``source_storage`` with a ``cloud_storage_id``, or ``None`` if
-        no task has one.
+        Returns the :class:`CloudStorageInfo` from the project's own
+        ``source_storage.cloud_storage_id`` (ProjectRead API), or ``None``
+        if the project has no source_storage.
 
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
         sdk = self._require_sdk("detect_project_cloud_storage")
-        with self._api_or_adapter() as source:
-            tasks = source.get_project_tasks(project_id)
-        cs_cache: dict[int, CloudStorageInfo] = {}
-        for task in tasks:
-            cs_info = ImageDownloader.detect_cloud_storage(sdk, task.id, cs_cache)
-            if cs_info is not None:
-                return cs_info
-        return None
+        project = sdk.projects.retrieve(project_id)
+        source_storage = getattr(project, "source_storage", None)
+        if source_storage is None:
+            return None
+        if isinstance(source_storage, dict):
+            cs_id: int | None = source_storage.get("cloud_storage_id")
+        else:
+            cs_id = getattr(source_storage, "cloud_storage_id", None)
+        if cs_id is None:
+            return None
+        cs_api = sdk.api_client.cloudstorages_api
+        cs_raw, _ = cs_api.retrieve(cs_id)
+        return parse_cloud_storage(cs_raw)
 
     def sync_project_images(
         self,
         project_id: int,
         target_dir: Path,
+        project_cloud_storage: CloudStorageInfo | None = None,
     ) -> DownloadStats:
         """Sync all S3 objects for *project_id* into *target_dir*.
 
@@ -455,9 +466,14 @@ class CvatClient:
         downloads those missing locally.  Never deletes from S3 or syncs
         in reverse.
 
+        When *project_cloud_storage* is provided, uses it; otherwise
+        calls :meth:`detect_project_cloud_storage`(project_id).
+
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
-        cs_info = self.detect_project_cloud_storage(project_id)
+        if project_cloud_storage is None:
+            project_cloud_storage = self.detect_project_cloud_storage(project_id)
+        cs_info = project_cloud_storage
         if cs_info is None:
             logger.warning(
                 f"Проект {project_id}: cloud storage не найден — "
