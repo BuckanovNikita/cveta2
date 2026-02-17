@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
 from cvat_sdk import make_client
+from cvat_sdk.api_client.exceptions import ApiException
 from loguru import logger
 from tqdm import tqdm
 
@@ -40,6 +42,119 @@ _DATA_PROCESSING_TIMEOUT = int(os.environ.get("CVETA2_DATA_TIMEOUT", "60"))
 Configurable via ``CVETA2_DATA_TIMEOUT`` env var (default 60).
 """
 
+_HTTP_5XX_MIN = 500
+_HTTP_5XX_MAX = 600
+
+
+@dataclass(frozen=True)
+class _FetchAnnotationsOptions:
+    """Options for _fetch_annotations (filters + display/hint)."""
+
+    completed_only: bool = False
+    ignore_task_ids: set[int] | None = None
+    task_selector: list[int | str] | None = None
+    host: str = ""
+    project_name: str = ""
+
+
+def _log_task_5xx_skip(
+    task: RawTask,
+    host: str,
+    project_name: str,
+    status: int,
+    e: ApiException,
+) -> None:
+    """Log 5xx error and ignore-command hint for a skipped task."""
+    task_link = (
+        f"{host.rstrip('/')}/tasks/{task.id}"
+        if host
+        else f"task_id={task.id} {task.name!r}"
+    )
+    logger.error(f"CVAT server error (HTTP {status}) for task {task_link}: {e}")
+    if project_name:
+        logger.info(
+            f"Чтобы пропустить задачу при следующем запуске: "
+            f"cveta2 ignore --project {project_name!r} --add {task.id}"
+        )
+    else:
+        logger.info(
+            f"Чтобы пропустить задачу при следующем запуске: "
+            f"cveta2 ignore --project <имя_проекта> --add {task.id}"
+        )
+
+
+def _filter_tasks_for_fetch(
+    tasks: list[RawTask],
+    options: _FetchAnnotationsOptions,
+) -> list[RawTask]:
+    """Apply ignore list, task selector, completed_only; return filtered list."""
+    if options.ignore_task_ids:
+        skipped = [t for t in tasks if t.id in options.ignore_task_ids]
+        if skipped:
+            logger.warning(f"Пропускаем {len(skipped)} задач(а) из ignore-списка:")
+            for t in skipped:
+                logger.warning(f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})")
+        tasks = [t for t in tasks if t.id not in options.ignore_task_ids]
+    if options.task_selector is not None:
+        tasks = CvatClient.resolve_task_selectors(tasks, options.task_selector)
+        names = ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
+        logger.info(f"Selected {len(tasks)} task(s): {names}")
+    if options.completed_only:
+        tasks = [t for t in tasks if t.status == "completed"]
+        logger.trace(f"Filtered to {len(tasks)} completed task(s)")
+    return tasks
+
+
+def _task_to_records(
+    task: RawTask,
+    data_meta: RawDataMeta,
+    annotations: RawAnnotations,
+    label_names: dict[int, str],
+    attr_names: dict[int, str],
+) -> tuple[list[AnnotationRecord], list[DeletedImage]]:
+    """Build annotation records and deleted list for one task."""
+    if annotations.tracks:
+        logger.warning(
+            f"Task {task.name!r} has {len(annotations.tracks)} track(s) "
+            f"that will be skipped (only direct shapes are extracted)"
+        )
+    ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names)
+    task_annotations = _collect_shapes(annotations.shapes, ctx)
+    deleted_ids = set(data_meta.deleted_frames)
+    frames = ctx.frames
+    task_deleted = [
+        DeletedImage(
+            task_id=task.id,
+            task_name=task.name,
+            task_status=task.status,
+            task_updated_date=task.updated_date,
+            frame_id=fid,
+            image_name=(frames[fid].name if fid in frames else "<unknown>"),
+        )
+        for fid in data_meta.deleted_frames
+    ]
+    annotated_ids = {a.frame_id for a in task_annotations}
+    task_without = [
+        ImageWithoutAnnotations(
+            image_name=frame.name,
+            image_width=frame.width,
+            image_height=frame.height,
+            task_id=task.id,
+            task_name=task.name,
+            task_status=task.status,
+            task_updated_date=task.updated_date,
+            frame_id=fid,
+            subset=task.subset,
+        )
+        for fid, frame in frames.items()
+        if fid not in deleted_ids and fid not in annotated_ids
+    ]
+    return (
+        list(task_annotations) + task_without,
+        task_deleted,
+    )
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from contextlib import AbstractContextManager
@@ -48,7 +163,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
-    from cveta2._client.dtos import RawTask
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawTask
     from cveta2._client.ports import CvatApiPort
 
 
@@ -213,6 +328,7 @@ class CvatClient:
         completed_only: bool = False,
         ignore_task_ids: set[int] | None = None,
         task_selector: list[int | str] | None = None,
+        project_name: str = "",
     ) -> ProjectAnnotations:
         """Fetch all bbox annotations and deleted images from a project.
 
@@ -222,13 +338,14 @@ class CvatClient:
         matching tasks are processed.
         """
         with self._api_or_adapter() as source:
-            return self._fetch_annotations(
-                source,
-                project_id,
+            options = _FetchAnnotationsOptions(
                 completed_only=completed_only,
                 ignore_task_ids=ignore_task_ids,
                 task_selector=task_selector,
+                host=(self._cfg.host or ""),
+                project_name=project_name,
             )
+            return self._fetch_annotations(source, project_id, options)
 
     # ------------------------------------------------------------------
     # Core annotation logic (single code path for all API backends)
@@ -282,34 +399,13 @@ class CvatClient:
     def _fetch_annotations(
         api: CvatApiPort,
         project_id: int,
-        *,
-        completed_only: bool = False,
-        ignore_task_ids: set[int] | None = None,
-        task_selector: list[int | str] | None = None,
+        options: _FetchAnnotationsOptions,
     ) -> ProjectAnnotations:
         """Fetch annotations through a ``CvatApiPort`` implementation."""
         tasks = api.get_project_tasks(project_id)
         labels = api.get_project_labels(project_id)
         label_names, attr_names = _build_label_maps(labels)
-
-        if ignore_task_ids:
-            skipped = [t for t in tasks if t.id in ignore_task_ids]
-            if skipped:
-                logger.warning(f"Пропускаем {len(skipped)} задач(а) из ignore-списка:")
-                for t in skipped:
-                    logger.warning(
-                        f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})"
-                    )
-            tasks = [t for t in tasks if t.id not in ignore_task_ids]
-
-        if task_selector is not None:
-            tasks = CvatClient.resolve_task_selectors(tasks, task_selector)
-            names = ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
-            logger.info(f"Selected {len(tasks)} task(s): {names}")
-
-        if completed_only:
-            tasks = [t for t in tasks if t.status == "completed"]
-            logger.trace(f"Filtered to {len(tasks)} completed task(s)")
+        tasks = _filter_tasks_for_fetch(tasks, options)
         if not tasks:
             logger.warning("No tasks in this project.")
             return ProjectAnnotations(
@@ -317,67 +413,32 @@ class CvatClient:
                 deleted_images=[],
             )
 
+        raise_on_failure = (
+            os.environ.get("CVETA2_RAISE_ON_FAILURE", "").lower() == "true"
+        )
         all_records: list[AnnotationRecord] = []
         all_deleted: list[DeletedImage] = []
 
         for task in tqdm(tasks, desc="Processing tasks", unit="task", leave=False):
-            data_meta = api.get_task_data_meta(task.id)
-            annotations = api.get_task_annotations(task.id)
+            try:
+                data_meta = api.get_task_data_meta(task.id)
+                annotations = api.get_task_annotations(task.id)
+            except ApiException as e:
+                status = getattr(e, "status", 0)
+                if _HTTP_5XX_MIN <= status < _HTTP_5XX_MAX:
+                    if raise_on_failure:
+                        raise
+                    _log_task_5xx_skip(
+                        task, options.host, options.project_name, status, e
+                    )
+                    continue
+                raise
 
-            # NOTE: Only direct shapes are processed. Track-based annotations
-            # (interpolated/linked bboxes) are intentionally skipped — cveta2
-            # targets per-frame bbox exports, not temporal tracking data.
-            if annotations.tracks:
-                logger.warning(
-                    f"Task {task.name!r} has {len(annotations.tracks)} track(s) "
-                    f"that will be skipped (only direct shapes are extracted)"
-                )
-
-            ctx = _TaskContext.from_raw(
-                task,
-                data_meta,
-                label_names,
-                attr_names,
+            records, deleted = _task_to_records(
+                task, data_meta, annotations, label_names, attr_names
             )
-            task_annotations = _collect_shapes(
-                annotations.shapes,
-                ctx,
-            )
-
-            deleted_ids = set(data_meta.deleted_frames)
-            frames = ctx.frames
-            task_deleted = [
-                DeletedImage(
-                    task_id=task.id,
-                    task_name=task.name,
-                    task_status=task.status,
-                    task_updated_date=task.updated_date,
-                    frame_id=fid,
-                    image_name=(frames[fid].name if fid in frames else "<unknown>"),
-                )
-                for fid in data_meta.deleted_frames
-            ]
-
-            annotated_ids = {a.frame_id for a in task_annotations}
-            task_without = [
-                ImageWithoutAnnotations(
-                    image_name=frame.name,
-                    image_width=frame.width,
-                    image_height=frame.height,
-                    task_id=task.id,
-                    task_name=task.name,
-                    task_status=task.status,
-                    task_updated_date=task.updated_date,
-                    frame_id=fid,
-                    subset=task.subset,
-                )
-                for fid, frame in frames.items()
-                if fid not in deleted_ids and fid not in annotated_ids
-            ]
-
-            all_records.extend(task_annotations)
-            all_records.extend(task_without)
-            all_deleted.extend(task_deleted)
+            all_records.extend(records)
+            all_deleted.extend(deleted)
 
         bbox_count = sum(1 for r in all_records if isinstance(r, BBoxAnnotation))
         without_count = len(all_records) - bbox_count

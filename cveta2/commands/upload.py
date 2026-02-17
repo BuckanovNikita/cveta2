@@ -203,11 +203,7 @@ def run_upload(args: argparse.Namespace) -> None:
 
         if missing:
             preview = ", ".join(missing[:10])
-            extra = (
-                f" (и ещё {len(missing) - 10})"
-                if len(missing) > 10  # noqa: PLR2004
-                else ""
-            )
+            extra = f" (и ещё {len(missing) - 10})" if len(missing) > 10 else ""
             logger.warning(
                 f"{len(missing)} изображений не найдено локально: {preview}{extra}",
             )

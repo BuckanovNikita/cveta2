@@ -60,6 +60,7 @@ def run_fetch(args: argparse.Namespace) -> None:
                 project_id=project_id,
                 completed_only=args.completed_only,
                 ignore_task_ids=ignore_set,
+                project_name=project_name,
             )
         except Cveta2Error as e:
             sys.exit(str(e))
@@ -92,6 +93,7 @@ def run_fetch_task(args: argparse.Namespace) -> None:
                 completed_only=args.completed_only,
                 ignore_task_ids=ignore_set,
                 task_selector=task_sel,
+                project_name=project_name,
             )
         except Cveta2Error as e:
             sys.exit(str(e))

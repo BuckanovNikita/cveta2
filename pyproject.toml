@@ -57,6 +57,7 @@ ignore = [
     "D203",
     "RUF001",  # ambiguous-unicode-character - project uses Russian (Cyrillic) strings
     "PERF203", # try-except-in-loop - false positive in modern Python (3.11+)
+    "PLR2004",
 ]
 fixable = ["ALL"]
 exclude = ["scripts/**"]  # lint only; format still runs on scripts

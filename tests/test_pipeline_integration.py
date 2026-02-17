@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pandas as pd
+import pytest
+from cvat_sdk.api_client.exceptions import ApiException
 
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
@@ -26,7 +29,13 @@ from tests.fixtures.fake_cvat_project import (
 )
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2._client.dtos import (
+        RawAnnotations,
+        RawDataMeta,
+        RawLabel,
+        RawProject,
+        RawTask,
+    )
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,6 +57,33 @@ _IMAGE_NAMES = [
 
 def _client(fixtures: LoadedFixtures) -> CvatClient:
     return CvatClient(_CFG, api=FakeCvatApi(fixtures))
+
+
+class _FailingTaskApi:
+    """CvatApiPort wrapper that raises ApiException(500) for a given task id."""
+
+    def __init__(self, delegate: FakeCvatApi, failing_task_id: int) -> None:
+        self._delegate = delegate
+        self._failing_task_id = failing_task_id
+
+    def list_projects(self) -> list[RawProject]:
+        return self._delegate.list_projects()
+
+    def get_project_tasks(self, project_id: int) -> list[RawTask]:
+        return self._delegate.get_project_tasks(project_id)
+
+    def get_project_labels(self, project_id: int) -> list[RawLabel]:
+        return self._delegate.get_project_labels(project_id)
+
+    def get_task_data_meta(self, task_id: int) -> RawDataMeta:
+        if task_id == self._failing_task_id:
+            raise ApiException(status=500, reason="Internal Server Error")
+        return self._delegate.get_task_data_meta(task_id)
+
+    def get_task_annotations(self, task_id: int) -> RawAnnotations:
+        if task_id == self._failing_task_id:
+            raise ApiException(status=500, reason="Internal Server Error")
+        return self._delegate.get_task_annotations(task_id)
 
 
 def _build(
@@ -330,3 +366,51 @@ def test_partition_with_deleted_and_in_progress(
         assert name in set(partition.obsolete["image_name"])
     assert len(partition.dataset) > 0
     assert len(partition.in_progress) > 0
+
+
+def test_5xx_task_skipped(coco8_fixtures: LoadedFixtures) -> None:
+    """When one task returns 5xx, that task is skipped and others are processed."""
+    fake = _build(
+        coco8_fixtures,
+        ["normal", "all-empty"],
+        statuses=["completed", "completed"],
+    )
+    failing_task_id = fake.tasks[1].id
+    api = _FailingTaskApi(FakeCvatApi(fake), failing_task_id=failing_task_id)
+    client = CvatClient(_CFG, api=api)
+
+    result = client.fetch_annotations(
+        fake.project.id,
+        project_name="test-project",
+    )
+
+    # Only first task (normal) data; second task (all-empty) was skipped due to 5xx
+    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    task_ids = {a.task_id for a in result.annotations}
+    assert len(bbox_records) == 30
+    assert task_ids == {fake.tasks[0].id}
+    assert failing_task_id not in task_ids
+
+
+def test_5xx_raise_on_failure(coco8_fixtures: LoadedFixtures) -> None:
+    """When CVETA2_RAISE_ON_FAILURE=true, 5xx is re-raised immediately."""
+    fake = _build(
+        coco8_fixtures,
+        ["normal", "all-empty"],
+        statuses=["completed", "completed"],
+    )
+    failing_task_id = fake.tasks[1].id
+    api = _FailingTaskApi(FakeCvatApi(fake), failing_task_id=failing_task_id)
+    client = CvatClient(_CFG, api=api)
+
+    prev = os.environ.get("CVETA2_RAISE_ON_FAILURE")
+    try:
+        os.environ["CVETA2_RAISE_ON_FAILURE"] = "true"
+        with pytest.raises(ApiException) as exc_info:
+            client.fetch_annotations(fake.project.id)
+        assert exc_info.value.status == 500
+    finally:
+        if prev is None:
+            os.environ.pop("CVETA2_RAISE_ON_FAILURE", None)
+        else:
+            os.environ["CVETA2_RAISE_ON_FAILURE"] = prev
