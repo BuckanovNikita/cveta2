@@ -10,34 +10,6 @@ from pydantic import BaseModel, Discriminator
 Split = Literal["train", "val", "test"]
 """Allowed values for the ``split`` field (our convention for dataset splits)."""
 
-# Canonical CSV column order shared by all AnnotationRecord variants.
-# Every ``to_csv_row()`` implementation must produce dicts with exactly these keys.
-CSV_COLUMNS: tuple[str, ...] = (
-    "image_name",
-    "image_width",
-    "image_height",
-    "instance_shape",
-    "instance_label",
-    "bbox_x_tl",
-    "bbox_y_tl",
-    "bbox_x_br",
-    "bbox_y_br",
-    "task_id",
-    "task_name",
-    "task_status",
-    "task_updated_date",
-    "created_by_username",
-    "frame_id",
-    "split",
-    "subset",
-    "occluded",
-    "z_order",
-    "rotation",
-    "source",
-    "annotation_id",
-    "attributes",
-)
-
 
 class BBoxAnnotation(BaseModel):
     """Single bounding-box annotation record."""
@@ -73,6 +45,11 @@ class BBoxAnnotation(BaseModel):
         attrs = row.pop("attributes")
         row["attributes"] = json.dumps(attrs, ensure_ascii=False)
         return row
+
+
+# Canonical CSV column order shared by all AnnotationRecord variants.
+# Inferred from BBoxAnnotation (full schema); every to_csv_row() must use these keys.
+CSV_COLUMNS: tuple[str, ...] = tuple(BBoxAnnotation.model_fields.keys())
 
 
 class ImageWithoutAnnotations(BaseModel):

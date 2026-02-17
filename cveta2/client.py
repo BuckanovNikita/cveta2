@@ -145,27 +145,34 @@ class CvatClient:
         """Return the best available API port (injected > persistent > None)."""
         return self._api or self._persistent_api
 
+    @contextmanager
+    def _api_or_adapter(self) -> Iterator[CvatApiPort]:
+        """Yield the best API port (injected/persistent or a new SDK adapter)."""
+        api = self._get_api()
+        if api is not None:
+            yield api
+        else:
+            with self._open_sdk_adapter() as adapter:
+                yield adapter
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def list_projects(self) -> list[ProjectInfo]:
         """Fetch list of projects from CVAT (id and name)."""
-        api = self._get_api()
-        if api is not None:
-            raw = api.list_projects()
+
+        def from_source(source: CvatApiPort) -> list[ProjectInfo]:
+            raw = source.list_projects()
             return [ProjectInfo(id=p.id, name=p.name) for p in raw]
-        with self._open_sdk_adapter() as adapter:
-            raw = adapter.list_projects()
-            return [ProjectInfo(id=p.id, name=p.name) for p in raw]
+
+        with self._api_or_adapter() as source:
+            return from_source(source)
 
     def list_project_tasks(self, project_id: int) -> list[RawTask]:
         """Fetch the list of tasks for a project from CVAT."""
-        api = self._get_api()
-        if api is not None:
-            return api.get_project_tasks(project_id)
-        with self._open_sdk_adapter() as adapter:
-            return adapter.get_project_tasks(project_id)
+        with self._api_or_adapter() as source:
+            return source.get_project_tasks(project_id)
 
     def resolve_project_id(
         self,
@@ -209,18 +216,9 @@ class CvatClient:
         If ``task_selector`` is given (list of task IDs or names), only
         matching tasks are processed.
         """
-        api = self._get_api()
-        if api is not None:
+        with self._api_or_adapter() as source:
             return self._fetch_annotations(
-                api,
-                project_id,
-                completed_only=completed_only,
-                ignore_task_ids=ignore_task_ids,
-                task_selector=task_selector,
-            )
-        with self._open_sdk_adapter() as adapter:
-            return self._fetch_annotations(
-                adapter,
+                source,
                 project_id,
                 completed_only=completed_only,
                 ignore_task_ids=ignore_task_ids,
@@ -437,12 +435,8 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
         sdk = self._require_sdk("detect_project_cloud_storage")
-        api = self._get_api()
-        if api is None:
-            msg = "API port not available."
-            raise RuntimeError(msg)
-
-        tasks = api.get_project_tasks(project_id)
+        with self._api_or_adapter() as source:
+            tasks = source.get_project_tasks(project_id)
         cs_cache: dict[int, CloudStorageInfo] = {}
         for task in tasks:
             cs_info = ImageDownloader.detect_cloud_storage(sdk, task.id, cs_cache)
