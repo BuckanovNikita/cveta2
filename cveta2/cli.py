@@ -174,6 +174,20 @@ class CliApp:
                 "or CVETA2_CONFIG)."
             ),
         )
+        parser.add_argument(
+            "--reset",
+            action="store_true",
+            help=(
+                "Re-ask path for every project using cache_root/project_name "
+                "as default (ignore existing paths)."
+            ),
+        )
+        parser.add_argument(
+            "--list",
+            dest="list_paths",
+            action="store_true",
+            help="List current image cache paths and exit.",
+        )
 
     def _add_s3_sync_parser(
         self,
@@ -365,7 +379,11 @@ class CliApp:
             if args.command == "setup":
                 run_setup(setup_path)
             else:
-                run_setup_cache(setup_path)
+                run_setup_cache(
+                    setup_path,
+                    reset=getattr(args, "reset", False),
+                    list_paths=getattr(args, "list_paths", False),
+                )
             return
 
         dispatch: dict[str, object] = {
