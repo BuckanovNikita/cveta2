@@ -73,6 +73,7 @@ def _make_args(
         completed_only=completed_only,
         no_images=no_images,
         images_dir=None,
+        save_tasks=False,
     )
 
 

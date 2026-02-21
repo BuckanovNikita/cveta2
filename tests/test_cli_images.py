@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from cveta2.cli import CliApp
-from cveta2.models import ProjectAnnotations
+from cveta2.client import FetchContext
 
 
 def _write_config(
@@ -37,9 +37,10 @@ def _mock_client_ctx(
     client.__enter__ = MagicMock(return_value=client)
     client.__exit__ = MagicMock(return_value=False)
     client.resolve_project_id.return_value = project_id
-    client.fetch_annotations.return_value = ProjectAnnotations(
-        annotations=[],
-        deleted_images=[],
+    client.prepare_fetch.return_value = FetchContext(
+        tasks=[],
+        label_names={},
+        attr_names={},
     )
     client.download_images.return_value = MagicMock(
         downloaded=0,

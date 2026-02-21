@@ -33,6 +33,7 @@ from cveta2.models import (
     DeletedImage,
     ImageWithoutAnnotations,
     ProjectAnnotations,
+    TaskAnnotations,
 )
 from cveta2.projects_cache import ProjectInfo
 
@@ -53,6 +54,21 @@ class _FetchAnnotationsOptions:
     completed_only: bool = False
     ignore_task_ids: set[int] | None = None
     task_selector: list[int | str] | None = None
+    host: str = ""
+    project_name: str = ""
+
+
+@dataclass(frozen=True)
+class FetchContext:
+    """Prepared context for per-task annotation fetching.
+
+    Returned by :meth:`CvatClient.prepare_fetch`; passed to
+    :meth:`CvatClient.fetch_one_task` for each task in the loop.
+    """
+
+    tasks: list[RawTask]
+    label_names: dict[int, str]
+    attr_names: dict[int, str]
     host: str = ""
     project_name: str = ""
 
@@ -347,6 +363,30 @@ class CvatClient:
             )
             return self._fetch_annotations(source, project_id, options)
 
+    def prepare_fetch(
+        self,
+        project_id: int,
+        *,
+        completed_only: bool = False,
+        ignore_task_ids: set[int] | None = None,
+        task_selector: list[int | str] | None = None,
+        project_name: str = "",
+    ) -> FetchContext:
+        """Prepare fetch context: get task list, labels, apply filters.
+
+        The returned :class:`FetchContext` holds the filtered task list
+        and label maps.  Pass it to :meth:`fetch_one_task` for each task.
+        """
+        with self._api_or_adapter() as source:
+            options = _FetchAnnotationsOptions(
+                completed_only=completed_only,
+                ignore_task_ids=ignore_task_ids,
+                task_selector=task_selector,
+                host=(self._cfg.host or ""),
+                project_name=project_name,
+            )
+            return self._prepare_fetch(source, project_id, options)
+
     # ------------------------------------------------------------------
     # Core annotation logic (single code path for all API backends)
     # ------------------------------------------------------------------
@@ -396,61 +436,90 @@ class CvatClient:
         return matched
 
     @staticmethod
+    def _prepare_fetch(
+        api: CvatApiPort,
+        project_id: int,
+        options: _FetchAnnotationsOptions,
+    ) -> FetchContext:
+        """Get task list and labels, apply filters, return context."""
+        tasks = api.get_project_tasks(project_id)
+        labels = api.get_project_labels(project_id)
+        label_names, attr_names = _build_label_maps(labels)
+        tasks = _filter_tasks_for_fetch(tasks, options)
+        return FetchContext(
+            tasks=tasks,
+            label_names=label_names,
+            attr_names=attr_names,
+            host=options.host,
+            project_name=options.project_name,
+        )
+
+    @staticmethod
+    def _fetch_one_task(
+        api: CvatApiPort,
+        task: RawTask,
+        ctx: FetchContext,
+    ) -> TaskAnnotations | None:
+        """Fetch annotations for a single task via the API port.
+
+        Returns ``None`` when the task was skipped (5xx with
+        ``CVETA2_RAISE_ON_FAILURE`` not set).
+        """
+        raise_on_failure = (
+            os.environ.get("CVETA2_RAISE_ON_FAILURE", "").lower() == "true"
+        )
+        try:
+            data_meta = api.get_task_data_meta(task.id)
+            annotations = api.get_task_annotations(task.id)
+        except ApiException as e:
+            status = getattr(e, "status", 0)
+            if _HTTP_5XX_MIN <= status < _HTTP_5XX_MAX:
+                if raise_on_failure:
+                    raise
+                _log_task_5xx_skip(task, ctx.host, ctx.project_name, status, e)
+                return None
+            raise
+
+        records, deleted = _task_to_records(
+            task, data_meta, annotations, ctx.label_names, ctx.attr_names
+        )
+        return TaskAnnotations(
+            task_id=task.id,
+            task_name=task.name,
+            annotations=records,
+            deleted_images=deleted,
+        )
+
+    @staticmethod
     def _fetch_annotations(
         api: CvatApiPort,
         project_id: int,
         options: _FetchAnnotationsOptions,
     ) -> ProjectAnnotations:
         """Fetch annotations through a ``CvatApiPort`` implementation."""
-        tasks = api.get_project_tasks(project_id)
-        labels = api.get_project_labels(project_id)
-        label_names, attr_names = _build_label_maps(labels)
-        tasks = _filter_tasks_for_fetch(tasks, options)
-        if not tasks:
+        ctx = CvatClient._prepare_fetch(api, project_id, options)
+        if not ctx.tasks:
             logger.warning("No tasks in this project.")
             return ProjectAnnotations(
                 annotations=[],
                 deleted_images=[],
             )
 
-        raise_on_failure = (
-            os.environ.get("CVETA2_RAISE_ON_FAILURE", "").lower() == "true"
-        )
-        all_records: list[AnnotationRecord] = []
-        all_deleted: list[DeletedImage] = []
+        task_results: list[TaskAnnotations] = []
+        for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
+            result = CvatClient._fetch_one_task(api, task, ctx)
+            if result is not None:
+                task_results.append(result)
 
-        for task in tqdm(tasks, desc="Processing tasks", unit="task", leave=False):
-            try:
-                data_meta = api.get_task_data_meta(task.id)
-                annotations = api.get_task_annotations(task.id)
-            except ApiException as e:
-                status = getattr(e, "status", 0)
-                if _HTTP_5XX_MIN <= status < _HTTP_5XX_MAX:
-                    if raise_on_failure:
-                        raise
-                    _log_task_5xx_skip(
-                        task, options.host, options.project_name, status, e
-                    )
-                    continue
-                raise
-
-            records, deleted = _task_to_records(
-                task, data_meta, annotations, label_names, attr_names
-            )
-            all_records.extend(records)
-            all_deleted.extend(deleted)
-
-        bbox_count = sum(1 for r in all_records if isinstance(r, BBoxAnnotation))
-        without_count = len(all_records) - bbox_count
+        merged = TaskAnnotations.merge(task_results)
+        bbox_count = sum(1 for r in merged.annotations if isinstance(r, BBoxAnnotation))
+        without_count = len(merged.annotations) - bbox_count
         logger.trace(
             f"Fetched {bbox_count} bbox annotation(s), "
-            f"{len(all_deleted)} deleted image(s), "
+            f"{len(merged.deleted_images)} deleted image(s), "
             f"{without_count} image(s) without annotations",
         )
-        return ProjectAnnotations(
-            annotations=all_records,
-            deleted_images=all_deleted,
-        )
+        return merged
 
     # ------------------------------------------------------------------
     # Image download

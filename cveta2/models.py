@@ -115,3 +115,29 @@ class ProjectAnnotations(BaseModel):
         Each row has the keys from ``CSV_COLUMNS``.
         """
         return [record.to_csv_row() for record in self.annotations]
+
+
+class TaskAnnotations(BaseModel):
+    """Result of fetching annotations from a single CVAT task."""
+
+    task_id: int
+    task_name: str
+    annotations: list[AnnotationRecord]
+    deleted_images: list[DeletedImage]
+
+    def to_csv_rows(self) -> list[dict[str, str | int | float | bool | None]]:
+        """Build flat CSV rows from annotation records for this task."""
+        return [record.to_csv_row() for record in self.annotations]
+
+    @staticmethod
+    def merge(task_results: list[TaskAnnotations]) -> ProjectAnnotations:
+        """Merge multiple per-task results into a single ProjectAnnotations."""
+        all_annotations: list[AnnotationRecord] = []
+        all_deleted: list[DeletedImage] = []
+        for tr in task_results:
+            all_annotations.extend(tr.annotations)
+            all_deleted.extend(tr.deleted_images)
+        return ProjectAnnotations(
+            annotations=all_annotations,
+            deleted_images=all_deleted,
+        )

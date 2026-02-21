@@ -251,7 +251,7 @@ cveta2 setup-cache --list
 
 ### `cveta2 fetch`
 
-Выгрузка **всех** bbox-аннотаций и удалённых изображений из проекта CVAT. Результат разбивается на три CSV-файла + список удалённых. Если папка `--output-dir` уже существует, в интерактивном режиме будет предложено перезаписать, указать другой путь или отменить.
+Выгрузка **всех** bbox-аннотаций и удалённых изображений из проекта CVAT. Каждая задача выгружается последовательно и сохраняется как промежуточный CSV в `output/.tasks/task_{id}.csv`, после чего результаты объединяются и разбиваются на три CSV-файла + список удалённых. Если папка `--output-dir` уже существует, в интерактивном режиме будет предложено перезаписать, указать другой путь или отменить.
 
 ```bash
 # По ID проекта
@@ -278,7 +278,7 @@ cveta2 fetch -p "coco8-dev" -o output/ --images-dir /mnt/data/coco8
 
 ### `cveta2 fetch-task`
 
-Выгрузка bbox-аннотаций для **конкретных задач** проекта. В отличие от `fetch`, не разбивает результат на dataset/obsolete/in_progress — записывает единый `dataset.csv` и `deleted.txt` в указанную директорию. Задачи указываются по ID или имени через `-t`, либо выбираются интерактивно (checkbox с поиском).
+Выгрузка bbox-аннотаций для **конкретных задач** проекта. Использует ту же логику поштучной выгрузки задач, что и `fetch` (промежуточные CSV в `output/.tasks/`). В отличие от `fetch`, не разбивает результат на dataset/obsolete/in_progress — записывает единый `dataset.csv` и `deleted.txt` в указанную директорию. Задачи указываются по ID или имени через `-t`, либо выбираются интерактивно (checkbox с поиском).
 
 ```bash
 # Одна задача по ID
@@ -497,10 +497,10 @@ with CvatClient(cfg) as client:
 
 ## Формат данных
 
-`CvatClient.fetch_annotations()` возвращает `ProjectAnnotations`:
+`CvatClient.fetch_annotations()` возвращает `ProjectAnnotations`, `CvatClient.fetch_one_task()` — `TaskAnnotations`:
 
-- `annotations: list[AnnotationRecord]` — единый список из `BBoxAnnotation` и `ImageWithoutAnnotations` (discriminated union по полю `instance_shape`)
-- `deleted_images: list[DeletedImage]`
+- `ProjectAnnotations` — результат по всем задачам: `annotations: list[AnnotationRecord]`, `deleted_images: list[DeletedImage]`
+- `TaskAnnotations` — результат по одной задаче: `task_id`, `task_name`, `annotations`, `deleted_images`. Метод `TaskAnnotations.merge(list)` объединяет несколько задач в `ProjectAnnotations`
 
 `AnnotationRecord` — это `BBoxAnnotation` (`instance_shape="box"`) или `ImageWithoutAnnotations` (`instance_shape="none"`). Оба типа содержат `image_name`, `task_id`, `frame_id` и реализуют `to_csv_row()`.
 

@@ -10,8 +10,9 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import questionary
 from loguru import logger
+from tqdm import tqdm
 
-from cveta2.client import CvatClient
+from cveta2.client import CvatClient, FetchContext
 from cveta2.commands._helpers import (
     load_config,
     require_host,
@@ -29,6 +30,7 @@ from cveta2.config import (
 )
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
+from cveta2.models import TaskAnnotations
 
 if TYPE_CHECKING:
     import argparse
@@ -45,6 +47,7 @@ def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
     cfg = load_config()
     require_host(cfg)
+    output_dir = _resolve_output_dir(Path(args.output_dir))
 
     with CvatClient(cfg) as client:
         try:
@@ -57,7 +60,7 @@ def run_fetch(args: argparse.Namespace) -> None:
         ignore_set = _warn_ignored_tasks(project_name)
 
         try:
-            result = client.fetch_annotations(
+            ctx = client.prepare_fetch(
                 project_id=project_id,
                 completed_only=args.completed_only,
                 ignore_task_ids=ignore_set,
@@ -66,19 +69,27 @@ def run_fetch(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
+        result = _fetch_and_save_tasks(
+            client,
+            ctx,
+            output_dir,
+            save_tasks=args.save_tasks,
+        )
+
         _download_images(
             _DownloadImagesParams(
                 args, project_id, project_name, client, result, cs_info
             )
         )
 
-    _write_output(args, result)
+    _write_output(args, result, output_dir)
 
 
 def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
     cfg = load_config()
     require_host(cfg)
+    output_dir = Path(args.output_dir)
 
     with CvatClient(cfg) as client:
         try:
@@ -89,11 +100,10 @@ def run_fetch_task(args: argparse.Namespace) -> None:
             sys.exit(str(e))
 
         ignore_set = _warn_ignored_tasks(project_name)
-
         task_sel = _resolve_task_selector(args, client, project_id, ignore_set)
 
         try:
-            result = client.fetch_annotations(
+            ctx = client.prepare_fetch(
                 project_id=project_id,
                 completed_only=args.completed_only,
                 ignore_task_ids=ignore_set,
@@ -103,13 +113,20 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
+        result = _fetch_and_save_tasks(
+            client,
+            ctx,
+            output_dir,
+            save_tasks=args.save_tasks,
+        )
+
         _download_images(
             _DownloadImagesParams(
                 args, project_id, project_name, client, result, cs_info
             )
         )
 
-    write_dataset_and_deleted(result, Path(args.output_dir))
+    write_dataset_and_deleted(result, output_dir)
 
 
 # ------------------------------------------------------------------
@@ -127,6 +144,53 @@ class _DownloadImagesParams:
     client: CvatClient
     result: ProjectAnnotations
     project_cloud_storage: CloudStorageInfo | None = None
+
+
+def _fetch_and_save_tasks(
+    client: CvatClient,
+    ctx: FetchContext,
+    output_dir: Path,
+    *,
+    save_tasks: bool = False,
+) -> ProjectAnnotations:
+    """Fetch tasks one by one, saving per-task CSVs into ``output_dir/.tasks/``.
+
+    When *save_tasks* is False (default), the ``.tasks/`` directory is
+    removed after merging.
+
+    Returns the merged :class:`ProjectAnnotations` from all fetched tasks.
+    """
+    if not ctx.tasks:
+        logger.warning("No tasks in this project.")
+        return TaskAnnotations.merge([])
+
+    tasks_dir = output_dir / ".tasks"
+    tasks_dir.mkdir(parents=True, exist_ok=True)
+
+    task_results: list[TaskAnnotations] = []
+    with client._api_or_adapter() as api:  # noqa: SLF001
+        for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
+            task_result = client._fetch_one_task(api, task, ctx)  # noqa: SLF001
+            if task_result is None:
+                continue
+
+            rows = task_result.to_csv_rows()
+            if rows:
+                df = pd.DataFrame(rows)
+                task_csv = tasks_dir / f"task_{task.id}.csv"
+                df.to_csv(task_csv, index=False, encoding="utf-8")
+                logger.trace(
+                    f"Task {task.name!r} (id={task.id}): {len(rows)} rows → {task_csv}"
+                )
+
+            task_results.append(task_result)
+
+    if not save_tasks:
+        import shutil  # noqa: PLC0415
+
+        shutil.rmtree(tasks_dir, ignore_errors=True)
+
+    return TaskAnnotations.merge(task_results)
 
 
 def _download_images(params: _DownloadImagesParams) -> None:
@@ -148,10 +212,9 @@ def _download_images(params: _DownloadImagesParams) -> None:
 def _write_output(
     args: argparse.Namespace,
     result: ProjectAnnotations,
+    output_dir: Path,
 ) -> None:
     """Partition annotations and write output files."""
-    output_dir = _resolve_output_dir(Path(args.output_dir))
-
     rows = result.to_csv_rows()
     df = pd.DataFrame(rows)
 

@@ -142,6 +142,14 @@ class CliApp:
                 "(takes precedence over config mapping)."
             ),
         )
+        parser.add_argument(
+            "--save-tasks",
+            action="store_true",
+            help=(
+                "Keep per-task CSV files in .tasks/ subdirectory. "
+                "By default they are removed after merging."
+            ),
+        )
 
     def _add_setup_parser(
         self,
