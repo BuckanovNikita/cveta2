@@ -84,6 +84,7 @@ class RawLabel:
     id: int
     name: str
     attributes: list[RawLabelAttribute]
+    color: str = ""
 
 
 @dataclass(frozen=True, slots=True)

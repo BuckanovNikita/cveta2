@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 from cveta2.commands.fetch import run_fetch, run_fetch_task
 from cveta2.commands.ignore import run_ignore
+from cveta2.commands.labels import run_labels
 from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup, run_setup_cache
@@ -41,6 +42,7 @@ class CliApp:
         self._add_upload_parser(subparsers)
         self._add_merge_parser(subparsers)
         self._add_ignore_parser(subparsers)
+        self._add_labels_parser(subparsers)
         self._add_doctor_parser(subparsers)
 
         return parser
@@ -374,6 +376,36 @@ class CliApp:
             help="Description / reason for ignoring (used with --add).",
         )
 
+    def _add_labels_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``labels`` command parser."""
+        parser = subparsers.add_parser(
+            "labels",
+            help=(
+                "List and interactively edit project labels. "
+                "Includes safety checks before label deletion."
+            ),
+        )
+        parser.add_argument(
+            "--project",
+            "-p",
+            type=str,
+            default=None,
+            help=(
+                "Project ID or name. If omitted, "
+                "interactive project selection is shown."
+            ),
+        )
+        parser.add_argument(
+            "--list",
+            action="store_true",
+            default=False,
+            dest="list_labels",
+            help="List project labels and exit.",
+        )
+
     def _add_doctor_parser(
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
@@ -405,6 +437,7 @@ class CliApp:
             "upload": lambda: run_upload(args),
             "merge": lambda: run_merge(args),
             "ignore": lambda: run_ignore(args),
+            "labels": lambda: run_labels(args),
             "doctor": run_doctor,
         }
         handler = dispatch.get(args.command)

@@ -7,6 +7,7 @@
 # Documentation guidelines 
 1. always write to README.md in russian
 1. Write README.md as user friendly intro rich with examples, not as wall of internals
+1. Write CIONTRIBUTING.md in russian
 1. Try avoid using strings instead ofg types if it's not strictly neccessary..
 1. Update README.md and AGENT_DOCS when finishing task or make breaking api changes.
 

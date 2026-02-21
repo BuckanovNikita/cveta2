@@ -182,7 +182,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawTask
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawLabel, RawTask
     from cveta2._client.ports import CvatApiPort
 
 
@@ -312,6 +312,82 @@ class CvatClient:
         """Fetch the list of tasks for a project from CVAT."""
         with self._api_or_adapter() as source:
             return source.get_project_tasks(project_id)
+
+    def get_project_labels(self, project_id: int) -> list[RawLabel]:
+        """Fetch label definitions for a project from CVAT."""
+        with self._api_or_adapter() as source:
+            return source.get_project_labels(project_id)
+
+    def count_label_usage(self, project_id: int) -> dict[int, int]:
+        """Count annotations per label across all project tasks.
+
+        Returns a mapping ``{label_id: annotation_count}`` where the count
+        includes both shapes and tracks.  Used to warn before label deletion.
+        """
+        with self._api_or_adapter() as source:
+            tasks = source.get_project_tasks(project_id)
+            counts: dict[int, int] = {}
+            for task in tqdm(
+                tasks, desc="Checking annotations", unit="task", leave=False
+            ):
+                try:
+                    annotations = source.get_task_annotations(task.id)
+                except ApiException:
+                    logger.warning(f"Не удалось получить аннотации задачи {task.id}")
+                    continue
+                for shape in annotations.shapes:
+                    counts[shape.label_id] = counts.get(shape.label_id, 0) + 1
+                for track in annotations.tracks:
+                    counts[track.label_id] = counts.get(track.label_id, 0) + 1
+            return counts
+
+    def update_project_labels(
+        self,
+        project_id: int,
+        *,
+        add: list[str] | None = None,
+        rename: dict[int, str] | None = None,
+        delete: list[int] | None = None,
+    ) -> None:
+        """Update project labels via CVAT PATCH API.
+
+        Parameters
+        ----------
+        project_id:
+            CVAT project ID.
+        add:
+            Label names to create (CVAT assigns IDs and colors).
+        rename:
+            Mapping ``{label_id: new_name}`` for labels to rename.
+        delete:
+            Label IDs to delete.  **Destroys all annotations using
+            those labels permanently.**
+
+        Requires an active context manager.
+
+        """
+        sdk = self._require_sdk("update_project_labels")
+        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
+
+        patch_labels: list[cvat_models.PatchedLabelRequest] = [
+            cvat_models.PatchedLabelRequest(name=name) for name in (add or [])
+        ]
+        patch_labels.extend(
+            cvat_models.PatchedLabelRequest(id=lid, name=new_name)
+            for lid, new_name in (rename or {}).items()
+        )
+        patch_labels.extend(
+            cvat_models.PatchedLabelRequest(id=lid, deleted=True)
+            for lid in (delete or [])
+        )
+        if not patch_labels:
+            return
+        sdk.api_client.projects_api.partial_update(
+            project_id,
+            patched_project_write_request=cvat_models.PatchedProjectWriteRequest(
+                labels=patch_labels,
+            ),
+        )
 
     def resolve_project_id(
         self,

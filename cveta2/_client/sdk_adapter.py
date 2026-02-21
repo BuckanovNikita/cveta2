@@ -159,7 +159,9 @@ class SdkCvatApiAdapter:
     def _convert_label(label: cvat_models.Label) -> RawLabel:
         raw_attrs = label.attributes or []
         attrs = [RawLabelAttribute(id=a.id, name=a.name or "") for a in raw_attrs]
-        return RawLabel(id=label.id, name=label.name, attributes=attrs)
+        return RawLabel(
+            id=label.id, name=label.name, attributes=attrs, color=label.color or ""
+        )
 
     @staticmethod
     def _convert_data_meta(
