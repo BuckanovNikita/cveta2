@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Start (or recreate) a minimal CVAT + MinIO stack for integration tests.
 #
-# Only starts the services needed for API testing:
+# Starts the services needed for API testing and web UI:
 #   cvat_server  (+deps: db, redis x2, opa)
 #   cvat_worker_import   (task creation)
 #   cvat_worker_chunks   (image processing, if present in the version)
 #   cveta2-minio         (S3 storage)
+#   cvat_ui, traefik     (web UI)
 #
-# Analytics (clickhouse, vector, grafana), UI, traefik, and non-essential
-# workers are NOT started. The server port is exposed directly.
+# Analytics (clickhouse, vector, grafana) and non-essential workers are NOT started.
+# Single port: traefik routes both API and UI on CVAT_PORT (see docker-compose.ui.yml).
+# Container names are prefixed with username (INTEGRATION_USER) to avoid clashes.
 #
 # Usage:
 #   ./scripts/integration_up.sh [--cvat-version v2.26.0] [--port 9080]
@@ -31,7 +33,11 @@ COCO8_IMAGES_DIR="$REPO_ROOT/tests/fixtures/data/coco8/images"
 CVAT_VERSION=""
 CVAT_PORT=""
 HEALTH_TIMEOUT=180
-WITH_UI=false
+
+# ── Container name prefix (username) ───────────────────────────────
+INTEGRATION_USER=$(printf '%s' "${USER:-default}" | sed 's/[^a-zA-Z0-9_.-]/_/g')
+INTEGRATION_USER="${INTEGRATION_USER:-default}"
+export INTEGRATION_USER
 
 # ── Parse arguments ─────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -52,10 +58,6 @@ while [[ $# -gt 0 ]]; do
             CVAT_PORT="${1#*=}"
             shift
             ;;
-        --with-ui)
-            WITH_UI=true
-            shift
-            ;;
         -h|--help)
             echo "Usage: $0 [--cvat-version v2.X.X] [--port PORT]"
             echo ""
@@ -64,8 +66,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --cvat-version TAG   CVAT version tag to check out (default: submodule HEAD)"
-            echo "  --port PORT          Host port for CVAT API (default: random free port)"
-            echo "  --with-ui            Start cvat_ui and traefik for web UI (port 8080)"
+            echo "  --port PORT          Host port for CVAT API and UI (default: random free port)"
             exit 0
             ;;
         *)
@@ -84,10 +85,7 @@ export CVAT_PORT
 
 # ── Helpers ─────────────────────────────────────────────────────────
 compose() {
-    COMPOSE_FILES=(-f "$CVAT_SUBMODULE/docker-compose.yml" -f "$OVERRIDE_FILE")
-    if [ "$WITH_UI" = true ]; then
-        COMPOSE_FILES+=(-f "$UI_OVERRIDE_FILE")
-    fi
+    COMPOSE_FILES=(-f "$CVAT_SUBMODULE/docker-compose.yml" -f "$OVERRIDE_FILE" -f "$UI_OVERRIDE_FILE")
     docker compose \
         --project-directory "$CVAT_SUBMODULE" \
         "${COMPOSE_FILES[@]}" \
@@ -136,12 +134,9 @@ else
 fi
 
 # ── 5. Start minimal CVAT stack ───────────────────────────────────
-SERVICES="cvat_server cvat_worker_import cveta2-minio"
+SERVICES="cvat_server cvat_worker_import cveta2-minio cvat_ui traefik"
 if compose config --services 2>/dev/null | grep -q '^cvat_worker_chunks$'; then
     SERVICES="$SERVICES cvat_worker_chunks"
-fi
-if [ "$WITH_UI" = true ]; then
-    SERVICES="$SERVICES cvat_ui traefik"
 fi
 
 log "Starting minimal CVAT stack on port $CVAT_PORT ($SERVICES)"
@@ -172,7 +167,7 @@ docker exec \
     -e "DJANGO_SUPERUSER_USERNAME=$DJANGO_SUPERUSER_USERNAME" \
     -e "DJANGO_SUPERUSER_PASSWORD=$DJANGO_SUPERUSER_PASSWORD" \
     -e "DJANGO_SUPERUSER_EMAIL=$DJANGO_SUPERUSER_EMAIL" \
-    cvat_server \
+    "${INTEGRATION_USER}-cvat_server" \
     python3 manage.py createsuperuser --no-input 2>/dev/null || true
 
 log "Superuser ready (${DJANGO_SUPERUSER_USERNAME})"
@@ -180,8 +175,8 @@ log "Superuser ready (${DJANGO_SUPERUSER_USERNAME})"
 # ── 8. Create MinIO bucket ─────────────────────────────────────────
 log "Ensuring MinIO bucket exists"
 MINIO_BUCKET=$(grep '^MINIO_BUCKET=' "$ENV_FILE" | cut -d= -f2)
-docker exec cveta2-minio mc alias set local http://localhost:9000 minioadmin minioadmin 2>/dev/null || true
-docker exec cveta2-minio mc mb "local/${MINIO_BUCKET}" 2>/dev/null || true
+docker exec "${INTEGRATION_USER}-cveta2-minio" mc alias set local http://localhost:9000 minioadmin minioadmin 2>/dev/null || true
+docker exec "${INTEGRATION_USER}-cveta2-minio" mc mb "local/${MINIO_BUCKET}" 2>/dev/null || true
 
 # ── 9. Seed CVAT with test data ────────────────────────────────────
 log "Seeding CVAT with coco8-dev test data"
@@ -194,4 +189,4 @@ log "Run integration tests:"
 log "  CVAT_INTEGRATION_HOST=http://localhost:${CVAT_PORT} uv run pytest"
 log ""
 log "Tear down:"
-log "  docker compose --project-directory vendor/cvat -f vendor/cvat/docker-compose.yml -f tests/integration/docker-compose.override.yml --env-file tests/integration/.env down -v"
+log "  docker compose --project-directory vendor/cvat -f vendor/cvat/docker-compose.yml -f tests/integration/docker-compose.override.yml -f tests/integration/docker-compose.ui.yml --env-file tests/integration/.env down -v"

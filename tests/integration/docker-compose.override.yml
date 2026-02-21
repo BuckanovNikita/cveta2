@@ -1,25 +1,40 @@
 # Minimal override for CVAT integration tests.
 #
-# Adds MinIO, exposes cvat_server port directly (bypasses traefik),
-# and disables the analytics pipeline. All image versions come from the
-# checked-out CVAT submodule tag.
+# Adds MinIO and disables the analytics pipeline. All image versions come
+# from the checked-out CVAT submodule tag.
 #
-# The start script (integration_up.sh) selectively starts only the
-# services needed for testing:
-#   cvat_server  (+deps: db, redis x2, opa)
-#   cvat_worker_import
-#   cvat_worker_chunks  (if present in the checked-out version)
-#   cveta2-minio
+# INTEGRATION_USER is set by integration_up.sh (defaults to "default")
+# and used as a container-name prefix to avoid clashes between users.
+#
+# cvat_server is NOT exposed on the host — traffic goes through traefik
+# (see docker-compose.ui.yml). Single port for both API and UI.
 
 services:
+  cvat_db:
+    container_name: ${INTEGRATION_USER:-default}-cvat_db
+
+  cvat_redis_inmem:
+    container_name: ${INTEGRATION_USER:-default}-cvat_redis_inmem
+
+  cvat_redis_ondisk:
+    container_name: ${INTEGRATION_USER:-default}-cvat_redis_ondisk
+
+  cvat_opa:
+    container_name: ${INTEGRATION_USER:-default}-cvat_opa
+
   cvat_server:
-    ports:
-      - "${CVAT_PORT:-8080}:8080"
+    container_name: ${INTEGRATION_USER:-default}-cvat_server
     environment:
       CVAT_ANALYTICS: 0
 
+  cvat_worker_import:
+    container_name: ${INTEGRATION_USER:-default}-cvat_worker_import
+
+  cvat_worker_chunks:
+    container_name: ${INTEGRATION_USER:-default}-cvat_worker_chunks
+
   cveta2-minio:
-    container_name: cveta2-minio
+    container_name: ${INTEGRATION_USER:-default}-cveta2-minio
     image: minio/minio:latest
     restart: unless-stopped
     environment:

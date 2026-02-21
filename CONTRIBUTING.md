@@ -1,111 +1,67 @@
 # Участие в разработке
 
-## Требования
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) — менеджер пакетов
-- Docker и Docker Compose v2 (для интеграционных тестов)
-
-## Установка
+## Быстрый старт
 
 ```bash
 git clone --recurse-submodules <repo-url>
 cd cveta2
 uv sync
+uv run pre-commit install   # автоматические проверки перед коммитом
 ```
 
-Если репозиторий уже склонирован без `--recurse-submodules`:
+Требования: Python 3.12+, [uv](https://docs.astral.sh/uv/),
+Docker + Compose v2 (только для интеграционных тестов).
+
+Забыли `--recurse-submodules`? — `git submodule update --init`.
+
+## Стиль кода
+
+- Логирование — только **loguru**, никогда `print`. Используйте f-строки.
+- Конфигурации — всегда через **Pydantic**-модели.
+- Типы вместо строк — `Literal`, `Enum`, typed dataclass.
+- Не используйте `getattr` / `hasattr` / `__dict__` (исключение — `cvat_sdk`, с комментарием).
+- Комментарии — только для неочевидной логики. Не дублируйте код словами.
+
+## Инструменты
+
+Вся конфигурация — в `pyproject.toml`. Подробности смотрите там.
+
+| Инструмент | Что делает | Запуск вручную |
+|---|---|---|
+| **ruff** | Форматирование + линтинг (`select = ["ALL"]`) | `uv run ruff format .` / `uv run ruff check . --fix` |
+| **mypy** | Статическая типизация (`strict = true`) | `uv run mypy .` |
+| **vulture** | Поиск мёртвого кода | `uv run vulture` |
+| **pytest** | Тесты (параллельно, `-n auto`) | `uv run pytest` |
+| **pre-commit** | Всё вышеперечисленное + сборка + lock | `uv run pre-commit run --all-files` |
+
+Pre-commit запускает по порядку: ruff format → ruff check → mypy → vulture →
+pytest → count-lines → uv build → uv lock.
+
+## Тесты
+
+### Юнит-тесты
 
 ```bash
-git submodule update --init
+uv run pytest           # параллельно (по умолчанию)
+uv run pytest -n0       # в один поток (для отладки)
 ```
 
-## Запуск тестов
-
-### Юнит-тесты (по умолчанию)
-
-```bash
-uv run pytest
-```
-
-Тесты запускаются **параллельно** (`-n auto` через `pytest-xdist`).
-Количество воркеров определяется автоматически по числу ядер CPU.
-Внешние сервисы не требуются.
-
-Чтобы запустить тесты в один поток (например, для отладки):
-
-```bash
-uv run pytest -n0
-```
+Внешние сервисы не нужны — тесты работают на JSON-фикстурах.
 
 ### Интеграционные тесты
 
-Интеграционные тесты прогоняют тот же набор тестов против живого
-экземпляра CVAT (в дополнение к JSON-фикстурам) и включают
-end-to-end тесты, использующие реальные вызовы CVAT SDK.
-
-#### 1. Запуск CVAT + MinIO
+Прогоняют те же тесты против живого CVAT + end-to-end через SDK.
 
 ```bash
-./scripts/integration_up.sh
-```
+# 1. Поднять CVAT + MinIO (всегда с нуля)
+./scripts/integration_up.sh                    # случайный свободный порт
+./scripts/integration_up.sh --port 9080        # конкретный порт
+./scripts/integration_up.sh --cvat-version v2.26.0  # конкретная версия
 
-Скрипт всегда пересоздаёт CVAT с нуля:
-- Останавливает и удаляет существующий стек (`docker compose down -v`)
-- Скачивает изображения датасета coco8 (если ещё не скачаны)
-- Запускает **минимальный** набор контейнеров (8 вместо ~19):
-  `cvat_server`, `cvat_db`, `cvat_redis_inmem`, `cvat_redis_ondisk`,
-  `cvat_opa`, `cvat_worker_import`, `cvat_worker_chunks`, `cveta2-minio`
-- UI, Traefik, аналитика (ClickHouse, Vector, Grafana) и лишние воркеры
-  не запускаются — порт сервера проброшен напрямую
-- Создаёт пользователя-администратора
-- Наполняет CVAT тестовым проектом `coco8-dev` (7 задач, 80 меток)
-
-**Порт:** если `--port` не указан, скрипт выбирает **случайный свободный порт**
-(чтобы не конфликтовать с уже занятым 8080). В конце вывода скрипт печатает
-URL для запуска тестов — используйте его как значение `CVAT_INTEGRATION_HOST`.
-
-Чтобы указать конкретную версию CVAT:
-
-```bash
-./scripts/integration_up.sh --cvat-version v2.26.0
-```
-
-Чтобы зафиксировать порт (например, 9080):
-
-```bash
-./scripts/integration_up.sh --port 9080
-```
-
-В этом случае CVAT будет доступен на `http://localhost:9080`.
-
-#### 2. Запуск интеграционных тестов
-
-После `./scripts/integration_up.sh` скрипт выводит точный URL (с портом).
-Подставьте его в `CVAT_INTEGRATION_HOST`:
-
-```bash
-# Только интеграционные тесты (параллельно)
-CVAT_INTEGRATION_HOST=http://localhost:<порт_из_вывода_скрипта> uv run pytest -m integration
-
-# Все тесты (юнит + интеграционные, параллельно)
+# 2. Запустить тесты (порт — из вывода скрипта)
 CVAT_INTEGRATION_HOST=http://localhost:<порт> uv run pytest
 
-# В один поток (для отладки)
-CVAT_INTEGRATION_HOST=http://localhost:<порт> uv run pytest -n0
-```
-
-Если CVAT был запущен с `--port 9080`, используйте `http://localhost:9080`.
-Если порт не задавали — в выводе скрипта будет строка вида
-`Using random free port: 12345` и в конце `CVAT is running at http://localhost:12345`.
-
-Переменная окружения `CVAT_INTEGRATION_HOST` управляет активацией
-интеграционных тестов. Если она не задана — запускаются только тесты
-на JSON-фикстурах.
-
-#### 3. Остановка
-
-```bash
+# 3. Остановить
 docker compose --project-directory vendor/cvat \
   -f vendor/cvat/docker-compose.yml \
   -f tests/integration/docker-compose.override.yml \
@@ -113,64 +69,38 @@ docker compose --project-directory vendor/cvat \
   down -v
 ```
 
-### Как это работает
-
-Сессионная фикстура `coco8_fixtures` условно параметризована:
-
-- **Без** `CVAT_INTEGRATION_HOST`: только параметр `"json"` (загрузка
-  из `tests/fixtures/cvat/coco8-dev/`)
-- **С** `CVAT_INTEGRATION_HOST`: оба параметра — `"json"` и `"live"`
-  (live получает данные из реального CVAT через `SdkCvatApiAdapter`)
-
-Тесты, зависящие от `coco8_fixtures` (test_mapping, test_extractors,
-test_pipeline_integration, test_fetch_task), автоматически прогоняются
-на обоих бэкендах без дублирования кода.
-
-End-to-end тесты в `tests/integration/test_e2e.py` напрямую используют
-реальный SDK-адаптер, CvatClient и CLI-команды.
-
-## Корпоративный прокси / Кастомный Docker-реестр
-
-Если Docker Hub недоступен из-за корпоративного прокси, настройте
-зеркало реестра в Docker daemon (`/etc/docker/daemon.json`):
-
-```json
-{ "registry-mirrors": ["https://registry.corp.com"] }
-```
-
-Все образы (CVAT, PostgreSQL, Redis, OPA, MinIO и т.д.) будут
-загружаться через указанное зеркало. Версии образов берутся из
-`docker-compose.yml` того тега CVAT, который был выбран через
-`--cvat-version`.
-
-## Справка по переменным окружения
+Без `CVAT_INTEGRATION_HOST` интеграционные тесты не запускаются.
 
 | Переменная | По умолчанию | Описание |
 |---|---|---|
-| `CVAT_INTEGRATION_HOST` | _(не задана)_ | URL CVAT; включает интеграционные тесты |
-| `CVAT_INTEGRATION_USER` | `admin` | Имя пользователя CVAT для интеграционных тестов |
-| `CVAT_INTEGRATION_PASSWORD` | `admin` | Пароль CVAT для интеграционных тестов |
+| `CVAT_INTEGRATION_HOST` | — | URL CVAT; включает интеграционные тесты |
+| `CVAT_INTEGRATION_USER` | `admin` | Пользователь CVAT |
+| `CVAT_INTEGRATION_PASSWORD` | `admin` | Пароль CVAT |
 
-Порт задаётся через `--port` флаг скрипта `integration_up.sh`, а не
-через переменную окружения. Он влияет только на маппинг хост-порта.
+## Архитектура (кратко)
+
+- **API-абстракция** — весь доступ к CVAT через протокол `CvatApiPort`.
+  В продакшне — `SdkCvatApiAdapter` (обёртка над `cvat_sdk`),
+  в тестах — `FakeCvatApi` (JSON-фикстуры).
+- **DTO** (`_client/dtos.py`) — frozen dataclasses для CVAT API. Модели
+  (`models.py`) — Pydantic. Конфиги (`config.py`) — тоже Pydantic.
+- **CLI** (`cli.py`) — тонкий argparse; логика в `commands/` (по модулю на команду).
+
+## Документация
+
+| Файл | Для кого | Язык |
+|---|---|---|
+| `README.md` | Пользователей | Русский |
+| `CONTRIBUTING.md` | Разработчиков | Русский |
+| `AGENT_DOCS.md` | AI-агентов и разработчиков — внутренние решения | Английский |
+
+Обновляйте `README.md` и `AGENT_DOCS.md` при изменении API.
 
 ## Решение проблем
 
-### Конфликт портов
+**Порт занят** — `./scripts/integration_up.sh --port 9080`
 
-CVAT API слушает на порту 8080 по умолчанию (проброс напрямую, без
-Traefik), MinIO — 9000/9001. Если порт 8080 занят, используйте `--port`:
-
-```bash
-./scripts/integration_up.sh --port 9080
-```
-
-Для MinIO можно изменить маппинг портов в
-`tests/integration/docker-compose.override.yml`.
-
-### CVAT не запускается
-
-Скрипт ждёт до 180 секунд. Если CVAT не стартует — проверьте логи:
+**CVAT не стартует** — проверьте логи:
 
 ```bash
 docker compose --project-directory vendor/cvat \
@@ -180,20 +110,6 @@ docker compose --project-directory vendor/cvat \
   logs cvat_server
 ```
 
-### Сабмодуль не инициализирован
+**Ошибка про сабмодуль** — `git submodule update --init`
 
-```
-ERROR: CVAT submodule not initialized at vendor/cvat/
-```
-
-Решение: `git submodule update --init`
-
-### Устаревшие тестовые данные
-
-Если тесты падают после изменения фикстур, перезапустите скрипт:
-
-```bash
-./scripts/integration_up.sh
-```
-
-Он всегда сбрасывает CVAT в чистое состояние перед заполнением данными.
+**Тесты падают после изменения фикстур** — перезапустите `./scripts/integration_up.sh`
