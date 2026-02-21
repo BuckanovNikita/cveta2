@@ -61,13 +61,17 @@ end-to-end тесты, использующие реальные вызовы CV
 - Создаёт пользователя-администратора
 - Наполняет CVAT тестовым проектом `coco8-dev` (7 задач, 80 меток)
 
+**Порт:** если `--port` не указан, скрипт выбирает **случайный свободный порт**
+(чтобы не конфликтовать с уже занятым 8080). В конце вывода скрипт печатает
+URL для запуска тестов — используйте его как значение `CVAT_INTEGRATION_HOST`.
+
 Чтобы указать конкретную версию CVAT:
 
 ```bash
 ./scripts/integration_up.sh --cvat-version v2.26.0
 ```
 
-Чтобы использовать нестандартный порт (например, если 8080 занят):
+Чтобы зафиксировать порт (например, 9080):
 
 ```bash
 ./scripts/integration_up.sh --port 9080
@@ -77,16 +81,23 @@ end-to-end тесты, использующие реальные вызовы CV
 
 #### 2. Запуск интеграционных тестов
 
+После `./scripts/integration_up.sh` скрипт выводит точный URL (с портом).
+Подставьте его в `CVAT_INTEGRATION_HOST`:
+
 ```bash
 # Только интеграционные тесты (параллельно)
-CVAT_INTEGRATION_HOST=http://localhost:8080 uv run pytest -m integration
+CVAT_INTEGRATION_HOST=http://localhost:<порт_из_вывода_скрипта> uv run pytest -m integration
 
 # Все тесты (юнит + интеграционные, параллельно)
-CVAT_INTEGRATION_HOST=http://localhost:8080 uv run pytest
+CVAT_INTEGRATION_HOST=http://localhost:<порт> uv run pytest
 
 # В один поток (для отладки)
-CVAT_INTEGRATION_HOST=http://localhost:8080 uv run pytest -n0
+CVAT_INTEGRATION_HOST=http://localhost:<порт> uv run pytest -n0
 ```
+
+Если CVAT был запущен с `--port 9080`, используйте `http://localhost:9080`.
+Если порт не задавали — в выводе скрипта будет строка вида
+`Using random free port: 12345` и в конце `CVAT is running at http://localhost:12345`.
 
 Переменная окружения `CVAT_INTEGRATION_HOST` управляет активацией
 интеграционных тестов. Если она не задана — запускаются только тесты

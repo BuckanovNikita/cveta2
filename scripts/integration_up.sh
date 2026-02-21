@@ -13,6 +13,8 @@
 # Usage:
 #   ./scripts/integration_up.sh [--cvat-version v2.26.0] [--port 9080]
 #
+# If --port is omitted, a random free port is used (avoids clashes with 8080).
+#
 # Requirements: docker, docker compose v2, uv, curl, unzip
 
 set -euo pipefail
@@ -23,11 +25,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CVAT_SUBMODULE="$REPO_ROOT/vendor/cvat"
 ENV_FILE="$REPO_ROOT/tests/integration/.env"
 OVERRIDE_FILE="$REPO_ROOT/tests/integration/docker-compose.override.yml"
+UI_OVERRIDE_FILE="$REPO_ROOT/tests/integration/docker-compose.ui.yml"
 COCO8_IMAGES_DIR="$REPO_ROOT/tests/fixtures/data/coco8/images"
 
 CVAT_VERSION=""
-export CVAT_PORT=8080
+CVAT_PORT=""
 HEALTH_TIMEOUT=180
+WITH_UI=false
 
 # ── Parse arguments ─────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -48,6 +52,10 @@ while [[ $# -gt 0 ]]; do
             CVAT_PORT="${1#*=}"
             shift
             ;;
+        --with-ui)
+            WITH_UI=true
+            shift
+            ;;
         -h|--help)
             echo "Usage: $0 [--cvat-version v2.X.X] [--port PORT]"
             echo ""
@@ -56,7 +64,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --cvat-version TAG   CVAT version tag to check out (default: submodule HEAD)"
-            echo "  --port PORT          Host port for CVAT API (default: 8080)"
+            echo "  --port PORT          Host port for CVAT API (default: random free port)"
+            echo "  --with-ui            Start cvat_ui and traefik for web UI (port 8080)"
             exit 0
             ;;
         *)
@@ -66,12 +75,22 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# ── Resolve CVAT port ───────────────────────────────────────────────
+if [ -z "$CVAT_PORT" ]; then
+    CVAT_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
+    log "Using random free port: $CVAT_PORT"
+fi
+export CVAT_PORT
+
 # ── Helpers ─────────────────────────────────────────────────────────
 compose() {
+    COMPOSE_FILES=(-f "$CVAT_SUBMODULE/docker-compose.yml" -f "$OVERRIDE_FILE")
+    if [ "$WITH_UI" = true ]; then
+        COMPOSE_FILES+=(-f "$UI_OVERRIDE_FILE")
+    fi
     docker compose \
         --project-directory "$CVAT_SUBMODULE" \
-        -f "$CVAT_SUBMODULE/docker-compose.yml" \
-        -f "$OVERRIDE_FILE" \
+        "${COMPOSE_FILES[@]}" \
         --env-file "$ENV_FILE" \
         "$@"
 }
@@ -120,6 +139,9 @@ fi
 SERVICES="cvat_server cvat_worker_import cveta2-minio"
 if compose config --services 2>/dev/null | grep -q '^cvat_worker_chunks$'; then
     SERVICES="$SERVICES cvat_worker_chunks"
+fi
+if [ "$WITH_UI" = true ]; then
+    SERVICES="$SERVICES cvat_ui traefik"
 fi
 
 log "Starting minimal CVAT stack on port $CVAT_PORT ($SERVICES)"
