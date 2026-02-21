@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "boto3>=1.42.49",
-    "cvat-sdk>=2.56.0",
+    "cvat-sdk>=2.41.0",
     "loguru>=0.7.3",
     "pandas>=2.0.0",
     "pydantic>=2.12.5",
@@ -31,20 +31,16 @@ dev = [
     "pandas-stubs>=2.3.3.260113",
     "pre-commit>=4.5.1",
     "pytest>=9.0.2",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.15.0",
     "types-tqdm>=4.66.0.20240417",
     "vulture>=2.14",
-    # pandas-stubs may require these transitive type stubs; re-add if mypy
-    # reports missing stubs for openpyxl / xlrd / scipy / python-dateutil:
-    # "scipy-stubs>=1.15.3.0",
-    # "types-openpyxl>=3.1.5.20250919",
-    # "types-python-dateutil>=2.9.0.20260124",
-    # "types-xlrd>=2.0.0.20251020",
 ]
 
 [tool.ruff]
 target-version = "py310"
 line-length = 88
+exclude = ["vendor/**"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -63,7 +59,7 @@ fixable = ["ALL"]
 exclude = ["scripts/**"]  # lint only; format still runs on scripts
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "PLR2004", "PLC0415", "D103", "S311"]
+"tests/**" = ["S101", "S105", "PLR2004", "PLC0415", "D102", "D103", "S311"]
 "main.py" = ["F401"]  # re-export wrapper
 
 [tool.ruff.format]
@@ -74,7 +70,7 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-exclude = ["scripts/"]
+exclude = ["scripts/", "vendor/"]
 
 [[tool.mypy.overrides]]
 module = ["cvat_sdk.*"]
@@ -83,7 +79,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short"]
+addopts = ["-v", "--tb=short", "-n", "auto"]
+markers = [
+    "integration: requires running CVAT instance (only active when CVAT_INTEGRATION_HOST is set)",
+]
 
 [tool.vulture]
 min_confidence = 80

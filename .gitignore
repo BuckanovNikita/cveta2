@@ -42,3 +42,7 @@ Thumbs.db
 
 # Project cache
 .cache/
+
+# Integration test artifacts
+tests/fixtures/data/coco8/images/
+tests/integration/.seeded

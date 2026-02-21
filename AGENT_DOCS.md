@@ -210,6 +210,11 @@ upload:
 - **Pipeline tests**: `test_mapping.py` (label/attribute mapping), `test_extractors.py` (_collect_shapes unit tests), `test_partition.py` (partition_annotations_df), `test_pipeline_integration.py` (full pipeline via FakeCvatApi + CvatClient).
 - **Image download tests**: `test_image_downloader.py` (unit tests with fake SDK and S3 clients — flat saving, caching, deleted images filtering, S3 key construction, stats; also S3Syncer tests — _list_s3_objects, full sync, skip cached, empty bucket, never deletes local files), `test_image_cache_config.py` (load/save/get/set of ImageCacheConfig), `test_cli_images.py` (CLI integration: --no-images, --images-dir, non-interactive error, configured path), `test_cli_s3_sync.py` (CLI integration: s3-sync with all projects, single project, no image_cache error, unknown project error, continues on resolve failure), `test_preset_config.py` (priority: preset < user config < env).
 
+## Development workflow
+
+- **Tests** run in parallel by default (`-n auto` via `pytest-xdist`): `uv run pytest`. Use `-n0` for single-threaded debugging.
+- **Pre-commit hooks**: always run before committing: `uv run pre-commit run --all-files`.
+
 ## Dev tools (scripts/)
 
 - `scripts/upload_dataset_to_cvat.py` — creates a CVAT project and several tasks from a dataset YAML (e.g. coco8). Reads `path`, `train`, `val`, `names`; creates one project with labels from `names` and N tasks each with the same images (train+val). Uses `cveta2.config.CvatConfig` and cvat_sdk directly (no CvatApiPort). Run from repo root: `uv run python scripts/upload_dataset_to_cvat.py [--yaml path] [--project name] [--tasks N]`.

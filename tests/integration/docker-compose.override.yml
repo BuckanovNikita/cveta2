@@ -1,0 +1,43 @@
+# Minimal override for CVAT integration tests.
+#
+# Adds MinIO, exposes cvat_server port directly (bypasses traefik),
+# and disables the analytics pipeline. All image versions come from the
+# checked-out CVAT submodule tag.
+#
+# The start script (integration_up.sh) selectively starts only the
+# services needed for testing:
+#   cvat_server  (+deps: db, redis x2, opa)
+#   cvat_worker_import
+#   cvat_worker_chunks  (if present in the checked-out version)
+#   cveta2-minio
+
+services:
+  cvat_server:
+    ports:
+      - "${CVAT_PORT:-8080}:8080"
+    environment:
+      CVAT_ANALYTICS: 0
+
+  cveta2-minio:
+    container_name: cveta2-minio
+    image: minio/minio:latest
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - cveta2-minio-data:/data
+    networks:
+      - cvat
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cveta2-minio-data:
