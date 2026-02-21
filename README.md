@@ -68,7 +68,7 @@ cveta2 fetch-task -p 123 -o output/
 | `dataset.csv` | Данные из последней завершённой задачи для каждого неудалённого изображения |
 | `obsolete.csv` | Данные из старых завершённых задач + данные для изображений, удалённых в последней задаче |
 | `in_progress.csv` | Данные из незавершённых задач |
-| `deleted.txt` | Имена изображений, удалённых в их последней задаче (по одному на строку) |
+| `deleted.csv` | Удалённые изображения в том же CSV-формате, что и `dataset.csv` (`instance_shape="deleted"`) |
 | `raw.csv` | (только с `--raw`) Полный необработанный CSV со всеми строками |
 
 ## Загрузка изображений из S3
@@ -278,7 +278,7 @@ cveta2 fetch -p "coco8-dev" -o output/ --images-dir /mnt/data/coco8
 
 ### `cveta2 fetch-task`
 
-Выгрузка bbox-аннотаций для **конкретных задач** проекта. Использует ту же логику поштучной выгрузки задач, что и `fetch` (промежуточные CSV в `output/.tasks/`). В отличие от `fetch`, не разбивает результат на dataset/obsolete/in_progress — записывает единый `dataset.csv` и `deleted.txt` в указанную директорию. Задачи указываются по ID или имени через `-t`, либо выбираются интерактивно (checkbox с поиском).
+Выгрузка bbox-аннотаций для **конкретных задач** проекта. Использует ту же логику поштучной выгрузки задач, что и `fetch` (промежуточные CSV в `output/.tasks/`). В отличие от `fetch`, не разбивает результат на dataset/obsolete/in_progress — записывает единый `dataset.csv` и `deleted.csv` в указанную директорию. Задачи указываются по ID или имени через `-t`, либо выбираются интерактивно (checkbox с поиском).
 
 ```bash
 # Одна задача по ID
@@ -305,7 +305,7 @@ cveta2 fetch-task -p 123 -t 456 -o output/ --completed-only --no-images
 | Файл | Описание |
 |---|---|
 | `dataset.csv` | Все аннотации выбранных задач (без разбиения) |
-| `deleted.txt` | Имена удалённых изображений (по одному на строку) |
+| `deleted.csv` | Удалённые изображения (`instance_shape="deleted"`) |
 
 ### `cveta2 s3-sync`
 
@@ -391,7 +391,7 @@ cveta2 upload -d output/dataset.csv
 cveta2 merge --old old/dataset.csv --new new/dataset.csv -o merged.csv
 
 # С учётом удалённых изображений
-cveta2 merge --old old/dataset.csv --new new/dataset.csv --deleted new/deleted.txt -o merged.csv
+cveta2 merge --old old/dataset.csv --new new/dataset.csv --deleted new/deleted.csv -o merged.csv
 
 # Разрешение конфликтов по дате обновления задачи (побеждает более свежая)
 cveta2 merge --old old/dataset.csv --new new/dataset.csv --by-time -o merged.csv

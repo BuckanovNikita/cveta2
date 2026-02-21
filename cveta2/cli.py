@@ -69,7 +69,7 @@ class CliApp:
             "-o",
             required=True,
             help="Directory to save partitioned CSV files "
-            " (dataset, obsolete, in_progress).",
+            "(dataset, obsolete, in_progress, deleted).",
         )
         parser.add_argument(
             "--raw",
@@ -116,7 +116,7 @@ class CliApp:
             "--output-dir",
             "-o",
             required=True,
-            help="Directory to save dataset.csv and deleted.txt.",
+            help="Directory to save dataset.csv and deleted.csv.",
         )
         self._add_common_fetch_args(parser)
 
@@ -300,7 +300,7 @@ class CliApp:
             type=str,
             default=None,
             help=(
-                "Path to deleted.txt — images listed there "
+                "Path to deleted.csv — images listed there "
                 "will be removed from the merged result."
             ),
         )

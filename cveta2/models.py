@@ -85,14 +85,34 @@ class ImageWithoutAnnotations(BaseModel):
 
 
 class DeletedImage(BaseModel):
-    """Record of a deleted image."""
+    """Record of a deleted image.
 
+    Written to ``deleted.csv`` with ``instance_shape="deleted"`` so the
+    file shares the same column schema as ``dataset.csv``.
+    """
+
+    image_name: str
+    image_width: int = 0
+    image_height: int = 0
+    instance_shape: Literal["deleted"] = "deleted"
     task_id: int
     task_name: str
     task_status: str = ""
     task_updated_date: str = ""
     frame_id: int
-    image_name: str
+    subset: str = ""
+
+    def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
+        """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""
+        row: dict[str, str | int | float | bool | None] = dict.fromkeys(
+            CSV_COLUMNS,
+            None,
+        )
+        for key, value in self.model_dump().items():
+            if key in row:
+                row[key] = value
+        row["attributes"] = json.dumps({}, ensure_ascii=False)
+        return row
 
 
 AnnotationRecord = Annotated[

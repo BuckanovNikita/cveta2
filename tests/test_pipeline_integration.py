@@ -259,7 +259,7 @@ def test_deleted_then_restored(coco8_fixtures: LoadedFixtures) -> None:
 
     _result, partition = _fetch_and_partition(fake)
 
-    assert partition.deleted_names == []
+    assert partition.deleted_images == []
     assert len(partition.dataset) > 0
     assert fake.tasks[1].id in set(partition.dataset["task_id"].unique())
     assert len(partition.obsolete) > 0
@@ -361,7 +361,9 @@ def test_partition_with_deleted_and_in_progress(
     all_deleted = list(result.deleted_images) + deleted_extra
     partition = partition_annotations_df(df, all_deleted)
 
-    assert sorted(partition.deleted_names) == sorted(_IMAGE_NAMES[:2])
+    assert sorted(d.image_name for d in partition.deleted_images) == sorted(
+        _IMAGE_NAMES[:2]
+    )
     for name in _IMAGE_NAMES[:2]:
         assert name in set(partition.obsolete["image_name"])
     assert len(partition.dataset) > 0

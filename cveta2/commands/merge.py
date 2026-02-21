@@ -48,11 +48,24 @@ def _read_dataset_csv(path: Path, *, by_time: bool = False) -> pd.DataFrame:
 
 
 def _read_deleted_names(path: Path | None) -> set[str]:
-    """Read *deleted.txt* and return image names as a set."""
+    """Read *deleted.csv* and return image names as a set.
+
+    Supports both the new CSV format (with ``image_name`` column) and the
+    legacy plain-text format (one name per line) for backward compatibility.
+    """
     if path is None:
         return set()
     if not path.is_file():
         sys.exit(f"Ошибка: файл не найден: {path}")
+    try:
+        df = pd.read_csv(path, encoding="utf-8")
+        if "image_name" in df.columns:
+            names = set(df["image_name"].dropna().unique())
+            logger.info(f"Загружен {path}: {len(names)} удалённых изображений")
+            return names
+    except Exception:  # noqa: BLE001
+        logger.debug(f"Не удалось прочитать {path} как CSV, пробую текстовый формат")
+    # Fallback: legacy plain-text format (one name per line)
     names = {
         line.strip()
         for line in path.read_text(encoding="utf-8").splitlines()

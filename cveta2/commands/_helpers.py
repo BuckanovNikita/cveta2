@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import ProjectAnnotations
+    from cveta2.models import DeletedImage, ProjectAnnotations
 
 _RESCAN_VALUE = "__rescan__"
 
@@ -182,13 +182,12 @@ def write_dataset_and_deleted(
     result: ProjectAnnotations,
     output_dir: Path,
 ) -> None:
-    """Write dataset.csv and deleted.txt from annotation result into *output_dir*."""
+    """Write dataset.csv and deleted.csv from annotation result into *output_dir*."""
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = result.to_csv_rows()
     df = pd.DataFrame(rows)
     write_df_csv(df, output_dir / "dataset.csv", "Dataset CSV")
-    deleted_names = [img.image_name for img in result.deleted_images]
-    write_deleted_txt(deleted_names, output_dir / "deleted.txt")
+    write_deleted_csv(result.deleted_images, output_dir / "deleted.csv")
 
 
 def write_df_csv(df: pd.DataFrame, path: Path, label: str) -> None:
@@ -197,10 +196,15 @@ def write_df_csv(df: pd.DataFrame, path: Path, label: str) -> None:
     logger.info(f"{label} saved to {path} ({len(df)} rows)")
 
 
-def write_deleted_txt(deleted_names: list[str], path: Path) -> None:
-    """Write deleted image names to a text file, one per line."""
-    content = "\n".join(deleted_names)
-    if deleted_names:
-        content += "\n"
-    path.write_text(content, encoding="utf-8")
-    logger.info(f"Deleted images list saved to {path} ({len(deleted_names)} names)")
+def write_deleted_csv(deleted_images: list[DeletedImage], path: Path) -> None:
+    """Write deleted images to a CSV matching the ``dataset.csv`` schema."""
+    from cveta2.models import CSV_COLUMNS  # noqa: PLC0415
+
+    rows = [img.to_csv_row() for img in deleted_images]
+    df = (
+        pd.DataFrame(rows, columns=list(CSV_COLUMNS))
+        if rows
+        else pd.DataFrame(columns=list(CSV_COLUMNS))
+    )
+    df.to_csv(path, index=False, encoding="utf-8")
+    logger.info(f"Deleted CSV saved to {path} ({len(df)} rows)")

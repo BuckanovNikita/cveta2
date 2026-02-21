@@ -63,7 +63,7 @@ def test_empty_dataframe() -> None:
     assert len(result.dataset) == 0
     assert len(result.obsolete) == 0
     assert len(result.in_progress) == 0
-    assert result.deleted_names == []
+    assert result.deleted_images == []
 
 
 def test_single_completed_task() -> None:
@@ -78,7 +78,7 @@ def test_single_completed_task() -> None:
     assert len(result.dataset) == 3
     assert len(result.obsolete) == 0
     assert len(result.in_progress) == 0
-    assert result.deleted_names == []
+    assert result.deleted_images == []
 
 
 def test_single_in_progress_task() -> None:
@@ -92,7 +92,7 @@ def test_single_in_progress_task() -> None:
     assert len(result.dataset) == 0
     assert len(result.obsolete) == 0
     assert len(result.in_progress) == 2
-    assert result.deleted_names == []
+    assert result.deleted_images == []
 
 
 def test_deleted_image_latest_task() -> None:
@@ -108,7 +108,7 @@ def test_deleted_image_latest_task() -> None:
     assert len(result.dataset) == 0
     assert len(result.obsolete) == 1
     assert result.obsolete["image_name"].iloc[0] == "a.jpg"
-    assert result.deleted_names == ["a.jpg"]
+    assert [d.image_name for d in result.deleted_images] == ["a.jpg"]
 
 
 def test_deleted_image_older_task() -> None:
@@ -123,7 +123,7 @@ def test_deleted_image_older_task() -> None:
 
     assert len(result.dataset) == 1
     assert len(result.obsolete) == 0
-    assert result.deleted_names == []
+    assert result.deleted_images == []
 
 
 def test_deleted_then_restored() -> None:
@@ -143,7 +143,7 @@ def test_deleted_then_restored() -> None:
     result = partition_annotations_df(_df(rows), deleted)
 
     # T2 (newest) is an annotation row, not a deletion -> image is alive
-    assert result.deleted_names == []
+    assert result.deleted_images == []
     # T2 row in dataset (latest completed)
     assert len(result.dataset) == 1
     assert result.dataset["task_id"].iloc[0] == 2
@@ -192,8 +192,8 @@ def test_image_only_in_deleted_registry() -> None:
     result = partition_annotations_df(_df(rows), deleted)
 
     assert len(result.dataset) == 1  # a.jpg unaffected
-    # phantom.jpg has no df rows, but is tracked in deleted_names
-    assert "phantom.jpg" in result.deleted_names
+    # phantom.jpg has no df rows, but is tracked in deleted_images
+    assert "phantom.jpg" in [d.image_name for d in result.deleted_images]
 
 
 def test_all_images_deleted() -> None:
@@ -211,7 +211,7 @@ def test_all_images_deleted() -> None:
     assert len(result.dataset) == 0
     assert len(result.obsolete) == 2
     assert len(result.in_progress) == 0
-    assert sorted(result.deleted_names) == ["a.jpg", "b.jpg"]
+    assert sorted(d.image_name for d in result.deleted_images) == ["a.jpg", "b.jpg"]
 
 
 def test_mixed_partition() -> None:
@@ -220,7 +220,7 @@ def test_mixed_partition() -> None:
     - img_ds1.jpg, img_ds2.jpg: completed in latest task -> dataset
     - img_stale.jpg: completed in older task, newer completed in task 2 -> obsolete
     - img_ip.jpg: annotation status -> in_progress
-    - img_del.jpg: deleted in latest task -> obsolete + deleted_names
+    - img_del.jpg: deleted in latest task -> obsolete + deleted_images
     """
     rows = [
         # Two images only in the latest completed task -> dataset
@@ -257,5 +257,5 @@ def test_mixed_partition() -> None:
     assert len(result.in_progress) == 1
     assert result.in_progress["image_name"].iloc[0] == "img_ip.jpg"
 
-    # Deleted names
-    assert result.deleted_names == ["img_del.jpg"]
+    # Deleted images
+    assert [d.image_name for d in result.deleted_images] == ["img_del.jpg"]

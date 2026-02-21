@@ -146,6 +146,9 @@ def _task_to_records(
             task_updated_date=task.updated_date,
             frame_id=fid,
             image_name=(frames[fid].name if fid in frames else "<unknown>"),
+            image_width=(frames[fid].width if fid in frames else 0),
+            image_height=(frames[fid].height if fid in frames else 0),
+            subset=task.subset,
         )
         for fid in data_meta.deleted_frames
     ]

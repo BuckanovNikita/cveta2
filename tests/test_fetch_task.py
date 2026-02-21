@@ -355,7 +355,7 @@ class TestRunFetchTaskIntegration:
         coco8_fixtures: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
-        """Normal single-task fetch writes dataset.csv and deleted.txt."""
+        """Normal single-task fetch writes dataset.csv and deleted.csv."""
         fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
         task_name = fake.tasks[0].name
         args = _make_args(
@@ -367,16 +367,17 @@ class TestRunFetchTaskIntegration:
         _run_fetch_task_with_fake(fake, args)
 
         dataset_csv = tmp_path / "out" / "dataset.csv"
-        deleted_txt = tmp_path / "out" / "deleted.txt"
+        deleted_csv = tmp_path / "out" / "deleted.csv"
         assert dataset_csv.exists()
-        assert deleted_txt.exists()
+        assert deleted_csv.exists()
 
         df = pd.read_csv(dataset_csv)
         assert len(df) > 0
         assert set(CSV_COLUMNS).issubset(set(df.columns))
 
-        deleted_content = deleted_txt.read_text(encoding="utf-8").strip()
-        assert deleted_content == ""
+        deleted_df = pd.read_csv(deleted_csv)
+        assert len(deleted_df) == 0
+        assert set(CSV_COLUMNS).issubset(set(deleted_df.columns))
 
     def test_output_csv_has_all_columns(
         self,
@@ -401,7 +402,7 @@ class TestRunFetchTaskIntegration:
         coco8_fixtures: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
-        """Task with deleted frames writes image names to deleted.txt."""
+        """Task with deleted frames writes deleted.csv with instance_shape='deleted'."""
         fake = _build(coco8_fixtures, ["all-removed"], statuses=["completed"])
         args = _make_args(
             project=str(fake.project.id),
@@ -411,9 +412,10 @@ class TestRunFetchTaskIntegration:
 
         _run_fetch_task_with_fake(fake, args)
 
-        deleted_txt = tmp_path / "out" / "deleted.txt"
-        deleted_names = deleted_txt.read_text(encoding="utf-8").strip().splitlines()
-        assert len(deleted_names) == 8
+        deleted_csv = tmp_path / "out" / "deleted.csv"
+        deleted_df = pd.read_csv(deleted_csv)
+        assert len(deleted_df) == 8
+        assert (deleted_df["instance_shape"] == "deleted").all()
 
     def test_completed_only_filter(
         self,
@@ -527,7 +529,7 @@ class TestRunFetchTaskIntegration:
         _run_fetch_task_with_fake(fake, args)
 
         assert (out_dir / "dataset.csv").exists()
-        assert (out_dir / "deleted.txt").exists()
+        assert (out_dir / "deleted.csv").exists()
 
     def test_bbox_annotations_in_csv(
         self,

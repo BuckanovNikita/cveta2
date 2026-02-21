@@ -28,9 +28,9 @@ cveta2/
 
   commands/     - CLI command implementations, split from cli.py
     __init__.py - package marker
-    _helpers.py - shared CLI helpers: load_config(), require_host(), resolve_project_from_args(), resolve_project_and_cloud_storage(), select_project_tui(), write_dataset_and_deleted(), write_df_csv(), write_deleted_txt(), read_dataset_csv()
+    _helpers.py - shared CLI helpers: load_config(), require_host(), resolve_project_from_args(), resolve_project_and_cloud_storage(), select_project_tui(), write_dataset_and_deleted(), write_df_csv(), write_deleted_csv(), read_dataset_csv()
     setup.py    - run_setup(): interactive wizard for CVAT credentials and core settings (host, org, auth); run_setup_cache(): interactive per-project image cache directory setup for all known projects (fetches project list from CVAT if cache is empty); _ensure_projects_list() helper loads or fetches projects
-    fetch.py    - run_fetch() and run_fetch_task() share unified per-task fetch loop via _fetch_and_save_tasks(client, ctx, output_dir): calls client.prepare_fetch() for FetchContext, then iterates tasks calling client.fetch_one_task(), saves each task's CSV to output_dir/.tasks/task_{id}.csv, merges via TaskAnnotations.merge() into ProjectAnnotations; run_fetch() partitions merged result into dataset/obsolete/in_progress CSVs; run_fetch_task() writes flat dataset.csv + deleted.txt; _download_images() passes project_cloud_storage to download_images(); _resolve_task_selector() + select_tasks_tui for multi-task selection; _resolve_images_dir() for image cache resolution; _resolve_output_dir() for overwrite prompt; _write_partition_result() for partitioned CSV/TXT export
+    fetch.py    - run_fetch() and run_fetch_task() share unified per-task fetch loop via _fetch_and_save_tasks(client, ctx, output_dir): calls client.prepare_fetch() for FetchContext, then iterates tasks calling client.fetch_one_task(), saves each task's CSV to output_dir/.tasks/task_{id}.csv, merges via TaskAnnotations.merge() into ProjectAnnotations; run_fetch() partitions merged result into dataset/obsolete/in_progress/deleted CSVs; run_fetch_task() writes flat dataset.csv + deleted.csv; _download_images() passes project_cloud_storage to download_images(); _resolve_task_selector() + select_tasks_tui for multi-task selection; _resolve_images_dir() for image cache resolution; _resolve_output_dir() for overwrite prompt; _write_partition_result() for partitioned CSV export
     ignore.py   - run_ignore(): manage per-project task ignore lists (add/remove/list); reads and writes the `ignore` section of config YAML
     merge.py    - run_merge(): merge two dataset CSVs (old + new) with conflict resolution (new-wins or by-time); _propagate_splits() copies split values from old to merged rows with null split; warns when old has no split data or when both sides have non-null split for common images
     s3_sync.py  - run_s3_sync(): sync images from S3 cloud storage to local cache for configured projects; uses resolve_project_and_cloud_storage() per project and passes project_cloud_storage to sync_project_images()
@@ -99,16 +99,16 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
 - `setup-cache` — interactive wizard that first asks for a **cache root** directory; then iterates over all known CVAT projects and prompts for an image cache directory for each. Per-project default is `cache_root / project_name` (or current path if already set and not `--reset`). Press Enter to accept the default or skip. If the projects cache is empty, connects to CVAT to fetch the project list first. Saves updated `image_cache` section via `save_image_cache_config()`. Optional `--config` to override config path. `--reset`: ignore existing paths when building the default (always use cache_root/project_name). `--list`: print current image_cache paths and exit (non-interactive, no CVAT).
 - `fetch` — fetches **all** bbox annotations and deleted images from a CVAT project, splits them into three CSVs, and optionally downloads project images from S3 cloud storage. Arguments:
   - `--project` / `-p` — project ID (number) or project name; if omitted, TUI shows cached project list with arrow-key selection and search filter; "↻ Обновить список" rescans CVAT and refreshes cache.
-  - `--output-dir` / `-o` (required) — directory for output files: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.txt`.
+  - `--output-dir` / `-o` (required) — directory for output files: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv`.
   - `--raw` — additionally save unprocessed full DataFrame as `raw.csv` in the output dir.
   - `--completed-only` — process only tasks with status "completed" (in_progress.csv will be empty).
   - `--no-images` — skip downloading images from S3 cloud storage entirely.
   - `--images-dir` — override the image cache directory for this run (takes precedence over `image_cache` config mapping; path used directly, no subdirectories created).
 
-- `fetch-task` — fetches bbox annotations for **specific task(s)** in a project. Unlike `fetch`, does not partition into dataset/obsolete/in_progress — writes a single `dataset.csv` and `deleted.txt` into the output directory. Arguments:
+- `fetch-task` — fetches bbox annotations for **specific task(s)** in a project. Unlike `fetch`, does not partition into dataset/obsolete/in_progress — writes a single `dataset.csv` and `deleted.csv` into the output directory. Arguments:
   - `--project` / `-p` — same as `fetch`.
   - `--task` / `-t` — task ID or name. Can be repeated (`-t 42 -t 43`). Numeric values match by task ID first, then by name; non-numeric strings match by name (case-insensitive). If passed without a value (`-t` alone) or omitted entirely, shows interactive TUI with checkbox multi-select (with search filter). Raises `TaskNotFoundError` if any selector doesn't match.
-  - `--output-dir` / `-o` (required) — directory for output files: `dataset.csv`, `deleted.txt`.
+  - `--output-dir` / `-o` (required) — directory for output files: `dataset.csv`, `deleted.csv`.
   - `--completed-only`, `--no-images`, `--images-dir` — same as `fetch`.
 
 - `s3-sync` — syncs all images from S3 cloud storage to local cache for every project configured in `image_cache`. Lists all objects under each project's cloud storage prefix and downloads those missing locally. Never deletes from S3 or syncs in reverse. Arguments:
@@ -137,7 +137,7 @@ Set `CVETA2_NO_INTERACTIVE=true` (case-insensitive) to disable all interactive p
   - `--old` (required) — path to the old (existing) dataset CSV.
   - `--new` (required) — path to the new (freshly downloaded) dataset CSV.
   - `--output` / `-o` (required) — path for the merged output CSV.
-  - `--deleted` — path to `deleted.txt`; listed images are excluded from output.
+  - `--deleted` — path to `deleted.csv`; listed images are excluded from output.
   - `--by-time` — for conflicting images, compare `task_updated_date` and keep the more recent side (instead of always preferring new).
   - **Split propagation**: after merging, the `split` field from the old dataset is propagated to merged rows where `split` is null. This preserves manually assigned splits (`train`/`val`/`test`) across re-downloads. Warnings are logged when: (a) the old dataset has no `split` data at all; (b) both datasets have non-null `split` for the same common images (the winning side's value is kept).
 

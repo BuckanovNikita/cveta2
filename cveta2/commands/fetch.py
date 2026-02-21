@@ -18,7 +18,7 @@ from cveta2.commands._helpers import (
     require_host,
     resolve_project_and_cloud_storage,
     write_dataset_and_deleted,
-    write_deleted_txt,
+    write_deleted_csv,
     write_df_csv,
 )
 from cveta2.commands._task_selector import select_tasks_tui
@@ -259,7 +259,7 @@ def _write_partition_result(
     partition: PartitionResult,
     output_dir: Path,
 ) -> None:
-    """Write all partition DataFrames and deleted.txt into *output_dir*."""
+    """Write all partition DataFrames and deleted.csv into *output_dir*."""
     output_dir.mkdir(parents=True, exist_ok=True)
     write_df_csv(partition.dataset, output_dir / "dataset.csv", "Dataset CSV")
     write_df_csv(partition.obsolete, output_dir / "obsolete.csv", "Obsolete CSV")
@@ -268,7 +268,7 @@ def _write_partition_result(
         output_dir / "in_progress.csv",
         "In-progress CSV",
     )
-    write_deleted_txt(partition.deleted_names, output_dir / "deleted.txt")
+    write_deleted_csv(partition.deleted_images, output_dir / "deleted.csv")
 
 
 def _resolve_task_selector(

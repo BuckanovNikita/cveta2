@@ -19,7 +19,37 @@ class PartitionResult:
     dataset: pd.DataFrame
     obsolete: pd.DataFrame
     in_progress: pd.DataFrame
-    deleted_names: list[str] = field(default_factory=list)
+    deleted_images: list[DeletedImage] = field(default_factory=list)
+
+
+def _filter_deleted_images(
+    deleted_images: list[DeletedImage],
+    deleted_image_names: set[str],
+    latest_per_image: pd.DataFrame,
+) -> list[DeletedImage]:
+    """Return deduplicated ``DeletedImage`` list for truly-deleted images.
+
+    Only keeps entries whose ``task_id`` matches the latest deletion task
+    for that ``image_name``.
+    """
+    latest_deleted_task: dict[str, int] = {}
+    for name in deleted_image_names:
+        row = latest_per_image.loc[name]
+        latest_deleted_task[name] = int(row["task_id"])
+
+    filtered = [
+        img
+        for img in deleted_images
+        if img.image_name in latest_deleted_task
+        and img.task_id == latest_deleted_task[img.image_name]
+    ]
+    seen: set[str] = set()
+    unique: list[DeletedImage] = []
+    for img in sorted(filtered, key=lambda x: x.image_name):
+        if img.image_name not in seen:
+            seen.add(img.image_name)
+            unique.append(img)
+    return unique
 
 
 def partition_annotations_df(
@@ -40,7 +70,7 @@ def partition_annotations_df(
        both sources).
     3. If the latest task for an image is a deletion record → the image is
        "deleted": all its rows in *df* go to **obsolete** and the filename is
-       collected into ``deleted_names``.
+       collected into ``deleted_images``.
     4. For non-deleted images:
        - rows where ``task_status != "completed"`` → **in_progress**
        - among completed rows, those from the *latest completed task* per image
@@ -108,12 +138,14 @@ def partition_annotations_df(
     # ------------------------------------------------------------------
     deleted_mask_map = latest_per_image["_is_deleted"] == 1
     deleted_image_names: set[str] = set(deleted_mask_map[deleted_mask_map].index)
-    deleted_names_sorted = sorted(deleted_image_names)
 
-    if deleted_names_sorted:
-        logger.debug(
-            f"Images deleted in their latest task: {len(deleted_names_sorted)}"
-        )
+    unique_deleted = _filter_deleted_images(
+        deleted_images,
+        deleted_image_names,
+        latest_per_image,
+    )
+    if unique_deleted:
+        logger.debug(f"Images deleted in their latest task: {len(unique_deleted)}")
 
     # ------------------------------------------------------------------
     # 4. Partition the DataFrame
@@ -160,12 +192,12 @@ def partition_annotations_df(
 
     logger.debug(
         f"Partition result: dataset={len(dataset)}, obsolete={len(obsolete)}, "
-        f"in_progress={len(in_progress)}, deleted_names={len(deleted_names_sorted)}",
+        f"in_progress={len(in_progress)}, deleted_images={len(unique_deleted)}",
     )
 
     return PartitionResult(
         dataset=dataset.reset_index(drop=True),
         obsolete=obsolete.reset_index(drop=True),
         in_progress=in_progress.reset_index(drop=True),
-        deleted_names=deleted_names_sorted,
+        deleted_images=unique_deleted,
     )
