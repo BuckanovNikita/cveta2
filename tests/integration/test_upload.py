@@ -244,6 +244,56 @@ def _normalize_bbox_df(df: pd.DataFrame) -> pd.DataFrame:
     return cast("pd.DataFrame", bbox)
 
 
+class TestMarkFramesDeletedIntegration:
+    """mark_frames_deleted: mark specific frames as deleted, verify via data_meta."""
+
+    def test_mark_frames_deleted(self) -> None:
+        project_id, _project_name, cs_info, cfg = _get_project_and_storage()
+        image_names = IMAGE_NAMES[:3]
+        with CvatClient(cfg) as client:
+            task_id = client.create_upload_task(
+                project_id=project_id,
+                name="integration-mark-deleted-test",
+                image_names=image_names,
+                cloud_storage_id=cs_info.id,
+                segment_size=10,
+            )
+            deleted = {image_names[1], image_names[2]}
+            num_deleted = client.mark_frames_deleted(task_id, deleted)
+        assert num_deleted == 2
+        sdk_client = _make_sdk_client()
+        try:
+            adapter = SdkCvatApiAdapter(sdk_client)
+            data_meta = adapter.get_task_data_meta(task_id)
+            assert sorted(data_meta.deleted_frames) == [1, 2]
+        finally:
+            sdk_client.close()
+
+
+class TestCompleteTaskIntegration:
+    """complete_task: mark task as completed, verify status."""
+
+    def test_complete_task(self) -> None:
+        project_id, _project_name, cs_info, cfg = _get_project_and_storage()
+        image_names = IMAGE_NAMES[:2]
+        with CvatClient(cfg) as client:
+            task_id = client.create_upload_task(
+                project_id=project_id,
+                name="integration-complete-test",
+                image_names=image_names,
+                cloud_storage_id=cs_info.id,
+                segment_size=10,
+            )
+            num_jobs = client.complete_task(task_id)
+        assert num_jobs >= 1
+        sdk_client = _make_sdk_client()
+        try:
+            task = sdk_client.tasks.retrieve(task_id)
+            assert str(task.status) == "completed"
+        finally:
+            sdk_client.close()
+
+
 class TestUploadThenFetchTaskIntegration:
     """Upload a task, run cveta2 fetch-task, compare results are equal."""
 

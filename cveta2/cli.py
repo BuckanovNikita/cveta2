@@ -275,6 +275,11 @@ class CliApp:
             default=None,
             help="Task name. If omitted, prompted interactively.",
         )
+        parser.add_argument(
+            "--complete",
+            action="store_true",
+            help="Mark the task as completed after upload.",
+        )
 
     def _add_merge_parser(
         self,

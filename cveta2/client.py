@@ -886,6 +886,93 @@ class CvatClient:
 
         return len(shapes)
 
+    def mark_frames_deleted(
+        self,
+        task_id: int,
+        image_names: set[str],
+    ) -> int:
+        """Mark frames as deleted in an existing CVAT task.
+
+        Reads ``data_meta`` to map image names to frame indices, then
+        updates the task's ``deleted_frames`` list via
+        ``partial_update_data_meta``.
+
+        Parameters
+        ----------
+        task_id:
+            CVAT task ID.
+        image_names:
+            Image file names to mark as deleted.
+
+        Returns
+        -------
+        int
+            Number of frames actually marked as deleted.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+
+        """
+        sdk = self._require_sdk("mark_frames_deleted")
+
+        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
+
+        data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
+        name_to_frame: dict[str, int] = {
+            frame.name: idx for idx, frame in enumerate(data_meta.frames)
+        }
+        frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
+        if not frame_ids:
+            return 0
+
+        current_deleted = set(data_meta.deleted_frames or [])
+        new_deleted = sorted(current_deleted | set(frame_ids))
+        sdk.api_client.tasks_api.partial_update_data_meta(
+            task_id,
+            patched_data_meta_write_request=cvat_models.PatchedDataMetaWriteRequest(
+                deleted_frames=new_deleted,
+            ),
+        )
+        logger.info(f"Помечено удалёнными {len(frame_ids)} кадров в задаче {task_id}")
+        return len(frame_ids)
+
+    def complete_task(self, task_id: int) -> int:
+        """Mark all jobs of a task as completed.
+
+        Sets each job's ``stage`` to ``acceptance`` and ``state`` to
+        ``completed``.  CVAT derives the task status from its jobs, so
+        once every job is completed the task status becomes ``completed``.
+
+        Parameters
+        ----------
+        task_id:
+            CVAT task ID.
+
+        Returns
+        -------
+        int
+            Number of jobs updated.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+
+        """
+        sdk = self._require_sdk("complete_task")
+
+        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
+
+        task_obj = sdk.tasks.retrieve(task_id)
+        jobs = task_obj.get_jobs()
+        jobs_api = sdk.api_client.jobs_api
+        for job in jobs:
+            jobs_api.partial_update(
+                job.id,
+                patched_job_write_request=cvat_models.PatchedJobWriteRequest(
+                    stage=cvat_models.JobStage("acceptance"),
+                    state=cvat_models.OperationStatus("completed"),
+                ),
+            )
+        logger.info(f"Задача {task_id} завершена ({len(jobs)} job(s) → completed)")
+        return len(jobs)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

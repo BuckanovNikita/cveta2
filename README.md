@@ -423,8 +423,9 @@ cveta2 merge --old old/dataset.csv --new new/dataset.csv --by-time -o merged.csv
 
 Логика слияния:
 - Изображения, присутствующие только в `--old` или только в `--new`, попадают в результат целиком
-- Для изображений, присутствующих в обоих файлах — по умолчанию побеждает `--new`; с `--by-time` побеждает тот, у которого более свежая `task_updated_date`
+- Для изображений, присутствующих в обоих файлах — по умолчанию побеждает `--new`; с `--by-time` побеждает тот, у которого более свежая `task_updated_date` (при равных датах или непарсимых значениях побеждает `--new`)
 - Изображения из `--deleted` исключаются из результата
+- **Пропагация split:** если у изображения в `--old` был задан `split` (`train`/`val`/`test`), а у победившей стороны split пуст — значение из `--old` автоматически переносится в результат
 
 ### `cveta2 doctor`
 
@@ -556,16 +557,40 @@ with CvatClient(cfg) as client:
 | `annotation_id` | `int \| None` | ID аннотации в CVAT |
 | `attributes` | `dict[str, str]` | Пользовательские атрибуты |
 
-### DeletedImage
+### ImageWithoutAnnotations
+
+Изображения без bbox-аннотаций. Включаются в CSV с пустыми bbox-полями. Отличаются от `BBoxAnnotation` значением `instance_shape="none"`.
 
 | Поле | Тип | Описание |
 |---|---|---|
+| `image_name` | `str` | Имя файла изображения |
+| `image_width` | `int` | Ширина изображения (px) |
+| `image_height` | `int` | Высота изображения (px) |
+| `instance_shape` | `"none"` | Тип фигуры (дискриминатор) |
+| `task_id` | `int` | ID задачи в CVAT |
+| `task_name` | `str` | Название задачи |
+| `task_status` | `str` | Статус задачи |
+| `task_updated_date` | `str` | Дата/время последнего обновления задачи |
+| `frame_id` | `int` | Индекс кадра внутри задачи |
+| `split` | `"train" \| "val" \| "test" \| None` | Сплит датасета |
+| `subset` | `str` | Подмножество из CVAT |
+
+### DeletedImage
+
+Запись об удалённом изображении. Сохраняется в `deleted.csv` с `instance_shape="deleted"`, чтобы формат столбцов совпадал с `dataset.csv`.
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `image_name` | `str` | Имя файла изображения |
+| `image_width` | `int` | Ширина изображения (px), по умолчанию `0` |
+| `image_height` | `int` | Высота изображения (px), по умолчанию `0` |
+| `instance_shape` | `"deleted"` | Тип фигуры (дискриминатор) |
 | `task_id` | `int` | ID задачи |
 | `task_name` | `str` | Название задачи |
 | `task_status` | `str` | Статус задачи |
 | `task_updated_date` | `str` | Дата обновления задачи |
 | `frame_id` | `int` | Индекс кадра |
-| `image_name` | `str` | Имя файла изображения |
+| `subset` | `str` | Подмножество из CVAT |
 
 ### DownloadStats
 
@@ -585,7 +610,19 @@ with CvatClient(cfg) as client:
 | `failed` | `int` | Ошибки при загрузке |
 | `total` | `int` | Общее количество изображений |
 
-## Тесты и фикстуры CVAT
+## Тесты
+
+### Тесты merge
+
+`tests/test_merge.py` покрывает всю логику слияния датасетов:
+
+- **Split propagation** — пропагация `split` из old в merged, предупреждения при конфликтах и отсутствии данных
+- **Default merge** — поведение «new wins» для общих изображений, исключение удалённых, сохранение уникальных
+- **By-time merge** — разрешение конфликтов по `task_updated_date` (new новее, old новее, равные даты, непарсимые даты, несколько строк на изображение)
+- **I/O** — чтение `deleted.csv` (CSV и legacy-формат), валидация обязательных столбцов, обработка ошибок
+- **CLI** — end-to-end тесты `run_merge` с временными файлами (базовое слияние, deleted, by-time, ошибка при отсутствии `task_updated_date`)
+
+### Фикстуры CVAT
 
 Тесты в `tests/test_cvat_fixtures.py` проверяют фикстуры проекта `coco8-dev`: загрузку JSON и соответствие данных именам задач (например, задача `all-removed` — все кадры в `deleted_frames`, `normal` — есть кадры не в удалённых).
 

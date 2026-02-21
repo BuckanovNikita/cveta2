@@ -148,6 +148,17 @@ def _resolve_upload_project(
 # ---------------------------------------------------------------------------
 
 
+def _extract_deleted_names(df: pd.DataFrame) -> set[str]:
+    """Extract image names from rows with ``instance_shape="deleted"``."""
+    if "instance_shape" not in df.columns:
+        return set()
+    mask = df["instance_shape"] == "deleted"
+    names: set[str] = set(df.loc[mask, "image_name"].dropna().unique())
+    if names:
+        logger.info(f"Найдено удалённых изображений: {len(names)}")
+    return names
+
+
 def run_upload(args: argparse.Namespace) -> None:
     """Run the ``upload`` command."""
     cfg = load_config()
@@ -155,21 +166,32 @@ def run_upload(args: argparse.Namespace) -> None:
     upload_cfg = load_upload_config()
 
     df = read_dataset_csv(Path(args.dataset), _UPLOAD_REQUIRED_COLUMNS)
+
+    # Separate deleted rows before label selection
+    deleted_names = _extract_deleted_names(df)
+    deleted_mask = (
+        (df["instance_shape"] == "deleted")
+        if "instance_shape" in df.columns
+        else pd.Series(data=False, index=df.index)
+    )
+    df_normal = df[~deleted_mask]
+
     exclude_names = _read_exclude_names(args.in_progress)
-    selected_labels = _select_labels(df)
+    selected_labels = _select_labels(df_normal)
 
     # Filter and collect unique image names
     include_no_annotation = _NO_ANNOTATION_LABEL in selected_labels
     real_labels = [lbl for lbl in selected_labels if lbl != _NO_ANNOTATION_LABEL]
-    mask = df["instance_label"].isin(real_labels)
+    mask = df_normal["instance_label"].isin(real_labels)
     if include_no_annotation:
-        mask = mask | df["instance_label"].isna()
-    filtered = df[mask]
+        mask = mask | df_normal["instance_label"].isna()
+    filtered = df_normal[mask]
     image_names = set(filtered["image_name"].dropna().unique()) - exclude_names
-    if not image_names:
+    if not image_names and not deleted_names:
         sys.exit("Ошибка: после фильтрации не осталось изображений.")
     logger.info(f"Изображений для загрузки: {len(image_names)}")
 
+    all_image_names = image_names | deleted_names
     task_name = _resolve_task_name(args.name)
 
     with CvatClient(cfg) as client:
@@ -178,7 +200,7 @@ def run_upload(args: argparse.Namespace) -> None:
             args.project,
         )
         search_dirs = _build_search_dirs(args.image_dir, project_name)
-        found_images, missing = resolve_images(image_names, search_dirs)
+        found_images, missing = resolve_images(all_image_names, search_dirs)
         logger.info(
             f"Найдено локально: {len(found_images)}, не найдено: {len(missing)}",
         )
@@ -208,7 +230,7 @@ def run_upload(args: argparse.Namespace) -> None:
                 f"{len(missing)} изображений не найдено локально: {preview}{extra}",
             )
 
-        task_image_names = sorted(image_names)
+        task_image_names = sorted(all_image_names)
         task_id = client.create_upload_task(
             project_id=project_id,
             name=task_name,
@@ -223,12 +245,19 @@ def run_upload(args: argparse.Namespace) -> None:
             annotations_df=filtered,
         )
 
+        if deleted_names:
+            client.mark_frames_deleted(task_id, deleted_names)
+
+        if args.complete:
+            client.complete_task(task_id)
+
         ipj = upload_cfg.images_per_job
         num_jobs = (len(task_image_names) + ipj - 1) // ipj
         logger.info(
             f"Задача создана: id={task_id}, "
             f"имя={task_name!r}, "
             f"изображений={len(task_image_names)}, "
+            f"удалённых={len(deleted_names)}, "
             f"аннотаций={num_shapes}, "
             f"jobs≈{num_jobs} (segment_size={ipj})",
         )
