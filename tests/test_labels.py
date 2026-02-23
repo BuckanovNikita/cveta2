@@ -15,8 +15,10 @@ from cveta2.commands.labels import (
     _format_label,
     _interactive_add,
     _interactive_delete,
+    _interactive_recolor,
     _interactive_rename,
     _print_labels,
+    _validate_hex_color,
 )
 from cveta2.config import CvatConfig
 from cveta2.exceptions import InteractiveModeRequiredError
@@ -650,3 +652,122 @@ def test_delete_label_no_annotations_among_annotated() -> None:
         _interactive_delete(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_called_once_with(1, delete=[1])
+
+
+# ---------------------------------------------------------------------------
+# Hex color validation
+# ---------------------------------------------------------------------------
+
+
+def test_validate_hex_color_valid() -> None:
+    assert _validate_hex_color("#ff0000") is True
+    assert _validate_hex_color("#00FF00") is True
+    assert _validate_hex_color("#123abc") is True
+
+
+def test_validate_hex_color_invalid() -> None:
+    assert isinstance(_validate_hex_color("ff0000"), str)
+    assert isinstance(_validate_hex_color("#fff"), str)
+    assert isinstance(_validate_hex_color("#gggggg"), str)
+    assert isinstance(_validate_hex_color("red"), str)
+    assert isinstance(_validate_hex_color(""), str)
+
+
+# ---------------------------------------------------------------------------
+# Interactive recolor
+# ---------------------------------------------------------------------------
+
+
+def test_recolor_label() -> None:
+    mock_client = MagicMock()
+    updated = [
+        RawLabel(id=1, name="cat", attributes=[], color="#0000ff"),
+        _LABELS[1],
+        _LABELS[2],
+    ]
+    mock_client.get_project_labels.return_value = updated
+
+    with patch("cveta2.commands.labels.questionary") as mock_q:
+        mock_q.select.return_value.ask.return_value = 1
+        mock_q.text.return_value.ask.return_value = "#0000ff"
+        result = _interactive_recolor(mock_client, 1, list(_LABELS))
+
+    mock_client.update_project_labels.assert_called_once_with(1, recolor={1: "#0000ff"})
+    assert len(result) == 3
+
+
+def test_recolor_cancel_select() -> None:
+    mock_client = MagicMock()
+
+    with patch("cveta2.commands.labels.questionary") as mock_q:
+        mock_q.select.return_value.ask.return_value = None
+        result = _interactive_recolor(mock_client, 1, list(_LABELS))
+
+    mock_client.update_project_labels.assert_not_called()
+    assert result == list(_LABELS)
+
+
+def test_recolor_empty_cancels() -> None:
+    mock_client = MagicMock()
+
+    with patch("cveta2.commands.labels.questionary") as mock_q:
+        mock_q.select.return_value.ask.return_value = 1
+        mock_q.text.return_value.ask.return_value = ""
+        result = _interactive_recolor(mock_client, 1, list(_LABELS))
+
+    mock_client.update_project_labels.assert_not_called()
+    assert result == list(_LABELS)
+
+
+def test_recolor_none_cancels() -> None:
+    mock_client = MagicMock()
+
+    with patch("cveta2.commands.labels.questionary") as mock_q:
+        mock_q.select.return_value.ask.return_value = 1
+        mock_q.text.return_value.ask.return_value = None
+        _interactive_recolor(mock_client, 1, list(_LABELS))
+
+    mock_client.update_project_labels.assert_not_called()
+
+
+def test_recolor_same_color_noop() -> None:
+    """Entering the same color (case-insensitive) does nothing."""
+    mock_client = MagicMock()
+
+    with patch("cveta2.commands.labels.questionary") as mock_q:
+        mock_q.select.return_value.ask.return_value = 1
+        mock_q.text.return_value.ask.return_value = "#FF0000"
+        _interactive_recolor(mock_client, 1, list(_LABELS))
+
+    mock_client.update_project_labels.assert_not_called()
+
+
+def test_recolor_label_without_color() -> None:
+    """Recolor a label that has no color set."""
+    labels = [RawLabel(id=10, name="fish", attributes=[], color="")]
+    mock_client = MagicMock()
+    updated = [RawLabel(id=10, name="fish", attributes=[], color="#abcdef")]
+    mock_client.get_project_labels.return_value = updated
+
+    with patch("cveta2.commands.labels.questionary") as mock_q:
+        mock_q.select.return_value.ask.return_value = 10
+        mock_q.text.return_value.ask.return_value = "#abcdef"
+        result = _interactive_recolor(mock_client, 1, labels)
+
+    mock_client.update_project_labels.assert_called_once_with(
+        1, recolor={10: "#abcdef"}
+    )
+    assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# CvatClient.update_project_labels — recolor
+# ---------------------------------------------------------------------------
+
+
+def test_update_labels_recolor_calls_partial_update() -> None:
+    client = CvatClient(_CFG)
+    mock_sdk = _setup_sdk_mock(client)
+
+    client.update_project_labels(42, recolor={1: "#00ff00"})
+    mock_sdk.api_client.projects_api.partial_update.assert_called_once()

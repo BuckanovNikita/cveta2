@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import TYPE_CHECKING
 
@@ -25,8 +26,11 @@ if TYPE_CHECKING:
 
 _ACTION_ADD = "add"
 _ACTION_RENAME = "rename"
+_ACTION_RECOLOR = "recolor"
 _ACTION_DELETE = "delete"
 _ACTION_EXIT = "exit"
+
+_HEX_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 
 
 # ------------------------------------------------------------------
@@ -129,6 +133,12 @@ def _interactive_loop(
             )
             choices.append(
                 questionary.Choice(
+                    title="Изменить цвет метки",
+                    value=_ACTION_RECOLOR,
+                ),
+            )
+            choices.append(
+                questionary.Choice(
                     title="Удалить метку",
                     value=_ACTION_DELETE,
                 ),
@@ -152,6 +162,9 @@ def _interactive_loop(
 
         elif action == _ACTION_RENAME:
             labels = _interactive_rename(client, project_id, labels)
+
+        elif action == _ACTION_RECOLOR:
+            labels = _interactive_recolor(client, project_id, labels)
 
         elif action == _ACTION_DELETE:
             labels = _interactive_delete(client, project_id, labels)
@@ -235,6 +248,66 @@ def _interactive_rename(
 
     client.update_project_labels(project_id, rename={label_id: new_name})
     logger.info(f"Метка {old_label.name!r} → {new_name!r}")
+    return client.get_project_labels(project_id)
+
+
+# ------------------------------------------------------------------
+# Recolor
+# ------------------------------------------------------------------
+
+
+def _validate_hex_color(value: str) -> bool | str:
+    """Validate that value is a hex color like ``#rrggbb``."""
+    if re.match(_HEX_COLOR_RE, value):
+        return True
+    return "Введите цвет в формате #rrggbb (например, #ff0000)"
+
+
+def _interactive_recolor(
+    client: CvatClient,
+    project_id: int,
+    labels: list[RawLabel],
+) -> list[RawLabel]:
+    """Select a label and change its color."""
+    sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
+    choices = [
+        questionary.Choice(title=_format_label(lbl), value=lbl.id)
+        for lbl in sorted_labels
+    ]
+
+    label_id: int | None = questionary.select(
+        "Какой метке изменить цвет?",
+        choices=choices,
+        use_shortcuts=False,
+        use_indicator=True,
+        use_search_filter=True,
+        use_jk_keys=False,
+    ).ask()
+
+    if label_id is None:
+        return labels
+
+    old_label = next(lbl for lbl in labels if lbl.id == label_id)
+    default_color = old_label.color or ""
+
+    new_color: str | None = questionary.text(
+        f"Новый цвет для {old_label.name!r} (текущий: {default_color or 'не задан'}, "
+        "Enter — отмена):",
+        validate=lambda val: (
+            True if not val.strip() else _validate_hex_color(val.strip())
+        ),
+    ).ask()
+
+    if not new_color or not new_color.strip():
+        return labels
+
+    new_color = new_color.strip().lower()
+    if new_color == old_label.color.lower():
+        logger.info("Цвет не изменился")
+        return labels
+
+    client.update_project_labels(project_id, recolor={label_id: new_color})
+    logger.info(f"Цвет метки {old_label.name!r}: {default_color} → {new_color}")
     return client.get_project_labels(project_id)
 
 

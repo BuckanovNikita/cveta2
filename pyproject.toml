@@ -35,6 +35,7 @@ dev = [
     "ruff>=0.15.0",
     "types-tqdm>=4.66.0.20240417",
     "vulture>=2.14",
+    "import-linter>=2.0",
 ]
 
 [tool.ruff]
@@ -87,3 +88,50 @@ markers = [
 [tool.vulture]
 min_confidence = 80
 paths = ["cveta2", "main.py"]
+
+[tool.importlinter]
+root_packages = ["cveta2"]
+include_external_packages = false
+
+[[tool.importlinter.contracts]]
+name = "Core architecture layers"
+type = "layers"
+layers = [
+    "cveta2.cli",
+    "cveta2.commands",
+    "cveta2.client",
+    "cveta2._client",
+]
+ignore_imports = [
+    "cveta2.commands._task_selector -> cveta2._client.dtos",
+    "cveta2.commands.labels -> cveta2._client.dtos",
+    "cveta2.commands.ignore -> cveta2._client.dtos",
+]
+
+[[tool.importlinter.contracts]]
+name = "Foundation modules isolation"
+type = "forbidden"
+source_modules = [
+    "cveta2.models",
+    "cveta2.exceptions",
+]
+forbidden_modules = [
+    "cveta2.client",
+    "cveta2.commands",
+    "cveta2.cli",
+    "cveta2._client",
+]
+
+[[tool.importlinter.contracts]]
+name = "Config layer isolation"
+type = "forbidden"
+source_modules = [
+    "cveta2.config",
+]
+forbidden_modules = [
+    "cveta2.client",
+    "cveta2.commands",
+    "cveta2.cli",
+    "cveta2._client",
+    "cveta2.models",
+]

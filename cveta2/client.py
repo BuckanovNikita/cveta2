@@ -348,6 +348,7 @@ class CvatClient:
         add: list[str] | None = None,
         rename: dict[int, str] | None = None,
         delete: list[int] | None = None,
+        recolor: dict[int, str] | None = None,
     ) -> None:
         """Update project labels via CVAT PATCH API.
 
@@ -362,6 +363,9 @@ class CvatClient:
         delete:
             Label IDs to delete.  **Destroys all annotations using
             those labels permanently.**
+        recolor:
+            Mapping ``{label_id: new_hex_color}`` for labels to
+            change color (e.g. ``"#ff0000"``).
 
         Requires an active context manager.
 
@@ -379,6 +383,10 @@ class CvatClient:
         patch_labels.extend(
             cvat_models.PatchedLabelRequest(id=lid, deleted=True)
             for lid in (delete or [])
+        )
+        patch_labels.extend(
+            cvat_models.PatchedLabelRequest(id=lid, color=color)
+            for lid, color in (recolor or {}).items()
         )
         if not patch_labels:
             return
