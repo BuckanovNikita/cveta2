@@ -11,13 +11,8 @@ from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import (
-        RawAnnotations,
-        RawDataMeta,
-        RawLabel,
-        RawProject,
-        RawTask,
-    )
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
 
 pytestmark = pytest.mark.integration
 
@@ -51,8 +46,8 @@ def fetch_live_fixtures() -> LoadedFixtures:
 
     try:
         adapter = SdkCvatApiAdapter(client)
-        projects: list[RawProject] = adapter.list_projects()
-        project: RawProject | None = None
+        projects: list[ProjectInfo] = adapter.list_projects()
+        project: ProjectInfo | None = None
         for p in projects:
             if p.name.strip().lower() == "coco8-dev":
                 project = p
@@ -61,8 +56,8 @@ def fetch_live_fixtures() -> LoadedFixtures:
         if project is None:
             pytest.skip("coco8-dev project not found in CVAT (run seed_cvat.py first)")
 
-        tasks: list[RawTask] = adapter.get_project_tasks(project.id)
-        labels: list[RawLabel] = adapter.get_project_labels(project.id)
+        tasks: list[TaskInfo] = adapter.get_project_tasks(project.id)
+        labels: list[LabelInfo] = adapter.get_project_labels(project.id)
         task_data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {}
         for task in tasks:
             data_meta = adapter.get_task_data_meta(task.id)

@@ -10,27 +10,22 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import (
-        RawAnnotations,
-        RawDataMeta,
-        RawLabel,
-        RawProject,
-        RawTask,
-    )
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
 
 
 class CvatApiPort(Protocol):
     """Minimal interface for CVAT API operations used by ``CvatClient``."""
 
-    def list_projects(self) -> list[RawProject]:
+    def list_projects(self) -> list[ProjectInfo]:
         """Return all accessible projects."""
         ...
 
-    def get_project_tasks(self, project_id: int) -> list[RawTask]:
+    def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Return tasks belonging to a project."""
         ...
 
-    def get_project_labels(self, project_id: int) -> list[RawLabel]:
+    def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         """Return label definitions for a project."""
         ...
 

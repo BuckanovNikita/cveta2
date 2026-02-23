@@ -22,7 +22,7 @@ from cveta2.exceptions import Cveta2Error
 if TYPE_CHECKING:
     import argparse
 
-    from cveta2._client.dtos import RawLabel
+    from cveta2.models import LabelInfo
 
 _ACTION_ADD = "add"
 _ACTION_RENAME = "rename"
@@ -79,25 +79,14 @@ def _resolve_project(
 # ------------------------------------------------------------------
 
 
-def _format_label(label: RawLabel) -> str:
-    """Build a human-readable label description."""
-    parts = [f"{label.name!r} (id={label.id})"]
-    if label.color:
-        parts.append(f"цвет={label.color}")
-    if label.attributes:
-        attr_names = ", ".join(a.name for a in label.attributes)
-        parts.append(f"атрибуты: {attr_names}")
-    return "  ".join(parts)
-
-
-def _print_labels(labels: list[RawLabel], project_name: str) -> None:
+def _print_labels(labels: list[LabelInfo], project_name: str) -> None:
     """Display current labels for a project."""
     if not labels:
         logger.info(f"Проект {project_name!r}: нет меток")
         return
     logger.info(f"Проект {project_name!r}: {len(labels)} меток:")
     for label in sorted(labels, key=lambda lbl: lbl.name):
-        logger.info(f"  - {_format_label(label)}")
+        logger.info(f"  - {label.format_display()}")
 
 
 # ------------------------------------------------------------------
@@ -178,8 +167,8 @@ def _interactive_loop(
 def _interactive_add(
     client: CvatClient,
     project_id: int,
-    labels: list[RawLabel],
-) -> list[RawLabel]:
+    labels: list[LabelInfo],
+) -> list[LabelInfo]:
     """Prompt for a new label name and add it to the project."""
     existing_names = {lbl.name.casefold() for lbl in labels}
 
@@ -206,12 +195,12 @@ def _interactive_add(
 def _interactive_rename(
     client: CvatClient,
     project_id: int,
-    labels: list[RawLabel],
-) -> list[RawLabel]:
+    labels: list[LabelInfo],
+) -> list[LabelInfo]:
     """Select a label and rename it."""
     sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
     choices = [
-        questionary.Choice(title=_format_label(lbl), value=lbl.id)
+        questionary.Choice(title=lbl.format_display(), value=lbl.id)
         for lbl in sorted_labels
     ]
 
@@ -266,12 +255,12 @@ def _validate_hex_color(value: str) -> bool | str:
 def _interactive_recolor(
     client: CvatClient,
     project_id: int,
-    labels: list[RawLabel],
-) -> list[RawLabel]:
+    labels: list[LabelInfo],
+) -> list[LabelInfo]:
     """Select a label and change its color."""
     sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
     choices = [
-        questionary.Choice(title=_format_label(lbl), value=lbl.id)
+        questionary.Choice(title=lbl.format_display(), value=lbl.id)
         for lbl in sorted_labels
     ]
 
@@ -319,12 +308,12 @@ def _interactive_recolor(
 def _interactive_delete(
     client: CvatClient,
     project_id: int,
-    labels: list[RawLabel],
-) -> list[RawLabel]:
+    labels: list[LabelInfo],
+) -> list[LabelInfo]:
     """Select labels to delete with annotation-count safety checks."""
     sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
     choices = [
-        questionary.Choice(title=_format_label(lbl), value=lbl.id)
+        questionary.Choice(title=lbl.format_display(), value=lbl.id)
         for lbl in sorted_labels
     ]
 

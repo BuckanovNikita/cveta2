@@ -7,25 +7,22 @@ with repeated tasks, custom/random task names, and variable task statuses.
 from __future__ import annotations
 
 import random
-from typing import Literal, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
-from cveta2._client.dtos import (
-    RawAnnotations,
-    RawDataMeta,
-    RawLabel,
-    RawProject,
-    RawTask,
-)
+from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
+
+if TYPE_CHECKING:
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
 
 
 class LoadedFixtures(NamedTuple):
     """Loaded CVAT fixture data: project, tasks, labels, and per-task data."""
 
-    project: RawProject
-    tasks: list[RawTask]
-    labels: list[RawLabel]
+    project: ProjectInfo
+    tasks: list[TaskInfo]
+    labels: list[LabelInfo]
     task_data: dict[int, tuple[RawDataMeta, RawAnnotations]]
 
 
@@ -70,7 +67,7 @@ class FakeProjectConfig(BaseModel):
 
 
 def _resolve_task_indices(
-    base_tasks: list[RawTask],
+    base_tasks: list[TaskInfo],
     config: FakeProjectConfig,
 ) -> list[int]:
     if config.task_indices is not None:
@@ -96,7 +93,7 @@ def _resolve_task_ids(
 
 def _resolve_name(
     position: int,
-    base_task: RawTask,
+    base_task: TaskInfo,
     config: FakeProjectConfig,
     rng: random.Random,
 ) -> str:
@@ -113,7 +110,7 @@ def _resolve_name(
 
 def _resolve_status(
     position: int,
-    base_task: RawTask,
+    base_task: TaskInfo,
     config: FakeProjectConfig,
     rng: random.Random,
 ) -> str:
@@ -126,7 +123,7 @@ def _resolve_status(
 
 
 def task_indices_by_names(
-    base_tasks: list[RawTask],
+    base_tasks: list[TaskInfo],
     names: list[str],
 ) -> list[int]:
     """Resolve list of base task names to list of indices (for task_indices).
@@ -157,7 +154,7 @@ def build_fake_project(
 ) -> LoadedFixtures:
     """Build a fake project from base fixtures.
 
-    Base fixtures: (RawProject, list[RawTask], list[RawLabel],
+    Base fixtures: (ProjectInfo, list[TaskInfo], list[LabelInfo],
     task_id -> (RawDataMeta, RawAnnotations)). Return has the same type:
     new project, new task list (optional reorder/repeat/names/statuses),
     same labels, task_data keyed by new task ids.
@@ -175,8 +172,8 @@ def build_fake_project(
     task_ids = _resolve_task_ids(len(indices), config)
     rng = random.Random(config.seed)
 
-    new_project = RawProject(id=config.project_id, name=config.project_name)
-    new_tasks: list[RawTask] = []
+    new_project = ProjectInfo(id=config.project_id, name=config.project_name)
+    new_tasks: list[TaskInfo] = []
     new_task_data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {}
 
     for pos, (idx, new_id) in enumerate(zip(indices, task_ids, strict=True)):
@@ -186,7 +183,7 @@ def build_fake_project(
         name = _resolve_name(pos, base_task, config, rng)
         status = _resolve_status(pos, base_task, config, rng)
 
-        new_task = RawTask(
+        new_task = TaskInfo(
             id=new_id,
             name=name,
             status=status,

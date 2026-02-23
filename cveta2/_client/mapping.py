@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAttribute, RawLabel
+    from cveta2._client.dtos import RawAttribute
+    from cveta2.models import LabelInfo
 
 
 def _attr_display_name(attr_names: dict[int, str], spec_id: int) -> str:
@@ -25,7 +26,7 @@ def _resolve_attributes(
 
 
 def _build_label_maps(
-    labels: list[RawLabel],
+    labels: list[LabelInfo],
 ) -> tuple[dict[int, str], dict[int, str]]:
     """Build label_id -> label_name and attr spec_id -> name mappings."""
     label_names: dict[int, str] = {}

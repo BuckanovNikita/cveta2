@@ -1,7 +1,10 @@
-"""Typed data-transfer objects for CVAT API responses.
+"""Typed data-transfer objects for internal CVAT API responses.
 
-These simple dataclasses represent the data consumed from the CVAT SDK,
+These simple dataclasses represent raw data consumed from the CVAT SDK,
 providing a typed boundary that is trivial to construct in tests.
+
+Domain-level types that cross layer boundaries (``TaskInfo``,
+``LabelInfo``, ``ProjectInfo``) live in :mod:`cveta2.models`.
 """
 
 from __future__ import annotations
@@ -70,35 +73,6 @@ class RawTrack:
 
 
 @dataclass(frozen=True, slots=True)
-class RawLabelAttribute:
-    """Attribute spec defined on a label."""
-
-    id: int
-    name: str
-
-
-@dataclass(frozen=True, slots=True)
-class RawLabel:
-    """Project label with its attribute specs."""
-
-    id: int
-    name: str
-    attributes: list[RawLabelAttribute]
-    color: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class RawTask:
-    """CVAT task metadata."""
-
-    id: int
-    name: str
-    status: str
-    subset: str
-    updated_date: str
-
-
-@dataclass(frozen=True, slots=True)
 class RawDataMeta:
     """Frame list and deleted frame IDs for a task."""
 
@@ -112,11 +86,3 @@ class RawAnnotations:
 
     shapes: list[RawShape] = field(default_factory=list)
     tracks: list[RawTrack] = field(default_factory=list)
-
-
-@dataclass(frozen=True, slots=True)
-class RawProject:
-    """Minimal project info from CVAT."""
-
-    id: int
-    name: str

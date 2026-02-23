@@ -1,8 +1,8 @@
-"""Load CVAT JSON fixtures into DTOs for tests.
+"""Load CVAT JSON fixtures into domain models for tests.
 
 Reads project.json and tasks/*.json from a project directory (e.g. coco8-dev)
-and returns RawProject, list of RawTask, list of RawLabel, and a mapping
-task_id -> (RawDataMeta, RawAnnotations). Uses cveta2._client.dtos.
+and returns ProjectInfo, list of TaskInfo, list of LabelInfo, and a mapping
+task_id -> (RawDataMeta, RawAnnotations).
 """
 
 from __future__ import annotations
@@ -16,14 +16,11 @@ from cveta2._client.dtos import (
     RawAttribute,
     RawDataMeta,
     RawFrame,
-    RawLabel,
-    RawLabelAttribute,
-    RawProject,
     RawShape,
-    RawTask,
     RawTrack,
     RawTrackedShape,
 )
+from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
@@ -39,8 +36,8 @@ def _dict_to_attribute(d: dict[str, Any]) -> RawAttribute:
     return RawAttribute(spec_id=int(d.get("spec_id", 0)), value=str(d.get("value", "")))
 
 
-def _dict_to_label_attribute(d: dict[str, Any]) -> RawLabelAttribute:
-    return RawLabelAttribute(id=int(d.get("id", 0)), name=d.get("name", "") or "")
+def _dict_to_label_attribute(d: dict[str, Any]) -> LabelAttributeInfo:
+    return LabelAttributeInfo(id=int(d.get("id", 0)), name=d.get("name", "") or "")
 
 
 def _dict_to_shape(d: dict[str, Any]) -> RawShape:
@@ -86,8 +83,8 @@ def _dict_to_track(d: dict[str, Any]) -> RawTrack:
     )
 
 
-def _dict_to_task(d: dict[str, Any]) -> RawTask:
-    return RawTask(
+def _dict_to_task(d: dict[str, Any]) -> TaskInfo:
+    return TaskInfo(
         id=int(d.get("id", 0)),
         name=d.get("name", "") or "",
         status=d.get("status", "") or "",
@@ -108,9 +105,9 @@ def _dict_to_annotations(d: dict[str, Any]) -> RawAnnotations:
     return RawAnnotations(shapes=shapes, tracks=tracks)
 
 
-def _dict_to_label(d: dict[str, Any]) -> RawLabel:
+def _dict_to_label(d: dict[str, Any]) -> LabelInfo:
     attrs = d.get("attributes") or []
-    return RawLabel(
+    return LabelInfo(
         id=int(d.get("id", 0)),
         name=d.get("name", "") or "",
         attributes=[_dict_to_label_attribute(a) for a in attrs],
@@ -126,7 +123,7 @@ def load_cvat_fixtures(
     <task_id>_<slug>.json files.
 
     Returns:
-        (RawProject, list[RawTask], list[RawLabel], task_id -> (RawDataMeta,
+        (ProjectInfo, list[TaskInfo], list[LabelInfo], task_id -> (RawDataMeta,
         RawAnnotations))
 
     """
@@ -140,13 +137,13 @@ def load_cvat_fixtures(
         raise FileNotFoundError(f"Missing directory {tasks_dir}")
 
     project_data = json.loads(project_file.read_text(encoding="utf-8"))
-    project = RawProject(
+    project = ProjectInfo(
         id=int(project_data.get("id", 0)),
         name=project_data.get("name", "") or "",
     )
     labels = [_dict_to_label(item) for item in (project_data.get("labels") or [])]
 
-    tasks: list[RawTask] = []
+    tasks: list[TaskInfo] = []
     task_data_map: dict[int, tuple[RawDataMeta, RawAnnotations]] = {}
 
     for path in sorted(tasks_dir.glob("*.json")):

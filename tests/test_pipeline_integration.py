@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -29,13 +28,8 @@ from tests.fixtures.fake_cvat_project import (
 )
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import (
-        RawAnnotations,
-        RawDataMeta,
-        RawLabel,
-        RawProject,
-        RawTask,
-    )
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -66,13 +60,13 @@ class _FailingTaskApi:
         self._delegate = delegate
         self._failing_task_id = failing_task_id
 
-    def list_projects(self) -> list[RawProject]:
+    def list_projects(self) -> list[ProjectInfo]:
         return self._delegate.list_projects()
 
-    def get_project_tasks(self, project_id: int) -> list[RawTask]:
+    def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         return self._delegate.get_project_tasks(project_id)
 
-    def get_project_labels(self, project_id: int) -> list[RawLabel]:
+    def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         return self._delegate.get_project_labels(project_id)
 
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
@@ -108,7 +102,7 @@ def _with_dates(
 ) -> LoadedFixtures:
     """Return fixtures with updated_date overrides by task position."""
     new_tasks = [
-        replace(task, updated_date=dates[i]) if i in dates else task
+        task.model_copy(update={"updated_date": dates[i]}) if i in dates else task
         for i, task in enumerate(fixtures.tasks)
     ]
     new_data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {

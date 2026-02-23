@@ -6,19 +6,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel
 
 from cveta2.config import get_projects_cache_path
+from cveta2.models import ProjectInfo
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-class ProjectInfo(BaseModel):
-    """Cached project id and name."""
-
-    id: int
-    name: str
 
 
 def load_projects_cache(path: Path | None = None) -> list[ProjectInfo]:

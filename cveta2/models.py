@@ -5,7 +5,71 @@ from __future__ import annotations
 import json
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Discriminator
+from pydantic import BaseModel, ConfigDict, Discriminator
+
+# ------------------------------------------------------------------
+# CVAT entity models (project / task / label)
+# ------------------------------------------------------------------
+
+
+class ProjectInfo(BaseModel):
+    """CVAT project summary (id + name)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    name: str
+
+
+class TaskInfo(BaseModel):
+    """CVAT task metadata."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    name: str
+    status: str
+    subset: str
+    updated_date: str
+
+    def format_display(self) -> str:
+        """Human-readable one-line summary for TUI menus."""
+        return f"{self.name} (id={self.id}, {self.status})"
+
+
+class LabelAttributeInfo(BaseModel):
+    """Attribute spec defined on a label."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    name: str
+
+
+class LabelInfo(BaseModel):
+    """CVAT project label with attribute specs."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    name: str
+    color: str = ""
+    attributes: list[LabelAttributeInfo] = []
+
+    def format_display(self) -> str:
+        """Human-readable label description for TUI menus."""
+        parts = [f"{self.name!r} (id={self.id})"]
+        if self.color:
+            parts.append(f"цвет={self.color}")
+        if self.attributes:
+            attr_names = ", ".join(a.name for a in self.attributes)
+            parts.append(f"атрибуты: {attr_names}")
+        return "  ".join(parts)
+
+
+# ------------------------------------------------------------------
+# Annotation models
+# ------------------------------------------------------------------
 
 Split = Literal["train", "val", "test"]
 """Allowed values for the ``split`` field (our convention for dataset splits)."""

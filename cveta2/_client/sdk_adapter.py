@@ -23,14 +23,11 @@ from cveta2._client.dtos import (
     RawAttribute,
     RawDataMeta,
     RawFrame,
-    RawLabel,
-    RawLabelAttribute,
-    RawProject,
     RawShape,
-    RawTask,
     RawTrack,
     RawTrackedShape,
 )
+from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
 
 if TYPE_CHECKING:
     from cvat_sdk.api_client import models as cvat_models
@@ -74,20 +71,20 @@ class SdkCvatApiAdapter:
     # ------------------------------------------------------------------
 
     @_api_retry
-    def list_projects(self) -> list[RawProject]:
+    def list_projects(self) -> list[ProjectInfo]:
         """Return all accessible projects."""
         raw = self.client.projects.list()
-        return [RawProject(id=p.id, name=p.name or "") for p in raw]
+        return [ProjectInfo(id=p.id, name=p.name or "") for p in raw]
 
     @_api_retry
-    def get_project_tasks(self, project_id: int) -> list[RawTask]:
+    def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Return tasks belonging to a project."""
         project = self.client.projects.retrieve(project_id)
         tasks = project.get_tasks()
         return [self._convert_task(t) for t in tasks]
 
     @_api_retry
-    def get_project_labels(self, project_id: int) -> list[RawLabel]:
+    def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         """Return label definitions for a project."""
         project = self.client.projects.retrieve(project_id)
         labels = project.get_labels()
@@ -126,8 +123,8 @@ class SdkCvatApiAdapter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _convert_task(task: cvat_models.TaskRead) -> RawTask:
-        return RawTask(
+    def _convert_task(task: cvat_models.TaskRead) -> TaskInfo:
+        return TaskInfo(
             id=task.id,
             name=task.name or "",
             status=str(task.status or ""),
@@ -156,10 +153,10 @@ class SdkCvatApiAdapter:
         return str(raw)
 
     @staticmethod
-    def _convert_label(label: cvat_models.Label) -> RawLabel:
+    def _convert_label(label: cvat_models.Label) -> LabelInfo:
         raw_attrs = label.attributes or []
-        attrs = [RawLabelAttribute(id=a.id, name=a.name or "") for a in raw_attrs]
-        return RawLabel(
+        attrs = [LabelAttributeInfo(id=a.id, name=a.name or "") for a in raw_attrs]
+        return LabelInfo(
             id=label.id, name=label.name, attributes=attrs, color=label.color or ""
         )
 

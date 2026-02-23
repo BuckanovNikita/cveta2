@@ -32,10 +32,12 @@ from cveta2.models import (
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
+    LabelInfo,
     ProjectAnnotations,
+    ProjectInfo,
     TaskAnnotations,
+    TaskInfo,
 )
-from cveta2.projects_cache import ProjectInfo
 
 _DATA_PROCESSING_TIMEOUT = int(os.environ.get("CVETA2_DATA_TIMEOUT", "60"))
 """Max seconds to wait for CVAT to finish processing cloud storage data.
@@ -66,7 +68,7 @@ class FetchContext:
     :meth:`CvatClient.fetch_one_task` for each task in the loop.
     """
 
-    tasks: list[RawTask]
+    tasks: list[TaskInfo]
     label_names: dict[int, str]
     attr_names: dict[int, str]
     host: str = ""
@@ -74,7 +76,7 @@ class FetchContext:
 
 
 def _log_task_5xx_skip(
-    task: RawTask,
+    task: TaskInfo,
     host: str,
     project_name: str,
     status: int,
@@ -100,9 +102,9 @@ def _log_task_5xx_skip(
 
 
 def _filter_tasks_for_fetch(
-    tasks: list[RawTask],
+    tasks: list[TaskInfo],
     options: _FetchAnnotationsOptions,
-) -> list[RawTask]:
+) -> list[TaskInfo]:
     """Apply ignore list, task selector, completed_only; return filtered list."""
     if options.ignore_task_ids:
         skipped = [t for t in tasks if t.id in options.ignore_task_ids]
@@ -122,7 +124,7 @@ def _filter_tasks_for_fetch(
 
 
 def _task_to_records(
-    task: RawTask,
+    task: TaskInfo,
     data_meta: RawDataMeta,
     annotations: RawAnnotations,
     label_names: dict[int, str],
@@ -182,7 +184,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawLabel, RawTask
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
     from cveta2._client.ports import CvatApiPort
 
 
@@ -300,20 +302,15 @@ class CvatClient:
 
     def list_projects(self) -> list[ProjectInfo]:
         """Fetch list of projects from CVAT (id and name)."""
-
-        def from_source(source: CvatApiPort) -> list[ProjectInfo]:
-            raw = source.list_projects()
-            return [ProjectInfo(id=p.id, name=p.name) for p in raw]
-
         with self._api_or_adapter() as source:
-            return from_source(source)
+            return source.list_projects()
 
-    def list_project_tasks(self, project_id: int) -> list[RawTask]:
+    def list_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Fetch the list of tasks for a project from CVAT."""
         with self._api_or_adapter() as source:
             return source.get_project_tasks(project_id)
 
-    def get_project_labels(self, project_id: int) -> list[RawLabel]:
+    def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         """Fetch label definitions for a project from CVAT."""
         with self._api_or_adapter() as source:
             return source.get_project_labels(project_id)
@@ -480,9 +477,9 @@ class CvatClient:
 
     @staticmethod
     def _resolve_one_task_selector(
-        tasks: list[RawTask],
+        tasks: list[TaskInfo],
         selector: int | str,
-    ) -> RawTask:
+    ) -> TaskInfo:
         """Resolve a single task selector (ID or name) to a task.
 
         Numeric strings and ints match by task ID first, then by name.
@@ -504,9 +501,9 @@ class CvatClient:
 
     @staticmethod
     def resolve_task_selectors(
-        tasks: list[RawTask],
+        tasks: list[TaskInfo],
         selectors: Sequence[int | str],
-    ) -> list[RawTask]:
+    ) -> list[TaskInfo]:
         """Resolve a list of task selectors to matching tasks.
 
         Each selector is resolved independently via
@@ -514,7 +511,7 @@ class CvatClient:
         by different selectors) are removed, preserving order.
         """
         seen_ids: set[int] = set()
-        matched: list[RawTask] = []
+        matched: list[TaskInfo] = []
         for sel in selectors:
             task = CvatClient._resolve_one_task_selector(tasks, sel)
             if task.id not in seen_ids:
@@ -544,7 +541,7 @@ class CvatClient:
     @staticmethod
     def _fetch_one_task(
         api: CvatApiPort,
-        task: RawTask,
+        task: TaskInfo,
         ctx: FetchContext,
     ) -> TaskAnnotations | None:
         """Fetch annotations for a single task via the API port.

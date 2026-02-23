@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -17,7 +18,10 @@ from cveta2.config import (
     require_interactive,
     save_image_cache_config,
 )
-from cveta2.projects_cache import ProjectInfo, load_projects_cache, save_projects_cache
+from cveta2.projects_cache import load_projects_cache, save_projects_cache
+
+if TYPE_CHECKING:
+    from cveta2.models import ProjectInfo
 
 
 def run_setup(config_path: Path) -> None:

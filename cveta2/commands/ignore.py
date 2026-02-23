@@ -23,12 +23,12 @@ from cveta2.config import (
     save_ignore_config,
 )
 from cveta2.exceptions import Cveta2Error
-from cveta2.projects_cache import ProjectInfo, load_projects_cache
+from cveta2.projects_cache import load_projects_cache
 
 if TYPE_CHECKING:
     import argparse
 
-    from cveta2._client.dtos import RawTask
+    from cveta2.models import ProjectInfo, TaskInfo
 
 _ACTION_ADD = "add"
 _ACTION_REMOVE = "remove"
@@ -185,8 +185,8 @@ def _resolve_selectors(
     client: CvatClient,
     project_id: int,
     selectors: list[str],
-) -> list[RawTask]:
-    """Fetch project tasks and resolve selectors to ``RawTask`` objects."""
+) -> list[TaskInfo]:
+    """Fetch project tasks and resolve selectors to ``TaskInfo`` objects."""
     tasks = client.list_project_tasks(project_id)
     return CvatClient.resolve_task_selectors(tasks, selectors)
 

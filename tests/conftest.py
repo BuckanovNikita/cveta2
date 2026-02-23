@@ -15,7 +15,8 @@ from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
 if TYPE_CHECKING:
     from _pytest.mark.structures import ParameterSet
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawTask
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2.models import TaskInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 COCO8_DIR = Path(__file__).resolve().parent / "fixtures" / "cvat" / "coco8-dev"
@@ -58,9 +59,9 @@ def coco8_label_maps(
 @pytest.fixture(scope="session")
 def coco8_tasks_by_name(
     coco8_fixtures: LoadedFixtures,
-) -> dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]]:
-    """Map task slug -> (RawTask, RawDataMeta, RawAnnotations)."""
-    result: dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]] = {}
+) -> dict[str, tuple[TaskInfo, RawDataMeta, RawAnnotations]]:
+    """Map task slug -> (TaskInfo, RawDataMeta, RawAnnotations)."""
+    result: dict[str, tuple[TaskInfo, RawDataMeta, RawAnnotations]] = {}
     for task in coco8_fixtures.tasks:
         key = task.name.strip().lower()
         data_meta, annotations = coco8_fixtures.task_data[task.id]

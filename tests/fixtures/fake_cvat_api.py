@@ -9,13 +9,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import (
-        RawAnnotations,
-        RawDataMeta,
-        RawLabel,
-        RawProject,
-        RawTask,
-    )
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
@@ -32,15 +27,15 @@ class FakeCvatApi:
         self._labels = fixtures.labels
         self._task_data = fixtures.task_data
 
-    def list_projects(self) -> list[RawProject]:
+    def list_projects(self) -> list[ProjectInfo]:
         """Return the single fixture project."""
         return [self._project]
 
-    def get_project_tasks(self, _project_id: int) -> list[RawTask]:
+    def get_project_tasks(self, _project_id: int) -> list[TaskInfo]:
         """Return tasks from fixture data."""
         return list(self._tasks)
 
-    def get_project_labels(self, _project_id: int) -> list[RawLabel]:
+    def get_project_labels(self, _project_id: int) -> list[LabelInfo]:
         """Return labels from fixture data."""
         return list(self._labels)
 

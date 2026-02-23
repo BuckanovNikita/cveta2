@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cveta2._client.dtos import RawLabel, RawProject
+from cveta2.models import LabelInfo, ProjectInfo
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
     LoadedFixtures,
@@ -162,9 +162,9 @@ def test_build_fake_invalid_task_index(base_fixtures: LoadedFixtures) -> None:
 
 def test_build_fake_empty_base_tasks() -> None:
     empty = LoadedFixtures(
-        project=RawProject(id=0, name="empty"),
+        project=ProjectInfo(id=0, name="empty"),
         tasks=[],
-        labels=[RawLabel(id=1, name="x", attributes=[])],
+        labels=[LabelInfo(id=1, name="x", attributes=[])],
         task_data={},
     )
     config = FakeProjectConfig(count=2, seed=1)

@@ -12,18 +12,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cveta2._client.dtos import (
-    RawAnnotations,
-    RawDataMeta,
-    RawTask,
-)
+from cveta2._client.dtos import RawAnnotations, RawDataMeta
+from cveta2.models import TaskInfo
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
 
 if TYPE_CHECKING:
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
-# Assertion: (task, data_meta, annotations) -> None
-TaskAssertion = Callable[[RawTask, RawDataMeta, RawAnnotations], None]
+TaskAssertion = Callable[[TaskInfo, RawDataMeta, RawAnnotations], None]
 
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "cvat" / "coco8-dev"
@@ -53,7 +49,7 @@ def _track_frames(annotations: RawAnnotations) -> set[int]:
 
 
 def _assert_normal(
-    task: RawTask,
+    task: TaskInfo,
     data_meta: RawDataMeta,
     _annotations: RawAnnotations,
 ) -> None:
@@ -66,7 +62,7 @@ def _assert_normal(
 
 
 def _assert_all_empty(
-    task: RawTask,
+    task: TaskInfo,
     data_meta: RawDataMeta,
     annotations: RawAnnotations,
 ) -> None:
@@ -80,7 +76,7 @@ def _assert_all_empty(
 
 
 def _assert_all_removed(
-    task: RawTask,
+    task: TaskInfo,
     data_meta: RawDataMeta,
     _annotations: RawAnnotations,
 ) -> None:
@@ -99,7 +95,7 @@ def _assert_all_removed(
 
 
 def _assert_zero_frame_empty_last_removed(
-    task: RawTask,
+    task: TaskInfo,
     data_meta: RawDataMeta,
     annotations: RawAnnotations,
 ) -> None:
@@ -118,7 +114,7 @@ def _assert_zero_frame_empty_last_removed(
 
 
 def _assert_all_bboxes_moved(
-    task: RawTask,
+    task: TaskInfo,
     _data_meta: RawDataMeta,
     annotations: RawAnnotations,
 ) -> None:
@@ -129,7 +125,7 @@ def _assert_all_bboxes_moved(
 
 
 def _assert_all_except_first_empty(
-    task: RawTask,
+    task: TaskInfo,
     data_meta: RawDataMeta,
     annotations: RawAnnotations,
 ) -> None:
@@ -147,7 +143,7 @@ def _assert_all_except_first_empty(
 
 
 def _assert_frames_1_2_removed(
-    task: RawTask,
+    task: TaskInfo,
     data_meta: RawDataMeta,
     _annotations: RawAnnotations,
 ) -> None:

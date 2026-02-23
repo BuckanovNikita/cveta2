@@ -10,17 +10,17 @@ import questionary
 from cveta2.config import require_interactive
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawTask
     from cveta2.client import CvatClient
+    from cveta2.models import TaskInfo
 
 
 def build_task_choices(
-    tasks: list[RawTask],
+    tasks: list[TaskInfo],
 ) -> list[questionary.Choice]:
     """Build questionary choices from a task list."""
     return [
         questionary.Choice(
-            title=f"{t.name} (id={t.id}, {t.status})",
+            title=t.format_display(),
             value=t.id,
         )
         for t in tasks
@@ -31,10 +31,10 @@ def select_tasks_tui(
     client: CvatClient,
     project_id: int,
     exclude_ids: set[int] | None = None,
-) -> list[RawTask]:
+) -> list[TaskInfo]:
     """Interactive multi-task selection via TUI checkbox.
 
-    Returns full ``RawTask`` objects so callers can access ``.id`` and ``.name``.
+    Returns full ``TaskInfo`` objects so callers can access ``.id`` and ``.name``.
     Tasks whose IDs are in *exclude_ids* are hidden from the list.
     """
     require_interactive(

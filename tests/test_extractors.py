@@ -9,7 +9,8 @@ from cveta2._client.dtos import RawAttribute, RawFrame, RawShape
 from cveta2._client.extractors import _collect_shapes
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawTask
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2.models import TaskInfo
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -61,7 +62,7 @@ def _make_shape(**overrides: object) -> RawShape:
 
 def _ctx_for(
     name: str,
-    tasks_by_name: dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]],
+    tasks_by_name: dict[str, tuple[TaskInfo, RawDataMeta, RawAnnotations]],
     label_maps: tuple[dict[int, str], dict[int, str]],
 ) -> tuple[_TaskContext, RawAnnotations]:
     """Build _TaskContext + return annotations for a named fixture task."""
@@ -77,7 +78,7 @@ def _ctx_for(
 
 
 def test_normal_task_produces_annotations(
-    coco8_tasks_by_name: dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]],
+    coco8_tasks_by_name: dict[str, tuple[TaskInfo, RawDataMeta, RawAnnotations]],
     coco8_label_maps: tuple[dict[int, str], dict[int, str]],
 ) -> None:
     """Normal task produces the expected number of BBoxAnnotation objects."""
@@ -89,7 +90,7 @@ def test_normal_task_produces_annotations(
 
 
 def test_empty_task_no_annotations(
-    coco8_tasks_by_name: dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]],
+    coco8_tasks_by_name: dict[str, tuple[TaskInfo, RawDataMeta, RawAnnotations]],
     coco8_label_maps: tuple[dict[int, str], dict[int, str]],
 ) -> None:
     """all-empty task has no shapes, so _collect_shapes returns []."""
@@ -99,7 +100,7 @@ def test_empty_task_no_annotations(
 
 
 def test_field_mapping_correct(
-    coco8_tasks_by_name: dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]],
+    coco8_tasks_by_name: dict[str, tuple[TaskInfo, RawDataMeta, RawAnnotations]],
     coco8_label_maps: tuple[dict[int, str], dict[int, str]],
 ) -> None:
     """First shape from normal task has correct field mapping."""
@@ -123,7 +124,7 @@ def test_field_mapping_correct(
 
 
 def test_all_except_first_empty(
-    coco8_tasks_by_name: dict[str, tuple[RawTask, RawDataMeta, RawAnnotations]],
+    coco8_tasks_by_name: dict[str, tuple[TaskInfo, RawDataMeta, RawAnnotations]],
     coco8_label_maps: tuple[dict[int, str], dict[int, str]],
 ) -> None:
     """all-except-first-empty: only frame 0 produces annotations."""

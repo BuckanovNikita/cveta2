@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawDataMeta, RawFrame, RawTask
+    from cveta2._client.dtos import RawDataMeta, RawFrame
+    from cveta2.models import TaskInfo
 
 _RECTANGLE = "rectangle"
 
@@ -27,7 +28,7 @@ class _TaskContext:
     @classmethod
     def from_raw(
         cls,
-        task: RawTask,
+        task: TaskInfo,
         data_meta: RawDataMeta,
         label_names: dict[int, str],
         attr_names: dict[int, str],

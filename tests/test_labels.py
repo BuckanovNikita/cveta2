@@ -8,11 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from cveta2._client.dtos import RawLabel, RawLabelAttribute
 from cveta2.cli import CliApp
 from cveta2.client import CvatClient
 from cveta2.commands.labels import (
-    _format_label,
     _interactive_add,
     _interactive_delete,
     _interactive_recolor,
@@ -22,6 +20,7 @@ from cveta2.commands.labels import (
 )
 from cveta2.config import CvatConfig
 from cveta2.exceptions import InteractiveModeRequiredError
+from cveta2.models import LabelAttributeInfo, LabelInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
@@ -41,14 +40,14 @@ if TYPE_CHECKING:
 _CFG = CvatConfig()
 
 _LABELS = [
-    RawLabel(id=1, name="cat", attributes=[], color="#ff0000"),
-    RawLabel(id=2, name="dog", attributes=[RawLabelAttribute(id=10, name="breed")]),
-    RawLabel(
+    LabelInfo(id=1, name="cat", attributes=[], color="#ff0000"),
+    LabelInfo(id=2, name="dog", attributes=[LabelAttributeInfo(id=10, name="breed")]),
+    LabelInfo(
         id=3,
         name="bird",
         attributes=[
-            RawLabelAttribute(id=11, name="species"),
-            RawLabelAttribute(id=12, name="color"),
+            LabelAttributeInfo(id=11, name="species"),
+            LabelAttributeInfo(id=12, name="color"),
         ],
         color="#00ff00",
     ),
@@ -79,7 +78,7 @@ def _write_config(path: Path) -> None:
 
 
 def _mock_client_ctx(
-    labels: list[RawLabel] | None = None,
+    labels: list[LabelInfo] | None = None,
 ) -> MagicMock:
     """Build a mock CvatClient for CLI tests."""
     client = MagicMock()
@@ -107,39 +106,39 @@ def _setup_sdk_mock(client: CvatClient) -> MagicMock:
 
 
 # ---------------------------------------------------------------------------
-# _format_label
+# LabelInfo.format_display
 # ---------------------------------------------------------------------------
 
 
 def test_format_label_simple() -> None:
-    label = RawLabel(id=1, name="cat", attributes=[])
-    result = _format_label(label)
+    label = LabelInfo(id=1, name="cat", attributes=[])
+    result = label.format_display()
     assert "'cat'" in result
     assert "id=1" in result
 
 
 def test_format_label_with_color() -> None:
-    label = RawLabel(id=1, name="cat", attributes=[], color="#ff0000")
-    result = _format_label(label)
+    label = LabelInfo(id=1, name="cat", attributes=[], color="#ff0000")
+    result = label.format_display()
     assert "цвет=#ff0000" in result
 
 
 def test_format_label_with_attributes() -> None:
-    label = RawLabel(
+    label = LabelInfo(
         id=2,
         name="dog",
         attributes=[
-            RawLabelAttribute(id=10, name="breed"),
-            RawLabelAttribute(id=11, name="size"),
+            LabelAttributeInfo(id=10, name="breed"),
+            LabelAttributeInfo(id=11, name="size"),
         ],
     )
-    result = _format_label(label)
+    result = label.format_display()
     assert "атрибуты: breed, size" in result
 
 
 def test_format_label_no_color_no_attrs() -> None:
-    label = RawLabel(id=5, name="fish", attributes=[])
-    result = _format_label(label)
+    label = LabelInfo(id=5, name="fish", attributes=[])
+    result = label.format_display()
     assert "цвет" not in result
     assert "атрибуты" not in result
 
@@ -169,7 +168,7 @@ def test_get_project_labels_returns_fixture_labels(
     client = CvatClient(_CFG, api=FakeCvatApi(fake))
     labels = client.get_project_labels(fake.project.id)
     assert len(labels) == len(fake.labels)
-    assert all(isinstance(lbl, RawLabel) for lbl in labels)
+    assert all(isinstance(lbl, LabelInfo) for lbl in labels)
     label_names = {lbl.name for lbl in labels}
     expected_names = {lbl.name for lbl in fake.labels}
     assert label_names == expected_names
@@ -376,7 +375,7 @@ def test_cli_labels_noninteractive_without_list_errors(
 
 def test_add_new_label() -> None:
     mock_client = MagicMock()
-    updated = [*_LABELS, RawLabel(id=4, name="fish", attributes=[])]
+    updated = [*_LABELS, LabelInfo(id=4, name="fish", attributes=[])]
     mock_client.get_project_labels.return_value = updated
 
     with patch("cveta2.commands.labels.questionary") as mock_q:
@@ -431,7 +430,7 @@ def test_add_duplicate_case_insensitive() -> None:
 
 def test_add_strips_whitespace() -> None:
     mock_client = MagicMock()
-    updated = [*_LABELS, RawLabel(id=4, name="fish", attributes=[])]
+    updated = [*_LABELS, LabelInfo(id=4, name="fish", attributes=[])]
     mock_client.get_project_labels.return_value = updated
 
     with patch("cveta2.commands.labels.questionary") as mock_q:
@@ -449,7 +448,7 @@ def test_add_strips_whitespace() -> None:
 def test_rename_label() -> None:
     mock_client = MagicMock()
     updated = [
-        RawLabel(id=1, name="kitty", attributes=[], color="#ff0000"),
+        LabelInfo(id=1, name="kitty", attributes=[], color="#ff0000"),
         _LABELS[1],
         _LABELS[2],
     ]
@@ -681,7 +680,7 @@ def test_validate_hex_color_invalid() -> None:
 def test_recolor_label() -> None:
     mock_client = MagicMock()
     updated = [
-        RawLabel(id=1, name="cat", attributes=[], color="#0000ff"),
+        LabelInfo(id=1, name="cat", attributes=[], color="#0000ff"),
         _LABELS[1],
         _LABELS[2],
     ]
@@ -744,9 +743,9 @@ def test_recolor_same_color_noop() -> None:
 
 def test_recolor_label_without_color() -> None:
     """Recolor a label that has no color set."""
-    labels = [RawLabel(id=10, name="fish", attributes=[], color="")]
+    labels = [LabelInfo(id=10, name="fish", attributes=[], color="")]
     mock_client = MagicMock()
-    updated = [RawLabel(id=10, name="fish", attributes=[], color="#abcdef")]
+    updated = [LabelInfo(id=10, name="fish", attributes=[], color="#abcdef")]
     mock_client.get_project_labels.return_value = updated
 
     with patch("cveta2.commands.labels.questionary") as mock_q:

@@ -102,12 +102,6 @@ layers = [
     "cveta2.client",
     "cveta2._client",
 ]
-ignore_imports = [
-    "cveta2.commands._task_selector -> cveta2._client.dtos",
-    "cveta2.commands.labels -> cveta2._client.dtos",
-    "cveta2.commands.ignore -> cveta2._client.dtos",
-]
-
 [[tool.importlinter.contracts]]
 name = "Foundation modules isolation"
 type = "forbidden"
