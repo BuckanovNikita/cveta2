@@ -9,7 +9,7 @@
 #   cvat_ui, traefik     (web UI)
 #
 # Analytics (clickhouse, vector, grafana) and non-essential workers are NOT started.
-# Single port: traefik routes both API and UI on CVAT_PORT (see docker-compose.ui.yml).
+# Single port: traefik routes both API and UI on CVAT_PORT (see docker-compose.override.yml).
 # Container names are prefixed with username (INTEGRATION_USER) to avoid clashes.
 #
 # Usage:
@@ -27,7 +27,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 CVAT_SUBMODULE="$REPO_ROOT/vendor/cvat"
 ENV_FILE="$REPO_ROOT/tests/integration/.env"
 OVERRIDE_FILE="$REPO_ROOT/tests/integration/docker-compose.override.yml"
-UI_OVERRIDE_FILE="$REPO_ROOT/tests/integration/docker-compose.ui.yml"
 COCO8_IMAGES_DIR="$REPO_ROOT/tests/fixtures/data/coco8/images"
 
 CVAT_VERSION=""
@@ -76,19 +75,28 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Resolve CVAT port ───────────────────────────────────────────────
+# ── Resolve dynamic ports ──────────────────────────────────────────
+random_free_port() {
+    python3 -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
+}
+
 if [ -z "$CVAT_PORT" ]; then
-    CVAT_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()")
+    CVAT_PORT=$(random_free_port)
     log "Using random free port: $CVAT_PORT"
 fi
 export CVAT_PORT
 
+MINIO_PORT=$(random_free_port)
+MINIO_CONSOLE_PORT=$(random_free_port)
+export MINIO_PORT MINIO_CONSOLE_PORT
+
 # ── Helpers ─────────────────────────────────────────────────────────
 compose() {
-    COMPOSE_FILES=(-f "$CVAT_SUBMODULE/docker-compose.yml" -f "$OVERRIDE_FILE" -f "$UI_OVERRIDE_FILE")
     docker compose \
         --project-directory "$CVAT_SUBMODULE" \
-        "${COMPOSE_FILES[@]}" \
+        -p "${INTEGRATION_USER}-cvat" \
+        -f "$CVAT_SUBMODULE/docker-compose.yml" \
+        -f "$OVERRIDE_FILE" \
         --env-file "$ENV_FILE" \
         "$@"
 }
@@ -189,4 +197,4 @@ log "Run integration tests:"
 log "  CVAT_INTEGRATION_HOST=http://localhost:${CVAT_PORT} uv run pytest"
 log ""
 log "Tear down:"
-log "  docker compose --project-directory vendor/cvat -f vendor/cvat/docker-compose.yml -f tests/integration/docker-compose.override.yml -f tests/integration/docker-compose.ui.yml --env-file tests/integration/.env down -v"
+log "  docker compose --project-directory vendor/cvat -p ${INTEGRATION_USER}-cvat -f vendor/cvat/docker-compose.yml -f tests/integration/docker-compose.override.yml --env-file tests/integration/.env down -v"

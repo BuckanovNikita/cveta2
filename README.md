@@ -64,6 +64,232 @@ cveta2 fetch-task -p 123 -o output/
 
 В папке `output/` появятся файлы: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv` (и `raw.csv` с `--raw`). Подробнее — в [DATASET_FORMAT.md](DATASET_FORMAT.md).
 
+## Команды CLI
+
+### `cveta2 setup`
+
+Интерактивный мастер настройки подключения к CVAT: хост, организация, авторизация (токен или логин/пароль). Результат сохраняется в `~/.config/cveta2/config.yaml`.
+
+```bash
+cveta2 setup
+
+# Указать другой путь к конфигу
+cveta2 setup --config /path/to/config.yaml
+```
+
+### `cveta2 setup-cache`
+
+Интерактивная настройка путей кэширования изображений для всех известных проектов. Сначала запрашивается **корневая директория кэша**; для каждого проекта по умолчанию предлагается путь «корень/имя_проекта». Нажмите Enter, чтобы принять значение по умолчанию или пропустить проект.
+
+Если локальный кэш проектов пуст — автоматически загружает список с CVAT.
+
+- **`--reset`** — переспросить путь для каждого проекта, используя только «корень/имя_проекта» как значение по умолчанию (игнорировать уже заданные пути).
+- **`--list`** — вывести текущие пути кэша из конфига и выйти (без запросов и без CVAT).
+
+```bash
+cveta2 setup-cache
+
+# Указать другой путь к конфигу
+cveta2 setup-cache --config /path/to/config.yaml
+
+# Показать текущие пути кэша
+cveta2 setup-cache --list
+```
+
+### `cveta2 fetch`
+
+Выгрузка **всех** bbox-аннотаций и удалённых изображений из проекта CVAT. Каждая задача выгружается последовательно и сохраняется как промежуточный CSV в `output/.tasks/task_{id}.csv`, после чего результаты объединяются и разбиваются на три CSV-файла + список удалённых. Если папка `--output-dir` уже существует, в интерактивном режиме будет предложено перезаписать, указать другой путь или отменить.
+
+```bash
+# По ID проекта
+cveta2 fetch --project 123 -o output/
+
+# По имени проекта
+cveta2 fetch -p "Имя проекта" -o output/
+
+# Интерактивный выбор проекта (из кэша; в списке есть опция обновить с CVAT)
+cveta2 fetch -o output/
+
+# Дополнительно сохранить полный (необработанный) CSV
+cveta2 fetch -p 123 -o output/ --raw
+
+# Только задачи со статусом completed
+cveta2 fetch -p 123 -o output/ --completed-only
+
+# Без загрузки изображений
+cveta2 fetch -p 123 -o output/ --no-images
+
+# С указанием директории для изображений
+cveta2 fetch -p "coco8-dev" -o output/ --images-dir /mnt/data/coco8
+
+# Сохранить промежуточные CSV задач (по умолчанию удаляются после объединения)
+cveta2 fetch -p 123 -o output/ --save-tasks
+```
+
+### `cveta2 fetch-task`
+
+Выгрузка bbox-аннотаций для **конкретных задач** проекта. Использует ту же логику поштучной выгрузки задач, что и `fetch` (промежуточные CSV в `output/.tasks/`). В отличие от `fetch`, не разбивает результат на dataset/obsolete/in_progress — записывает единый `dataset.csv` и `deleted.csv` в указанную директорию. Задачи указываются по ID или имени через `-t`, либо выбираются интерактивно (checkbox с поиском).
+
+```bash
+# Одна задача по ID
+cveta2 fetch-task -p 123 -t 456 -o output/
+
+# Несколько задач
+cveta2 fetch-task -p 123 -t 456 -t 789 -o output/
+
+# По имени задачи (регистр не важен)
+cveta2 fetch-task -p 123 -t "Партия 3" -t "Партия 4" -o output/
+
+# Интерактивный выбор задач из списка (checkbox с мульти-выбором и поиском)
+cveta2 fetch-task -p 123 -t -o output/
+
+# Без -t — тоже интерактивный выбор
+cveta2 fetch-task -p 123 -o output/
+
+# Фильтры и изображения работают так же, как в fetch
+cveta2 fetch-task -p 123 -t 456 -o output/ --completed-only --no-images
+
+# Сохранить промежуточные CSV задач
+cveta2 fetch-task -p 123 -t 456 -o output/ --save-tasks
+```
+
+В директории `output/` появятся `dataset.csv` и `deleted.csv`. Подробнее — в [DATASET_FORMAT.md](DATASET_FORMAT.md).
+
+### `cveta2 s3-sync`
+
+Синхронизация изображений из S3 cloud storage в локальный кэш для всех настроенных в `image_cache` проектов. Скачивает только отсутствующие файлы — никогда не загружает и не удаляет ничего на S3.
+
+```bash
+# Синхронизировать все настроенные проекты
+cveta2 s3-sync
+
+# Только один конкретный проект
+cveta2 s3-sync -p coco8-dev
+```
+
+### `cveta2 ignore`
+
+Управление списком игнорируемых задач для проекта. Игнорируемые задачи всегда пропускаются при `fetch` (считаются «в работе»). Задачи можно добавлять/удалять по ID или по имени. Без `--add`/`--remove`/`--list` открывается интерактивное меню.
+
+```bash
+# Добавить задачу в ignore-список (по ID)
+cveta2 ignore -p "Мой проект" --add 456
+
+# Добавить несколько задач (по ID или имени) с описанием причины
+cveta2 ignore -p "Мой проект" --add 456 "Партия 3" -d "Дубликаты"
+
+# Удалить задачу из ignore-списка
+cveta2 ignore -p "Мой проект" --remove 456
+
+# Показать игнорируемые задачи по всем проектам (не требует подключения к CVAT)
+cveta2 ignore --list
+
+# Интерактивный режим (TUI с добавлением/удалением через checkbox)
+cveta2 ignore -p "Мой проект"
+```
+
+Конфигурация хранится в `config.yaml`:
+
+```yaml
+ignore:
+  my-project:
+    - id: 456
+      name: "Партия 3"
+      description: "Дубликаты"
+    - id: 789
+      name: "Партия 5"
+```
+
+### `cveta2 labels`
+
+Просмотр и интерактивное редактирование меток (labels) проекта CVAT. Поддерживает добавление, переименование, изменение цвета и удаление меток. Перед удалением подсчитывает количество аннотаций, использующих метку, и требует явного подтверждения.
+
+```bash
+# Показать метки проекта
+cveta2 labels -p "Мой проект" --list
+
+# По ID проекта
+cveta2 labels -p 123 --list
+
+# Интерактивное редактирование (добавление/переименование/цвет/удаление)
+cveta2 labels -p "Мой проект"
+
+# Интерактивный выбор проекта (без -p)
+cveta2 labels
+```
+
+Операции:
+- **Добавление** — создаёт новую метку (цвет назначается CVAT автоматически)
+- **Переименование** — безопасно: все аннотации сохраняются (меняется только имя, привязка по ID)
+- **Изменение цвета** — безопасно: меняет цвет метки в формате `#rrggbb` (например, `#ff0000`). Не влияет на аннотации
+- **Удаление** — **необратимо уничтожает** все аннотации (shapes, tracks), использующие метку. Перед удалением команда подсчитывает аннотации по всем задачам проекта и показывает количество. Если аннотации есть — требуется ввести имена меток для подтверждения
+
+### `cveta2 upload`
+
+Создание задачи в CVAT из `dataset.csv`: интерактивный выбор классов, загрузка изображений на S3 и создание задачи с cloud storage. Bbox-аннотации из CSV автоматически переносятся в новую задачу (фрейм-маппинг читается из CVAT `data_meta`, а не из порядка файлов).
+
+```bash
+# Минимальный вызов — проект и CSV обязательны
+cveta2 upload -p "Мой проект" -d output/dataset.csv
+
+# По ID проекта
+cveta2 upload -p 123 -d output/dataset.csv
+
+# Исключить изображения, которые уже в работе
+cveta2 upload -p "Мой проект" -d output/dataset.csv --in-progress output/in_progress.csv
+
+# Указать директорию с изображениями и имя задачи
+cveta2 upload -p "Мой проект" -d output/dataset.csv --image-dir /mnt/data --name "Партия 3"
+
+# Создать задачу и сразу отметить как completed
+cveta2 upload -p "Мой проект" -d output/dataset.csv --complete
+
+# Интерактивный выбор проекта (без -p)
+cveta2 upload -d output/dataset.csv
+```
+
+Процесс:
+1. Чтение `dataset.csv` и (опционально) `in_progress.csv` для исключения занятых изображений
+2. Интерактивный выбор классов (`instance_label`) через checkbox — изображения без аннотаций тоже можно включить
+3. Загрузка недостающих изображений на S3 (уже загруженные пропускаются)
+4. Создание задачи в CVAT с cloud storage и автоматическим разбиением на jobs
+5. Загрузка bbox-аннотаций в новую задачу (привязка по `image_name` → `frame_id` из CVAT)
+
+Количество изображений на job настраивается через `upload.images_per_job` в конфиге (по умолчанию 100). Таймаут ожидания обработки данных CVAT — через переменную `CVETA2_DATA_TIMEOUT` (по умолчанию 60 секунд).
+
+### `cveta2 merge`
+
+Слияние двух CSV-файлов с аннотациями. Полезно, когда нужно объединить старый `dataset.csv` с новой выгрузкой — например, после переразметки части изображений. Оба файла должны содержать стандартные столбцы датасета (`image_name`, `instance_shape`, `instance_label`, bbox-поля); при использовании `--by-time` дополнительно нужен столбец `task_updated_date`.
+
+```bash
+# Базовое слияние — для общих изображений побеждает new
+cveta2 merge --old old/dataset.csv --new new/dataset.csv -o merged.csv
+
+# С учётом удалённых изображений
+cveta2 merge --old old/dataset.csv --new new/dataset.csv --deleted new/deleted.csv -o merged.csv
+
+# Разрешение конфликтов по дате обновления задачи (побеждает более свежая)
+cveta2 merge --old old/dataset.csv --new new/dataset.csv --by-time -o merged.csv
+```
+
+Логика слияния:
+- Изображения, присутствующие только в `--old` или только в `--new`, попадают в результат целиком
+- Для изображений, присутствующих в обоих файлах — по умолчанию побеждает `--new`; с `--by-time` побеждает тот, у которого более свежая `task_updated_date` (при равных датах или непарсимых значениях побеждает `--new`)
+- Изображения из `--deleted` исключаются из результата
+- **Пропагация split:** если у изображения в `--old` был задан `split` (`train`/`val`/`test`), а у победившей стороны split пуст — значение из `--old` автоматически переносится в результат
+
+### `cveta2 doctor`
+
+Диагностика конфигурации и окружения. Проверяет:
+
+- Наличие и корректность файла конфигурации (хост, креды)
+- Доступность AWS/S3-учётных данных (boto3)
+- Права доступа кэша изображений: у файлов проверяется групповое чтение, у директорий — групповое чтение и выполнение (чтобы все пользователи группы имели доступ)
+
+```bash
+cveta2 doctor
+```
+
 ## Загрузка изображений из S3
 
 При `fetch` cveta2 автоматически скачивает изображения проекта из S3 cloud storage, подключённого к CVAT. Используется **облачное хранилище проекта** (поле `source_storage` у самого проекта в API CVAT), а не хранилище отдельных задач. Все изображения ищутся в префиксе проекта по имени файла.
@@ -210,230 +436,6 @@ export CVETA2_NO_INTERACTIVE=true
 cveta2 fetch -p 123 -o output/ --images-dir /data/images
 ```
 
-## Команды CLI
-
-### `cveta2 setup`
-
-Интерактивный мастер настройки подключения к CVAT: хост, организация, авторизация (токен или логин/пароль). Результат сохраняется в `~/.config/cveta2/config.yaml`.
-
-```bash
-cveta2 setup
-
-# Указать другой путь к конфигу
-cveta2 setup --config /path/to/config.yaml
-```
-
-### `cveta2 setup-cache`
-
-Интерактивная настройка путей кэширования изображений для всех известных проектов. Сначала запрашивается **корневая директория кэша**; для каждого проекта по умолчанию предлагается путь «корень/имя_проекта». Нажмите Enter, чтобы принять значение по умолчанию или пропустить проект.
-
-Если локальный кэш проектов пуст — автоматически загружает список с CVAT.
-
-- **`--reset`** — переспросить путь для каждого проекта, используя только «корень/имя_проекта» как значение по умолчанию (игнорировать уже заданные пути).
-- **`--list`** — вывести текущие пути кэша из конфига и выйти (без запросов и без CVAT).
-
-```bash
-cveta2 setup-cache
-
-# Указать другой путь к конфигу
-cveta2 setup-cache --config /path/to/config.yaml
-
-# Показать текущие пути кэша
-cveta2 setup-cache --list
-```
-
-### `cveta2 fetch`
-
-Выгрузка **всех** bbox-аннотаций и удалённых изображений из проекта CVAT. Каждая задача выгружается последовательно и сохраняется как промежуточный CSV в `output/.tasks/task_{id}.csv`, после чего результаты объединяются и разбиваются на три CSV-файла + список удалённых. Если папка `--output-dir` уже существует, в интерактивном режиме будет предложено перезаписать, указать другой путь или отменить.
-
-```bash
-# По ID проекта
-cveta2 fetch --project 123 -o output/
-
-# По имени проекта
-cveta2 fetch -p "Имя проекта" -o output/
-
-# Интерактивный выбор проекта (из кэша; в списке есть опция обновить с CVAT)
-cveta2 fetch -o output/
-
-# Дополнительно сохранить полный (необработанный) CSV
-cveta2 fetch -p 123 -o output/ --raw
-
-# Только задачи со статусом completed
-cveta2 fetch -p 123 -o output/ --completed-only
-
-# Без загрузки изображений
-cveta2 fetch -p 123 -o output/ --no-images
-
-# С указанием директории для изображений
-cveta2 fetch -p "coco8-dev" -o output/ --images-dir /mnt/data/coco8
-```
-
-### `cveta2 fetch-task`
-
-Выгрузка bbox-аннотаций для **конкретных задач** проекта. Использует ту же логику поштучной выгрузки задач, что и `fetch` (промежуточные CSV в `output/.tasks/`). В отличие от `fetch`, не разбивает результат на dataset/obsolete/in_progress — записывает единый `dataset.csv` и `deleted.csv` в указанную директорию. Задачи указываются по ID или имени через `-t`, либо выбираются интерактивно (checkbox с поиском).
-
-```bash
-# Одна задача по ID
-cveta2 fetch-task -p 123 -t 456 -o output/
-
-# Несколько задач
-cveta2 fetch-task -p 123 -t 456 -t 789 -o output/
-
-# По имени задачи (регистр не важен)
-cveta2 fetch-task -p 123 -t "Партия 3" -t "Партия 4" -o output/
-
-# Интерактивный выбор задач из списка (checkbox с мульти-выбором и поиском)
-cveta2 fetch-task -p 123 -t -o output/
-
-# Без -t — тоже интерактивный выбор
-cveta2 fetch-task -p 123 -o output/
-
-# Фильтры и изображения работают так же, как в fetch
-cveta2 fetch-task -p 123 -t 456 -o output/ --completed-only --no-images
-```
-
-В директории `output/` появятся `dataset.csv` и `deleted.csv`. Подробнее — в [DATASET_FORMAT.md](DATASET_FORMAT.md).
-
-### `cveta2 s3-sync`
-
-Синхронизация изображений из S3 cloud storage в локальный кэш для всех настроенных в `image_cache` проектов. Скачивает только отсутствующие файлы — никогда не загружает и не удаляет ничего на S3.
-
-```bash
-# Синхронизировать все настроенные проекты
-cveta2 s3-sync
-
-# Только один конкретный проект
-cveta2 s3-sync -p coco8-dev
-```
-
-### `cveta2 ignore`
-
-Управление списком игнорируемых задач для проекта. Игнорируемые задачи всегда пропускаются при `fetch` (считаются «в работе»). Задачи можно добавлять/удалять по ID или по имени. Без `--add`/`--remove`/`--list` открывается интерактивное меню.
-
-```bash
-# Добавить задачу в ignore-список (по ID)
-cveta2 ignore -p "Мой проект" --add 456
-
-# Добавить несколько задач (по ID или имени) с описанием причины
-cveta2 ignore -p "Мой проект" --add 456 "Партия 3" -d "Дубликаты"
-
-# Удалить задачу из ignore-списка
-cveta2 ignore -p "Мой проект" --remove 456
-
-# Показать игнорируемые задачи по всем проектам (не требует подключения к CVAT)
-cveta2 ignore --list
-
-# Интерактивный режим (TUI с добавлением/удалением через checkbox)
-cveta2 ignore -p "Мой проект"
-```
-
-Конфигурация хранится в `config.yaml`:
-
-```yaml
-ignore:
-  my-project:
-    - id: 456
-      name: "Партия 3"
-      description: "Дубликаты"
-    - id: 789
-      name: "Партия 5"
-```
-
-### `cveta2 labels`
-
-Просмотр и интерактивное редактирование меток (labels) проекта CVAT. Поддерживает добавление, переименование, изменение цвета и удаление меток. Перед удалением подсчитывает количество аннотаций, использующих метку, и требует явного подтверждения.
-
-```bash
-# Показать метки проекта
-cveta2 labels -p "Мой проект" --list
-
-# По ID проекта
-cveta2 labels -p 123 --list
-
-# Интерактивное редактирование (добавление/переименование/цвет/удаление)
-cveta2 labels -p "Мой проект"
-
-# Интерактивный выбор проекта (без -p)
-cveta2 labels
-```
-
-Операции:
-- **Добавление** — создаёт новую метку (цвет назначается CVAT автоматически)
-- **Переименование** — безопасно: все аннотации сохраняются (меняется только имя, привязка по ID)
-- **Изменение цвета** — безопасно: меняет цвет метки в формате `#rrggbb` (например, `#ff0000`). Не влияет на аннотации
-- **Удаление** — **необратимо уничтожает** все аннотации (shapes, tracks), использующие метку. Перед удалением команда подсчитывает аннотации по всем задачам проекта и показывает количество. Если аннотации есть — требуется ввести имена меток для подтверждения
-
-### `cveta2 upload`
-
-Создание задачи в CVAT из `dataset.csv`: интерактивный выбор классов, загрузка изображений на S3 и создание задачи с cloud storage. Bbox-аннотации из CSV автоматически переносятся в новую задачу (фрейм-маппинг читается из CVAT `data_meta`, а не из порядка файлов).
-
-```bash
-# Минимальный вызов — проект и CSV обязательны
-cveta2 upload -p "Мой проект" -d output/dataset.csv
-
-# По ID проекта
-cveta2 upload -p 123 -d output/dataset.csv
-
-# Исключить изображения, которые уже в работе
-cveta2 upload -p "Мой проект" -d output/dataset.csv --in-progress output/in_progress.csv
-
-# Указать директорию с изображениями и имя задачи
-cveta2 upload -p "Мой проект" -d output/dataset.csv --image-dir /mnt/data --name "Партия 3"
-
-# Интерактивный выбор проекта (без -p)
-cveta2 upload -d output/dataset.csv
-```
-
-Процесс:
-1. Чтение `dataset.csv` и (опционально) `in_progress.csv` для исключения занятых изображений
-2. Интерактивный выбор классов (`instance_label`) через checkbox — изображения без аннотаций тоже можно включить
-3. Загрузка недостающих изображений на S3 (уже загруженные пропускаются)
-4. Создание задачи в CVAT с cloud storage и автоматическим разбиением на jobs
-5. Загрузка bbox-аннотаций в новую задачу (привязка по `image_name` → `frame_id` из CVAT)
-
-Количество изображений на job настраивается через `upload.images_per_job` в конфиге (по умолчанию 100). Таймаут ожидания обработки данных CVAT — через переменную `CVETA2_DATA_TIMEOUT` (по умолчанию 60 секунд).
-
-### `cveta2 merge`
-
-Слияние двух CSV-файлов с аннотациями. Полезно, когда нужно объединить старый `dataset.csv` с новой выгрузкой — например, после переразметки части изображений. Оба файла должны содержать стандартные столбцы датасета (`image_name`, `instance_shape`, `instance_label`, bbox-поля); при использовании `--by-time` дополнительно нужен столбец `task_updated_date`.
-
-```bash
-# Базовое слияние — для общих изображений побеждает new
-cveta2 merge --old old/dataset.csv --new new/dataset.csv -o merged.csv
-
-# С учётом удалённых изображений
-cveta2 merge --old old/dataset.csv --new new/dataset.csv --deleted new/deleted.csv -o merged.csv
-
-# Разрешение конфликтов по дате обновления задачи (побеждает более свежая)
-cveta2 merge --old old/dataset.csv --new new/dataset.csv --by-time -o merged.csv
-```
-
-Логика слияния:
-- Изображения, присутствующие только в `--old` или только в `--new`, попадают в результат целиком
-- Для изображений, присутствующих в обоих файлах — по умолчанию побеждает `--new`; с `--by-time` побеждает тот, у которого более свежая `task_updated_date` (при равных датах или непарсимых значениях побеждает `--new`)
-- Изображения из `--deleted` исключаются из результата
-- **Пропагация split:** если у изображения в `--old` был задан `split` (`train`/`val`/`test`), а у победившей стороны split пуст — значение из `--old` автоматически переносится в результат
-
-### `cveta2 doctor`
-
-Диагностика конфигурации и окружения. Проверяет:
-
-- Наличие и корректность файла конфигурации (хост, креды)
-- Доступность AWS/S3-учётных данных (boto3)
-- Права доступа кэша изображений: у файлов проверяется групповое чтение, у директорий — групповое чтение и выполнение (чтобы все пользователи группы имели доступ)
-
-```bash
-cveta2 doctor
-```
-
-## Примеры использования
-
-```bash
-# Путь к конфигу через env (кэш проектов — projects.yaml в той же папке)
-CVETA2_CONFIG=/path/to/config.yaml cveta2 fetch -p 123 -o output/
-```
-
 ## Python API
 
 ### Выгрузка аннотаций
@@ -442,10 +444,9 @@ CVETA2_CONFIG=/path/to/config.yaml cveta2 fetch -p 123 -o output/
 from cveta2 import CvatClient, fetch_annotations
 from cveta2.config import CvatConfig
 
-# Конфиг загрузится из файла и env (или выполните cveta2 setup)
 cfg = CvatConfig.load()
 
-# Для загрузки изображений нужен контекстный менеджер
+# Вариант 1: CvatClient — полный контроль
 with CvatClient(cfg) as client:
     result = client.fetch_annotations(project_id=123, completed_only=True)
 
@@ -453,32 +454,85 @@ with CvatClient(cfg) as client:
     result = client.fetch_annotations(project_id=123, task_selector=[456])
     result = client.fetch_annotations(project_id=123, task_selector=[456, "Партия 3"])
 
-    # Скачать изображения из S3 в указанную директорию
-    from pathlib import Path
-    stats = client.download_images(result, Path("/mnt/data/my-project"))
-    print(f"Загружено: {stats.downloaded}, из кэша: {stats.cached}, ошибок: {stats.failed}")
+    # result.annotations — список BBoxAnnotation и ImageWithoutAnnotations
+    for ann in result.annotations[:3]:
+        print(
+            f"{ann.image_name}: {ann.instance_label} "
+            f"[{ann.bbox_x_tl}, {ann.bbox_y_tl}, {ann.bbox_x_br}, {ann.bbox_y_br}]"
+        )
 
-# Или короче через функцию-обёртку: сразу DataFrame
+    # result.deleted_images — список DeletedImage
+    for img in result.deleted_images:
+        print(f"Удалено: {img.image_name} (task={img.task_id})")
+
+# Вариант 2: функция-обёртка — сразу DataFrame
 df = fetch_annotations(project_id=123, cfg=cfg)
 print(df.head())
+```
 
-# Аннотации bbox — список BBoxAnnotation
-for ann in result.annotations[:3]:
-    print(
-        f"{ann.image_name}: {ann.instance_label} "
-        f"[{ann.bbox_x_tl}, {ann.bbox_y_tl}, {ann.bbox_x_br}, {ann.bbox_y_br}] "
-        f"author={ann.created_by_username}"
-    )
+### Работа с проектами
 
-# Удалённые изображения — список DeletedImage
-for img in result.deleted_images:
-    print(f"Удалено: {img.image_name} (task={img.task_id}, frame={img.frame_id})")
+```python
+from cveta2 import CvatClient
+from cveta2.config import CvatConfig
+
+cfg = CvatConfig.load()
+
+with CvatClient(cfg) as client:
+    # Список проектов
+    projects = client.list_projects()
+    for p in projects:
+        print(f"{p.id}: {p.name}")
+
+    # Разрешить имя проекта → ID
+    project_id = client.resolve_project_id("Мой проект")
+
+    # Список задач проекта
+    tasks = client.list_project_tasks(project_id)
+    for t in tasks:
+        print(f"{t.id}: {t.name} ({t.status})")
+```
+
+### Управление метками
+
+```python
+from cveta2 import CvatClient
+from cveta2.config import CvatConfig
+
+cfg = CvatConfig.load()
+
+with CvatClient(cfg) as client:
+    project_id = client.resolve_project_id("Мой проект")
+
+    # Получить метки проекта
+    labels = client.get_project_labels(project_id)
+    for label in labels:
+        print(f"{label.id}: {label.name} ({label.color})")
+
+    # Подсчитать использование меток (количество аннотаций)
+    usage = client.count_label_usage(project_id)
+    for label in labels:
+        count = usage.get(label.id, 0)
+        print(f"{label.name}: {count} аннотаций")
+
+    # Добавить новые метки
+    client.update_project_labels(project_id, add=["cat", "dog"])
+
+    # Переименовать метку (по label_id)
+    client.update_project_labels(project_id, rename={1: "кошка"})
+
+    # Изменить цвет метки
+    client.update_project_labels(project_id, recolor={1: "#ff0000"})
+
+    # Удалить метку (НЕОБРАТИМО уничтожает все аннотации с этой меткой)
+    client.update_project_labels(project_id, delete=[1])
 ```
 
 ### Создание задачи и загрузка аннотаций
 
 ```python
 from pathlib import Path
+import pandas as pd
 from cveta2 import CvatClient
 from cveta2.config import CvatConfig
 
@@ -497,49 +551,57 @@ with CvatClient(cfg) as client:
         name="Партия 3",
         image_names=["img001.jpg", "img002.jpg", "img003.jpg"],
         cloud_storage_id=cs_info.id,
-        segment_size=100,  # изображений на job
+        segment_size=100,
     )
     print(f"Задача создана: id={task_id}")
 
     # Загрузить bbox-аннотации из DataFrame
-    import pandas as pd
     df = pd.read_csv("output/dataset.csv")
     num_shapes = client.upload_task_annotations(task_id=task_id, annotations_df=df)
     print(f"Загружено аннотаций: {num_shapes}")
+
+    # Пометить фреймы как удалённые
+    deleted_count = client.mark_frames_deleted(
+        task_id=task_id,
+        image_names={"img003.jpg"},
+    )
+    print(f"Помечено удалёнными: {deleted_count}")
+
+    # Завершить задачу (все jobs → stage=acceptance, state=completed)
+    jobs_updated = client.complete_task(task_id)
+    print(f"Завершено jobs: {jobs_updated}")
+```
+
+### Загрузка и синхронизация изображений
+
+```python
+from pathlib import Path
+from cveta2 import CvatClient
+from cveta2.config import CvatConfig
+
+cfg = CvatConfig.load()
+
+with CvatClient(cfg) as client:
+    project_id = client.resolve_project_id("Мой проект")
+
+    # Скачать изображения по результатам fetch
+    result = client.fetch_annotations(project_id=project_id)
+    stats = client.download_images(result, Path("/mnt/data/my-project"))
+    print(f"Загружено: {stats.downloaded}, из кэша: {stats.cached}, ошибок: {stats.failed}")
+
+    # Синхронизировать все изображения из S3 (без привязки к аннотациям)
+    cs_info = client.detect_project_cloud_storage(project_id)
+    stats = client.sync_project_images(
+        project_id=project_id,
+        target_dir=Path("/mnt/data/my-project"),
+        project_cloud_storage=cs_info,
+    )
+    print(f"Синхронизировано: {stats.downloaded} новых, {stats.cached} уже было")
 ```
 
 ## Формат данных
 
 Подробное описание формата выходных CSV и моделей данных — в [DATASET_FORMAT.md](DATASET_FORMAT.md).
-
-## Тесты
-
-### Тесты merge
-
-`tests/test_merge.py` покрывает всю логику слияния датасетов:
-
-- **Split propagation** — пропагация `split` из old в merged, предупреждения при конфликтах и отсутствии данных
-- **Default merge** — поведение «new wins» для общих изображений, исключение удалённых, сохранение уникальных
-- **By-time merge** — разрешение конфликтов по `task_updated_date` (new новее, old новее, равные даты, непарсимые даты, несколько строк на изображение)
-- **I/O** — чтение `deleted.csv` (CSV и legacy-формат), валидация обязательных столбцов, обработка ошибок
-- **CLI** — end-to-end тесты `run_merge` с временными файлами (базовое слияние, deleted, by-time, ошибка при отсутствии `task_updated_date`)
-
-### Фикстуры CVAT
-
-Тесты в `tests/test_cvat_fixtures.py` проверяют фикстуры проекта `coco8-dev`: загрузку JSON и соответствие данных именам задач (например, задача `all-removed` — все кадры в `deleted_frames`, `normal` — есть кадры не в удалённых).
-
-Фикстуры лежат в `tests/fixtures/cvat/coco8-dev/` (`project.json` и `tasks/*.json`). Чтобы пересоздать их из реального CVAT:
-
-```bash
-export CVAT_HOST="http://localhost:8080"  # или ваш URL CVAT
-export CVAT_USERNAME="admin"
-export CVAT_PASSWORD="ваш_пароль"
-uv run python scripts/export_cvat_fixtures.py --project coco8-dev
-```
-
-По умолчанию вывод пишется в `tests/fixtures/cvat/coco8-dev/`. Другой каталог: `--output-dir path`. Подробнее — в `scripts/README.md`.
-
-Для тестов можно собирать **фейковые проекты** из базовых фикстур: произвольный набор задач в любом порядке, с повторами, случайными или заданными именами и статусами. Модуль `tests/fixtures/fake_cvat_project.py`: `FakeProjectConfig` (pydantic) и `build_fake_project(base_fixtures, config)`. Пример: три задачи «normal» подряд с id 100, 101, 102 или случайный набор из 5 задач с `count=5`, `seed=42`. Тесты — в `tests/test_fake_cvat_project.py`.
 
 ## Ограничения
 

@@ -1,13 +1,17 @@
-# Minimal override for CVAT integration tests.
+# Override for CVAT integration tests.
 #
-# Adds MinIO and disables the analytics pipeline. All image versions come
-# from the checked-out CVAT submodule tag.
+# Adds MinIO, cvat_ui and traefik. Disables the analytics pipeline.
+# All image versions come from the checked-out CVAT submodule tag.
 #
 # INTEGRATION_USER is set by integration_up.sh (defaults to "default")
 # and used as a container-name prefix to avoid clashes between users.
 #
-# cvat_server is NOT exposed on the host — traffic goes through traefik
-# (see docker-compose.ui.yml). Single port for both API and UI.
+# Traefik routes both API and UI on a single dynamic port (CVAT_PORT):
+#   /api/, /static/, /admin, /django-rq  ->  cvat_server
+#   everything else                      ->  cvat_ui
+#
+# !override on traefik ports replaces the base 8080/8090 bindings
+# so only the dynamic CVAT_PORT is exposed (requires Compose v2.24.6+).
 
 services:
   cvat_db:
@@ -33,6 +37,14 @@ services:
   cvat_worker_chunks:
     container_name: ${INTEGRATION_USER:-default}-cvat_worker_chunks
 
+  traefik:
+    container_name: ${INTEGRATION_USER:-default}-traefik
+    ports: !override
+      - "${CVAT_PORT:-8080}:8080"
+
+  cvat_ui:
+    container_name: ${INTEGRATION_USER:-default}-cvat_ui
+
   cveta2-minio:
     container_name: ${INTEGRATION_USER:-default}-cveta2-minio
     image: minio/minio:latest
@@ -42,8 +54,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - cveta2-minio-data:/data
     networks:
