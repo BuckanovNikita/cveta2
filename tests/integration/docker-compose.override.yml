@@ -39,8 +39,11 @@ services:
 
   traefik:
     container_name: ${INTEGRATION_USER:-default}-traefik
+    image: traefik:v3.6
     ports: !override
       - "${CVAT_PORT:-8080}:8080"
+    environment:
+      TRAEFIK_PROVIDERS_DOCKER_NETWORK: ${INTEGRATION_USER:-default}-cvat_cvat
 
   cvat_ui:
     container_name: ${INTEGRATION_USER:-default}-cvat_ui

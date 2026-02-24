@@ -189,7 +189,9 @@ docker exec "${INTEGRATION_USER}-cveta2-minio" mc mb "local/${MINIO_BUCKET}" 2>/
 # ── 9. Seed CVAT with test data ────────────────────────────────────
 log "Seeding CVAT with coco8-dev test data"
 cd "$REPO_ROOT"
-CVAT_INTEGRATION_HOST="http://localhost:${CVAT_PORT}" uv run python tests/integration/seed_cvat.py
+CVAT_INTEGRATION_HOST="http://localhost:${CVAT_PORT}" \
+    MINIO_ENDPOINT="http://localhost:${MINIO_PORT}" \
+    uv run python tests/integration/seed_cvat.py
 
 log "Done! CVAT is running at http://localhost:${CVAT_PORT}"
 log ""
