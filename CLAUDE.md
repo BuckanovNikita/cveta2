@@ -89,6 +89,23 @@ CVAT allows frames to be marked as deleted (`data_meta.deleted_frames`), but ann
 
 Integration tests require a running CVAT instance and are gated by `CVAT_INTEGRATION_HOST` env var. Test fixtures are in `tests/fixtures/cvat/coco8-dev/` (CVAT JSON format). The `FakeCvatApi` in `tests/fake_cvat_api.py` provides in-memory CVAT simulation for unit tests.
 
+**Running integration tests** (full lifecycle):
+
+```bash
+./scripts/integration_up.sh      # start CVAT + MinIO on fixed ports, seed test data
+./scripts/integration_test.sh    # run all tests (handles env vars, disables xdist)
+./scripts/integration_stop.sh    # tear down
+```
+
+`integration_test.sh` sets `CVAT_INTEGRATION_HOST`, `MINIO_ENDPOINT`, S3 credentials, and disables xdist automatically. Extra pytest args are forwarded: `./scripts/integration_test.sh -k upload`.
+
+**Fixed ports**: CVAT API `9988`, MinIO API `9989`, MinIO console `9990`. Override with `--port` / `--minio-port` flags on `integration_up.sh`.
+
+**Important caveats**:
+
+- **No xdist**: parallel workers cause CVAT 429 rate-limiting and fixture ordering issues. `integration_test.sh` overrides `addopts` to disable `-n auto`.
+- **Fresh state required**: upload integration tests create tasks in the seeded project. If you re-run tests against the same instance without re-seeding, `live-cvat` parametrized tests fail with `ValueError: Duplicate base task name`. Always tear down and restart between runs.
+
 #### Task-by-Task Processing
 
 `fetch` processes tasks individually (`fetch_one_task()`) and saves intermediate CSVs in `output/.tasks/task_{id}.csv` before merging. This allows resuming on failures and provides visibility into per-task data.

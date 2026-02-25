@@ -15,7 +15,10 @@
 # Usage:
 #   ./scripts/integration_up.sh [--cvat-version v2.26.0] [--port 9080]
 #
-# If --port is omitted, a random free port is used (avoids clashes with 8080).
+# If --port is omitted, fixed well-known ports are used:
+#   CVAT API (traefik): 9988
+#   MinIO API:          9989
+#   MinIO console:      9990
 #
 # Requirements: docker, docker compose v2, uv, curl, unzip
 
@@ -30,7 +33,9 @@ OVERRIDE_FILE="$REPO_ROOT/tests/integration/docker-compose.override.yml"
 COCO8_IMAGES_DIR="$REPO_ROOT/tests/fixtures/data/coco8/images"
 
 CVAT_VERSION=""
-CVAT_PORT=""
+CVAT_PORT="9988"
+MINIO_PORT="9989"
+MINIO_CONSOLE_PORT="9990"
 HEALTH_TIMEOUT=180
 
 # ── Container name prefix (username) ───────────────────────────────
@@ -57,6 +62,14 @@ while [[ $# -gt 0 ]]; do
             CVAT_PORT="${1#*=}"
             shift
             ;;
+        --minio-port)
+            MINIO_PORT="$2"
+            shift 2
+            ;;
+        --minio-port=*)
+            MINIO_PORT="${1#*=}"
+            shift
+            ;;
         -h|--help)
             echo "Usage: $0 [--cvat-version v2.X.X] [--port PORT]"
             echo ""
@@ -65,7 +78,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --cvat-version TAG   CVAT version tag to check out (default: submodule HEAD)"
-            echo "  --port PORT          Host port for CVAT API and UI (default: random free port)"
+            echo "  --port PORT          Host port for CVAT API and UI (default: 9988)"
+            echo "  --minio-port PORT    Host port for MinIO API (default: 9989)"
             exit 0
             ;;
         *)
@@ -75,20 +89,21 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Resolve dynamic ports ──────────────────────────────────────────
-random_free_port() {
-    python3 -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
+# ── Check ports are free ───────────────────────────────────────────
+check_port_free() {
+    local port=$1 label=$2
+    if ss -tlnH "sport = :$port" 2>/dev/null | grep -q .; then
+        echo "ERROR: Port $port ($label) is already in use." >&2
+        echo "Free it or use --port / --minio-port to override." >&2
+        exit 1
+    fi
 }
 
-if [ -z "$CVAT_PORT" ]; then
-    CVAT_PORT=$(random_free_port)
-    log "Using random free port: $CVAT_PORT"
-fi
-export CVAT_PORT
+check_port_free "$CVAT_PORT" "CVAT API"
+check_port_free "$MINIO_PORT" "MinIO API"
+check_port_free "$MINIO_CONSOLE_PORT" "MinIO console"
 
-MINIO_PORT=$(random_free_port)
-MINIO_CONSOLE_PORT=$(random_free_port)
-export MINIO_PORT MINIO_CONSOLE_PORT
+export CVAT_PORT MINIO_PORT MINIO_CONSOLE_PORT
 
 # ── Helpers ─────────────────────────────────────────────────────────
 compose() {
@@ -194,9 +209,11 @@ CVAT_INTEGRATION_HOST="http://localhost:${CVAT_PORT}" \
     uv run python tests/integration/seed_cvat.py
 
 log "Done! CVAT is running at http://localhost:${CVAT_PORT}"
+log "MinIO API: http://localhost:${MINIO_PORT}"
+log "MinIO console: http://localhost:${MINIO_CONSOLE_PORT}"
 log ""
 log "Run integration tests:"
-log "  CVAT_INTEGRATION_HOST=http://localhost:${CVAT_PORT} uv run pytest"
+log "  ./scripts/integration_test.sh"
 log ""
 log "Tear down:"
-log "  docker compose --project-directory vendor/cvat -p ${INTEGRATION_USER}-cvat -f vendor/cvat/docker-compose.yml -f tests/integration/docker-compose.override.yml --env-file tests/integration/.env down -v"
+log "  ./scripts/integration_stop.sh"
