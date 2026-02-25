@@ -122,7 +122,9 @@ def partition_annotations_df(
     latest_from_df = latest_from_df.copy()
     latest_from_df["_is_deleted"] = 0
 
-    combined = pd.concat([latest_from_df, deleted_df], ignore_index=True)
+    # Put deletion records first so they win ties (same task_updated_date)
+    # This handles edge cases where annotations exist for deleted frames
+    combined = pd.concat([deleted_df, latest_from_df], ignore_index=True)
     # Parse dates properly so comparisons work regardless of format/timezone.
     combined["_parsed_date"] = pd.to_datetime(
         combined["task_updated_date"],

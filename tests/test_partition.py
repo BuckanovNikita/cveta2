@@ -259,3 +259,33 @@ def test_mixed_partition() -> None:
 
     # Deleted images
     assert [d.image_name for d in result.deleted_images] == ["img_del.jpg"]
+
+
+def test_deleted_image_with_annotations_in_same_task() -> None:
+    """Bug: Image has annotations AND is marked deleted in same task with same date.
+
+    This reproduces the bug where an image is marked as deleted in a task,
+    but that task still contains annotation shapes for that image (before it
+    was deleted). Both have the same task_updated_date, and the annotation
+    wins because it appears first in the combined dataframe.
+
+    Expected: The image should be marked as deleted and go to obsolete.
+    Actual (bug): The image appears in dataset because annotation wins the tie.
+    """
+    rows = [
+        # Earlier task with annotation
+        _row("img.jpg", 1, "2026-01-01T00:00:00"),
+        # Latest task has annotation for the image (before deletion)
+        _row("img.jpg", 2, "2026-01-02T00:00:00"),
+    ]
+    deleted = [
+        # Same task marks the image as deleted (same date as annotation)
+        _deleted("img.jpg", 2, "2026-01-02T00:00:00"),
+    ]
+    result = partition_annotations_df(_df(rows), deleted)
+
+    assert len(result.dataset) == 0, "Deleted image should not be in dataset"
+    assert len(result.obsolete) == 2, "Both rows should be obsolete"
+    assert "img.jpg" in [d.image_name for d in result.deleted_images], (
+        "Image should be in deleted_images"
+    )
