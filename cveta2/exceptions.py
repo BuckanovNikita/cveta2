@@ -19,3 +19,21 @@ class TaskNotFoundError(Cveta2Error):
 
 class InteractiveModeRequiredError(Cveta2Error):
     """Raised when interactive input is needed but disabled."""
+
+
+class LabelsMismatchError(Cveta2Error):
+    """Raised when CSV labels don't match project labels."""
+
+    def __init__(  # noqa: D107
+        self,
+        unknown_labels: list[str],
+        project_name: str,
+        available_labels: list[str],
+    ) -> None:
+        self.unknown_labels = unknown_labels
+        self.available_labels = available_labels
+        super().__init__(
+            f"Метки из CSV не найдены в проекте {project_name!r}: "
+            f"{', '.join(unknown_labels)}. "
+            f"Доступные метки: {', '.join(available_labels)}."
+        )

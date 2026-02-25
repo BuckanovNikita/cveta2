@@ -23,7 +23,7 @@ from cveta2.config import (
     load_upload_config,
     require_interactive,
 )
-from cveta2.exceptions import Cveta2Error
+from cveta2.exceptions import Cveta2Error, LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, resolve_images
 
 if TYPE_CHECKING:
@@ -148,6 +148,26 @@ def _resolve_upload_project(
 # ---------------------------------------------------------------------------
 
 
+def _validate_labels(
+    client: CvatClient,
+    project_id: int,
+    project_name: str,
+    real_labels: list[str],
+) -> None:
+    """Check that all CSV labels exist in the CVAT project."""
+    if not real_labels:
+        return
+    project_labels = client.get_project_labels(project_id)
+    project_label_names = {lbl.name for lbl in project_labels}
+    unknown_labels = sorted(set(real_labels) - project_label_names)
+    if unknown_labels:
+        raise LabelsMismatchError(
+            unknown_labels=unknown_labels,
+            project_name=project_name,
+            available_labels=sorted(project_label_names),
+        )
+
+
 def _extract_deleted_names(df: pd.DataFrame) -> set[str]:
     """Extract image names from rows with ``instance_shape="deleted"``."""
     if "instance_shape" not in df.columns:
@@ -199,6 +219,9 @@ def run_upload(args: argparse.Namespace) -> None:
             client,
             args.project,
         )
+
+        _validate_labels(client, project_id, project_name, real_labels)
+
         search_dirs = _build_search_dirs(args.image_dir, project_name)
         found_images, missing = resolve_images(all_image_names, search_dirs)
         logger.info(
