@@ -24,10 +24,13 @@ from cveta2.config import (
     require_interactive,
 )
 from cveta2.exceptions import Cveta2Error, LabelsMismatchError
+from cveta2.image_downloader import _build_s3_key
 from cveta2.image_uploader import S3Uploader, resolve_images
 
 if TYPE_CHECKING:
     import argparse
+
+    from cveta2.image_downloader import CloudStorageInfo
 
 _NO_ANNOTATION_LABEL = "__no_annotation__"
 
@@ -126,6 +129,33 @@ def _build_search_dirs(
             "уже находящиеся на S3.",
         )
     return dirs
+
+
+def _warn_missing_images(missing: list[str]) -> None:
+    """Log a warning about images not found locally."""
+    if not missing:
+        return
+    preview = ", ".join(missing[:10])
+    extra = f" (и ещё {len(missing) - 10})" if len(missing) > 10 else ""
+    logger.warning(
+        f"{len(missing)} изображений не найдено локально: {preview}{extra}",
+    )
+
+
+def _enrich_paths(
+    df: pd.DataFrame,
+    cs_info: CloudStorageInfo,
+    found_images: dict[str, Path],
+) -> pd.DataFrame:
+    """Add ``s3_path`` and ``image_path`` columns to the DataFrame."""
+    df = df.copy()
+    df["s3_path"] = df["image_name"].map(
+        lambda name: _build_s3_key(cs_info.prefix, name)
+    )
+    df["image_path"] = df["image_name"].map(
+        lambda name: str(found_images[name].resolve()) if name in found_images else None
+    )
+    return df
 
 
 def _resolve_upload_project(
@@ -238,6 +268,8 @@ def run_upload(args: argparse.Namespace) -> None:
             f"Cloud storage: s3://{cs_info.bucket}/{cs_info.prefix} (id={cs_info.id})",
         )
 
+        filtered = _enrich_paths(filtered, cs_info, found_images)
+
         if found_images:
             stats = S3Uploader().upload(cs_info, found_images)
             logger.info(
@@ -246,12 +278,7 @@ def run_upload(args: argparse.Namespace) -> None:
                 f"{stats.failed} ошибок",
             )
 
-        if missing:
-            preview = ", ".join(missing[:10])
-            extra = f" (и ещё {len(missing) - 10})" if len(missing) > 10 else ""
-            logger.warning(
-                f"{len(missing)} изображений не найдено локально: {preview}{extra}",
-            )
+        _warn_missing_images(missing)
 
         task_image_names = sorted(all_image_names)
         task_id = client.create_upload_task(

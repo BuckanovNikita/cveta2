@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, ConfigDict, Discriminator, field_validator
 
 # ------------------------------------------------------------------
 # CVAT entity models (project / task / label)
@@ -75,6 +76,23 @@ Split = Literal["train", "val", "test"]
 """Allowed values for the ``split`` field (our convention for dataset splits)."""
 
 
+def _validate_image_name(v: str) -> str:
+    """Ensure *image_name* is a bare filename (no directory components)."""
+    name = PurePosixPath(v).name
+    if not name:
+        msg = f"image_name must be a non-empty filename, got {v!r}"
+        raise ValueError(msg)
+    return name
+
+
+def _validate_image_path(v: str | None) -> str | None:
+    """Ensure *image_path* is absolute when provided."""
+    if v is not None and not PurePosixPath(v).is_absolute():
+        msg = f"image_path must be an absolute path, got {v!r}"
+        raise ValueError(msg)
+    return v
+
+
 class BBoxAnnotation(BaseModel):
     """Single bounding-box annotation record."""
 
@@ -101,7 +119,16 @@ class BBoxAnnotation(BaseModel):
     rotation: float
     source: str
     annotation_id: int | None
+    s3_path: str | None = None
+    image_path: str | None = None
     attributes: dict[str, str]
+
+    validate_image_name = field_validator("image_name", mode="before")(
+        _validate_image_name
+    )
+    validate_image_path = field_validator("image_path", mode="before")(
+        _validate_image_path
+    )
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON)."""
@@ -134,6 +161,15 @@ class ImageWithoutAnnotations(BaseModel):
     frame_id: int
     split: Split | None = None
     subset: str = ""
+    s3_path: str | None = None
+    image_path: str | None = None
+
+    validate_image_name = field_validator("image_name", mode="before")(
+        _validate_image_name
+    )
+    validate_image_path = field_validator("image_path", mode="before")(
+        _validate_image_path
+    )
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""
@@ -165,6 +201,15 @@ class DeletedImage(BaseModel):
     task_updated_date: str = ""
     frame_id: int
     subset: str = ""
+    s3_path: str | None = None
+    image_path: str | None = None
+
+    validate_image_name = field_validator("image_name", mode="before")(
+        _validate_image_name
+    )
+    validate_image_path = field_validator("image_path", mode="before")(
+        _validate_image_path
+    )
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""

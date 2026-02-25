@@ -30,6 +30,7 @@ from cveta2.config import (
 )
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
+from cveta2.image_downloader import _build_s3_key
 from cveta2.models import TaskAnnotations
 
 if TYPE_CHECKING:
@@ -76,11 +77,14 @@ def run_fetch(args: argparse.Namespace) -> None:
             save_tasks=args.save_tasks,
         )
 
-        _download_images(
+        _populate_s3_paths(result, cs_info)
+
+        images_dir = _download_images(
             _DownloadImagesParams(
                 args, project_id, project_name, client, result, cs_info
             )
         )
+        _populate_image_paths(result, images_dir)
 
     _write_output(args, result, output_dir)
 
@@ -120,11 +124,14 @@ def run_fetch_task(args: argparse.Namespace) -> None:
             save_tasks=args.save_tasks,
         )
 
-        _download_images(
+        _populate_s3_paths(result, cs_info)
+
+        images_dir = _download_images(
             _DownloadImagesParams(
                 args, project_id, project_name, client, result, cs_info
             )
         )
+        _populate_image_paths(result, images_dir)
 
     write_dataset_and_deleted(result, output_dir)
 
@@ -144,6 +151,36 @@ class _DownloadImagesParams:
     client: CvatClient
     result: ProjectAnnotations
     project_cloud_storage: CloudStorageInfo | None = None
+
+
+def _populate_s3_paths(
+    result: ProjectAnnotations,
+    cs_info: CloudStorageInfo | None,
+) -> None:
+    """Set ``s3_path`` on all annotation and deleted-image records."""
+    if cs_info is None:
+        return
+    for ann in result.annotations:
+        ann.s3_path = _build_s3_key(cs_info.prefix, ann.image_name)
+    for deleted in result.deleted_images:
+        deleted.s3_path = _build_s3_key(cs_info.prefix, deleted.image_name)
+
+
+def _populate_image_paths(
+    result: ProjectAnnotations,
+    images_dir: Path | None,
+) -> None:
+    """Set ``image_path`` on records whose image exists locally."""
+    if images_dir is None:
+        return
+    for ann in result.annotations:
+        local = images_dir / ann.image_name
+        if local.exists():
+            ann.image_path = str(local.resolve())
+    for deleted in result.deleted_images:
+        local = images_dir / deleted.image_name
+        if local.exists():
+            deleted.image_path = str(local.resolve())
 
 
 def _fetch_and_save_tasks(
@@ -193,8 +230,11 @@ def _fetch_and_save_tasks(
     return TaskAnnotations.merge(task_results)
 
 
-def _download_images(params: _DownloadImagesParams) -> None:
-    """Download images if requested (within the CvatClient context)."""
+def _download_images(params: _DownloadImagesParams) -> Path | None:
+    """Download images if requested (within the CvatClient context).
+
+    Returns the resolved images directory, or ``None`` if download was skipped.
+    """
     images_dir = _resolve_images_dir(params.args, params.project_name)
     if images_dir is not None:
         stats = params.client.download_images(
@@ -207,6 +247,7 @@ def _download_images(params: _DownloadImagesParams) -> None:
             f"Изображения: {stats.downloaded} загружено, "
             f"{stats.cached} из кэша, {stats.failed} ошибок"
         )
+    return images_dir
 
 
 def _write_output(
