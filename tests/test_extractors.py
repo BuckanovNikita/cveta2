@@ -187,3 +187,33 @@ def test_attributes_resolved() -> None:
 
     assert len(result) == 1
     assert result[0].attributes == {"color": "red", "make": "BMW"}
+
+
+def test_multiple_shapes_on_same_frame() -> None:
+    """Two shapes on the same frame are both collected."""
+    ctx = _make_ctx()
+    s1 = _make_shape(id=1, frame=0, label_id=1)
+    s2 = _make_shape(id=2, frame=0, label_id=2)
+    result = _collect_shapes([s1, s2], ctx)
+
+    assert len(result) == 2
+    assert {r.annotation_id for r in result} == {1, 2}
+    assert all(r.frame_id == 0 for r in result)
+
+
+def test_non_rectangle_shape_logs_warning() -> None:
+    """Non-rectangle shape is skipped and a warning is logged."""
+    from loguru import logger
+
+    ctx = _make_ctx()
+    polygon = _make_shape(type="polygon")
+
+    messages: list[str] = []
+    handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        result = _collect_shapes([polygon], ctx)
+    finally:
+        logger.remove(handler_id)
+
+    assert result == []
+    assert any("polygon" in m.lower() for m in messages)

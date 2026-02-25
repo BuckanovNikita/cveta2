@@ -18,6 +18,7 @@ from cveta2.models import (
     DeletedImage,
     ImageWithoutAnnotations,
     ProjectAnnotations,
+    TaskInfo,
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import (
@@ -29,7 +30,7 @@ from tests.fixtures.fake_cvat_project import (
 
 if TYPE_CHECKING:
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
-    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
+    from cveta2.models import LabelInfo, ProjectInfo
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -388,6 +389,24 @@ def test_5xx_task_skipped(coco8_fixtures: LoadedFixtures) -> None:
     assert failing_task_id not in task_ids
 
 
+def test_4xx_error_propagated(coco8_fixtures: LoadedFixtures) -> None:
+    """Non-5xx ApiException (e.g. 404) is re-raised, not swallowed."""
+    fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+
+    class _NotFoundApi(_FailingTaskApi):
+        def get_task_data_meta(self, task_id: int) -> RawDataMeta:
+            if task_id == self._failing_task_id:
+                raise ApiException(status=404, reason="Not Found")
+            return self._delegate.get_task_data_meta(task_id)
+
+    api = _NotFoundApi(FakeCvatApi(fake), failing_task_id=fake.tasks[0].id)
+    client = CvatClient(_CFG, api=api)
+
+    with pytest.raises(ApiException) as exc_info:
+        client.fetch_annotations(fake.project.id)
+    assert exc_info.value.status == 404
+
+
 def test_5xx_raise_on_failure(coco8_fixtures: LoadedFixtures) -> None:
     """When CVETA2_RAISE_ON_FAILURE=true, 5xx is re-raised immediately."""
     fake = _build(
@@ -410,3 +429,127 @@ def test_5xx_raise_on_failure(coco8_fixtures: LoadedFixtures) -> None:
             os.environ.pop("CVETA2_RAISE_ON_FAILURE", None)
         else:
             os.environ["CVETA2_RAISE_ON_FAILURE"] = prev
+
+
+# ---------------------------------------------------------------------------
+# resolve_project_id
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_project_id_digit_string(coco8_fixtures: LoadedFixtures) -> None:
+    """Digit-string input returns the integer directly."""
+    fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+    client = _client(fake)
+    assert client.resolve_project_id("42") == 42
+
+
+def test_resolve_project_id_casefold_name(coco8_fixtures: LoadedFixtures) -> None:
+    """Name matching is case-insensitive."""
+    fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+    client = _client(fake)
+    name = fake.project.name
+    # Use uppercased name — should still resolve
+    result = client.resolve_project_id(name.upper(), cached=[fake.project])
+    assert result == fake.project.id
+
+
+def test_resolve_project_id_not_found(coco8_fixtures: LoadedFixtures) -> None:
+    """Non-existent project name raises ProjectNotFoundError."""
+    from cveta2.exceptions import ProjectNotFoundError
+
+    fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+    client = _client(fake)
+
+    with pytest.raises(ProjectNotFoundError):
+        client.resolve_project_id("does-not-exist")
+
+
+# ---------------------------------------------------------------------------
+# _task_to_records with tracks
+# ---------------------------------------------------------------------------
+
+
+def test_task_to_records_tracks_warning() -> None:
+    """Tasks with tracks log a warning and skip them."""
+    from cveta2._client.dtos import (
+        RawAnnotations,
+        RawDataMeta,
+        RawFrame,
+        RawTrack,
+        RawTrackedShape,
+    )
+    from cveta2.client import _task_to_records
+
+    task = TaskInfo(
+        id=99,
+        name="track-task",
+        status="completed",
+        subset="",
+        updated_date="2026-01-01T00:00:00",
+    )
+    data_meta = RawDataMeta(
+        frames=[RawFrame(name="a.jpg", width=640, height=480)],
+        deleted_frames=[],
+    )
+    track_shape = RawTrackedShape(
+        type="rectangle",
+        frame=0,
+        points=[0, 0, 10, 10],
+        outside=False,
+        occluded=False,
+        z_order=0,
+        rotation=0.0,
+        attributes=[],
+        created_by="user",
+    )
+    annotations = RawAnnotations(
+        shapes=[],
+        tracks=[
+            RawTrack(
+                id=1,
+                label_id=1,
+                source="manual",
+                shapes=[track_shape],
+                created_by="user",
+            ),
+        ],
+    )
+
+    messages: list[str] = []
+    from loguru import logger
+
+    handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
+    try:
+        _records, deleted = _task_to_records(
+            task, data_meta, annotations, {1: "car"}, {}
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert any("track" in m.lower() for m in messages)
+    assert deleted == []
+
+
+def test_task_to_records_unknown_deleted_frame_id() -> None:
+    """Deleted frame_id not in frames produces '<unknown>' image_name."""
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
+    from cveta2.client import _task_to_records
+
+    task = TaskInfo(
+        id=99,
+        name="test",
+        status="completed",
+        subset="",
+        updated_date="2026-01-01T00:00:00",
+    )
+    data_meta = RawDataMeta(
+        frames=[RawFrame(name="a.jpg", width=640, height=480)],
+        deleted_frames=[999],  # frame 999 doesn't exist
+    )
+    annotations = RawAnnotations(shapes=[], tracks=[])
+
+    _records, deleted = _task_to_records(task, data_meta, annotations, {}, {})
+
+    assert len(deleted) == 1
+    assert deleted[0].image_name == "<unknown>"
+    assert deleted[0].frame_id == 999

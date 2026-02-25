@@ -289,3 +289,118 @@ def test_deleted_image_with_annotations_in_same_task() -> None:
     assert "img.jpg" in [d.image_name for d in result.deleted_images], (
         "Image should be in deleted_images"
     )
+
+
+def test_multi_annotation_per_image_all_go_to_dataset() -> None:
+    """Image with 5 bbox rows in one completed task -- all 5 go to dataset."""
+    rows = [
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),
+    ]
+    result = partition_annotations_df(_df(rows), [])
+
+    assert len(result.dataset) == 5
+    assert len(result.obsolete) == 0
+    assert len(result.in_progress) == 0
+
+
+def test_timezone_mixed_dates() -> None:
+    """Dates with different timezone offsets are parsed correctly via utc=True."""
+    rows = [
+        _row("a.jpg", 1, "2026-01-01T12:00:00+03:00"),  # = 09:00 UTC
+        _row("a.jpg", 2, "2026-01-01T08:00:00+00:00"),  # = 08:00 UTC (older)
+    ]
+    result = partition_annotations_df(_df(rows), [])
+
+    # Task 1 is newer in UTC, so it goes to dataset
+    assert len(result.dataset) == 1
+    assert result.dataset["task_id"].iloc[0] == 1
+    assert len(result.obsolete) == 1
+    assert result.obsolete["task_id"].iloc[0] == 2
+
+
+def test_three_tasks_same_image() -> None:
+    """3 tasks for same image: completed(T1) + annotation(T2) + completed(T3).
+
+    T3 (latest completed) -> dataset, T1 (older completed) -> obsolete,
+    T2 (annotation) -> in_progress.
+    """
+    rows = [
+        _row("a.jpg", 1, "2026-01-01T00:00:00", status="completed"),
+        _row("a.jpg", 2, "2026-01-02T00:00:00", status="annotation"),
+        _row("a.jpg", 3, "2026-01-03T00:00:00", status="completed"),
+    ]
+    result = partition_annotations_df(_df(rows), [])
+
+    assert len(result.dataset) == 1
+    assert result.dataset["task_id"].iloc[0] == 3
+    assert len(result.obsolete) == 1
+    assert result.obsolete["task_id"].iloc[0] == 1
+    assert len(result.in_progress) == 1
+    assert result.in_progress["task_id"].iloc[0] == 2
+
+
+def test_duplicate_deleted_image_entries() -> None:
+    """Same image deleted in same task twice -- _filter_deleted_images deduplicates."""
+    rows = [
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),
+    ]
+    deleted = [
+        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),
+        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # duplicate
+    ]
+    result = partition_annotations_df(_df(rows), deleted)
+
+    assert len(result.deleted_images) == 1
+    assert result.deleted_images[0].image_name == "a.jpg"
+    assert len(result.obsolete) == 1
+
+
+def test_deleted_then_restored_several_tasks_later() -> None:
+    """Image deleted in T2, then re-annotated several tasks later in T5.
+
+    Timeline:
+      T1 (completed, Jan 1) — initial annotation
+      T2 (completed, Jan 2) — image deleted
+      T3 (completed, Jan 3) — unrelated task (different image)
+      T4 (completed, Jan 4) — unrelated task (different image)
+      T5 (completed, Jan 5) — image re-annotated
+
+    Expected:
+      - Image is NOT treated as deleted (T5 annotation is newer than T2 deletion)
+      - T5 row → dataset (latest completed for this image)
+      - T1 row → obsolete (older completed for this image)
+      - Unrelated images from T3, T4 → dataset
+    """
+    rows = [
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),  # T1: initial annotation
+        _row("b.jpg", 3, "2026-01-03T00:00:00"),  # T3: unrelated
+        _row("c.jpg", 4, "2026-01-04T00:00:00"),  # T4: unrelated
+        _row("a.jpg", 5, "2026-01-05T00:00:00"),  # T5: re-annotated
+    ]
+    deleted = [
+        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # T2: deletion
+    ]
+    result = partition_annotations_df(_df(rows), deleted)
+
+    # Image is alive — T5 annotation is newer than T2 deletion
+    assert result.deleted_images == []
+
+    # T5 row in dataset (latest completed for a.jpg)
+    dataset_a = result.dataset[result.dataset["image_name"] == "a.jpg"]
+    assert len(dataset_a) == 1
+    assert dataset_a["task_id"].iloc[0] == 5
+
+    # T1 row in obsolete (older completed for a.jpg)
+    obsolete_a = result.obsolete[result.obsolete["image_name"] == "a.jpg"]
+    assert len(obsolete_a) == 1
+    assert obsolete_a["task_id"].iloc[0] == 1
+
+    # Unrelated images from T3, T4 in dataset
+    assert "b.jpg" in set(result.dataset["image_name"])
+    assert "c.jpg" in set(result.dataset["image_name"])
+
+    assert len(result.in_progress) == 0

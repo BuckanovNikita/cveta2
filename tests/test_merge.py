@@ -231,6 +231,48 @@ class TestMergeDatasetsSplitPropagation:
         assert (a_rows["split"] == "train").all()
 
 
+class TestMergeDatasetsEdgeCases:
+    """Edge cases for _merge_datasets."""
+
+    def test_empty_old_preserves_new(self) -> None:
+        """Empty old DataFrame -- all new images preserved."""
+        old = _df([])
+        new = _df([_row("a.jpg"), _row("b.jpg")])
+
+        merged = _merge_datasets(old, new, set())
+
+        assert set(merged["image_name"]) == {"a.jpg", "b.jpg"}
+
+    def test_empty_new_preserves_old(self) -> None:
+        """Empty new DataFrame -- all old images preserved."""
+        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
+        new = _df([])
+
+        merged = _merge_datasets(old, new, set())
+
+        assert set(merged["image_name"]) == {"a.jpg", "b.jpg"}
+
+    def test_both_empty_no_crash(self) -> None:
+        """Both DataFrames empty -- no crash, empty result."""
+        old = _df([])
+        new = _df([])
+
+        merged = _merge_datasets(old, new, set())
+
+        assert len(merged) == 0
+
+    def test_disjoint_datasets_fully_preserved(self) -> None:
+        """No common images -- both sides fully preserved."""
+        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
+        new = _df([_row("c.jpg"), _row("d.jpg")])
+
+        merged = _merge_datasets(old, new, set())
+
+        assert set(merged["image_name"]) == {"a.jpg", "b.jpg", "c.jpg", "d.jpg"}
+        a_split = merged.loc[merged["image_name"] == "a.jpg", "split"].iloc[0]
+        assert a_split == "train"
+
+
 # ---------------------------------------------------------------------------
 # By-time resolution — _resolve_by_time
 # ---------------------------------------------------------------------------
