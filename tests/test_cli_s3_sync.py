@@ -6,30 +6,13 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 from cveta2.cli import CliApp
 from cveta2.image_downloader import DownloadStats
-
-
-def _write_config(
-    path: Path,
-    *,
-    image_cache: dict[str, str] | None = None,
-) -> None:
-    """Write a minimal config YAML for testing."""
-    data: dict[str, object] = {
-        "cvat": {
-            "host": "http://localhost:8080",
-            "token": "test-token",
-        },
-    }
-    if image_cache:
-        data["image_cache"] = image_cache
-    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+from tests.conftest import write_test_config
 
 
 def _mock_client_ctx() -> MagicMock:
@@ -51,7 +34,7 @@ def test_s3_sync_no_image_cache_exits(
 ) -> None:
     """s3-sync exits with error when no image_cache is configured."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path)  # no image_cache
+    write_test_config(cfg_path)  # no image_cache
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
     monkeypatch.delenv("CVAT_TOKEN", raising=False)
@@ -67,7 +50,7 @@ def test_s3_sync_all_projects(
 ) -> None:
     """s3-sync syncs all configured projects."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(
+    write_test_config(
         cfg_path,
         image_cache={
             "project-a": str(tmp_path / "images-a"),
@@ -102,7 +85,7 @@ def test_s3_sync_single_project(
 ) -> None:
     """s3-sync --project syncs only the specified project."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(
+    write_test_config(
         cfg_path,
         image_cache={
             "project-a": str(tmp_path / "images-a"),
@@ -132,7 +115,7 @@ def test_s3_sync_unknown_project_exits(
 ) -> None:
     """s3-sync --project with unknown project name exits with error."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(
+    write_test_config(
         cfg_path,
         image_cache={"project-a": str(tmp_path / "images-a")},
     )
@@ -153,7 +136,7 @@ def test_s3_sync_continues_on_resolve_error(
     from cveta2.exceptions import ProjectNotFoundError
 
     cfg_path = tmp_path / "config.yaml"
-    _write_config(
+    write_test_config(
         cfg_path,
         image_cache={
             "bad-project": str(tmp_path / "images-bad"),

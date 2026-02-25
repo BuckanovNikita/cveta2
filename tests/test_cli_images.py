@@ -6,27 +6,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
 from cveta2.cli import CliApp
 from cveta2.client import FetchContext
-
-
-def _write_config(
-    path: Path,
-    *,
-    image_cache: dict[str, str] | None = None,
-) -> None:
-    """Write a minimal config YAML for testing."""
-    data: dict[str, object] = {
-        "cvat": {
-            "host": "http://localhost:8080",
-            "token": "test-token",
-        },
-    }
-    if image_cache:
-        data["image_cache"] = image_cache
-    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+from tests.conftest import write_test_config
 
 
 def _mock_client_ctx(
@@ -57,7 +40,7 @@ def test_fetch_no_images_flag_skips_download(
 ) -> None:
     """--no-images prevents any image download attempt."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path)
+    write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
     monkeypatch.delenv("CVAT_TOKEN", raising=False)
@@ -88,7 +71,7 @@ def test_fetch_images_dir_overrides_config(
 ) -> None:
     """--images-dir is passed to download_images, ignoring config mapping."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path, image_cache={"coco8-dev": "/other/path"})
+    write_test_config(cfg_path, image_cache={"coco8-dev": "/other/path"})
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
     monkeypatch.delenv("CVAT_TOKEN", raising=False)
@@ -124,7 +107,7 @@ def test_fetch_noninteractive_no_path_errors(
 ) -> None:
     """Non-interactive mode + no configured path = error exit."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path)  # No image_cache section
+    write_test_config(cfg_path)  # No image_cache section
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     monkeypatch.delenv("CVAT_HOST", raising=False)
@@ -154,7 +137,7 @@ def test_fetch_configured_path_downloads(
 ) -> None:
     """When image_cache has the project, download_images is called with that path."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path, image_cache={"coco8-dev": "/mnt/data/coco8"})
+    write_test_config(cfg_path, image_cache={"coco8-dev": "/mnt/data/coco8"})
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
     monkeypatch.delenv("CVAT_TOKEN", raising=False)
@@ -186,7 +169,7 @@ def test_fetch_noninteractive_no_images_skips(
 ) -> None:
     """Non-interactive + --no-images works without error."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path)
+    write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     monkeypatch.delenv("CVAT_HOST", raising=False)

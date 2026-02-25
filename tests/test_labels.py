@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
 from cveta2.cli import CliApp
 from cveta2.client import CvatClient
@@ -21,16 +20,13 @@ from cveta2.commands.labels import (
 from cveta2.config import CvatConfig
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import LabelAttributeInfo, LabelInfo
+from tests.conftest import build_fake, write_test_config
 from tests.fixtures.fake_cvat_api import FakeCvatApi
-from tests.fixtures.fake_cvat_project import (
-    FakeProjectConfig,
-    LoadedFixtures,
-    build_fake_project,
-    task_indices_by_names,
-)
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
 # ---------------------------------------------------------------------------
@@ -52,29 +48,6 @@ _LABELS = [
         color="#00ff00",
     ),
 ]
-
-
-def _build(
-    base: LoadedFixtures,
-    task_names: list[str],
-    statuses: list[str] | None = None,
-) -> LoadedFixtures:
-    indices = task_indices_by_names(base.tasks, task_names)
-    config = FakeProjectConfig(
-        task_indices=indices,
-        task_statuses=statuses if statuses is not None else "keep",
-    )
-    return build_fake_project(base, config)
-
-
-def _write_config(path: Path) -> None:
-    data = {
-        "cvat": {
-            "host": "http://localhost:8080",
-            "token": "test-token",
-        },
-    }
-    path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
 def _mock_client_ctx(
@@ -164,7 +137,7 @@ def test_print_labels_with_data() -> None:
 def test_get_project_labels_returns_fixture_labels(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
-    fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
     client = CvatClient(_CFG, api=FakeCvatApi(fake))
     labels = client.get_project_labels(fake.project.id)
     assert len(labels) == len(fake.labels)
@@ -183,7 +156,7 @@ def test_count_label_usage_shapes_per_label(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
     """Normal task has shapes; count_label_usage aggregates them."""
-    fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
     client = CvatClient(_CFG, api=FakeCvatApi(fake))
     counts = client.count_label_usage(fake.project.id)
     total = sum(counts.values())
@@ -193,7 +166,7 @@ def test_count_label_usage_shapes_per_label(
 def test_count_label_usage_empty_task(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
-    fake = _build(coco8_fixtures, ["all-empty"], statuses=["completed"])
+    fake = build_fake(coco8_fixtures, ["all-empty"], statuses=["completed"])
     client = CvatClient(_CFG, api=FakeCvatApi(fake))
     counts = client.count_label_usage(fake.project.id)
     assert sum(counts.values()) == 0
@@ -202,7 +175,7 @@ def test_count_label_usage_empty_task(
 def test_count_label_usage_multiple_tasks(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
-    fake = _build(
+    fake = build_fake(
         coco8_fixtures,
         ["normal", "all-bboxes-moved"],
         statuses=["completed", "completed"],
@@ -217,7 +190,7 @@ def test_count_label_usage_ids_match_labels(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
     """All label_ids in usage come from the project's labels."""
-    fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
     client = CvatClient(_CFG, api=FakeCvatApi(fake))
     counts = client.count_label_usage(fake.project.id)
     label_ids = {lbl.id for lbl in fake.labels}
@@ -229,7 +202,7 @@ def test_count_label_usage_deleted_frames_counted(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
     """Shapes on deleted frames are still counted (they exist in CVAT)."""
-    fake = _build(coco8_fixtures, ["all-removed"], statuses=["completed"])
+    fake = build_fake(coco8_fixtures, ["all-removed"], statuses=["completed"])
     client = CvatClient(_CFG, api=FakeCvatApi(fake))
     counts = client.count_label_usage(fake.project.id)
     assert sum(counts.values()) == 30
@@ -291,7 +264,7 @@ def test_cli_labels_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path)
+    write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
     monkeypatch.delenv("CVAT_TOKEN", raising=False)
@@ -318,7 +291,7 @@ def test_cli_labels_list_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path)
+    write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
     monkeypatch.delenv("CVAT_TOKEN", raising=False)
@@ -346,7 +319,7 @@ def test_cli_labels_noninteractive_without_list_errors(
 ) -> None:
     """Non-interactive mode without --list should fail."""
     cfg_path = tmp_path / "config.yaml"
-    _write_config(cfg_path)
+    write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     monkeypatch.delenv("CVAT_HOST", raising=False)

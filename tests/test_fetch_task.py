@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pandas as pd
@@ -19,13 +20,11 @@ from cveta2.commands.fetch import (
 from cveta2.config import CvatConfig, IgnoreConfig, IgnoredTask, ImageCacheConfig
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import CSV_COLUMNS
+from tests.conftest import build_fake, make_fake_client
 from tests.fixtures.fake_cvat_api import FakeCvatApi
-from tests.fixtures.fake_cvat_project import (
-    FakeProjectConfig,
-    LoadedFixtures,
-    build_fake_project,
-    task_indices_by_names,
-)
+
+if TYPE_CHECKING:
+    from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -34,27 +33,6 @@ from tests.fixtures.fake_cvat_project import (
 _CFG = CvatConfig(host="http://fake-cvat")
 
 _MODULE = "cveta2.commands.fetch"
-
-
-def _build(
-    base: LoadedFixtures,
-    task_names: list[str],
-    statuses: list[str] | None = None,
-    **kwargs: object,
-) -> LoadedFixtures:
-    """Build a fake project from named base tasks with optional statuses."""
-    indices = task_indices_by_names(base.tasks, task_names)
-    config = FakeProjectConfig(
-        task_indices=indices,
-        task_statuses=statuses if statuses is not None else "keep",
-        **kwargs,  # type: ignore[arg-type]
-    )
-    return build_fake_project(base, config)
-
-
-def _client(fixtures: LoadedFixtures) -> CvatClient:
-    """Create a CvatClient backed by fake API data."""
-    return CvatClient(_CFG, api=FakeCvatApi(fixtures))
 
 
 def _make_args(
@@ -119,8 +97,8 @@ class TestResolveTaskSelector:
 
     def test_explicit_task_id(self, coco8_fixtures: LoadedFixtures) -> None:
         """Explicit task ID string is returned as-is."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
-        client = _client(fake)
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        client = make_fake_client(fake)
         task_id_str = str(fake.tasks[0].id)
         args = _make_args(task=[task_id_str], output_dir="unused")
 
@@ -130,8 +108,8 @@ class TestResolveTaskSelector:
 
     def test_explicit_task_name(self, coco8_fixtures: LoadedFixtures) -> None:
         """Explicit task name is returned as-is."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
-        client = _client(fake)
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        client = make_fake_client(fake)
         task_name = fake.tasks[0].name
         args = _make_args(task=[task_name], output_dir="unused")
 
@@ -141,12 +119,12 @@ class TestResolveTaskSelector:
 
     def test_multiple_explicit_tasks(self, coco8_fixtures: LoadedFixtures) -> None:
         """Multiple -t values are returned in order."""
-        fake = _build(
+        fake = build_fake(
             coco8_fixtures,
             ["normal", "all-empty"],
             statuses=["completed", "completed"],
         )
-        client = _client(fake)
+        client = make_fake_client(fake)
         ids = [str(t.id) for t in fake.tasks]
         args = _make_args(task=ids, output_dir="unused")
 
@@ -156,8 +134,8 @@ class TestResolveTaskSelector:
 
     def test_empty_task_triggers_tui(self, coco8_fixtures: LoadedFixtures) -> None:
         """``-t`` without a value (empty string) falls through to TUI."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
-        client = _client(fake)
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        client = make_fake_client(fake)
         args = _make_args(task=[""], output_dir="unused")
 
         with (
@@ -171,8 +149,8 @@ class TestResolveTaskSelector:
 
     def test_none_task_triggers_tui(self, coco8_fixtures: LoadedFixtures) -> None:
         """``task=None`` (no -t flag at all) falls through to TUI."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
-        client = _client(fake)
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        client = make_fake_client(fake)
         args = _make_args(task=None, output_dir="unused")
 
         with (
@@ -189,8 +167,8 @@ class TestResolveTaskSelector:
         coco8_fixtures: LoadedFixtures,
     ) -> None:
         """Whitespace-only task values are stripped and filtered out."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
-        client = _client(fake)
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        client = make_fake_client(fake)
         task_name = fake.tasks[0].name
         args = _make_args(task=["  ", task_name, ""], output_dir="unused")
 
@@ -356,7 +334,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Normal single-task fetch writes dataset.csv and deleted.csv."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         task_name = fake.tasks[0].name
         args = _make_args(
             project=str(fake.project.id),
@@ -385,7 +363,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Output dataset.csv contains all canonical CSV_COLUMNS."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         args = _make_args(
             project=str(fake.project.id),
             task=[fake.tasks[0].name],
@@ -403,7 +381,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Task with deleted frames writes deleted.csv with instance_shape='deleted'."""
-        fake = _build(coco8_fixtures, ["all-removed"], statuses=["completed"])
+        fake = build_fake(coco8_fixtures, ["all-removed"], statuses=["completed"])
         args = _make_args(
             project=str(fake.project.id),
             task=[fake.tasks[0].name],
@@ -423,7 +401,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """``--completed-only`` skips non-completed tasks."""
-        fake = _build(
+        fake = build_fake(
             coco8_fixtures,
             ["normal", "all-empty"],
             statuses=["completed", "annotation"],
@@ -448,7 +426,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Tasks in the ignore config are excluded from results."""
-        fake = _build(
+        fake = build_fake(
             coco8_fixtures,
             ["normal", "all-empty"],
             statuses=["completed", "completed"],
@@ -478,7 +456,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Non-existent task name causes sys.exit via Cveta2Error."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         args = _make_args(
             project=str(fake.project.id),
             task=["nonexistent-task-xyz"],
@@ -494,7 +472,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Fetching multiple tasks combines annotations in output."""
-        fake = _build(
+        fake = build_fake(
             coco8_fixtures,
             ["normal", "all-empty"],
             statuses=["completed", "completed"],
@@ -518,7 +496,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Output directory is created automatically when it does not exist."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         out_dir = tmp_path / "nested" / "deep" / "output"
         args = _make_args(
             project=str(fake.project.id),
@@ -537,7 +515,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """BBox annotations appear in the CSV with valid bbox coordinates."""
-        fake = _build(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         args = _make_args(
             project=str(fake.project.id),
             task=[fake.tasks[0].name],
@@ -558,7 +536,7 @@ class TestRunFetchTaskIntegration:
         tmp_path: Path,
     ) -> None:
         """Images without annotations appear as instance_shape='none' rows."""
-        fake = _build(coco8_fixtures, ["all-empty"], statuses=["completed"])
+        fake = build_fake(coco8_fixtures, ["all-empty"], statuses=["completed"])
         args = _make_args(
             project=str(fake.project.id),
             task=[fake.tasks[0].name],
