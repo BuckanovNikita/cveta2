@@ -200,7 +200,8 @@ def _check_one(path: Path, *, is_dir: bool, out: _BrokenList) -> None:
     """Append *path* to *out* if required group bits are missing."""
     try:
         st = path.stat()
-    except OSError:
+    except OSError as e:
+        logger.debug(f"Не удалось проверить {path}: {e}")
         return
 
     need = (stat.S_IRGRP | stat.S_IXGRP) if is_dir else stat.S_IRGRP

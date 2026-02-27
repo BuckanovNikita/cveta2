@@ -98,8 +98,10 @@ class SdkCvatApiAdapter:
         except ApiTypeError as e:
             if "chunks_updated_date" not in str(e):
                 raise
-            # CVAT can return null for chunks_updated_date; SDK expects datetime.
-            # Fallback: raw GET + build RawDataMeta from JSON (no SDK deserialization).
+            # CVAT SDK ≤2.7 expects `chunks_updated_date` to be a datetime,
+            # but CVAT server can return null for it, causing ApiTypeError
+            # during deserialization.  Work around by re-fetching the raw JSON
+            # and building RawDataMeta manually (skipping SDK parsing).
             _, response = tasks_api.retrieve_data_meta(task_id, _parse_response=False)
             body = (
                 response.read()

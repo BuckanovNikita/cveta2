@@ -63,7 +63,12 @@ def _read_deleted_names(path: Path | None) -> set[str]:
             names = set(df["image_name"].dropna().unique())
             logger.info(f"Загружен {path}: {len(names)} удалённых изображений")
             return names
-    except Exception:  # noqa: BLE001
+    except (
+        pd.errors.ParserError,
+        pd.errors.EmptyDataError,
+        UnicodeDecodeError,
+        KeyError,
+    ):
         logger.debug(f"Не удалось прочитать {path} как CSV, пробую текстовый формат")
     # Fallback: legacy plain-text format (one name per line)
     names = {

@@ -336,7 +336,10 @@ def _parse_ignore_entry(raw: object) -> IgnoredTask | None:
                 name=str(raw.get("name", "")),
                 description=str(raw.get("description", "")),
             )
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                f"Пропущена некорректная запись ignore (id={raw.get('id')!r}): {e}"
+            )
             return None
     if isinstance(raw, int):
         return IgnoredTask(id=raw, name="")

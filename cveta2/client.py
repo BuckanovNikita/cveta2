@@ -319,16 +319,23 @@ class CvatClient:
         with self._api_or_adapter() as source:
             tasks = source.get_project_tasks(project_id)
             counts: dict[int, int] = {}
+            skipped: list[int] = []
             for task in tqdm(
                 tasks, desc="Checking annotations", unit="task", leave=False
             ):
                 try:
                     annotations = source.get_task_annotations(task.id)
                 except ApiException:
-                    logger.warning(f"Не удалось получить аннотации задачи {task.id}")
+                    logger.warning(
+                        f"Не удалось получить аннотации задачи {task.id},"
+                        " подсчёт меток может быть неполным",
+                    )
+                    skipped.append(task.id)
                     continue
                 for shape in annotations.shapes:
                     counts[shape.label_id] = counts.get(shape.label_id, 0) + 1
+            if skipped:
+                logger.warning(f"Пропущено задач при подсчёте меток: {skipped}")
             return counts
 
     def update_project_labels(
