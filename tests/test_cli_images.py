@@ -43,7 +43,6 @@ def test_fetch_no_images_flag_skips_download(
     write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx()
     with (
@@ -74,7 +73,6 @@ def test_fetch_images_dir_overrides_config(
     write_test_config(cfg_path, image_cache={"coco8-dev": "/other/path"})
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     custom_dir = tmp_path / "custom-images"
 
@@ -111,7 +109,6 @@ def test_fetch_noninteractive_no_path_errors(
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx()
     with (
@@ -140,7 +137,6 @@ def test_fetch_configured_path_downloads(
     write_test_config(cfg_path, image_cache={"coco8-dev": "/mnt/data/coco8"})
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx()
     with (
@@ -173,7 +169,6 @@ def test_fetch_noninteractive_no_images_skips(
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx()
     with (

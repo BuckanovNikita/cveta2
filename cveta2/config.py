@@ -134,7 +134,6 @@ class CvatConfig(BaseModel):
 
     host: str = ""
     organization: str | None = None
-    token: str | None = None
     username: str | None = None
     password: str | None = None
 
@@ -161,7 +160,6 @@ class CvatConfig(BaseModel):
         return cls(
             host=os.environ.get("CVAT_HOST", ""),
             organization=os.environ.get("CVAT_ORGANIZATION"),
-            token=os.environ.get("CVAT_TOKEN"),
             username=os.environ.get("CVAT_USERNAME"),
             password=os.environ.get("CVAT_PASSWORD"),
         )
@@ -174,7 +172,6 @@ class CvatConfig(BaseModel):
         return CvatConfig(
             host=override.host or self.host,
             organization=override.organization or self.organization,
-            token=override.token or self.token,
             username=override.username or self.username,
             password=override.password or self.password,
         )
@@ -211,8 +208,6 @@ class CvatConfig(BaseModel):
         cvat_data: dict[str, str] = {"host": self.host}
         if self.organization:
             cvat_data["organization"] = self.organization
-        if self.token:
-            cvat_data["token"] = self.token
         if self.username:
             cvat_data["username"] = self.username
         if self.password:
@@ -235,17 +230,13 @@ class CvatConfig(BaseModel):
         """Prompt interactively for missing credentials.  Returns updated copy."""
         username = self.username
         password = self.password
-        token = self.token
-
-        if token:
-            return self
 
         if not username:
-            require_interactive("Задайте CVAT_TOKEN или CVAT_USERNAME/CVAT_PASSWORD.")
+            require_interactive("Задайте CVAT_USERNAME/CVAT_PASSWORD.")
             logger.info("Учётные данные не указаны. Введите логин CVAT:")
             username = input("Имя пользователя: ")
         if not password:
-            require_interactive("Задайте CVAT_TOKEN или CVAT_PASSWORD.")
+            require_interactive("Задайте CVAT_PASSWORD.")
             password = getpass.getpass(f"Пароль для {username}: ")
 
         return self.model_copy(update={"username": username, "password": password})

@@ -266,10 +266,7 @@ def main() -> None:
         raise SystemExit(1)
 
     kwargs: dict = {"host": resolved.host}
-    if resolved.token:
-        kwargs["access_token"] = resolved.token
-    else:
-        kwargs["credentials"] = (resolved.username or "", resolved.password or "")
+    kwargs["credentials"] = (resolved.username or "", resolved.password or "")
 
     with make_client(**kwargs) as cvat:
         if resolved.organization:

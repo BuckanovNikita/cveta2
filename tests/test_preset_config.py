@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 _CVAT_ENV_VARS = (
     "CVAT_HOST",
     "CVAT_ORGANIZATION",
-    "CVAT_TOKEN",
     "CVAT_USERNAME",
     "CVAT_PASSWORD",
 )
@@ -64,7 +63,7 @@ def test_env_overrides_all(
 ) -> None:
     """Env vars override both preset and user config."""
     monkeypatch.setenv("CVAT_HOST", "https://env-cvat.example.com")
-    for var in ("CVAT_ORGANIZATION", "CVAT_TOKEN", "CVAT_USERNAME", "CVAT_PASSWORD"):
+    for var in ("CVAT_ORGANIZATION", "CVAT_USERNAME", "CVAT_PASSWORD"):
         monkeypatch.delenv(var, raising=False)
 
     cfg_path = tmp_path / "config.yaml"

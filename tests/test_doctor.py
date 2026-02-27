@@ -13,7 +13,7 @@ from cveta2.config import CvatConfig, ImageCacheConfig
 
 def test_run_doctor_no_crash() -> None:
     """run_doctor completes without crashing when config is mocked."""
-    cfg = CvatConfig(host="https://fake.cvat.ai", token="fake-token")  # noqa: S106
+    cfg = CvatConfig(host="https://fake.cvat.ai", username="user", password="pass")  # noqa: S106
     ic_cfg = ImageCacheConfig()
 
     with (

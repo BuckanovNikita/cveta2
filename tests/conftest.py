@@ -130,7 +130,8 @@ def write_test_config(
     data: dict[str, object] = {
         "cvat": {
             "host": "http://localhost:8080",
-            "token": "test-token",
+            "username": "test-user",
+            "password": "test-password",
         },
     }
     if image_cache:

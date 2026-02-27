@@ -28,7 +28,7 @@ def run_setup(config_path: Path) -> None:
     """Interactively ask user for CVAT credentials and core settings."""
     require_interactive(
         "The 'setup' command is fully interactive. "
-        "Configure via env vars (CVAT_HOST, CVAT_TOKEN, etc.) "
+        "Configure via env vars (CVAT_HOST, CVAT_USERNAME, CVAT_PASSWORD) "
         "or edit the config file directly."
     )
     existing = CvatConfig.from_file(config_path)
@@ -42,40 +42,20 @@ def run_setup(config_path: Path) -> None:
     org_prompt += ": "
     organization = input(org_prompt).strip() or org_default
 
-    logger.info("Аутентификация: токен (t) или логин/пароль (p)?")
-    auth_choice = ""
-    while auth_choice not in ("t", "p"):
-        auth_choice = input("Выберите [t/p]: ").strip().lower()
-
-    token: str | None = None
-    username: str | None = None
-    password: str | None = None
-
-    if auth_choice == "t":
-        token_default = existing.token or ""
-        prompt = "Персональный токен доступа"
-        if token_default:
-            prompt += f" [{token_default[:6]}...]"
-        prompt += ": "
-        token = input(prompt).strip() or token_default
-        if not token:
-            logger.warning("Токен не указан — его можно добавить позже.")
-    else:
-        username_default = existing.username or ""
-        prompt = "Имя пользователя"
-        if username_default:
-            prompt += f" [{username_default}]"
-        prompt += ": "
-        username = input(prompt).strip() or username_default
-        password = getpass.getpass("Пароль: ")
-        if not password and existing.password:
-            password = existing.password
-            logger.info("Пароль не изменён (использован существующий).")
+    username_default = existing.username or ""
+    prompt = "Имя пользователя"
+    if username_default:
+        prompt += f" [{username_default}]"
+    prompt += ": "
+    username = input(prompt).strip() or username_default
+    password = getpass.getpass("Пароль: ")
+    if not password and existing.password:
+        password = existing.password
+        logger.info("Пароль не изменён (использован существующий).")
 
     cfg = CvatConfig(
         host=host,
         organization=organization or None,
-        token=token,
         username=username,
         password=password,
     )

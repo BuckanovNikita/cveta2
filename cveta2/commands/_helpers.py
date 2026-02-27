@@ -173,7 +173,7 @@ def require_host(cfg: CvatConfig) -> None:
         "Ошибка: хост CVAT не настроен.\n"
         "Запустите setup для сохранения настроек:\n  cveta2 setup\n"
         "Или задайте переменные окружения: CVAT_HOST и "
-        "(CVAT_TOKEN или CVAT_USERNAME/CVAT_PASSWORD).\n"
+        "(CVAT_USERNAME/CVAT_PASSWORD).\n"
         f"Файл конфигурации: {config_path}"
     )
 

@@ -37,7 +37,6 @@ def test_s3_sync_no_image_cache_exits(
     write_test_config(cfg_path)  # no image_cache
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     app = CliApp()
     with pytest.raises(SystemExit):
@@ -59,7 +58,6 @@ def test_s3_sync_all_projects(
     )
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx()
     # resolve_project_id returns different IDs per project
@@ -94,7 +92,6 @@ def test_s3_sync_single_project(
     )
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx()
     with (
@@ -121,7 +118,6 @@ def test_s3_sync_unknown_project_exits(
     )
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     app = CliApp()
     with pytest.raises(SystemExit):
@@ -145,7 +141,6 @@ def test_s3_sync_continues_on_resolve_error(
     )
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx()
 

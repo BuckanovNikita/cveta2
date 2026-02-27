@@ -64,12 +64,9 @@ def check_config() -> bool:
             "'host' is not configured (set CVAT_HOST or cvat.host in config)"
         )
 
-    has_token = bool(cfg.token)
     has_password = bool(cfg.username and cfg.password)
-    if not has_token and not has_password:
-        problems.append(
-            "No credentials: provide CVAT_TOKEN or CVAT_USERNAME + CVAT_PASSWORD"
-        )
+    if not has_password:
+        problems.append("No credentials: provide CVAT_USERNAME + CVAT_PASSWORD")
 
     ic_cfg = load_image_cache_config()
     if not ic_cfg.projects:

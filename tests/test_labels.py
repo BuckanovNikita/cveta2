@@ -267,7 +267,6 @@ def test_cli_labels_list(
     write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx(labels=_LABELS)
     with (
@@ -294,7 +293,6 @@ def test_cli_labels_list_empty(
     write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx(labels=[])
     with (
@@ -323,7 +321,6 @@ def test_cli_labels_noninteractive_without_list_errors(
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     monkeypatch.delenv("CVAT_HOST", raising=False)
-    monkeypatch.delenv("CVAT_TOKEN", raising=False)
 
     mock_client = _mock_client_ctx(labels=_LABELS)
     with (
