@@ -34,5 +34,5 @@ class CvatApiPort(Protocol):
         ...
 
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
-        """Return shapes and tracks for a task."""
+        """Return shapes for a task."""
         ...

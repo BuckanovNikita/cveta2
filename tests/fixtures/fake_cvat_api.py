@@ -45,6 +45,6 @@ class FakeCvatApi:
         return data_meta
 
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
-        """Return shapes and tracks for a task by id."""
+        """Return shapes for a task by id."""
         _data_meta, annotations = self._task_data[task_id]
         return annotations

@@ -131,11 +131,6 @@ def _task_to_records(
     attr_names: dict[int, str],
 ) -> tuple[list[AnnotationRecord], list[DeletedImage]]:
     """Build annotation records and deleted list for one task."""
-    if annotations.tracks:
-        logger.warning(
-            f"Task {task.name!r} has {len(annotations.tracks)} track(s) "
-            f"that will be skipped (only direct shapes are extracted)"
-        )
     ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names)
     task_annotations = _collect_shapes(annotations.shapes, ctx)
     deleted_ids = set(data_meta.deleted_frames)
@@ -191,9 +186,9 @@ if TYPE_CHECKING:
 class _SdkClientFactory(Protocol):
     """Protocol for the SDK client factory (e.g. ``cvat_sdk.make_client``).
 
-    The factory must accept keyword arguments (``host``, optionally
-    ``access_token`` or ``credentials``) and return a context manager
-    that yields an SDK client.
+    The factory must accept keyword arguments (``host`` and
+    ``credentials``) and return a context manager that yields an SDK
+    client.
     """
 
     def __call__(self, **kwargs: Any) -> AbstractContextManager[Any]:  # noqa: ANN401
@@ -318,8 +313,8 @@ class CvatClient:
     def count_label_usage(self, project_id: int) -> dict[int, int]:
         """Count annotations per label across all project tasks.
 
-        Returns a mapping ``{label_id: annotation_count}`` where the count
-        includes both shapes and tracks.  Used to warn before label deletion.
+        Returns a mapping ``{label_id: annotation_count}``.
+        Used to warn before label deletion.
         """
         with self._api_or_adapter() as source:
             tasks = source.get_project_tasks(project_id)
@@ -334,8 +329,6 @@ class CvatClient:
                     continue
                 for shape in annotations.shapes:
                     counts[shape.label_id] = counts.get(shape.label_id, 0) + 1
-                for track in annotations.tracks:
-                    counts[track.label_id] = counts.get(track.label_id, 0) + 1
             return counts
 
     def update_project_labels(
@@ -1003,9 +996,7 @@ class CvatClient:
         accept it).  It is set on the client instance afterwards.
         """
         kwargs: dict[str, Any] = {"host": cfg.host}
-        if cfg.token:
-            kwargs["access_token"] = cfg.token
-        elif cfg.username and cfg.password:
+        if cfg.username and cfg.password:
             kwargs["credentials"] = (cfg.username, cfg.password)
         return kwargs
 

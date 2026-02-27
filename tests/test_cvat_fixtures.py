@@ -39,15 +39,6 @@ def _shape_frames(annotations: RawAnnotations) -> set[int]:
     return {s.frame for s in annotations.shapes}
 
 
-def _track_frames(annotations: RawAnnotations) -> set[int]:
-    """Frame indices that have at least one track segment."""
-    out: set[int] = set()
-    for track in annotations.tracks:
-        for ts in track.shapes:
-            out.add(ts.frame)
-    return out
-
-
 def _assert_normal(
     task: TaskInfo,
     data_meta: RawDataMeta,
@@ -68,7 +59,6 @@ def _assert_all_empty(
 ) -> None:
     """No annotations; at least one frame not deleted."""
     assert len(annotations.shapes) == 0, f"task {task.name}: expected no shapes"
-    assert len(annotations.tracks) == 0, f"task {task.name}: expected no tracks"
     not_deleted = _frame_indices(data_meta) - _deleted_set(data_meta)
     assert len(not_deleted) >= 1, (
         f"task {task.name}: expected at least one frame not in deleted_frames"
@@ -99,13 +89,9 @@ def _assert_zero_frame_empty_last_removed(
     data_meta: RawDataMeta,
     annotations: RawAnnotations,
 ) -> None:
-    """Frame 0 has no shapes/track segments; last frame index in deleted_frames."""
+    """Frame 0 has no shapes; last frame index in deleted_frames."""
     shape_frames = _shape_frames(annotations)
-    track_frames = _track_frames(annotations)
     assert 0 not in shape_frames, f"task {task.name}: frame 0 should have no shapes"
-    assert 0 not in track_frames, (
-        f"task {task.name}: frame 0 should have no track segments"
-    )
     if len(data_meta.frames) >= 1:
         last_idx = len(data_meta.frames) - 1
         assert last_idx in _deleted_set(data_meta), (
@@ -118,9 +104,9 @@ def _assert_all_bboxes_moved(
     _data_meta: RawDataMeta,
     annotations: RawAnnotations,
 ) -> None:
-    """Has at least one shape or track."""
-    assert len(annotations.shapes) >= 1 or len(annotations.tracks) >= 1, (
-        f"task {task.name}: expected at least one shape or track"
+    """Has at least one shape."""
+    assert len(annotations.shapes) >= 1, (
+        f"task {task.name}: expected at least one shape"
     )
 
 
@@ -129,16 +115,12 @@ def _assert_all_except_first_empty(
     data_meta: RawDataMeta,
     annotations: RawAnnotations,
 ) -> None:
-    """No shape/track on frame index > 0; frame 0 may have annotations."""
+    """No shapes on frame index > 0; frame 0 may have annotations."""
     shape_frames = _shape_frames(annotations)
-    track_frames = _track_frames(annotations)
     for idx in _frame_indices(data_meta):
         if idx > 0:
             assert idx not in shape_frames, (
                 f"task {task.name}: frame {idx} should have no shapes"
-            )
-            assert idx not in track_frames, (
-                f"task {task.name}: frame {idx} should have no track segments"
             )
 
 

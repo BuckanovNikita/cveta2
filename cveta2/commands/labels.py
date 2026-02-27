@@ -347,7 +347,7 @@ def _interactive_delete(
     if has_annotations:
         logger.warning(
             "ВНИМАНИЕ: удаление меток НЕОБРАТИМО уничтожит все "
-            "аннотации (shapes, tracks), использующие эти метки!"
+            "аннотации (shapes), использующие эти метки!"
         )
         names_to_confirm = ", ".join(lbl.name for lbl in selected_labels)
         confirm: str | None = questionary.text(

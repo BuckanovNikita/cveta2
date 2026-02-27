@@ -24,8 +24,6 @@ from cveta2._client.dtos import (
     RawDataMeta,
     RawFrame,
     RawShape,
-    RawTrack,
-    RawTrackedShape,
 )
 from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
 
@@ -113,7 +111,7 @@ class SdkCvatApiAdapter:
 
     @_api_retry
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
-        """Return shapes and tracks for a task."""
+        """Return shapes for a task."""
         tasks_api = self.client.api_client.tasks_api
         labeled_data, _ = tasks_api.retrieve_annotations(task_id)
         return self._convert_annotations(labeled_data)
@@ -196,10 +194,8 @@ class SdkCvatApiAdapter:
         labeled_data: cvat_models.LabeledData,
     ) -> RawAnnotations:
         raw_shapes = labeled_data.shapes or []
-        raw_tracks = labeled_data.tracks or []
         return RawAnnotations(
             shapes=[SdkCvatApiAdapter._convert_shape(s) for s in raw_shapes],
-            tracks=[SdkCvatApiAdapter._convert_track(t) for t in raw_tracks],
         )
 
     @staticmethod
@@ -222,42 +218,6 @@ class SdkCvatApiAdapter:
             ),
             created_by=SdkCvatApiAdapter._extract_creator_username(
                 shape,
-            ),
-        )
-
-    @staticmethod
-    def _convert_tracked_shape(
-        ts: cvat_models.TrackedShape,
-    ) -> RawTrackedShape:
-        type_str = ts.type.value if ts.type else str(ts.type)
-        return RawTrackedShape(
-            type=type_str,
-            frame=ts.frame,
-            points=list(ts.points or []),
-            outside=bool(ts.outside),
-            occluded=bool(ts.occluded),
-            z_order=int(ts.z_order or 0),
-            rotation=float(ts.rotation or 0.0),
-            attributes=SdkCvatApiAdapter._convert_attributes(
-                ts.attributes,
-            ),
-            created_by=SdkCvatApiAdapter._extract_creator_username(
-                ts,
-            ),
-        )
-
-    @staticmethod
-    def _convert_track(
-        track: cvat_models.LabeledTrack,
-    ) -> RawTrack:
-        raw_shapes = track.shapes or []
-        return RawTrack(
-            id=track.id or 0,
-            label_id=track.label_id,
-            source=str(track.source or ""),
-            shapes=[SdkCvatApiAdapter._convert_tracked_shape(s) for s in raw_shapes],
-            created_by=SdkCvatApiAdapter._extract_creator_username(
-                track,
             ),
         )
 

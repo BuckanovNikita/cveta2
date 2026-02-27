@@ -7,8 +7,6 @@ from cveta2._client.dtos import (
     RawDataMeta,
     RawFrame,
     RawShape,
-    RawTrack,
-    RawTrackedShape,
 )
 from cveta2._client.extractors import _collect_shapes
 from cveta2._client.mapping import (
@@ -26,8 +24,6 @@ __all__ = [
     "RawDataMeta",
     "RawFrame",
     "RawShape",
-    "RawTrack",
-    "RawTrackedShape",
     "SdkCvatApiAdapter",
     "_TaskContext",
     "_build_label_maps",

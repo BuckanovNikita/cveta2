@@ -47,32 +47,6 @@ class RawShape:
 
 
 @dataclass(frozen=True, slots=True)
-class RawTrackedShape:
-    """A single shape within a track (interpolated/linked bbox)."""
-
-    type: str
-    frame: int
-    points: list[float]
-    outside: bool
-    occluded: bool
-    z_order: int
-    rotation: float
-    attributes: list[RawAttribute]
-    created_by: str
-
-
-@dataclass(frozen=True, slots=True)
-class RawTrack:
-    """An annotation track containing multiple tracked shapes."""
-
-    id: int
-    label_id: int
-    source: str
-    shapes: list[RawTrackedShape]
-    created_by: str
-
-
-@dataclass(frozen=True, slots=True)
 class RawDataMeta:
     """Frame list and deleted frame IDs for a task."""
 
@@ -82,7 +56,6 @@ class RawDataMeta:
 
 @dataclass(frozen=True, slots=True)
 class RawAnnotations:
-    """Shapes and tracks for a task."""
+    """Shapes for a task."""
 
     shapes: list[RawShape] = field(default_factory=list)
-    tracks: list[RawTrack] = field(default_factory=list)

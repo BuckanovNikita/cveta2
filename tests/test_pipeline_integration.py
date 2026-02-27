@@ -442,72 +442,6 @@ def test_resolve_project_id_not_found(coco8_fixtures: LoadedFixtures) -> None:
         client.resolve_project_id("does-not-exist")
 
 
-# ---------------------------------------------------------------------------
-# _task_to_records with tracks
-# ---------------------------------------------------------------------------
-
-
-def test_task_to_records_tracks_warning() -> None:
-    """Tasks with tracks log a warning and skip them."""
-    from cveta2._client.dtos import (
-        RawAnnotations,
-        RawDataMeta,
-        RawFrame,
-        RawTrack,
-        RawTrackedShape,
-    )
-    from cveta2.client import _task_to_records
-
-    task = TaskInfo(
-        id=99,
-        name="track-task",
-        status="completed",
-        subset="",
-        updated_date="2026-01-01T00:00:00",
-    )
-    data_meta = RawDataMeta(
-        frames=[RawFrame(name="a.jpg", width=640, height=480)],
-        deleted_frames=[],
-    )
-    track_shape = RawTrackedShape(
-        type="rectangle",
-        frame=0,
-        points=[0, 0, 10, 10],
-        outside=False,
-        occluded=False,
-        z_order=0,
-        rotation=0.0,
-        attributes=[],
-        created_by="user",
-    )
-    annotations = RawAnnotations(
-        shapes=[],
-        tracks=[
-            RawTrack(
-                id=1,
-                label_id=1,
-                source="manual",
-                shapes=[track_shape],
-                created_by="user",
-            ),
-        ],
-    )
-
-    messages: list[str] = []
-    from loguru import logger
-
-    handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
-    try:
-        _records, deleted = _task_to_records(
-            task, data_meta, annotations, {1: "car"}, {}
-        )
-    finally:
-        logger.remove(handler_id)
-
-    assert any("track" in m.lower() for m in messages)
-    assert deleted == []
-
-
 def test_task_to_records_unknown_deleted_frame_id() -> None:
     """Deleted frame_id not in frames produces '<unknown>' image_name."""
     from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
@@ -524,7 +458,7 @@ def test_task_to_records_unknown_deleted_frame_id() -> None:
         frames=[RawFrame(name="a.jpg", width=640, height=480)],
         deleted_frames=[999],  # frame 999 doesn't exist
     )
-    annotations = RawAnnotations(shapes=[], tracks=[])
+    annotations = RawAnnotations(shapes=[])
 
     _records, deleted = _task_to_records(task, data_meta, annotations, {}, {})
 

@@ -17,8 +17,6 @@ from cveta2._client.dtos import (
     RawDataMeta,
     RawFrame,
     RawShape,
-    RawTrack,
-    RawTrackedShape,
 )
 from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -57,32 +55,6 @@ def _dict_to_shape(d: dict[str, Any]) -> RawShape:
     )
 
 
-def _dict_to_tracked_shape(d: dict[str, Any]) -> RawTrackedShape:
-    attrs = d.get("attributes") or []
-    return RawTrackedShape(
-        type=d.get("type", "") or "",
-        frame=int(d.get("frame", 0)),
-        points=list(d.get("points") or []),
-        outside=bool(d.get("outside", False)),
-        occluded=bool(d.get("occluded", False)),
-        z_order=int(d.get("z_order", 0)),
-        rotation=float(d.get("rotation", 0.0)),
-        attributes=[_dict_to_attribute(a) for a in attrs],
-        created_by=d.get("created_by", "") or "",
-    )
-
-
-def _dict_to_track(d: dict[str, Any]) -> RawTrack:
-    shapes = d.get("shapes") or []
-    return RawTrack(
-        id=int(d.get("id", 0)),
-        label_id=int(d.get("label_id", 0)),
-        source=d.get("source", "") or "",
-        shapes=[_dict_to_tracked_shape(s) for s in shapes],
-        created_by=d.get("created_by", "") or "",
-    )
-
-
 def _dict_to_task(d: dict[str, Any]) -> TaskInfo:
     return TaskInfo(
         id=int(d.get("id", 0)),
@@ -101,8 +73,7 @@ def _dict_to_data_meta(d: dict[str, Any]) -> RawDataMeta:
 
 def _dict_to_annotations(d: dict[str, Any]) -> RawAnnotations:
     shapes = [_dict_to_shape(s) for s in (d.get("shapes") or [])]
-    tracks = [_dict_to_track(t) for t in (d.get("tracks") or [])]
-    return RawAnnotations(shapes=shapes, tracks=tracks)
+    return RawAnnotations(shapes=shapes)
 
 
 def _dict_to_label(d: dict[str, Any]) -> LabelInfo:
