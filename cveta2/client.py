@@ -55,6 +55,7 @@ class _FetchAnnotationsOptions:
 
     completed_only: bool = False
     ignore_task_ids: set[int] | None = None
+    silent_task_ids: set[int] | None = None
     task_selector: list[int | str] | None = None
     host: str = ""
     project_name: str = ""
@@ -108,9 +109,11 @@ def _filter_tasks_for_fetch(
     """Apply ignore list, task selector, completed_only; return filtered list."""
     if options.ignore_task_ids:
         skipped = [t for t in tasks if t.id in options.ignore_task_ids]
-        if skipped:
-            logger.warning(f"Пропускаем {len(skipped)} задач(а) из ignore-списка:")
-            for t in skipped:
+        silent_ids = options.silent_task_ids or set()
+        logged = [t for t in skipped if t.id not in silent_ids]
+        if logged:
+            logger.warning(f"Пропускаем {len(logged)} задач(а) из ignore-списка:")
+            for t in logged:
                 logger.warning(f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})")
         tasks = [t for t in tasks if t.id not in options.ignore_task_ids]
     if options.task_selector is not None:
@@ -437,14 +440,22 @@ class CvatClient:
         If ``task_selector`` is given (list of task IDs or names), only
         matching tasks are processed.
         """
+        options = _FetchAnnotationsOptions(
+            completed_only=completed_only,
+            ignore_task_ids=ignore_task_ids,
+            task_selector=task_selector,
+            host=(self._cfg.host or ""),
+            project_name=project_name,
+        )
+        return self.fetch_with_options(project_id, options)
+
+    def fetch_with_options(
+        self,
+        project_id: int,
+        options: _FetchAnnotationsOptions,
+    ) -> ProjectAnnotations:
+        """Fetch annotations using pre-built *options*."""
         with self._api_or_adapter() as source:
-            options = _FetchAnnotationsOptions(
-                completed_only=completed_only,
-                ignore_task_ids=ignore_task_ids,
-                task_selector=task_selector,
-                host=(self._cfg.host or ""),
-                project_name=project_name,
-            )
             return self._fetch_annotations(source, project_id, options)
 
     def prepare_fetch(
@@ -461,14 +472,22 @@ class CvatClient:
         The returned :class:`FetchContext` holds the filtered task list
         and label maps.  Pass it to :meth:`fetch_one_task` for each task.
         """
+        options = _FetchAnnotationsOptions(
+            completed_only=completed_only,
+            ignore_task_ids=ignore_task_ids,
+            task_selector=task_selector,
+            host=(self._cfg.host or ""),
+            project_name=project_name,
+        )
+        return self.prepare_fetch_options(project_id, options)
+
+    def prepare_fetch_options(
+        self,
+        project_id: int,
+        options: _FetchAnnotationsOptions,
+    ) -> FetchContext:
+        """Prepare fetch context using pre-built *options*."""
         with self._api_or_adapter() as source:
-            options = _FetchAnnotationsOptions(
-                completed_only=completed_only,
-                ignore_task_ids=ignore_task_ids,
-                task_selector=task_selector,
-                host=(self._cfg.host or ""),
-                project_name=project_name,
-            )
             return self._prepare_fetch(source, project_id, options)
 
     # ------------------------------------------------------------------

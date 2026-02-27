@@ -279,6 +279,7 @@ class IgnoredTask(BaseModel):
     id: int
     name: str
     description: str = ""
+    silent: bool = False
 
 
 class IgnoreConfig(BaseModel):
@@ -298,18 +299,26 @@ class IgnoreConfig(BaseModel):
         """Return the full ignored-task entries for *project_name*."""
         return list(self.projects.get(project_name, []))
 
+    def get_silent_task_ids(self, project_name: str) -> set[int]:
+        """Return task IDs where ``silent=True`` for *project_name*."""
+        return {t.id for t in self.projects.get(project_name, []) if t.silent}
+
     def add_task(
         self,
         project_name: str,
         task_id: int,
         task_name: str,
         description: str = "",
+        *,
+        silent: bool = False,
     ) -> None:
         """Add a task to the ignore list for *project_name*."""
         entries = self.projects.setdefault(project_name, [])
         if not any(e.id == task_id for e in entries):
             entries.append(
-                IgnoredTask(id=task_id, name=task_name, description=description)
+                IgnoredTask(
+                    id=task_id, name=task_name, description=description, silent=silent
+                )
             )
 
     def remove_task(self, project_name: str, task_id: int) -> bool:
@@ -335,6 +344,7 @@ def _parse_ignore_entry(raw: object) -> IgnoredTask | None:
                 id=int(raw["id"]),
                 name=str(raw.get("name", "")),
                 description=str(raw.get("description", "")),
+                silent=bool(raw.get("silent", False)),
             )
         except (TypeError, ValueError) as e:
             logger.warning(
@@ -380,6 +390,8 @@ def _serialize_ignore_entry(entry: IgnoredTask) -> dict[str, object]:
     data: dict[str, object] = {"id": entry.id, "name": entry.name}
     if entry.description:
         data["description"] = entry.description
+    if entry.silent:
+        data["silent"] = True
     return data
 
 

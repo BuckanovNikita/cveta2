@@ -9,17 +9,25 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from loguru import logger
 
-from cveta2.client import CvatClient
+from cveta2.client import CvatClient, _FetchAnnotationsOptions, _filter_tasks_for_fetch
 from cveta2.commands.fetch import (
     _resolve_images_dir,
     _resolve_task_selector,
     _warn_ignored_tasks,
     run_fetch_task,
 )
-from cveta2.config import CvatConfig, IgnoreConfig, IgnoredTask, ImageCacheConfig
+from cveta2.config import (
+    CvatConfig,
+    IgnoreConfig,
+    IgnoredTask,
+    ImageCacheConfig,
+    _parse_ignore_entry,
+    _serialize_ignore_entry,
+)
 from cveta2.exceptions import InteractiveModeRequiredError
-from cveta2.models import CSV_COLUMNS
+from cveta2.models import CSV_COLUMNS, TaskInfo
 from tests.conftest import build_fake, make_fake_client
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 
@@ -186,14 +194,15 @@ class TestWarnIgnoredTasks:
     """Tests for ``_warn_ignored_tasks``."""
 
     def test_no_ignored_tasks(self) -> None:
-        """Returns None when ignore config is empty for the project."""
+        """Returns (None, None) when ignore config is empty for the project."""
         with patch(
             f"{_MODULE}.load_ignore_config",
             return_value=IgnoreConfig(),
         ):
-            result = _warn_ignored_tasks("my-project")
+            ignore_set, silent_set = _warn_ignored_tasks("my-project")
 
-        assert result is None
+        assert ignore_set is None
+        assert silent_set is None
 
     def test_returns_set_of_ignored_ids(self) -> None:
         """Returns a set of task IDs from the ignore config."""
@@ -210,12 +219,13 @@ class TestWarnIgnoredTasks:
             f"{_MODULE}.load_ignore_config",
             return_value=ignore_cfg,
         ):
-            result = _warn_ignored_tasks("my-project")
+            ignore_set, silent_set = _warn_ignored_tasks("my-project")
 
-        assert result == {10, 20, 30}
+        assert ignore_set == {10, 20, 30}
+        assert silent_set is None
 
     def test_different_project_returns_none(self) -> None:
-        """Returns None when the project is not in the ignore config."""
+        """Returns (None, None) when the project is not in the ignore config."""
         ignore_cfg = IgnoreConfig(
             projects={"other-project": [IgnoredTask(id=10, name="t10")]},
         )
@@ -223,9 +233,187 @@ class TestWarnIgnoredTasks:
             f"{_MODULE}.load_ignore_config",
             return_value=ignore_cfg,
         ):
-            result = _warn_ignored_tasks("my-project")
+            ignore_set, silent_set = _warn_ignored_tasks("my-project")
 
-        assert result is None
+        assert ignore_set is None
+        assert silent_set is None
+
+    def test_returns_silent_task_ids(self) -> None:
+        """Returns silent task IDs as the second element of the tuple."""
+        ignore_cfg = IgnoreConfig(
+            projects={
+                "my-project": [
+                    IgnoredTask(id=10, name="t10", silent=True),
+                    IgnoredTask(id=20, name="t20"),
+                    IgnoredTask(id=30, name="t30", silent=True),
+                ],
+            },
+        )
+        with patch(
+            f"{_MODULE}.load_ignore_config",
+            return_value=ignore_cfg,
+        ):
+            ignore_set, silent_set = _warn_ignored_tasks("my-project")
+
+        assert ignore_set == {10, 20, 30}
+        assert silent_set == {10, 30}
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _filter_tasks_for_fetch (silent ignored tasks)
+# ---------------------------------------------------------------------------
+
+
+class TestFilterTasksSilent:
+    """Tests for silent ignored tasks in ``_filter_tasks_for_fetch``."""
+
+    @staticmethod
+    def _make_tasks() -> list[TaskInfo]:
+        return [
+            TaskInfo(
+                id=1,
+                name="task-1",
+                status="completed",
+                subset="",
+                updated_date="2024-01-01",
+            ),
+            TaskInfo(
+                id=2,
+                name="task-2",
+                status="completed",
+                subset="",
+                updated_date="2024-01-02",
+            ),
+            TaskInfo(
+                id=3,
+                name="task-3",
+                status="completed",
+                subset="",
+                updated_date="2024-01-03",
+            ),
+        ]
+
+    def test_silent_ignored_tasks_no_warning(self) -> None:
+        """Silent ignored tasks are filtered out but produce no warning."""
+        tasks = self._make_tasks()
+        options = _FetchAnnotationsOptions(
+            ignore_task_ids={2},
+            silent_task_ids={2},
+        )
+        messages: list[str] = []
+        sink_id = logger.add(
+            lambda m: messages.append(m.record["message"]), level="WARNING"
+        )
+        try:
+            result = _filter_tasks_for_fetch(tasks, options)
+        finally:
+            logger.remove(sink_id)
+
+        assert [t.id for t in result] == [1, 3]
+        assert not any("Пропускаем" in m for m in messages)
+        assert not any("task-2" in m for m in messages)
+
+    def test_non_silent_ignored_tasks_warn(self) -> None:
+        """Non-silent ignored tasks produce a warning."""
+        tasks = self._make_tasks()
+        options = _FetchAnnotationsOptions(
+            ignore_task_ids={2},
+        )
+        messages: list[str] = []
+        sink_id = logger.add(
+            lambda m: messages.append(m.record["message"]), level="WARNING"
+        )
+        try:
+            result = _filter_tasks_for_fetch(tasks, options)
+        finally:
+            logger.remove(sink_id)
+
+        assert [t.id for t in result] == [1, 3]
+        assert any("Пропускаем" in m for m in messages)
+        assert any("task-2" in m for m in messages)
+
+    def test_mixed_silent_and_non_silent(self) -> None:
+        """Only non-silent ignored tasks appear in the warning."""
+        tasks = self._make_tasks()
+        options = _FetchAnnotationsOptions(
+            ignore_task_ids={1, 2},
+            silent_task_ids={1},
+        )
+        messages: list[str] = []
+        sink_id = logger.add(
+            lambda m: messages.append(m.record["message"]), level="WARNING"
+        )
+        try:
+            result = _filter_tasks_for_fetch(tasks, options)
+        finally:
+            logger.remove(sink_id)
+
+        assert [t.id for t in result] == [3]
+        all_text = " ".join(messages)
+        assert "Пропускаем 1 задач" in all_text
+        assert "task-2" in all_text
+        assert "task-1" not in all_text
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: IgnoredTask silent field (config round-trip)
+# ---------------------------------------------------------------------------
+
+
+class TestIgnoredTaskSilent:
+    """Tests for the ``silent`` field on ``IgnoredTask``."""
+
+    def test_parse_silent_true(self) -> None:
+        """``_parse_ignore_entry`` reads ``silent: true``."""
+        entry = _parse_ignore_entry({"id": 5, "name": "t5", "silent": True})
+        assert entry is not None
+        assert entry.silent is True
+
+    def test_parse_silent_absent_defaults_false(self) -> None:
+        """Missing ``silent`` key defaults to False."""
+        entry = _parse_ignore_entry({"id": 5, "name": "t5"})
+        assert entry is not None
+        assert entry.silent is False
+
+    def test_serialize_silent_true(self) -> None:
+        """``_serialize_ignore_entry`` includes ``silent`` only when True."""
+        entry = IgnoredTask(id=5, name="t5", silent=True)
+        data = _serialize_ignore_entry(entry)
+        assert data["silent"] is True
+
+    def test_serialize_silent_false_omitted(self) -> None:
+        """``_serialize_ignore_entry`` omits ``silent`` when False."""
+        entry = IgnoredTask(id=5, name="t5", silent=False)
+        data = _serialize_ignore_entry(entry)
+        assert "silent" not in data
+
+    def test_get_silent_task_ids(self) -> None:
+        """``get_silent_task_ids`` returns only IDs with ``silent=True``."""
+        cfg = IgnoreConfig(
+            projects={
+                "proj": [
+                    IgnoredTask(id=1, name="a", silent=True),
+                    IgnoredTask(id=2, name="b"),
+                    IgnoredTask(id=3, name="c", silent=True),
+                ],
+            },
+        )
+        assert cfg.get_silent_task_ids("proj") == {1, 3}
+
+    def test_get_silent_task_ids_empty(self) -> None:
+        """Returns empty set when no silent tasks."""
+        cfg = IgnoreConfig(
+            projects={"proj": [IgnoredTask(id=1, name="a")]},
+        )
+        assert cfg.get_silent_task_ids("proj") == set()
+
+    def test_add_task_with_silent(self) -> None:
+        """``add_task`` accepts ``silent`` keyword argument."""
+        cfg = IgnoreConfig()
+        cfg.add_task("proj", 42, "my-task", silent=True)
+        entries = cfg.get_ignored_entries("proj")
+        assert len(entries) == 1
+        assert entries[0].silent is True
 
 
 # ---------------------------------------------------------------------------

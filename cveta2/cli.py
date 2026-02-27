@@ -380,6 +380,12 @@ class CliApp:
             default=None,
             help="Description / reason for ignoring (used with --add).",
         )
+        parser.add_argument(
+            "--silent",
+            action="store_true",
+            default=False,
+            help="Suppress per-task warning during fetch (used with --add).",
+        )
 
     def _add_labels_parser(
         self,

@@ -12,7 +12,7 @@ import questionary
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2.client import CvatClient, FetchContext
+from cveta2.client import CvatClient, FetchContext, _FetchAnnotationsOptions
 from cveta2.commands._helpers import (
     load_config,
     require_host,
@@ -58,15 +58,17 @@ def run_fetch(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        ignore_set = _warn_ignored_tasks(project_name)
+        ignore_set, silent_set = _warn_ignored_tasks(project_name)
+        fetch_options = _FetchAnnotationsOptions(
+            completed_only=args.completed_only,
+            ignore_task_ids=ignore_set,
+            silent_task_ids=silent_set,
+            host=(cfg.host or ""),
+            project_name=project_name,
+        )
 
         try:
-            ctx = client.prepare_fetch(
-                project_id=project_id,
-                completed_only=args.completed_only,
-                ignore_task_ids=ignore_set,
-                project_name=project_name,
-            )
+            ctx = client.prepare_fetch_options(project_id, fetch_options)
         except Cveta2Error as e:
             sys.exit(str(e))
 
@@ -103,17 +105,19 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        ignore_set = _warn_ignored_tasks(project_name)
+        ignore_set, silent_set = _warn_ignored_tasks(project_name)
         task_sel = _resolve_task_selector(args, client, project_id, ignore_set)
+        fetch_options = _FetchAnnotationsOptions(
+            completed_only=args.completed_only,
+            ignore_task_ids=ignore_set,
+            silent_task_ids=silent_set,
+            task_selector=task_sel,
+            host=(cfg.host or ""),
+            project_name=project_name,
+        )
 
         try:
-            ctx = client.prepare_fetch(
-                project_id=project_id,
-                completed_only=args.completed_only,
-                ignore_task_ids=ignore_set,
-                task_selector=task_sel,
-                project_name=project_name,
-            )
+            ctx = client.prepare_fetch_options(project_id, fetch_options)
         except Cveta2Error as e:
             sys.exit(str(e))
 
@@ -333,13 +337,20 @@ def _resolve_task_selector(
     return [t.id for t in selected]
 
 
-def _warn_ignored_tasks(project_name: str) -> set[int] | None:
-    """Load ignore config, warn about ignored tasks, return their IDs as a set."""
+def _warn_ignored_tasks(
+    project_name: str,
+) -> tuple[set[int] | None, set[int] | None]:
+    """Load ignore config, return ``(ignore_set, silent_set)``.
+
+    *ignore_set* contains all ignored task IDs (or None if empty).
+    *silent_set* contains IDs of tasks marked ``silent=True``.
+    """
     ignore_cfg = load_ignore_config()
     ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
     if not ignored_ids:
-        return None
-    return set(ignored_ids)
+        return None, None
+    silent_ids = ignore_cfg.get_silent_task_ids(project_name)
+    return set(ignored_ids), (silent_ids or None)
 
 
 def _resolve_images_dir(

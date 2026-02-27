@@ -74,9 +74,12 @@ def run_ignore(args: argparse.Namespace) -> None:
 
         if args.add:
             description = (args.description or "").strip()
+            silent = args.silent
             resolved = _resolve_selectors(client, project_id, args.add)
             for task in resolved:
-                ignore_cfg.add_task(project_name, task.id, task.name, description)
+                ignore_cfg.add_task(
+                    project_name, task.id, task.name, description, silent=silent
+                )
                 logger.info(
                     f"Задача {task.name!r} (id={task.id}) добавлена "
                     f"в ignore-список проекта {project_name!r}"
@@ -201,6 +204,8 @@ def _format_ignored_entry(e: IgnoredTask) -> str:
     label = f"{e.name!r} (id={e.id})" if e.name else f"id={e.id}"
     if e.description:
         label += f" — {e.description}"
+    if e.silent:
+        label += " [silent]"
     return label
 
 
@@ -302,12 +307,17 @@ def _interactive_add(
     description = (
         questionary.text("Описание / причина (Enter — пропустить):").ask() or ""
     ).strip()
+    silent = questionary.confirm(
+        "Не показывать предупреждение при fetch (silent)?", default=False
+    ).ask()
 
     tasks_by_id = {t.id: t for t in tasks}
     for val in answer:
         task = tasks_by_id.get(int(val))
         if task is not None:
-            ignore_cfg.add_task(project_name, task.id, task.name, description)
+            ignore_cfg.add_task(
+                project_name, task.id, task.name, description, silent=bool(silent)
+            )
             logger.info(f"Задача {task.name!r} (id={task.id}) добавлена")
     return True
 
