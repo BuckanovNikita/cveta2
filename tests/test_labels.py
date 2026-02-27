@@ -20,12 +20,10 @@ from cveta2.commands.labels import (
 from cveta2.config import CvatConfig
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import LabelAttributeInfo, LabelInfo
-from tests.conftest import build_fake, write_test_config
+from tests.conftest import build_fake
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
@@ -259,15 +257,8 @@ def test_update_labels_requires_context_manager() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_cli_labels_list(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
-
+@pytest.mark.usefixtures("test_config")
+def test_cli_labels_list() -> None:
     mock_client = _mock_client_ctx(labels=_LABELS)
     with (
         patch(
@@ -285,15 +276,8 @@ def test_cli_labels_list(
     mock_client.get_project_labels.assert_called_once_with(1)
 
 
-def test_cli_labels_list_empty(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
-
+@pytest.mark.usefixtures("test_config")
+def test_cli_labels_list_empty() -> None:
     mock_client = _mock_client_ctx(labels=[])
     with (
         patch(
@@ -311,16 +295,12 @@ def test_cli_labels_list_empty(
     mock_client.get_project_labels.assert_called_once()
 
 
+@pytest.mark.usefixtures("test_config")
 def test_cli_labels_noninteractive_without_list_errors(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-interactive mode without --list should fail."""
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-    monkeypatch.delenv("CVAT_HOST", raising=False)
 
     mock_client = _mock_client_ctx(labels=_LABELS)
     with (

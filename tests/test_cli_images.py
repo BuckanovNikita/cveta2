@@ -35,15 +35,9 @@ def _mock_client_ctx(
 
 
 def test_fetch_no_images_flag_skips_download(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_config: Path,
 ) -> None:
     """--no-images prevents any image download attempt."""
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
-
     mock_client = _mock_client_ctx()
     with (
         patch("cveta2.commands.fetch.CvatClient", return_value=mock_client),
@@ -56,7 +50,7 @@ def test_fetch_no_images_flag_skips_download(
                 "--project",
                 "1",
                 "--output-dir",
-                str(tmp_path / "out"),
+                str(test_config.parent / "out"),
                 "--no-images",
             ]
         )
@@ -66,13 +60,10 @@ def test_fetch_no_images_flag_skips_download(
 
 def test_fetch_images_dir_overrides_config(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_config: Path,
 ) -> None:
     """--images-dir is passed to download_images, ignoring config mapping."""
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path, image_cache={"coco8-dev": "/other/path"})
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
+    write_test_config(test_config, image_cache={"coco8-dev": "/other/path"})
 
     custom_dir = tmp_path / "custom-images"
 
@@ -100,15 +91,11 @@ def test_fetch_images_dir_overrides_config(
 
 
 def test_fetch_noninteractive_no_path_errors(
-    tmp_path: Path,
+    test_config: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-interactive mode + no configured path = error exit."""
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)  # No image_cache section
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-    monkeypatch.delenv("CVAT_HOST", raising=False)
 
     mock_client = _mock_client_ctx()
     with (
@@ -123,20 +110,16 @@ def test_fetch_noninteractive_no_path_errors(
                     "--project",
                     "coco8-dev",
                     "--output-dir",
-                    str(tmp_path / "out"),
+                    str(test_config.parent / "out"),
                 ]
             )
 
 
 def test_fetch_configured_path_downloads(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_config: Path,
 ) -> None:
     """When image_cache has the project, download_images is called with that path."""
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path, image_cache={"coco8-dev": "/mnt/data/coco8"})
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
+    write_test_config(test_config, image_cache={"coco8-dev": "/mnt/data/coco8"})
 
     mock_client = _mock_client_ctx()
     with (
@@ -150,7 +133,7 @@ def test_fetch_configured_path_downloads(
                 "--project",
                 "coco8-dev",
                 "--output-dir",
-                str(tmp_path / "out"),
+                str(test_config.parent / "out"),
             ]
         )
 
@@ -160,15 +143,11 @@ def test_fetch_configured_path_downloads(
 
 
 def test_fetch_noninteractive_no_images_skips(
-    tmp_path: Path,
+    test_config: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Non-interactive + --no-images works without error."""
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-    monkeypatch.delenv("CVAT_HOST", raising=False)
 
     mock_client = _mock_client_ctx()
     with (
@@ -182,7 +161,7 @@ def test_fetch_noninteractive_no_images_skips(
                 "--project",
                 "1",
                 "--output-dir",
-                str(tmp_path / "out"),
+                str(test_config.parent / "out"),
                 "--no-images",
             ]
         )

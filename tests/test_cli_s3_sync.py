@@ -28,16 +28,9 @@ def _mock_client_ctx() -> MagicMock:
     return client
 
 
-def test_s3_sync_no_image_cache_exits(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@pytest.mark.usefixtures("test_config")
+def test_s3_sync_no_image_cache_exits() -> None:
     """s3-sync exits with error when no image_cache is configured."""
-    cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)  # no image_cache
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
-
     app = CliApp()
     with pytest.raises(SystemExit):
         app.run(["s3-sync"])
@@ -45,19 +38,16 @@ def test_s3_sync_no_image_cache_exits(
 
 def test_s3_sync_all_projects(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_config: Path,
 ) -> None:
     """s3-sync syncs all configured projects."""
-    cfg_path = tmp_path / "config.yaml"
     write_test_config(
-        cfg_path,
+        test_config,
         image_cache={
             "project-a": str(tmp_path / "images-a"),
             "project-b": str(tmp_path / "images-b"),
         },
     )
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
 
     mock_client = _mock_client_ctx()
     # resolve_project_id returns different IDs per project
@@ -79,19 +69,16 @@ def test_s3_sync_all_projects(
 
 def test_s3_sync_single_project(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_config: Path,
 ) -> None:
     """s3-sync --project syncs only the specified project."""
-    cfg_path = tmp_path / "config.yaml"
     write_test_config(
-        cfg_path,
+        test_config,
         image_cache={
             "project-a": str(tmp_path / "images-a"),
             "project-b": str(tmp_path / "images-b"),
         },
     )
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
 
     mock_client = _mock_client_ctx()
     with (
@@ -108,16 +95,13 @@ def test_s3_sync_single_project(
 
 def test_s3_sync_unknown_project_exits(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_config: Path,
 ) -> None:
     """s3-sync --project with unknown project name exits with error."""
-    cfg_path = tmp_path / "config.yaml"
     write_test_config(
-        cfg_path,
+        test_config,
         image_cache={"project-a": str(tmp_path / "images-a")},
     )
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
 
     app = CliApp()
     with pytest.raises(SystemExit):
@@ -126,21 +110,18 @@ def test_s3_sync_unknown_project_exits(
 
 def test_s3_sync_continues_on_resolve_error(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    test_config: Path,
 ) -> None:
     """s3-sync continues to next project when one fails to resolve."""
     from cveta2.exceptions import ProjectNotFoundError
 
-    cfg_path = tmp_path / "config.yaml"
     write_test_config(
-        cfg_path,
+        test_config,
         image_cache={
             "bad-project": str(tmp_path / "images-bad"),
             "good-project": str(tmp_path / "images-good"),
         },
     )
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    monkeypatch.delenv("CVAT_HOST", raising=False)
 
     mock_client = _mock_client_ctx()
 

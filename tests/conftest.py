@@ -139,6 +139,17 @@ def write_test_config(
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
+@pytest.fixture
+def test_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Write a minimal test config and isolate env from real CVAT vars."""
+    cfg_path = tmp_path / "config.yaml"
+    write_test_config(cfg_path)
+    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
+    for var in ("CVAT_HOST", "CVAT_ORGANIZATION", "CVAT_USERNAME", "CVAT_PASSWORD"):
+        monkeypatch.delenv(var, raising=False)
+    return cfg_path
+
+
 def make_bbox(**overrides: object) -> BBoxAnnotation:
     """Create a BBoxAnnotation with sensible defaults."""
     defaults: dict[str, object] = {
