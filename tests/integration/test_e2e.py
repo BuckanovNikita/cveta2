@@ -184,7 +184,7 @@ class TestRealCliFetchTask:
         from unittest.mock import patch
 
         with (
-            patch("cveta2.commands.fetch.load_config", return_value=cfg),
+            patch("cveta2.commands.fetch.CvatConfig.load", return_value=cfg),
             patch("cveta2.commands.fetch.require_host"),
             patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(

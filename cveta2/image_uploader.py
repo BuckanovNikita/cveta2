@@ -1,8 +1,7 @@
 """Upload images to S3 cloud storage for CVAT task creation.
 
-Reuses :class:`CloudStorageInfo`, :func:`_build_s3_key`,
-:func:`_list_s3_objects` and the S3 retry decorator from
-:mod:`cveta2.image_downloader`.
+Reuses :class:`CloudStorageInfo` from :mod:`cveta2.image_downloader`
+and S3 utilities from :mod:`cveta2.s3_utils`.
 """
 
 from __future__ import annotations
@@ -11,21 +10,16 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-import boto3
 from loguru import logger
 from pydantic import BaseModel
 from tqdm import tqdm
 
-from cveta2.image_downloader import (
-    CloudStorageInfo,
-    _build_s3_key,
-    _list_s3_objects,
-    _s3_retry,
-)
+from cveta2.s3_utils import build_s3_key, list_s3_objects, make_s3_client, s3_retry
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from cveta2.image_downloader import CloudStorageInfo
     from cveta2.s3_types import S3Client
 
 
@@ -113,11 +107,8 @@ def build_server_file_mapping(
         Passed to :meth:`S3Uploader.upload` to avoid a redundant listing.
 
     """
-    client = s3_client or boto3.Session().client(
-        "s3",
-        endpoint_url=cs_info.endpoint_url or None,
-    )
-    objects = _list_s3_objects(client, cs_info.bucket, cs_info.prefix)
+    client = s3_client or make_s3_client(cs_info)
+    objects = list_s3_objects(client, cs_info.bucket, cs_info.prefix)
     existing_keys: set[str] = {key for key, _name in objects}
 
     # Build basename → relative-name lookup.
@@ -157,7 +148,7 @@ def build_server_file_mapping(
 # ---------------------------------------------------------------------------
 
 
-@_s3_retry
+@s3_retry
 def _upload_one_s3(
     s3_client: S3Client,
     bucket: str,
@@ -172,7 +163,7 @@ class S3Uploader:
     """Upload images to S3 cloud storage, skipping already-existing files.
 
     Uses the same S3 key construction as :class:`ImageDownloader` (via
-    :func:`_build_s3_key`) to ensure consistency between upload and
+    :func:`build_s3_key`) to ensure consistency between upload and
     download paths.
     """
 
@@ -198,7 +189,7 @@ class S3Uploader:
             :func:`build_server_file_mapping`.
         existing_keys:
             Pre-computed set of existing S3 keys.  When provided, the
-            internal ``_list_existing_keys`` call is skipped.
+            internal ``list_s3_objects`` call is skipped.
 
         Returns
         -------
@@ -211,14 +202,12 @@ class S3Uploader:
 
         stats = UploadStats(total=len(images))
 
-        s3 = boto3.Session().client(
-            "s3",
-            endpoint_url=cs_info.endpoint_url or None,
-        )
+        s3 = make_s3_client(cs_info)
 
         # List existing objects to skip re-uploads
         if existing_keys is None:
-            existing_keys = self._list_existing_keys(s3, cs_info)
+            objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
+            existing_keys = {key for key, _name in objects}
 
         to_upload: list[tuple[str, str, Path]] = []  # (name, key, path)
         for name, local_path in images.items():
@@ -227,7 +216,7 @@ class S3Uploader:
                 if name_to_server_file and name in name_to_server_file
                 else name
             )
-            s3_key = _build_s3_key(cs_info.prefix, server_file)
+            s3_key = build_s3_key(cs_info.prefix, server_file)
             if s3_key in existing_keys:
                 stats.skipped_existing += 1
             else:
@@ -256,12 +245,3 @@ class S3Uploader:
             f"(всего {stats.total})"
         )
         return stats
-
-    @staticmethod
-    def _list_existing_keys(
-        s3_client: S3Client,
-        cs_info: CloudStorageInfo,
-    ) -> set[str]:
-        """Return the set of existing S3 keys under the cloud storage prefix."""
-        objects = _list_s3_objects(s3_client, cs_info.bucket, cs_info.prefix)
-        return {key for key, _name in objects}

@@ -9,11 +9,10 @@ from loguru import logger
 
 from cveta2.client import CvatClient
 from cveta2.commands._helpers import (
-    load_config,
     require_host,
     resolve_project_and_cloud_storage,
 )
-from cveta2.config import load_image_cache_config
+from cveta2.config import CvatConfig, load_image_cache_config
 from cveta2.exceptions import Cveta2Error
 
 if TYPE_CHECKING:
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
 def run_s3_sync(args: argparse.Namespace) -> None:
     """Run the ``s3-sync`` command."""
-    cfg = load_config()
+    cfg = CvatConfig.load()
     require_host(cfg)
 
     ic_cfg = load_image_cache_config()

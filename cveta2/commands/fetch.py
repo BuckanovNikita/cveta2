@@ -13,9 +13,8 @@ import questionary
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2.client import CvatClient, FetchContext, _FetchAnnotationsOptions
+from cveta2.client import CvatClient, FetchContext
 from cveta2.commands._helpers import (
-    load_config,
     require_host,
     resolve_project_and_cloud_storage,
     write_dataset_and_deleted,
@@ -24,6 +23,7 @@ from cveta2.commands._helpers import (
 )
 from cveta2.commands._task_selector import select_tasks_tui
 from cveta2.config import (
+    CvatConfig,
     is_interactive_disabled,
     load_ignore_config,
     load_image_cache_config,
@@ -31,8 +31,8 @@ from cveta2.config import (
 )
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
-from cveta2.image_downloader import _build_s3_key
 from cveta2.models import TaskAnnotations
+from cveta2.s3_utils import build_s3_key
 
 if TYPE_CHECKING:
     import argparse
@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
-    cfg = load_config()
+    cfg = CvatConfig.load()
     require_host(cfg)
     output_dir = _resolve_output_dir(Path(args.output_dir))
 
@@ -60,16 +60,15 @@ def run_fetch(args: argparse.Namespace) -> None:
             sys.exit(str(e))
 
         ignore_set, silent_set = _warn_ignored_tasks(project_name)
-        fetch_options = _FetchAnnotationsOptions(
-            completed_only=args.completed_only,
-            ignore_task_ids=ignore_set,
-            silent_task_ids=silent_set,
-            host=(cfg.host or ""),
-            project_name=project_name,
-        )
 
         try:
-            ctx = client.prepare_fetch_options(project_id, fetch_options)
+            ctx = client.prepare_fetch(
+                project_id,
+                completed_only=args.completed_only,
+                ignore_task_ids=ignore_set,
+                silent_task_ids=silent_set,
+                project_name=project_name,
+            )
         except Cveta2Error as e:
             sys.exit(str(e))
 
@@ -94,7 +93,7 @@ def run_fetch(args: argparse.Namespace) -> None:
 
 def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
-    cfg = load_config()
+    cfg = CvatConfig.load()
     require_host(cfg)
     output_dir = Path(args.output_dir)
 
@@ -108,17 +107,16 @@ def run_fetch_task(args: argparse.Namespace) -> None:
 
         ignore_set, silent_set = _warn_ignored_tasks(project_name)
         task_sel = _resolve_task_selector(args, client, project_id, ignore_set)
-        fetch_options = _FetchAnnotationsOptions(
-            completed_only=args.completed_only,
-            ignore_task_ids=ignore_set,
-            silent_task_ids=silent_set,
-            task_selector=task_sel,
-            host=(cfg.host or ""),
-            project_name=project_name,
-        )
 
         try:
-            ctx = client.prepare_fetch_options(project_id, fetch_options)
+            ctx = client.prepare_fetch(
+                project_id,
+                completed_only=args.completed_only,
+                ignore_task_ids=ignore_set,
+                silent_task_ids=silent_set,
+                task_selector=task_sel,
+                project_name=project_name,
+            )
         except Cveta2Error as e:
             sys.exit(str(e))
 
@@ -166,9 +164,9 @@ def _populate_s3_paths(
     if cs_info is None:
         return
     for ann in result.annotations:
-        ann.s3_path = _build_s3_key(cs_info.prefix, ann.image_name)
+        ann.s3_path = build_s3_key(cs_info.prefix, ann.image_name)
     for deleted in result.deleted_images:
-        deleted.s3_path = _build_s3_key(cs_info.prefix, deleted.image_name)
+        deleted.s3_path = build_s3_key(cs_info.prefix, deleted.image_name)
 
 
 def _populate_image_paths(

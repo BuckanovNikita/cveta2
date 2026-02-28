@@ -9,8 +9,6 @@ from cveta2.image_downloader import (
     CloudStorageInfo,
     ImageDownloader,
     S3Syncer,
-    _build_s3_key,
-    _list_s3_objects,
     parse_cloud_storage,
 )
 from cveta2.models import (
@@ -19,6 +17,7 @@ from cveta2.models import (
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
+from cveta2.s3_utils import build_s3_key, list_s3_objects
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -152,9 +151,9 @@ def _img_no_ann(
 
 
 def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: MagicMock) -> None:
-    """Patch boto3.Session to return the fake S3 client."""
+    """Patch make_s3_client to return the fake S3 client."""
     monkeypatch.setattr(
-        "cveta2.image_downloader.boto3.Session",
+        "cveta2.s3_utils.boto3.Session",
         lambda: MagicMock(client=lambda *_a, **_kw: fake_s3),
     )
 
@@ -227,15 +226,15 @@ def test_parse_cloud_storage_no_prefix() -> None:
 
 
 def test_s3_key_with_prefix() -> None:
-    assert _build_s3_key("data/images", "cat.jpg") == "data/images/cat.jpg"
+    assert build_s3_key("data/images", "cat.jpg") == "data/images/cat.jpg"
 
 
 def test_s3_key_without_prefix() -> None:
-    assert _build_s3_key("", "cat.jpg") == "cat.jpg"
+    assert build_s3_key("", "cat.jpg") == "cat.jpg"
 
 
 def test_s3_key_frame_already_has_prefix() -> None:
-    assert _build_s3_key("data/images", "data/images/cat.jpg") == "data/images/cat.jpg"
+    assert build_s3_key("data/images", "data/images/cat.jpg") == "data/images/cat.jpg"
 
 
 def test_download_saves_to_target_dir_flat(
@@ -517,53 +516,53 @@ def _patch_boto_sync(
     monkeypatch: pytest.MonkeyPatch,
     fake_s3: MagicMock,
 ) -> None:
-    """Patch boto3.Session to return the fake S3 client (for sync tests)."""
+    """Patch make_s3_client to return the fake S3 client (for sync tests)."""
     monkeypatch.setattr(
-        "cveta2.image_downloader.boto3.Session",
+        "cveta2.s3_utils.boto3.Session",
         lambda: MagicMock(client=lambda *_a, **_kw: fake_s3),
     )
 
 
-# --- _list_s3_objects tests ---
+# --- list_s3_objects tests ---
 
 
-def test_list_s3_objects_returns_keys_stripped_of_prefix() -> None:
-    """_list_s3_objects strips the prefix from keys."""
+def testlist_s3_objects_returns_keys_stripped_of_prefix() -> None:
+    """list_s3_objects strips the prefix from keys."""
     s3_objects = {
         "images/a.jpg": b"data-a",
         "images/b.jpg": b"data-b",
     }
     fake_s3 = _make_list_s3_client(s3_objects)
-    result = _list_s3_objects(fake_s3, "test-bucket", "images")
+    result = list_s3_objects(fake_s3, "test-bucket", "images")
     assert sorted(result) == [("images/a.jpg", "a.jpg"), ("images/b.jpg", "b.jpg")]
 
 
-def test_list_s3_objects_no_prefix() -> None:
-    """_list_s3_objects with empty prefix returns keys as-is."""
+def testlist_s3_objects_no_prefix() -> None:
+    """list_s3_objects with empty prefix returns keys as-is."""
     s3_objects = {
         "cat.jpg": b"cat",
         "dog.jpg": b"dog",
     }
     fake_s3 = _make_list_s3_client(s3_objects)
-    result = _list_s3_objects(fake_s3, "bucket", "")
+    result = list_s3_objects(fake_s3, "bucket", "")
     assert sorted(result) == [("cat.jpg", "cat.jpg"), ("dog.jpg", "dog.jpg")]
 
 
-def test_list_s3_objects_empty_bucket() -> None:
-    """_list_s3_objects returns empty list for empty bucket."""
+def testlist_s3_objects_empty_bucket() -> None:
+    """list_s3_objects returns empty list for empty bucket."""
     fake_s3 = _make_list_s3_client({})
-    result = _list_s3_objects(fake_s3, "bucket", "prefix")
+    result = list_s3_objects(fake_s3, "bucket", "prefix")
     assert result == []
 
 
-def test_list_s3_objects_skips_prefix_marker() -> None:
-    """_list_s3_objects skips the prefix directory marker (empty name after strip)."""
+def testlist_s3_objects_skips_prefix_marker() -> None:
+    """list_s3_objects skips the prefix directory marker (empty name after strip)."""
     s3_objects = {
         "images/": b"",  # directory marker
         "images/a.jpg": b"data",
     }
     fake_s3 = _make_list_s3_client(s3_objects)
-    result = _list_s3_objects(fake_s3, "bucket", "images/")
+    result = list_s3_objects(fake_s3, "bucket", "images/")
     assert result == [("images/a.jpg", "a.jpg")]
 
 

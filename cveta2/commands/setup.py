@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cveta2.client import CvatClient
-from cveta2.commands._helpers import load_config, require_host
+from cveta2.commands._helpers import require_host
 from cveta2.config import (
     CvatConfig,
     ImageCacheConfig,
@@ -173,7 +173,7 @@ def _ensure_projects_list(config_path: Path) -> list[ProjectInfo]:
         return projects
 
     logger.info("Кэш проектов пуст. Загружаю список с CVAT...")
-    cfg = load_config(config_path=config_path)
+    cfg = CvatConfig.load(config_path=config_path)
     require_host(cfg)
 
     with CvatClient(cfg) as client:

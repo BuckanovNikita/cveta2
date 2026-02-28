@@ -12,20 +12,19 @@ from loguru import logger
 
 from cveta2.client import CvatClient
 from cveta2.commands._helpers import (
-    load_config,
     read_dataset_csv,
     require_host,
-    resolve_project_from_args,
-    select_project_tui,
+    resolve_project_or_exit,
 )
 from cveta2.config import (
+    CvatConfig,
     load_image_cache_config,
     load_upload_config,
     require_interactive,
 )
-from cveta2.exceptions import Cveta2Error, LabelsMismatchError
-from cveta2.image_downloader import _build_s3_key
+from cveta2.exceptions import LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
+from cveta2.s3_utils import build_s3_key
 
 if TYPE_CHECKING:
     import argparse
@@ -151,7 +150,7 @@ def _enrich_paths(
     """Add ``s3_path`` and ``image_path`` columns to the DataFrame."""
     df = df.copy()
     df["s3_path"] = df["image_name"].map(
-        lambda name: _build_s3_key(
+        lambda name: build_s3_key(
             cs_info.prefix,
             name_to_server_file[name]
             if name_to_server_file and name in name_to_server_file
@@ -162,21 +161,6 @@ def _enrich_paths(
         lambda name: str(found_images[name].resolve()) if name in found_images else None
     )
     return df
-
-
-def _resolve_upload_project(
-    client: CvatClient,
-    project_arg: str | None,
-) -> tuple[int, str]:
-    """Resolve project ID and name for the upload command."""
-    try:
-        resolved = resolve_project_from_args(project_arg, client)
-    except Cveta2Error as exc:
-        sys.exit(str(exc))
-
-    if resolved is not None:
-        return resolved
-    return select_project_tui(client)
 
 
 # ---------------------------------------------------------------------------
@@ -217,7 +201,7 @@ def _extract_deleted_names(df: pd.DataFrame) -> set[str]:
 
 def run_upload(args: argparse.Namespace) -> None:
     """Run the ``upload`` command."""
-    cfg = load_config()
+    cfg = CvatConfig.load()
     require_host(cfg)
     upload_cfg = load_upload_config()
 
@@ -251,9 +235,9 @@ def run_upload(args: argparse.Namespace) -> None:
     task_name = _resolve_task_name(args.name)
 
     with CvatClient(cfg) as client:
-        project_id, project_name = _resolve_upload_project(
-            client,
+        project_id, project_name = resolve_project_or_exit(
             args.project,
+            client,
         )
 
         _validate_labels(client, project_id, project_name, real_labels)

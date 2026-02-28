@@ -82,7 +82,7 @@ def _run_fetch_task_with_fake(
     ic = ignore_config if ignore_config is not None else IgnoreConfig()
 
     with (
-        patch(f"{_MODULE}.load_config", return_value=_CFG),
+        patch(f"{_MODULE}.CvatConfig.load", return_value=_CFG),
         patch(f"{_MODULE}.require_host"),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         patch(f"{_MODULE}.load_ignore_config", return_value=ic),

@@ -10,6 +10,7 @@ import questionary
 from loguru import logger
 
 from cveta2.config import CvatConfig, get_config_path, require_interactive
+from cveta2.exceptions import Cveta2Error
 from cveta2.models import CSV_COLUMNS
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
 
@@ -101,6 +102,25 @@ def select_project_tui(client: CvatClient) -> tuple[int, str]:
         return (project_id, project_name)
 
 
+def resolve_project_or_exit(
+    project_arg: str | None,
+    client: CvatClient,
+) -> tuple[int, str]:
+    """Resolve project ID and name, falling back to interactive TUI.
+
+    Calls :func:`resolve_project_from_args` and exits on error.
+    When *project_arg* is empty, falls back to :func:`select_project_tui`.
+    """
+    try:
+        resolved = resolve_project_from_args(project_arg, client)
+    except Cveta2Error as e:
+        sys.exit(str(e))
+
+    if resolved is not None:
+        return resolved
+    return select_project_tui(client)
+
+
 def resolve_project_and_cloud_storage(
     client: CvatClient,
     project_spec: str | None,
@@ -129,11 +149,6 @@ def resolve_project_and_cloud_storage(
         project_id, project_name = select_project_tui(client)
     cs_info = client.detect_project_cloud_storage(project_id)
     return (project_id, project_name, cs_info)
-
-
-def load_config(config_path: Path | None = None) -> CvatConfig:
-    """Load config from file and env. Path from CVETA2_CONFIG or argument."""
-    return CvatConfig.load(config_path=config_path)
 
 
 def read_dataset_csv(

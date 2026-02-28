@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import sys
 from typing import TYPE_CHECKING
 
 import questionary
@@ -11,13 +10,10 @@ from loguru import logger
 
 from cveta2.client import CvatClient
 from cveta2.commands._helpers import (
-    load_config,
     require_host,
-    resolve_project_from_args,
-    select_project_tui,
+    resolve_project_or_exit,
 )
-from cveta2.config import require_interactive
-from cveta2.exceptions import Cveta2Error
+from cveta2.config import CvatConfig, require_interactive
 
 if TYPE_CHECKING:
     import argparse
@@ -40,11 +36,11 @@ _HEX_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 
 def run_labels(args: argparse.Namespace) -> None:
     """Run the ``labels`` command: list or interactively edit project labels."""
-    cfg = load_config()
+    cfg = CvatConfig.load()
     require_host(cfg)
 
     with CvatClient(cfg) as client:
-        project_id, project_name = _resolve_project(args, client)
+        project_id, project_name = resolve_project_or_exit(args.project, client)
 
         if args.list_labels:
             labels = client.get_project_labels(project_id)
@@ -52,26 +48,6 @@ def run_labels(args: argparse.Namespace) -> None:
             return
 
         _interactive_loop(client, project_id, project_name)
-
-
-# ------------------------------------------------------------------
-# Project resolution
-# ------------------------------------------------------------------
-
-
-def _resolve_project(
-    args: argparse.Namespace,
-    client: CvatClient,
-) -> tuple[int, str]:
-    """Resolve project ID and name from CLI args or interactive TUI."""
-    try:
-        resolved = resolve_project_from_args(args.project, client)
-    except Cveta2Error as e:
-        sys.exit(str(e))
-
-    if resolved is not None:
-        return resolved
-    return select_project_tui(client)
 
 
 # ------------------------------------------------------------------

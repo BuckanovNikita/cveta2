@@ -53,6 +53,23 @@ _HTTP_5XX_MIN = 500
 _HTTP_5XX_MAX = 600
 
 
+def _build_name_to_frame(data_meta: object) -> dict[str, int]:
+    """Build frame-name → frame-index mapping from CVAT data_meta.
+
+    Basename fallback handles month-subfolder frame names
+    (e.g. ``"2026-02/img.jpg"`` → also accessible via ``"img.jpg"``).
+
+    Uses attribute access on opaque CVAT SDK ``DataMetaRead`` object.
+    """
+    name_to_frame: dict[str, int] = {}
+    for idx, frame in enumerate(data_meta.frames):  # type: ignore[attr-defined]
+        name_to_frame[frame.name] = idx
+        base = PurePosixPath(frame.name).name
+        if base not in name_to_frame:
+            name_to_frame[base] = idx
+    return name_to_frame
+
+
 @dataclass(frozen=True)
 class _FetchAnnotationsOptions:
     """Options for _fetch_annotations (filters + display/hint)."""
@@ -290,25 +307,19 @@ class CvatClient:
                 )
             yield SdkCvatApiAdapter(sdk_client)
 
-    def _get_api(self) -> CvatApiPort | None:
-        """Return the best available API port (injected > persistent > None)."""
-        return self._api or self._persistent_api
-
     @contextmanager
-    def _api_or_adapter(self) -> Iterator[CvatApiPort]:
-        """Yield the best API port (injected/persistent or a new SDK adapter)."""
-        api = self._get_api()
+    def open_api(self) -> Iterator[CvatApiPort]:
+        """Context manager yielding the best available API port.
+
+        Uses injected or persistent API if available, otherwise opens
+        a fresh SDK adapter.
+        """
+        api = self._api or self._persistent_api
         if api is not None:
             yield api
         else:
             with self._open_sdk_adapter() as adapter:
                 yield adapter
-
-    @contextmanager
-    def open_api(self) -> Iterator[CvatApiPort]:
-        """Context manager yielding the best available API port."""
-        with self._api_or_adapter() as api:
-            yield api
 
     # ------------------------------------------------------------------
     # Public API
@@ -316,17 +327,17 @@ class CvatClient:
 
     def list_projects(self) -> list[ProjectInfo]:
         """Fetch list of projects from CVAT (id and name)."""
-        with self._api_or_adapter() as source:
+        with self.open_api() as source:
             return source.list_projects()
 
     def list_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Fetch the list of tasks for a project from CVAT."""
-        with self._api_or_adapter() as source:
+        with self.open_api() as source:
             return source.get_project_tasks(project_id)
 
     def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         """Fetch label definitions for a project from CVAT."""
-        with self._api_or_adapter() as source:
+        with self.open_api() as source:
             return source.get_project_labels(project_id)
 
     def count_label_usage(self, project_id: int) -> dict[int, int]:
@@ -335,7 +346,7 @@ class CvatClient:
         Returns a mapping ``{label_id: annotation_count}``.
         Used to warn before label deletion.
         """
-        with self._api_or_adapter() as source:
+        with self.open_api() as source:
             tasks = source.get_project_tasks(project_id)
             counts: dict[int, int] = {}
             skipped: list[int] = []
@@ -439,12 +450,13 @@ class CvatClient:
                 return p.id
         raise ProjectNotFoundError(f"Project not found: {s!r}")
 
-    def fetch_annotations(
+    def fetch_annotations(  # noqa: PLR0913
         self,
         project_id: int,
         *,
         completed_only: bool = False,
         ignore_task_ids: set[int] | None = None,
+        silent_task_ids: set[int] | None = None,
         task_selector: list[int | str] | None = None,
         project_name: str = "",
     ) -> ProjectAnnotations:
@@ -452,33 +464,28 @@ class CvatClient:
 
         If ``completed_only`` is True, only completed tasks are processed.
         Tasks whose IDs are in ``ignore_task_ids`` are silently skipped.
+        ``silent_task_ids`` suppresses the skip-warning for those IDs.
         If ``task_selector`` is given (list of task IDs or names), only
         matching tasks are processed.
         """
         options = _FetchAnnotationsOptions(
             completed_only=completed_only,
             ignore_task_ids=ignore_task_ids,
+            silent_task_ids=silent_task_ids,
             task_selector=task_selector,
             host=(self._cfg.host or ""),
             project_name=project_name,
         )
-        return self.fetch_with_options(project_id, options)
-
-    def fetch_with_options(
-        self,
-        project_id: int,
-        options: _FetchAnnotationsOptions,
-    ) -> ProjectAnnotations:
-        """Fetch annotations using pre-built *options*."""
-        with self._api_or_adapter() as source:
+        with self.open_api() as source:
             return self._fetch_annotations(source, project_id, options)
 
-    def prepare_fetch(
+    def prepare_fetch(  # noqa: PLR0913
         self,
         project_id: int,
         *,
         completed_only: bool = False,
         ignore_task_ids: set[int] | None = None,
+        silent_task_ids: set[int] | None = None,
         task_selector: list[int | str] | None = None,
         project_name: str = "",
     ) -> FetchContext:
@@ -490,19 +497,12 @@ class CvatClient:
         options = _FetchAnnotationsOptions(
             completed_only=completed_only,
             ignore_task_ids=ignore_task_ids,
+            silent_task_ids=silent_task_ids,
             task_selector=task_selector,
             host=(self._cfg.host or ""),
             project_name=project_name,
         )
-        return self.prepare_fetch_options(project_id, options)
-
-    def prepare_fetch_options(
-        self,
-        project_id: int,
-        options: _FetchAnnotationsOptions,
-    ) -> FetchContext:
-        """Prepare fetch context using pre-built *options*."""
-        with self._api_or_adapter() as source:
+        with self.open_api() as source:
             return self._prepare_fetch(source, project_id, options)
 
     # ------------------------------------------------------------------
@@ -853,16 +853,8 @@ class CvatClient:
         sdk = self._require_sdk("upload_task_annotations")
 
         # Read actual frame mapping from CVAT (authoritative source).
-        # Frame index = position in the data_meta.frames list.
-        # Basename fallback handles month-subfolder frame names
-        # (e.g. "2026-02/img.jpg" → also accessible via "img.jpg").
         data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
-        name_to_frame: dict[str, int] = {}
-        for idx, frame in enumerate(data_meta.frames):
-            name_to_frame[frame.name] = idx
-            base = PurePosixPath(frame.name).name
-            if base not in name_to_frame:
-                name_to_frame[base] = idx
+        name_to_frame = _build_name_to_frame(data_meta)
 
         logger.debug(f"Задача {task_id}: получено {len(name_to_frame)} фреймов из CVAT")
 
@@ -950,12 +942,7 @@ class CvatClient:
         sdk = self._require_sdk("mark_frames_deleted")
 
         data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
-        name_to_frame: dict[str, int] = {}
-        for idx, frame in enumerate(data_meta.frames):
-            name_to_frame[frame.name] = idx
-            base = PurePosixPath(frame.name).name
-            if base not in name_to_frame:
-                name_to_frame[base] = idx
+        name_to_frame = _build_name_to_frame(data_meta)
         frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
         if not frame_ids:
             return 0
@@ -1040,17 +1027,6 @@ class CvatClient:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
-
-def _project_annotations_to_csv_rows(
-    result: ProjectAnnotations,
-) -> list[dict[str, str | int | float | bool | None]]:
-    """Build CSV rows — thin wrapper around ``ProjectAnnotations.to_csv_rows``.
-
-    .. deprecated::
-        Use ``result.to_csv_rows()`` directly instead.
-    """
-    return result.to_csv_rows()
 
 
 def fetch_annotations(

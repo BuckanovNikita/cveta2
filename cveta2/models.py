@@ -144,6 +144,23 @@ class BBoxAnnotation(BaseModel):
 CSV_COLUMNS: tuple[str, ...] = tuple(BBoxAnnotation.model_fields.keys())
 
 
+def _sparse_csv_row(model: BaseModel) -> dict[str, str | int | float | bool | None]:
+    """Build a CSV row matching ``CSV_COLUMNS`` from a sparse model.
+
+    Fields present on the model are written; all others default to None.
+    An empty ``attributes`` JSON object is added.
+    """
+    row: dict[str, str | int | float | bool | None] = dict.fromkeys(
+        CSV_COLUMNS,
+        None,
+    )
+    for key, value in model.model_dump().items():
+        if key in row:
+            row[key] = value
+    row["attributes"] = json.dumps({}, ensure_ascii=False)
+    return row
+
+
 class ImageWithoutAnnotations(BaseModel):
     """Image without bbox annotations.
 
@@ -174,15 +191,7 @@ class ImageWithoutAnnotations(BaseModel):
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""
-        row: dict[str, str | int | float | bool | None] = dict.fromkeys(
-            CSV_COLUMNS,
-            None,
-        )
-        for key, value in self.model_dump().items():
-            if key in row:
-                row[key] = value
-        row["attributes"] = json.dumps({}, ensure_ascii=False)
-        return row
+        return _sparse_csv_row(self)
 
 
 class DeletedImage(BaseModel):
@@ -214,15 +223,7 @@ class DeletedImage(BaseModel):
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""
-        row: dict[str, str | int | float | bool | None] = dict.fromkeys(
-            CSV_COLUMNS,
-            None,
-        )
-        for key, value in self.model_dump().items():
-            if key in row:
-                row[key] = value
-        row["attributes"] = json.dumps({}, ensure_ascii=False)
-        return row
+        return _sparse_csv_row(self)
 
 
 AnnotationRecord = Annotated[
