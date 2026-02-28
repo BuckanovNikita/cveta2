@@ -51,18 +51,32 @@ cli → commands → client → _client
 ### Module Organization
 
 - **`cveta2/cli.py`** - Argparse CLI entry point, dispatches to commands
-- **`cveta2/commands/`** - Command implementations (fetch, upload, labels, merge, convert, etc.)
+- **`cveta2/commands/`** - Command implementations:
+  - `fetch.py` - Fetch annotations from CVAT project
+  - `upload.py` - Upload annotated dataset back to CVAT
+  - `convert.py` - Bidirectional CSV ↔ YOLO conversion
+  - `merge.py` - Merge multiple fetch outputs
+  - `labels.py` - Manage project labels
+  - `s3_sync.py` - Download images from S3
+  - `setup.py` / `setup-cache` - Initial config and project cache setup
+  - `ignore.py` - Mark tasks to skip during fetch
+  - `doctor.py` - Diagnostic checks
+  - `_task_selector.py` / `_helpers.py` - Shared internals
 - **`cveta2/client.py`** - High-level `CvatClient` API (public interface)
 - **`cveta2/_client/`** - Low-level CVAT SDK adapter (internal)
   - `sdk_adapter.py` - Wraps `cvat_sdk` with our DTOs
   - `extractors.py` - Converts CVAT shapes to `BBoxAnnotation`
   - `dtos.py` - Raw CVAT data transfer objects
   - `ports.py` - Protocol for CVAT API (enables test fakes)
-- **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation, DeletedImage, etc.)
+  - `context.py` - API context management
+  - `mapping.py` - Data mapping utilities
+- **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation with optional `confidence`, DeletedImage, etc.)
 - **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
 - **`cveta2/dataset_partition.py`** - Core logic: splits annotations into dataset/obsolete/in_progress
 - **`cveta2/image_downloader.py`** - S3 → local sync
-- **`cveta2/image_uploader.py`** - Local → S3 upload
+- **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
+- **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
+- **`cveta2/projects_cache.py`** - Local project metadata cache
 
 ### Key Data Flow
 
@@ -72,9 +86,11 @@ cli → commands → client → _client
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
 
 2. **Upload**: `commands/upload.py` → `client.create_upload_task()` + `client.upload_task_annotations()`
-   - Reads CSV, uploads images to S3, creates CVAT task, uploads annotations
+   - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
 
-3. **Partition Logic** (`dataset_partition.py`):
+3. **Convert**: `commands/convert.py` — `--to-yolo` exports CSV to YOLO format (images + labels), `--from-yolo` imports YOLO predictions back to CSV. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
+
+4. **Partition Logic** (`dataset_partition.py`):
    - For each image, finds **latest task** by `task_updated_date` (comparing annotations + deletions)
    - If latest task is deletion → image goes to `obsolete`, added to `deleted_images`
    - Otherwise: completed tasks → `dataset` (latest) or `obsolete` (stale), non-completed → `in_progress`
@@ -133,18 +149,19 @@ uv run pytest -x                 # stop on first failure
 ## Configuration
 
 Config loaded via `CvatConfig.load()` from:
-1. Environment variables (`CVAT_HOST`, `CVAT_TOKEN`, etc.)
+1. Environment variables (`CVAT_HOST`, `CVAT_USERNAME`, `CVAT_PASSWORD`, `CVAT_ORGANIZATION`)
 2. `~/.config/cveta2/config.yaml` (or `CVETA2_CONFIG`)
 3. Built-in preset (`cveta2/presets/default.yaml`)
 
 **Noninteractive mode**: Set `CVETA2_NO_INTERACTIVE=true` to disable all prompts (for CI).
 
+**Error handling**: CVAT 5xx errors during fetch are handled per-task — failed tasks are skipped with a warning and the rest proceed. Set `CVETA2_RAISE_ON_FAILURE=true` to abort on first error instead.
+
 ## Important Files
 
-- **AGENTS.md** - Style guide, linter setup, documentation rules
+- **CONTRIBUTING.md** - Style guide, linter setup, documentation rules
 - **DATASET_FORMAT.md** - Output CSV format, data model reference
 - **README.md** - User documentation (Russian)
-- **RELEASE.md** - Release process and commit conventions
 - **pyproject.toml** - Dependencies, tool configs, import-linter contracts
 
 ## Common Tasks
@@ -174,16 +191,3 @@ uv run pre-commit run --all-files
 ```
 
 If hooks modify files (ruff format), review changes and re-add them.
-
-## Release Process
-
-This project uses **semantic-release** for automated versioning and changelog generation based on commit history.
-
-**Commit format**: Use [Conventional Commits](https://www.conventionalcommits.org/ru/v1.0.0/) (`feat:`, `fix:`, `refactor:`, etc.)
-
-**Releases**: Automated via GitHub Actions on push to `main`. See `RELEASE.md` for details.
-
-**Setup semantic-release** (one-time):
-```bash
-npm install
-```
