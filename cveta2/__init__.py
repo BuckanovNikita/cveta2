@@ -2,6 +2,7 @@
 
 from cveta2._client.ports import CvatApiPort
 from cveta2.client import CvatClient, FetchContext, fetch_annotations
+from cveta2.config import CvatConfig
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import (
     Cveta2Error,
@@ -30,6 +31,7 @@ __all__ = [
     "BBoxAnnotation",
     "CvatApiPort",
     "CvatClient",
+    "CvatConfig",
     "Cveta2Error",
     "DeletedImage",
     "FetchContext",

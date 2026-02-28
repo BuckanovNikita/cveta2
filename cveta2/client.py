@@ -214,18 +214,22 @@ class CvatClient:
 
     def __init__(
         self,
-        cfg: CvatConfig,
+        cfg: CvatConfig | None = None,
         client_factory: _SdkClientFactory | None = None,
         *,
         api: CvatApiPort | None = None,
     ) -> None:
         """Store client configuration and optional API port for DI.
 
+        When *cfg* is ``None``, configuration is loaded automatically
+        from environment variables, config file, and built-in preset
+        via :meth:`CvatConfig.load`.
+
         When *api* is provided it is used directly.  Otherwise an
         ``SdkCvatApiAdapter`` is created on the fly from an SDK client
         opened via *client_factory*.
         """
-        self._cfg = cfg
+        self._cfg = cfg or CvatConfig.load()
         self._client_factory: _SdkClientFactory = client_factory or make_client
         self._api = api
         # Persistent adapter opened by __enter__, closed by __exit__.
