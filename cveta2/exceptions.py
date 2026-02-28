@@ -24,12 +24,13 @@ class InteractiveModeRequiredError(Cveta2Error):
 class LabelsMismatchError(Cveta2Error):
     """Raised when CSV labels don't match project labels."""
 
-    def __init__(  # noqa: D107
+    def __init__(
         self,
         unknown_labels: list[str],
         project_name: str,
         available_labels: list[str],
     ) -> None:
+        """Initialize with mismatched and available label lists."""
         self.unknown_labels = unknown_labels
         self.available_labels = available_labels
         super().__init__(

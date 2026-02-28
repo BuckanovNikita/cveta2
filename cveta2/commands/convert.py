@@ -6,7 +6,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import pandas as pd
 import yaml
@@ -27,36 +27,40 @@ if TYPE_CHECKING:
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 
 
-def _pixel_to_yolo(  # noqa: PLR0913
-    x_tl: float,
-    y_tl: float,
-    x_br: float,
-    y_br: float,
-    img_w: int,
-    img_h: int,
-) -> tuple[float, float, float, float]:
+class PixelBox(NamedTuple):
+    """Pixel-coordinate bounding box (top-left, bottom-right)."""
+
+    x_tl: float
+    y_tl: float
+    x_br: float
+    y_br: float
+
+
+class YoloBox(NamedTuple):
+    """YOLO normalized bounding box (center x, center y, width, height)."""
+
+    xc: float
+    yc: float
+    w: float
+    h: float
+
+
+def _pixel_to_yolo(box: PixelBox, img_w: int, img_h: int) -> YoloBox:
     """Convert pixel bbox (top-left, bottom-right) to YOLO normalized (xc, yc, w, h)."""
-    xc = ((x_tl + x_br) / 2.0) / img_w
-    yc = ((y_tl + y_br) / 2.0) / img_h
-    w = (x_br - x_tl) / img_w
-    h = (y_br - y_tl) / img_h
-    return xc, yc, w, h
+    xc = ((box.x_tl + box.x_br) / 2.0) / img_w
+    yc = ((box.y_tl + box.y_br) / 2.0) / img_h
+    w = (box.x_br - box.x_tl) / img_w
+    h = (box.y_br - box.y_tl) / img_h
+    return YoloBox(xc, yc, w, h)
 
 
-def _yolo_to_pixel(  # noqa: PLR0913
-    xc: float,
-    yc: float,
-    w: float,
-    h: float,
-    img_w: int,
-    img_h: int,
-) -> tuple[float, float, float, float]:
+def _yolo_to_pixel(box: YoloBox, img_w: int, img_h: int) -> PixelBox:
     """Convert YOLO normalized (xc, yc, w, h) to pixel bbox (x_tl, y_tl, x_br, y_br)."""
-    x_tl = (xc - w / 2) * img_w
-    y_tl = (yc - h / 2) * img_h
-    x_br = (xc + w / 2) * img_w
-    y_br = (yc + h / 2) * img_h
-    return x_tl, y_tl, x_br, y_br
+    x_tl = (box.xc - box.w / 2) * img_w
+    y_tl = (box.yc - box.h / 2) * img_h
+    x_br = (box.xc + box.w / 2) * img_w
+    y_br = (box.yc + box.h / 2) * img_h
+    return PixelBox(x_tl, y_tl, x_br, y_br)
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +211,9 @@ def _yolo_fields_to_row(  # noqa: PLR0913
 ) -> dict[str, object]:
     """Convert a parsed YOLO label line to a CSV row dict."""
     class_id = int(fields[0])
-    xc, yc, bw, bh = fields[1], fields[2], fields[3], fields[4]
+    yolo = YoloBox(fields[1], fields[2], fields[3], fields[4])
     conf = fields[5] if len(fields) >= 6 else None
-    x_tl, y_tl, x_br, y_br = _yolo_to_pixel(xc, yc, bw, bh, img_w, img_h)
+    x_tl, y_tl, x_br, y_br = _yolo_to_pixel(yolo, img_w, img_h)
     label_name = class_names.get(class_id, f"class_{class_id}")
     return _make_csv_row_box(
         image_name=img_path.name,
@@ -270,15 +274,19 @@ def _write_box_labels(  # noqa: PLR0913
         lines: list[str] = []
         for _, row in group.iterrows():
             class_id = label_map[row["instance_label"]]
-            xc, yc, w, h = _pixel_to_yolo(
-                row["bbox_x_tl"],
-                row["bbox_y_tl"],
-                row["bbox_x_br"],
-                row["bbox_y_br"],
+            yolo = _pixel_to_yolo(
+                PixelBox(
+                    row["bbox_x_tl"],
+                    row["bbox_y_tl"],
+                    row["bbox_x_br"],
+                    row["bbox_y_br"],
+                ),
                 img_w,
                 img_h,
             )
-            lines.append(f"{class_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}")
+            lines.append(
+                f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {yolo.w:.6f} {yolo.h:.6f}"
+            )
         label_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

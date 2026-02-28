@@ -11,6 +11,8 @@ import pytest
 import yaml
 
 from cveta2.commands.convert import (
+    PixelBox,
+    YoloBox,
     _link_or_copy,
     _parse_label_file,
     _pixel_to_yolo,
@@ -115,29 +117,29 @@ class TestCoordinateConversion:
     """Tests for pixel <-> YOLO coordinate conversion."""
 
     def test_pixel_to_yolo_basic(self) -> None:
-        xc, yc, w, h = _pixel_to_yolo(100, 50, 200, 150, 400, 300)
-        assert xc == pytest.approx(0.375)
-        assert yc == pytest.approx(1.0 / 3.0)
-        assert w == pytest.approx(0.25)
-        assert h == pytest.approx(1.0 / 3.0)
+        yolo = _pixel_to_yolo(PixelBox(100, 50, 200, 150), 400, 300)
+        assert yolo.xc == pytest.approx(0.375)
+        assert yolo.yc == pytest.approx(1.0 / 3.0)
+        assert yolo.w == pytest.approx(0.25)
+        assert yolo.h == pytest.approx(1.0 / 3.0)
 
     def test_yolo_to_pixel_basic(self) -> None:
-        x_tl, y_tl, x_br, y_br = _yolo_to_pixel(0.5, 0.5, 0.5, 0.5, 640, 480)
-        assert x_tl == pytest.approx(160.0)
-        assert y_tl == pytest.approx(120.0)
-        assert x_br == pytest.approx(480.0)
-        assert y_br == pytest.approx(360.0)
+        pixel = _yolo_to_pixel(YoloBox(0.5, 0.5, 0.5, 0.5), 640, 480)
+        assert pixel.x_tl == pytest.approx(160.0)
+        assert pixel.y_tl == pytest.approx(120.0)
+        assert pixel.x_br == pytest.approx(480.0)
+        assert pixel.y_br == pytest.approx(360.0)
 
     def test_roundtrip(self) -> None:
         """Pixel -> yolo -> pixel should recover original coords."""
-        x_tl, y_tl, x_br, y_br = 50.0, 30.0, 200.0, 180.0
+        original = PixelBox(50.0, 30.0, 200.0, 180.0)
         img_w, img_h = 640, 480
-        xc, yc, w, h = _pixel_to_yolo(x_tl, y_tl, x_br, y_br, img_w, img_h)
-        x_tl2, y_tl2, x_br2, y_br2 = _yolo_to_pixel(xc, yc, w, h, img_w, img_h)
-        assert x_tl2 == pytest.approx(x_tl, abs=0.01)
-        assert y_tl2 == pytest.approx(y_tl, abs=0.01)
-        assert x_br2 == pytest.approx(x_br, abs=0.01)
-        assert y_br2 == pytest.approx(y_br, abs=0.01)
+        yolo = _pixel_to_yolo(original, img_w, img_h)
+        recovered = _yolo_to_pixel(yolo, img_w, img_h)
+        assert recovered.x_tl == pytest.approx(original.x_tl, abs=0.01)
+        assert recovered.y_tl == pytest.approx(original.y_tl, abs=0.01)
+        assert recovered.x_br == pytest.approx(original.x_br, abs=0.01)
+        assert recovered.y_br == pytest.approx(original.y_br, abs=0.01)
 
 
 # ---------------------------------------------------------------------------

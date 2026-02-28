@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import os
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import pandas as pd
 from cvat_sdk import make_client
+from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiException
+from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from loguru import logger
 from tqdm import tqdm
 
@@ -181,6 +184,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import TracebackType
 
+    from cvat_sdk import Client as CvatSdkClient
     from typing_extensions import Self
 
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
@@ -195,8 +199,9 @@ class _SdkClientFactory(Protocol):
     client.
     """
 
-    def __call__(self, **kwargs: Any) -> AbstractContextManager[Any]:  # noqa: ANN401
-        ...
+    def __call__(
+        self, **kwargs: str | tuple[str, str]
+    ) -> AbstractContextManager[CvatSdkClient]: ...
 
 
 class CvatClient:
@@ -235,7 +240,7 @@ class CvatClient:
         self._api = api
         # Persistent adapter opened by __enter__, closed by __exit__.
         self._persistent_api: SdkCvatApiAdapter | None = None
-        self._sdk_client: Any = None
+        self._sdk_client: CvatSdkClient | None = None
 
     # ------------------------------------------------------------------
     # Context manager (optional connection reuse)
@@ -298,6 +303,12 @@ class CvatClient:
         else:
             with self._open_sdk_adapter() as adapter:
                 yield adapter
+
+    @contextmanager
+    def open_api(self) -> Iterator[CvatApiPort]:
+        """Context manager yielding the best available API port."""
+        with self._api_or_adapter() as api:
+            yield api
 
     # ------------------------------------------------------------------
     # Public API
@@ -376,7 +387,6 @@ class CvatClient:
 
         """
         sdk = self._require_sdk("update_project_labels")
-        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
 
         patch_labels: list[cvat_models.PatchedLabelRequest] = [
             cvat_models.PatchedLabelRequest(name=name) for name in (add or [])
@@ -563,7 +573,7 @@ class CvatClient:
         )
 
     @staticmethod
-    def _fetch_one_task(
+    def fetch_one_task(
         api: CvatApiPort,
         task: TaskInfo,
         ctx: FetchContext,
@@ -615,7 +625,7 @@ class CvatClient:
 
         task_results: list[TaskAnnotations] = []
         for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
-            result = CvatClient._fetch_one_task(api, task, ctx)
+            result = CvatClient.fetch_one_task(api, task, ctx)
             if result is not None:
                 task_results.append(result)
 
@@ -767,11 +777,7 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        import time  # noqa: PLC0415
-
         sdk = self._require_sdk("create_upload_task")
-
-        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
 
         task_spec = cvat_models.TaskWriteRequest(
             name=name,
@@ -845,11 +851,6 @@ class CvatClient:
 
         """
         sdk = self._require_sdk("upload_task_annotations")
-
-        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
-        from cvat_sdk.core.proxies.annotations import (  # noqa: PLC0415
-            AnnotationUpdateAction,
-        )
 
         # Read actual frame mapping from CVAT (authoritative source).
         # Frame index = position in the data_meta.frames list.
@@ -948,8 +949,6 @@ class CvatClient:
         """
         sdk = self._require_sdk("mark_frames_deleted")
 
-        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
-
         data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
         name_to_frame: dict[str, int] = {}
         for idx, frame in enumerate(data_meta.frames):
@@ -994,8 +993,6 @@ class CvatClient:
         """
         sdk = self._require_sdk("complete_task")
 
-        from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
-
         task_obj = sdk.tasks.retrieve(task_id)
         jobs = task_obj.get_jobs()
         jobs_api = sdk.api_client.jobs_api
@@ -1014,7 +1011,7 @@ class CvatClient:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _require_sdk(self, method_name: str) -> Any:  # noqa: ANN401
+    def _require_sdk(self, method_name: str) -> CvatSdkClient:
         """Return the raw SDK client or raise with a helpful message."""
         if self._sdk_client is None:
             msg = (
@@ -1028,13 +1025,13 @@ class CvatClient:
             raise RuntimeError(msg)
         return sdk
 
-    def _build_client_kwargs(self, cfg: CvatConfig) -> dict[str, Any]:
+    def _build_client_kwargs(self, cfg: CvatConfig) -> dict[str, str | tuple[str, str]]:
         """Build keyword arguments for ``make_client``.
 
         ``organization`` is not passed to ``make_client`` (SDK does not
         accept it).  It is set on the client instance afterwards.
         """
-        kwargs: dict[str, Any] = {"host": cfg.host}
+        kwargs: dict[str, str | tuple[str, str]] = {"host": cfg.host or ""}
         if cfg.username and cfg.password:
             kwargs["credentials"] = (cfg.username, cfg.password)
         return kwargs

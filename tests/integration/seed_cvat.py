@@ -25,6 +25,7 @@ from urllib.parse import urlencode
 
 if TYPE_CHECKING:
     from cvat_sdk.core.client import Client as CvatClient
+    from cvat_sdk.core.proxies.projects import Project as CvatProject
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -164,7 +165,7 @@ def _load_task_fixtures() -> list[dict[str, Any]]:
 
 def _create_project(
     client: CvatClient, labels: list[dict[str, Any]], cloud_storage_id: int
-) -> Any:  # noqa: ANN401
+) -> CvatProject:
     """Create coco8-dev project with labels and cloud storage source."""
     project_spec = {
         "name": "coco8-dev",

@@ -65,7 +65,7 @@ fixable = ["ALL"]
 exclude = ["scripts/**"]  # lint only; format still runs on scripts
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "PLR2004", "PLC0415", "D102", "D103", "S311"]
+"tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D102", "D103", "S311"]
 "main.py" = ["F401"]  # re-export wrapper
 
 [tool.ruff.format]
@@ -93,6 +93,7 @@ markers = [
 [tool.vulture]
 min_confidence = 80
 paths = ["cveta2", "main.py"]
+exclude = ["cveta2/s3_types.py"]
 
 [tool.importlinter]
 root_packages = ["cveta2"]

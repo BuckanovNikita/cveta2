@@ -9,7 +9,7 @@ pending images are counted as failed. Already-cached files are skipped.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
 import boto3
@@ -24,7 +24,10 @@ from tenacity import (
 from tqdm import tqdm
 
 if TYPE_CHECKING:
+    from cvat_sdk import Client as CvatSdkClient
+
     from cveta2.models import ProjectAnnotations
+    from cveta2.s3_types import S3Client
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +218,7 @@ class ImageDownloader:
     def _build_s3_clients(
         self,
         project_cloud_storage: CloudStorageInfo,
-    ) -> dict[str, Any]:
+    ) -> dict[str, S3Client]:
         """Build one boto3 S3 client for the project cloud storage."""
         ep_key = f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
         return {
@@ -229,7 +232,7 @@ class ImageDownloader:
         self,
         pending: dict[str, int],
         project_cloud_storage: CloudStorageInfo | None,
-        s3_clients: dict[str, Any],
+        s3_clients: dict[str, S3Client],
         stats: DownloadStats,
     ) -> None:
         """Download pending images from project cloud storage by name lookup."""
@@ -272,7 +275,7 @@ class ImageDownloader:
 
     @staticmethod
     def _build_project_storage_name_map(
-        s3_client: Any,  # noqa: ANN401
+        s3_client: S3Client,
         bucket: str,
         prefix: str,
     ) -> dict[str, str]:
@@ -288,7 +291,7 @@ class ImageDownloader:
 
     @staticmethod
     def detect_cloud_storage(
-        sdk_client: Any,  # noqa: ANN401
+        sdk_client: CvatSdkClient,
         task_id: int,
         cs_cache: dict[int, CloudStorageInfo],
     ) -> CloudStorageInfo | None:
@@ -329,7 +332,7 @@ class ImageDownloader:
     @staticmethod
     @_s3_retry
     def _download_one(
-        s3_client: Any,  # noqa: ANN401
+        s3_client: S3Client,
         bucket: str,
         key: str,
         dest: Path,
@@ -345,7 +348,7 @@ class ImageDownloader:
 
 @_s3_retry
 def _download_one_s3(
-    s3_client: Any,  # noqa: ANN401
+    s3_client: S3Client,
     bucket: str,
     key: str,
     dest: Path,
@@ -358,7 +361,7 @@ def _download_one_s3(
 
 
 def _list_s3_objects(
-    s3_client: Any,  # noqa: ANN401
+    s3_client: S3Client,
     bucket: str,
     prefix: str,
 ) -> list[tuple[str, str]]:

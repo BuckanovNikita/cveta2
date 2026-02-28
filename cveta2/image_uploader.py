@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import boto3
 from loguru import logger
@@ -25,6 +25,8 @@ from cveta2.image_downloader import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from cveta2.s3_types import S3Client
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +89,7 @@ def resolve_images(
 def build_server_file_mapping(
     cs_info: CloudStorageInfo,
     image_names: set[str],
-    s3_client: Any = None,  # noqa: ANN401
+    s3_client: S3Client | None = None,
 ) -> tuple[dict[str, str], set[str]]:
     """Map image names to their S3 ``server_file`` paths relative to prefix.
 
@@ -157,7 +159,7 @@ def build_server_file_mapping(
 
 @_s3_retry
 def _upload_one_s3(
-    s3_client: Any,  # noqa: ANN401
+    s3_client: S3Client,
     bucket: str,
     key: str,
     local_path: Path,
@@ -257,7 +259,7 @@ class S3Uploader:
 
     @staticmethod
     def _list_existing_keys(
-        s3_client: Any,  # noqa: ANN401
+        s3_client: S3Client,
         cs_info: CloudStorageInfo,
     ) -> set[str]:
         """Return the set of existing S3 keys under the cloud storage prefix."""

@@ -10,6 +10,7 @@ import questionary
 from loguru import logger
 
 from cveta2.config import CvatConfig, get_config_path, require_interactive
+from cveta2.models import CSV_COLUMNS
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
 
 if TYPE_CHECKING:
@@ -198,8 +199,6 @@ def write_df_csv(df: pd.DataFrame, path: Path, label: str) -> None:
 
 def write_deleted_csv(deleted_images: list[DeletedImage], path: Path) -> None:
     """Write deleted images to a CSV matching the ``dataset.csv`` schema."""
-    from cveta2.models import CSV_COLUMNS  # noqa: PLC0415
-
     rows = [img.to_csv_row() for img in deleted_images]
     df = (
         pd.DataFrame(rows, columns=list(CSV_COLUMNS))

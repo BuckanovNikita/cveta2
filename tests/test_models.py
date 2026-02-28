@@ -23,7 +23,8 @@ from tests.conftest import make_bbox
 def test_bbox_to_csv_row_attributes_serialized_as_json() -> None:
     """Attributes dict is serialized as a JSON string."""
     row = make_bbox(attributes={"color": "red", "make": "BMW"}).to_csv_row()
-    parsed = json.loads(row["attributes"])  # type: ignore[arg-type]
+    assert isinstance(row["attributes"], str)
+    parsed = json.loads(row["attributes"])
     assert parsed == {"color": "red", "make": "BMW"}
 
 

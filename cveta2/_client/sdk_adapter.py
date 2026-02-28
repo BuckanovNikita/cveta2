@@ -28,6 +28,7 @@ from cveta2._client.dtos import (
 from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
 
 if TYPE_CHECKING:
+    from cvat_sdk import Client as CvatSdkClient
     from cvat_sdk.api_client import models as cvat_models
 
 from cvat_sdk.api_client.exceptions import ApiTypeError
@@ -60,7 +61,7 @@ class SdkCvatApiAdapter:
     All public methods are wrapped with retry logic for transient errors.
     """
 
-    def __init__(self, client: Any) -> None:  # noqa: ANN401
+    def __init__(self, client: CvatSdkClient) -> None:
         """Wrap an already-opened ``cvat_sdk`` client."""
         self.client = client
 

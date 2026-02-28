@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -11,6 +11,8 @@ from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
+    from cvat_sdk import Client as CvatSdkClient
+
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
     from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
 
@@ -21,7 +23,7 @@ def _env(key: str, default: str) -> str:
     return os.environ.get(key, default).strip()
 
 
-def _make_sdk_client() -> Any:  # noqa: ANN401
+def _make_sdk_client() -> CvatSdkClient:
     """Create and return an opened cvat_sdk client."""
     from cvat_sdk import make_client
 

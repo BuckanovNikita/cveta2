@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
@@ -104,14 +104,14 @@ def build_fake(
     base: LoadedFixtures,
     task_names: list[str],
     statuses: list[str] | None = None,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> LoadedFixtures:
     """Build a fake project from named base tasks with optional statuses."""
     indices = task_indices_by_names(base.tasks, task_names)
     config = FakeProjectConfig(
         task_indices=indices,
         task_statuses=statuses if statuses is not None else "keep",
-        **kwargs,  # type: ignore[arg-type]
+        **kwargs,
     )
     return build_fake_project(base, config)
 
@@ -150,9 +150,9 @@ def test_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return cfg_path
 
 
-def make_bbox(**overrides: object) -> BBoxAnnotation:
+def make_bbox(**overrides: Any) -> BBoxAnnotation:
     """Create a BBoxAnnotation with sensible defaults."""
-    defaults: dict[str, object] = {
+    defaults: dict[str, Any] = {
         "image_name": "img.jpg",
         "image_width": 640,
         "image_height": 480,
@@ -176,4 +176,4 @@ def make_bbox(**overrides: object) -> BBoxAnnotation:
         "attributes": {"color": "red"},
     }
     defaults.update(overrides)
-    return BBoxAnnotation(**defaults)  # type: ignore[arg-type]
+    return BBoxAnnotation(**defaults)

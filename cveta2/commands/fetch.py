@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -209,9 +210,9 @@ def _fetch_and_save_tasks(
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     task_results: list[TaskAnnotations] = []
-    with client._api_or_adapter() as api:  # noqa: SLF001
+    with client.open_api() as api:
         for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
-            task_result = client._fetch_one_task(api, task, ctx)  # noqa: SLF001
+            task_result = client.fetch_one_task(api, task, ctx)
             if task_result is None:
                 continue
 
@@ -227,8 +228,6 @@ def _fetch_and_save_tasks(
             task_results.append(task_result)
 
     if not save_tasks:
-        import shutil  # noqa: PLC0415
-
         shutil.rmtree(tasks_dir, ignore_errors=True)
 
     return TaskAnnotations.merge(task_results)

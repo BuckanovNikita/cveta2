@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from cveta2._client.context import _TaskContext
 from cveta2._client.dtos import RawAttribute, RawFrame, RawShape
@@ -41,7 +41,7 @@ def _make_ctx(
 
 _DEFAULT_POINTS = [10.0, 20.0, 100.0, 200.0]
 
-_SHAPE_DEFAULTS = {
+_SHAPE_DEFAULTS: dict[str, Any] = {
     "id": 1,
     "type": "rectangle",
     "frame": 0,
@@ -56,8 +56,8 @@ _SHAPE_DEFAULTS = {
 }
 
 
-def _make_shape(**overrides: object) -> RawShape:
-    return RawShape(**{**_SHAPE_DEFAULTS, **overrides})  # type: ignore[arg-type]
+def _make_shape(**overrides: Any) -> RawShape:
+    return RawShape(**{**_SHAPE_DEFAULTS, **overrides})
 
 
 def _ctx_for(
