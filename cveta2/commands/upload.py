@@ -25,7 +25,7 @@ from cveta2.config import (
 )
 from cveta2.exceptions import Cveta2Error, LabelsMismatchError
 from cveta2.image_downloader import _build_s3_key
-from cveta2.image_uploader import S3Uploader, resolve_images
+from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
 
 if TYPE_CHECKING:
     import argparse
@@ -146,11 +146,17 @@ def _enrich_paths(
     df: pd.DataFrame,
     cs_info: CloudStorageInfo,
     found_images: dict[str, Path],
+    name_to_server_file: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Add ``s3_path`` and ``image_path`` columns to the DataFrame."""
     df = df.copy()
     df["s3_path"] = df["image_name"].map(
-        lambda name: _build_s3_key(cs_info.prefix, name)
+        lambda name: _build_s3_key(
+            cs_info.prefix,
+            name_to_server_file[name]
+            if name_to_server_file and name in name_to_server_file
+            else name,
+        )
     )
     df["image_path"] = df["image_name"].map(
         lambda name: str(found_images[name].resolve()) if name in found_images else None
@@ -268,10 +274,20 @@ def run_upload(args: argparse.Namespace) -> None:
             f"Cloud storage: s3://{cs_info.bucket}/{cs_info.prefix} (id={cs_info.id})",
         )
 
-        filtered = _enrich_paths(filtered, cs_info, found_images)
+        name_to_server_file, existing_keys = build_server_file_mapping(
+            cs_info,
+            all_image_names,
+        )
+
+        filtered = _enrich_paths(filtered, cs_info, found_images, name_to_server_file)
 
         if found_images:
-            stats = S3Uploader().upload(cs_info, found_images)
+            stats = S3Uploader().upload(
+                cs_info,
+                found_images,
+                name_to_server_file,
+                existing_keys,
+            )
             logger.info(
                 f"S3: {stats.uploaded} загружено, "
                 f"{stats.skipped_existing} уже на S3, "
@@ -280,7 +296,7 @@ def run_upload(args: argparse.Namespace) -> None:
 
         _warn_missing_images(missing)
 
-        task_image_names = sorted(all_image_names)
+        task_image_names = sorted(name_to_server_file[n] for n in all_image_names)
         task_id = client.create_upload_task(
             project_id=project_id,
             name=task_name,

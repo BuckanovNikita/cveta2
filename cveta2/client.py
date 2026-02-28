@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
@@ -852,10 +853,15 @@ class CvatClient:
 
         # Read actual frame mapping from CVAT (authoritative source).
         # Frame index = position in the data_meta.frames list.
+        # Basename fallback handles month-subfolder frame names
+        # (e.g. "2026-02/img.jpg" → also accessible via "img.jpg").
         data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
-        name_to_frame: dict[str, int] = {
-            frame.name: idx for idx, frame in enumerate(data_meta.frames)
-        }
+        name_to_frame: dict[str, int] = {}
+        for idx, frame in enumerate(data_meta.frames):
+            name_to_frame[frame.name] = idx
+            base = PurePosixPath(frame.name).name
+            if base not in name_to_frame:
+                name_to_frame[base] = idx
 
         logger.debug(f"Задача {task_id}: получено {len(name_to_frame)} фреймов из CVAT")
 
@@ -945,9 +951,12 @@ class CvatClient:
         from cvat_sdk.api_client import models as cvat_models  # noqa: PLC0415
 
         data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
-        name_to_frame: dict[str, int] = {
-            frame.name: idx for idx, frame in enumerate(data_meta.frames)
-        }
+        name_to_frame: dict[str, int] = {}
+        for idx, frame in enumerate(data_meta.frames):
+            name_to_frame[frame.name] = idx
+            base = PurePosixPath(frame.name).name
+            if base not in name_to_frame:
+                name_to_frame[base] = idx
         frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
         if not frame_ids:
             return 0

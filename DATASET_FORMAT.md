@@ -56,7 +56,7 @@
 | `annotation_id` | `int \| None` | ID аннотации в CVAT |
 | `confidence` | `float \| None` | Уверенность предсказания (заполняется при конвертации из YOLO) |
 | `attributes` | `dict[str, str]` | Пользовательские атрибуты |
-| `s3_path` | `str \| None` | Полный S3-ключ относительно бакета (например `prefix/img.jpg`), `None` если неизвестен |
+| `s3_path` | `str \| None` | Полный S3-ключ относительно бакета (например `prefix/img.jpg` или `prefix/2026-02/img.jpg` для новых загрузок), `None` если неизвестен |
 | `image_path` | `str \| None` | Абсолютный локальный путь к файлу изображения, `None` если неизвестен |
 
 ### ImageWithoutAnnotations
