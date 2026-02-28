@@ -76,7 +76,8 @@ class CliApp:
         parser.add_argument(
             "--raw",
             action="store_true",
-            help="Additionally save unprocessed full CSV as raw.csv.",
+            help="Save all records (including deletions) "
+            "as raw.csv without partitioning.",
         )
         self._add_common_fetch_args(parser)
 

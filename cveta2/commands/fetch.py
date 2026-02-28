@@ -264,8 +264,10 @@ def _write_output(
     df = pd.DataFrame(rows)
 
     if args.raw:
+        deleted_rows = [d.to_csv_row() for d in result.deleted_images]
+        raw_df = pd.DataFrame(rows + deleted_rows)
         output_dir.mkdir(parents=True, exist_ok=True)
-        write_df_csv(df, output_dir / "raw.csv", "Raw CSV")
+        write_df_csv(raw_df, output_dir / "raw.csv", "Raw CSV")
 
     partition = partition_annotations_df(df, result.deleted_images)
     _write_partition_result(partition, output_dir)

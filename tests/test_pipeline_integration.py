@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,8 @@ from tests.conftest import build_fake, make_fake_client
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
     from cveta2.models import LabelInfo, ProjectInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -440,6 +443,38 @@ def test_resolve_project_id_not_found(coco8_fixtures: LoadedFixtures) -> None:
 
     with pytest.raises(ProjectNotFoundError):
         client.resolve_project_id("does-not-exist")
+
+
+def test_raw_csv_includes_deleted_images(
+    coco8_fixtures: LoadedFixtures,
+    tmp_path: Path,
+) -> None:
+    """--raw produces raw.csv containing both annotation and deletion rows."""
+    fake = build_fake(
+        coco8_fixtures,
+        ["normal", "all-removed"],
+        statuses=["completed", "completed"],
+    )
+    result = make_fake_client(fake).fetch_annotations(fake.project.id)
+
+    # Simulate args with raw=True
+    args = argparse.Namespace(raw=True)
+    from cveta2.commands.fetch import _write_output
+
+    _write_output(args, result, tmp_path / "out")
+
+    raw_csv = tmp_path / "out" / "raw.csv"
+    assert raw_csv.exists()
+
+    raw_df = pd.read_csv(raw_csv)
+    shapes = set(raw_df["instance_shape"].dropna().unique())
+    assert "deleted" in shapes, "raw.csv must include deletion rows"
+    assert "box" in shapes, "raw.csv must include annotation rows"
+
+    # Total rows = annotations + deleted
+    annotation_rows = result.to_csv_rows()
+    expected_total = len(annotation_rows) + len(result.deleted_images)
+    assert len(raw_df) == expected_total
 
 
 def test_task_to_records_unknown_deleted_frame_id() -> None:
