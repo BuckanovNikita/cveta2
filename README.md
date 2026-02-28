@@ -442,12 +442,10 @@ cveta2 fetch -p 123 -o output/ --images-dir /data/images
 
 ```python
 from cveta2 import CvatClient, fetch_annotations
-from cveta2.config import CvatConfig
-
-cfg = CvatConfig.load()
 
 # Вариант 1: CvatClient — полный контроль
-with CvatClient(cfg) as client:
+# Конфигурация загружается автоматически (env, config file, preset)
+with CvatClient() as client:
     result = client.fetch_annotations(project_id=123, completed_only=True)
 
     # Только конкретные задачи — по ID или имени (список)
@@ -465,8 +463,15 @@ with CvatClient(cfg) as client:
     for img in result.deleted_images:
         print(f"Удалено: {img.image_name} (task={img.task_id})")
 
+# Вариант 1б: явная конфигурация (если нужны нестандартные настройки)
+from cveta2 import CvatConfig
+
+cfg = CvatConfig.load()
+with CvatClient(cfg) as client:
+    result = client.fetch_annotations(project_id=123)
+
 # Вариант 2: функция-обёртка — сразу DataFrame
-df = fetch_annotations(project_id=123, cfg=cfg)
+df = fetch_annotations(project_id=123)
 print(df.head())
 ```
 
@@ -474,11 +479,8 @@ print(df.head())
 
 ```python
 from cveta2 import CvatClient
-from cveta2.config import CvatConfig
 
-cfg = CvatConfig.load()
-
-with CvatClient(cfg) as client:
+with CvatClient() as client:
     # Список проектов
     projects = client.list_projects()
     for p in projects:
@@ -497,11 +499,8 @@ with CvatClient(cfg) as client:
 
 ```python
 from cveta2 import CvatClient
-from cveta2.config import CvatConfig
 
-cfg = CvatConfig.load()
-
-with CvatClient(cfg) as client:
+with CvatClient() as client:
     project_id = client.resolve_project_id("Мой проект")
 
     # Получить метки проекта
@@ -534,11 +533,8 @@ with CvatClient(cfg) as client:
 from pathlib import Path
 import pandas as pd
 from cveta2 import CvatClient
-from cveta2.config import CvatConfig
 
-cfg = CvatConfig.load()
-
-with CvatClient(cfg) as client:
+with CvatClient() as client:
     project_id = client.resolve_project_id("Мой проект")
 
     # Определить cloud storage проекта
@@ -577,11 +573,8 @@ with CvatClient(cfg) as client:
 ```python
 from pathlib import Path
 from cveta2 import CvatClient
-from cveta2.config import CvatConfig
 
-cfg = CvatConfig.load()
-
-with CvatClient(cfg) as client:
+with CvatClient() as client:
     project_id = client.resolve_project_id("Мой проект")
 
     # Скачать изображения по результатам fetch
