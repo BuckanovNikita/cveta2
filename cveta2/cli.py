@@ -11,6 +11,7 @@ from cveta2.commands.doctor import run_doctor
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+from cveta2.commands.convert import run_convert
 from cveta2.commands.fetch import run_fetch, run_fetch_task
 from cveta2.commands.ignore import run_ignore
 from cveta2.commands.labels import run_labels
@@ -43,6 +44,7 @@ class CliApp:
         self._add_merge_parser(subparsers)
         self._add_ignore_parser(subparsers)
         self._add_labels_parser(subparsers)
+        self._add_convert_parser(subparsers)
         self._add_doctor_parser(subparsers)
 
         return parser
@@ -418,6 +420,85 @@ class CliApp:
             help="List project labels and exit.",
         )
 
+    def _add_convert_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``convert`` command parser."""
+        parser = subparsers.add_parser(
+            "convert",
+            help=("Convert between cveta2 CSV and YOLO detection format."),
+        )
+        direction = parser.add_mutually_exclusive_group(required=True)
+        direction.add_argument(
+            "--to-yolo",
+            action="store_true",
+            default=False,
+            help="Convert cveta2 CSV to YOLO detection format.",
+        )
+        direction.add_argument(
+            "--from-yolo",
+            action="store_true",
+            default=False,
+            help="Convert YOLO detection format to cveta2 CSV.",
+        )
+        parser.add_argument(
+            "--dataset",
+            "-d",
+            type=str,
+            default=None,
+            help="Path to dataset.csv (for --to-yolo).",
+        )
+        parser.add_argument(
+            "--input",
+            "-i",
+            type=str,
+            default=None,
+            help="Path to YOLO dataset directory (for --from-yolo).",
+        )
+        parser.add_argument(
+            "--output",
+            "-o",
+            required=True,
+            help=("Output path: directory for --to-yolo, CSV file for --from-yolo."),
+        )
+        parser.add_argument(
+            "--link-mode",
+            choices=["reflink", "hardlink", "symlink", "copy", "auto"],
+            default="auto",
+            help=(
+                "How to place images in YOLO output "
+                "(default: auto — reflink with copy fallback)."
+            ),
+        )
+        parser.add_argument(
+            "--image-dir",
+            type=str,
+            action="append",
+            default=None,
+            help=("Additional directory to search for images. Can be repeated."),
+        )
+        parser.add_argument(
+            "--names-file",
+            type=str,
+            default=None,
+            help=(
+                "YAML file with class names for --from-yolo "
+                "prediction mode (format: {0: name, ...} or "
+                "{names: {0: name, ...}})."
+            ),
+        )
+        parser.add_argument(
+            "--read-all-sizes",
+            action="store_true",
+            default=False,
+            help=(
+                "Read dimensions from every image individually "
+                "(for --from-yolo). By default, reads only the "
+                "first image and assumes all have the same size."
+            ),
+        )
+
     def _add_doctor_parser(
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
@@ -450,6 +531,7 @@ class CliApp:
             "merge": lambda: run_merge(args),
             "ignore": lambda: run_ignore(args),
             "labels": lambda: run_labels(args),
+            "convert": lambda: run_convert(args),
             "doctor": run_doctor,
         }
         handler = dispatch.get(args.command)

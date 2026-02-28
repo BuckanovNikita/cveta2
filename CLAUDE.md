@@ -51,7 +51,7 @@ cli → commands → client → _client
 ### Module Organization
 
 - **`cveta2/cli.py`** - Argparse CLI entry point, dispatches to commands
-- **`cveta2/commands/`** - Command implementations (fetch, upload, labels, merge, etc.)
+- **`cveta2/commands/`** - Command implementations (fetch, upload, labels, merge, convert, etc.)
 - **`cveta2/client.py`** - High-level `CvatClient` API (public interface)
 - **`cveta2/_client/`** - Low-level CVAT SDK adapter (internal)
   - `sdk_adapter.py` - Wraps `cvat_sdk` with our DTOs

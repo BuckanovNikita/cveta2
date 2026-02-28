@@ -119,6 +119,7 @@ class BBoxAnnotation(BaseModel):
     rotation: float
     source: str
     annotation_id: int | None
+    confidence: float | None = None
     s3_path: str | None = None
     image_path: str | None = None
     attributes: dict[str, str]

@@ -54,6 +54,7 @@
 | `rotation` | `float` | Угол поворота (0–360) |
 | `source` | `str` | Источник аннотации (manual/auto) |
 | `annotation_id` | `int \| None` | ID аннотации в CVAT |
+| `confidence` | `float \| None` | Уверенность предсказания (заполняется при конвертации из YOLO) |
 | `attributes` | `dict[str, str]` | Пользовательские атрибуты |
 | `s3_path` | `str \| None` | Полный S3-ключ относительно бакета (например `prefix/img.jpg`), `None` если неизвестен |
 | `image_path` | `str \| None` | Абсолютный локальный путь к файлу изображения, `None` если неизвестен |
