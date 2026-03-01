@@ -447,6 +447,92 @@ def _serialize_image_cache_section(image_cache: ImageCacheConfig) -> dict[str, s
     return {k: str(v) for k, v in image_cache.projects.items()}
 
 
+def is_clearml_disabled() -> bool:
+    """Return True when ``CVETA2_CLEARML`` is ``'false'``."""
+    return os.environ.get("CVETA2_CLEARML", "").lower() == "false"
+
+
+# ---------------------------------------------------------------------------
+# ClearML config
+# ---------------------------------------------------------------------------
+
+
+class ClearmlProjectMapping(BaseModel):
+    """Mapping of a single CVAT project to a ClearML project/dataset pair."""
+
+    clearml_project: str
+    clearml_dataset: str
+
+
+class ClearmlConfig(BaseModel):
+    """ClearML integration settings."""
+
+    enabled: bool = False
+    projects: dict[str, ClearmlProjectMapping] = {}
+
+    def get_mapping(self, project_name: str) -> ClearmlProjectMapping | None:
+        """Return the ClearML mapping for *project_name*, or None if not configured."""
+        return self.projects.get(project_name)
+
+
+def _parse_clearml_section(raw: object) -> ClearmlConfig:
+    """Parse ``clearml`` section from raw YAML value."""
+    if not isinstance(raw, dict):
+        return ClearmlConfig()
+    enabled = raw.get("enabled", True)
+    if not isinstance(enabled, bool):
+        enabled = True
+    projects_raw = raw.get("projects")
+    if not isinstance(projects_raw, dict):
+        return ClearmlConfig(enabled=enabled)
+    projects: dict[str, ClearmlProjectMapping] = {}
+    for proj_name, mapping in projects_raw.items():
+        if not isinstance(mapping, dict):
+            continue
+        cp = mapping.get("clearml_project")
+        cd = mapping.get("clearml_dataset")
+        if isinstance(cp, str) and isinstance(cd, str):
+            projects[str(proj_name)] = ClearmlProjectMapping(
+                clearml_project=cp, clearml_dataset=cd
+            )
+    return ClearmlConfig(enabled=enabled, projects=projects)
+
+
+def _serialize_clearml_section(cfg: ClearmlConfig) -> dict[str, object] | None:
+    """Serialize ClearML config to YAML-friendly dict, or None if empty."""
+    if not cfg.projects and not cfg.enabled:
+        return None
+    result: dict[str, object] = {"enabled": cfg.enabled}
+    if cfg.projects:
+        result["projects"] = {
+            name: {
+                "clearml_project": m.clearml_project,
+                "clearml_dataset": m.clearml_dataset,
+            }
+            for name, m in cfg.projects.items()
+        }
+    return result
+
+
+def load_clearml_config(config_path: Path | None = None) -> ClearmlConfig:
+    """Load the ``clearml`` section from the config YAML."""
+    return _load_section("clearml", _parse_clearml_section, config_path)
+
+
+def save_clearml_config(
+    cfg: ClearmlConfig,
+    config_path: Path | None = None,
+) -> Path:
+    """Update only the ``clearml`` section of the config YAML."""
+    return _save_section(
+        "clearml",
+        cfg,
+        _serialize_clearml_section,
+        config_path,
+        log_message="ClearML config saved to {path}",
+    )
+
+
 def save_image_cache_config(
     image_cache: ImageCacheConfig,
     config_path: Path | None = None,

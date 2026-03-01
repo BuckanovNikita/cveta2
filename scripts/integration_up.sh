@@ -36,6 +36,9 @@ CVAT_VERSION=""
 CVAT_PORT="9988"
 MINIO_PORT="9989"
 MINIO_CONSOLE_PORT="9990"
+CLEARML_API_PORT="8880"
+CLEARML_FILES_PORT="8881"
+CLEARML_WEB_PORT="8882"
 HEALTH_TIMEOUT=180
 
 # ── Container name prefix (username) ───────────────────────────────
@@ -102,8 +105,11 @@ check_port_free() {
 check_port_free "$CVAT_PORT" "CVAT API"
 check_port_free "$MINIO_PORT" "MinIO API"
 check_port_free "$MINIO_CONSOLE_PORT" "MinIO console"
+check_port_free "$CLEARML_API_PORT" "ClearML API"
+check_port_free "$CLEARML_FILES_PORT" "ClearML fileserver"
+check_port_free "$CLEARML_WEB_PORT" "ClearML webserver"
 
-export CVAT_PORT MINIO_PORT MINIO_CONSOLE_PORT
+export CVAT_PORT MINIO_PORT MINIO_CONSOLE_PORT CLEARML_API_PORT CLEARML_FILES_PORT CLEARML_WEB_PORT
 
 # ── Helpers ─────────────────────────────────────────────────────────
 compose() {
@@ -157,7 +163,7 @@ else
 fi
 
 # ── 5. Start minimal CVAT stack ───────────────────────────────────
-SERVICES="cvat_server cvat_worker_import cveta2-minio cvat_ui traefik"
+SERVICES="cvat_server cvat_worker_import cveta2-minio cvat_ui traefik clearml-apiserver clearml-webserver clearml-fileserver"
 if compose config --services 2>/dev/null | grep -q '^cvat_worker_chunks$'; then
     SERVICES="$SERVICES cvat_worker_chunks"
 fi
@@ -179,6 +185,20 @@ until curl -sf "http://localhost:${CVAT_PORT}/api/server/about" > /dev/null 2>&1
     elapsed=$((elapsed + 3))
 done
 log "CVAT is healthy"
+
+# ── 6b. Wait for ClearML health ──────────────────────────────────────
+log "Waiting for ClearML API to be healthy (timeout ${HEALTH_TIMEOUT}s)"
+elapsed=0
+until curl -sf "http://localhost:${CLEARML_API_PORT}/debug.ping" > /dev/null 2>&1; do
+    if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
+        echo "ERROR: ClearML API did not become healthy within ${HEALTH_TIMEOUT}s" >&2
+        echo "Check logs: compose logs clearml-apiserver" >&2
+        exit 1
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
+done
+log "ClearML API is healthy"
 
 # ── 7. Create superuser ────────────────────────────────────────────
 log "Creating CVAT superuser"
@@ -211,6 +231,8 @@ CVAT_INTEGRATION_HOST="http://localhost:${CVAT_PORT}" \
 log "Done! CVAT is running at http://localhost:${CVAT_PORT}"
 log "MinIO API: http://localhost:${MINIO_PORT}"
 log "MinIO console: http://localhost:${MINIO_CONSOLE_PORT}"
+log "ClearML API: http://localhost:${CLEARML_API_PORT}"
+log "ClearML Web: http://localhost:${CLEARML_WEB_PORT}"
 log ""
 log "Run integration tests:"
 log "  ./scripts/integration_test.sh"

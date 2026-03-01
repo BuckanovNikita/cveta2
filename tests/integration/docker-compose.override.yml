@@ -69,5 +69,109 @@ services:
       timeout: 5s
       retries: 5
 
+  clearml-redis:
+    container_name: ${INTEGRATION_USER:-default}-clearml-redis
+    image: redis:7.4.1
+    networks:
+      - cvat
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  clearml-mongo:
+    container_name: ${INTEGRATION_USER:-default}-clearml-mongo
+    image: mongo:7.0.22
+    networks:
+      - cvat
+    volumes:
+      - clearml-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  clearml-elastic:
+    container_name: ${INTEGRATION_USER:-default}-clearml-elastic
+    image: elasticsearch:8.17.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+    networks:
+      - cvat
+    volumes:
+      - clearml-elastic-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  clearml-fileserver:
+    container_name: ${INTEGRATION_USER:-default}-clearml-fileserver
+    image: allegroai/clearml:latest
+    command: fileserver
+    ports:
+      - "${CLEARML_FILES_PORT:-8881}:8081"
+    environment:
+      CLEARML__HOSTS__API_SERVER: "http://clearml-apiserver:8008"
+      CLEARML__HOSTS__REDIS__FILESERVER__HOST: "clearml-redis"
+      CLEARML__HOSTS__REDIS__FILESERVER__PORT: "6379"
+    networks:
+      - cvat
+    volumes:
+      - clearml-fileserver-data:/mnt/fileserver
+    depends_on:
+      clearml-redis:
+        condition: service_healthy
+
+  clearml-apiserver:
+    container_name: ${INTEGRATION_USER:-default}-clearml-apiserver
+    image: allegroai/clearml:latest
+    command: apiserver
+    ports:
+      - "${CLEARML_API_PORT:-8880}:8008"
+    environment:
+      CLEARML__HOSTS__MONGO__BACKEND__HOST: "mongodb://clearml-mongo:27017/backend"
+      CLEARML__HOSTS__MONGO__AUTH__HOST: "mongodb://clearml-mongo:27017/auth"
+      CLEARML__HOSTS__ELASTIC__EVENTS__HOSTS: '[{"host":"clearml-elastic","port":9200,"scheme":"http"}]'
+      CLEARML__HOSTS__ELASTIC__WORKERS__HOSTS: '[{"host":"clearml-elastic","port":9200,"scheme":"http"}]'
+      CLEARML__HOSTS__REDIS__APISERVER__HOST: "clearml-redis"
+      CLEARML__HOSTS__REDIS__APISERVER__PORT: "6379"
+      CLEARML__HOSTS__REDIS__WORKERS__HOST: "clearml-redis"
+      CLEARML__HOSTS__REDIS__WORKERS__PORT: "6379"
+      CLEARML__APISERVER__PRE_POPULATE__ENABLED: "true"
+    networks:
+      - cvat
+    depends_on:
+      clearml-redis:
+        condition: service_healthy
+      clearml-mongo:
+        condition: service_healthy
+      clearml-elastic:
+        condition: service_healthy
+
+  clearml-webserver:
+    container_name: ${INTEGRATION_USER:-default}-clearml-webserver
+    image: allegroai/clearml:latest
+    command: webserver
+    ports:
+      - "${CLEARML_WEB_PORT:-8882}:80"
+    environment:
+      NGINX_APISERVER_ADDRESS: "http://clearml-apiserver:8008"
+      NGINX_FILESERVER_ADDRESS: "http://clearml-fileserver:8081"
+    networks:
+      - cvat
+    depends_on:
+      clearml-apiserver:
+        condition: service_started
+
 volumes:
   cveta2-minio-data:
+  clearml-mongo-data:
+  clearml-elastic-data:
+  clearml-redis-data:
+  clearml-fileserver-data:

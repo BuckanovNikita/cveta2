@@ -18,6 +18,7 @@ from cveta2.commands.labels import run_labels
 from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup, run_setup_cache
+from cveta2.commands.setup_clearml import run_setup_clearml
 from cveta2.commands.upload import run_upload
 from cveta2.config import get_config_path
 
@@ -46,6 +47,7 @@ class CliApp:
         self._add_labels_parser(subparsers)
         self._add_convert_parser(subparsers)
         self._add_doctor_parser(subparsers)
+        self._add_setup_clearml_parser(subparsers)
 
         return parser
 
@@ -515,17 +517,49 @@ class CliApp:
             help="Check configuration and image cache health.",
         )
 
+    def _add_setup_clearml_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``setup-clearml`` command parser."""
+        parser = subparsers.add_parser(
+            "setup-clearml",
+            help=(
+                "Interactively configure ClearML project mappings "
+                "for dataset publishing."
+            ),
+        )
+        parser.add_argument(
+            "--config",
+            default=None,
+            help=(
+                "Path to YAML config (default: ~/.config/cveta2/config.yaml "
+                "or CVETA2_CONFIG)."
+            ),
+        )
+        parser.add_argument(
+            "--list",
+            dest="list_mappings",
+            action="store_true",
+            help="List current ClearML project mappings and exit.",
+        )
+
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""
-        if args.command in ("setup", "setup-cache"):
+        if args.command in ("setup", "setup-cache", "setup-clearml"):
             setup_path = Path(args.config) if args.config else get_config_path()
             if args.command == "setup":
                 run_setup(setup_path)
-            else:
+            elif args.command == "setup-cache":
                 run_setup_cache(
                     setup_path,
                     reset=getattr(args, "reset", False),
                     list_paths=getattr(args, "list_paths", False),
+                )
+            else:
+                run_setup_clearml(
+                    setup_path,
+                    list_mappings=getattr(args, "list_mappings", False),
                 )
             return
 

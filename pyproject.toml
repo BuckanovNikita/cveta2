@@ -23,6 +23,9 @@ dependencies = [
     "reflink-copy>=0.1.0",
 ]
 
+[project.optional-dependencies]
+clearml = ["clearml>=1.16.0"]
+
 [project.scripts]
 cveta2 = "cveta2.cli:main"
 
@@ -82,6 +85,10 @@ exclude = ["scripts/", "vendor/", "local/"]
 module = ["cvat_sdk.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["clearml.*"]
+ignore_missing_imports = true
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -105,6 +112,7 @@ type = "layers"
 layers = [
     "cveta2.cli",
     "cveta2.commands",
+    "cveta2._clearml",
     "cveta2.client",
     "cveta2._client",
 ]
@@ -128,6 +136,18 @@ type = "forbidden"
 source_modules = [
     "cveta2.config",
 ]
+forbidden_modules = [
+    "cveta2.client",
+    "cveta2.commands",
+    "cveta2.cli",
+    "cveta2._client",
+    "cveta2.models",
+]
+
+[[tool.importlinter.contracts]]
+name = "ClearML layer isolation"
+type = "forbidden"
+source_modules = ["cveta2._clearml"]
 forbidden_modules = [
     "cveta2.client",
     "cveta2.commands",

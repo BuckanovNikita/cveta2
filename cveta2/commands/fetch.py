@@ -90,6 +90,10 @@ def run_fetch(args: argparse.Namespace) -> None:
 
     _write_output(args, result, output_dir)
 
+    from cveta2._clearml import maybe_publish_clearml  # noqa: PLC0415
+
+    maybe_publish_clearml(project_name, output_dir)
+
 
 def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
