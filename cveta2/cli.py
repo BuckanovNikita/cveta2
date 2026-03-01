@@ -427,7 +427,7 @@ class CliApp:
         """Add the ``convert`` command parser."""
         parser = subparsers.add_parser(
             "convert",
-            help=("Convert between cveta2 CSV and YOLO detection format."),
+            help=("Convert between cveta2 CSV and YOLO/COCO detection formats."),
         )
         direction = parser.add_mutually_exclusive_group(required=True)
         direction.add_argument(
@@ -441,6 +441,12 @@ class CliApp:
             action="store_true",
             default=False,
             help="Convert YOLO detection format to cveta2 CSV.",
+        )
+        direction.add_argument(
+            "--to-coco",
+            action="store_true",
+            default=False,
+            help="Convert cveta2 CSV to COCO detection format (rfdetr-compatible).",
         )
         parser.add_argument(
             "--dataset",

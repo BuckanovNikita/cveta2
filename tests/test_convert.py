@@ -11,10 +11,12 @@ import pytest
 import yaml
 
 from cveta2.commands.convert import (
+    CocoBox,
     PixelBox,
     YoloBox,
     _link_or_copy,
     _parse_label_file,
+    _pixel_to_coco,
     _pixel_to_yolo,
     _SizeCache,
     _yolo_to_pixel,
@@ -129,6 +131,10 @@ class TestCoordinateConversion:
         assert pixel.y_tl == pytest.approx(120.0)
         assert pixel.x_br == pytest.approx(480.0)
         assert pixel.y_br == pytest.approx(360.0)
+
+    def test_pixel_to_coco_basic(self) -> None:
+        coco = _pixel_to_coco(PixelBox(100, 50, 300, 250))
+        assert coco == CocoBox(x=100, y=50, w=200, h=200)
 
     def test_roundtrip(self) -> None:
         """Pixel -> yolo -> pixel should recover original coords."""
@@ -618,3 +624,142 @@ class TestSizeCache:
         cache = _SizeCache(read_all=True)
         assert cache.get(img1) == (640, 480)
         assert cache.get(img2) == (320, 240)
+
+
+# ---------------------------------------------------------------------------
+# --to-coco tests
+# ---------------------------------------------------------------------------
+
+
+def _coco_args(tmp_path: Path, csv_path: Path, img_dir: Path) -> argparse.Namespace:
+    out_dir = tmp_path / "coco_out"
+    return _make_args(
+        to_yolo=False,
+        from_yolo=False,
+        to_coco=True,
+        dataset=str(csv_path),
+        output=str(out_dir),
+        link_mode="copy",
+        image_dir=[str(img_dir)],
+        names_file=None,
+    )
+
+
+class TestToCoco:
+    """Tests for --to-coco CSV to COCO conversion."""
+
+    def _make_image(self, path: Path, width: int = 640, height: int = 480) -> None:
+        from PIL import Image
+
+        Image.new("RGB", (width, height)).save(path)
+
+    def test_basic_structure(self, tmp_path: Path) -> None:
+        """Check directory layout, JSON schema, bbox/area/category values."""
+        img_dir = tmp_path / "images"
+        img_dir.mkdir()
+        self._make_image(img_dir / "test.jpg")
+
+        rows = [
+            _box_row("test.jpg", "cat", "train", x_tl=10, y_tl=20, x_br=110, y_br=120),
+        ]
+        csv_path = _make_dataset_csv(tmp_path, rows)
+        args = _coco_args(tmp_path, csv_path, img_dir)
+        run_convert(args)
+
+        out_dir = tmp_path / "coco_out"
+        assert (out_dir / "train" / "test.jpg").is_file()
+        json_path = out_dir / "train" / "_annotations.coco.json"
+        assert json_path.is_file()
+
+        with json_path.open() as f:
+            coco = json.load(f)
+
+        assert "images" in coco
+        assert "annotations" in coco
+        assert "categories" in coco
+
+        assert len(coco["images"]) == 1
+        assert coco["images"][0]["file_name"] == "test.jpg"
+        assert coco["images"][0]["width"] == 640
+        assert coco["images"][0]["height"] == 480
+
+        assert len(coco["annotations"]) == 1
+        ann = coco["annotations"][0]
+        assert ann["bbox"] == [10.0, 20.0, 100.0, 100.0]
+        assert ann["area"] == pytest.approx(10000.0)
+        assert ann["iscrowd"] == 0
+        assert ann["category_id"] == 1  # 1-based
+
+        assert len(coco["categories"]) == 1
+        assert coco["categories"][0]["id"] == 1
+        assert coco["categories"][0]["name"] == "cat"
+
+    def test_val_renamed_to_valid(self, tmp_path: Path) -> None:
+        """Val split directory should be renamed to valid/."""
+        img_dir = tmp_path / "images"
+        img_dir.mkdir()
+        self._make_image(img_dir / "test.jpg")
+
+        rows = [_box_row("test.jpg", "cat", "val")]
+        csv_path = _make_dataset_csv(tmp_path, rows)
+        args = _coco_args(tmp_path, csv_path, img_dir)
+        run_convert(args)
+
+        out_dir = tmp_path / "coco_out"
+        assert (out_dir / "valid" / "_annotations.coco.json").is_file()
+        assert not (out_dir / "val").exists()
+
+    def test_none_shape_in_images_not_annotations(self, tmp_path: Path) -> None:
+        """Images with shape=none appear in images but not annotations."""
+        img_dir = tmp_path / "images"
+        img_dir.mkdir()
+        self._make_image(img_dir / "empty.jpg")
+
+        rows = [_none_row("empty.jpg", "train")]
+        csv_path = _make_dataset_csv(tmp_path, rows)
+        args = _coco_args(tmp_path, csv_path, img_dir)
+        run_convert(args)
+
+        out_dir = tmp_path / "coco_out"
+        json_path = out_dir / "train" / "_annotations.coco.json"
+        with json_path.open() as f:
+            coco = json.load(f)
+
+        assert len(coco["images"]) == 1
+        assert coco["images"][0]["file_name"] == "empty.jpg"
+        assert len(coco["annotations"]) == 0
+
+    def test_missing_split_error(self, tmp_path: Path) -> None:
+        """Should error if any image has no split."""
+        rows = [_box_row("test.jpg", "cat", "train")]
+        rows[0]["split"] = None
+        csv_path = _make_dataset_csv(tmp_path, rows)
+        args = _coco_args(tmp_path, csv_path, tmp_path)
+        with pytest.raises(SystemExit):
+            run_convert(args)
+
+    def test_multiple_labels_1based_ids(self, tmp_path: Path) -> None:
+        """Sorted labels should get 1-based category IDs."""
+        img_dir = tmp_path / "images"
+        img_dir.mkdir()
+        self._make_image(img_dir / "a.jpg")
+        self._make_image(img_dir / "b.jpg")
+        self._make_image(img_dir / "c.jpg")
+
+        rows = [
+            _box_row("a.jpg", "zebra", "train"),
+            _box_row("b.jpg", "apple", "train"),
+            _box_row("c.jpg", "mango", "train"),
+        ]
+        csv_path = _make_dataset_csv(tmp_path, rows)
+        args = _coco_args(tmp_path, csv_path, img_dir)
+        run_convert(args)
+
+        out_dir = tmp_path / "coco_out"
+        json_path = out_dir / "train" / "_annotations.coco.json"
+        with json_path.open() as f:
+            coco = json.load(f)
+
+        cats = {c["name"]: c["id"] for c in coco["categories"]}
+        # Sorted: apple=1, mango=2, zebra=3
+        assert cats == {"apple": 1, "mango": 2, "zebra": 3}

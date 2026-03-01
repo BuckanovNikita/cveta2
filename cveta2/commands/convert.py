@@ -627,11 +627,144 @@ def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+class CocoBox(NamedTuple):
+    """COCO bounding box (top-left x, top-left y, width, height) in pixels."""
+
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+def _pixel_to_coco(box: PixelBox) -> CocoBox:
+    """Convert pixel bbox (top-left, bottom-right) to COCO (x, y, w, h)."""
+    return CocoBox(box.x_tl, box.y_tl, box.x_br - box.x_tl, box.y_br - box.y_tl)
+
+
+def _write_coco_split(
+    split_df: pd.DataFrame,
+    split_dir: Path,
+    label_map: dict[str, int],
+    found: dict[str, Path],
+    link_mode: str,
+) -> None:
+    """Write COCO JSON and place images for a single split."""
+    images_list: list[dict[str, object]] = []
+    image_id_map: dict[str, int] = {}
+    first_rows = split_df.groupby("image_name").first()
+    for img_id, image_name in enumerate(
+        sorted(split_df["image_name"].unique()), start=1
+    ):
+        name_s = str(image_name)
+        if name_s in found:
+            _link_or_copy(found[name_s], split_dir / name_s, link_mode)
+
+        first_row = first_rows.loc[image_name]
+        image_id_map[name_s] = img_id
+        images_list.append(
+            {
+                "id": img_id,
+                "file_name": name_s,
+                "width": int(first_row["image_width"]),
+                "height": int(first_row["image_height"]),
+            }
+        )
+
+    annotations_list: list[dict[str, object]] = []
+    split_boxes = split_df[split_df["instance_shape"] == "box"]
+    ann_id = 0
+    for _, row in split_boxes.iterrows():
+        name_s = str(row["image_name"])
+        if name_s not in image_id_map:
+            continue
+        coco = _pixel_to_coco(
+            PixelBox(
+                row["bbox_x_tl"], row["bbox_y_tl"], row["bbox_x_br"], row["bbox_y_br"]
+            )
+        )
+        ann_id += 1
+        annotations_list.append(
+            {
+                "id": ann_id,
+                "image_id": image_id_map[name_s],
+                "category_id": label_map[row["instance_label"]],
+                "bbox": [
+                    round(coco.x, 2),
+                    round(coco.y, 2),
+                    round(coco.w, 2),
+                    round(coco.h, 2),
+                ],
+                "area": round(coco.w * coco.h, 2),
+                "iscrowd": 0,
+            }
+        )
+
+    categories_list = [
+        {"id": cat_id, "name": name, "supercategory": "none"}
+        for name, cat_id in sorted(label_map.items(), key=lambda x: x[1])
+    ]
+
+    coco_json = {
+        "images": images_list,
+        "annotations": annotations_list,
+        "categories": categories_list,
+    }
+    json_path = split_dir / "_annotations.coco.json"
+    with json_path.open("w", encoding="utf-8") as f:
+        json.dump(coco_json, f, ensure_ascii=False, indent=2)
+
+    logger.info(
+        f"Split {split_dir.name}: {len(images_list)} изображений, "
+        f"{len(annotations_list)} аннотаций -> {json_path}"
+    )
+
+
+def _convert_to_coco(args: argparse.Namespace) -> None:
+    """Convert cveta2 dataset.csv to COCO detection format (rfdetr-compatible)."""
+    csv_path = Path(args.dataset)
+    output_dir = Path(args.output)
+    link_mode: str = args.link_mode or "auto"
+
+    df = read_dataset_csv(csv_path, {"image_name", "instance_shape", "split"})
+    df = df[df["instance_shape"].isin(["box", "none"])].copy()
+    _validate_splits(df)
+
+    # Build label map: sorted unique labels → 1-based IDs (COCO convention)
+    box_df = df[df["instance_shape"] == "box"].copy()
+    label_map: dict[str, int] = {}
+    if not box_df.empty:
+        unique_labels = sorted(box_df["instance_label"].dropna().unique())
+        label_map = {name: idx + 1 for idx, name in enumerate(unique_labels)}
+    logger.info(f"Классов: {len(label_map)}, map: {label_map}")
+
+    search_dirs = _build_search_dirs(getattr(args, "image_dir", None))
+    found, missing = resolve_images(set(df["image_name"].unique()), search_dirs)
+    if missing:
+        logger.warning(f"Не найдено {len(missing)} изображений: {missing[:10]}")
+
+    split_dir_map: dict[str, str] = {"val": "valid"}
+    splits = sorted(df["split"].unique())
+    logger.info(f"Сплиты: {splits}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for split in splits:
+        dir_name = split_dir_map.get(split, split)
+        split_dir = output_dir / dir_name
+        split_dir.mkdir(parents=True, exist_ok=True)
+        _write_coco_split(
+            df[df["split"] == split], split_dir, label_map, found, link_mode
+        )
+
+    logger.info(f"Готово: COCO датасет сохранён в {output_dir}")
+
+
 def run_convert(args: argparse.Namespace) -> None:
     """Dispatch to the appropriate conversion direction."""
     if getattr(args, "to_yolo", False):
         _convert_to_yolo(args)
     elif getattr(args, "from_yolo", False):
         _convert_from_yolo(args)
+    elif getattr(args, "to_coco", False):
+        _convert_to_coco(args)
     else:
-        sys.exit("Ошибка: укажите --to-yolo или --from-yolo")
+        sys.exit("Ошибка: укажите --to-yolo, --from-yolo или --to-coco")
