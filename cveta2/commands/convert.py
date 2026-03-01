@@ -236,6 +236,53 @@ def _yolo_fields_to_row(  # noqa: PLR0913
 # ---------------------------------------------------------------------------
 
 
+class _ExportContext(NamedTuple):
+    """Shared state prepared by ``_prepare_export``."""
+
+    df: pd.DataFrame
+    output_dir: Path
+    link_mode: str
+    label_map: dict[str, int]
+    found: dict[str, Path]
+    splits: list[str]
+
+
+def _prepare_export(
+    args: argparse.Namespace,
+    *,
+    label_start: int = 0,
+) -> _ExportContext:
+    """Load CSV, validate splits, build label map, and resolve images.
+
+    *label_start* controls the first class ID (0 for YOLO, 1 for COCO).
+    """
+    csv_path = Path(args.dataset)
+    output_dir = Path(args.output)
+    link_mode: str = args.link_mode or "auto"
+
+    df = read_dataset_csv(csv_path, {"image_name", "instance_shape", "split"})
+    df = df[df["instance_shape"].isin(["box", "none"])].copy()
+    _validate_splits(df)
+
+    box_df = df[df["instance_shape"] == "box"]
+    label_map: dict[str, int] = {}
+    if not box_df.empty:
+        unique_labels = sorted(box_df["instance_label"].dropna().unique())
+        label_map = {name: idx + label_start for idx, name in enumerate(unique_labels)}
+    logger.info(f"Классов: {len(label_map)}, map: {label_map}")
+
+    search_dirs = _build_search_dirs(getattr(args, "image_dir", None))
+    found, missing = resolve_images(set(df["image_name"].unique()), search_dirs)
+    if missing:
+        logger.warning(f"Не найдено {len(missing)} изображений: {missing[:10]}")
+
+    splits = sorted(df["split"].unique())
+    logger.info(f"Сплиты: {splits}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return _ExportContext(df, output_dir, link_mode, label_map, found, splits)
+
+
 def _validate_splits(df: pd.DataFrame) -> None:
     """Exit with error if any images have no split value."""
     missing_split = df[df["split"].isna() | (df["split"] == "")]
@@ -334,44 +381,36 @@ def _write_dataset_yaml(
 
 def _convert_to_yolo(args: argparse.Namespace) -> None:
     """Convert cveta2 dataset.csv to YOLO detection format."""
-    csv_path = Path(args.dataset)
-    output_dir = Path(args.output)
-    link_mode: str = args.link_mode or "auto"
+    ctx = _prepare_export(args, label_start=0)
 
-    df = read_dataset_csv(csv_path, {"image_name", "instance_shape", "split"})
-    df = df[df["instance_shape"].isin(["box", "none"])].copy()
-    _validate_splits(df)
+    for split in ctx.splits:
+        (ctx.output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
+        (ctx.output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
 
-    box_df = df[df["instance_shape"] == "box"].copy()
-    none_df = df[df["instance_shape"] == "none"].copy()
-
-    label_map: dict[str, int] = {}
-    if not box_df.empty:
-        unique_labels = sorted(box_df["instance_label"].dropna().unique())
-        label_map = {name: idx for idx, name in enumerate(unique_labels)}
-    logger.info(f"Классов: {len(label_map)}, map: {label_map}")
-
-    search_dirs = _build_search_dirs(getattr(args, "image_dir", None))
-    found, missing = resolve_images(set(df["image_name"].unique()), search_dirs)
-    if missing:
-        logger.warning(f"Не найдено {len(missing)} изображений: {missing[:10]}")
-
-    splits = sorted(df["split"].unique())
-    logger.info(f"Сплиты: {splits}")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for split in splits:
-        (output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
-        (output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
+    box_df = ctx.df[ctx.df["instance_shape"] == "box"].copy()
+    none_df = ctx.df[ctx.df["instance_shape"] == "none"].copy()
 
     images_processed: set[str] = set()
-    _write_box_labels(box_df, output_dir, label_map, found, link_mode, images_processed)
-    _write_none_labels(none_df, output_dir, found, link_mode, images_processed)
-    _write_dataset_yaml(output_dir, splits, label_map)
+    _write_box_labels(
+        box_df,
+        ctx.output_dir,
+        ctx.label_map,
+        ctx.found,
+        ctx.link_mode,
+        images_processed,
+    )
+    _write_none_labels(
+        none_df,
+        ctx.output_dir,
+        ctx.found,
+        ctx.link_mode,
+        images_processed,
+    )
+    _write_dataset_yaml(ctx.output_dir, ctx.splits, ctx.label_map)
 
     logger.info(
         f"Готово: {len(images_processed)} изображений, "
-        f"{len(label_map)} классов -> {output_dir}"
+        f"{len(ctx.label_map)} классов -> {ctx.output_dir}"
     )
 
 
@@ -535,6 +574,35 @@ def _from_yolo_predictions(
 # ---------------------------------------------------------------------------
 
 
+def _make_csv_row_base(
+    instance_shape: str,
+    image_name: str,
+    img_size: tuple[int, int],
+    *,
+    split: str | None,
+    frame_id: int,
+) -> dict[str, object]:
+    """Build a CSV row dict with common fields shared by box/none rows."""
+    row: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
+    row.update(
+        image_name=image_name,
+        image_width=img_size[0],
+        image_height=img_size[1],
+        instance_shape=instance_shape,
+        task_id=0,
+        task_name="yolo",
+        task_status="",
+        task_updated_date="",
+        created_by_username="",
+        frame_id=frame_id,
+        split=split,
+        subset="",
+        source="yolo",
+        attributes=json.dumps({}, ensure_ascii=False),
+    )
+    return row
+
+
 def _make_csv_row_box(  # noqa: PLR0913
     *,
     image_name: str,
@@ -551,32 +619,24 @@ def _make_csv_row_box(  # noqa: PLR0913
     confidence: float | None = None,
 ) -> dict[str, object]:
     """Build a CSV row dict for a box annotation."""
-    row: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
+    row = _make_csv_row_base(
+        "box",
+        image_name,
+        (img_w, img_h),
+        split=split,
+        frame_id=frame_id,
+    )
     row.update(
-        image_name=image_name,
-        image_width=img_w,
-        image_height=img_h,
-        instance_shape="box",
         instance_label=label,
         bbox_x_tl=round(x_tl, 2),
         bbox_y_tl=round(y_tl, 2),
         bbox_x_br=round(x_br, 2),
         bbox_y_br=round(y_br, 2),
-        task_id=0,
-        task_name="yolo",
-        task_status="",
-        task_updated_date="",
-        created_by_username="",
-        frame_id=frame_id,
-        split=split,
-        subset="",
         occluded=False,
         z_order=0,
         rotation=0.0,
-        source="yolo",
         annotation_id=annotation_id,
         confidence=confidence,
-        attributes=json.dumps({}, ensure_ascii=False),
     )
     return row
 
@@ -590,24 +650,13 @@ def _make_csv_row_none(
     frame_id: int,
 ) -> dict[str, object]:
     """Build a CSV row dict for an image without annotations."""
-    row: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
-    row.update(
-        image_name=image_name,
-        image_width=img_w,
-        image_height=img_h,
-        instance_shape="none",
-        task_id=0,
-        task_name="yolo",
-        task_status="",
-        task_updated_date="",
-        created_by_username="",
-        frame_id=frame_id,
+    return _make_csv_row_base(
+        "none",
+        image_name,
+        (img_w, img_h),
         split=split,
-        subset="",
-        source="yolo",
-        attributes=json.dumps({}, ensure_ascii=False),
+        frame_id=frame_id,
     )
-    return row
 
 
 def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
@@ -721,41 +770,22 @@ def _write_coco_split(
 
 def _convert_to_coco(args: argparse.Namespace) -> None:
     """Convert cveta2 dataset.csv to COCO detection format (rfdetr-compatible)."""
-    csv_path = Path(args.dataset)
-    output_dir = Path(args.output)
-    link_mode: str = args.link_mode or "auto"
-
-    df = read_dataset_csv(csv_path, {"image_name", "instance_shape", "split"})
-    df = df[df["instance_shape"].isin(["box", "none"])].copy()
-    _validate_splits(df)
-
-    # Build label map: sorted unique labels → 1-based IDs (COCO convention)
-    box_df = df[df["instance_shape"] == "box"].copy()
-    label_map: dict[str, int] = {}
-    if not box_df.empty:
-        unique_labels = sorted(box_df["instance_label"].dropna().unique())
-        label_map = {name: idx + 1 for idx, name in enumerate(unique_labels)}
-    logger.info(f"Классов: {len(label_map)}, map: {label_map}")
-
-    search_dirs = _build_search_dirs(getattr(args, "image_dir", None))
-    found, missing = resolve_images(set(df["image_name"].unique()), search_dirs)
-    if missing:
-        logger.warning(f"Не найдено {len(missing)} изображений: {missing[:10]}")
+    ctx = _prepare_export(args, label_start=1)
 
     split_dir_map: dict[str, str] = {"val": "valid"}
-    splits = sorted(df["split"].unique())
-    logger.info(f"Сплиты: {splits}")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    for split in splits:
+    for split in ctx.splits:
         dir_name = split_dir_map.get(split, split)
-        split_dir = output_dir / dir_name
+        split_dir = ctx.output_dir / dir_name
         split_dir.mkdir(parents=True, exist_ok=True)
         _write_coco_split(
-            df[df["split"] == split], split_dir, label_map, found, link_mode
+            ctx.df[ctx.df["split"] == split],
+            split_dir,
+            ctx.label_map,
+            ctx.found,
+            ctx.link_mode,
         )
 
-    logger.info(f"Готово: COCO датасет сохранён в {output_dir}")
+    logger.info(f"Готово: COCO датасет сохранён в {ctx.output_dir}")
 
 
 def run_convert(args: argparse.Namespace) -> None:

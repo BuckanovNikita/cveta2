@@ -47,46 +47,8 @@ if TYPE_CHECKING:
 
 def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
-    cfg = CvatConfig.load()
-    require_host(cfg)
     output_dir = _resolve_output_dir(Path(args.output_dir))
-
-    with CvatClient(cfg) as client:
-        try:
-            project_id, project_name, cs_info = resolve_project_and_cloud_storage(
-                client, getattr(args, "project", None)
-            )
-        except Cveta2Error as e:
-            sys.exit(str(e))
-
-        ignore_set, silent_set = _warn_ignored_tasks(project_name)
-
-        try:
-            ctx = client.prepare_fetch(
-                project_id,
-                completed_only=args.completed_only,
-                ignore_task_ids=ignore_set,
-                silent_task_ids=silent_set,
-                project_name=project_name,
-            )
-        except Cveta2Error as e:
-            sys.exit(str(e))
-
-        result = _fetch_and_save_tasks(
-            client,
-            ctx,
-            output_dir,
-            save_tasks=args.save_tasks,
-        )
-
-        _populate_s3_paths(result, cs_info)
-
-        images_dir = _download_images(
-            _DownloadImagesParams(
-                args, project_id, project_name, client, result, cs_info
-            )
-        )
-        _populate_image_paths(result, images_dir)
+    result, project_name = _fetch_common(args, output_dir)
 
     _write_output(args, result, output_dir)
 
@@ -97,9 +59,21 @@ def run_fetch(args: argparse.Namespace) -> None:
 
 def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
+    output_dir = Path(args.output_dir)
+    result, _ = _fetch_common(args, output_dir)
+    write_dataset_and_deleted(result, output_dir)
+
+
+def _fetch_common(
+    args: argparse.Namespace,
+    output_dir: Path,
+) -> tuple[ProjectAnnotations, str]:
+    """Shared fetch logic for ``run_fetch`` and ``run_fetch_task``.
+
+    Returns ``(result, project_name)``.
+    """
     cfg = CvatConfig.load()
     require_host(cfg)
-    output_dir = Path(args.output_dir)
 
     with CvatClient(cfg) as client:
         try:
@@ -110,7 +84,10 @@ def run_fetch_task(args: argparse.Namespace) -> None:
             sys.exit(str(e))
 
         ignore_set, silent_set = _warn_ignored_tasks(project_name)
-        task_sel = _resolve_task_selector(args, client, project_id, ignore_set)
+
+        task_selector: list[int | str] | None = None
+        if hasattr(args, "task"):
+            task_selector = _resolve_task_selector(args, client, project_id, ignore_set)
 
         try:
             ctx = client.prepare_fetch(
@@ -118,7 +95,7 @@ def run_fetch_task(args: argparse.Namespace) -> None:
                 completed_only=args.completed_only,
                 ignore_task_ids=ignore_set,
                 silent_task_ids=silent_set,
-                task_selector=task_sel,
+                task_selector=task_selector,
                 project_name=project_name,
             )
         except Cveta2Error as e:
@@ -131,16 +108,14 @@ def run_fetch_task(args: argparse.Namespace) -> None:
             save_tasks=args.save_tasks,
         )
 
-        _populate_s3_paths(result, cs_info)
-
         images_dir = _download_images(
             _DownloadImagesParams(
                 args, project_id, project_name, client, result, cs_info
             )
         )
-        _populate_image_paths(result, images_dir)
+        _populate_paths(result, cs_info, images_dir)
 
-    write_dataset_and_deleted(result, output_dir)
+    return result, project_name
 
 
 # ------------------------------------------------------------------
@@ -160,34 +135,19 @@ class _DownloadImagesParams:
     project_cloud_storage: CloudStorageInfo | None = None
 
 
-def _populate_s3_paths(
+def _populate_paths(
     result: ProjectAnnotations,
     cs_info: CloudStorageInfo | None,
-) -> None:
-    """Set ``s3_path`` on all annotation and deleted-image records."""
-    if cs_info is None:
-        return
-    for ann in result.annotations:
-        ann.s3_path = build_s3_key(cs_info.prefix, ann.image_name)
-    for deleted in result.deleted_images:
-        deleted.s3_path = build_s3_key(cs_info.prefix, deleted.image_name)
-
-
-def _populate_image_paths(
-    result: ProjectAnnotations,
     images_dir: Path | None,
 ) -> None:
-    """Set ``image_path`` on records whose image exists locally."""
-    if images_dir is None:
-        return
-    for ann in result.annotations:
-        local = images_dir / ann.image_name
-        if local.exists():
-            ann.image_path = str(local.resolve())
-    for deleted in result.deleted_images:
-        local = images_dir / deleted.image_name
-        if local.exists():
-            deleted.image_path = str(local.resolve())
+    """Set ``s3_path`` and ``image_path`` on all annotation/deleted records."""
+    for record in (*result.annotations, *result.deleted_images):
+        if cs_info is not None:
+            record.s3_path = build_s3_key(cs_info.prefix, record.image_name)
+        if images_dir is not None:
+            local = images_dir / record.image_name
+            if local.exists():
+                record.image_path = str(local.resolve())
 
 
 def _fetch_and_save_tasks(

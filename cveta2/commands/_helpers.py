@@ -220,5 +220,4 @@ def write_deleted_csv(deleted_images: list[DeletedImage], path: Path) -> None:
         if rows
         else pd.DataFrame(columns=list(CSV_COLUMNS))
     )
-    df.to_csv(path, index=False, encoding="utf-8")
-    logger.info(f"Deleted CSV saved to {path} ({len(df)} rows)")
+    write_df_csv(df, path, "Deleted CSV")
