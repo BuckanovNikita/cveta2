@@ -18,8 +18,6 @@ from cveta2.commands._helpers import (
     require_host,
     resolve_project_and_cloud_storage,
     write_dataset_and_deleted,
-    write_deleted_csv,
-    write_df_csv,
 )
 from cveta2.commands._task_selector import select_tasks_tui
 from cveta2.config import (
@@ -31,7 +29,7 @@ from cveta2.config import (
 )
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
-from cveta2.models import TaskAnnotations
+from cveta2.models import CSV_COLUMNS, TaskAnnotations
 from cveta2.s3_utils import build_s3_key
 
 if TYPE_CHECKING:
@@ -228,7 +226,9 @@ def _write_output(
         deleted_rows = [d.to_csv_row() for d in result.deleted_images]
         raw_df = pd.DataFrame(rows + deleted_rows)
         output_dir.mkdir(parents=True, exist_ok=True)
-        write_df_csv(raw_df, output_dir / "raw.csv", "Raw CSV")
+        raw_path = output_dir / "raw.csv"
+        raw_df.to_csv(raw_path, index=False, encoding="utf-8")
+        logger.info(f"Raw CSV saved to {raw_path} ({len(raw_df)} rows)")
 
     partition = partition_annotations_df(df, result.deleted_images)
     _write_partition_result(partition, output_dir)
@@ -269,14 +269,25 @@ def _write_partition_result(
 ) -> None:
     """Write all partition DataFrames and deleted.csv into *output_dir*."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_df_csv(partition.dataset, output_dir / "dataset.csv", "Dataset CSV")
-    write_df_csv(partition.obsolete, output_dir / "obsolete.csv", "Obsolete CSV")
-    write_df_csv(
-        partition.in_progress,
-        output_dir / "in_progress.csv",
-        "In-progress CSV",
+
+    for df, name, label in [
+        (partition.dataset, "dataset.csv", "Dataset CSV"),
+        (partition.obsolete, "obsolete.csv", "Obsolete CSV"),
+        (partition.in_progress, "in_progress.csv", "In-progress CSV"),
+    ]:
+        path = output_dir / name
+        df.to_csv(path, index=False, encoding="utf-8")
+        logger.info(f"{label} saved to {path} ({len(df)} rows)")
+
+    deleted_rows = [img.to_csv_row() for img in partition.deleted_images]
+    deleted_df = (
+        pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))
+        if deleted_rows
+        else pd.DataFrame(columns=list(CSV_COLUMNS))
     )
-    write_deleted_csv(partition.deleted_images, output_dir / "deleted.csv")
+    deleted_path = output_dir / "deleted.csv"
+    deleted_df.to_csv(deleted_path, index=False, encoding="utf-8")
+    logger.info(f"Deleted CSV saved to {deleted_path} ({len(deleted_df)} rows)")
 
 
 def _resolve_task_selector(

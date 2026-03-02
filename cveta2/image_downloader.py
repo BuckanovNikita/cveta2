@@ -12,11 +12,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
+import boto3
 from loguru import logger
 from pydantic import BaseModel
 from tqdm import tqdm
 
-from cveta2.s3_utils import list_s3_objects, make_s3_client, s3_retry
+from cveta2.s3_utils import list_s3_objects, s3_retry
 
 if TYPE_CHECKING:
     from cvat_sdk import Client as CvatSdkClient
@@ -179,18 +180,15 @@ class ImageDownloader:
                     "как failed. Укажите project_id при вызове download_images."
                 )
             return
-        s3_clients = self._build_s3_clients(project_cloud_storage)
+        ep_key = f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
+        s3_clients = {
+            ep_key: boto3.Session().client(
+                "s3", endpoint_url=project_cloud_storage.endpoint_url or None
+            )
+        }
         self._download_from_project_storage(
             pending, project_cloud_storage, s3_clients, stats
         )
-
-    def _build_s3_clients(
-        self,
-        project_cloud_storage: CloudStorageInfo,
-    ) -> dict[str, S3Client]:
-        """Build one boto3 S3 client for the project cloud storage."""
-        ep_key = f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
-        return {ep_key: make_s3_client(project_cloud_storage)}
 
     def _download_from_project_storage(
         self,
@@ -226,7 +224,7 @@ class ImageDownloader:
                 continue
             dest = self._target_dir / image_name
             try:
-                self._download_one(
+                _download_one_s3(
                     s3_clients[ep_key],
                     project_cloud_storage.bucket,
                     s3_key,
@@ -293,16 +291,6 @@ class ImageDownloader:
         )
         return cs_info
 
-    @staticmethod
-    def _download_one(
-        s3_client: S3Client,
-        bucket: str,
-        key: str,
-        dest: Path,
-    ) -> None:
-        """Download a single S3 object to *dest*."""
-        _download_one_s3(s3_client, bucket, key, dest)
-
 
 # ---------------------------------------------------------------------------
 # S3 download helper
@@ -346,7 +334,7 @@ class S3Syncer:
 
         Returns counters of downloaded / cached / failed files.
         """
-        s3 = make_s3_client(cs_info)
+        s3 = boto3.Session().client("s3", endpoint_url=cs_info.endpoint_url or None)
         objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
         if not objects:
             logger.info(f"Нет объектов в s3://{cs_info.bucket}/{cs_info.prefix}")

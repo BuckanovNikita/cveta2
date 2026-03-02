@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from loguru import logger
 
-from cveta2.commands._helpers import read_dataset_csv, write_df_csv
+from cveta2.commands._helpers import read_dataset_csv
 
 if TYPE_CHECKING:
     import argparse
@@ -258,4 +258,5 @@ def run_merge(args: argparse.Namespace) -> None:
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    write_df_csv(merged, output_path, "Merged CSV")
+    merged.to_csv(output_path, index=False, encoding="utf-8")
+    logger.info(f"Merged CSV saved to {output_path} ({len(merged)} rows)")

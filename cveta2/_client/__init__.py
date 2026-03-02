@@ -9,10 +9,7 @@ from cveta2._client.dtos import (
     RawShape,
 )
 from cveta2._client.extractors import _collect_shapes
-from cveta2._client.mapping import (
-    _build_label_maps,
-    _resolve_attributes,
-)
+from cveta2._client.mapping import _build_label_maps
 from cveta2._client.ports import CvatApiPort
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 
@@ -28,5 +25,4 @@ __all__ = [
     "_TaskContext",
     "_build_label_maps",
     "_collect_shapes",
-    "_resolve_attributes",
 ]

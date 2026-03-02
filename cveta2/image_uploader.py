@@ -10,11 +10,18 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+import boto3
 from loguru import logger
 from pydantic import BaseModel
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from tqdm import tqdm
 
-from cveta2.s3_utils import build_s3_key, list_s3_objects, make_s3_client, s3_retry
+from cveta2.s3_utils import build_s3_key, list_s3_objects
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -107,7 +114,9 @@ def build_server_file_mapping(
         Passed to :meth:`S3Uploader.upload` to avoid a redundant listing.
 
     """
-    client = s3_client or make_s3_client(cs_info)
+    client = s3_client or boto3.Session().client(
+        "s3", endpoint_url=cs_info.endpoint_url or None
+    )
     objects = list_s3_objects(client, cs_info.bucket, cs_info.prefix)
     existing_keys: set[str] = {key for key, _name in objects}
 
@@ -146,17 +155,6 @@ def build_server_file_mapping(
 # ---------------------------------------------------------------------------
 # S3 uploader
 # ---------------------------------------------------------------------------
-
-
-@s3_retry
-def _upload_one_s3(
-    s3_client: S3Client,
-    bucket: str,
-    key: str,
-    local_path: Path,
-) -> None:
-    """Upload a single local file to S3."""
-    s3_client.upload_file(str(local_path), bucket, key)
 
 
 class S3Uploader:
@@ -202,7 +200,7 @@ class S3Uploader:
 
         stats = UploadStats(total=len(images))
 
-        s3 = make_s3_client(cs_info)
+        s3 = boto3.Session().client("s3", endpoint_url=cs_info.endpoint_url or None)
 
         # List existing objects to skip re-uploads
         if existing_keys is None:
@@ -233,7 +231,14 @@ class S3Uploader:
             to_upload, desc="Uploading to S3", unit="file", leave=False
         ):
             try:
-                _upload_one_s3(s3, cs_info.bucket, s3_key, local_path)
+                for attempt in Retrying(
+                    retry=retry_if_exception_type((OSError, ConnectionError)),
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=1, min=1, max=10),
+                    reraise=True,
+                ):
+                    with attempt:
+                        s3.upload_file(str(local_path), cs_info.bucket, s3_key)
                 stats.uploaded += 1
             except (OSError, ConnectionError):
                 logger.exception(f"Не удалось загрузить {name} (key={s3_key})")

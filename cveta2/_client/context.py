@@ -44,11 +44,3 @@ class _TaskContext:
             task_updated_date=task.updated_date,
             subset=task.subset,
         )
-
-    def get_frame(self, frame_id: int) -> RawFrame | None:
-        """Return frame metadata by index, or None if missing."""
-        return self.frames.get(frame_id)
-
-    def get_label_name(self, label_id: int) -> str:
-        r"""Return label name by id, or "<unknown>" if missing."""
-        return self.label_names.get(label_id, "<unknown>")

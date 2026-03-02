@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import DeletedImage, ProjectAnnotations
+    from cveta2.models import ProjectAnnotations
 
 _RESCAN_VALUE = "__rescan__"
 
@@ -202,22 +202,17 @@ def write_dataset_and_deleted(
     output_dir.mkdir(parents=True, exist_ok=True)
     rows = result.to_csv_rows()
     df = pd.DataFrame(rows)
-    write_df_csv(df, output_dir / "dataset.csv", "Dataset CSV")
-    write_deleted_csv(result.deleted_images, output_dir / "deleted.csv")
 
+    dataset_path = output_dir / "dataset.csv"
+    df.to_csv(dataset_path, index=False, encoding="utf-8")
+    logger.info(f"Dataset CSV saved to {dataset_path} ({len(df)} rows)")
 
-def write_df_csv(df: pd.DataFrame, path: Path, label: str) -> None:
-    """Write a DataFrame to CSV and log the result."""
-    df.to_csv(path, index=False, encoding="utf-8")
-    logger.info(f"{label} saved to {path} ({len(df)} rows)")
-
-
-def write_deleted_csv(deleted_images: list[DeletedImage], path: Path) -> None:
-    """Write deleted images to a CSV matching the ``dataset.csv`` schema."""
-    rows = [img.to_csv_row() for img in deleted_images]
-    df = (
-        pd.DataFrame(rows, columns=list(CSV_COLUMNS))
-        if rows
+    deleted_rows = [img.to_csv_row() for img in result.deleted_images]
+    deleted_df = (
+        pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))
+        if deleted_rows
         else pd.DataFrame(columns=list(CSV_COLUMNS))
     )
-    write_df_csv(df, path, "Deleted CSV")
+    deleted_path = output_dir / "deleted.csv"
+    deleted_df.to_csv(deleted_path, index=False, encoding="utf-8")
+    logger.info(f"Deleted CSV saved to {deleted_path} ({len(deleted_df)} rows)")

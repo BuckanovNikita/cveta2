@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import boto3
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -13,7 +12,6 @@ from tenacity import (
 )
 
 if TYPE_CHECKING:
-    from cveta2.image_downloader import CloudStorageInfo
     from cveta2.s3_types import S3Client
 
 s3_retry = retry(
@@ -64,12 +62,3 @@ def list_s3_objects(
             break
         kwargs["ContinuationToken"] = resp["NextContinuationToken"]
     return objects
-
-
-def make_s3_client(cs_info: CloudStorageInfo) -> S3Client:
-    """Create a boto3 S3 client from cloud storage info."""
-    client: S3Client = boto3.Session().client(
-        "s3",
-        endpoint_url=cs_info.endpoint_url or None,
-    )
-    return client
