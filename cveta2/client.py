@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -13,6 +12,7 @@ import pandas as pd
 from cvat_sdk import make_client
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiException
+from cvat_sdk.core.exceptions import BackgroundRequestException
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from loguru import logger
 from tqdm import tqdm
@@ -43,11 +43,8 @@ from cveta2.models import (
     TaskInfo,
 )
 
-_DATA_PROCESSING_TIMEOUT = int(os.environ.get("CVETA2_DATA_TIMEOUT", "60"))
-"""Max seconds to wait for CVAT to finish processing cloud storage data.
-
-Configurable via ``CVETA2_DATA_TIMEOUT`` env var (default 60).
-"""
+_DATA_CHECK_PERIOD = 5
+"""Seconds between status checks during data processing."""
 
 _HTTP_5XX_MIN = 500
 _HTTP_5XX_MAX = 600
@@ -753,8 +750,9 @@ class CvatClient:
         Creates one task with ``segment_size`` controlling how many images
         go into each job (CVAT splits automatically).  After attaching data
         the method **waits** for CVAT to finish processing the cloud storage
-        files (up to ``_DATA_PROCESSING_TIMEOUT`` seconds) so that subsequent
-        annotation uploads land on the correct frames.
+        files so that subsequent annotation uploads land on the correct
+        frames.  Raises ``RuntimeError`` immediately if processing fails
+        (e.g. images not found in cloud storage).
 
         Parameters
         ----------
@@ -794,26 +792,25 @@ class CvatClient:
             use_cache=True,
             sorting_method=cvat_models.SortingMethod("natural"),
         )
-        sdk.api_client.tasks_api.create_data(
+        result, _ = sdk.api_client.tasks_api.create_data(
             task.id,
             data_request=data_request,
         )
+        rq_id = result.rq_id
 
         # Wait for CVAT to finish processing cloud storage data.
         # Without this, annotation uploads arrive before frames are indexed
         # and are silently discarded.
-        task_obj = None
-        for _ in range(_DATA_PROCESSING_TIMEOUT):
-            time.sleep(1)
-            task_obj = sdk.tasks.retrieve(int(task.id))
-            if task_obj.size and task_obj.size > 0:
-                break
-        else:
-            logger.warning(
-                f"Задача {task.id}: обработка данных не завершилась "
-                f"за {_DATA_PROCESSING_TIMEOUT}с — аннотации могут быть потеряны"
+        try:
+            sdk.wait_for_completion(
+                rq_id,
+                status_check_period=_DATA_CHECK_PERIOD,
             )
+        except BackgroundRequestException as exc:
+            msg = f"Задача {task.id}: обработка данных не удалась — {exc}"
+            raise RuntimeError(msg) from exc
 
+        task_obj = sdk.tasks.retrieve(int(task.id))
         size_info = f", size={task_obj.size}" if task_obj else ""
         logger.info(
             f"Привязано {len(image_names)} изображений к задаче {task.id} "
