@@ -851,10 +851,11 @@ class CvatClient:
 
         """
         sdk = self._require_sdk("upload_task_annotations")
+        adapter = self._require_adapter("upload_task_annotations")
 
         # Read actual frame mapping from CVAT (authoritative source).
-        data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
-        name_to_frame = _build_name_to_frame(data_meta)
+        raw_meta = adapter.get_task_data_meta(task_id)
+        name_to_frame = _build_name_to_frame(raw_meta)
 
         logger.debug(f"Задача {task_id}: получено {len(name_to_frame)} фреймов из CVAT")
 
@@ -940,14 +941,15 @@ class CvatClient:
 
         """
         sdk = self._require_sdk("mark_frames_deleted")
+        adapter = self._require_adapter("mark_frames_deleted")
 
-        data_meta, _ = sdk.api_client.tasks_api.retrieve_data_meta(task_id)
-        name_to_frame = _build_name_to_frame(data_meta)
+        raw_meta = adapter.get_task_data_meta(task_id)
+        name_to_frame = _build_name_to_frame(raw_meta)
         frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
         if not frame_ids:
             return 0
 
-        current_deleted = set(data_meta.deleted_frames or [])
+        current_deleted = set(raw_meta.deleted_frames)
         new_deleted = sorted(current_deleted | set(frame_ids))
         sdk.api_client.tasks_api.partial_update_data_meta(
             task_id,
@@ -997,6 +999,16 @@ class CvatClient:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _require_adapter(self, method_name: str) -> SdkCvatApiAdapter:
+        """Return the persistent adapter or raise with a helpful message."""
+        if self._persistent_api is None:
+            msg = (
+                f"{method_name}() requires a context manager. "
+                "Use: with CvatClient(cfg) as client: ..."
+            )
+            raise RuntimeError(msg)
+        return self._persistent_api
 
     def _require_sdk(self, method_name: str) -> CvatSdkClient:
         """Return the raw SDK client or raise with a helpful message."""
