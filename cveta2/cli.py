@@ -455,7 +455,7 @@ class CliApp:
             "-d",
             type=str,
             default=None,
-            help="Path to dataset.csv (for --to-yolo).",
+            help="Path to dataset.csv (for --to-yolo / --to-coco).",
         )
         parser.add_argument(
             "--input",

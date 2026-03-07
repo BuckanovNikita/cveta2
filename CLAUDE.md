@@ -34,7 +34,7 @@ uv run vulture             # dead code detection
 
 **Error handling conventions**:
 - Never use bare `except Exception` — catch specific exception types relevant to the operation (e.g. `pd.errors.ParserError`, `KeyError`, `OSError`).
-- Never silently swallow exceptions. At minimum, log at `debug` level so failures are traceable. Use `warning` when the caller gets incomplete/degraded results.
+- Never silently swallow exceptions. At minimum, log at `info` level so failures are traceable. Use `warning` when the caller gets incomplete/degraded results.
 - When skipping items in a loop due to errors, track which items were skipped and log a summary after the loop so the user knows results may be incomplete.
 - Ruff enforces this: the `BLE001` rule bans broad `except` clauses. Do not suppress it with `# noqa`.
 

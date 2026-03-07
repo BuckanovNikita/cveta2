@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from cveta2.image_downloader import CloudStorageInfo
 from cveta2.image_uploader import build_server_file_mapping
+from cveta2.s3_utils import build_s3_key
 
 _MONTH_PREFIX_RE = re.compile(r"\d{4}-\d{2}/.+")
 
@@ -127,3 +128,60 @@ class TestBuildServerFileMapping:
 
         # Lexicographic max = 2026-02
         assert mapping["img.jpg"] == "2026-02/img.jpg"
+
+    def test_deep_nested_subfolder(self) -> None:
+        cs_info = _make_cs_info()
+        s3 = _mock_s3_client(
+            [
+                (
+                    "project/images/subdir/another/img.jpg",
+                    "subdir/another/img.jpg",
+                ),
+            ]
+        )
+
+        mapping, _ = build_server_file_mapping(
+            cs_info,
+            {"img.jpg"},
+            s3_client=s3,
+        )
+
+        assert mapping["img.jpg"] == "subdir/another/img.jpg"
+        assert (
+            build_s3_key(cs_info.prefix, mapping["img.jpg"])
+            == "project/images/subdir/another/img.jpg"
+        )
+
+    def test_mixed_depths_with_prefix(self) -> None:
+        cs_info = _make_cs_info()
+        s3 = _mock_s3_client(
+            [
+                ("project/images/flat.jpg", "flat.jpg"),
+                ("project/images/2026-03/monthly.jpg", "2026-03/monthly.jpg"),
+                ("project/images/a/b/c/deep.jpg", "a/b/c/deep.jpg"),
+            ]
+        )
+
+        mapping, _ = build_server_file_mapping(
+            cs_info,
+            {"flat.jpg", "monthly.jpg", "deep.jpg"},
+            s3_client=s3,
+        )
+
+        assert mapping["flat.jpg"] == "flat.jpg"
+        assert mapping["monthly.jpg"] == "2026-03/monthly.jpg"
+        assert mapping["deep.jpg"] == "a/b/c/deep.jpg"
+
+        # All produce correct full S3 keys
+        assert (
+            build_s3_key(cs_info.prefix, mapping["flat.jpg"])
+            == "project/images/flat.jpg"
+        )
+        assert (
+            build_s3_key(cs_info.prefix, mapping["monthly.jpg"])
+            == "project/images/2026-03/monthly.jpg"
+        )
+        assert (
+            build_s3_key(cs_info.prefix, mapping["deep.jpg"])
+            == "project/images/a/b/c/deep.jpg"
+        )

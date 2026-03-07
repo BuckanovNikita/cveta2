@@ -1,6 +1,6 @@
 # cveta2
 
-Утилита для работы с аннотациями CVAT-проектов: выгрузка проекта (`cveta2 fetch`), выгрузка отдельных задач (`cveta2 fetch-task`), создание задач с переносом аннотаций (`cveta2 upload`), синхронизация изображений (`cveta2 s3-sync`), управление игнорируемыми задачами (`cveta2 ignore`), управление метками проекта (`cveta2 labels`), слияние датасетов (`cveta2 merge`), конвертация между CSV и YOLO форматом (`cveta2 convert`). Доступна как CLI и как Python API (`CvatClient`, `fetch_annotations`).
+Утилита для работы с аннотациями CVAT-проектов: выгрузка проекта (`cveta2 fetch`), выгрузка отдельных задач (`cveta2 fetch-task`), создание задач с переносом аннотаций (`cveta2 upload`), синхронизация изображений (`cveta2 s3-sync`), управление игнорируемыми задачами (`cveta2 ignore`), управление метками проекта (`cveta2 labels`), слияние датасетов (`cveta2 merge`), конвертация между CSV, YOLO и COCO форматами (`cveta2 convert`). Доступна как CLI и как Python API (`CvatClient`, `fetch_annotations`).
 
 ## Что умеет
 
@@ -13,7 +13,7 @@
 - **Игнорирование задач** (`ignore`) — управление списком задач, которые всегда пропускаются при `fetch` (добавление/удаление по ID или имени, интерактивный выбор, просмотр всех проектов)
 - **Управление метками** (`labels`) — просмотр и интерактивное редактирование меток проекта (добавление, переименование, изменение цвета, удаление); перед удалением проверяет количество аннотаций и требует подтверждения
 - **Слияние датасетов** (`merge`) — объединение двух `dataset.csv` с учётом удалённых изображений и разрешением конфликтов (по порядку или по дате)
-- **Конвертация форматов** (`convert`) — двунаправленная конвертация между cveta2 CSV и YOLO detection форматом (поддержка датасетов и предсказаний с confidence, русских меток, изображений без аннотаций)
+- **Конвертация форматов** (`convert`) — конвертация между cveta2 CSV и YOLO detection форматом (двунаправленная, с поддержкой датасетов и предсказаний с confidence, русских меток, изображений без аннотаций), а также CSV → COCO detection формат (для RF-DETR и других фреймворков)
 - Поддерживает фильтр по задачам со статусом `completed`
 - Всё за один вызов — без промежуточных XML/ZIP файлов
 
@@ -281,7 +281,7 @@ cveta2 merge --old old/dataset.csv --new new/dataset.csv --by-time -o merged.csv
 
 ### `cveta2 convert`
 
-Двунаправленная конвертация между cveta2 CSV и YOLO detection форматом. Поддерживает два режима: CSV → YOLO (`--to-yolo`) и YOLO → CSV (`--from-yolo`).
+Конвертация между cveta2 CSV и форматами детекции. Поддерживает три режима: CSV → YOLO (`--to-yolo`), YOLO → CSV (`--from-yolo`) и CSV → COCO (`--to-coco`).
 
 **CSV → YOLO** (`--to-yolo`):
 
@@ -326,6 +326,35 @@ cveta2 convert --from-yolo -i predictions/ -o preds.csv --names-file classes.yam
 В режиме предсказаний поддерживается 6-е поле confidence в YOLO `.txt` файлах (формат: `class_id xc yc w h confidence`). Значение записывается в столбец `confidence` выходного CSV.
 
 Изображения автоматически ищутся во всех директориях из `image_cache` конфига. Дополнительные пути можно указать через `--image-dir` (можно повторять).
+
+**CSV → COCO** (`--to-coco`):
+
+```bash
+# Конвертировать dataset.csv в COCO detection формат
+cveta2 convert --to-coco -d dataset.csv -o coco_dataset/
+
+# Использовать символические ссылки вместо копирования
+cveta2 convert --to-coco -d dataset.csv -o coco_dataset/ --link-mode symlink
+
+# Указать дополнительную директорию с изображениями
+cveta2 convert --to-coco -d dataset.csv -o coco_dataset/ --image-dir /mnt/data/images
+```
+
+Создаёт структуру директорий, совместимую с RF-DETR и другими фреймворками, ожидающими COCO-формат:
+
+```
+coco_dataset/
+  train/                       -- изображения + аннотации для train
+    _annotations.coco.json
+    image1.jpg
+    image2.jpg
+  valid/                       -- изображения + аннотации для val (папка "valid", не "val")
+    _annotations.coco.json
+  test/                        -- изображения + аннотации для test
+    _annotations.coco.json
+```
+
+Каждый `_annotations.coco.json` содержит стандартную структуру COCO: `images`, `annotations` (с `bbox` в формате `[x, y, w, h]`), `categories`. Нумерация категорий начинается с 1 (в отличие от YOLO, где с 0). Каждое изображение должно иметь заполненное поле `split` (`train`/`val`/`test`). Сплит `val` сохраняется в папку `valid`.
 
 ### `cveta2 doctor`
 
