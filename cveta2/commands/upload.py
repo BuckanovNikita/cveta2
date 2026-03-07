@@ -280,7 +280,10 @@ def run_upload(args: argparse.Namespace) -> None:
 
         _warn_missing_images(missing)
 
-        task_image_names = sorted(name_to_server_file[n] for n in all_image_names)
+        task_image_names = sorted(
+            build_s3_key(cs_info.prefix, name_to_server_file[n])
+            for n in all_image_names
+        )
         task_id = client.create_upload_task(
             project_id=project_id,
             name=task_name,
