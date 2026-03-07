@@ -36,14 +36,14 @@ uv run pre-commit run --all-files
 Pre-commit запускает хуки в следующем порядке:
 
 1. `ruff format` — форматирование
-2. `ruff check` — линтинг
-3. `lint-imports` — проверка архитектурных контрактов
-4. `mypy` — статическая типизация
-5. `vulture` — поиск мёртвого кода
-6. `pytest` — тесты
-7. `count-lines` — подсчёт строк кода
-8. `uv build` — проверка собираемости пакета
-9. `uv lock` — синхронизация lock-файла
+1. `ruff check` — линтинг
+1. `lint-imports` — проверка архитектурных контрактов
+1. `mypy` — статическая типизация
+1. `vulture` — поиск мёртвого кода
+1. `pytest` — тесты
+1. `count-lines` — подсчёт строк кода
+1. `uv build` — проверка собираемости пакета
+1. `uv lock` — синхронизация lock-файла
 
 Всегда запускайте `ruff format` перед `ruff check` — форматтер может создать/исправить lint-ошибки.
 
@@ -55,6 +55,7 @@ uv run ruff format --check .  # проверка без изменений (exit
 ```
 
 Конфигурация:
+
 - `line-length = 88`
 - `target-version = "py310"`
 - `docstring-code-format = true` — форматирует примеры кода в docstrings
@@ -69,6 +70,7 @@ uv run ruff check --fix .  # автоматически исправить бе�
 ```
 
 Конфигурация:
+
 - `select = ["ALL"]` — включены **все** правила ruff
 - Отключённые правила:
 
@@ -96,6 +98,7 @@ uv run mypy .
 ```
 
 Конфигурация:
+
 - `strict = true` — строжайший режим
 - `python_version = "3.10"`
 - `warn_return_any = true`
@@ -165,6 +168,7 @@ uv run pytest -n0       # в один поток (для отладки)
 Внешние сервисы не нужны — тесты работают на JSON-фикстурах.
 
 Покрытие:
+
 - **merge** (`tests/test_merge.py`) — split propagation, default merge (new wins), by-time merge, I/O (CSV и legacy), CLI end-to-end
 - **partition** (`tests/test_partition.py`) — разбиение на dataset/obsolete/in_progress
 - **extractors** (`tests/test_extractors.py`) — конвертация shapes в BBoxAnnotation
@@ -192,26 +196,24 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 
 ### Интеграционные тесты
 
-Прогоняют тесты против живого CVAT + MinIO.
+Прогоняют тесты против живого CVAT + MinIO + ClearML.
 
 ```bash
-# 1. Поднять CVAT + MinIO (всегда с нуля)
-./scripts/integration_up.sh                    # случайный свободный порт
+# 1. Поднять стек (порт по умолчанию 9988, всегда с нуля)
+./scripts/integration_up.sh
 ./scripts/integration_up.sh --port 9080        # конкретный порт
 ./scripts/integration_up.sh --cvat-version v2.26.0  # конкретная версия
 
-# 2. Запустить тесты (порт — из вывода скрипта)
-CVAT_INTEGRATION_HOST=http://localhost:<порт> uv run pytest
+# 2. Запустить тесты (скрипт сам выставляет env-переменные и отключает xdist)
+./scripts/integration_test.sh
+./scripts/integration_test.sh -k upload        # только upload-тесты
+./scripts/integration_test.sh -x --tb=long     # остановиться на первой ошибке
 
-# 3. Остановить
-docker compose --project-directory vendor/cvat \
-  -f vendor/cvat/docker-compose.yml \
-  -f tests/integration/docker-compose.override.yml \
-  --env-file tests/integration/.env \
-  down -v
+# 3. Остановить и удалить volumes
+./scripts/integration_stop.sh
 ```
 
-Без `CVAT_INTEGRATION_HOST` интеграционные тесты не запускаются.
+Без `CVAT_INTEGRATION_HOST` интеграционные тесты не запускаются. Скрипт `integration_test.sh` выставляет эту переменную автоматически.
 
 | Переменная | По умолчанию | Описание |
 |---|---|---|
@@ -236,10 +238,9 @@ docker compose --project-directory vendor/cvat \
 |---|---|---|
 | `README.md` | Пользователей | Русский |
 | `CONTRIBUTING.md` | Разработчиков | Русский |
-| `AGENT_DOCS.md` | AI-агентов и разработчиков — внутренние решения | Английский |
 | `DATASET_FORMAT.md` | Пользователей — формат выходных CSV | Русский |
 
-Обновляйте `README.md` и `AGENT_DOCS.md` при изменении API.
+Обновляйте `README.md` при изменении API.
 
 ## Решение проблем
 
@@ -248,11 +249,7 @@ docker compose --project-directory vendor/cvat \
 **CVAT не стартует** — проверьте логи:
 
 ```bash
-docker compose --project-directory vendor/cvat \
-  -f vendor/cvat/docker-compose.yml \
-  -f tests/integration/docker-compose.override.yml \
-  --env-file tests/integration/.env \
-  logs cvat_server
+docker logs "$(whoami)-cvat_server"
 ```
 
 **Ошибка про сабмодуль** — `git submodule update --init`
