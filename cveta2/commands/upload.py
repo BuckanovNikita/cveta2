@@ -290,6 +290,7 @@ def run_upload(args: argparse.Namespace) -> None:
             image_names=task_image_names,
             cloud_storage_id=cs_info.id,
             segment_size=upload_cfg.images_per_job,
+            image_quality=upload_cfg.image_quality,
         )
 
         # Upload annotations from dataset.csv to the new task

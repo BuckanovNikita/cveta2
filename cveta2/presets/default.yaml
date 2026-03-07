@@ -2,3 +2,4 @@ cvat:
   host: "http://localhost:8080"
 upload:
   images_per_job: 100
+  image_quality: 100

@@ -737,13 +737,14 @@ class CvatClient:
     # Task creation
     # ------------------------------------------------------------------
 
-    def create_upload_task(
+    def create_upload_task(  # noqa: PLR0913
         self,
         project_id: int,
         name: str,
         image_names: list[str],
         cloud_storage_id: int,
         segment_size: int = 100,
+        image_quality: int = 100,
     ) -> int:
         """Create a CVAT task backed by cloud storage images.
 
@@ -766,6 +767,8 @@ class CvatClient:
             CVAT cloud storage ID to read images from.
         segment_size:
             Maximum frames per job (CVAT auto-creates multiple jobs).
+        image_quality:
+            JPEG compression quality for CVAT image chunks (0-100).
 
         Returns
         -------
@@ -786,7 +789,7 @@ class CvatClient:
         logger.info(f"Создана задача: {task.name} (id={task.id})")
 
         data_request = cvat_models.DataRequest(
-            image_quality=70,
+            image_quality=image_quality,
             server_files=image_names,
             cloud_storage_id=cloud_storage_id,
             use_cache=True,

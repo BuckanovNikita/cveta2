@@ -427,6 +427,7 @@ class UploadConfig(BaseModel):
     """Settings for the ``upload`` command."""
 
     images_per_job: int = 100
+    image_quality: int = 100
 
 
 def _parse_upload_section(raw: object) -> UploadConfig:
