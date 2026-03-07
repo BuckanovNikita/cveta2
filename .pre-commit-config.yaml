@@ -37,8 +37,8 @@ repos:
         always_run: true
 
       - id: pytest
-        name: pytest
-        entry: uv run pytest -n auto
+        name: pytest (with coverage)
+        entry: uv run pytest -n auto --cov --cov-report=term-missing --cov-fail-under=65
         language: system
         pass_filenames: false
         always_run: true

@@ -44,6 +44,7 @@ dev = [
     "ipykernel>=7.2.0",
     "ipywidgets>=8.1.8",
     "matplotlib>=3.10.8",
+    "pytest-cov>=7.0.0",
 ]
 
 [tool.ruff]
@@ -68,7 +69,7 @@ fixable = ["ALL"]
 exclude = ["scripts/**"]  # lint only; format still runs on scripts
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D102", "D103", "S311"]
+"tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D101", "D102", "D103", "S311", "SLF001"]
 "main.py" = ["F401"]  # re-export wrapper
 
 [tool.ruff.format]
@@ -101,6 +102,28 @@ markers = [
 min_confidence = 80
 paths = ["cveta2", "main.py"]
 exclude = ["cveta2/s3_types.py"]
+
+[tool.coverage.run]
+source = ["cveta2"]
+branch = true
+omit = [
+    "cveta2/__main__.py",
+    "cveta2/s3_types.py",
+    "cveta2/commands/setup.py",
+    "cveta2/commands/setup_clearml.py",
+    "cveta2/commands/ignore.py",
+    "cveta2/commands/_task_selector.py",
+]
+
+[tool.coverage.report]
+fail_under = 65
+show_missing = true
+skip_empty = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+]
 
 [tool.importlinter]
 root_packages = ["cveta2"]
