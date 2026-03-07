@@ -201,19 +201,12 @@ def test_multiple_shapes_on_same_frame() -> None:
     assert all(r.frame_id == 0 for r in result)
 
 
-def test_non_rectangle_shape_logs_warning() -> None:
+def test_non_rectangle_shape_logs_warning(capture_logs: list[str]) -> None:
     """Non-rectangle shape is skipped and a warning is logged."""
-    from loguru import logger
-
     ctx = _make_ctx()
     polygon = _make_shape(type="polygon")
 
-    messages: list[str] = []
-    handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
-    try:
-        result = _collect_shapes([polygon], ctx)
-    finally:
-        logger.remove(handler_id)
+    result = _collect_shapes([polygon], ctx)
 
     assert result == []
-    assert any("polygon" in m.lower() for m in messages)
+    assert any("polygon" in m.lower() for m in capture_logs)

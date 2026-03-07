@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
-from loguru import logger
 
 from cveta2.client import CvatClient, _FetchAnnotationsOptions, _filter_tasks_for_fetch
 from cveta2.commands.fetch import (
@@ -293,63 +292,45 @@ class TestFilterTasksSilent:
             ),
         ]
 
-    def test_silent_ignored_tasks_no_warning(self) -> None:
+    def test_silent_ignored_tasks_no_warning(self, capture_logs: list[str]) -> None:
         """Silent ignored tasks are filtered out but produce no warning."""
         tasks = self._make_tasks()
         options = _FetchAnnotationsOptions(
             ignore_task_ids={2},
             silent_task_ids={2},
         )
-        messages: list[str] = []
-        sink_id = logger.add(
-            lambda m: messages.append(m.record["message"]), level="WARNING"
-        )
-        try:
-            result = _filter_tasks_for_fetch(tasks, options)
-        finally:
-            logger.remove(sink_id)
+
+        result = _filter_tasks_for_fetch(tasks, options)
 
         assert [t.id for t in result] == [1, 3]
-        assert not any("Пропускаем" in m for m in messages)
-        assert not any("task-2" in m for m in messages)
+        assert not any("Пропускаем" in m for m in capture_logs)
+        assert not any("task-2" in m for m in capture_logs)
 
-    def test_non_silent_ignored_tasks_warn(self) -> None:
+    def test_non_silent_ignored_tasks_warn(self, capture_logs: list[str]) -> None:
         """Non-silent ignored tasks produce a warning."""
         tasks = self._make_tasks()
         options = _FetchAnnotationsOptions(
             ignore_task_ids={2},
         )
-        messages: list[str] = []
-        sink_id = logger.add(
-            lambda m: messages.append(m.record["message"]), level="WARNING"
-        )
-        try:
-            result = _filter_tasks_for_fetch(tasks, options)
-        finally:
-            logger.remove(sink_id)
+
+        result = _filter_tasks_for_fetch(tasks, options)
 
         assert [t.id for t in result] == [1, 3]
-        assert any("Пропускаем" in m for m in messages)
-        assert any("task-2" in m for m in messages)
+        assert any("Пропускаем" in m for m in capture_logs)
+        assert any("task-2" in m for m in capture_logs)
 
-    def test_mixed_silent_and_non_silent(self) -> None:
+    def test_mixed_silent_and_non_silent(self, capture_logs: list[str]) -> None:
         """Only non-silent ignored tasks appear in the warning."""
         tasks = self._make_tasks()
         options = _FetchAnnotationsOptions(
             ignore_task_ids={1, 2},
             silent_task_ids={1},
         )
-        messages: list[str] = []
-        sink_id = logger.add(
-            lambda m: messages.append(m.record["message"]), level="WARNING"
-        )
-        try:
-            result = _filter_tasks_for_fetch(tasks, options)
-        finally:
-            logger.remove(sink_id)
+
+        result = _filter_tasks_for_fetch(tasks, options)
 
         assert [t.id for t in result] == [3]
-        all_text = " ".join(messages)
+        all_text = " ".join(capture_logs)
         assert "Пропускаем 1 задач" in all_text
         assert "task-2" in all_text
         assert "task-1" not in all_text

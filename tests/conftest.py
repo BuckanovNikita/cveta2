@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
+from loguru import logger
 
 from cveta2._client.mapping import _build_label_maps
 from cveta2.client import CvatClient
@@ -23,6 +24,8 @@ from tests.fixtures.fake_cvat_project import (
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from _pytest.mark.structures import ParameterSet
 
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
@@ -177,3 +180,16 @@ def make_bbox(**overrides: Any) -> BBoxAnnotation:
     }
     defaults.update(overrides)
     return BBoxAnnotation(**defaults)
+
+
+@pytest.fixture
+def capture_logs() -> Generator[list[str], None, None]:
+    """Capture loguru messages at WARNING+ level into a list of strings."""
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda msg: messages.append(msg.record["message"]), level="WARNING"
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(handler_id)

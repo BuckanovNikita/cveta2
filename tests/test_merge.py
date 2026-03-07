@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
-from loguru import logger
 
 from cveta2.commands.merge import (
     _merge_datasets,
@@ -82,7 +81,9 @@ class TestPropagateSplits:
         assert splits["a.jpg"] == "train"
         assert splits["b.jpg"] == "val"
 
-    def test_no_propagation_when_old_has_no_split_column(self) -> None:
+    def test_no_propagation_when_old_has_no_split_column(
+        self, capture_logs: list[str]
+    ) -> None:
         """Warning emitted and no changes when old lacks split column."""
         old = pd.DataFrame(
             [
@@ -100,45 +101,34 @@ class TestPropagateSplits:
         new = _df([_row("a.jpg")])
         merged = new.copy()
 
-        messages: list[str] = []
-        handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
-        try:
-            result = _propagate_splits(merged, old, new, {"a.jpg"})
-        finally:
-            logger.remove(handler_id)
+        result = _propagate_splits(merged, old, new, {"a.jpg"})
 
         assert pd.isna(result["split"].iloc[0])
-        assert any("нет данных split" in m for m in messages)
+        assert any("нет данных split" in m for m in capture_logs)
 
-    def test_no_propagation_when_old_splits_all_null(self) -> None:
+    def test_no_propagation_when_old_splits_all_null(
+        self, capture_logs: list[str]
+    ) -> None:
         """Warning emitted when old has split column but all values are NaN."""
         old = _df([_row("a.jpg", split=None)])
         new = _df([_row("a.jpg")])
         merged = new.copy()
 
-        messages: list[str] = []
-        handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
-        try:
-            _propagate_splits(merged, old, new, {"a.jpg"})
-        finally:
-            logger.remove(handler_id)
+        _propagate_splits(merged, old, new, {"a.jpg"})
 
-        assert any("нет данных split" in m for m in messages)
+        assert any("нет данных split" in m for m in capture_logs)
 
-    def test_conflict_warning_when_both_have_split(self) -> None:
+    def test_conflict_warning_when_both_have_split(
+        self, capture_logs: list[str]
+    ) -> None:
         """Warning emitted when both old and new have non-null split for same image."""
         old = _df([_row("a.jpg", split="train")])
         new = _df([_row("a.jpg", split="test")])
         merged = new.copy()
 
-        messages: list[str] = []
-        handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
-        try:
-            _propagate_splits(merged, old, new, {"a.jpg"})
-        finally:
-            logger.remove(handler_id)
+        _propagate_splits(merged, old, new, {"a.jpg"})
 
-        assert any("split задан в обоих датасетах" in m for m in messages)
+        assert any("split задан в обоих датасетах" in m for m in capture_logs)
 
     def test_conflict_keeps_winner_split(self) -> None:
         """Winner's split value is preserved, not overwritten."""
@@ -204,19 +194,14 @@ class TestMergeDatasetsSplitPropagation:
         b_split = merged.loc[merged["image_name"] == "b.jpg", "split"].iloc[0]
         assert b_split == "val"
 
-    def test_no_split_in_old_warns(self) -> None:
+    def test_no_split_in_old_warns(self, capture_logs: list[str]) -> None:
         """Warning is logged when old dataset has no split data."""
         old = _df([_row("a.jpg")])
         new = _df([_row("a.jpg")])
 
-        messages: list[str] = []
-        handler_id = logger.add(lambda msg: messages.append(str(msg)), level="WARNING")
-        try:
-            _merge_datasets(old, new, set())
-        finally:
-            logger.remove(handler_id)
+        _merge_datasets(old, new, set())
 
-        assert any("нет данных split" in m for m in messages)
+        assert any("нет данных split" in m for m in capture_logs)
 
     def test_multiple_rows_per_image_propagated(self) -> None:
         """When an image has multiple annotation rows, all get the split from old."""

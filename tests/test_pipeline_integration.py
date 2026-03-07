@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -388,7 +387,10 @@ def test_4xx_error_propagated(coco8_fixtures: LoadedFixtures) -> None:
     assert exc_info.value.status == 404
 
 
-def test_5xx_raise_on_failure(coco8_fixtures: LoadedFixtures) -> None:
+def test_5xx_raise_on_failure(
+    coco8_fixtures: LoadedFixtures,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """When CVETA2_RAISE_ON_FAILURE=true, 5xx is re-raised immediately."""
     fake = build_fake(
         coco8_fixtures,
@@ -399,17 +401,10 @@ def test_5xx_raise_on_failure(coco8_fixtures: LoadedFixtures) -> None:
     api = _FailingTaskApi(FakeCvatApi(fake), failing_task_id=failing_task_id)
     client = CvatClient(_CFG, api=api)
 
-    prev = os.environ.get("CVETA2_RAISE_ON_FAILURE")
-    try:
-        os.environ["CVETA2_RAISE_ON_FAILURE"] = "true"
-        with pytest.raises(ApiException) as exc_info:
-            client.fetch_annotations(fake.project.id)
-        assert exc_info.value.status == 500
-    finally:
-        if prev is None:
-            os.environ.pop("CVETA2_RAISE_ON_FAILURE", None)
-        else:
-            os.environ["CVETA2_RAISE_ON_FAILURE"] = prev
+    monkeypatch.setenv("CVETA2_RAISE_ON_FAILURE", "true")
+    with pytest.raises(ApiException) as exc_info:
+        client.fetch_annotations(fake.project.id)
+    assert exc_info.value.status == 500
 
 
 # ---------------------------------------------------------------------------
