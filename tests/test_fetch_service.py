@@ -369,6 +369,18 @@ def test_resolve_project_id_not_found(coco8_fixtures: LoadedFixtures) -> None:
         client.resolve_project_id("does-not-exist")
 
 
+def test_count_images_unique_and_empty() -> None:
+    """count_images counts unique image names; empty/columnless frames give 0."""
+    from cveta2.services.output import count_images
+
+    df = pd.DataFrame(
+        {"image_name": ["a.jpg", "a.jpg", "b.jpg"], "instance_label": ["x", "y", "x"]}
+    )
+    assert count_images(df) == 2
+    assert count_images(pd.DataFrame()) == 0
+    assert count_images(pd.DataFrame({"other": [1]})) == 0
+
+
 def test_raw_csv_includes_deleted_images(
     coco8_fixtures: LoadedFixtures,
     tmp_path: Path,

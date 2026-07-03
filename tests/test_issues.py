@@ -312,6 +312,22 @@ class TestCreateTaskIssues:
         assert client.create_task_issues(7, df) == 1
         assert api.create_issue.call_count == 1
 
+    def test_same_text_on_different_bboxes_creates_issue_per_bbox(self) -> None:
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
+        other_bbox = {
+            "bbox_x_tl": 10.0,
+            "bbox_y_tl": 20.0,
+            "bbox_x_br": 30.0,
+            "bbox_y_br": 40.0,
+        }
+        base = {"image_name": "img_0.jpg", "issue_text": "same", "issue_state": "new"}
+        df = pd.DataFrame([{**base, **_BBOX}, {**base, **other_bbox}])
+
+        assert client.create_task_issues(7, df) == 2
+        positions = [c.args[0].position for c in api.create_issue.call_args_list]
+        assert positions == [[1.0, 2.0, 3.0, 4.0], [10.0, 20.0, 30.0, 40.0]]
+
     def test_unknown_image_skipped_with_warning(self, capture_logs: list[str]) -> None:
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)

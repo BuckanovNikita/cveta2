@@ -86,6 +86,13 @@ def enrich_dataframe_paths(
     return df
 
 
+def count_images(df: pd.DataFrame) -> int:
+    """Count unique images in an annotation DataFrame (0 when empty)."""
+    if "image_name" not in df.columns:
+        return 0
+    return int(df["image_name"].nunique())
+
+
 def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     """Write raw.csv with all annotation and deleted rows, unpartitioned."""
     rows = result.to_csv_rows()
@@ -94,7 +101,10 @@ def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_path = output_dir / "raw.csv"
     raw_df.to_csv(raw_path, index=False, encoding="utf-8")
-    logger.info(f"Raw CSV saved to {raw_path} ({len(raw_df)} rows)")
+    logger.info(
+        f"Raw CSV saved to {raw_path} "
+        f"({count_images(raw_df)} images, {len(raw_df)} rows)"
+    )
 
 
 def _write_deleted_csv(
@@ -123,7 +133,9 @@ def write_partition_csvs(partition: PartitionResult, output_dir: Path) -> None:
     ]:
         path = output_dir / name
         df.to_csv(path, index=False, encoding="utf-8")
-        logger.info(f"{label} saved to {path} ({len(df)} rows)")
+        logger.info(
+            f"{label} saved to {path} ({count_images(df)} images, {len(df)} rows)"
+        )
 
     _write_deleted_csv(partition.deleted_images, output_dir)
 
@@ -136,6 +148,9 @@ def write_dataset_and_deleted(result: ProjectAnnotations, output_dir: Path) -> N
 
     dataset_path = output_dir / "dataset.csv"
     df.to_csv(dataset_path, index=False, encoding="utf-8")
-    logger.info(f"Dataset CSV saved to {dataset_path} ({len(df)} rows)")
+    logger.info(
+        f"Dataset CSV saved to {dataset_path} "
+        f"({count_images(df)} images, {len(df)} rows)"
+    )
 
     _write_deleted_csv(result.deleted_images, output_dir)

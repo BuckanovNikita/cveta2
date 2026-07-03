@@ -10,9 +10,12 @@ Requires a running, seeded CVAT (see scripts/integration_up.sh).
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+from cvat_sdk.api_client import models as cvat_models
+from cvat_sdk.core.helpers import get_paginated_collection
 
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.client import CvatClient
@@ -22,7 +25,14 @@ from cveta2.models import (
     BBoxAnnotation,
     ImageWithoutAnnotations,
 )
+from cveta2.services.fetch import FetchOptions, fetch_selected_tasks
+from cveta2.task_cache import get_task_cache_dir
 from tests.integration.conftest import _env, _make_sdk_client
+from tests.integration.test_upload import (
+    IMAGE_NAMES,
+    _cs_info_for_host,
+    _get_project_and_storage,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -143,6 +153,80 @@ class TestRealClientFetchAnnotations:
                 assert set(row.keys()) == expected_keys
         finally:
             sdk_client.close()
+
+
+def _complete_task_jobs(task_id: int) -> None:
+    """Move every job of *task_id* to acceptance/completed via the raw SDK."""
+    sdk_client = _make_sdk_client()
+    try:
+        jobs = get_paginated_collection(
+            sdk_client.api_client.jobs_api.list_endpoint, task_id=task_id
+        )
+        for job in jobs:
+            sdk_client.api_client.jobs_api.partial_update(
+                int(job.id),
+                patched_job_write_request=cvat_models.PatchedJobWriteRequest(
+                    stage=cvat_models.JobStage("acceptance"),
+                    state=cvat_models.OperationStatus("completed"),
+                ),
+            )
+    finally:
+        sdk_client.close()
+
+
+class TestFetchTaskCacheLive:
+    """Live round-trip of the task-annotation cache across two fetches."""
+
+    def test_second_fetch_served_from_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project_id, project_name, cs_info, cfg = _get_project_and_storage()
+        task_name = "integration-cache-roundtrip-test"
+        with CvatClient(cfg) as client:
+            task_id = client.create_upload_task(
+                project_id=project_id,
+                name=task_name,
+                image_names=IMAGE_NAMES[:2],
+                cloud_storage_id=cs_info.id,
+                segment_size=10,
+            )
+        _complete_task_jobs(task_id)
+
+        monkeypatch.delenv("CVETA2_DISABLE_CACHE", raising=False)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+
+        sdk_client = _make_sdk_client()
+        try:
+            adapter = SdkCvatApiAdapter(sdk_client)
+            tasks = adapter.get_project_tasks(project_id)
+            live_task = next(t for t in tasks if t.name == task_name)
+            assert live_task.status == "completed"
+
+            spy = MagicMock(wraps=adapter.get_task_annotations)
+            monkeypatch.setattr(adapter, "get_task_annotations", spy)
+            client = CvatClient(cfg, api=adapter)
+            options = FetchOptions(task_selector=[task_name])
+            with patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=_cs_info_for_host(cs_info),
+            ):
+                fetch_selected_tasks(
+                    client, project_id, project_name, tmp_path / "out1", None, options
+                )
+                assert spy.call_count == 1
+                entry = get_task_cache_dir(project_id) / f"task_{task_id}.json"
+                assert entry.exists(), "first fetch must persist a local cache entry"
+
+                fetch_selected_tasks(
+                    client, project_id, project_name, tmp_path / "out2", None, options
+                )
+                assert spy.call_count == 1, "second fetch must be served from cache"
+        finally:
+            sdk_client.close()
+
+        df1 = pd.read_csv(tmp_path / "out1" / "dataset.csv")
+        df2 = pd.read_csv(tmp_path / "out2" / "dataset.csv")
+        pd.testing.assert_frame_equal(df1, df2)
 
 
 class TestRealCliFetchTask:

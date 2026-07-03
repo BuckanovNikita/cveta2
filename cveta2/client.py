@@ -133,7 +133,12 @@ def _filter_tasks_for_fetch(
 
 
 def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
-    """Return deduplicated rows with ``issue_state == "new"`` and non-empty text."""
+    """Return deduplicated rows with ``issue_state == "new"`` and non-empty text.
+
+    Issues are attached per-bbox, so the dedup key includes the bbox
+    coordinates: distinct boxes on one image with the same text each keep
+    their row; only fully identical duplicates collapse.
+    """
     if "issue_state" not in annotations_df.columns:
         return pd.DataFrame()
     df = annotations_df.copy()
@@ -142,9 +147,12 @@ def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
     df["issue_state"] = df["issue_state"].fillna("").astype(str).str.strip()
     df["issue_text"] = df["issue_text"].fillna("").astype(str).str.strip()
     new_rows: pd.DataFrame = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
-    deduped: pd.DataFrame = new_rows.drop_duplicates(
-        subset=["image_name", "issue_text"]
-    )
+    dedup_key = ["image_name", "issue_text"] + [
+        col
+        for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
+        if col in new_rows.columns
+    ]
+    deduped: pd.DataFrame = new_rows.drop_duplicates(subset=dedup_key)
     return deduped
 
 
@@ -804,9 +812,10 @@ class CvatClient:
 
         Rows whose ``issue_state`` is ``"new"`` and whose ``issue_text`` is
         non-empty become CVAT issues on *task_id*; ``issue_text`` is posted
-        as the first comment.  Duplicate ``(image_name, issue_text)`` pairs
-        are created once.  Issues are attached to the row's bbox; rows
-        without a complete bbox are skipped with a warning.
+        as the first comment.  Each bbox gets its own issue; duplicate
+        ``(image_name, issue_text, bbox)`` rows are created once.  Issues
+        are attached to the row's bbox; rows without a complete bbox are
+        skipped with a warning.
 
         Returns the number of issues created.  Requires an active context
         manager (``with CvatClient(...) as c:``).

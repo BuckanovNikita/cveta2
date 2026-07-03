@@ -185,3 +185,83 @@ class TestUploadIssuesFromCsvIntegration:
             assert issues[0].comments == [issue_message]
         finally:
             sdk_client.close()
+
+    def test_same_text_on_two_bboxes_creates_two_issues(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cveta2.commands.upload import run_upload
+
+        project_id, _project_name, cs_info, cfg = _get_project_and_storage()
+        task_name = "integration-issues-multibbox-test"
+        issue_message = "проверить оба бокса"
+        dataset_csv = tmp_path / "dataset.csv"
+        base_row = {
+            "image_name": IMAGE_NAMES[0],
+            "instance_label": "person",
+            "instance_shape": "box",
+            "issue_text": issue_message,
+            "issue_state": "new",
+        }
+        pd.DataFrame(
+            [
+                {
+                    **base_row,
+                    "bbox_x_tl": 10.0,
+                    "bbox_y_tl": 20.0,
+                    "bbox_x_br": 110.0,
+                    "bbox_y_br": 120.0,
+                },
+                {
+                    **base_row,
+                    "bbox_x_tl": 200.0,
+                    "bbox_y_tl": 210.0,
+                    "bbox_x_br": 300.0,
+                    "bbox_y_br": 310.0,
+                },
+            ]
+        ).to_csv(dataset_csv, index=False, encoding="utf-8")
+        monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "no-config.yaml"))
+        upload_args = argparse.Namespace(
+            dataset=str(dataset_csv),
+            in_progress=None,
+            name=task_name,
+            project=str(project_id),
+            image_dir=None,
+            complete=False,
+            mark_all_deleted=False,
+        )
+        with (
+            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
+            patch(
+                "cveta2.commands.upload._select_labels",
+                return_value=["person"],
+            ),
+            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
+            patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=_cs_info_for_host(cs_info),
+            ),
+        ):
+            run_upload(upload_args)
+
+        sdk_client = _make_sdk_client()
+        try:
+            adapter = SdkCvatApiAdapter(sdk_client)
+            tasks = adapter.get_project_tasks(project_id)
+            task = next(t for t in tasks if t.name == task_name)
+            issues = adapter.get_task_issues(task.id)
+            assert len(issues) == 2
+            for issue in issues:
+                assert issue.resolved is False
+                assert issue.comments == [issue_message]
+            raw_issues = get_paginated_collection(
+                sdk_client.api_client.issues_api.list_endpoint,
+                task_id=task.id,
+            )
+            positions = sorted(list(issue.position) for issue in raw_issues)
+            assert positions == [
+                [10.0, 20.0, 110.0, 120.0],
+                [200.0, 210.0, 300.0, 310.0],
+            ]
+        finally:
+            sdk_client.close()

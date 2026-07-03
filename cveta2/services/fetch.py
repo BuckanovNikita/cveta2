@@ -8,6 +8,7 @@ directory) before calling in; the public API calls in directly.
 from __future__ import annotations
 
 import shutil
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -97,9 +98,11 @@ def fetch_project(  # noqa: PLR0913
     if options.raw:
         write_raw_csv(result, output_dir)
 
+    started = time.monotonic()
     df = pd.DataFrame(result.to_csv_rows())
     partition = partition_annotations_df(df, result.deleted_images)
     write_partition_csvs(partition, output_dir)
+    logger.info(f"Партиционирование и запись CSV: {time.monotonic() - started:.1f} с")
 
     if options.publish_clearml:
         from cveta2._clearml import maybe_publish_clearml  # noqa: PLC0415
@@ -169,6 +172,7 @@ def _fetch_core(  # noqa: PLR0913
             logger.info(f"Кэш аннотаций: удалено устаревших записей: {pruned}")
 
     if options.images_dir is not None:
+        started = time.monotonic()
         stats = client.download_images(
             result,
             options.images_dir,
@@ -177,7 +181,8 @@ def _fetch_core(  # noqa: PLR0913
         )
         logger.info(
             f"Изображения: {stats.downloaded} загружено, "
-            f"{stats.cached} из кэша, {stats.failed} ошибок"
+            f"{stats.cached} из кэша, {stats.failed} ошибок "
+            f"({time.monotonic() - started:.1f} с)"
         )
     populate_record_paths(result, cs_info, options.images_dir)
 
@@ -232,12 +237,16 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
 
     cache_hits = 0
     fetched = 0
+    hit_seconds = 0.0
+    fetch_seconds = 0.0
     task_results: list[TaskAnnotations] = []
     api = client.api
     for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
+        started = time.monotonic()
         task_result = None if force or cache is None else cache.get(task)
         if task_result is not None:
             cache_hits += 1
+            hit_seconds += time.monotonic() - started
         else:
             task_result = client.fetch_one_task(api, task, ctx)
             if task_result is None:
@@ -245,6 +254,7 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
             fetched += 1
             if cache is not None:
                 cache.put(task, task_result)
+            fetch_seconds += time.monotonic() - started
 
         rows = task_result.to_csv_rows()
         if rows:
@@ -261,6 +271,9 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
         shutil.rmtree(tasks_dir, ignore_errors=True)
 
     if cache is not None:
-        logger.info(f"Задач из кэша: {cache_hits}, загружено с CVAT: {fetched}")
+        logger.info(
+            f"Задач из кэша: {cache_hits} ({hit_seconds:.1f} с), "
+            f"загружено с CVAT: {fetched} ({fetch_seconds:.1f} с)"
+        )
 
     return TaskAnnotations.merge(task_results)

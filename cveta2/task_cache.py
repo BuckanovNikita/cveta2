@@ -205,7 +205,7 @@ class TaskAnnotationCache:
         except OSError as e:
             logger.info(f"Не удалось прочитать локальный кэш задачи {task.id}: {e}")
             return None
-        envelope = _validate_envelope(raw, task)
+        envelope = _validate_envelope(raw, task, source="локальный кэш")
         if envelope is None:
             path.unlink(missing_ok=True)
             return None
@@ -218,7 +218,7 @@ class TaskAnnotationCache:
         raw = self._s3.get(task.id)
         if raw is None:
             return None
-        envelope = _validate_envelope(raw, task)
+        envelope = _validate_envelope(raw, task, source="S3-кэш")
         if envelope is None:
             return None
         self._write_local(task.id, raw)
@@ -239,17 +239,41 @@ class TaskAnnotationCache:
         return self._local_dir / f"task_{task_id}.json"
 
 
-def _validate_envelope(raw: bytes, task: TaskInfo) -> CachedTaskEnvelope | None:
-    """Parse *raw* and return the envelope when it matches the live *task*."""
+def _validate_envelope(
+    raw: bytes, task: TaskInfo, source: str
+) -> CachedTaskEnvelope | None:
+    """Parse *raw* and return the envelope when it matches the live *task*.
+
+    Every rejection is logged with its reason so cache misses stay
+    diagnosable (*source* names the cache layer in the message).
+    """
     try:
         envelope = CachedTaskEnvelope.model_validate_json(raw)
-    except ValidationError:
+    except ValidationError as e:
+        logger.info(
+            f"{source}: запись задачи {task.id} не прошла валидацию "
+            f"({e.error_count()} ошибок) — задача будет загружена заново"
+        )
         return None
     if envelope.schema_version != CACHE_SCHEMA_VERSION:
+        logger.info(
+            f"{source}: запись задачи {task.id} имеет версию схемы "
+            f"{envelope.schema_version} (ожидается {CACHE_SCHEMA_VERSION}) — "
+            f"задача будет загружена заново"
+        )
         return None
     if envelope.task_id != task.id:
+        logger.info(
+            f"{source}: запись задачи {task.id} принадлежит задаче "
+            f"{envelope.task_id} — задача будет загружена заново"
+        )
         return None
     if envelope.task_updated_date != task.updated_date:
+        logger.info(
+            f"{source}: запись задачи {task.id} устарела "
+            f"(в кэше updated_date={envelope.task_updated_date!r}, "
+            f"в CVAT {task.updated_date!r}) — задача будет загружена заново"
+        )
         return None
     return envelope
 

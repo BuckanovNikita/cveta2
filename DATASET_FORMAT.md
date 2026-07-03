@@ -79,8 +79,8 @@ CVAT issues are attached to a frame (image), so both columns are duplicated on a
 **On upload (`upload`):**
 
 - Rows with `issue_state = "new"` and a non-empty `issue_text` become open issues on the created task; `issue_text` becomes the first comment.
-- Duplicate (`image_name`, `issue_text`) pairs are created once.
-- The issue position is the row's bbox when all four coordinates are present, otherwise the whole frame.
+- Each bbox gets its own issue; duplicate (`image_name`, `issue_text`, bbox coordinates) rows are created once.
+- The issue position is the row's bbox; rows with `issue_text` but without all four coordinates are skipped with a warning (no full-frame issues).
 - Rows with `issue_state` equal to `open`, `resolved` or `""` are ignored on upload.
 
 ### ImageWithoutAnnotations
