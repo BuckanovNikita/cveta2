@@ -151,10 +151,10 @@ def _img_no_ann(
 
 
 def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: MagicMock) -> None:
-    """Patch boto3.Session to return the fake S3 client."""
+    """Patch make_s3_client to return the fake S3 client."""
     monkeypatch.setattr(
-        "cveta2.image_downloader.boto3.Session",
-        lambda: MagicMock(client=lambda *_a, **_kw: fake_s3),
+        "cveta2.image_downloader.make_s3_client",
+        lambda *_a, **_kw: fake_s3,
     )
 
 
@@ -516,10 +516,10 @@ def _patch_boto_sync(
     monkeypatch: pytest.MonkeyPatch,
     fake_s3: MagicMock,
 ) -> None:
-    """Patch boto3.Session to return the fake S3 client (for sync tests)."""
+    """Patch make_s3_client to return the fake S3 client (for sync tests)."""
     monkeypatch.setattr(
-        "cveta2.image_downloader.boto3.Session",
-        lambda: MagicMock(client=lambda *_a, **_kw: fake_s3),
+        "cveta2.image_downloader.make_s3_client",
+        lambda *_a, **_kw: fake_s3,
     )
 
 

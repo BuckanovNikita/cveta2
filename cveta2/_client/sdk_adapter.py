@@ -6,9 +6,11 @@ It converts opaque SDK objects into typed DTOs from ``dtos.py``.
 
 from __future__ import annotations
 
+import functools
 import json
 from typing import TYPE_CHECKING, Any
 
+import urllib3.exceptions
 from loguru import logger
 from tenacity import (
     RetryCallState,
@@ -28,6 +30,8 @@ from cveta2._client.dtos import (
 from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from cvat_sdk import Client as CvatSdkClient
     from cvat_sdk.api_client import models as cvat_models
 
@@ -44,13 +48,37 @@ def _log_retry(retry_state: RetryCallState) -> None:
 
 
 # Retry on network / server errors with exponential backoff.
+# urllib3 timeout errors are not OSError, hence urllib3.exceptions.HTTPError.
 _api_retry = retry(
-    retry=retry_if_exception_type((OSError, ConnectionError)),
+    retry=retry_if_exception_type(
+        (OSError, ConnectionError, urllib3.exceptions.HTTPError)
+    ),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
     before_sleep=_log_retry,
     reraise=True,
 )
+
+_CONNECT_TIMEOUT = 10.0
+
+
+def apply_request_timeout(sdk_client: CvatSdkClient, timeout: float) -> None:
+    """Enforce a default (connect, read) timeout on every CVAT HTTP request.
+
+    Wraps the SDK's low-level ``rest_client.request`` so that requests
+    without an explicit ``_request_timeout`` get ``(10.0, timeout)``.
+    Explicit per-call timeouts set by the SDK are preserved.
+    """
+    rest_client = sdk_client.api_client.rest_client
+    original_request: Callable[..., object] = rest_client.request
+
+    @functools.wraps(original_request)
+    def request_with_timeout(*args: object, **kwargs: object) -> object:
+        if kwargs.get("_request_timeout") is None:
+            kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, timeout)
+        return original_request(*args, **kwargs)
+
+    rest_client.request = request_with_timeout
 
 
 class SdkCvatApiAdapter:

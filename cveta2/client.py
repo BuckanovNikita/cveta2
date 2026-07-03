@@ -20,7 +20,7 @@ from tqdm import tqdm
 from cveta2._client.context import _TaskContext
 from cveta2._client.extractors import _collect_shapes
 from cveta2._client.mapping import _build_label_maps
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
+from cveta2._client.sdk_adapter import SdkCvatApiAdapter, apply_request_timeout
 from cveta2.config import CvatConfig
 from cveta2.exceptions import ProjectNotFoundError, TaskNotFoundError
 from cveta2.image_downloader import (
@@ -269,6 +269,8 @@ class CvatClient:
         kwargs = self._build_client_kwargs(resolved)
         self._sdk_client = self._client_factory(**kwargs)
         sdk = self._sdk_client.__enter__()
+        if resolved.request_timeout:
+            apply_request_timeout(sdk, resolved.request_timeout)
         if resolved.organization:
             sdk.organization_slug = resolved.organization
             logger.trace(f"Using organization: {resolved.organization}")
@@ -297,6 +299,8 @@ class CvatClient:
         resolved = self._cfg.ensure_credentials()
         kwargs = self._build_client_kwargs(resolved)
         with self._client_factory(**kwargs) as sdk_client:
+            if resolved.request_timeout:
+                apply_request_timeout(sdk_client, resolved.request_timeout)
             if resolved.organization:
                 sdk_client.organization_slug = resolved.organization
                 logger.trace(

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from cveta2.exceptions import InteractiveModeRequiredError
 
@@ -129,6 +129,20 @@ def _save_section(
     return path
 
 
+def _parse_timeout_env(raw: str | None) -> float | None:
+    """Parse CVETA2_DATA_TIMEOUT env value; warn and return None on garbage."""
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(
+            f"Некорректное значение CVETA2_DATA_TIMEOUT={raw!r} — "
+            f"ожидается число секунд; таймаут не применяется."
+        )
+        return None
+
+
 class CvatConfig(BaseModel):
     """CVAT connection settings."""
 
@@ -136,6 +150,13 @@ class CvatConfig(BaseModel):
     organization: str | None = None
     username: str | None = None
     password: str | None = None
+    request_timeout: float | None = None
+
+    @field_validator("host")
+    @classmethod
+    def _strip_host_trailing_slash(cls, value: str) -> str:
+        """Normalize host URL by stripping trailing slashes."""
+        return value.rstrip("/")
 
     @classmethod
     def _from_cvat_section(cls, data: dict[str, object]) -> CvatConfig:
@@ -162,6 +183,7 @@ class CvatConfig(BaseModel):
             organization=os.environ.get("CVAT_ORGANIZATION"),
             username=os.environ.get("CVAT_USERNAME"),
             password=os.environ.get("CVAT_PASSWORD"),
+            request_timeout=_parse_timeout_env(os.environ.get("CVETA2_DATA_TIMEOUT")),
         )
 
     def merge(self, override: CvatConfig) -> CvatConfig:
@@ -174,6 +196,11 @@ class CvatConfig(BaseModel):
             organization=override.organization or self.organization,
             username=override.username or self.username,
             password=override.password or self.password,
+            request_timeout=(
+                override.request_timeout
+                if override.request_timeout is not None
+                else self.request_timeout
+            ),
         )
 
     @classmethod
@@ -205,13 +232,15 @@ class CvatConfig(BaseModel):
                     projects={k: Path(str(v)) for k, v in raw_ic.items()},
                 )
 
-        cvat_data: dict[str, str] = {"host": self.host}
+        cvat_data: dict[str, str | float] = {"host": self.host}
         if self.organization:
             cvat_data["organization"] = self.organization
         if self.username:
             cvat_data["username"] = self.username
         if self.password:
             cvat_data["password"] = self.password
+        if self.request_timeout is not None:
+            cvat_data["request_timeout"] = self.request_timeout
 
         output: dict[str, object] = {"cvat": cvat_data}
         if existing_image_cache and existing_image_cache.projects:

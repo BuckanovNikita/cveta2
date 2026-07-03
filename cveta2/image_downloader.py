@@ -12,12 +12,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
-import boto3
 from loguru import logger
 from pydantic import BaseModel
 from tqdm import tqdm
 
-from cveta2.s3_utils import list_s3_objects, s3_retry
+from cveta2.s3_utils import list_s3_objects, make_s3_client, s3_retry
 
 if TYPE_CHECKING:
     from cvat_sdk import Client as CvatSdkClient
@@ -182,9 +181,7 @@ class ImageDownloader:
             return
         ep_key = f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
         s3_clients = {
-            ep_key: boto3.Session().client(
-                "s3", endpoint_url=project_cloud_storage.endpoint_url or None
-            )
+            ep_key: make_s3_client(project_cloud_storage.endpoint_url or None)
         }
         self._download_from_project_storage(
             pending, project_cloud_storage, s3_clients, stats
@@ -334,7 +331,7 @@ class S3Syncer:
 
         Returns counters of downloaded / cached / failed files.
         """
-        s3 = boto3.Session().client("s3", endpoint_url=cs_info.endpoint_url or None)
+        s3 = make_s3_client(cs_info.endpoint_url or None)
         objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
         if not objects:
             logger.info(f"Нет объектов в s3://{cs_info.bucket}/{cs_info.prefix}")

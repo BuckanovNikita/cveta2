@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-import boto3
 from loguru import logger
 from pydantic import BaseModel
 from tenacity import (
@@ -21,7 +20,7 @@ from tenacity import (
 )
 from tqdm import tqdm
 
-from cveta2.s3_utils import build_s3_key, list_s3_objects
+from cveta2.s3_utils import build_s3_key, list_s3_objects, make_s3_client
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,9 +113,7 @@ def build_server_file_mapping(
         Passed to :meth:`S3Uploader.upload` to avoid a redundant listing.
 
     """
-    client = s3_client or boto3.Session().client(
-        "s3", endpoint_url=cs_info.endpoint_url or None
-    )
+    client = s3_client or make_s3_client(cs_info.endpoint_url or None)
     objects = list_s3_objects(client, cs_info.bucket, cs_info.prefix)
     existing_keys: set[str] = {key for key, _name in objects}
 
@@ -200,7 +197,7 @@ class S3Uploader:
 
         stats = UploadStats(total=len(images))
 
-        s3 = boto3.Session().client("s3", endpoint_url=cs_info.endpoint_url or None)
+        s3 = make_s3_client(cs_info.endpoint_url or None)
 
         # List existing objects to skip re-uploads
         if existing_keys is None:

@@ -20,7 +20,8 @@ from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.commands.setup_clearml import run_setup_clearml
 from cveta2.commands.upload import run_upload
-from cveta2.config import get_config_path
+from cveta2.config import CvatConfig, get_config_path
+from cveta2.s3_utils import set_default_data_timeout
 
 
 class CliApp:
@@ -562,6 +563,8 @@ class CliApp:
                     list_mappings=getattr(args, "list_mappings", False),
                 )
             return
+
+        set_default_data_timeout(CvatConfig.load().request_timeout)
 
         dispatch: dict[str, Callable[[], None]] = {
             "fetch": lambda: run_fetch(args),

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -15,11 +18,45 @@ if TYPE_CHECKING:
     from cveta2.s3_types import S3Client
 
 s3_retry = retry(
-    retry=retry_if_exception_type((OSError, ConnectionError)),
+    retry=retry_if_exception_type(
+        (OSError, ConnectionError, ConnectTimeoutError, ReadTimeoutError)
+    ),
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
     reraise=True,
 )
+
+_S3_CONNECT_TIMEOUT = 10.0
+
+
+class _DataTimeoutDefault:
+    """Process-wide default read timeout (seconds) for S3 clients."""
+
+    value: float | None = None
+
+
+def set_default_data_timeout(timeout: float | None) -> None:
+    """Set the default S3 read timeout used by :func:`make_s3_client`.
+
+    ``None`` or ``0`` disables the timeout (boto3 defaults apply).
+    """
+    _DataTimeoutDefault.value = timeout
+
+
+def make_s3_client(endpoint_url: str | None = None) -> S3Client:
+    """Create a boto3 S3 client honoring the default data timeout."""
+    session = boto3.Session()
+    if _DataTimeoutDefault.value:
+        timeout_config = Config(
+            connect_timeout=_S3_CONNECT_TIMEOUT,
+            read_timeout=_DataTimeoutDefault.value,
+            retries={"max_attempts": 3, "mode": "standard"},
+        )
+        return cast(
+            "S3Client",
+            session.client("s3", endpoint_url=endpoint_url, config=timeout_config),
+        )
+    return cast("S3Client", session.client("s3", endpoint_url=endpoint_url))
 
 
 def build_s3_key(prefix: str, frame_name: str) -> str:
