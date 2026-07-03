@@ -83,6 +83,39 @@ def apply_request_timeout(sdk_client: CvatSdkClient, timeout: float) -> None:
     rest_client.request = request_with_timeout
 
 
+_GLOBAL_TIMEOUT_MARKER = "_cveta2_global_timeout"
+
+
+def install_global_request_timeout(timeout: float) -> None:
+    """Enforce the timeout on ALL CVAT SDK REST clients, present and future.
+
+    ``apply_request_timeout`` wraps one opened client, but ``make_client``
+    performs requests (server version check, login) before any wrapping is
+    possible; a black-holed host hangs there forever. Patching
+    ``RESTClientObject.request`` at class level covers that window too.
+    Idempotent: repeated calls only update the timeout value.
+    """
+    from cvat_sdk.api_client.rest import RESTClientObject  # noqa: PLC0415
+
+    if getattr(RESTClientObject, _GLOBAL_TIMEOUT_MARKER, None) is not None:
+        setattr(RESTClientObject, _GLOBAL_TIMEOUT_MARKER, timeout)
+        return
+
+    original_request = RESTClientObject.request
+
+    @functools.wraps(original_request)
+    def request_with_timeout(
+        self: RESTClientObject, *args: object, **kwargs: object
+    ) -> object:
+        if kwargs.get("_request_timeout") is None:
+            read_timeout = getattr(RESTClientObject, _GLOBAL_TIMEOUT_MARKER)
+            kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, read_timeout)
+        return original_request(self, *args, **kwargs)
+
+    RESTClientObject.request = request_with_timeout
+    setattr(RESTClientObject, _GLOBAL_TIMEOUT_MARKER, timeout)
+
+
 class SdkCvatApiAdapter:
     """``CvatApiPort`` implementation backed by an open CVAT SDK client.
 

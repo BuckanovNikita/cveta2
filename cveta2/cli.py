@@ -11,6 +11,7 @@ from cveta2.commands.doctor import run_doctor
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+from cveta2._client.sdk_adapter import install_global_request_timeout
 from cveta2.commands.convert import run_convert
 from cveta2.commands.fetch import run_fetch, run_fetch_task
 from cveta2.commands.ignore import run_ignore
@@ -38,6 +39,18 @@ _TASK_ACTIONS: dict[str, Callable[[argparse.Namespace], None]] = {
     "delete": run_task_delete,
     "status": run_task_status,
 }
+
+
+def _configure_data_timeout(timeout: float | None) -> None:
+    """Apply the configured timeout to S3 clients and all CVAT SDK requests.
+
+    The class-level SDK patch covers requests made while the client is still
+    being created (server version check, login), where the per-instance
+    ``apply_request_timeout`` wrapper cannot reach yet.
+    """
+    set_default_data_timeout(timeout)
+    if timeout:
+        install_global_request_timeout(timeout)
 
 
 class CliApp:
@@ -738,7 +751,7 @@ class CliApp:
                 )
             return
 
-        set_default_data_timeout(CvatConfig.load().request_timeout)
+        _configure_data_timeout(CvatConfig.load().request_timeout)
 
         dispatch: dict[str, Callable[[], None]] = {
             "fetch": lambda: run_fetch(args),

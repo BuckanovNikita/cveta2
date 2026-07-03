@@ -191,3 +191,59 @@ def test_make_s3_client_without_timeout(timeout: float | None) -> None:
     client: Any = make_s3_client(endpoint_url="http://localhost:9000")
     assert client.meta.endpoint_url == "http://localhost:9000"
     assert client.meta.config.read_timeout != 123.0
+
+
+# ---------------------------------------------------------------------------
+# CLI global SDK timeout backstop
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("timeout", "expected_calls"),
+    [
+        (45.0, [45.0]),
+        (None, []),
+        (0.0, []),
+    ],
+    ids=["value_installs_global", "none_skips", "zero_skips"],
+)
+def test_configure_data_timeout_installs_global_backstop(
+    monkeypatch: pytest.MonkeyPatch,
+    timeout: float | None,
+    expected_calls: list[float],
+) -> None:
+    from cveta2 import cli
+
+    calls: list[float] = []
+    monkeypatch.setattr(cli, "install_global_request_timeout", calls.append)
+    cli._configure_data_timeout(timeout)
+    assert calls == expected_calls
+    set_default_data_timeout(None)
+
+
+def test_install_global_request_timeout_covers_new_rest_clients(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cvat_sdk.api_client.rest import RESTClientObject
+
+    from cveta2._client import sdk_adapter
+
+    recorded: dict[str, object] = {}
+
+    def fake_request(_self: object, *_args: object, **kwargs: object) -> None:
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(RESTClientObject, "request", fake_request)
+    try:
+        sdk_adapter.install_global_request_timeout(7.0)
+        sdk_adapter.install_global_request_timeout(9.0)
+
+        instance = object.__new__(RESTClientObject)
+        RESTClientObject.request(instance, "GET", "http://x")
+        assert recorded["_request_timeout"] == (10.0, 9.0)
+
+        recorded.clear()
+        RESTClientObject.request(instance, "GET", "http://x", _request_timeout=5)
+        assert recorded["_request_timeout"] == 5
+    finally:
+        delattr(RESTClientObject, sdk_adapter._GLOBAL_TIMEOUT_MARKER)
