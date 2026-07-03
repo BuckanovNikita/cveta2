@@ -24,6 +24,9 @@ def run_s3_sync(args: argparse.Namespace) -> None:
     cfg = CvatConfig.load()
     require_host(cfg)
 
+    if args.root and not args.project:
+        sys.exit("Ошибка: --root требует явного указания проекта через --project.")
+
     ic_cfg = load_image_cache_config()
     if not ic_cfg.projects:
         sys.exit(
@@ -50,7 +53,7 @@ def run_s3_sync(args: argparse.Namespace) -> None:
             logger.info(f"--- Синхронизация проекта: {project_name} ---")
             try:
                 project_id, _name, cs_info = resolve_project_and_cloud_storage(
-                    client, project_name
+                    client, project_name, sync_root=args.root
                 )
             except Cveta2Error as e:
                 logger.error(f"Проект {project_name!r}: не удалось определить ID — {e}")

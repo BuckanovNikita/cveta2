@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 from cveta2.cli import CliApp
-from cveta2.image_downloader import DownloadStats
+from cveta2.image_downloader import CloudStorageInfo, DownloadStats
 from tests.conftest import write_test_config
 
 
@@ -143,3 +144,100 @@ def test_s3_sync_continues_on_resolve_error(
     mock_client.sync_project_images.assert_called_once()
     call_args = mock_client.sync_project_images.call_args
     assert call_args[0][1] == tmp_path / "images-good"
+
+
+def _cvat_cs_info() -> CloudStorageInfo:
+    return CloudStorageInfo(
+        id=3,
+        bucket="cvat-bucket",
+        prefix="cvat/prefix",
+        endpoint_url="http://minio:9000",
+    )
+
+
+def _run_s3_sync_with_cs(
+    mock_client: MagicMock,
+    argv: list[str],
+) -> CloudStorageInfo:
+    """Run s3-sync via CLI and return the cs_info passed to sync_project_images."""
+    mock_client.detect_project_cloud_storage.return_value = _cvat_cs_info()
+    with (
+        patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
+        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
+    ):
+        app = CliApp()
+        app.run(argv)
+    mock_client.sync_project_images.assert_called_once()
+    cs_info = mock_client.sync_project_images.call_args.kwargs["project_cloud_storage"]
+    assert isinstance(cs_info, CloudStorageInfo)
+    return cs_info
+
+
+def test_s3_sync_root_flag_overrides_cloud_storage(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    """s3-sync --root overrides bucket and prefix for the run."""
+    write_test_config(
+        test_config,
+        image_cache={"project-a": str(tmp_path / "images-a")},
+    )
+
+    cs_info = _run_s3_sync_with_cs(
+        _mock_client_ctx(),
+        [
+            "s3-sync",
+            "--project",
+            "project-a",
+            "--root",
+            "s3://custom-bucket/images/my_favourite",
+        ],
+    )
+
+    assert cs_info.bucket == "custom-bucket"
+    assert cs_info.prefix == "images/my_favourite"
+    assert cs_info.endpoint_url == "http://minio:9000"
+
+
+def test_s3_sync_config_sync_root_applied(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    """s3-sync applies the sync_roots config section without --root."""
+    test_config.write_text(
+        yaml.safe_dump(
+            {
+                "cvat": {
+                    "host": "http://localhost:8080",
+                    "username": "test-user",
+                    "password": "test-password",
+                },
+                "image_cache": {"project-a": str(tmp_path / "images-a")},
+                "sync_roots": {"project-a": "images/my_favourite"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cs_info = _run_s3_sync_with_cs(
+        _mock_client_ctx(),
+        ["s3-sync", "--project", "project-a"],
+    )
+
+    assert cs_info.bucket == "cvat-bucket"
+    assert cs_info.prefix == "images/my_favourite"
+
+
+def test_s3_sync_root_without_project_exits(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    """s3-sync --root without --project exits with error."""
+    write_test_config(
+        test_config,
+        image_cache={"project-a": str(tmp_path / "images-a")},
+    )
+
+    app = CliApp()
+    with pytest.raises(SystemExit):
+        app.run(["s3-sync", "--root", "s3://bucket/prefix"])

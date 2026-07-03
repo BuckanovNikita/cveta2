@@ -59,6 +59,33 @@ def make_s3_client(endpoint_url: str | None = None) -> S3Client:
     return cast("S3Client", session.client("s3", endpoint_url=endpoint_url))
 
 
+def parse_sync_root(root: str) -> tuple[str | None, str]:
+    """Parse a sync root string into ``(bucket, prefix)``.
+
+    ``s3://bucket/some/prefix`` -> ``("bucket", "some/prefix")``,
+    ``s3://bucket`` -> ``("bucket", "")``, a bare ``some/prefix`` ->
+    ``(None, "some/prefix")``.  Trailing slashes are stripped.
+
+    Raises
+    ------
+    ValueError
+        When *root* is empty or an ``s3://`` URL has no bucket name.
+
+    """
+    cleaned = root.strip()
+    if cleaned.startswith("s3://"):
+        bucket, _, prefix = cleaned.removeprefix("s3://").partition("/")
+        if not bucket:
+            msg = f"Некорректный sync root {root!r}: отсутствует имя бакета."
+            raise ValueError(msg)
+        return (bucket, prefix.rstrip("/"))
+    prefix = cleaned.rstrip("/")
+    if not prefix:
+        msg = f"Некорректный sync root {root!r}: пустое значение."
+        raise ValueError(msg)
+    return (None, prefix)
+
+
 def build_s3_key(prefix: str, frame_name: str) -> str:
     """Construct the S3 object key for a frame.
 

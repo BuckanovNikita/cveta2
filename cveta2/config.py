@@ -302,6 +302,51 @@ def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig
     return _load_section("image_cache", _parse_image_cache_section, config_path)
 
 
+class SyncRootsConfig(BaseModel):
+    """Per-project mapping: project_name -> S3 root for image downloads.
+
+    A root is either a full ``s3://bucket/prefix`` URL or a bare prefix
+    string applied to the project's own CVAT bucket.
+    """
+
+    projects: dict[str, str] = {}
+
+    def get_root(self, project_name: str) -> str | None:
+        """Return the sync root for *project_name*, or None if not configured."""
+        return self.projects.get(project_name)
+
+
+def _parse_sync_roots_section(raw: object) -> SyncRootsConfig:
+    """Parse ``sync_roots`` section from raw YAML value."""
+    if not isinstance(raw, dict):
+        return SyncRootsConfig()
+    return SyncRootsConfig(projects={str(k): str(v) for k, v in raw.items()})
+
+
+def load_sync_roots_config(config_path: Path | None = None) -> SyncRootsConfig:
+    """Load the ``sync_roots`` section from the config YAML."""
+    return _load_section("sync_roots", _parse_sync_roots_section, config_path)
+
+
+def _serialize_sync_roots_section(cfg: SyncRootsConfig) -> dict[str, str] | None:
+    """Serialize sync roots config to YAML-friendly dict, or None if empty."""
+    return dict(cfg.projects) or None
+
+
+def save_sync_roots_config(
+    cfg: SyncRootsConfig,
+    config_path: Path | None = None,
+) -> Path:
+    """Update only the ``sync_roots`` section of the config YAML."""
+    return _save_section(
+        "sync_roots",
+        cfg,
+        _serialize_sync_roots_section,
+        config_path,
+        log_message="Sync roots config saved to {path}",
+    )
+
+
 class IgnoredTask(BaseModel):
     """A single ignored task entry (id + cached name + optional description)."""
 

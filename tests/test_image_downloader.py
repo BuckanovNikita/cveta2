@@ -17,7 +17,7 @@ from cveta2.models import (
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
-from cveta2.s3_utils import build_s3_key, list_s3_objects
+from cveta2.s3_utils import build_s3_key, list_s3_objects, parse_sync_root
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -707,6 +707,35 @@ def test_s3_syncer_creates_target_dir(
     assert stats.downloaded == 1
     assert target.exists()
     assert (target / "img.jpg").read_bytes() == b"data"
+
+
+def test_s3_syncer_with_custom_sync_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer with a parse_sync_root-derived prefix lists only that subtree."""
+    s3_objects = {
+        "images/my_favourite/a.jpg": b"data-a",
+        "images/other/b.jpg": b"data-b",
+    }
+    fake_s3 = _make_list_s3_client(s3_objects)
+    _patch_boto_sync(monkeypatch, fake_s3)
+
+    bucket, prefix = parse_sync_root("s3://custom-bucket/images/my_favourite")
+    assert bucket is not None
+    cs_info = CloudStorageInfo(
+        id=1,
+        bucket=bucket,
+        prefix=prefix,
+        endpoint_url="http://minio:9000",
+    )
+    target = tmp_path / "sync-dir"
+    stats = S3Syncer(target).sync(cs_info)
+
+    assert stats.total == 1
+    assert stats.downloaded == 1
+    assert (target / "a.jpg").read_bytes() == b"data-a"
+    assert not (target / "b.jpg").exists()
 
 
 def test_s3_syncer_never_deletes_local_files(

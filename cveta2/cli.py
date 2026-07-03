@@ -262,6 +262,17 @@ class CliApp:
                 "If omitted, syncs every configured project."
             ),
         )
+        parser.add_argument(
+            "--root",
+            type=str,
+            default=None,
+            help=(
+                "One-run override of the S3 sync root "
+                "(s3://bucket/prefix or a bare prefix). "
+                "Takes priority over the sync_roots config section. "
+                "Requires --project."
+            ),
+        )
 
     def _add_upload_parser(
         self,
