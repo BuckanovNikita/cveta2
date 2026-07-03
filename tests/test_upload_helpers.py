@@ -154,9 +154,9 @@ def test_enrich_paths_adds_columns() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg", "b.jpg"], "label": ["x", "y"]})
     found = {"a.jpg": Path("/data/a.jpg")}
     result = _enrich_paths(df, _make_cs_info(), found)
-    assert "s3_path" in result.columns
+    assert "s3_image_path" in result.columns
     assert "image_path" in result.columns
-    assert result.iloc[0]["s3_path"] == "images/a.jpg"
+    assert result.iloc[0]["s3_image_path"] == "images/a.jpg"
     assert result.iloc[0]["image_path"] == str(Path("/data/a.jpg").resolve())
     assert pd.isna(result.iloc[1]["image_path"])
 
@@ -165,7 +165,7 @@ def test_enrich_paths_with_server_file_mapping() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg"]})
     mapping = {"a.jpg": "2026-01/a.jpg"}
     result = _enrich_paths(df, _make_cs_info(), {}, mapping)
-    assert result.iloc[0]["s3_path"] == "images/2026-01/a.jpg"
+    assert result.iloc[0]["s3_image_path"] == "images/2026-01/a.jpg"
 
 
 # ---------------------------------------------------------------------------

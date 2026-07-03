@@ -169,9 +169,9 @@ def _enrich_paths(
     found_images: dict[str, Path],
     name_to_server_file: dict[str, str] | None = None,
 ) -> pd.DataFrame:
-    """Add ``s3_path`` and ``image_path`` columns to the DataFrame."""
+    """Add ``s3_image_path`` and ``image_path`` columns to the DataFrame."""
     df = df.copy()
-    df["s3_path"] = df["image_name"].map(
+    df["s3_image_path"] = df["image_name"].map(
         lambda name: build_s3_key(
             cs_info.prefix,
             name_to_server_file[name]

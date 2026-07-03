@@ -120,7 +120,7 @@ class BBoxAnnotation(BaseModel):
     source: str
     annotation_id: int | None
     confidence: float | None = None
-    s3_path: str | None = None
+    s3_image_path: str | None = None
     image_path: str | None = None
     attributes: dict[str, str]
 
@@ -179,7 +179,7 @@ class ImageWithoutAnnotations(BaseModel):
     frame_id: int
     split: Split | None = None
     subset: str = ""
-    s3_path: str | None = None
+    s3_image_path: str | None = None
     image_path: str | None = None
 
     validate_image_name = field_validator("image_name", mode="before")(
@@ -211,7 +211,7 @@ class DeletedImage(BaseModel):
     task_updated_date: str = ""
     frame_id: int
     subset: str = ""
-    s3_path: str | None = None
+    s3_image_path: str | None = None
     image_path: str | None = None
 
     validate_image_name = field_validator("image_name", mode="before")(

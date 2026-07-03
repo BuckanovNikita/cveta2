@@ -185,14 +185,14 @@ def test_image_name_validator_on_image_without_annotations() -> None:
 
 
 # ---------------------------------------------------------------------------
-# s3_path and image_path defaults
+# s3_image_path and image_path defaults
 # ---------------------------------------------------------------------------
 
 
-def test_s3_path_defaults_to_none() -> None:
-    """s3_path defaults to None."""
+def test_s3_image_path_defaults_to_none() -> None:
+    """s3_image_path defaults to None."""
     bbox = make_bbox()
-    assert bbox.s3_path is None
+    assert bbox.s3_image_path is None
 
 
 def test_image_path_defaults_to_none() -> None:

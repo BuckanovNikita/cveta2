@@ -138,10 +138,10 @@ def _populate_paths(
     cs_info: CloudStorageInfo | None,
     images_dir: Path | None,
 ) -> None:
-    """Set ``s3_path`` and ``image_path`` on all annotation/deleted records."""
+    """Set ``s3_image_path`` and ``image_path`` on all annotation/deleted records."""
     for record in (*result.annotations, *result.deleted_images):
         if cs_info is not None:
-            record.s3_path = build_s3_key(cs_info.prefix, record.image_name)
+            record.s3_image_path = build_s3_key(cs_info.prefix, record.image_name)
         if images_dir is not None:
             local = images_dir / record.image_name
             if local.exists():
