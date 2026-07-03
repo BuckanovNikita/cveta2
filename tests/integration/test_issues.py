@@ -161,7 +161,7 @@ class TestUploadIssuesFromCsvIntegration:
             mark_all_deleted=False,
         )
         with (
-            patch("cveta2.commands.upload.CvatConfig.load", return_value=cfg),
+            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
             patch(
                 "cveta2.commands.upload._select_labels",
                 return_value=["person", "car"],

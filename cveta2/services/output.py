@@ -34,6 +34,28 @@ def populate_record_paths(
                 record.image_path = str(local.resolve())
 
 
+def enrich_dataframe_paths(
+    df: pd.DataFrame,
+    cs_info: CloudStorageInfo,
+    found_images: dict[str, Path],
+    name_to_server_file: dict[str, str] | None = None,
+) -> pd.DataFrame:
+    """Add ``s3_image_path`` and ``image_path`` columns to the DataFrame."""
+    df = df.copy()
+    df["s3_image_path"] = df["image_name"].map(
+        lambda name: build_s3_key(
+            cs_info.prefix,
+            name_to_server_file[name]
+            if name_to_server_file and name in name_to_server_file
+            else name,
+        )
+    )
+    df["image_path"] = df["image_name"].map(
+        lambda name: str(found_images[name].resolve()) if name in found_images else None
+    )
+    return df
+
+
 def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     """Write raw.csv with all annotation and deleted rows, unpartitioned."""
     rows = result.to_csv_rows()

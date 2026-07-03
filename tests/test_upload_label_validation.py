@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2.commands.upload import _validate_labels
 from cveta2.exceptions import Cveta2Error, LabelsMismatchError
 from cveta2.models import LabelInfo
+from cveta2.services.upload import validate_labels
 
 
 class TestLabelsMismatchError:
@@ -64,7 +64,7 @@ class TestUploadLabelValidation:
     """Tests for _validate_labels in the upload command."""
 
     def test_labels_match_no_error(self) -> None:
-        _validate_labels(
+        validate_labels(
             _client_with_labels({"car", "person", "truck"}),
             1,
             "test_project",
@@ -73,7 +73,7 @@ class TestUploadLabelValidation:
 
     def test_labels_mismatch_raises(self) -> None:
         with pytest.raises(LabelsMismatchError) as exc_info:
-            _validate_labels(
+            validate_labels(
                 _client_with_labels({"car", "person"}),
                 1,
                 "test_project",
@@ -83,12 +83,12 @@ class TestUploadLabelValidation:
 
     def test_empty_real_labels_no_error(self) -> None:
         client = _client_with_labels({"car", "person"})
-        _validate_labels(client, 1, "test_project", [])
+        validate_labels(client, 1, "test_project", [])
         client.get_project_labels.assert_not_called()
 
     def test_mismatch_error_lists_available(self) -> None:
         with pytest.raises(LabelsMismatchError) as exc_info:
-            _validate_labels(
+            validate_labels(
                 _client_with_labels({"car", "person"}),
                 1,
                 "test_project",

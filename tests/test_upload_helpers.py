@@ -1,4 +1,4 @@
-"""Tests for pure helper functions in cveta2/commands/upload.py."""
+"""Tests for pure helper functions of the upload service."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from cveta2.commands.upload import (
-    _NO_ANNOTATION_LABEL,
-    _build_search_dirs,
-    _enrich_paths,
-    _extract_deleted_names,
-    _filter_frames_by_labels,
-    _read_exclude_names,
+from cveta2.exceptions import Cveta2Error
+from cveta2.services.output import enrich_dataframe_paths
+from cveta2.services.upload import (
     _warn_missing_images,
+    build_search_dirs,
+    filter_frames_by_labels,
+    read_exclude_names,
+    split_deleted_rows,
 )
 from tests.helpers import make_cs_info
 
@@ -24,62 +24,68 @@ from tests.helpers import make_cs_info
 
 
 def test_read_exclude_names_none_returns_empty() -> None:
-    assert _read_exclude_names(None) == set()
+    assert read_exclude_names(None) == set()
 
 
 def test_read_exclude_names_empty_string_returns_empty() -> None:
-    assert _read_exclude_names("") == set()
+    assert read_exclude_names("") == set()
 
 
 def test_read_exclude_names_valid_csv(tmp_path: Path) -> None:
     csv = tmp_path / "ip.csv"
     csv.write_text("image_name,other\nfoo.jpg,1\nbar.jpg,2\n", encoding="utf-8")
-    assert _read_exclude_names(str(csv)) == {"foo.jpg", "bar.jpg"}
+    assert read_exclude_names(str(csv)) == {"foo.jpg", "bar.jpg"}
 
 
 def test_read_exclude_names_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit):
-        _read_exclude_names(str(tmp_path / "nope.csv"))
+    with pytest.raises(Cveta2Error):
+        read_exclude_names(str(tmp_path / "nope.csv"))
 
 
 def test_read_exclude_names_csv_without_image_name(tmp_path: Path) -> None:
     csv = tmp_path / "no_col.csv"
     csv.write_text("col_a,col_b\n1,2\n", encoding="utf-8")
-    assert _read_exclude_names(str(csv)) == set()
+    assert read_exclude_names(str(csv)) == set()
 
 
 # ---------------------------------------------------------------------------
-# _extract_deleted_names
+# split_deleted_rows
 # ---------------------------------------------------------------------------
 
 
-def test_extract_deleted_names_no_column() -> None:
+def test_split_deleted_rows_no_column() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg", "b.jpg"]})
-    assert _extract_deleted_names(df) == set()
+    df_normal, names = split_deleted_rows(df)
+    assert names == set()
+    assert df_normal.equals(df)
 
 
-def test_extract_deleted_names_mixed_shapes() -> None:
+def test_split_deleted_rows_mixed_shapes() -> None:
     df = pd.DataFrame(
         {
             "image_name": ["a.jpg", "b.jpg", "c.jpg"],
             "instance_shape": ["box", "deleted", "deleted"],
         }
     )
-    assert _extract_deleted_names(df) == {"b.jpg", "c.jpg"}
+    df_normal, names = split_deleted_rows(df)
+    assert names == {"b.jpg", "c.jpg"}
+    assert df_normal["image_name"].tolist() == ["a.jpg"]
 
 
-def test_extract_deleted_names_none_deleted() -> None:
+def test_split_deleted_rows_none_deleted() -> None:
     df = pd.DataFrame(
         {
             "image_name": ["a.jpg"],
             "instance_shape": ["box"],
         }
     )
-    assert _extract_deleted_names(df) == set()
+    df_normal, names = split_deleted_rows(df)
+    assert names == set()
+    assert len(df_normal) == 1
 
 
 # ---------------------------------------------------------------------------
-# _filter_frames_by_labels
+# filter_frames_by_labels
 # ---------------------------------------------------------------------------
 
 
@@ -93,24 +99,26 @@ def _frames_df() -> pd.DataFrame:
 
 
 def test_filter_frames_keeps_all_rows_of_selected_frame() -> None:
-    result = _filter_frames_by_labels(_frames_df(), ["Edge"], set())
+    result = filter_frames_by_labels(_frames_df(), ["Edge"])
     assert result["image_name"].tolist() == ["a.jpg", "a.jpg"]
     assert set(result["instance_label"]) == {"Edge", "Other"}
 
 
 def test_filter_frames_excludes_frame_with_only_unselected_labels() -> None:
-    result = _filter_frames_by_labels(_frames_df(), ["Edge"], set())
+    result = filter_frames_by_labels(_frames_df(), ["Edge"])
     assert "b.jpg" not in set(result["image_name"])
 
 
-def test_filter_frames_sentinel_includes_nan_label_frames() -> None:
-    result = _filter_frames_by_labels(_frames_df(), [_NO_ANNOTATION_LABEL], set())
+def test_filter_frames_include_unannotated_selects_nan_label_frames() -> None:
+    result = filter_frames_by_labels(_frames_df(), [], include_unannotated=True)
     assert result["image_name"].tolist() == ["c.jpg"]
     assert result["instance_label"].isna().all()
 
 
 def test_filter_frames_exclude_names_removes_frames() -> None:
-    result = _filter_frames_by_labels(_frames_df(), ["Edge", "Other"], {"a.jpg"})
+    result = filter_frames_by_labels(
+        _frames_df(), ["Edge", "Other"], exclude_names={"a.jpg"}
+    )
     assert set(result["image_name"]) == {"b.jpg"}
 
 
@@ -140,14 +148,14 @@ def test_warn_missing_many_items_truncated(capture_logs: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _enrich_paths
+# enrich_dataframe_paths
 # ---------------------------------------------------------------------------
 
 
 def test_enrich_paths_adds_columns() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg", "b.jpg"], "label": ["x", "y"]})
     found = {"a.jpg": Path("/data/a.jpg")}
-    result = _enrich_paths(df, make_cs_info(), found)
+    result = enrich_dataframe_paths(df, make_cs_info(), found)
     assert "s3_image_path" in result.columns
     assert "image_path" in result.columns
     assert result.iloc[0]["s3_image_path"] == "images/a.jpg"
@@ -158,12 +166,12 @@ def test_enrich_paths_adds_columns() -> None:
 def test_enrich_paths_with_server_file_mapping() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg"]})
     mapping = {"a.jpg": "2026-01/a.jpg"}
-    result = _enrich_paths(df, make_cs_info(), {}, mapping)
+    result = enrich_dataframe_paths(df, make_cs_info(), {}, mapping)
     assert result.iloc[0]["s3_image_path"] == "images/2026-01/a.jpg"
 
 
 # ---------------------------------------------------------------------------
-# _build_search_dirs
+# build_search_dirs
 # ---------------------------------------------------------------------------
 
 
@@ -173,7 +181,7 @@ def test_build_search_dirs_with_arg(
     img_dir = tmp_path / "imgs"
     img_dir.mkdir()
     monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
-    dirs = _build_search_dirs(str(img_dir), "proj")
+    dirs = build_search_dirs(str(img_dir), "proj")
     assert img_dir.resolve() in dirs
 
 
@@ -183,7 +191,7 @@ def test_build_search_dirs_none_warns(
     capture_logs: list[str],
 ) -> None:
     monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
-    dirs = _build_search_dirs(None, "proj")
+    dirs = build_search_dirs(None, "proj")
     assert dirs == []
     assert any("Не указан --image-dir" in m for m in capture_logs)
 
@@ -196,5 +204,5 @@ def test_build_search_dirs_includes_cache(
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(f"image_cache:\n  my-project: {cache_dir}\n", encoding="utf-8")
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    dirs = _build_search_dirs(None, "my-project")
+    dirs = build_search_dirs(None, "my-project")
     assert cache_dir in dirs
