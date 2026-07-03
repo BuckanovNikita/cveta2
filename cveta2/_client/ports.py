@@ -1,8 +1,11 @@
-"""Protocol defining the CVAT API boundary.
+"""Protocols defining the CVAT API boundary.
 
 ``CvatApiPort`` is the single seam between business logic and the CVAT SDK.
-In production it is satisfied by ``SdkCvatApiAdapter``; in tests a trivial
-fake returning fixture data can be used instead.
+In production it is satisfied by ``SdkCvatApiAdapter``; in tests a fake
+returning fixture data (or a ``MagicMock(spec=CvatApiPort)``) is used
+instead.  Implementations raise :class:`cveta2.exceptions.CvatApiError`
+for API-level failures — no ``cvat_sdk`` exception types cross this
+boundary.
 """
 
 from __future__ import annotations
@@ -10,12 +13,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue
+    from cveta2._client.dtos import (
+        LabelPatch,
+        NewIssue,
+        NewShape,
+        RawAnnotations,
+        RawDataMeta,
+        RawIssue,
+        RawJob,
+        RawShape,
+        UploadTaskSpec,
+    )
+    from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
 
 
-class CvatApiPort(Protocol):
-    """Minimal interface for CVAT API operations used by ``CvatClient``."""
+class CvatReadPort(Protocol):
+    """Read-only CVAT API operations used by ``CvatClient``."""
 
     def list_projects(self) -> list[ProjectInfo]:
         """Return all accessible projects."""
@@ -29,6 +43,10 @@ class CvatApiPort(Protocol):
         """Return label definitions for a project."""
         ...
 
+    def get_project_cloud_storage(self, project_id: int) -> CloudStorageInfo | None:
+        """Return the project's source cloud storage, or None."""
+        ...
+
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
         """Return frame metadata and deleted frame IDs for a task."""
         ...
@@ -40,3 +58,65 @@ class CvatApiPort(Protocol):
     def get_task_issues(self, task_id: int) -> list[RawIssue]:
         """Return review issues (with comment texts) for a task."""
         ...
+
+    def get_task_labels(self, task_id: int) -> list[LabelInfo]:
+        """Return label definitions available in a task."""
+        ...
+
+    def get_task_jobs(self, task_id: int) -> list[RawJob]:
+        """Return jobs (with frame ranges) of a task."""
+        ...
+
+    def get_task_size(self, task_id: int) -> int:
+        """Return the number of frames in a task."""
+        ...
+
+
+class CvatWritePort(Protocol):
+    """Mutating CVAT API operations used by ``CvatClient``."""
+
+    def create_task_with_data(self, spec: UploadTaskSpec) -> int:
+        """Create a task, attach cloud-storage data, wait; return task id."""
+        ...
+
+    def put_task_shapes(self, task_id: int, shapes: list[NewShape]) -> None:
+        """Add annotation shapes to a task."""
+        ...
+
+    def create_issue(self, issue: NewIssue) -> None:
+        """Open a review issue on a job frame."""
+        ...
+
+    def set_deleted_frames(self, task_id: int, frame_ids: list[int]) -> None:
+        """Replace the task's deleted-frames list."""
+        ...
+
+    def delete_shapes(self, task_id: int, shapes: list[RawShape]) -> None:
+        """Delete the given existing shapes from a task."""
+        ...
+
+    def delete_task(self, task_id: int) -> None:
+        """Delete a task permanently."""
+        ...
+
+    def update_job(
+        self,
+        job_id: int,
+        *,
+        stage: str | None = None,
+        state: str | None = None,
+    ) -> None:
+        """Patch stage and/or state of a job."""
+        ...
+
+    def patch_project_labels(
+        self,
+        project_id: int,
+        patches: list[LabelPatch],
+    ) -> None:
+        """Apply label additions/renames/deletions/recolors to a project."""
+        ...
+
+
+class CvatApiPort(CvatReadPort, CvatWritePort, Protocol):
+    """Full CVAT API surface used by ``CvatClient``."""

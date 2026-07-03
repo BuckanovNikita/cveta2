@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from cveta2._client.dtos import LabelPatch
+from cveta2._client.ports import CvatApiPort
 from cveta2.cli import CliApp
 from cveta2.client import CvatClient
 from cveta2.commands.labels import (
@@ -60,19 +62,10 @@ def _mock_client_ctx(
     return client
 
 
-def _setup_sdk_mock(client: CvatClient) -> MagicMock:
-    """Set up mocked SDK internals for update_project_labels tests.
-
-    Returns the mock SDK object whose ``api_client.projects_api``
-    can be asserted on.
-    """
-    mock_sdk = MagicMock()
-    # Satisfy _require_sdk() check
-    object.__setattr__(client, "_sdk_client", MagicMock())
-    api = MagicMock()
-    api.client = mock_sdk
-    object.__setattr__(client, "_persistent_api", api)
-    return mock_sdk
+def _client_with_api_mock() -> tuple[CvatClient, MagicMock]:
+    """Build a CvatClient over a mocked API port for update_project_labels tests."""
+    api = MagicMock(spec=CvatApiPort)
+    return CvatClient(_CFG, api=api), api
 
 
 # ---------------------------------------------------------------------------
@@ -211,38 +204,36 @@ def test_count_label_usage_deleted_frames_counted(
 
 
 def test_update_labels_no_ops_does_nothing() -> None:
-    """Empty add/rename/delete does not call the SDK."""
-    client = CvatClient(_CFG)
-    mock_sdk = _setup_sdk_mock(client)
+    """Empty add/rename/delete does not call the API."""
+    client, api = _client_with_api_mock()
 
     client.update_project_labels(1)
-    mock_sdk.api_client.projects_api.partial_update.assert_not_called()
+    api.patch_project_labels.assert_not_called()
 
 
-def test_update_labels_add_calls_partial_update() -> None:
-    client = CvatClient(_CFG)
-    mock_sdk = _setup_sdk_mock(client)
+def test_update_labels_add_calls_patch() -> None:
+    client, api = _client_with_api_mock()
 
     client.update_project_labels(42, add=["new_label"])
-    mock_sdk.api_client.projects_api.partial_update.assert_called_once()
-    call_args = mock_sdk.api_client.projects_api.partial_update.call_args
-    assert call_args[0][0] == 42
+    api.patch_project_labels.assert_called_once_with(42, [LabelPatch(name="new_label")])
 
 
-def test_update_labels_delete_calls_partial_update() -> None:
-    client = CvatClient(_CFG)
-    mock_sdk = _setup_sdk_mock(client)
+def test_update_labels_delete_calls_patch() -> None:
+    client, api = _client_with_api_mock()
 
     client.update_project_labels(42, delete=[1, 2])
-    mock_sdk.api_client.projects_api.partial_update.assert_called_once()
+    api.patch_project_labels.assert_called_once_with(
+        42, [LabelPatch(id=1, deleted=True), LabelPatch(id=2, deleted=True)]
+    )
 
 
-def test_update_labels_rename_calls_partial_update() -> None:
-    client = CvatClient(_CFG)
-    mock_sdk = _setup_sdk_mock(client)
+def test_update_labels_rename_calls_patch() -> None:
+    client, api = _client_with_api_mock()
 
     client.update_project_labels(42, rename={1: "renamed"})
-    mock_sdk.api_client.projects_api.partial_update.assert_called_once()
+    api.patch_project_labels.assert_called_once_with(
+        42, [LabelPatch(id=1, name="renamed")]
+    )
 
 
 def test_update_labels_requires_context_manager() -> None:
@@ -658,9 +649,10 @@ def test_recolor_label_without_color() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_update_labels_recolor_calls_partial_update() -> None:
-    client = CvatClient(_CFG)
-    mock_sdk = _setup_sdk_mock(client)
+def test_update_labels_recolor_calls_patch() -> None:
+    client, api = _client_with_api_mock()
 
     client.update_project_labels(42, recolor={1: "#00ff00"})
-    mock_sdk.api_client.projects_api.partial_update.assert_called_once()
+    api.patch_project_labels.assert_called_once_with(
+        42, [LabelPatch(id=1, color="#00ff00")]
+    )

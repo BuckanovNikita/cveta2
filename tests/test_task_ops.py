@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from cvat_sdk.api_client import models as cvat_models
 
-from cveta2._client.dtos import RawDataMeta, RawFrame
+from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
+from cveta2._client.ports import CvatApiPort
 from cveta2.cli import CliApp
 from cveta2.client import CvatClient
 from cveta2.commands.task_ops import (
@@ -19,7 +18,8 @@ from cveta2.commands.task_ops import (
     run_task_status,
 )
 from cveta2.config import CvatConfig
-from cveta2.models import TaskInfo
+from cveta2.models import LabelInfo, TaskInfo
+from tests.helpers import make_raw_shape
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -196,32 +196,22 @@ class TestRunTaskCommands:
 
 
 # ---------------------------------------------------------------------------
-# Client write methods at the SDK boundary
+# Client write methods at the API-port boundary
 # ---------------------------------------------------------------------------
 
 
-def _client_with_mocked_sdk(
-    sdk: MagicMock, adapter: MagicMock | None = None
-) -> CvatClient:
-    client = CvatClient(CvatConfig(host="http://cvat.test"))
-    client._sdk_client = sdk
-    persistent = adapter if adapter is not None else MagicMock()
-    persistent.client = sdk
-    client._persistent_api = persistent
-    return client
-
-
-def _label(label_id: int, name: str) -> SimpleNamespace:
-    return SimpleNamespace(id=label_id, name=name)
+def _client_with_api(api: MagicMock) -> CvatClient:
+    return CvatClient(CvatConfig(host="http://cvat.test"), api=api)
 
 
 class TestDropLabelAnnotations:
     def test_unknown_label_raises_value_error_with_available(self) -> None:
-        sdk = MagicMock()
-        task_obj = MagicMock()
-        task_obj.get_labels.return_value = [_label(1, "person"), _label(2, "car")]
-        sdk.tasks.retrieve.return_value = task_obj
-        client = _client_with_mocked_sdk(sdk)
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_labels.return_value = [
+            LabelInfo(id=1, name="person"),
+            LabelInfo(id=2, name="car"),
+        ]
+        client = _client_with_api(api)
 
         with pytest.raises(ValueError, match="person") as exc_info:
             client.count_task_label_shapes(5, "ghost")
@@ -229,64 +219,37 @@ class TestDropLabelAnnotations:
         assert "'ghost'" in str(exc_info.value)
 
     def test_drop_deletes_only_matching_shapes(self) -> None:
-        sdk = MagicMock()
-        task_obj = MagicMock()
-        task_obj.get_labels.return_value = [_label(1, "person"), _label(2, "car")]
-        sdk.tasks.retrieve.return_value = task_obj
-        shapes = [
-            SimpleNamespace(
-                id=10,
-                type=cvat_models.ShapeType("rectangle"),
-                frame=0,
-                label_id=1,
-                points=[1.0, 2.0, 3.0, 4.0],
-            ),
-            SimpleNamespace(
-                id=11,
-                type=cvat_models.ShapeType("rectangle"),
-                frame=1,
-                label_id=2,
-                points=[5.0, 6.0, 7.0, 8.0],
-            ),
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_labels.return_value = [
+            LabelInfo(id=1, name="person"),
+            LabelInfo(id=2, name="car"),
         ]
-        sdk.api_client.tasks_api.retrieve_annotations.return_value = (
-            SimpleNamespace(shapes=shapes),
-            None,
-        )
-        client = _client_with_mocked_sdk(sdk)
+        matching = make_raw_shape(id=10, label_id=1, points=[1.0, 2.0, 3.0, 4.0])
+        other = make_raw_shape(id=11, frame=1, label_id=2, points=[5.0, 6.0, 7.0, 8.0])
+        api.get_task_annotations.return_value = RawAnnotations(shapes=[matching, other])
+        client = _client_with_api(api)
 
         deleted = client.drop_label_annotations(5, "person")
 
         assert deleted == 1
-        call = sdk.api_client.tasks_api.partial_update_annotations.call_args
-        assert call.args == ("delete", 5)
-        request = call.kwargs["patched_labeled_data_request"]
-        assert len(request.shapes) == 1
-        assert request.shapes[0].id == 10
-        assert request.shapes[0].label_id == 1
+        api.delete_shapes.assert_called_once_with(5, [matching])
 
     def test_drop_with_no_matching_shapes_returns_zero(self) -> None:
-        sdk = MagicMock()
-        task_obj = MagicMock()
-        task_obj.get_labels.return_value = [_label(1, "person")]
-        sdk.tasks.retrieve.return_value = task_obj
-        sdk.api_client.tasks_api.retrieve_annotations.return_value = (
-            SimpleNamespace(shapes=[]),
-            None,
-        )
-        client = _client_with_mocked_sdk(sdk)
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_labels.return_value = [LabelInfo(id=1, name="person")]
+        api.get_task_annotations.return_value = RawAnnotations(shapes=[])
+        client = _client_with_api(api)
 
         assert client.drop_label_annotations(5, "person") == 0
-        sdk.api_client.tasks_api.partial_update_annotations.assert_not_called()
+        api.delete_shapes.assert_not_called()
 
 
 class TestMarkFramesDeletedByIds:
     def test_skips_unknown_frame_ids_with_warning(
         self, capture_logs: list[str]
     ) -> None:
-        sdk = MagicMock()
-        adapter = MagicMock()
-        adapter.get_task_data_meta.return_value = RawDataMeta(
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_data_meta.return_value = RawDataMeta(
             frames=[
                 RawFrame(name="a.jpg", width=10, height=10),
                 RawFrame(name="b.jpg", width=10, height=10),
@@ -294,66 +257,52 @@ class TestMarkFramesDeletedByIds:
             ],
             deleted_frames=[0],
         )
-        client = _client_with_mocked_sdk(sdk, adapter)
+        client = _client_with_api(api)
 
         marked = client.mark_frames_deleted_by_ids(7, [1, 5, -1])
 
         assert marked == 1
-        call = sdk.api_client.tasks_api.partial_update_data_meta.call_args
-        assert call.args == (7,)
-        request = call.kwargs["patched_data_meta_write_request"]
-        assert request.deleted_frames == [0, 1]
+        api.set_deleted_frames.assert_called_once_with(7, [0, 1])
         assert any("5" in msg and "-1" in msg for msg in capture_logs)
 
     def test_all_unknown_ids_makes_no_api_call(self) -> None:
-        sdk = MagicMock()
-        adapter = MagicMock()
-        adapter.get_task_data_meta.return_value = RawDataMeta(
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_data_meta.return_value = RawDataMeta(
             frames=[RawFrame(name="a.jpg", width=10, height=10)],
             deleted_frames=[],
         )
-        client = _client_with_mocked_sdk(sdk, adapter)
+        client = _client_with_api(api)
 
         assert client.mark_frames_deleted_by_ids(7, [3, 4]) == 0
-        sdk.api_client.tasks_api.partial_update_data_meta.assert_not_called()
+        api.set_deleted_frames.assert_not_called()
 
 
 class TestSetTaskJobsStatus:
     def test_requires_stage_or_state(self) -> None:
-        client = _client_with_mocked_sdk(MagicMock())
+        client = _client_with_api(MagicMock(spec=CvatApiPort))
         with pytest.raises(ValueError, match="stage"):
             client.set_task_jobs_status(1)
 
     def test_patches_only_provided_fields(self) -> None:
-        sdk = MagicMock()
-        task_obj = MagicMock()
-        task_obj.get_jobs.return_value = [SimpleNamespace(id=100)]
-        sdk.tasks.retrieve.return_value = task_obj
-        client = _client_with_mocked_sdk(sdk)
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_jobs.return_value = [RawJob(id=100, start_frame=0, stop_frame=9)]
+        client = _client_with_api(api)
 
         num_jobs = client.set_task_jobs_status(1, state="in progress")
 
         assert num_jobs == 1
-        call = sdk.api_client.jobs_api.partial_update.call_args
-        assert call.args == (100,)
-        request = call.kwargs["patched_job_write_request"]
-        assert request.to_dict() == {"state": "in progress"}
+        api.update_job.assert_called_once_with(100, stage=None, state="in progress")
 
     def test_complete_task_sets_acceptance_completed(self) -> None:
-        sdk = MagicMock()
-        task_obj = MagicMock()
-        task_obj.get_jobs.return_value = [
-            SimpleNamespace(id=100),
-            SimpleNamespace(id=101),
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_jobs.return_value = [
+            RawJob(id=100, start_frame=0, stop_frame=9),
+            RawJob(id=101, start_frame=10, stop_frame=19),
         ]
-        sdk.tasks.retrieve.return_value = task_obj
-        client = _client_with_mocked_sdk(sdk)
+        client = _client_with_api(api)
 
         num_jobs = client.complete_task(1)
 
         assert num_jobs == 2
-        assert sdk.api_client.jobs_api.partial_update.call_count == 2
-        request = sdk.api_client.jobs_api.partial_update.call_args.kwargs[
-            "patched_job_write_request"
-        ]
-        assert request.to_dict() == {"stage": "acceptance", "state": "completed"}
+        assert api.update_job.call_count == 2
+        api.update_job.assert_called_with(101, stage="acceptance", state="completed")

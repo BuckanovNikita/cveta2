@@ -69,3 +69,58 @@ class RawIssue:
     frame: int
     resolved: bool
     comments: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class RawJob:
+    """A CVAT job with its frame range."""
+
+    id: int
+    start_frame: int
+    stop_frame: int
+
+
+@dataclass(frozen=True, slots=True)
+class NewShape:
+    """A new rectangle annotation to upload to a task."""
+
+    frame: int
+    label_id: int
+    points: list[float]
+    type: str = "rectangle"
+
+
+@dataclass(frozen=True, slots=True)
+class NewIssue:
+    """A new review issue to open on a job frame."""
+
+    job_id: int
+    frame: int
+    position: list[float]
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class LabelPatch:
+    """A single label change for a project PATCH request.
+
+    ``id=None`` creates a new label named *name*; with ``id`` set, the
+    non-``None`` fields are updated (``deleted=True`` removes the label).
+    """
+
+    id: int | None = None
+    name: str | None = None
+    color: str | None = None
+    deleted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class UploadTaskSpec:
+    """Specification for creating a task backed by cloud-storage images."""
+
+    project_id: int
+    name: str
+    server_files: list[str]
+    cloud_storage_id: int
+    segment_size: int = 100
+    image_quality: int = 100

@@ -7,18 +7,22 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
+from cveta2._client.assembly import task_to_records
 from cveta2._client.context import _build_frame_issues, _TaskContext
 from cveta2._client.dtos import (
     RawAnnotations,
     RawDataMeta,
     RawFrame,
     RawIssue,
+    RawJob,
     RawShape,
 )
 from cveta2._client.extractors import _collect_shapes
+from cveta2._client.ports import CvatApiPort
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2.client import CvatClient, FetchContext, _task_to_records
+from cveta2.client import CvatClient, FetchContext
 from cveta2.models import (
     BBoxAnnotation,
     ImageWithoutAnnotations,
@@ -53,15 +57,8 @@ def _make_data_meta(num_frames: int) -> RawDataMeta:
     return RawDataMeta(frames=frames)
 
 
-def _client_with_mocked_sdk(
-    sdk: MagicMock, adapter: MagicMock | None = None
-) -> CvatClient:
-    client = CvatClient(CFG)
-    client._sdk_client = sdk
-    persistent = adapter if adapter is not None else MagicMock()
-    persistent.client = sdk
-    client._persistent_api = persistent
-    return client
+def _client_with_api(api: MagicMock) -> CvatClient:
+    return CvatClient(CFG, api=api)
 
 
 def _single_page(results: list[Any]) -> tuple[SimpleNamespace, SimpleNamespace]:
@@ -71,21 +68,23 @@ def _single_page(results: list[Any]) -> tuple[SimpleNamespace, SimpleNamespace]:
     )
 
 
-def _sdk_for_issue_creation(
-    num_frames: int, jobs: list[SimpleNamespace]
-) -> tuple[MagicMock, MagicMock]:
-    sdk = MagicMock()
-    sdk.api_client.jobs_api.list_endpoint.call_with_http_info.return_value = (
-        _single_page(jobs)
-    )
-    adapter = MagicMock()
-    adapter.get_task_data_meta.return_value = _make_data_meta(num_frames)
-    return sdk, adapter
+def _api_for_issue_creation(num_frames: int, jobs: list[RawJob]) -> MagicMock:
+    api = MagicMock(spec=CvatApiPort)
+    api.get_task_data_meta.return_value = _make_data_meta(num_frames)
+    api.get_task_jobs.return_value = jobs
+    return api
 
+
+_BBOX = {
+    "bbox_x_tl": 1.0,
+    "bbox_y_tl": 2.0,
+    "bbox_x_br": 3.0,
+    "bbox_y_br": 4.0,
+}
 
 _TWO_JOBS = [
-    SimpleNamespace(id=201, start_frame=0, stop_frame=99),
-    SimpleNamespace(id=202, start_frame=100, stop_frame=199),
+    RawJob(id=201, start_frame=0, stop_frame=99),
+    RawJob(id=202, start_frame=100, stop_frame=199),
 ]
 
 
@@ -161,7 +160,7 @@ class TestFetchedRecordsCarryIssueColumns:
         assert result[1].issue_state == ""
 
     def test_task_to_records_stamps_images_without_annotations(self) -> None:
-        records, _deleted = _task_to_records(
+        records, _deleted = task_to_records(
             _make_task(),
             _make_data_meta(2),
             RawAnnotations(shapes=[_make_shape(1, 0)]),
@@ -243,27 +242,21 @@ class TestFetchedRecordsCarryIssueColumns:
 
 class TestCreateTaskIssues:
     def test_frame_to_job_resolution_across_two_jobs(self) -> None:
-        sdk, adapter = _sdk_for_issue_creation(200, _TWO_JOBS)
-        client = _client_with_mocked_sdk(sdk, adapter)
+        api = _api_for_issue_creation(200, _TWO_JOBS)
+        client = _client_with_api(api)
         df = pd.DataFrame(
             [
                 {
                     "image_name": "img_5.jpg",
                     "issue_text": "первая",
                     "issue_state": "new",
-                    "bbox_x_tl": 1.0,
-                    "bbox_y_tl": 2.0,
-                    "bbox_x_br": 3.0,
-                    "bbox_y_br": 4.0,
+                    **_BBOX,
                 },
                 {
                     "image_name": "img_150.jpg",
                     "issue_text": "вторая",
                     "issue_state": "new",
-                    "bbox_x_tl": None,
-                    "bbox_y_tl": None,
-                    "bbox_x_br": None,
-                    "bbox_y_br": None,
+                    **_BBOX,
                 },
             ]
         )
@@ -271,99 +264,116 @@ class TestCreateTaskIssues:
         created = client.create_task_issues(7, df)
 
         assert created == 2
-        calls = sdk.api_client.issues_api.create.call_args_list
+        calls = api.create_issue.call_args_list
         first = calls[0].args[0]
         second = calls[1].args[0]
-        assert (first.frame, first.job) == (5, 201)
+        assert (first.frame, first.job_id) == (5, 201)
         assert first.position == [1.0, 2.0, 3.0, 4.0]
         assert first.message == "первая"
-        assert (second.frame, second.job) == (150, 202)
+        assert (second.frame, second.job_id) == (150, 202)
         assert second.message == "вторая"
 
-    def test_full_frame_position_falls_back_to_data_meta_dims(self) -> None:
-        sdk, adapter = _sdk_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_mocked_sdk(sdk, adapter)
-        df = pd.DataFrame(
-            [{"image_name": "img_0.jpg", "issue_text": "t", "issue_state": "new"}]
-        )
-
-        assert client.create_task_issues(7, df) == 1
-        request = sdk.api_client.issues_api.create.call_args.args[0]
-        assert request.position == [0.0, 0.0, 640.0, 480.0]
-
-    def test_full_frame_position_prefers_row_dims(self) -> None:
-        sdk, adapter = _sdk_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_mocked_sdk(sdk, adapter)
+    @pytest.mark.parametrize(
+        "partial_coords",
+        [{}, {"bbox_x_tl": 1.0, "bbox_y_tl": 2.0}],
+        ids=["no-bbox", "partial-bbox"],
+    )
+    def test_rows_without_full_bbox_skipped_with_warning(
+        self, capture_logs: list[str], partial_coords: dict[str, float]
+    ) -> None:
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
         df = pd.DataFrame(
             [
                 {
                     "image_name": "img_0.jpg",
                     "issue_text": "t",
                     "issue_state": "new",
-                    "image_width": 800,
-                    "image_height": 600,
+                    **partial_coords,
                 }
             ]
         )
 
-        assert client.create_task_issues(7, df) == 1
-        request = sdk.api_client.issues_api.create.call_args.args[0]
-        assert request.position == [0.0, 0.0, 800.0, 600.0]
+        assert client.create_task_issues(7, df) == 0
+        api.create_issue.assert_not_called()
+        assert any("img_0.jpg" in msg for msg in capture_logs)
 
     def test_dedupe_on_image_name_and_text(self) -> None:
-        sdk, adapter = _sdk_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_mocked_sdk(sdk, adapter)
-        row = {"image_name": "img_0.jpg", "issue_text": "same", "issue_state": "new"}
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
+        row = {
+            "image_name": "img_0.jpg",
+            "issue_text": "same",
+            "issue_state": "new",
+            **_BBOX,
+        }
         df = pd.DataFrame([row, row])
 
         assert client.create_task_issues(7, df) == 1
-        assert sdk.api_client.issues_api.create.call_count == 1
+        assert api.create_issue.call_count == 1
 
     def test_unknown_image_skipped_with_warning(self, capture_logs: list[str]) -> None:
-        sdk, adapter = _sdk_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_mocked_sdk(sdk, adapter)
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
         df = pd.DataFrame(
             [
-                {"image_name": "img_0.jpg", "issue_text": "ok", "issue_state": "new"},
-                {"image_name": "ghost.jpg", "issue_text": "no", "issue_state": "new"},
+                {
+                    "image_name": "img_0.jpg",
+                    "issue_text": "ok",
+                    "issue_state": "new",
+                    **_BBOX,
+                },
+                {
+                    "image_name": "ghost.jpg",
+                    "issue_text": "no",
+                    "issue_state": "new",
+                    **_BBOX,
+                },
             ]
         )
 
         assert client.create_task_issues(7, df) == 1
-        assert sdk.api_client.issues_api.create.call_count == 1
+        assert api.create_issue.call_count == 1
         assert any("ghost.jpg" in msg for msg in capture_logs)
 
     def test_frame_without_job_skipped_with_warning(
         self, capture_logs: list[str]
     ) -> None:
-        jobs = [SimpleNamespace(id=201, start_frame=0, stop_frame=0)]
-        sdk, adapter = _sdk_for_issue_creation(2, jobs)
-        client = _client_with_mocked_sdk(sdk, adapter)
+        jobs = [RawJob(id=201, start_frame=0, stop_frame=0)]
+        api = _api_for_issue_creation(2, jobs)
+        client = _client_with_api(api)
         df = pd.DataFrame(
-            [{"image_name": "img_1.jpg", "issue_text": "t", "issue_state": "new"}]
+            [
+                {
+                    "image_name": "img_1.jpg",
+                    "issue_text": "t",
+                    "issue_state": "new",
+                    **_BBOX,
+                }
+            ]
         )
 
         assert client.create_task_issues(7, df) == 0
-        sdk.api_client.issues_api.create.assert_not_called()
+        api.create_issue.assert_not_called()
         assert any("img_1.jpg" in msg for msg in capture_logs)
 
     def test_missing_issue_state_column_returns_zero(self) -> None:
-        sdk = MagicMock()
-        client = _client_with_mocked_sdk(sdk)
+        api = MagicMock(spec=CvatApiPort)
+        client = _client_with_api(api)
         df = pd.DataFrame([{"image_name": "img_0.jpg"}])
 
         assert client.create_task_issues(7, df) == 0
-        sdk.api_client.issues_api.create.assert_not_called()
+        api.create_issue.assert_not_called()
 
     def test_new_state_with_empty_text_ignored(self) -> None:
-        sdk = MagicMock()
-        client = _client_with_mocked_sdk(sdk)
+        api = MagicMock(spec=CvatApiPort)
+        client = _client_with_api(api)
         df = pd.DataFrame(
             [{"image_name": "img_0.jpg", "issue_text": "", "issue_state": "new"}]
         )
 
         assert client.create_task_issues(7, df) == 0
-        sdk.api_client.issues_api.create.assert_not_called()
+        api.create_issue.assert_not_called()
 
     def test_csv_roundtrip_empty_state_read_as_nan_is_handled(
         self, tmp_path: Path
@@ -377,15 +387,15 @@ class TestCreateTaskIssues:
         assert loaded["issue_state"].isna().all()
         assert loaded["issue_text"].isna().all()
 
-        sdk = MagicMock()
-        client = _client_with_mocked_sdk(sdk)
+        api = MagicMock(spec=CvatApiPort)
+        client = _client_with_api(api)
 
         assert client.create_task_issues(7, loaded) == 0
-        sdk.api_client.issues_api.create.assert_not_called()
+        api.create_issue.assert_not_called()
 
     def test_open_and_resolved_states_are_not_uploaded(self) -> None:
-        sdk = MagicMock()
-        client = _client_with_mocked_sdk(sdk)
+        api = MagicMock(spec=CvatApiPort)
+        client = _client_with_api(api)
         df = pd.DataFrame(
             [
                 {"image_name": "img_0.jpg", "issue_text": "a", "issue_state": "open"},
@@ -398,7 +408,7 @@ class TestCreateTaskIssues:
         )
 
         assert client.create_task_issues(7, df) == 0
-        sdk.api_client.issues_api.create.assert_not_called()
+        api.create_issue.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

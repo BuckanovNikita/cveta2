@@ -21,6 +21,20 @@ class InteractiveModeRequiredError(Cveta2Error):
     """Raised when interactive input is needed but disabled."""
 
 
+class CvatApiError(Cveta2Error):
+    """CVAT API returned an error response.
+
+    Wraps SDK-level API exceptions so no ``cvat_sdk`` types leak above
+    the ``_client`` layer.  ``status_code`` is the HTTP status (0 when
+    unknown).
+    """
+
+    def __init__(self, message: str, status_code: int = 0) -> None:
+        """Store the HTTP status code alongside the message."""
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class LabelsMismatchError(Cveta2Error):
     """Raised when CSV labels don't match project labels."""
 

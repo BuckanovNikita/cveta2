@@ -1,42 +1,40 @@
-"""CVAT client logic: connect, fetch annotations, extract shapes."""
+"""CVAT client logic: connect, fetch annotations, orchestrate task operations.
+
+All CVAT SDK interaction goes through :class:`CvatApiPort`
+(``cveta2._client``); this module holds only domain orchestration.
+"""
 
 from __future__ import annotations
 
 import os
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
-from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING
 
 import pandas as pd
-from cvat_sdk import make_client
-from cvat_sdk.api_client import models as cvat_models
-from cvat_sdk.api_client.exceptions import ApiException
-from cvat_sdk.core.exceptions import BackgroundRequestException
-from cvat_sdk.core.helpers import get_paginated_collection
-from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2._client.context import _TaskContext
-from cveta2._client.extractors import _collect_shapes
+from cveta2._client.assembly import (
+    build_name_to_frame,
+    find_job_for_frame,
+    issue_position_from_row,
+    task_to_records,
+)
+from cveta2._client.connection import open_sdk_api
+from cveta2._client.dtos import LabelPatch, NewIssue, NewShape, UploadTaskSpec
 from cveta2._client.mapping import _build_label_maps
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter, apply_request_timeout
 from cveta2.config import CvatConfig
-from cveta2.exceptions import ProjectNotFoundError, TaskNotFoundError
+from cveta2.exceptions import CvatApiError, ProjectNotFoundError, TaskNotFoundError
 from cveta2.image_downloader import (
     CloudStorageInfo,
     DownloadStats,
     ImageDownloader,
     S3Syncer,
-    parse_cloud_storage,
 )
 from cveta2.models import (
     CSV_COLUMNS,
-    AnnotationRecord,
     BBoxAnnotation,
-    DeletedImage,
-    ImageWithoutAnnotations,
     LabelInfo,
     ProjectAnnotations,
     ProjectInfo,
@@ -44,57 +42,19 @@ from cveta2.models import (
     TaskInfo,
 )
 
-_DATA_CHECK_PERIOD = 5
-"""Seconds between status checks during data processing."""
-
 _HTTP_5XX_MIN = 500
 _HTTP_5XX_MAX = 600
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Sequence
+    from pathlib import Path
+    from types import TracebackType
 
-def _build_name_to_frame(data_meta: object) -> dict[str, int]:
-    """Build frame-name → frame-index mapping from CVAT data_meta.
+    from typing_extensions import Self
 
-    Basename fallback handles month-subfolder frame names
-    (e.g. ``"2026-02/img.jpg"`` → also accessible via ``"img.jpg"``).
-
-    Uses attribute access on opaque CVAT SDK ``DataMetaRead`` object.
-    """
-    name_to_frame: dict[str, int] = {}
-    for idx, frame in enumerate(data_meta.frames):  # type: ignore[attr-defined]
-        name_to_frame[frame.name] = idx
-        base = PurePosixPath(frame.name).name
-        if base not in name_to_frame:
-            name_to_frame[base] = idx
-    return name_to_frame
-
-
-_ISSUE_BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
-
-
-def _find_job_for_frame(jobs: list[Any], frame: int) -> int | None:
-    """Return the job ID whose [start_frame, stop_frame] range contains *frame*."""
-    for job in jobs:
-        if int(job.start_frame) <= frame <= int(job.stop_frame):
-            return int(job.id)
-    return None
-
-
-def _positive_dimension(row_value: Any, frame_dimension: int) -> float:  # noqa: ANN401
-    """Prefer the row's image dimension; fall back to the data_meta frame's."""
-    if row_value is not None and pd.notna(row_value) and float(row_value) > 0:
-        return float(row_value)
-    return float(frame_dimension)
-
-
-def _issue_position(row: pd.Series[Any], frame_info: RawFrame) -> list[float]:
-    """Build the issue rectangle: the row's bbox, or the full frame."""
-    values = [row.get(col) for col in _ISSUE_BBOX_COLUMNS]
-    coords = [value for value in values if value is not None and pd.notna(value)]
-    if len(coords) == len(_ISSUE_BBOX_COLUMNS):
-        return [float(value) for value in coords]
-    width = _positive_dimension(row.get("image_width"), frame_info.width)
-    height = _positive_dimension(row.get("image_height"), frame_info.height)
-    return [0.0, 0.0, width, height]
+    from cveta2._client.connection import SdkClientFactory
+    from cveta2._client.dtos import RawDataMeta, RawShape
+    from cveta2._client.ports import CvatApiPort
 
 
 @dataclass(frozen=True)
@@ -128,8 +88,7 @@ def _log_task_5xx_skip(
     task: TaskInfo,
     host: str,
     project_name: str,
-    status: int,
-    e: ApiException,
+    e: CvatApiError,
 ) -> None:
     """Log 5xx error and ignore-command hint for a skipped task."""
     task_link = (
@@ -137,7 +96,7 @@ def _log_task_5xx_skip(
         if host
         else f"task_id={task.id} {task.name!r}"
     )
-    logger.error(f"CVAT server error (HTTP {status}) for task {task_link}: {e}")
+    logger.error(f"CVAT server error (HTTP {e.status_code}) for task {task_link}: {e}")
     if project_name:
         logger.info(
             f"Чтобы пропустить задачу при следующем запуске: "
@@ -174,81 +133,20 @@ def _filter_tasks_for_fetch(
     return tasks
 
 
-def _task_to_records(  # noqa: PLR0913
-    task: TaskInfo,
-    data_meta: RawDataMeta,
-    annotations: RawAnnotations,
-    label_names: dict[int, str],
-    attr_names: dict[int, str],
-    issues: list[RawIssue] | None = None,
-) -> tuple[list[AnnotationRecord], list[DeletedImage]]:
-    """Build annotation records and deleted list for one task."""
-    ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names, issues)
-    task_annotations = _collect_shapes(annotations.shapes, ctx)
-    deleted_ids = set(data_meta.deleted_frames)
-    frames = ctx.frames
-    task_deleted = [
-        DeletedImage(
-            task_id=task.id,
-            task_name=task.name,
-            task_status=task.status,
-            task_updated_date=task.updated_date,
-            frame_id=fid,
-            image_name=(frames[fid].name if fid in frames else "<unknown>"),
-            image_width=(frames[fid].width if fid in frames else 0),
-            image_height=(frames[fid].height if fid in frames else 0),
-            subset=task.subset,
-        )
-        for fid in data_meta.deleted_frames
-    ]
-    annotated_ids = {a.frame_id for a in task_annotations}
-    task_without = [
-        ImageWithoutAnnotations(
-            image_name=frame.name,
-            image_width=frame.width,
-            image_height=frame.height,
-            task_id=task.id,
-            task_name=task.name,
-            task_status=task.status,
-            task_updated_date=task.updated_date,
-            frame_id=fid,
-            subset=task.subset,
-            issue_text=ctx.frame_issues.get(fid, ("", ""))[0],
-            issue_state=ctx.frame_issues.get(fid, ("", ""))[1],
-        )
-        for fid, frame in frames.items()
-        if fid not in deleted_ids and fid not in annotated_ids
-    ]
-    return (
-        list(task_annotations) + task_without,
-        task_deleted,
+def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
+    """Return deduplicated rows with ``issue_state == "new"`` and non-empty text."""
+    if "issue_state" not in annotations_df.columns:
+        return pd.DataFrame()
+    df = annotations_df.copy()
+    if "issue_text" not in df.columns:
+        df["issue_text"] = ""
+    df["issue_state"] = df["issue_state"].fillna("").astype(str).str.strip()
+    df["issue_text"] = df["issue_text"].fillna("").astype(str).str.strip()
+    new_rows: pd.DataFrame = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
+    deduped: pd.DataFrame = new_rows.drop_duplicates(
+        subset=["image_name", "issue_text"]
     )
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
-    from contextlib import AbstractContextManager
-    from pathlib import Path
-    from types import TracebackType
-
-    from cvat_sdk import Client as CvatSdkClient
-    from typing_extensions import Self
-
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawIssue
-    from cveta2._client.ports import CvatApiPort
-
-
-class _SdkClientFactory(Protocol):
-    """Protocol for the SDK client factory (e.g. ``cvat_sdk.make_client``).
-
-    The factory must accept keyword arguments (``host`` and
-    ``credentials``) and return a context manager that yields an SDK
-    client.
-    """
-
-    def __call__(
-        self, **kwargs: str | tuple[str, str]
-    ) -> AbstractContextManager[CvatSdkClient]: ...
+    return deduped
 
 
 class CvatClient:
@@ -261,14 +159,15 @@ class CvatClient:
             projects = client.list_projects()
             result = client.fetch_annotations(project_id)
 
-    Without the context manager, each public method opens and closes
-    its own connection (backward-compatible behaviour).
+    Without the context manager, read methods open and close their own
+    connection per call; write methods require the context manager (or
+    an injected ``api``).
     """
 
     def __init__(
         self,
         cfg: CvatConfig | None = None,
-        client_factory: _SdkClientFactory | None = None,
+        client_factory: SdkClientFactory | None = None,
         *,
         api: CvatApiPort | None = None,
     ) -> None:
@@ -278,16 +177,16 @@ class CvatClient:
         from environment variables, config file, and built-in preset
         via :meth:`CvatConfig.load`.
 
-        When *api* is provided it is used directly.  Otherwise an
-        ``SdkCvatApiAdapter`` is created on the fly from an SDK client
-        opened via *client_factory*.
+        When *api* is provided it is used directly (no connection is
+        opened).  Otherwise an SDK-backed adapter is opened via
+        *client_factory*.
         """
         self._cfg = cfg or CvatConfig.load()
-        self._client_factory: _SdkClientFactory = client_factory or make_client
+        self._client_factory = client_factory
         self._api = api
-        # Persistent adapter opened by __enter__, closed by __exit__.
-        self._persistent_api: SdkCvatApiAdapter | None = None
-        self._sdk_client: CvatSdkClient | None = None
+        # Persistent API opened by __enter__, closed by __exit__.
+        self._persistent_api: CvatApiPort | None = None
+        self._exit_stack: ExitStack | None = None
 
     # ------------------------------------------------------------------
     # Context manager (optional connection reuse)
@@ -299,15 +198,10 @@ class CvatClient:
             # DI api provided -- nothing to open.
             return self
         resolved = self._cfg.ensure_credentials()
-        kwargs = self._build_client_kwargs(resolved)
-        self._sdk_client = self._client_factory(**kwargs)
-        sdk = self._sdk_client.__enter__()
-        if resolved.request_timeout:
-            apply_request_timeout(sdk, resolved.request_timeout)
-        if resolved.organization:
-            sdk.organization_slug = resolved.organization
-            logger.trace(f"Using organization: {resolved.organization}")
-        self._persistent_api = SdkCvatApiAdapter(sdk)
+        self._exit_stack = ExitStack()
+        self._persistent_api = self._exit_stack.enter_context(
+            open_sdk_api(resolved, self._client_factory)
+        )
         return self
 
     def __exit__(
@@ -318,28 +212,13 @@ class CvatClient:
     ) -> None:
         """Close the persistent SDK connection."""
         self._persistent_api = None
-        if self._sdk_client is not None:
-            self._sdk_client.__exit__(exc_type, exc_val, exc_tb)
-            self._sdk_client = None
+        if self._exit_stack is not None:
+            stack, self._exit_stack = self._exit_stack, None
+            stack.__exit__(exc_type, exc_val, exc_tb)
 
     # ------------------------------------------------------------------
-    # SDK client lifecycle
+    # API port lifecycle
     # ------------------------------------------------------------------
-
-    @contextmanager
-    def _open_sdk_adapter(self) -> Iterator[SdkCvatApiAdapter]:
-        """Open an SDK client and yield an adapter wrapping it."""
-        resolved = self._cfg.ensure_credentials()
-        kwargs = self._build_client_kwargs(resolved)
-        with self._client_factory(**kwargs) as sdk_client:
-            if resolved.request_timeout:
-                apply_request_timeout(sdk_client, resolved.request_timeout)
-            if resolved.organization:
-                sdk_client.organization_slug = resolved.organization
-                logger.trace(
-                    f"Using organization: {resolved.organization}",
-                )
-            yield SdkCvatApiAdapter(sdk_client)
 
     @contextmanager
     def open_api(self) -> Iterator[CvatApiPort]:
@@ -352,8 +231,20 @@ class CvatClient:
         if api is not None:
             yield api
         else:
-            with self._open_sdk_adapter() as adapter:
+            resolved = self._cfg.ensure_credentials()
+            with open_sdk_api(resolved, self._client_factory) as adapter:
                 yield adapter
+
+    def _require_api(self, method_name: str) -> CvatApiPort:
+        """Return the injected or persistent API port, or raise."""
+        api = self._api or self._persistent_api
+        if api is None:
+            msg = (
+                f"{method_name}() requires a context manager. "
+                "Use: with CvatClient(cfg) as client: ..."
+            )
+            raise RuntimeError(msg)
+        return api
 
     # ------------------------------------------------------------------
     # Public API
@@ -410,7 +301,7 @@ class CvatClient:
             ):
                 try:
                     annotations = source.get_task_annotations(task.id)
-                except ApiException:
+                except CvatApiError:
                     logger.warning(
                         f"Не удалось получить аннотации задачи {task.id},"
                         " подсчёт меток может быть неполным",
@@ -452,31 +343,20 @@ class CvatClient:
         Requires an active context manager.
 
         """
-        sdk = self._require_sdk("update_project_labels")
+        api = self._require_api("update_project_labels")
 
-        patch_labels: list[cvat_models.PatchedLabelRequest] = [
-            cvat_models.PatchedLabelRequest(name=name) for name in (add or [])
-        ]
-        patch_labels.extend(
-            cvat_models.PatchedLabelRequest(id=lid, name=new_name)
+        patches: list[LabelPatch] = [LabelPatch(name=name) for name in (add or [])]
+        patches.extend(
+            LabelPatch(id=lid, name=new_name)
             for lid, new_name in (rename or {}).items()
         )
-        patch_labels.extend(
-            cvat_models.PatchedLabelRequest(id=lid, deleted=True)
-            for lid in (delete or [])
+        patches.extend(LabelPatch(id=lid, deleted=True) for lid in (delete or []))
+        patches.extend(
+            LabelPatch(id=lid, color=color) for lid, color in (recolor or {}).items()
         )
-        patch_labels.extend(
-            cvat_models.PatchedLabelRequest(id=lid, color=color)
-            for lid, color in (recolor or {}).items()
-        )
-        if not patch_labels:
+        if not patches:
             return
-        sdk.api_client.projects_api.partial_update(
-            project_id,
-            patched_project_write_request=cvat_models.PatchedProjectWriteRequest(
-                labels=patch_labels,
-            ),
-        )
+        api.patch_project_labels(project_id, patches)
 
     def resolve_project_id(
         self,
@@ -644,25 +524,24 @@ class CvatClient:
         try:
             data_meta = api.get_task_data_meta(task.id)
             annotations = api.get_task_annotations(task.id)
-        except ApiException as e:
-            status = getattr(e, "status", 0)
-            if _HTTP_5XX_MIN <= status < _HTTP_5XX_MAX:
+        except CvatApiError as e:
+            if _HTTP_5XX_MIN <= e.status_code < _HTTP_5XX_MAX:
                 if raise_on_failure:
                     raise
-                _log_task_5xx_skip(task, ctx.host, ctx.project_name, status, e)
+                _log_task_5xx_skip(task, ctx.host, ctx.project_name, e)
                 return None
             raise
 
         try:
             issues = api.get_task_issues(task.id)
-        except ApiException as e:
+        except CvatApiError as e:
             logger.warning(
                 f"Не удалось получить issues задачи {task.id}: {e} — "
                 f"колонки issue_text/issue_state останутся пустыми"
             )
             issues = []
 
-        records, deleted = _task_to_records(
+        records, deleted = task_to_records(
             task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues
         )
         return TaskAnnotations(
@@ -717,7 +596,6 @@ class CvatClient:
         """Download project images from S3 cloud storage into *target_dir*.
 
         Requires an active context manager (``with CvatClient(...) as c:``).
-        Uses the raw SDK client to detect cloud storage and boto3 for S3.
         Images are saved directly as ``target_dir / image_name`` — no
         additional subdirectories are created.  Already-cached files are
         skipped.
@@ -751,20 +629,8 @@ class CvatClient:
 
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
-        sdk = self._require_sdk("detect_project_cloud_storage")
-        project = sdk.projects.retrieve(project_id)
-        source_storage = getattr(project, "source_storage", None)
-        if source_storage is None:
-            return None
-        if isinstance(source_storage, dict):
-            cs_id: int | None = source_storage.get("cloud_storage_id")
-        else:
-            cs_id = getattr(source_storage, "cloud_storage_id", None)
-        if cs_id is None:
-            return None
-        cs_api = sdk.api_client.cloudstorages_api
-        cs_raw, _ = cs_api.retrieve(cs_id)
-        return parse_cloud_storage(cs_raw)
+        api = self._require_api("detect_project_cloud_storage")
+        return api.get_project_cloud_storage(project_id)
 
     def sync_project_images(
         self,
@@ -845,49 +711,16 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        sdk = self._require_sdk("create_upload_task")
-
-        task_spec = cvat_models.TaskWriteRequest(
-            name=name,
+        api = self._require_api("create_upload_task")
+        spec = UploadTaskSpec(
             project_id=project_id,
-            segment_size=segment_size,
-        )
-        task, _ = sdk.api_client.tasks_api.create(task_spec)
-        logger.info(f"Создана задача: {task.name} (id={task.id})")
-
-        data_request = cvat_models.DataRequest(
-            image_quality=image_quality,
+            name=name,
             server_files=image_names,
             cloud_storage_id=cloud_storage_id,
-            use_cache=True,
-            sorting_method=cvat_models.SortingMethod("natural"),
+            segment_size=segment_size,
+            image_quality=image_quality,
         )
-        result, _ = sdk.api_client.tasks_api.create_data(
-            task.id,
-            data_request=data_request,
-        )
-        rq_id = result.rq_id
-
-        # Wait for CVAT to finish processing cloud storage data.
-        # Without this, annotation uploads arrive before frames are indexed
-        # and are silently discarded.
-        try:
-            sdk.wait_for_completion(
-                rq_id,
-                status_check_period=_DATA_CHECK_PERIOD,
-            )
-        except BackgroundRequestException as exc:
-            msg = f"Задача {task.id}: обработка данных не удалась — {exc}"
-            raise RuntimeError(msg) from exc
-
-        task_obj = sdk.tasks.retrieve(int(task.id))
-        size_info = f", size={task_obj.size}" if task_obj else ""
-        logger.info(
-            f"Привязано {len(image_names)} изображений к задаче {task.id} "
-            f"(cloud_storage_id={cloud_storage_id}, "
-            f"segment_size={segment_size}{size_info})"
-        )
-        return int(task.id)
+        return api.create_task_with_data(spec)
 
     def upload_task_annotations(
         self,
@@ -917,18 +750,15 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        sdk = self._require_sdk("upload_task_annotations")
-        adapter = self._require_adapter("upload_task_annotations")
+        api = self._require_api("upload_task_annotations")
 
         # Read actual frame mapping from CVAT (authoritative source).
-        raw_meta = adapter.get_task_data_meta(task_id)
-        name_to_frame = _build_name_to_frame(raw_meta)
+        raw_meta = api.get_task_data_meta(task_id)
+        name_to_frame = build_name_to_frame(raw_meta)
 
         logger.debug(f"Задача {task_id}: получено {len(name_to_frame)} фреймов из CVAT")
 
-        # Get label name -> label_id mapping from the task
-        task_obj = sdk.tasks.retrieve(task_id)
-        task_labels = task_obj.get_labels()
+        task_labels = api.get_task_labels(task_id)
         label_name_to_id: dict[str, int] = {lbl.name: lbl.id for lbl in task_labels}
 
         # Filter to rows with actual annotations (non-NaN label + bbox)
@@ -938,7 +768,7 @@ class CvatClient:
         ].notna().all(axis=1)
         ann_rows = annotations_df[has_annotation]
 
-        shapes: list[cvat_models.LabeledShapeRequest] = []
+        shapes: list[NewShape] = []
         skipped = 0
         for _, row in ann_rows.iterrows():
             img_name = str(row["image_name"])
@@ -952,8 +782,7 @@ class CvatClient:
                 )
                 continue
             shapes.append(
-                cvat_models.LabeledShapeRequest(
-                    type=cvat_models.ShapeType("rectangle"),
+                NewShape(
                     frame=name_to_frame[img_name],
                     label_id=label_name_to_id[label_name],
                     points=[
@@ -971,10 +800,7 @@ class CvatClient:
             )
 
         if shapes:
-            task_obj.update_annotations(
-                cvat_models.PatchedLabeledDataRequest(shapes=shapes),
-                action=AnnotationUpdateAction.CREATE,
-            )
+            api.put_task_shapes(task_id, shapes)
             logger.info(f"Загружено {len(shapes)} аннотаций в задачу {task_id}")
         else:
             logger.info(f"Нет аннотаций для загрузки в задачу {task_id}")
@@ -991,52 +817,45 @@ class CvatClient:
         Rows whose ``issue_state`` is ``"new"`` and whose ``issue_text`` is
         non-empty become CVAT issues on *task_id*; ``issue_text`` is posted
         as the first comment.  Duplicate ``(image_name, issue_text)`` pairs
-        are created once.  The issue rectangle is the row's bbox when all
-        four coordinates are present, otherwise the full frame.
+        are created once.  Issues are attached to the row's bbox; rows
+        without a complete bbox are skipped with a warning.
 
         Returns the number of issues created.  Requires an active context
         manager (``with CvatClient(...) as c:``).
         """
-        sdk = self._require_sdk("create_task_issues")
-        adapter = self._require_adapter("create_task_issues")
+        api = self._require_api("create_task_issues")
 
-        if "issue_state" not in annotations_df.columns:
-            return 0
-        df = annotations_df.copy()
-        if "issue_text" not in df.columns:
-            df["issue_text"] = ""
-        df["issue_state"] = df["issue_state"].fillna("").astype(str).str.strip()
-        df["issue_text"] = df["issue_text"].fillna("").astype(str).str.strip()
-        new_rows = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
-        new_rows = new_rows.drop_duplicates(subset=["image_name", "issue_text"])
+        new_rows = _select_new_issue_rows(annotations_df)
         if new_rows.empty:
             return 0
 
-        raw_meta = adapter.get_task_data_meta(task_id)
-        name_to_frame = _build_name_to_frame(raw_meta)
-        jobs = get_paginated_collection(
-            sdk.api_client.jobs_api.list_endpoint,
-            task_id=task_id,
-        )
+        raw_meta = api.get_task_data_meta(task_id)
+        name_to_frame = build_name_to_frame(raw_meta)
+        jobs = api.get_task_jobs(task_id)
 
         created = 0
         unknown_images: list[str] = []
         unmapped_frames: list[str] = []
+        missing_bbox: list[str] = []
         for _, row in new_rows.iterrows():
             image_name = str(row["image_name"])
             frame = name_to_frame.get(image_name)
             if frame is None:
                 unknown_images.append(image_name)
                 continue
-            job_id = _find_job_for_frame(jobs, frame)
+            position = issue_position_from_row(row)
+            if position is None:
+                missing_bbox.append(image_name)
+                continue
+            job_id = find_job_for_frame(jobs, frame)
             if job_id is None:
                 unmapped_frames.append(image_name)
                 continue
-            sdk.api_client.issues_api.create(
-                cvat_models.IssueWriteRequest(
+            api.create_issue(
+                NewIssue(
+                    job_id=job_id,
                     frame=frame,
-                    position=_issue_position(row, raw_meta.frames[frame]),
-                    job=job_id,
+                    position=position,
                     message=str(row["issue_text"]),
                 ),
             )
@@ -1046,6 +865,11 @@ class CvatClient:
             logger.warning(
                 f"Issues пропущены: изображения не найдены в задаче {task_id}: "
                 f"{unknown_images}"
+            )
+        if missing_bbox:
+            logger.warning(
+                f"Issues пропущены: у строк нет полного bbox в задаче {task_id}: "
+                f"{missing_bbox}"
             )
         if unmapped_frames:
             logger.warning(
@@ -1063,8 +887,7 @@ class CvatClient:
         """Mark frames as deleted in an existing CVAT task.
 
         Reads ``data_meta`` to map image names to frame indices, then
-        updates the task's ``deleted_frames`` list via
-        ``partial_update_data_meta``.
+        updates the task's ``deleted_frames`` list.
 
         Parameters
         ----------
@@ -1081,14 +904,12 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        adapter = self._require_adapter("mark_frames_deleted")
+        api = self._require_api("mark_frames_deleted")
 
-        raw_meta = adapter.get_task_data_meta(task_id)
-        name_to_frame = _build_name_to_frame(raw_meta)
+        raw_meta = api.get_task_data_meta(task_id)
+        name_to_frame = build_name_to_frame(raw_meta)
         frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
-        return self._patch_deleted_frames(
-            "mark_frames_deleted", task_id, raw_meta, frame_ids
-        )
+        return self._patch_deleted_frames(api, task_id, raw_meta, frame_ids)
 
     def mark_frames_deleted_by_ids(
         self,
@@ -1099,7 +920,7 @@ class CvatClient:
 
         Frame IDs outside the task's frame range are skipped with a
         warning.  The remaining IDs are merged with the current
-        ``deleted_frames`` via ``partial_update_data_meta``.
+        ``deleted_frames``.
 
         Parameters
         ----------
@@ -1116,9 +937,9 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        adapter = self._require_adapter("mark_frames_deleted_by_ids")
+        api = self._require_api("mark_frames_deleted_by_ids")
 
-        raw_meta = adapter.get_task_data_meta(task_id)
+        raw_meta = api.get_task_data_meta(task_id)
         num_frames = len(raw_meta.frames)
         requested = sorted(set(frame_ids))
         valid = [fid for fid in requested if 0 <= fid < num_frames]
@@ -1128,13 +949,11 @@ class CvatClient:
                 f"Задача {task_id}: кадры {unknown} не найдены "
                 f"(в задаче {num_frames} кадров) — пропускаем"
             )
-        return self._patch_deleted_frames(
-            "mark_frames_deleted_by_ids", task_id, raw_meta, valid
-        )
+        return self._patch_deleted_frames(api, task_id, raw_meta, valid)
 
+    @staticmethod
     def _patch_deleted_frames(
-        self,
-        method_name: str,
+        api: CvatApiPort,
         task_id: int,
         raw_meta: RawDataMeta,
         frame_ids: list[int],
@@ -1142,14 +961,8 @@ class CvatClient:
         """Union *frame_ids* with the task's deleted frames and PATCH data_meta."""
         if not frame_ids:
             return 0
-        sdk = self._require_sdk(method_name)
         new_deleted = sorted(set(raw_meta.deleted_frames) | set(frame_ids))
-        sdk.api_client.tasks_api.partial_update_data_meta(
-            task_id,
-            patched_data_meta_write_request=cvat_models.PatchedDataMetaWriteRequest(
-                deleted_frames=new_deleted,
-            ),
-        )
+        api.set_deleted_frames(task_id, new_deleted)
         logger.info(f"Помечено удалёнными {len(frame_ids)} кадров в задаче {task_id}")
         return len(frame_ids)
 
@@ -1161,15 +974,14 @@ class CvatClient:
 
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
-        sdk = self._require_sdk("count_task_label_shapes")
-        return len(self._find_label_shapes(sdk, task_id, label))
+        api = self._require_api("count_task_label_shapes")
+        return len(self._find_label_shapes(api, task_id, label))
 
     def drop_label_annotations(self, task_id: int, label: str) -> int:
         """Delete all annotation shapes with the given label from a task.
 
         Resolves the label name to its ID via the task's labels, collects
-        matching shapes from ``retrieve_annotations`` and deletes them via
-        ``partial_update_annotations`` with ``action="delete"``.
+        matching shapes and deletes them.
 
         Parameters
         ----------
@@ -1192,28 +1004,12 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        sdk = self._require_sdk("drop_label_annotations")
-        shapes = self._find_label_shapes(sdk, task_id, label)
+        api = self._require_api("drop_label_annotations")
+        shapes = self._find_label_shapes(api, task_id, label)
         if not shapes:
             logger.info(f"В задаче {task_id} нет аннотаций с меткой {label!r}")
             return 0
-        shape_requests = [
-            cvat_models.LabeledShapeRequest(
-                type=shape.type,
-                frame=shape.frame,
-                label_id=shape.label_id,
-                points=list(shape.points or []),
-                id=shape.id,
-            )
-            for shape in shapes
-        ]
-        sdk.api_client.tasks_api.partial_update_annotations(
-            "delete",
-            task_id,
-            patched_labeled_data_request=cvat_models.PatchedLabeledDataRequest(
-                shapes=shape_requests,
-            ),
-        )
+        api.delete_shapes(task_id, shapes)
         logger.info(
             f"Удалено {len(shapes)} аннотаций с меткой {label!r} из задачи {task_id}"
         )
@@ -1221,17 +1017,16 @@ class CvatClient:
 
     @staticmethod
     def _find_label_shapes(
-        sdk: CvatSdkClient,
+        api: CvatApiPort,
         task_id: int,
         label: str,
-    ) -> list[cvat_models.LabeledShape]:
+    ) -> list[RawShape]:
         """Return task shapes whose label name equals *label*.
 
         Raises ``ValueError`` listing available labels when no task label
         matches *label*.
         """
-        task_obj = sdk.tasks.retrieve(task_id)
-        task_labels = task_obj.get_labels()
+        task_labels = api.get_task_labels(task_id)
         label_ids = {lbl.id for lbl in task_labels if lbl.name == label}
         if not label_ids:
             available = ", ".join(sorted(str(lbl.name) for lbl in task_labels))
@@ -1239,16 +1034,16 @@ class CvatClient:
                 f"Метка {label!r} не найдена в задаче {task_id}. "
                 f"Доступные метки: {available}"
             )
-        labeled_data, _ = sdk.api_client.tasks_api.retrieve_annotations(task_id)
-        return [s for s in (labeled_data.shapes or []) if s.label_id in label_ids]
+        annotations = api.get_task_annotations(task_id)
+        return [s for s in annotations.shapes if s.label_id in label_ids]
 
     def delete_task(self, task_id: int) -> None:
         """Delete a CVAT task permanently (including its data and jobs).
 
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
-        sdk = self._require_sdk("delete_task")
-        sdk.api_client.tasks_api.destroy(task_id)
+        api = self._require_api("delete_task")
+        api.delete_task(task_id)
         logger.info(f"Задача {task_id} удалена")
 
     def set_task_jobs_status(
@@ -1283,24 +1078,11 @@ class CvatClient:
         """
         if stage is None and state is None:
             raise ValueError("Укажите stage и/или state.")
-        sdk = self._require_sdk("set_task_jobs_status")
+        api = self._require_api("set_task_jobs_status")
 
-        patch_kwargs: dict[str, object] = {}
-        if stage is not None:
-            patch_kwargs["stage"] = cvat_models.JobStage(stage)
-        if state is not None:
-            patch_kwargs["state"] = cvat_models.OperationStatus(state)
-
-        task_obj = sdk.tasks.retrieve(task_id)
-        jobs = task_obj.get_jobs()
-        jobs_api = sdk.api_client.jobs_api
+        jobs = api.get_task_jobs(task_id)
         for job in jobs:
-            jobs_api.partial_update(
-                job.id,
-                patched_job_write_request=cvat_models.PatchedJobWriteRequest(
-                    **patch_kwargs
-                ),
-            )
+            api.update_job(job.id, stage=stage, state=state)
         logger.info(
             f"Задача {task_id}: обновлено {len(jobs)} job(s) "
             f"(stage={stage or '-'}, state={state or '-'})"
@@ -1318,45 +1100,6 @@ class CvatClient:
         manager (``with CvatClient(...) as c:``).
         """
         return self.set_task_jobs_status(task_id, stage="acceptance", state="completed")
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _require_adapter(self, method_name: str) -> SdkCvatApiAdapter:
-        """Return the persistent adapter or raise with a helpful message."""
-        if self._persistent_api is None:
-            msg = (
-                f"{method_name}() requires a context manager. "
-                "Use: with CvatClient(cfg) as client: ..."
-            )
-            raise RuntimeError(msg)
-        return self._persistent_api
-
-    def _require_sdk(self, method_name: str) -> CvatSdkClient:
-        """Return the raw SDK client or raise with a helpful message."""
-        if self._sdk_client is None:
-            msg = (
-                f"{method_name}() requires a context manager. "
-                "Use: with CvatClient(cfg) as client: ..."
-            )
-            raise RuntimeError(msg)
-        sdk = self._persistent_api.client if self._persistent_api else None
-        if sdk is None:
-            msg = "SDK client not available."
-            raise RuntimeError(msg)
-        return sdk
-
-    def _build_client_kwargs(self, cfg: CvatConfig) -> dict[str, str | tuple[str, str]]:
-        """Build keyword arguments for ``make_client``.
-
-        ``organization`` is not passed to ``make_client`` (SDK does not
-        accept it).  It is set on the client instance afterwards.
-        """
-        kwargs: dict[str, str | tuple[str, str]] = {"host": cfg.host or ""}
-        if cfg.username and cfg.password:
-            kwargs["credentials"] = (cfg.username, cfg.password)
-        return kwargs
 
 
 # ---------------------------------------------------------------------------

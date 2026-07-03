@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
-from cvat_sdk.api_client.exceptions import ApiException
 
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
+from cveta2.exceptions import CvatApiError
 from cveta2.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
@@ -301,15 +301,15 @@ def test_5xx_task_skipped(coco8_fixtures: LoadedFixtures) -> None:
 
 
 def test_4xx_error_propagated(coco8_fixtures: LoadedFixtures) -> None:
-    """Non-5xx ApiException (e.g. 404) is re-raised, not swallowed."""
+    """Non-5xx CvatApiError (e.g. 404) is re-raised, not swallowed."""
     fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
 
     api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id}, fail_status=404)
     client = CvatClient(CvatConfig(), api=api)
 
-    with pytest.raises(ApiException) as exc_info:
+    with pytest.raises(CvatApiError) as exc_info:
         client.fetch_annotations(fake.project.id)
-    assert exc_info.value.status == 404
+    assert exc_info.value.status_code == 404
 
 
 def test_5xx_raise_on_failure(
@@ -327,9 +327,9 @@ def test_5xx_raise_on_failure(
     client = CvatClient(CvatConfig(), api=api)
 
     monkeypatch.setenv("CVETA2_RAISE_ON_FAILURE", "true")
-    with pytest.raises(ApiException) as exc_info:
+    with pytest.raises(CvatApiError) as exc_info:
         client.fetch_annotations(fake.project.id)
-    assert exc_info.value.status == 500
+    assert exc_info.value.status_code == 500
 
 
 # ---------------------------------------------------------------------------
@@ -399,8 +399,8 @@ def test_raw_csv_includes_deleted_images(
 
 def test_task_to_records_unknown_deleted_frame_id() -> None:
     """Deleted frame_id not in frames produces '<unknown>' image_name."""
+    from cveta2._client.assembly import task_to_records
     from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
-    from cveta2.client import _task_to_records
 
     task = TaskInfo(
         id=99,
@@ -415,7 +415,7 @@ def test_task_to_records_unknown_deleted_frame_id() -> None:
     )
     annotations = RawAnnotations(shapes=[])
 
-    _records, deleted = _task_to_records(task, data_meta, annotations, {}, {})
+    _records, deleted = task_to_records(task, data_meta, annotations, {}, {})
 
     assert len(deleted) == 1
     assert deleted[0].image_name == "<unknown>"
