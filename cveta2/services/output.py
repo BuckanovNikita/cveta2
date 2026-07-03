@@ -1,0 +1,89 @@
+"""CSV writers and record path population shared by fetch/upload workflows."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pandas as pd
+from loguru import logger
+
+from cveta2.models import CSV_COLUMNS
+from cveta2.s3_utils import build_s3_key
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+    from cveta2.dataset_partition import PartitionResult
+    from cveta2.image_downloader import CloudStorageInfo
+    from cveta2.models import DeletedImage, ProjectAnnotations
+
+
+def populate_record_paths(
+    result: ProjectAnnotations,
+    cs_info: CloudStorageInfo | None,
+    images_dir: Path | None,
+) -> None:
+    """Set ``s3_image_path`` and ``image_path`` on all annotation/deleted records."""
+    for record in (*result.annotations, *result.deleted_images):
+        if cs_info is not None:
+            record.s3_image_path = build_s3_key(cs_info.prefix, record.image_name)
+        if images_dir is not None:
+            local = images_dir / record.image_name
+            if local.exists():
+                record.image_path = str(local.resolve())
+
+
+def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
+    """Write raw.csv with all annotation and deleted rows, unpartitioned."""
+    rows = result.to_csv_rows()
+    deleted_rows = [d.to_csv_row() for d in result.deleted_images]
+    raw_df = pd.DataFrame(rows + deleted_rows)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = output_dir / "raw.csv"
+    raw_df.to_csv(raw_path, index=False, encoding="utf-8")
+    logger.info(f"Raw CSV saved to {raw_path} ({len(raw_df)} rows)")
+
+
+def _write_deleted_csv(
+    deleted_images: Sequence[DeletedImage], output_dir: Path
+) -> None:
+    """Write deleted.csv with full CSV columns (empty frame when no rows)."""
+    deleted_rows = [img.to_csv_row() for img in deleted_images]
+    deleted_df = (
+        pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))
+        if deleted_rows
+        else pd.DataFrame(columns=list(CSV_COLUMNS))
+    )
+    deleted_path = output_dir / "deleted.csv"
+    deleted_df.to_csv(deleted_path, index=False, encoding="utf-8")
+    logger.info(f"Deleted CSV saved to {deleted_path} ({len(deleted_df)} rows)")
+
+
+def write_partition_csvs(partition: PartitionResult, output_dir: Path) -> None:
+    """Write dataset/obsolete/in_progress CSVs and deleted.csv into *output_dir*."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for df, name, label in [
+        (partition.dataset, "dataset.csv", "Dataset CSV"),
+        (partition.obsolete, "obsolete.csv", "Obsolete CSV"),
+        (partition.in_progress, "in_progress.csv", "In-progress CSV"),
+    ]:
+        path = output_dir / name
+        df.to_csv(path, index=False, encoding="utf-8")
+        logger.info(f"{label} saved to {path} ({len(df)} rows)")
+
+    _write_deleted_csv(partition.deleted_images, output_dir)
+
+
+def write_dataset_and_deleted(result: ProjectAnnotations, output_dir: Path) -> None:
+    """Write dataset.csv and deleted.csv from annotation result into *output_dir*."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rows = result.to_csv_rows()
+    df = pd.DataFrame(rows)
+
+    dataset_path = output_dir / "dataset.csv"
+    df.to_csv(dataset_path, index=False, encoding="utf-8")
+    logger.info(f"Dataset CSV saved to {dataset_path} ({len(df)} rows)")
+
+    _write_deleted_csv(result.deleted_images, output_dir)

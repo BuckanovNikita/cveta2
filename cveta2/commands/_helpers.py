@@ -16,7 +16,6 @@ from cveta2.config import (
     require_interactive,
 )
 from cveta2.exceptions import Cveta2Error
-from cveta2.models import CSV_COLUMNS
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
 from cveta2.s3_utils import parse_sync_root
 
@@ -25,7 +24,6 @@ if TYPE_CHECKING:
 
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import ProjectAnnotations
 
 _RESCAN_VALUE = "__rescan__"
 
@@ -236,27 +234,3 @@ def require_host(cfg: CvatConfig) -> None:
         "(CVAT_USERNAME/CVAT_PASSWORD).\n"
         f"Файл конфигурации: {config_path}"
     )
-
-
-def write_dataset_and_deleted(
-    result: ProjectAnnotations,
-    output_dir: Path,
-) -> None:
-    """Write dataset.csv and deleted.csv from annotation result into *output_dir*."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    rows = result.to_csv_rows()
-    df = pd.DataFrame(rows)
-
-    dataset_path = output_dir / "dataset.csv"
-    df.to_csv(dataset_path, index=False, encoding="utf-8")
-    logger.info(f"Dataset CSV saved to {dataset_path} ({len(df)} rows)")
-
-    deleted_rows = [img.to_csv_row() for img in result.deleted_images]
-    deleted_df = (
-        pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))
-        if deleted_rows
-        else pd.DataFrame(columns=list(CSV_COLUMNS))
-    )
-    deleted_path = output_dir / "deleted.csv"
-    deleted_df.to_csv(deleted_path, index=False, encoding="utf-8")
-    logger.info(f"Deleted CSV saved to {deleted_path} ({len(deleted_df)} rows)")

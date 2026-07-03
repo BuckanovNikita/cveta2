@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -377,11 +376,9 @@ def test_raw_csv_includes_deleted_images(
     )
     result = make_fake_client(fake).fetch_annotations(fake.project.id)
 
-    # Simulate args with raw=True
-    args = argparse.Namespace(raw=True)
-    from cveta2.commands.fetch import _write_output
+    from cveta2.services.output import write_raw_csv
 
-    _write_output(args, result, tmp_path / "out")
+    write_raw_csv(result, tmp_path / "out")
 
     raw_csv = tmp_path / "out" / "raw.csv"
     assert raw_csv.exists()

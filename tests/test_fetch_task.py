@@ -14,7 +14,6 @@ from cveta2.client import CvatClient, _FetchAnnotationsOptions, _filter_tasks_fo
 from cveta2.commands.fetch import (
     _resolve_images_dir,
     _resolve_task_selector,
-    _warn_ignored_tasks,
     run_fetch_task,
 )
 from cveta2.config import (
@@ -27,6 +26,7 @@ from cveta2.config import (
 )
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import CSV_COLUMNS, TaskInfo
+from cveta2.services.fetch import load_ignore_sets
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import CFG, build_fake, make_fake_client, make_fetch_args
 
@@ -62,7 +62,7 @@ def _run_fetch_task_with_fake(
         patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
         patch("cveta2.commands._bootstrap.require_host"),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-        patch(f"{_MODULE}.load_ignore_config", return_value=ic),
+        patch("cveta2.services.fetch.load_ignore_config", return_value=ic),
         patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
         patch(
             "cveta2.client.CvatClient.detect_project_cloud_storage",
@@ -163,20 +163,20 @@ class TestResolveTaskSelector:
 
 
 # ---------------------------------------------------------------------------
-# Unit tests: _warn_ignored_tasks
+# Unit tests: load_ignore_sets
 # ---------------------------------------------------------------------------
 
 
 class TestWarnIgnoredTasks:
-    """Tests for ``_warn_ignored_tasks``."""
+    """Tests for ``load_ignore_sets``."""
 
     def test_no_ignored_tasks(self) -> None:
         """Returns (None, None) when ignore config is empty for the project."""
         with patch(
-            f"{_MODULE}.load_ignore_config",
+            "cveta2.services.fetch.load_ignore_config",
             return_value=IgnoreConfig(),
         ):
-            ignore_set, silent_set = _warn_ignored_tasks("my-project")
+            ignore_set, silent_set = load_ignore_sets("my-project")
 
         assert ignore_set is None
         assert silent_set is None
@@ -193,10 +193,10 @@ class TestWarnIgnoredTasks:
             },
         )
         with patch(
-            f"{_MODULE}.load_ignore_config",
+            "cveta2.services.fetch.load_ignore_config",
             return_value=ignore_cfg,
         ):
-            ignore_set, silent_set = _warn_ignored_tasks("my-project")
+            ignore_set, silent_set = load_ignore_sets("my-project")
 
         assert ignore_set == {10, 20, 30}
         assert silent_set is None
@@ -207,10 +207,10 @@ class TestWarnIgnoredTasks:
             projects={"other-project": [IgnoredTask(id=10, name="t10")]},
         )
         with patch(
-            f"{_MODULE}.load_ignore_config",
+            "cveta2.services.fetch.load_ignore_config",
             return_value=ignore_cfg,
         ):
-            ignore_set, silent_set = _warn_ignored_tasks("my-project")
+            ignore_set, silent_set = load_ignore_sets("my-project")
 
         assert ignore_set is None
         assert silent_set is None
@@ -227,10 +227,10 @@ class TestWarnIgnoredTasks:
             },
         )
         with patch(
-            f"{_MODULE}.load_ignore_config",
+            "cveta2.services.fetch.load_ignore_config",
             return_value=ignore_cfg,
         ):
-            ignore_set, silent_set = _warn_ignored_tasks("my-project")
+            ignore_set, silent_set = load_ignore_sets("my-project")
 
         assert ignore_set == {10, 20, 30}
         assert silent_set == {10, 30}

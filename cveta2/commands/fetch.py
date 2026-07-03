@@ -1,290 +1,104 @@
-"""Implementation of the ``cveta2 fetch`` and ``cveta2 fetch-task`` commands."""
+"""CLI adapters for ``cveta2 fetch`` and ``cveta2 fetch-task``.
+
+Only argument mapping, interactive prompts and ``sys.exit`` UX live here;
+the pipeline itself is :mod:`cveta2.services.fetch`.
+"""
 
 from __future__ import annotations
 
-import shutil
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pandas as pd
 import questionary
 from loguru import logger
-from tqdm import tqdm
 
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import (
-    resolve_project_and_cloud_storage,
-    write_dataset_and_deleted,
-)
+from cveta2.commands._helpers import resolve_project_and_cloud_storage
 from cveta2.commands._task_selector import select_tasks_tui
 from cveta2.config import (
-    is_cache_disabled,
     is_interactive_disabled,
-    load_ignore_config,
     load_image_cache_config,
     save_image_cache_config,
 )
-from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
-from cveta2.models import CSV_COLUMNS, TaskAnnotations
-from cveta2.s3_utils import build_s3_key
-from cveta2.task_cache import (
-    S3CacheBackend,
-    TaskAnnotationCache,
-    get_task_cache_dir,
+from cveta2.services.fetch import (
+    FetchOptions,
+    fetch_project,
+    fetch_selected_tasks,
+    load_ignore_sets,
 )
 
 if TYPE_CHECKING:
     import argparse
 
-    from cveta2.client import CvatClient, FetchContext
+    from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import ProjectAnnotations
-
-# ------------------------------------------------------------------
-# Public command entry points
-# ------------------------------------------------------------------
 
 
 def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
     output_dir = _resolve_output_dir(Path(args.output_dir))
-    result, project_name = _fetch_common(args, output_dir, prune_cache=True)
-
-    _write_output(args, result, output_dir)
-
-    from cveta2._clearml import maybe_publish_clearml  # noqa: PLC0415
-
-    maybe_publish_clearml(project_name, output_dir)
+    with open_client() as client:
+        project_id, project_name, cs_info = _resolve_project_or_exit(client, args)
+        options = _build_fetch_options(args, client, project_id, project_name)
+        try:
+            fetch_project(
+                client, project_id, project_name, output_dir, cs_info, options
+            )
+        except Cveta2Error as e:
+            sys.exit(str(e))
 
 
 def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
     output_dir = Path(args.output_dir)
-    result, _ = _fetch_common(args, output_dir)
-    write_dataset_and_deleted(result, output_dir)
-
-
-def _fetch_common(
-    args: argparse.Namespace,
-    output_dir: Path,
-    *,
-    prune_cache: bool = False,
-) -> tuple[ProjectAnnotations, str]:
-    """Shared fetch logic for ``run_fetch`` and ``run_fetch_task``.
-
-    When *prune_cache* is True (full-project fetch), local cache entries
-    of tasks that no longer exist in the project are removed.
-    Returns ``(result, project_name)``.
-    """
     with open_client() as client:
+        project_id, project_name, cs_info = _resolve_project_or_exit(client, args)
+        options = _build_fetch_options(args, client, project_id, project_name)
         try:
-            project_id, project_name, cs_info = resolve_project_and_cloud_storage(
-                client, getattr(args, "project", None)
+            fetch_selected_tasks(
+                client, project_id, project_name, output_dir, cs_info, options
             )
         except Cveta2Error as e:
             sys.exit(str(e))
 
-        ignore_set, silent_set = _warn_ignored_tasks(project_name)
 
-        task_selector: list[int | str] | None = None
-        if hasattr(args, "task"):
-            task_selector = _resolve_task_selector(args, client, project_id, ignore_set)
-
-        try:
-            ctx = client.prepare_fetch(
-                project_id,
-                completed_only=args.completed_only,
-                ignore_task_ids=ignore_set,
-                silent_task_ids=silent_set,
-                task_selector=task_selector,
-                project_name=project_name,
-            )
-        except Cveta2Error as e:
-            sys.exit(str(e))
-
-        cache = _build_task_cache(args, client, project_id)
-
-        result = _fetch_and_save_tasks(
-            client,
-            ctx,
-            output_dir,
-            save_tasks=args.save_tasks,
-            cache=cache,
-            force=args.force,
-        )
-
-        if cache is not None and prune_cache:
-            live_ids = {t.id for t in client.list_project_tasks(project_id)}
-            pruned = cache.prune(live_ids)
-            if pruned:
-                logger.info(f"Кэш аннотаций: удалено устаревших записей: {pruned}")
-
-        images_dir = _download_images(
-            _DownloadImagesParams(
-                args, project_id, project_name, client, result, cs_info
-            )
-        )
-        _populate_paths(result, cs_info, images_dir)
-
-    return result, project_name
+def _resolve_project_or_exit(
+    client: CvatClient,
+    args: argparse.Namespace,
+) -> tuple[int, str, CloudStorageInfo | None]:
+    """Resolve project id/name and cloud storage; exit with message on failure."""
+    try:
+        return resolve_project_and_cloud_storage(client, getattr(args, "project", None))
+    except Cveta2Error as e:
+        sys.exit(str(e))
 
 
-# ------------------------------------------------------------------
-# Shared helpers (project resolution, output, images)
-# ------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _DownloadImagesParams:
-    """Arguments for _download_images (avoids PLR0913)."""
-
-    args: argparse.Namespace
-    project_id: int
-    project_name: str
-    client: CvatClient
-    result: ProjectAnnotations
-    project_cloud_storage: CloudStorageInfo | None = None
-
-
-def _populate_paths(
-    result: ProjectAnnotations,
-    cs_info: CloudStorageInfo | None,
-    images_dir: Path | None,
-) -> None:
-    """Set ``s3_image_path`` and ``image_path`` on all annotation/deleted records."""
-    for record in (*result.annotations, *result.deleted_images):
-        if cs_info is not None:
-            record.s3_image_path = build_s3_key(cs_info.prefix, record.image_name)
-        if images_dir is not None:
-            local = images_dir / record.image_name
-            if local.exists():
-                record.image_path = str(local.resolve())
-
-
-def _build_task_cache(
+def _build_fetch_options(
     args: argparse.Namespace,
     client: CvatClient,
     project_id: int,
-) -> TaskAnnotationCache | None:
-    """Build the task-annotation cache for a fetch run.
+    project_name: str,
+) -> FetchOptions:
+    """Resolve interactive inputs and map CLI args onto FetchOptions."""
+    ignore_set, silent_set = load_ignore_sets(project_name)
 
-    ``--no-cache`` (or ``CVETA2_DISABLE_CACHE=true``) disables caching
-    entirely.  The S3 backend always uses the project's original CVAT
-    cloud storage prefix (never a user override), so all users share one
-    cache location.
-    """
-    if args.no_cache or is_cache_disabled():
-        return None
-    s3_backend = S3CacheBackend.from_cloud_storage(
-        client.detect_project_cloud_storage(project_id)
+    task_selector: list[int | str] | None = None
+    if hasattr(args, "task"):
+        task_selector = _resolve_task_selector(args, client, project_id, ignore_set)
+
+    return FetchOptions(
+        completed_only=args.completed_only,
+        task_selector=task_selector,
+        ignore_task_ids=ignore_set,
+        silent_task_ids=silent_set,
+        use_cache=not args.no_cache,
+        force=args.force,
+        save_tasks=args.save_tasks,
+        images_dir=_resolve_images_dir(args, project_name),
+        raw=getattr(args, "raw", False),
     )
-    return TaskAnnotationCache(get_task_cache_dir(project_id), s3=s3_backend)
-
-
-def _fetch_and_save_tasks(  # noqa: PLR0913
-    client: CvatClient,
-    ctx: FetchContext,
-    output_dir: Path,
-    *,
-    save_tasks: bool = False,
-    cache: TaskAnnotationCache | None = None,
-    force: bool = False,
-) -> ProjectAnnotations:
-    """Fetch tasks one by one, saving per-task CSVs into ``output_dir/.tasks/``.
-
-    Completed tasks are served from *cache* when possible; fresh results
-    are cached before any path population so shared S3 entries stay
-    machine-independent.  With *force* the cache is only written, never
-    read.  When *save_tasks* is False (default), the ``.tasks/``
-    directory is removed after merging.
-
-    Returns the merged :class:`ProjectAnnotations` from all fetched tasks.
-    """
-    if not ctx.tasks:
-        logger.warning("No tasks in this project.")
-        return TaskAnnotations.merge([])
-
-    tasks_dir = output_dir / ".tasks"
-    tasks_dir.mkdir(parents=True, exist_ok=True)
-
-    cache_hits = 0
-    fetched = 0
-    task_results: list[TaskAnnotations] = []
-    api = client.api
-    for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
-        task_result = None if force or cache is None else cache.get(task)
-        if task_result is not None:
-            cache_hits += 1
-        else:
-            task_result = client.fetch_one_task(api, task, ctx)
-            if task_result is None:
-                continue
-            fetched += 1
-            if cache is not None:
-                cache.put(task, task_result)
-
-        rows = task_result.to_csv_rows()
-        if rows:
-            df = pd.DataFrame(rows)
-            task_csv = tasks_dir / f"task_{task.id}.csv"
-            df.to_csv(task_csv, index=False, encoding="utf-8")
-            logger.trace(
-                f"Task {task.name!r} (id={task.id}): {len(rows)} rows → {task_csv}"
-            )
-
-        task_results.append(task_result)
-
-    if not save_tasks:
-        shutil.rmtree(tasks_dir, ignore_errors=True)
-
-    if cache is not None:
-        logger.info(f"Задач из кэша: {cache_hits}, загружено с CVAT: {fetched}")
-
-    return TaskAnnotations.merge(task_results)
-
-
-def _download_images(params: _DownloadImagesParams) -> Path | None:
-    """Download images if requested (within the CvatClient context).
-
-    Returns the resolved images directory, or ``None`` if download was skipped.
-    """
-    images_dir = _resolve_images_dir(params.args, params.project_name)
-    if images_dir is not None:
-        stats = params.client.download_images(
-            params.result,
-            images_dir,
-            project_id=params.project_id,
-            project_cloud_storage=params.project_cloud_storage,
-        )
-        logger.info(
-            f"Изображения: {stats.downloaded} загружено, "
-            f"{stats.cached} из кэша, {stats.failed} ошибок"
-        )
-    return images_dir
-
-
-def _write_output(
-    args: argparse.Namespace,
-    result: ProjectAnnotations,
-    output_dir: Path,
-) -> None:
-    """Partition annotations and write output files."""
-    rows = result.to_csv_rows()
-    df = pd.DataFrame(rows)
-
-    if args.raw:
-        deleted_rows = [d.to_csv_row() for d in result.deleted_images]
-        raw_df = pd.DataFrame(rows + deleted_rows)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        raw_path = output_dir / "raw.csv"
-        raw_df.to_csv(raw_path, index=False, encoding="utf-8")
-        logger.info(f"Raw CSV saved to {raw_path} ({len(raw_df)} rows)")
-
-    partition = partition_annotations_df(df, result.deleted_images)
-    _write_partition_result(partition, output_dir)
 
 
 def _resolve_output_dir(output_dir: Path) -> Path:
@@ -316,33 +130,6 @@ def _resolve_output_dir(output_dir: Path) -> Path:
     return output_dir
 
 
-def _write_partition_result(
-    partition: PartitionResult,
-    output_dir: Path,
-) -> None:
-    """Write all partition DataFrames and deleted.csv into *output_dir*."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    for df, name, label in [
-        (partition.dataset, "dataset.csv", "Dataset CSV"),
-        (partition.obsolete, "obsolete.csv", "Obsolete CSV"),
-        (partition.in_progress, "in_progress.csv", "In-progress CSV"),
-    ]:
-        path = output_dir / name
-        df.to_csv(path, index=False, encoding="utf-8")
-        logger.info(f"{label} saved to {path} ({len(df)} rows)")
-
-    deleted_rows = [img.to_csv_row() for img in partition.deleted_images]
-    deleted_df = (
-        pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))
-        if deleted_rows
-        else pd.DataFrame(columns=list(CSV_COLUMNS))
-    )
-    deleted_path = output_dir / "deleted.csv"
-    deleted_df.to_csv(deleted_path, index=False, encoding="utf-8")
-    logger.info(f"Deleted CSV saved to {deleted_path} ({len(deleted_df)} rows)")
-
-
 def _resolve_task_selector(
     args: argparse.Namespace,
     client: CvatClient,
@@ -362,22 +149,6 @@ def _resolve_task_selector(
             return explicit
     selected = select_tasks_tui(client, project_id, exclude_ids=ignore_task_ids)
     return [t.id for t in selected]
-
-
-def _warn_ignored_tasks(
-    project_name: str,
-) -> tuple[set[int] | None, set[int] | None]:
-    """Load ignore config, return ``(ignore_set, silent_set)``.
-
-    *ignore_set* contains all ignored task IDs (or None if empty).
-    *silent_set* contains IDs of tasks marked ``silent=True``.
-    """
-    ignore_cfg = load_ignore_config()
-    ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
-    if not ignored_ids:
-        return None, None
-    silent_ids = ignore_cfg.get_silent_task_ids(project_name)
-    return set(ignored_ids), (silent_ids or None)
 
 
 def _resolve_images_dir(

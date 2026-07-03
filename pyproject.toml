@@ -138,6 +138,7 @@ type = "layers"
 layers = [
     "cveta2.cli",
     "cveta2.commands",
+    "cveta2.services",
     "cveta2._clearml",
     "cveta2.client",
     "cveta2._client",
@@ -151,6 +152,7 @@ source_modules = [
 ]
 forbidden_modules = [
     "cveta2.client",
+    "cveta2.services",
     "cveta2.commands",
     "cveta2.cli",
     "cveta2._client",
@@ -164,6 +166,7 @@ source_modules = [
 ]
 forbidden_modules = [
     "cveta2.client",
+    "cveta2.services",
     "cveta2.commands",
     "cveta2.cli",
     "cveta2._client",
