@@ -8,9 +8,11 @@ import pandas as pd
 import pytest
 
 from cveta2.commands.upload import (
+    _NO_ANNOTATION_LABEL,
     _build_search_dirs,
     _enrich_paths,
     _extract_deleted_names,
+    _filter_frames_by_labels,
     _read_exclude_names,
     _warn_missing_images,
 )
@@ -74,6 +76,42 @@ def test_extract_deleted_names_none_deleted() -> None:
         }
     )
     assert _extract_deleted_names(df) == set()
+
+
+# ---------------------------------------------------------------------------
+# _filter_frames_by_labels
+# ---------------------------------------------------------------------------
+
+
+def _frames_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "image_name": ["a.jpg", "a.jpg", "b.jpg", "c.jpg"],
+            "instance_label": ["Edge", "Other", "Other", None],
+        }
+    )
+
+
+def test_filter_frames_keeps_all_rows_of_selected_frame() -> None:
+    result = _filter_frames_by_labels(_frames_df(), ["Edge"], set())
+    assert result["image_name"].tolist() == ["a.jpg", "a.jpg"]
+    assert set(result["instance_label"]) == {"Edge", "Other"}
+
+
+def test_filter_frames_excludes_frame_with_only_unselected_labels() -> None:
+    result = _filter_frames_by_labels(_frames_df(), ["Edge"], set())
+    assert "b.jpg" not in set(result["image_name"])
+
+
+def test_filter_frames_sentinel_includes_nan_label_frames() -> None:
+    result = _filter_frames_by_labels(_frames_df(), [_NO_ANNOTATION_LABEL], set())
+    assert result["image_name"].tolist() == ["c.jpg"]
+    assert result["instance_label"].isna().all()
+
+
+def test_filter_frames_exclude_names_removes_frames() -> None:
+    result = _filter_frames_by_labels(_frames_df(), ["Edge", "Other"], {"a.jpg"})
+    assert set(result["image_name"]) == {"b.jpg"}
 
 
 # ---------------------------------------------------------------------------

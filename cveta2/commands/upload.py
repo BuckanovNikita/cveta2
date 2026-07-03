@@ -97,6 +97,28 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
     return selected
 
 
+def _filter_frames_by_labels(
+    df_normal: pd.DataFrame,
+    selected_labels: list[str],
+    exclude_names: set[str],
+) -> pd.DataFrame:
+    """Return all rows of frames that contain at least one selected label.
+
+    Selected labels choose frames (images): every annotation row of a
+    chosen frame is kept, including rows whose label was not selected.
+    The ``_NO_ANNOTATION_LABEL`` sentinel selects frames with NaN labels.
+    Frames listed in *exclude_names* are dropped entirely.
+    """
+    real_labels = [lbl for lbl in selected_labels if lbl != _NO_ANNOTATION_LABEL]
+    mask = df_normal["instance_label"].isin(real_labels)
+    if _NO_ANNOTATION_LABEL in selected_labels:
+        mask = mask | df_normal["instance_label"].isna()
+    frame_names = set(df_normal.loc[mask, "image_name"].dropna().unique())
+    frame_names -= exclude_names
+    result: pd.DataFrame = df_normal[df_normal["image_name"].isin(frame_names)]
+    return result
+
+
 def _resolve_task_name(name_arg: str | None) -> str:
     """Return task name from argument or interactive prompt."""
     if name_arg:
@@ -172,14 +194,14 @@ def _validate_labels(
     client: CvatClient,
     project_id: int,
     project_name: str,
-    real_labels: list[str],
+    labels: list[str],
 ) -> None:
-    """Check that all CSV labels exist in the CVAT project."""
-    if not real_labels:
+    """Check that all labels of the frames being uploaded exist in CVAT."""
+    if not labels:
         return
     project_labels = client.get_project_labels(project_id)
     project_label_names = {lbl.name for lbl in project_labels}
-    unknown_labels = sorted(set(real_labels) - project_label_names)
+    unknown_labels = sorted(set(labels) - project_label_names)
     if unknown_labels:
         raise LabelsMismatchError(
             unknown_labels=unknown_labels,
@@ -219,14 +241,8 @@ def run_upload(args: argparse.Namespace) -> None:
     exclude_names = _read_exclude_names(args.in_progress)
     selected_labels = _select_labels(df_normal)
 
-    # Filter and collect unique image names
-    include_no_annotation = _NO_ANNOTATION_LABEL in selected_labels
-    real_labels = [lbl for lbl in selected_labels if lbl != _NO_ANNOTATION_LABEL]
-    mask = df_normal["instance_label"].isin(real_labels)
-    if include_no_annotation:
-        mask = mask | df_normal["instance_label"].isna()
-    filtered = df_normal[mask]
-    image_names = set(filtered["image_name"].dropna().unique()) - exclude_names
+    filtered = _filter_frames_by_labels(df_normal, selected_labels, exclude_names)
+    image_names = set(filtered["image_name"].dropna().unique())
     if not image_names and not deleted_names:
         sys.exit("Ошибка: после фильтрации не осталось изображений.")
     logger.info(f"Изображений для загрузки: {len(image_names)}")
@@ -240,7 +256,8 @@ def run_upload(args: argparse.Namespace) -> None:
             client,
         )
 
-        _validate_labels(client, project_id, project_name, real_labels)
+        upload_labels = sorted(filtered["instance_label"].dropna().unique())
+        _validate_labels(client, project_id, project_name, upload_labels)
 
         search_dirs = _build_search_dirs(args.image_dir, project_name)
         found_images, missing = resolve_images(all_image_names, search_dirs)

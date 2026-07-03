@@ -7,7 +7,7 @@ Uses coco8-dev project and tests/fixtures/data/coco8/images/.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 from unittest.mock import patch
 
@@ -389,3 +389,125 @@ class TestUploadThenFetchTaskIntegration:
                     )
                 else:
                     assert u == f, f"row {i} {col}: uploaded {u!r} vs fetched {f!r}"
+
+
+class TestUploadDeletedFromCsvIntegration:
+    """Full upload flow from a CSV with instance_shape="deleted" rows.
+
+    Runs ``run_upload`` end-to-end (images already seeded on S3), then
+    verifies the created task's data_meta.deleted_frames and that a
+    subsequent ``fetch-task`` reports the images as deleted.
+    """
+
+    def test_upload_csv_with_deleted_rows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cveta2.commands.fetch import run_fetch_task
+        from cveta2.commands.upload import run_upload
+
+        project_id, _project_name, cs_info, cfg = _get_project_and_storage()
+        task_name = "integration-deleted-csv-upload-test"
+        normal_names = IMAGE_NAMES[:2]
+        deleted_name = IMAGE_NAMES[2]
+        dataset_csv = tmp_path / "dataset.csv"
+        pd.DataFrame(
+            [
+                {
+                    "image_name": normal_names[0],
+                    "instance_label": "person",
+                    "instance_shape": "box",
+                    "bbox_x_tl": 10.0,
+                    "bbox_y_tl": 20.0,
+                    "bbox_x_br": 110.0,
+                    "bbox_y_br": 120.0,
+                },
+                {
+                    "image_name": normal_names[1],
+                    "instance_label": "car",
+                    "instance_shape": "box",
+                    "bbox_x_tl": 30.0,
+                    "bbox_y_tl": 40.0,
+                    "bbox_x_br": 130.0,
+                    "bbox_y_br": 140.0,
+                },
+                {
+                    "image_name": deleted_name,
+                    "instance_label": None,
+                    "instance_shape": "deleted",
+                    "bbox_x_tl": None,
+                    "bbox_y_tl": None,
+                    "bbox_x_br": None,
+                    "bbox_y_br": None,
+                },
+            ]
+        ).to_csv(dataset_csv, index=False, encoding="utf-8")
+        monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "no-config.yaml"))
+        upload_args = argparse.Namespace(
+            dataset=str(dataset_csv),
+            in_progress=None,
+            name=task_name,
+            project=str(project_id),
+            image_dir=None,
+            complete=False,
+        )
+        with (
+            patch("cveta2.commands.upload.CvatConfig.load", return_value=cfg),
+            patch(
+                "cveta2.commands.upload._select_labels",
+                return_value=["person", "car"],
+            ),
+            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
+            patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=_cs_info_for_host(cs_info),
+            ),
+        ):
+            run_upload(upload_args)
+
+        sdk_client = _make_sdk_client()
+        try:
+            adapter = SdkCvatApiAdapter(sdk_client)
+            tasks = adapter.get_project_tasks(project_id)
+            task = next(t for t in tasks if t.name == task_name)
+            data_meta = adapter.get_task_data_meta(task.id)
+            deleted_frame_names = {
+                PurePosixPath(data_meta.frames[fid].name).name
+                for fid in data_meta.deleted_frames
+            }
+            assert deleted_frame_names == {deleted_name}
+        finally:
+            sdk_client.close()
+
+        out_dir = tmp_path / "fetch_out"
+        fetch_args = argparse.Namespace(
+            project=str(project_id),
+            task=[task_name],
+            output_dir=str(out_dir),
+            completed_only=False,
+            no_images=True,
+            images_dir=None,
+            save_tasks=False,
+        )
+        with (
+            patch("cveta2.commands.fetch.CvatConfig.load", return_value=cfg),
+            patch("cveta2.commands.fetch.require_host"),
+            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
+            patch(
+                "cveta2.commands.fetch.load_ignore_config",
+                return_value=IgnoreConfig(),
+            ),
+            patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=cs_info,
+            ),
+        ):
+            run_fetch_task(fetch_args)
+        deleted_csv = out_dir / "deleted.csv"
+        assert deleted_csv.exists(), "expected deleted.csv after fetch"
+        deleted_df = pd.read_csv(deleted_csv)
+        assert set(deleted_df["image_name"]) == {deleted_name}
+        in_progress_csv = out_dir / "in_progress.csv"
+        assert in_progress_csv.exists(), "expected in_progress.csv after fetch"
+        fetched_df = pd.read_csv(in_progress_csv)
+        assert set(fetched_df["image_name"]) == set(normal_names)
+        assert deleted_name not in set(fetched_df["image_name"])
