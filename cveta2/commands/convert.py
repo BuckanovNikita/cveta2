@@ -68,6 +68,18 @@ def _yolo_to_pixel(box: YoloBox, img_w: int, img_h: int) -> PixelBox:
 # ---------------------------------------------------------------------------
 
 
+_reflink_fallback = {"warned": False}
+
+
+def _copy_after_reflink_failure(src: Path, dst: Path, error: OSError) -> None:
+    """Fall back to plain copy after a failed reflink attempt."""
+    if not _reflink_fallback["warned"]:
+        logger.warning(f"reflink недоступен ({error}): используется копирование")
+        _reflink_fallback["warned"] = True
+    dst.unlink(missing_ok=True)
+    shutil.copy2(src, dst)
+
+
 def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
     """Place *src* at *dst* using the specified link mode.
 
@@ -86,12 +98,17 @@ def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
     elif mode == "reflink":
         from reflink_copy import reflink  # noqa: PLC0415
 
-        reflink(str(src), str(dst))
+        try:
+            reflink(str(src), str(dst))
+        except OSError as exc:
+            _copy_after_reflink_failure(src, dst, exc)
     else:
-        # auto: try reflink, fall back to copy
         from reflink_copy import reflink_or_copy  # noqa: PLC0415
 
-        reflink_or_copy(str(src), str(dst))
+        try:
+            reflink_or_copy(str(src), str(dst))
+        except OSError as exc:
+            _copy_after_reflink_failure(src, dst, exc)
 
 
 # ---------------------------------------------------------------------------

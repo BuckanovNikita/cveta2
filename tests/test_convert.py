@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
+import shutil
 from pathlib import Path
 
 import pandas as pd
 import pytest
 import yaml
 
+from cveta2.commands import convert
 from cveta2.commands.convert import (
     CocoBox,
     PixelBox,
@@ -220,6 +223,110 @@ class TestLinkOrCopy:
         dst.write_text("old")
         _link_or_copy(src, dst, "copy")
         assert dst.read_text() == "old"  # not overwritten
+
+
+class TestReflinkFallback:
+    """Tests for fallback to plain copy when reflink fails."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_warned_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setitem(convert._reflink_fallback, "warned", value=False)
+
+    @staticmethod
+    def _make_src(tmp_path: Path, name: str = "src.txt") -> Path:
+        src = tmp_path / name
+        src.write_text("hello")
+        return src
+
+    def test_reflink_mode_falls_back_on_exdev(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_logs: list[str],
+    ) -> None:
+        def failing_reflink(_src: str, _dst: str) -> None:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        monkeypatch.setattr("reflink_copy.reflink", failing_reflink)
+        src = self._make_src(tmp_path)
+        dst = tmp_path / "out" / "dst.txt"
+        _link_or_copy(src, dst, "reflink")
+        assert dst.read_text() == "hello"
+        assert any("reflink недоступен" in m for m in capture_logs)
+
+    def test_auto_mode_falls_back_on_oserror(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_logs: list[str],
+    ) -> None:
+        def failing_reflink_or_copy(_src: str, _dst: str) -> None:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        monkeypatch.setattr("reflink_copy.reflink_or_copy", failing_reflink_or_copy)
+        src = self._make_src(tmp_path)
+        dst = tmp_path / "out" / "dst.txt"
+        _link_or_copy(src, dst, "auto")
+        assert dst.read_text() == "hello"
+        assert any("reflink недоступен" in m for m in capture_logs)
+
+    def test_half_created_dst_removed_before_copy(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def failing_reflink(_src: str, dst: str) -> None:
+            Path(dst).write_text("partial")
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        monkeypatch.setattr("reflink_copy.reflink", failing_reflink)
+        src = self._make_src(tmp_path)
+        dst = tmp_path / "out" / "dst.txt"
+        _link_or_copy(src, dst, "reflink")
+        assert dst.read_text() == "hello"
+
+    def test_warning_emitted_once_for_multiple_files(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_logs: list[str],
+    ) -> None:
+        def failing_reflink(_src: str, _dst: str) -> None:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+        monkeypatch.setattr("reflink_copy.reflink", failing_reflink)
+        for i in range(3):
+            src = self._make_src(tmp_path, f"src{i}.txt")
+            _link_or_copy(src, tmp_path / "out" / f"dst{i}.txt", "reflink")
+        warnings = [m for m in capture_logs if "reflink недоступен" in m]
+        assert len(warnings) == 1
+
+    def test_reflink_success_no_warning(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_logs: list[str],
+    ) -> None:
+        def succeeding_reflink(src: str, dst: str) -> None:
+            shutil.copy2(src, dst)
+
+        monkeypatch.setattr("reflink_copy.reflink", succeeding_reflink)
+        src = self._make_src(tmp_path)
+        dst = tmp_path / "out" / "dst.txt"
+        _link_or_copy(src, dst, "reflink")
+        assert dst.read_text() == "hello"
+        assert not capture_logs
+
+    def test_auto_mode_real_library_no_warning(
+        self,
+        tmp_path: Path,
+        capture_logs: list[str],
+    ) -> None:
+        src = self._make_src(tmp_path)
+        dst = tmp_path / "out" / "dst.txt"
+        _link_or_copy(src, dst, "auto")
+        assert dst.read_text() == "hello"
+        assert not capture_logs
 
 
 # ---------------------------------------------------------------------------
