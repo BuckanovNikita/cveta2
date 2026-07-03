@@ -142,6 +142,12 @@ def write_test_config(
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_task_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point XDG_CACHE_HOME at tmp_path so tests never touch the real ~/.cache."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+
+
 @pytest.fixture
 def test_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Write a minimal test config and isolate env from real CVAT vars."""

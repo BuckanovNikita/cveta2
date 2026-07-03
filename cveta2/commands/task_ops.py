@@ -14,6 +14,7 @@ from cveta2.client import CvatClient
 from cveta2.commands._helpers import require_host, resolve_project_or_exit
 from cveta2.config import CvatConfig, is_interactive_disabled
 from cveta2.exceptions import TaskNotFoundError
+from cveta2.task_cache import invalidate_local_entry
 
 if TYPE_CHECKING:
     import argparse
@@ -82,6 +83,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
             marked += client.mark_frames_deleted(task.id, set(images))
         if frames:
             marked += client.mark_frames_deleted_by_ids(task.id, frames)
+        invalidate_local_entry(project_id, task.id)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): помечено удалёнными кадров: {marked}"
         )
@@ -110,6 +112,7 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
             yes=args.yes,
         )
         deleted = client.drop_label_annotations(task.id, args.label)
+        invalidate_local_entry(project_id, task.id)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): удалено аннотаций: {deleted}"
         )
@@ -127,6 +130,7 @@ def run_task_delete(args: argparse.Namespace) -> None:
             yes=args.yes,
         )
         client.delete_task(task.id)
+        invalidate_local_entry(project_id, task.id)
         logger.info(f"Задача {task.name!r} (id={task.id}) удалена.")
 
 
@@ -142,6 +146,7 @@ def run_task_status(args: argparse.Namespace) -> None:
         project_id, _ = resolve_project_or_exit(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         num_jobs = client.set_task_jobs_status(task.id, stage=args.stage, state=state)
+        invalidate_local_entry(project_id, task.id)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): обновлено jobs: {num_jobs} "
             f"(stage={args.stage or '-'}, state={state or '-'})"

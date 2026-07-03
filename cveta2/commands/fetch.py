@@ -31,6 +31,11 @@ from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
 from cveta2.models import CSV_COLUMNS, TaskAnnotations
 from cveta2.s3_utils import build_s3_key
+from cveta2.task_cache import (
+    S3CacheBackend,
+    TaskAnnotationCache,
+    get_task_cache_dir,
+)
 
 if TYPE_CHECKING:
     import argparse
@@ -46,7 +51,7 @@ if TYPE_CHECKING:
 def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
     output_dir = _resolve_output_dir(Path(args.output_dir))
-    result, project_name = _fetch_common(args, output_dir)
+    result, project_name = _fetch_common(args, output_dir, prune_cache=True)
 
     _write_output(args, result, output_dir)
 
@@ -65,9 +70,13 @@ def run_fetch_task(args: argparse.Namespace) -> None:
 def _fetch_common(
     args: argparse.Namespace,
     output_dir: Path,
+    *,
+    prune_cache: bool = False,
 ) -> tuple[ProjectAnnotations, str]:
     """Shared fetch logic for ``run_fetch`` and ``run_fetch_task``.
 
+    When *prune_cache* is True (full-project fetch), local cache entries
+    of tasks that no longer exist in the project are removed.
     Returns ``(result, project_name)``.
     """
     cfg = CvatConfig.load()
@@ -99,12 +108,22 @@ def _fetch_common(
         except Cveta2Error as e:
             sys.exit(str(e))
 
+        cache = _build_task_cache(args, client, project_id)
+
         result = _fetch_and_save_tasks(
             client,
             ctx,
             output_dir,
             save_tasks=args.save_tasks,
+            cache=cache,
+            force=args.force,
         )
+
+        if cache is not None and prune_cache:
+            live_ids = {t.id for t in client.list_project_tasks(project_id)}
+            pruned = cache.prune(live_ids)
+            if pruned:
+                logger.info(f"Кэш аннотаций: удалено устаревших записей: {pruned}")
 
         images_dir = _download_images(
             _DownloadImagesParams(
@@ -148,17 +167,41 @@ def _populate_paths(
                 record.image_path = str(local.resolve())
 
 
-def _fetch_and_save_tasks(
+def _build_task_cache(
+    args: argparse.Namespace,
+    client: CvatClient,
+    project_id: int,
+) -> TaskAnnotationCache | None:
+    """Build the task-annotation cache for a fetch run.
+
+    ``--no-cache`` disables caching entirely.  The S3 backend always uses
+    the project's original CVAT cloud storage prefix (never a user
+    override), so all users share one cache location.
+    """
+    if args.no_cache:
+        return None
+    s3_backend = S3CacheBackend.from_cloud_storage(
+        client.detect_project_cloud_storage(project_id)
+    )
+    return TaskAnnotationCache(get_task_cache_dir(project_id), s3=s3_backend)
+
+
+def _fetch_and_save_tasks(  # noqa: PLR0913
     client: CvatClient,
     ctx: FetchContext,
     output_dir: Path,
     *,
     save_tasks: bool = False,
+    cache: TaskAnnotationCache | None = None,
+    force: bool = False,
 ) -> ProjectAnnotations:
     """Fetch tasks one by one, saving per-task CSVs into ``output_dir/.tasks/``.
 
-    When *save_tasks* is False (default), the ``.tasks/`` directory is
-    removed after merging.
+    Completed tasks are served from *cache* when possible; fresh results
+    are cached before any path population so shared S3 entries stay
+    machine-independent.  With *force* the cache is only written, never
+    read.  When *save_tasks* is False (default), the ``.tasks/``
+    directory is removed after merging.
 
     Returns the merged :class:`ProjectAnnotations` from all fetched tasks.
     """
@@ -169,12 +212,21 @@ def _fetch_and_save_tasks(
     tasks_dir = output_dir / ".tasks"
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
+    cache_hits = 0
+    fetched = 0
     task_results: list[TaskAnnotations] = []
     with client.open_api() as api:
         for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
-            task_result = client.fetch_one_task(api, task, ctx)
-            if task_result is None:
-                continue
+            task_result = None if force or cache is None else cache.get(task)
+            if task_result is not None:
+                cache_hits += 1
+            else:
+                task_result = client.fetch_one_task(api, task, ctx)
+                if task_result is None:
+                    continue
+                fetched += 1
+                if cache is not None:
+                    cache.put(task, task_result)
 
             rows = task_result.to_csv_rows()
             if rows:
@@ -189,6 +241,9 @@ def _fetch_and_save_tasks(
 
     if not save_tasks:
         shutil.rmtree(tasks_dir, ignore_errors=True)
+
+    if cache is not None:
+        logger.info(f"Задач из кэша: {cache_hits}, загружено с CVAT: {fetched}")
 
     return TaskAnnotations.merge(task_results)
 

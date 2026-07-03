@@ -176,6 +176,19 @@ class CliApp:
                 "By default they are removed after merging."
             ),
         )
+        parser.add_argument(
+            "--no-cache",
+            action="store_true",
+            help=("Disable the task annotation cache entirely (no reads, no writes)."),
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help=(
+                "Re-download annotations from CVAT even for cached tasks "
+                "and refresh the cache."
+            ),
+        )
 
     def _add_setup_parser(
         self,

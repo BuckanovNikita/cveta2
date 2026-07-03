@@ -68,6 +68,9 @@ ignore = [
 fixable = ["ALL"]
 exclude = ["scripts/**"]  # lint only; format still runs on scripts
 
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D101", "D102", "D103", "S311", "SLF001"]
 "main.py" = ["F401"]  # re-export wrapper

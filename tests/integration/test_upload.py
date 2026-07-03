@@ -343,6 +343,8 @@ class TestUploadThenFetchTaskIntegration:
             no_images=True,
             images_dir=None,
             save_tasks=False,
+            no_cache=True,
+            force=False,
         )
         with (
             patch("cveta2.commands.fetch.CvatConfig.load", return_value=cfg),
@@ -488,6 +490,8 @@ class TestUploadDeletedFromCsvIntegration:
             no_images=True,
             images_dir=None,
             save_tasks=False,
+            no_cache=True,
+            force=False,
         )
         with (
             patch("cveta2.commands.fetch.CvatConfig.load", return_value=cfg),

@@ -179,6 +179,8 @@ class TestRealCliFetchTask:
             no_images=True,
             images_dir=None,
             save_tasks=False,
+            no_cache=True,
+            force=False,
         )
 
         from unittest.mock import patch

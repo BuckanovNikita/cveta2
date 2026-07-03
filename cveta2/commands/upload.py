@@ -25,6 +25,7 @@ from cveta2.config import (
 from cveta2.exceptions import LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
 from cveta2.s3_utils import build_s3_key
+from cveta2.task_cache import invalidate_local_entry
 
 if TYPE_CHECKING:
     import argparse
@@ -328,8 +329,11 @@ def run_upload(args: argparse.Namespace) -> None:
         if args.complete:
             client.complete_task(task_id)
 
-        ipj = upload_cfg.images_per_job
-        num_jobs = (len(task_image_names) + ipj - 1) // ipj
+        invalidate_local_entry(project_id, task_id)
+
+        num_jobs = (
+            len(task_image_names) + upload_cfg.images_per_job - 1
+        ) // upload_cfg.images_per_job
         logger.info(
             f"Задача создана: id={task_id}, "
             f"имя={task_name!r}, "
@@ -337,6 +341,6 @@ def run_upload(args: argparse.Namespace) -> None:
             f"удалённых={len(deleted_names)}, "
             f"аннотаций={num_shapes}, "
             f"issues={num_issues}, "
-            f"jobs≈{num_jobs} (segment_size={ipj})",
+            f"jobs≈{num_jobs} (segment_size={upload_cfg.images_per_job})",
         )
         logger.info(f"URL: {cfg.host}/tasks/{task_id}")

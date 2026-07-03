@@ -42,13 +42,15 @@ _CFG = CvatConfig(host="http://fake-cvat")
 _MODULE = "cveta2.commands.fetch"
 
 
-def _make_args(
+def _make_args(  # noqa: PLR0913
     *,
     project: str | None = "1",
     task: list[str] | None = None,
     output_dir: str,
     completed_only: bool = False,
     no_images: bool = True,
+    no_cache: bool = True,
+    force: bool = False,
 ) -> argparse.Namespace:
     """Build an argparse.Namespace that mimics parsed fetch-task CLI args."""
     return argparse.Namespace(
@@ -59,6 +61,8 @@ def _make_args(
         no_images=no_images,
         images_dir=None,
         save_tasks=False,
+        no_cache=no_cache,
+        force=force,
     )
 
 

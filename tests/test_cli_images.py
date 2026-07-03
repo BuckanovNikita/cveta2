@@ -20,6 +20,7 @@ def _mock_client_ctx(
     client.__enter__ = MagicMock(return_value=client)
     client.__exit__ = MagicMock(return_value=False)
     client.resolve_project_id.return_value = project_id
+    client.detect_project_cloud_storage.return_value = None
     client.prepare_fetch.return_value = FetchContext(
         tasks=[],
         label_names={},
