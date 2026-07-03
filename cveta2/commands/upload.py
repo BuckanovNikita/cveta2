@@ -316,6 +316,10 @@ def run_upload(args: argparse.Namespace) -> None:
             annotations_df=filtered,
         )
 
+        num_issues = 0
+        if "issue_state" in filtered.columns:
+            num_issues = client.create_task_issues(task_id, filtered)
+
         if args.mark_all_deleted:
             client.mark_frames_deleted(task_id, all_image_names)
         elif deleted_names:
@@ -332,6 +336,7 @@ def run_upload(args: argparse.Namespace) -> None:
             f"изображений={len(task_image_names)}, "
             f"удалённых={len(deleted_names)}, "
             f"аннотаций={num_shapes}, "
+            f"issues={num_issues}, "
             f"jobs≈{num_jobs} (segment_size={ipj})",
         )
         logger.info(f"URL: {cfg.host}/tasks/{task_id}")

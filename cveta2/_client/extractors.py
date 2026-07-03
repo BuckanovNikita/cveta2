@@ -26,6 +26,7 @@ def _collect_shapes(
         frame_info = ctx.frames.get(shape.frame)
         if frame_info is None:
             continue
+        issue_text, issue_state = ctx.frame_issues.get(shape.frame, ("", ""))
         result.append(
             BBoxAnnotation(
                 image_name=frame_info.name,
@@ -48,6 +49,8 @@ def _collect_shapes(
                 rotation=shape.rotation,
                 source=shape.source,
                 annotation_id=shape.id,
+                issue_text=issue_text,
+                issue_state=issue_state,
                 attributes={
                     ctx.attr_names.get(a.spec_id, str(a.spec_id)): a.value
                     for a in shape.attributes

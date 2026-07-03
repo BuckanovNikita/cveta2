@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue
 
 
 class LoadedFixtures(NamedTuple):
@@ -24,6 +24,7 @@ class LoadedFixtures(NamedTuple):
     tasks: list[TaskInfo]
     labels: list[LabelInfo]
     task_data: dict[int, tuple[RawDataMeta, RawAnnotations]]
+    issues: dict[int, list[RawIssue]] | None = None
 
 
 # CVAT task statuses for random choice

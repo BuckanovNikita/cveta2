@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue
     from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
@@ -26,6 +26,7 @@ class FakeCvatApi:
         self._tasks = fixtures.tasks
         self._labels = fixtures.labels
         self._task_data = fixtures.task_data
+        self._issues = fixtures.issues or {}
 
     def list_projects(self) -> list[ProjectInfo]:
         """Return the single fixture project."""
@@ -48,3 +49,7 @@ class FakeCvatApi:
         """Return shapes for a task by id."""
         _data_meta, annotations = self._task_data[task_id]
         return annotations
+
+    def get_task_issues(self, task_id: int) -> list[RawIssue]:
+        """Return issues for a task by id (empty when not configured)."""
+        return list(self._issues.get(task_id, []))

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue
     from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
 
 
@@ -35,4 +35,8 @@ class CvatApiPort(Protocol):
 
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
         """Return shapes for a task."""
+        ...
+
+    def get_task_issues(self, task_id: int) -> list[RawIssue]:
+        """Return review issues (with comment texts) for a task."""
         ...

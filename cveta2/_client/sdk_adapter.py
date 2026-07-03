@@ -25,6 +25,7 @@ from cveta2._client.dtos import (
     RawAttribute,
     RawDataMeta,
     RawFrame,
+    RawIssue,
     RawShape,
 )
 from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from cvat_sdk.api_client import models as cvat_models
 
 from cvat_sdk.api_client.exceptions import ApiTypeError
+from cvat_sdk.core.helpers import get_paginated_collection
 
 
 def _log_retry(retry_state: RetryCallState) -> None:
@@ -146,6 +148,30 @@ class SdkCvatApiAdapter:
         tasks_api = self.client.api_client.tasks_api
         labeled_data, _ = tasks_api.retrieve_annotations(task_id)
         return self._convert_annotations(labeled_data)
+
+    @_api_retry
+    def get_task_issues(self, task_id: int) -> list[RawIssue]:
+        """Return review issues for a task, each with its comment texts."""
+        api_client = self.client.api_client
+        issues = get_paginated_collection(
+            api_client.issues_api.list_endpoint,
+            task_id=task_id,
+        )
+        result: list[RawIssue] = []
+        for issue in issues:
+            comments = get_paginated_collection(
+                api_client.comments_api.list_endpoint,
+                issue_id=int(issue.id),
+            )
+            result.append(
+                RawIssue(
+                    id=int(issue.id),
+                    frame=int(issue.frame),
+                    resolved=bool(issue.resolved),
+                    comments=[str(c.message or "") for c in comments],
+                ),
+            )
+        return result
 
     # ------------------------------------------------------------------
     # Conversion helpers (SDK objects -> DTOs)

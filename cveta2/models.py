@@ -120,6 +120,8 @@ class BBoxAnnotation(BaseModel):
     source: str
     annotation_id: int | None
     confidence: float | None = None
+    issue_text: str = ""
+    issue_state: str = ""
     s3_image_path: str | None = None
     image_path: str | None = None
     attributes: dict[str, str]
@@ -179,6 +181,8 @@ class ImageWithoutAnnotations(BaseModel):
     frame_id: int
     split: Split | None = None
     subset: str = ""
+    issue_text: str = ""
+    issue_state: str = ""
     s3_image_path: str | None = None
     image_path: str | None = None
 

@@ -59,3 +59,13 @@ class RawAnnotations:
     """Shapes for a task."""
 
     shapes: list[RawShape] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class RawIssue:
+    """A review issue attached to a task frame, with its comment texts."""
+
+    id: int
+    frame: int
+    resolved: bool
+    comments: list[str]

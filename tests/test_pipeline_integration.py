@@ -26,7 +26,7 @@ from tests.fixtures.fake_cvat_api import FakeCvatApi
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue
     from cveta2.models import LabelInfo, ProjectInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
@@ -73,6 +73,9 @@ class _FailingTaskApi:
         if task_id == self._failing_task_id:
             raise ApiException(status=500, reason="Internal Server Error")
         return self._delegate.get_task_annotations(task_id)
+
+    def get_task_issues(self, task_id: int) -> list[RawIssue]:
+        return self._delegate.get_task_issues(task_id)
 
 
 def _with_dates(

@@ -6,13 +6,14 @@ import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import pandas as pd
 from cvat_sdk import make_client
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiException
 from cvat_sdk.core.exceptions import BackgroundRequestException
+from cvat_sdk.core.helpers import get_paginated_collection
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from loguru import logger
 from tqdm import tqdm
@@ -65,6 +66,35 @@ def _build_name_to_frame(data_meta: object) -> dict[str, int]:
         if base not in name_to_frame:
             name_to_frame[base] = idx
     return name_to_frame
+
+
+_ISSUE_BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
+
+
+def _find_job_for_frame(jobs: list[Any], frame: int) -> int | None:
+    """Return the job ID whose [start_frame, stop_frame] range contains *frame*."""
+    for job in jobs:
+        if int(job.start_frame) <= frame <= int(job.stop_frame):
+            return int(job.id)
+    return None
+
+
+def _positive_dimension(row_value: Any, frame_dimension: int) -> float:  # noqa: ANN401
+    """Prefer the row's image dimension; fall back to the data_meta frame's."""
+    if row_value is not None and pd.notna(row_value) and float(row_value) > 0:
+        return float(row_value)
+    return float(frame_dimension)
+
+
+def _issue_position(row: pd.Series[Any], frame_info: RawFrame) -> list[float]:
+    """Build the issue rectangle: the row's bbox, or the full frame."""
+    values = [row.get(col) for col in _ISSUE_BBOX_COLUMNS]
+    coords = [value for value in values if value is not None and pd.notna(value)]
+    if len(coords) == len(_ISSUE_BBOX_COLUMNS):
+        return [float(value) for value in coords]
+    width = _positive_dimension(row.get("image_width"), frame_info.width)
+    height = _positive_dimension(row.get("image_height"), frame_info.height)
+    return [0.0, 0.0, width, height]
 
 
 @dataclass(frozen=True)
@@ -144,15 +174,16 @@ def _filter_tasks_for_fetch(
     return tasks
 
 
-def _task_to_records(
+def _task_to_records(  # noqa: PLR0913
     task: TaskInfo,
     data_meta: RawDataMeta,
     annotations: RawAnnotations,
     label_names: dict[int, str],
     attr_names: dict[int, str],
+    issues: list[RawIssue] | None = None,
 ) -> tuple[list[AnnotationRecord], list[DeletedImage]]:
     """Build annotation records and deleted list for one task."""
-    ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names)
+    ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names, issues)
     task_annotations = _collect_shapes(annotations.shapes, ctx)
     deleted_ids = set(data_meta.deleted_frames)
     frames = ctx.frames
@@ -182,6 +213,8 @@ def _task_to_records(
             task_updated_date=task.updated_date,
             frame_id=fid,
             subset=task.subset,
+            issue_text=ctx.frame_issues.get(fid, ("", ""))[0],
+            issue_state=ctx.frame_issues.get(fid, ("", ""))[1],
         )
         for fid, frame in frames.items()
         if fid not in deleted_ids and fid not in annotated_ids
@@ -201,7 +234,7 @@ if TYPE_CHECKING:
     from cvat_sdk import Client as CvatSdkClient
     from typing_extensions import Self
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawIssue
     from cveta2._client.ports import CvatApiPort
 
 
@@ -620,8 +653,17 @@ class CvatClient:
                 return None
             raise
 
+        try:
+            issues = api.get_task_issues(task.id)
+        except ApiException as e:
+            logger.warning(
+                f"Не удалось получить issues задачи {task.id}: {e} — "
+                f"колонки issue_text/issue_state останутся пустыми"
+            )
+            issues = []
+
         records, deleted = _task_to_records(
-            task, data_meta, annotations, ctx.label_names, ctx.attr_names
+            task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues
         )
         return TaskAnnotations(
             task_id=task.id,
@@ -938,6 +980,80 @@ class CvatClient:
             logger.info(f"Нет аннотаций для загрузки в задачу {task_id}")
 
         return len(shapes)
+
+    def create_task_issues(
+        self,
+        task_id: int,
+        annotations_df: pd.DataFrame,
+    ) -> int:
+        """Create open CVAT issues from rows with ``issue_state == "new"``.
+
+        Rows whose ``issue_state`` is ``"new"`` and whose ``issue_text`` is
+        non-empty become CVAT issues on *task_id*; ``issue_text`` is posted
+        as the first comment.  Duplicate ``(image_name, issue_text)`` pairs
+        are created once.  The issue rectangle is the row's bbox when all
+        four coordinates are present, otherwise the full frame.
+
+        Returns the number of issues created.  Requires an active context
+        manager (``with CvatClient(...) as c:``).
+        """
+        sdk = self._require_sdk("create_task_issues")
+        adapter = self._require_adapter("create_task_issues")
+
+        if "issue_state" not in annotations_df.columns:
+            return 0
+        df = annotations_df.copy()
+        if "issue_text" not in df.columns:
+            df["issue_text"] = ""
+        df["issue_state"] = df["issue_state"].fillna("").astype(str).str.strip()
+        df["issue_text"] = df["issue_text"].fillna("").astype(str).str.strip()
+        new_rows = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
+        new_rows = new_rows.drop_duplicates(subset=["image_name", "issue_text"])
+        if new_rows.empty:
+            return 0
+
+        raw_meta = adapter.get_task_data_meta(task_id)
+        name_to_frame = _build_name_to_frame(raw_meta)
+        jobs = get_paginated_collection(
+            sdk.api_client.jobs_api.list_endpoint,
+            task_id=task_id,
+        )
+
+        created = 0
+        unknown_images: list[str] = []
+        unmapped_frames: list[str] = []
+        for _, row in new_rows.iterrows():
+            image_name = str(row["image_name"])
+            frame = name_to_frame.get(image_name)
+            if frame is None:
+                unknown_images.append(image_name)
+                continue
+            job_id = _find_job_for_frame(jobs, frame)
+            if job_id is None:
+                unmapped_frames.append(image_name)
+                continue
+            sdk.api_client.issues_api.create(
+                cvat_models.IssueWriteRequest(
+                    frame=frame,
+                    position=_issue_position(row, raw_meta.frames[frame]),
+                    job=job_id,
+                    message=str(row["issue_text"]),
+                ),
+            )
+            created += 1
+
+        if unknown_images:
+            logger.warning(
+                f"Issues пропущены: изображения не найдены в задаче {task_id}: "
+                f"{unknown_images}"
+            )
+        if unmapped_frames:
+            logger.warning(
+                f"Issues пропущены: не найден job для кадров изображений "
+                f"в задаче {task_id}: {unmapped_frames}"
+            )
+        logger.info(f"Создано issues: {created} в задаче {task_id}")
+        return created
 
     def mark_frames_deleted(
         self,
