@@ -506,8 +506,8 @@ class TestUploadDeletedFromCsvIntegration:
         assert deleted_csv.exists(), "expected deleted.csv after fetch"
         deleted_df = pd.read_csv(deleted_csv)
         assert set(deleted_df["image_name"]) == {deleted_name}
-        in_progress_csv = out_dir / "in_progress.csv"
-        assert in_progress_csv.exists(), "expected in_progress.csv after fetch"
-        fetched_df = pd.read_csv(in_progress_csv)
+        fetched_dataset_csv = out_dir / "dataset.csv"
+        assert fetched_dataset_csv.exists(), "expected dataset.csv after fetch"
+        fetched_df = pd.read_csv(fetched_dataset_csv)
         assert set(fetched_df["image_name"]) == set(normal_names)
         assert deleted_name not in set(fetched_df["image_name"])
