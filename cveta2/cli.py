@@ -28,6 +28,7 @@ from cveta2.commands.task_ops import (
     run_task_status,
 )
 from cveta2.commands.upload import run_upload
+from cveta2.commands.whats_new import run_whats_new
 from cveta2.config import CvatConfig, get_config_path
 from cveta2.s3_utils import set_default_data_timeout
 
@@ -65,6 +66,7 @@ class CliApp:
         self._add_task_parser(subparsers)
         self._add_doctor_parser(subparsers)
         self._add_setup_clearml_parser(subparsers)
+        self._add_whats_new_parser(subparsers)
 
         return parser
 
@@ -667,6 +669,32 @@ class CliApp:
             help="List current ClearML project mappings and exit.",
         )
 
+    def _add_whats_new_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``whats-new`` command parser."""
+        parser = subparsers.add_parser(
+            "whats-new",
+            help=("List tasks completed after the tasks in a fetched dataset CSV."),
+        )
+        parser.add_argument(
+            "--project",
+            "-p",
+            type=str,
+            default=None,
+            help=(
+                "Project ID or name. If omitted, "
+                "interactive project selection is shown."
+            ),
+        )
+        parser.add_argument(
+            "--dataset",
+            "-d",
+            required=True,
+            help="Path to dataset.csv produced by the fetch command.",
+        )
+
     def _run_command(self, args: argparse.Namespace) -> None:
         """Dispatch parsed args to the target command implementation."""
         if args.command in ("setup", "setup-cache", "setup-clearml"):
@@ -699,6 +727,7 @@ class CliApp:
             "convert": lambda: run_convert(args),
             "task": lambda: _TASK_ACTIONS[args.action](args),
             "doctor": run_doctor,
+            "whats-new": lambda: run_whats_new(args),
         }
         handler = dispatch.get(args.command)
         if handler is None:

@@ -336,6 +336,27 @@ class CvatClient:
         with self.open_api() as source:
             return source.get_project_tasks(project_id)
 
+    def list_tasks_completed_after(
+        self,
+        project_id: int,
+        cutoff: str,
+    ) -> list[TaskInfo]:
+        """List completed project tasks updated strictly after *cutoff*.
+
+        *cutoff* and task ``updated_date`` values are normalized ISO
+        strings (see ``_extract_updated_date`` in the SDK adapter), so
+        lexicographic comparison matches chronological order.  Tasks
+        without an ``updated_date`` are treated as not-newer.  The result
+        is sorted by ``updated_date`` ascending.
+        """
+        tasks = self.list_project_tasks(project_id)
+        newer = [
+            t
+            for t in tasks
+            if t.status == "completed" and t.updated_date and t.updated_date > cutoff
+        ]
+        return sorted(newer, key=lambda t: t.updated_date)
+
     def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         """Fetch label definitions for a project from CVAT."""
         with self.open_api() as source:
