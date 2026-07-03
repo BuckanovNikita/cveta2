@@ -19,9 +19,24 @@ from cveta2.commands.merge import run_merge
 from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.commands.setup_clearml import run_setup_clearml
+from cveta2.commands.task_ops import (
+    JOB_STAGES,
+    STATE_CLI_TO_CVAT,
+    run_task_delete,
+    run_task_drop_label,
+    run_task_mark_deleted,
+    run_task_status,
+)
 from cveta2.commands.upload import run_upload
 from cveta2.config import CvatConfig, get_config_path
 from cveta2.s3_utils import set_default_data_timeout
+
+_TASK_ACTIONS: dict[str, Callable[[argparse.Namespace], None]] = {
+    "mark-deleted": run_task_mark_deleted,
+    "drop-label": run_task_drop_label,
+    "delete": run_task_delete,
+    "status": run_task_status,
+}
 
 
 class CliApp:
@@ -47,6 +62,7 @@ class CliApp:
         self._add_ignore_parser(subparsers)
         self._add_labels_parser(subparsers)
         self._add_convert_parser(subparsers)
+        self._add_task_parser(subparsers)
         self._add_doctor_parser(subparsers)
         self._add_setup_clearml_parser(subparsers)
 
@@ -286,6 +302,11 @@ class CliApp:
             action="store_true",
             help="Mark the task as completed after upload.",
         )
+        parser.add_argument(
+            "--mark-all-deleted",
+            action="store_true",
+            help="Mark every uploaded image as deleted after task creation.",
+        )
 
     def _add_merge_parser(
         self,
@@ -508,6 +529,107 @@ class CliApp:
             ),
         )
 
+    def _add_task_parser(
+        self,
+        subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    ) -> None:
+        """Add the ``task`` command parser with nested action subparsers."""
+        parser = subparsers.add_parser(
+            "task",
+            help=("Task write operations: mark-deleted, drop-label, delete, status."),
+        )
+        actions = parser.add_subparsers(dest="action", required=True)
+
+        mark = actions.add_parser(
+            "mark-deleted",
+            help="Mark task frames as deleted by frame ID and/or image name.",
+        )
+        self._add_task_common_args(mark)
+        mark.add_argument(
+            "--frame",
+            type=int,
+            action="append",
+            default=None,
+            metavar="N",
+            help="Frame ID to mark as deleted. Can be repeated.",
+        )
+        mark.add_argument(
+            "--image",
+            type=str,
+            action="append",
+            default=None,
+            metavar="NAME",
+            help="Image name to mark as deleted. Can be repeated.",
+        )
+
+        drop = actions.add_parser(
+            "drop-label",
+            help="Delete all annotations with the given label from a task.",
+        )
+        self._add_task_common_args(drop)
+        drop.add_argument(
+            "--label",
+            required=True,
+            help="Label name whose annotations will be deleted.",
+        )
+        drop.add_argument(
+            "--yes",
+            "-y",
+            action="store_true",
+            help="Skip the confirmation prompt.",
+        )
+
+        delete = actions.add_parser(
+            "delete",
+            help="Delete a task permanently.",
+        )
+        self._add_task_common_args(delete)
+        delete.add_argument(
+            "--yes",
+            "-y",
+            action="store_true",
+            help="Skip the confirmation prompt.",
+        )
+
+        status = actions.add_parser(
+            "status",
+            help="Set stage and/or state for all jobs of a task.",
+        )
+        self._add_task_common_args(status)
+        status.add_argument(
+            "--stage",
+            choices=JOB_STAGES,
+            default=None,
+            help="Job stage to set on every job of the task.",
+        )
+        status.add_argument(
+            "--state",
+            choices=sorted(STATE_CLI_TO_CVAT),
+            default=None,
+            help="Job state to set on every job of the task.",
+        )
+
+    @staticmethod
+    def _add_task_common_args(parser: argparse.ArgumentParser) -> None:
+        """Add ``--project`` / ``--task`` arguments shared by task actions."""
+        parser.add_argument(
+            "--project",
+            "-p",
+            type=str,
+            default=None,
+            help=(
+                "Project ID or name. If omitted, "
+                "interactive project selection is shown."
+            ),
+        )
+        parser.add_argument(
+            "--task",
+            "-t",
+            type=str,
+            required=True,
+            help="Task ID or name.",
+        )
+
     def _add_doctor_parser(
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
@@ -575,6 +697,7 @@ class CliApp:
             "ignore": lambda: run_ignore(args),
             "labels": lambda: run_labels(args),
             "convert": lambda: run_convert(args),
+            "task": lambda: _TASK_ACTIONS[args.action](args),
             "doctor": run_doctor,
         }
         handler = dispatch.get(args.command)

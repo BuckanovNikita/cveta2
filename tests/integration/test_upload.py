@@ -449,6 +449,7 @@ class TestUploadDeletedFromCsvIntegration:
             project=str(project_id),
             image_dir=None,
             complete=False,
+            mark_all_deleted=False,
         )
         with (
             patch("cveta2.commands.upload.CvatConfig.load", return_value=cfg),

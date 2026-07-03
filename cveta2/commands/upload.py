@@ -316,7 +316,9 @@ def run_upload(args: argparse.Namespace) -> None:
             annotations_df=filtered,
         )
 
-        if deleted_names:
+        if args.mark_all_deleted:
+            client.mark_frames_deleted(task_id, all_image_names)
+        elif deleted_names:
             client.mark_frames_deleted(task_id, deleted_names)
 
         if args.complete:

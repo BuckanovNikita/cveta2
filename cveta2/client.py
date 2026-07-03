@@ -193,7 +193,7 @@ def _task_to_records(
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Iterable, Iterator, Sequence
     from contextlib import AbstractContextManager
     from pathlib import Path
     from types import TracebackType
@@ -944,17 +944,69 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        sdk = self._require_sdk("mark_frames_deleted")
         adapter = self._require_adapter("mark_frames_deleted")
 
         raw_meta = adapter.get_task_data_meta(task_id)
         name_to_frame = _build_name_to_frame(raw_meta)
         frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
+        return self._patch_deleted_frames(
+            "mark_frames_deleted", task_id, raw_meta, frame_ids
+        )
+
+    def mark_frames_deleted_by_ids(
+        self,
+        task_id: int,
+        frame_ids: Iterable[int],
+    ) -> int:
+        """Mark frames as deleted in an existing CVAT task by frame IDs.
+
+        Frame IDs outside the task's frame range are skipped with a
+        warning.  The remaining IDs are merged with the current
+        ``deleted_frames`` via ``partial_update_data_meta``.
+
+        Parameters
+        ----------
+        task_id:
+            CVAT task ID.
+        frame_ids:
+            Frame indices to mark as deleted.
+
+        Returns
+        -------
+        int
+            Number of frames actually marked as deleted.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+
+        """
+        adapter = self._require_adapter("mark_frames_deleted_by_ids")
+
+        raw_meta = adapter.get_task_data_meta(task_id)
+        num_frames = len(raw_meta.frames)
+        requested = sorted(set(frame_ids))
+        valid = [fid for fid in requested if 0 <= fid < num_frames]
+        unknown = [fid for fid in requested if fid < 0 or fid >= num_frames]
+        if unknown:
+            logger.warning(
+                f"Задача {task_id}: кадры {unknown} не найдены "
+                f"(в задаче {num_frames} кадров) — пропускаем"
+            )
+        return self._patch_deleted_frames(
+            "mark_frames_deleted_by_ids", task_id, raw_meta, valid
+        )
+
+    def _patch_deleted_frames(
+        self,
+        method_name: str,
+        task_id: int,
+        raw_meta: RawDataMeta,
+        frame_ids: list[int],
+    ) -> int:
+        """Union *frame_ids* with the task's deleted frames and PATCH data_meta."""
         if not frame_ids:
             return 0
-
-        current_deleted = set(raw_meta.deleted_frames)
-        new_deleted = sorted(current_deleted | set(frame_ids))
+        sdk = self._require_sdk(method_name)
+        new_deleted = sorted(set(raw_meta.deleted_frames) | set(frame_ids))
         sdk.api_client.tasks_api.partial_update_data_meta(
             task_id,
             patched_data_meta_write_request=cvat_models.PatchedDataMetaWriteRequest(
@@ -964,17 +1016,125 @@ class CvatClient:
         logger.info(f"Помечено удалёнными {len(frame_ids)} кадров в задаче {task_id}")
         return len(frame_ids)
 
-    def complete_task(self, task_id: int) -> int:
-        """Mark all jobs of a task as completed.
+    def count_task_label_shapes(self, task_id: int, label: str) -> int:
+        """Count annotation shapes with the given label name in a task.
 
-        Sets each job's ``stage`` to ``acceptance`` and ``state`` to
-        ``completed``.  CVAT derives the task status from its jobs, so
-        once every job is completed the task status becomes ``completed``.
+        Raises ``ValueError`` (listing available labels) when the label
+        does not exist in the task.
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+        """
+        sdk = self._require_sdk("count_task_label_shapes")
+        return len(self._find_label_shapes(sdk, task_id, label))
+
+    def drop_label_annotations(self, task_id: int, label: str) -> int:
+        """Delete all annotation shapes with the given label from a task.
+
+        Resolves the label name to its ID via the task's labels, collects
+        matching shapes from ``retrieve_annotations`` and deletes them via
+        ``partial_update_annotations`` with ``action="delete"``.
 
         Parameters
         ----------
         task_id:
             CVAT task ID.
+        label:
+            Label name whose shapes should be deleted.
+
+        Returns
+        -------
+        int
+            Number of shapes deleted.
+
+        Raises
+        ------
+        ValueError
+            When the label does not exist in the task (message lists
+            available labels).
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+
+        """
+        sdk = self._require_sdk("drop_label_annotations")
+        shapes = self._find_label_shapes(sdk, task_id, label)
+        if not shapes:
+            logger.info(f"В задаче {task_id} нет аннотаций с меткой {label!r}")
+            return 0
+        shape_requests = [
+            cvat_models.LabeledShapeRequest(
+                type=shape.type,
+                frame=shape.frame,
+                label_id=shape.label_id,
+                points=list(shape.points or []),
+                id=shape.id,
+            )
+            for shape in shapes
+        ]
+        sdk.api_client.tasks_api.partial_update_annotations(
+            "delete",
+            task_id,
+            patched_labeled_data_request=cvat_models.PatchedLabeledDataRequest(
+                shapes=shape_requests,
+            ),
+        )
+        logger.info(
+            f"Удалено {len(shapes)} аннотаций с меткой {label!r} из задачи {task_id}"
+        )
+        return len(shapes)
+
+    @staticmethod
+    def _find_label_shapes(
+        sdk: CvatSdkClient,
+        task_id: int,
+        label: str,
+    ) -> list[cvat_models.LabeledShape]:
+        """Return task shapes whose label name equals *label*.
+
+        Raises ``ValueError`` listing available labels when no task label
+        matches *label*.
+        """
+        task_obj = sdk.tasks.retrieve(task_id)
+        task_labels = task_obj.get_labels()
+        label_ids = {lbl.id for lbl in task_labels if lbl.name == label}
+        if not label_ids:
+            available = ", ".join(sorted(str(lbl.name) for lbl in task_labels))
+            raise ValueError(
+                f"Метка {label!r} не найдена в задаче {task_id}. "
+                f"Доступные метки: {available}"
+            )
+        labeled_data, _ = sdk.api_client.tasks_api.retrieve_annotations(task_id)
+        return [s for s in (labeled_data.shapes or []) if s.label_id in label_ids]
+
+    def delete_task(self, task_id: int) -> None:
+        """Delete a CVAT task permanently (including its data and jobs).
+
+        Requires an active context manager (``with CvatClient(...) as c:``).
+        """
+        sdk = self._require_sdk("delete_task")
+        sdk.api_client.tasks_api.destroy(task_id)
+        logger.info(f"Задача {task_id} удалена")
+
+    def set_task_jobs_status(
+        self,
+        task_id: int,
+        *,
+        stage: str | None = None,
+        state: str | None = None,
+    ) -> int:
+        """Set stage and/or state on every job of a task.
+
+        Only the provided fields are patched.  CVAT derives the task
+        status from its jobs.
+
+        Parameters
+        ----------
+        task_id:
+            CVAT task ID.
+        stage:
+            Job stage: ``annotation``, ``validation`` or ``acceptance``.
+        state:
+            Job state: ``new``, ``in progress``, ``completed`` or
+            ``rejected``.
 
         Returns
         -------
@@ -984,7 +1144,15 @@ class CvatClient:
         Requires an active context manager (``with CvatClient(...) as c:``).
 
         """
-        sdk = self._require_sdk("complete_task")
+        if stage is None and state is None:
+            raise ValueError("Укажите stage и/или state.")
+        sdk = self._require_sdk("set_task_jobs_status")
+
+        patch_kwargs: dict[str, object] = {}
+        if stage is not None:
+            patch_kwargs["stage"] = cvat_models.JobStage(stage)
+        if state is not None:
+            patch_kwargs["state"] = cvat_models.OperationStatus(state)
 
         task_obj = sdk.tasks.retrieve(task_id)
         jobs = task_obj.get_jobs()
@@ -993,12 +1161,26 @@ class CvatClient:
             jobs_api.partial_update(
                 job.id,
                 patched_job_write_request=cvat_models.PatchedJobWriteRequest(
-                    stage=cvat_models.JobStage("acceptance"),
-                    state=cvat_models.OperationStatus("completed"),
+                    **patch_kwargs
                 ),
             )
-        logger.info(f"Задача {task_id} завершена ({len(jobs)} job(s) → completed)")
+        logger.info(
+            f"Задача {task_id}: обновлено {len(jobs)} job(s) "
+            f"(stage={stage or '-'}, state={state or '-'})"
+        )
         return len(jobs)
+
+    def complete_task(self, task_id: int) -> int:
+        """Mark all jobs of a task as completed.
+
+        Sets each job's ``stage`` to ``acceptance`` and ``state`` to
+        ``completed``.  CVAT derives the task status from its jobs, so
+        once every job is completed the task status becomes ``completed``.
+
+        Returns the number of jobs updated.  Requires an active context
+        manager (``with CvatClient(...) as c:``).
+        """
+        return self.set_task_jobs_status(task_id, stage="acceptance", state="completed")
 
     # ------------------------------------------------------------------
     # Internal helpers
