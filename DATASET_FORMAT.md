@@ -1,143 +1,143 @@
-# Формат выходных данных cveta2
+# cveta2 output data format
 
-cveta2 сохраняет bbox-аннотации в CSV-файлы. Тип записи определяется полем `instance_shape`: `"box"` (аннотация), `"none"` (изображение без аннотаций) или `"deleted"` (удалённое изображение).
+cveta2 stores bbox annotations in CSV files. The record type is determined by the `instance_shape` field: `"box"` (annotation), `"none"` (image without annotations) or `"deleted"` (deleted image).
 
-## Выходные файлы
+## Output files
 
 ### `cveta2 fetch`
 
-| Файл | Описание |
+| File | Description |
 |---|---|
-| `dataset.csv` | Данные из последней завершённой задачи для каждого неудалённого изображения |
-| `obsolete.csv` | Данные из старых завершённых задач + данные для изображений, удалённых в последней задаче |
-| `in_progress.csv` | Данные из незавершённых задач |
-| `deleted.csv` | Удалённые изображения в том же CSV-формате, что и `dataset.csv` (`instance_shape="deleted"`) |
-| `raw.csv` | (только с `--raw`) Полный необработанный CSV со всеми строками |
+| `dataset.csv` | Data from the latest completed task for every non-deleted image |
+| `obsolete.csv` | Data from stale completed tasks + data for images deleted in the latest task |
+| `in_progress.csv` | Data from non-completed tasks |
+| `deleted.csv` | Deleted images in the same CSV format as `dataset.csv` (`instance_shape="deleted"`) |
+| `raw.csv` | (only with `--raw`) Full unprocessed CSV with all rows |
 
 ### `cveta2 fetch-task`
 
-| Файл | Описание |
+| File | Description |
 |---|---|
-| `dataset.csv` | Все аннотации выбранных задач (без разбиения) |
-| `deleted.csv` | Удалённые изображения (`instance_shape="deleted"`) |
+| `dataset.csv` | All annotations of the selected tasks (no partitioning) |
+| `deleted.csv` | Deleted images (`instance_shape="deleted"`) |
 
-## Формат данных
+## Data format
 
-`CvatClient.fetch_annotations()` возвращает `ProjectAnnotations`, `CvatClient.fetch_one_task()` — `TaskAnnotations`:
+`CvatClient.fetch_annotations()` returns `ProjectAnnotations`, `CvatClient.fetch_one_task()` returns `TaskAnnotations`:
 
-- `ProjectAnnotations` — результат по всем задачам: `annotations: list[AnnotationRecord]`, `deleted_images: list[DeletedImage]`
-- `TaskAnnotations` — результат по одной задаче: `task_id`, `task_name`, `annotations`, `deleted_images`. Метод `TaskAnnotations.merge(list)` объединяет несколько задач в `ProjectAnnotations`
+- `ProjectAnnotations` — result across all tasks: `annotations: list[AnnotationRecord]`, `deleted_images: list[DeletedImage]`
+- `TaskAnnotations` — result for a single task: `task_id`, `task_name`, `annotations`, `deleted_images`. `TaskAnnotations.merge(list)` combines several tasks into a `ProjectAnnotations`
 
-`AnnotationRecord` — это `BBoxAnnotation` (`instance_shape="box"`) или `ImageWithoutAnnotations` (`instance_shape="none"`). Оба типа содержат `image_name`, `task_id`, `frame_id` и реализуют `to_csv_row()`.
+`AnnotationRecord` is either a `BBoxAnnotation` (`instance_shape="box"`) or an `ImageWithoutAnnotations` (`instance_shape="none"`). Both types contain `image_name`, `task_id`, `frame_id` and implement `to_csv_row()`.
 
 ### BBoxAnnotation
 
-| Поле | Тип | Описание |
+| Field | Type | Description |
 |---|---|---|
-| `image_name` | `str` | Имя файла изображения |
-| `image_width` | `int` | Ширина изображения (px) |
-| `image_height` | `int` | Высота изображения (px) |
-| `instance_shape` | `"box"` | Тип фигуры (дискриминатор) |
-| `instance_label` | `str` | Название метки |
-| `bbox_x_tl` | `float` | X верхнего левого угла |
-| `bbox_y_tl` | `float` | Y верхнего левого угла |
-| `bbox_x_br` | `float` | X нижнего правого угла |
-| `bbox_y_br` | `float` | Y нижнего правого угла |
-| `task_id` | `int` | ID задачи в CVAT |
-| `task_name` | `str` | Название задачи |
-| `task_status` | `str` | Статус задачи (completed, annotation, ...) |
-| `task_updated_date` | `str` | Дата/время последнего обновления задачи |
-| `created_by_username` | `str` | Имя пользователя, создавшего аннотацию |
-| `frame_id` | `int` | Индекс кадра внутри задачи |
-| `split` | `"train" \| "val" \| "test" \| None` | Сплит датасета (см. примечание ниже) |
-| `subset` | `str` | Подмножество из CVAT (поле задачи) |
-| `occluded` | `bool` | Объект перекрыт |
-| `z_order` | `int` | Порядок наложения |
-| `rotation` | `float` | Угол поворота (0–360) |
-| `source` | `str` | Источник аннотации (manual/auto) |
-| `annotation_id` | `int \| None` | ID аннотации в CVAT |
-| `confidence` | `float \| None` | Уверенность предсказания (заполняется при конвертации из YOLO) |
-| `issue_text` | `str` | Текст issue кадра из CVAT (комментарии; см. примечание ниже), `""` если issues нет |
-| `issue_state` | `str` | Состояние issue: `open`, `resolved` или `""` (нет issue); значение `new` зарезервировано для загрузки |
-| `attributes` | `dict[str, str]` | Пользовательские атрибуты |
-| `s3_image_path` | `str \| None` | Полный S3-ключ относительно бакета (например `prefix/img.jpg` или `prefix/2026-02/img.jpg` для новых загрузок), `None` если неизвестен |
-| `image_path` | `str \| None` | Абсолютный локальный путь к файлу изображения, `None` если неизвестен |
+| `image_name` | `str` | Image file name |
+| `image_width` | `int` | Image width (px) |
+| `image_height` | `int` | Image height (px) |
+| `instance_shape` | `"box"` | Shape type (discriminator) |
+| `instance_label` | `str` | Label name |
+| `bbox_x_tl` | `float` | X of the top-left corner |
+| `bbox_y_tl` | `float` | Y of the top-left corner |
+| `bbox_x_br` | `float` | X of the bottom-right corner |
+| `bbox_y_br` | `float` | Y of the bottom-right corner |
+| `task_id` | `int` | CVAT task ID |
+| `task_name` | `str` | Task name |
+| `task_status` | `str` | Task status (completed, annotation, ...) |
+| `task_updated_date` | `str` | Date/time of the task's last update |
+| `created_by_username` | `str` | Username of the annotation's author |
+| `frame_id` | `int` | Frame index within the task |
+| `split` | `"train" \| "val" \| "test" \| None` | Dataset split (see the note below) |
+| `subset` | `str` | Subset from CVAT (task field) |
+| `occluded` | `bool` | Object is occluded |
+| `z_order` | `int` | Stacking order |
+| `rotation` | `float` | Rotation angle (0–360) |
+| `source` | `str` | Annotation source (manual/auto) |
+| `annotation_id` | `int \| None` | Annotation ID in CVAT |
+| `confidence` | `float \| None` | Prediction confidence (filled when converting from YOLO) |
+| `issue_text` | `str` | Text of the frame's CVAT issue(s) (comments; see the note below), `""` when there are no issues |
+| `issue_state` | `str` | Issue state: `open`, `resolved` or `""` (no issue); the value `new` is reserved for upload |
+| `s3_image_path` | `str \| None` | Full S3 key relative to the bucket (e.g. `prefix/img.jpg`, or `prefix/2026-02/img.jpg` for new uploads), `None` when unknown |
+| `image_path` | `str \| None` | Absolute local path to the image file, `None` when unknown |
+| `attributes` | `dict[str, str]` | Custom attributes (serialized as JSON in CSV) |
 
-> **Поле `split`** — конвенция cveta2, а не CVAT. При выгрузке из CVAT (`fetch`) всегда `None`. Заполняется вручную или при конвертации. При загрузке обратно в CVAT (`upload`) игнорируется.
+> **The `split` field** is a cveta2 convention, not a CVAT one. On export from CVAT (`fetch`) it is always `None`. It is filled manually or during conversion. On upload back to CVAT (`upload`) it is ignored.
 
 ### Issues (`issue_text` / `issue_state`)
 
-Issues в CVAT привязаны к кадру (изображению), поэтому обе колонки дублируются на всех строках кадра — и на bbox-строках, и на строках без аннотаций.
+CVAT issues are attached to a frame (image), so both columns are duplicated on all rows of the frame — both bbox rows and rows without annotations.
 
-**При выгрузке (`fetch`):**
+**On export (`fetch`):**
 
-- Текст одного issue — это его комментарии, соединённые через `"; "` в порядке создания.
-- Если на кадре несколько issues, обе колонки соединяются через `" | "` в одном и том же порядке: N-й фрагмент `issue_text` соответствует N-му фрагменту `issue_state` (позиционное выравнивание).
-- `issue_state` принимает значения `open` (не решён), `resolved` (решён) или `""` (issues нет).
-- **Внимание:** разделитель `" | "` — соглашение формата. Если текст комментария сам содержит `" | "`, однозначно разбить колонку обратно на отдельные issues нельзя.
+- The text of a single issue is its comments joined with `"; "` in creation order.
+- When a frame has several issues, both columns are joined with `" | "` in the same order: the N-th fragment of `issue_text` corresponds to the N-th fragment of `issue_state` (positional alignment).
+- `issue_state` takes the values `open` (unresolved), `resolved` (resolved) or `""` (no issues).
+- **Caveat:** the `" | "` separator is a format convention. If a comment's text itself contains `" | "`, the column cannot be unambiguously split back into individual issues.
 
-**При загрузке (`upload`):**
+**On upload (`upload`):**
 
-- Строки со значением `issue_state = "new"` и непустым `issue_text` превращаются в открытые issues на созданной задаче; `issue_text` становится первым комментарием.
-- Дубликаты по паре (`image_name`, `issue_text`) создаются один раз.
-- Позиция issue — bbox строки, если все четыре координаты заполнены, иначе весь кадр.
-- Строки с `issue_state` = `open`, `resolved` или `""` при загрузке игнорируются.
+- Rows with `issue_state = "new"` and a non-empty `issue_text` become open issues on the created task; `issue_text` becomes the first comment.
+- Duplicate (`image_name`, `issue_text`) pairs are created once.
+- The issue position is the row's bbox when all four coordinates are present, otherwise the whole frame.
+- Rows with `issue_state` equal to `open`, `resolved` or `""` are ignored on upload.
 
 ### ImageWithoutAnnotations
 
-Изображения без bbox-аннотаций. Включаются в CSV с пустыми bbox-полями. Отличаются от `BBoxAnnotation` значением `instance_shape="none"`.
+Images without bbox annotations. They are still included in the CSV with empty bbox fields. Distinguished from `BBoxAnnotation` by `instance_shape="none"`.
 
-| Поле | Тип | Описание |
+| Field | Type | Description |
 |---|---|---|
-| `image_name` | `str` | Имя файла изображения |
-| `image_width` | `int` | Ширина изображения (px) |
-| `image_height` | `int` | Высота изображения (px) |
-| `instance_shape` | `"none"` | Тип фигуры (дискриминатор) |
-| `task_id` | `int` | ID задачи в CVAT |
-| `task_name` | `str` | Название задачи |
-| `task_status` | `str` | Статус задачи |
-| `task_updated_date` | `str` | Дата/время последнего обновления задачи |
-| `frame_id` | `int` | Индекс кадра внутри задачи |
-| `split` | `"train" \| "val" \| "test" \| None` | Сплит датасета |
-| `subset` | `str` | Подмножество из CVAT |
-| `issue_text` | `str` | Текст issue кадра (см. раздел про issues выше), `""` если issues нет |
-| `issue_state` | `str` | Состояние issue: `open`, `resolved` или `""` |
-| `s3_image_path` | `str \| None` | Полный S3-ключ относительно бакета, `None` если неизвестен |
-| `image_path` | `str \| None` | Абсолютный локальный путь к файлу, `None` если неизвестен |
+| `image_name` | `str` | Image file name |
+| `image_width` | `int` | Image width (px) |
+| `image_height` | `int` | Image height (px) |
+| `instance_shape` | `"none"` | Shape type (discriminator) |
+| `task_id` | `int` | CVAT task ID |
+| `task_name` | `str` | Task name |
+| `task_status` | `str` | Task status |
+| `task_updated_date` | `str` | Date/time of the task's last update |
+| `frame_id` | `int` | Frame index within the task |
+| `split` | `"train" \| "val" \| "test" \| None` | Dataset split |
+| `subset` | `str` | Subset from CVAT |
+| `issue_text` | `str` | Text of the frame's issue(s) (see the issues section above), `""` when there are no issues |
+| `issue_state` | `str` | Issue state: `open`, `resolved` or `""` |
+| `s3_image_path` | `str \| None` | Full S3 key relative to the bucket, `None` when unknown |
+| `image_path` | `str \| None` | Absolute local path to the file, `None` when unknown |
 
 ### DeletedImage
 
-Запись об удалённом изображении. Сохраняется в `deleted.csv` с `instance_shape="deleted"`, чтобы формат столбцов совпадал с `dataset.csv`.
+Record of a deleted image. Written to `deleted.csv` with `instance_shape="deleted"` so the file shares the same column schema as `dataset.csv`.
 
-| Поле | Тип | Описание |
+| Field | Type | Description |
 |---|---|---|
-| `image_name` | `str` | Имя файла изображения |
-| `image_width` | `int` | Ширина изображения (px), по умолчанию `0` |
-| `image_height` | `int` | Высота изображения (px), по умолчанию `0` |
-| `instance_shape` | `"deleted"` | Тип фигуры (дискриминатор) |
-| `task_id` | `int` | ID задачи |
-| `task_name` | `str` | Название задачи |
-| `task_status` | `str` | Статус задачи |
-| `task_updated_date` | `str` | Дата обновления задачи |
-| `frame_id` | `int` | Индекс кадра |
-| `subset` | `str` | Подмножество из CVAT |
-| `s3_image_path` | `str \| None` | Полный S3-ключ относительно бакета, `None` если неизвестен |
-| `image_path` | `str \| None` | Абсолютный локальный путь к файлу, `None` если неизвестен |
+| `image_name` | `str` | Image file name |
+| `image_width` | `int` | Image width (px), `0` by default |
+| `image_height` | `int` | Image height (px), `0` by default |
+| `instance_shape` | `"deleted"` | Shape type (discriminator) |
+| `task_id` | `int` | Task ID |
+| `task_name` | `str` | Task name |
+| `task_status` | `str` | Task status |
+| `task_updated_date` | `str` | Task update date |
+| `frame_id` | `int` | Frame index |
+| `subset` | `str` | Subset from CVAT |
+| `s3_image_path` | `str \| None` | Full S3 key relative to the bucket, `None` when unknown |
+| `image_path` | `str \| None` | Absolute local path to the file, `None` when unknown |
 
 ### DownloadStats
 
-| Поле | Тип | Описание |
+| Field | Type | Description |
 |---|---|---|
-| `downloaded` | `int` | Количество скачанных файлов |
-| `cached` | `int` | Пропущено (уже существовали локально) |
-| `failed` | `int` | Ошибки при скачивании |
-| `total` | `int` | Общее количество изображений |
+| `downloaded` | `int` | Number of downloaded files |
+| `cached` | `int` | Skipped (already existed locally) |
+| `failed` | `int` | Download errors |
+| `total` | `int` | Total number of images |
 
 ### UploadStats
 
-| Поле | Тип | Описание |
+| Field | Type | Description |
 |---|---|---|
-| `uploaded` | `int` | Количество загруженных файлов на S3 |
-| `skipped_existing` | `int` | Пропущено (уже существовали на S3) |
-| `failed` | `int` | Ошибки при загрузке |
-| `total` | `int` | Общее количество изображений |
+| `uploaded` | `int` | Number of files uploaded to S3 |
+| `skipped_existing` | `int` | Skipped (already existed on S3) |
+| `failed` | `int` | Upload errors |
+| `total` | `int` | Total number of images |

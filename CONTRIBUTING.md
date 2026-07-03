@@ -238,7 +238,7 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 |---|---|---|
 | `README.md` | Пользователей | Русский |
 | `CONTRIBUTING.md` | Разработчиков | Русский |
-| `DATASET_FORMAT.md` | Пользователей — формат выходных CSV | Русский |
+| `DATASET_FORMAT.md` | Пользователей — формат выходных CSV | Английский |
 
 Обновляйте `README.md` при изменении API.
 

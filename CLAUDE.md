@@ -54,12 +54,14 @@ cli → commands → client → _client
 - **`cveta2/commands/`** - Command implementations:
   - `fetch.py` - Fetch annotations from CVAT project
   - `upload.py` - Upload annotated dataset back to CVAT
-  - `convert.py` - Bidirectional CSV ↔ YOLO conversion
+  - `convert.py` - Bidirectional CSV ↔ YOLO conversion, plus CSV → COCO export
   - `merge.py` - Merge multiple fetch outputs
   - `labels.py` - Manage project labels
   - `s3_sync.py` - Download images from S3
   - `setup.py` / `setup-cache` - Initial config and project cache setup
   - `ignore.py` - Mark tasks to skip during fetch
+  - `task_ops.py` - `task` subcommands: mark-deleted, drop-label, delete, status
+  - `whats_new.py` - List tasks completed after a fetched dataset CSV
   - `doctor.py` - Diagnostic checks
   - `_task_selector.py` / `_helpers.py` - Shared internals
 - **`cveta2/client.py`** - High-level `CvatClient` API (public interface)
@@ -73,6 +75,7 @@ cli → commands → client → _client
 - **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation with optional `confidence`, DeletedImage, etc.)
 - **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
 - **`cveta2/dataset_partition.py`** - Core logic: splits annotations into dataset/obsolete/in_progress
+- **`cveta2/task_cache.py`** - Cache of completed-task annotations: local dir + shared S3 mirror, invalidated by task `updated_date`
 - **`cveta2/image_downloader.py`** - S3 → local sync
 - **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
 - **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
@@ -80,15 +83,18 @@ cli → commands → client → _client
 
 ### Key Data Flow
 
-1. **Fetch**: `cli` → `commands/fetch.py` → `client.fetch_annotations()` → `_client/sdk_adapter.py` → CVAT API
+1. **Fetch**: `cli` → `commands/fetch.py` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
+   - Completed tasks are served from `task_cache.py` when the cached `task_updated_date` matches (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); `--no-cache` / `--force` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
    - Annotations converted to `BBoxAnnotation` by `extractors.py`
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
 
 2. **Upload**: `commands/upload.py` → `client.create_upload_task()` + `client.upload_task_annotations()`
    - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
+   - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels)
+   - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues on the created task
 
-3. **Convert**: `commands/convert.py` — `--to-yolo` exports CSV to YOLO format (images + labels), `--from-yolo` imports YOLO predictions back to CSV. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
+3. **Convert**: `commands/convert.py` — `--to-yolo` exports CSV to YOLO format (images + labels), `--from-yolo` imports YOLO predictions back to CSV, `--to-coco` exports COCO detection format. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
 
 4. **Partition Logic** (`dataset_partition.py`):
    - For each image, finds **latest task** by `task_updated_date` (comparing annotations + deletions)
@@ -109,7 +115,7 @@ CVAT allows frames to be marked as deleted (`data_meta.deleted_frames`), but ann
 
 #### Integration Testing
 
-Integration tests require a running CVAT instance and are gated by `CVAT_INTEGRATION_HOST` env var. Test fixtures are in `tests/fixtures/cvat/coco8-dev/` (CVAT JSON format). The `FakeCvatApi` in `tests/fake_cvat_api.py` provides in-memory CVAT simulation for unit tests.
+Integration tests require a running CVAT instance and are gated by `CVAT_INTEGRATION_HOST` env var. Test fixtures are in `tests/fixtures/cvat/coco8-dev/` (CVAT JSON format). The `FakeCvatApi` in `tests/fixtures/fake_cvat_api.py` provides in-memory CVAT simulation for unit tests.
 
 **Running integration tests** (full lifecycle):
 
@@ -149,9 +155,13 @@ uv run pytest -x                 # stop on first failure
 ## Configuration
 
 Config loaded via `CvatConfig.load()` from:
-1. Environment variables (`CVAT_HOST`, `CVAT_USERNAME`, `CVAT_PASSWORD`, `CVAT_ORGANIZATION`)
+1. Environment variables (`CVAT_HOST`, `CVAT_USERNAME`, `CVAT_PASSWORD`, `CVAT_ORGANIZATION`, `CVETA2_DATA_TIMEOUT`)
 2. `~/.config/cveta2/config.yaml` (or `CVETA2_CONFIG`)
 3. Built-in preset (`cveta2/presets/default.yaml`)
+
+**Request timeouts**: opt-in via `CVETA2_DATA_TIMEOUT` env var or `cvat.request_timeout` config field (read timeout in seconds; connect timeout fixed at 10s). Applies to all CVAT HTTP requests (including client creation) and S3 operations. Unset or `0` = no timeout.
+
+**Sync roots**: the `sync_roots` config section (project name → `s3://bucket/prefix` or bare prefix) overrides the image download source for `s3-sync` and `fetch`; `s3-sync --root` is a one-run override. Upload always targets the project's own storage.
 
 **Noninteractive mode**: Set `CVETA2_NO_INTERACTIVE=true` to disable all prompts (for CI).
 
