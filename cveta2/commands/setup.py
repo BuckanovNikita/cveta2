@@ -35,12 +35,7 @@ def run_setup(config_path: Path) -> None:
 
     host_default = existing.host or "https://app.cvat.ai"
     host = input(f"Хост CVAT [{host_default}]: ").strip() or host_default
-    org_default = existing.organization or ""
-    org_prompt = "Slug организации (необязательно)"
-    if org_default:
-        org_prompt += f" [{org_default}]"
-    org_prompt += ": "
-    organization = input(org_prompt).strip() or org_default
+    organization = _prompt_organization(existing.organization)
 
     username_default = existing.username or ""
     prompt = "Имя пользователя"
@@ -55,13 +50,31 @@ def run_setup(config_path: Path) -> None:
 
     cfg = CvatConfig(
         host=host,
-        organization=organization or None,
+        organization=organization,
         username=username,
         password=password,
     )
 
     saved_path = cfg.save_to_file(config_path)
     logger.info(f"Готово! Конфигурация сохранена в {saved_path}")
+
+
+def _prompt_organization(existing_org: str | None) -> str | None:
+    """Ask for org slug until one is given or its absence is confirmed."""
+    org_default = existing_org or ""
+    org_prompt = "Slug организации"
+    if org_default:
+        org_prompt += f" [{org_default}]"
+    org_prompt += ": "
+    while True:
+        organization = input(org_prompt).strip() or org_default
+        if organization:
+            return organization
+        confirmation = input(
+            "Организация не указана. Подтвердите, что у вас нет организации (y/N): "
+        ).strip()
+        if confirmation.lower() == "y":
+            return None
 
 
 def run_setup_cache(
@@ -86,6 +99,14 @@ def run_setup_cache(
 
     image_cache = load_image_cache_config(config_path)
     cache_root = _prompt_cache_root()
+
+    if cache_root is not None and _apply_root_to_all_projects(
+        projects, image_cache, cache_root, reset=reset
+    ):
+        save_image_cache_config(image_cache, config_path)
+        logger.info("Готово! Пути кэширования обновлены.")
+        return
+
     logger.info(f"Найдено проектов: {len(projects)}. Укажите путь кэша для каждого.")
     logger.info("Нажмите Enter, чтобы принять значение по умолчанию или пропустить.\n")
 
@@ -119,6 +140,29 @@ def _prompt_cache_root() -> Path | None:
         "Корневая директория кэша (по умолчанию для проектов: корень/имя_проекта) []: "
     ).strip()
     return Path(raw).expanduser().resolve() if raw else None
+
+
+def _apply_root_to_all_projects(
+    projects: list[ProjectInfo],
+    image_cache: ImageCacheConfig,
+    cache_root: Path,
+    *,
+    reset: bool,
+) -> bool:
+    """Show derived paths for all projects; assign them all on confirmation."""
+    defaults = {
+        project.name: _default_cache_path(project, image_cache, cache_root, reset=reset)
+        for project in projects
+    }
+    for name, path in defaults.items():
+        logger.info(f"  {name} -> {path}")
+    answer = input("Применить ко всем проектам? (Y/n): ").strip().lower()
+    if answer not in ("", "y"):
+        return False
+    for name, path in defaults.items():
+        if path is not None:
+            image_cache.set_cache_dir(name, path)
+    return True
 
 
 def _default_cache_path(
