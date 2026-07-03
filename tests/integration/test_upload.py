@@ -347,11 +347,11 @@ class TestUploadThenFetchTaskIntegration:
             force=False,
         )
         with (
-            patch("cveta2.commands.fetch.CvatConfig.load", return_value=cfg),
-            patch("cveta2.commands.fetch.require_host"),
+            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
+            patch("cveta2.commands._bootstrap.require_host"),
             patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.commands.fetch.load_ignore_config",
+                "cveta2.services.fetch.load_ignore_config",
                 return_value=IgnoreConfig(),
             ),
             patch(
@@ -494,11 +494,11 @@ class TestUploadDeletedFromCsvIntegration:
             force=False,
         )
         with (
-            patch("cveta2.commands.fetch.CvatConfig.load", return_value=cfg),
-            patch("cveta2.commands.fetch.require_host"),
+            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
+            patch("cveta2.commands._bootstrap.require_host"),
             patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.commands.fetch.load_ignore_config",
+                "cveta2.services.fetch.load_ignore_config",
                 return_value=IgnoreConfig(),
             ),
             patch(
