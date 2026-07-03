@@ -1,19 +1,24 @@
-"""CLI integration tests for image download flags."""
+"""CLI behavior smokes for image download flags.
+
+Images-dir resolution itself is covered by
+``tests/test_fetch_task.py::TestResolveImagesDir``; these two tests only
+assert the wiring reaches (or skips) ``download_images``.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from cveta2.cli import CliApp
 from cveta2.client import FetchContext
 from tests.helpers import mock_client_ctx, write_test_config
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def _mock_client_ctx(project_id: int = 1) -> MagicMock:
-    """Build a mock CvatClient that returns empty annotations."""
     client = mock_client_ctx(project_id=project_id)
     client.detect_project_cloud_storage.return_value = None
     client.prepare_fetch.return_value = FetchContext(
@@ -30,17 +35,13 @@ def _mock_client_ctx(project_id: int = 1) -> MagicMock:
     return client
 
 
-def test_fetch_no_images_flag_skips_download(
-    test_config: Path,
-) -> None:
-    """--no-images prevents any image download attempt."""
+def test_fetch_no_images_flag_skips_download(test_config: Path) -> None:
     mock_client = _mock_client_ctx()
     with (
         patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
-        app = CliApp()
-        app.run(
+        CliApp().run(
             [
                 "fetch",
                 "--project",
@@ -54,13 +55,11 @@ def test_fetch_no_images_flag_skips_download(
     mock_client.download_images.assert_not_called()
 
 
-def test_fetch_images_dir_overrides_config(
+def test_fetch_images_dir_reaches_download(
     tmp_path: Path,
     test_config: Path,
 ) -> None:
-    """--images-dir is passed to download_images, ignoring config mapping."""
     write_test_config(test_config, image_cache={"coco8-dev": "/other/path"})
-
     custom_dir = tmp_path / "custom-images"
 
     mock_client = _mock_client_ctx()
@@ -68,8 +67,7 @@ def test_fetch_images_dir_overrides_config(
         patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
-        app = CliApp()
-        app.run(
+        CliApp().run(
             [
                 "fetch",
                 "--project",
@@ -82,84 +80,4 @@ def test_fetch_images_dir_overrides_config(
         )
 
     mock_client.download_images.assert_called_once()
-    call_args = mock_client.download_images.call_args
-    assert call_args[0][1] == custom_dir
-
-
-def test_fetch_noninteractive_no_path_errors(
-    test_config: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Non-interactive mode + no configured path = error exit."""
-    monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-
-    mock_client = _mock_client_ctx()
-    with (
-        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-    ):
-        app = CliApp()
-        with pytest.raises(SystemExit):
-            app.run(
-                [
-                    "fetch",
-                    "--project",
-                    "coco8-dev",
-                    "--output-dir",
-                    str(test_config.parent / "out"),
-                ]
-            )
-
-
-def test_fetch_configured_path_downloads(
-    test_config: Path,
-) -> None:
-    """When image_cache has the project, download_images is called with that path."""
-    write_test_config(test_config, image_cache={"coco8-dev": "/mnt/data/coco8"})
-
-    mock_client = _mock_client_ctx()
-    with (
-        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-    ):
-        app = CliApp()
-        app.run(
-            [
-                "fetch",
-                "--project",
-                "coco8-dev",
-                "--output-dir",
-                str(test_config.parent / "out"),
-            ]
-        )
-
-    mock_client.download_images.assert_called_once()
-    call_args = mock_client.download_images.call_args
-    assert call_args[0][1] == Path("/mnt/data/coco8")
-
-
-def test_fetch_noninteractive_no_images_skips(
-    test_config: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Non-interactive + --no-images works without error."""
-    monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-
-    mock_client = _mock_client_ctx()
-    with (
-        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-    ):
-        app = CliApp()
-        app.run(
-            [
-                "fetch",
-                "--project",
-                "1",
-                "--output-dir",
-                str(test_config.parent / "out"),
-                "--no-images",
-            ]
-        )
-
-    mock_client.download_images.assert_not_called()
+    assert mock_client.download_images.call_args[0][1] == custom_dir

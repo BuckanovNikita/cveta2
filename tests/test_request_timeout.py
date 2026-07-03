@@ -212,11 +212,11 @@ def test_configure_data_timeout_installs_global_backstop(
     timeout: float | None,
     expected_calls: list[float],
 ) -> None:
-    from cveta2.commands import _bootstrap
+    from cveta2._client import connection
 
     calls: list[float] = []
-    monkeypatch.setattr(_bootstrap, "install_global_request_timeout", calls.append)
-    _bootstrap.configure_data_timeout(timeout)
+    monkeypatch.setattr(connection, "install_global_request_timeout", calls.append)
+    connection.configure_data_timeout(timeout)
     assert calls == expected_calls
     set_default_data_timeout(None)
 

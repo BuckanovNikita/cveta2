@@ -163,13 +163,13 @@ def validate_labels(
 
 
 def build_search_dirs(
-    image_dir: str | None,
+    image_dirs: Sequence[str | Path] | str | Path | None,
     project_name: str,
 ) -> list[Path]:
     """Build list of directories to search for image files."""
-    dirs: list[Path] = []
-    if image_dir:
-        dirs.append(Path(image_dir).resolve())
+    if isinstance(image_dirs, (str, Path)):
+        image_dirs = [image_dirs]
+    dirs: list[Path] = [Path(d).resolve() for d in (image_dirs or [])]
     ic_cfg = load_image_cache_config()
     cache_dir = ic_cfg.get_cache_dir(project_name)
     if cache_dir is not None:

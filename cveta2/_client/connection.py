@@ -8,7 +8,12 @@ from typing import TYPE_CHECKING, Protocol
 from cvat_sdk import make_client
 from loguru import logger
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter, apply_request_timeout
+from cveta2._client.sdk_adapter import (
+    SdkCvatApiAdapter,
+    apply_request_timeout,
+    install_global_request_timeout,
+)
+from cveta2.s3_utils import set_default_data_timeout
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -17,6 +22,18 @@ if TYPE_CHECKING:
     from cvat_sdk import Client as CvatSdkClient
 
     from cveta2.config import CvatConfig
+
+
+def configure_data_timeout(timeout: float | None) -> None:
+    """Apply the configured timeout to S3 clients and all CVAT SDK requests.
+
+    The class-level SDK patch covers requests made while the client is still
+    being created (server version check, login), where the per-instance
+    ``apply_request_timeout`` wrapper cannot reach yet.
+    """
+    set_default_data_timeout(timeout)
+    if timeout:
+        install_global_request_timeout(timeout)
 
 
 class SdkClientFactory(Protocol):

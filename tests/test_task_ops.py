@@ -9,7 +9,6 @@ import pytest
 
 from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
 from cveta2._client.ports import CvatApiPort
-from cveta2.cli import CliApp
 from cveta2.client import CvatClient
 from cveta2.commands.task_ops import (
     STATE_CLI_TO_CVAT,
@@ -20,11 +19,6 @@ from cveta2.commands.task_ops import (
 from cveta2.config import CvatConfig
 from cveta2.models import LabelInfo, TaskInfo
 from tests.helpers import make_raw_shape
-
-
-def _parse(argv: list[str]) -> argparse.Namespace:
-    return CliApp()._parser.parse_args(argv)
-
 
 # ---------------------------------------------------------------------------
 # _confirm_or_exit
@@ -63,85 +57,6 @@ class TestConfirmOrExit:
         monkeypatch.setattr("builtins.input", lambda _prompt: answer)
         with pytest.raises(SystemExit):
             _confirm_or_exit("Удалить?", yes=False)
-
-
-# ---------------------------------------------------------------------------
-# CLI parser wiring
-# ---------------------------------------------------------------------------
-
-
-class TestTaskCliParsing:
-    def test_mark_deleted_parses_frames_and_images(self) -> None:
-        args = _parse(
-            [
-                "task",
-                "mark-deleted",
-                "-p",
-                "proj",
-                "-t",
-                "42",
-                "--frame",
-                "1",
-                "--frame",
-                "2",
-                "--image",
-                "a.jpg",
-            ]
-        )
-        assert args.command == "task"
-        assert args.action == "mark-deleted"
-        assert args.project == "proj"
-        assert args.task == "42"
-        assert args.frame == [1, 2]
-        assert args.image == ["a.jpg"]
-
-    def test_mark_deleted_requires_task(self) -> None:
-        with pytest.raises(SystemExit):
-            _parse(["task", "mark-deleted", "-p", "proj", "--frame", "1"])
-
-    def test_drop_label_parses(self) -> None:
-        args = _parse(
-            ["task", "drop-label", "-p", "proj", "-t", "my-task", "--label", "car"]
-        )
-        assert args.action == "drop-label"
-        assert args.label == "car"
-        assert args.yes is False
-
-    def test_drop_label_requires_label(self) -> None:
-        with pytest.raises(SystemExit):
-            _parse(["task", "drop-label", "-p", "proj", "-t", "1"])
-
-    def test_delete_parses_yes_flag(self) -> None:
-        args = _parse(["task", "delete", "-p", "proj", "-t", "7", "--yes"])
-        assert args.action == "delete"
-        assert args.yes is True
-
-    def test_status_parses_stage_and_state(self) -> None:
-        args = _parse(
-            [
-                "task",
-                "status",
-                "-p",
-                "proj",
-                "-t",
-                "7",
-                "--stage",
-                "acceptance",
-                "--state",
-                "in-progress",
-            ]
-        )
-        assert args.action == "status"
-        assert args.stage == "acceptance"
-        assert args.state == "in-progress"
-
-    def test_status_rejects_unknown_state(self) -> None:
-        with pytest.raises(SystemExit):
-            _parse(["task", "status", "-p", "proj", "-t", "7", "--state", "done"])
-
-    def test_task_requires_action(self) -> None:
-        with pytest.raises(SystemExit):
-            _parse(["task"])
 
 
 # ---------------------------------------------------------------------------

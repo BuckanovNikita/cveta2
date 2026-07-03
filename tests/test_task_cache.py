@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
@@ -12,8 +12,6 @@ import pytest
 from botocore.exceptions import EndpointConnectionError
 
 from cveta2.client import CvatClient
-from cveta2.commands.fetch import run_fetch, run_fetch_task
-from cveta2.config import CvatConfig, IgnoreConfig
 from cveta2.image_downloader import CloudStorageInfo
 from cveta2.models import (
     BBoxAnnotation,
@@ -22,6 +20,7 @@ from cveta2.models import (
     TaskAnnotations,
     TaskInfo,
 )
+from cveta2.services.fetch import FetchOptions, fetch_project, fetch_selected_tasks
 from cveta2.task_cache import (
     CACHE_SCHEMA_VERSION,
     CachedTaskEnvelope,
@@ -32,7 +31,7 @@ from cveta2.task_cache import (
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import CFG, build_fake, make_bbox, make_fetch_args, make_task
+from tests.helpers import CFG, build_fake, make_bbox, make_task
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -403,35 +402,28 @@ class TestS3Backend:
 # Fetch flow integration (fake CVAT API)
 # ---------------------------------------------------------------------------
 
-_MODULE = "cveta2.commands.fetch"
 
-
-def _run_fetch_task_cached(
+def _fetch_task_cached(
     fake_api: FakeCvatApi,
-    args: argparse.Namespace,
-    *,
+    fake: LoadedFixtures,
+    output_dir: Path,
+    options: FetchOptions,
     cs_info: CloudStorageInfo | None = None,
 ) -> None:
-    """Drive ``run_fetch_task`` with a fake API and a local-only cache."""
+    """Drive ``fetch_selected_tasks`` with a fake API and a local-only cache.
 
-    def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
-        return CvatClient(cfg, api=fake_api)
-
-    with (
-        patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
-        patch("cveta2.commands._bootstrap.require_host"),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-        patch("cveta2.services.fetch.load_ignore_config", return_value=IgnoreConfig()),
-        patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
-        patch(
-            "cveta2.client.CvatClient.detect_project_cloud_storage",
-            return_value=cs_info,
-        ),
-        patch(
-            "cveta2.services.fetch.S3CacheBackend.from_cloud_storage", return_value=None
-        ),
-    ):
-        run_fetch_task(args)
+    ``FakeCvatApi.get_project_cloud_storage`` returns None, so the S3
+    backend is never built — the cache stays local-only.  The task
+    selector always targets the fixture's first task.
+    """
+    fetch_selected_tasks(
+        CvatClient(CFG, api=fake_api),
+        fake.project.id,
+        fake.project.name,
+        output_dir,
+        cs_info,
+        replace(options, task_selector=[fake.tasks[0].name]),
+    )
 
 
 class TestFetchWithCache:
@@ -440,29 +432,11 @@ class TestFetchWithCache:
     ) -> None:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         api = FakeCvatApi(fake)
-        task_name = fake.tasks[0].name
 
-        _run_fetch_task_cached(
-            api,
-            make_fetch_args(
-                project=str(fake.project.id),
-                task=[task_name],
-                output_dir=str(tmp_path / "out1"),
-                no_cache=False,
-            ),
-        )
+        _fetch_task_cached(api, fake, tmp_path / "out1", FetchOptions())
         assert len(api.annotation_calls) == 1
 
-        _run_fetch_task_cached(
-            api,
-            make_fetch_args(
-                project=str(fake.project.id),
-                task=[task_name],
-                output_dir=str(tmp_path / "out2"),
-                save_tasks=True,
-                no_cache=False,
-            ),
-        )
+        _fetch_task_cached(api, fake, tmp_path / "out2", FetchOptions(save_tasks=True))
 
         assert len(api.annotation_calls) == 1
         df1 = pd.read_csv(tmp_path / "out1" / "dataset.csv")
@@ -476,28 +450,15 @@ class TestFetchWithCache:
     ) -> None:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         api = FakeCvatApi(fake)
-        task_name = fake.tasks[0].name
 
-        def fetch(out: str, *, no_cache: bool = False, force: bool = False) -> None:
-            _run_fetch_task_cached(
-                api,
-                make_fetch_args(
-                    project=str(fake.project.id),
-                    task=[task_name],
-                    output_dir=str(tmp_path / out),
-                    no_cache=no_cache,
-                    force=force,
-                ),
-            )
-
-        fetch("out1")
-        fetch("out2", force=True)
+        _fetch_task_cached(api, fake, tmp_path / "out1", FetchOptions())
+        _fetch_task_cached(api, fake, tmp_path / "out2", FetchOptions(force=True))
         assert len(api.annotation_calls) == 2
 
-        fetch("out3", no_cache=True)
+        _fetch_task_cached(api, fake, tmp_path / "out3", FetchOptions(use_cache=False))
         assert len(api.annotation_calls) == 3
 
-        fetch("out4")
+        _fetch_task_cached(api, fake, tmp_path / "out4", FetchOptions())
         assert len(api.annotation_calls) == 3
 
     def test_non_completed_tasks_always_refetched(
@@ -505,18 +466,9 @@ class TestFetchWithCache:
     ) -> None:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["annotation"])
         api = FakeCvatApi(fake)
-        task_name = fake.tasks[0].name
 
         for out in ("out1", "out2"):
-            _run_fetch_task_cached(
-                api,
-                make_fetch_args(
-                    project=str(fake.project.id),
-                    task=[task_name],
-                    output_dir=str(tmp_path / out),
-                    no_cache=False,
-                ),
-            )
+            _fetch_task_cached(api, fake, tmp_path / out, FetchOptions())
 
         assert len(api.annotation_calls) == 2
 
@@ -527,16 +479,7 @@ class TestFetchWithCache:
         api = FakeCvatApi(fake)
         cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
 
-        _run_fetch_task_cached(
-            api,
-            make_fetch_args(
-                project=str(fake.project.id),
-                task=[fake.tasks[0].name],
-                output_dir=str(tmp_path / "out"),
-                no_cache=False,
-            ),
-            cs_info=cs_info,
-        )
+        _fetch_task_cached(api, fake, tmp_path / "out", FetchOptions(), cs_info)
 
         df = pd.read_csv(tmp_path / "out" / "dataset.csv")
         assert df["s3_image_path"].str.startswith("pfx/").all()
@@ -561,40 +504,15 @@ class TestFullFetchPrunesCache:
         TaskAnnotationCache(cache_dir).put(
             make_task(999, updated=_UPDATED), _payload(999)
         )
-        args = argparse.Namespace(
-            project=str(fake.project.id),
-            output_dir=str(tmp_path / "out"),
-            raw=False,
-            completed_only=False,
-            no_images=True,
-            images_dir=None,
-            save_tasks=False,
-            no_cache=False,
-            force=False,
+
+        fetch_project(
+            CvatClient(CFG, api=api),
+            fake.project.id,
+            fake.project.name,
+            tmp_path / "out",
+            None,
+            FetchOptions(use_cache=True, publish_clearml=False),
         )
-
-        def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
-            return CvatClient(cfg, api=api)
-
-        with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
-            patch("cveta2.commands._bootstrap.require_host"),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-            patch(
-                "cveta2.services.fetch.load_ignore_config", return_value=IgnoreConfig()
-            ),
-            patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
-            patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
-                return_value=None,
-            ),
-            patch(
-                "cveta2.services.fetch.S3CacheBackend.from_cloud_storage",
-                return_value=None,
-            ),
-            patch("cveta2._clearml.maybe_publish_clearml"),
-        ):
-            run_fetch(args)
 
         assert not (cache_dir / "task_999.json").exists()
         assert (cache_dir / f"task_{fake.tasks[0].id}.json").exists()

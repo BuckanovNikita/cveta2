@@ -6,15 +6,20 @@ import errno
 import json
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
 import yaml
 
 from cveta2.commands.convert import run_convert
+from cveta2.exceptions import Cveta2Error
 from cveta2.models import CSV_COLUMNS
 from cveta2.services.convert import common as convert
+from cveta2.services.convert import (
+    convert_from_yolo,
+    convert_to_coco,
+    convert_to_yolo,
+)
 from cveta2.services.convert.common import (
     CocoBox,
     PixelBox,
@@ -27,9 +32,6 @@ from cveta2.services.convert.common import (
 )
 from cveta2.services.convert.yolo import _parse_label_file
 from tests.helpers import csv_row, make_args, make_bbox, write_dataset_csv
-
-if TYPE_CHECKING:
-    import argparse
 
 
 def _make_dataset_csv(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
@@ -303,16 +305,12 @@ class TestToYolo:
         csv_path = _make_dataset_csv(tmp_path, rows)
 
         out_dir = tmp_path / "yolo_out"
-        args = make_args(
-            to_yolo=True,
-            from_yolo=False,
-            dataset=str(csv_path),
-            output=str(out_dir),
+        convert_to_yolo(
+            csv_path,
+            out_dir,
+            image_dirs=[str(img_dir)],
             link_mode="copy",
-            image_dir=[str(img_dir)],
-            names_file=None,
         )
-        run_convert(args)
 
         assert (out_dir / "images" / "train" / "test.jpg").is_file()
         assert (out_dir / "labels" / "train" / "test.txt").is_file()
@@ -340,16 +338,12 @@ class TestToYolo:
         csv_path = _make_dataset_csv(tmp_path, rows)
 
         out_dir = tmp_path / "yolo_out"
-        args = make_args(
-            to_yolo=True,
-            from_yolo=False,
-            dataset=str(csv_path),
-            output=str(out_dir),
+        convert_to_yolo(
+            csv_path,
+            out_dir,
+            image_dirs=[str(img_dir)],
             link_mode="copy",
-            image_dir=[str(img_dir)],
-            names_file=None,
         )
-        run_convert(args)
 
         label_path = out_dir / "labels" / "val" / "empty.txt"
         assert label_path.is_file()
@@ -367,16 +361,12 @@ class TestToYolo:
         csv_path = _make_dataset_csv(tmp_path, rows)
 
         out_dir = tmp_path / "yolo_out"
-        args = make_args(
-            to_yolo=True,
-            from_yolo=False,
-            dataset=str(csv_path),
-            output=str(out_dir),
+        convert_to_yolo(
+            csv_path,
+            out_dir,
+            image_dirs=[str(img_dir)],
             link_mode="copy",
-            image_dir=[str(img_dir)],
-            names_file=None,
         )
-        run_convert(args)
 
         with (out_dir / "dataset.yaml").open() as f:
             ds = yaml.safe_load(f)
@@ -408,18 +398,7 @@ class TestFromYoloDataset:
             yaml.dump(coco_cfg, f)
 
         output_csv = tmp_path / "output.csv"
-        args = make_args(
-            to_yolo=False,
-            from_yolo=True,
-            input=str(ds_copy),
-            output=str(output_csv),
-            image_dir=None,
-            names_file=None,
-            dataset=None,
-            link_mode="auto",
-            read_all_sizes=False,
-        )
-        run_convert(args)
+        convert_from_yolo(ds_copy, output_csv, read_all_sizes=False)
 
         assert output_csv.is_file()
         df = pd.read_csv(output_csv)
@@ -448,18 +427,13 @@ class TestFromYoloDataset:
             yaml.dump({"names": {0: "cat", 1: "dog"}}, f)
 
         output_csv = tmp_path / "output.csv"
-        args = make_args(
-            to_yolo=False,
-            from_yolo=True,
-            input=str(pred_dir),
-            output=str(output_csv),
-            image_dir=[str(img_dir)],
-            names_file=str(names_path),
-            dataset=None,
-            link_mode="auto",
+        convert_from_yolo(
+            pred_dir,
+            output_csv,
+            names_file=names_path,
+            image_dirs=[str(img_dir)],
             read_all_sizes=False,
         )
-        run_convert(args)
 
         df = pd.read_csv(output_csv)
         assert len(df) == 2
@@ -510,33 +484,16 @@ class TestRoundtrip:
 
         # CSV -> YOLO
         yolo_dir = tmp_path / "yolo"
-        run_convert(
-            make_args(
-                to_yolo=True,
-                from_yolo=False,
-                dataset=str(csv_path),
-                output=str(yolo_dir),
-                link_mode="copy",
-                image_dir=[str(img_dir)],
-                names_file=None,
-            )
+        convert_to_yolo(
+            csv_path,
+            yolo_dir,
+            image_dirs=[str(img_dir)],
+            link_mode="copy",
         )
 
         # YOLO -> CSV
         roundtrip_csv = tmp_path / "roundtrip.csv"
-        run_convert(
-            make_args(
-                to_yolo=False,
-                from_yolo=True,
-                input=str(yolo_dir),
-                output=str(roundtrip_csv),
-                image_dir=None,
-                names_file=None,
-                dataset=None,
-                link_mode="auto",
-                read_all_sizes=False,
-            )
-        )
+        convert_from_yolo(yolo_dir, roundtrip_csv, read_all_sizes=False)
 
         df_orig = pd.read_csv(csv_path)
         df_rt = pd.read_csv(roundtrip_csv)
@@ -599,18 +556,10 @@ class TestSizeCache:
 # ---------------------------------------------------------------------------
 
 
-def _coco_args(tmp_path: Path, csv_path: Path, img_dir: Path) -> argparse.Namespace:
+def _run_to_coco(tmp_path: Path, csv_path: Path, img_dir: Path) -> Path:
     out_dir = tmp_path / "coco_out"
-    return make_args(
-        to_yolo=False,
-        from_yolo=False,
-        to_coco=True,
-        dataset=str(csv_path),
-        output=str(out_dir),
-        link_mode="copy",
-        image_dir=[str(img_dir)],
-        names_file=None,
-    )
+    convert_to_coco(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
+    return out_dir
 
 
 @pytest.mark.parametrize("export_format", ["yolo", "coco"])
@@ -620,18 +569,26 @@ def test_missing_split_error(tmp_path: Path, export_format: str) -> None:
     rows[0]["split"] = None
     csv_path = _make_dataset_csv(tmp_path, rows)
 
-    if export_format == "yolo":
-        args = make_args(
-            to_yolo=True,
-            from_yolo=False,
-            dataset=str(csv_path),
-            output=str(tmp_path / "yolo_out"),
-            link_mode="copy",
-            image_dir=[],
-            names_file=None,
-        )
-    else:
-        args = _coco_args(tmp_path, csv_path, tmp_path)
+    export = convert_to_yolo if export_format == "yolo" else convert_to_coco
+    with pytest.raises(Cveta2Error):
+        export(csv_path, tmp_path / "out", image_dirs=[str(tmp_path)], link_mode="copy")
+
+
+def test_run_convert_missing_split_exits(tmp_path: Path) -> None:
+    """The adapter maps a conversion-logic error onto ``SystemExit``."""
+    rows = [csv_row("test.jpg", label="cat", split="train")]
+    rows[0]["split"] = None
+    csv_path = _make_dataset_csv(tmp_path, rows)
+
+    args = make_args(
+        to_yolo=True,
+        from_yolo=False,
+        dataset=str(csv_path),
+        output=str(tmp_path / "yolo_out"),
+        link_mode="copy",
+        image_dir=[],
+        names_file=None,
+    )
 
     with pytest.raises(SystemExit):
         run_convert(args)
@@ -663,10 +620,8 @@ class TestToCoco:
             ),
         ]
         csv_path = _make_dataset_csv(tmp_path, rows)
-        args = _coco_args(tmp_path, csv_path, img_dir)
-        run_convert(args)
+        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
 
-        out_dir = tmp_path / "coco_out"
         assert (out_dir / "train" / "test.jpg").is_file()
         json_path = out_dir / "train" / "_annotations.coco.json"
         assert json_path.is_file()
@@ -702,10 +657,8 @@ class TestToCoco:
 
         rows = [csv_row("test.jpg", label="cat", split="val")]
         csv_path = _make_dataset_csv(tmp_path, rows)
-        args = _coco_args(tmp_path, csv_path, img_dir)
-        run_convert(args)
+        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
 
-        out_dir = tmp_path / "coco_out"
         assert (out_dir / "valid" / "_annotations.coco.json").is_file()
         assert not (out_dir / "val").exists()
 
@@ -717,10 +670,8 @@ class TestToCoco:
 
         rows = [csv_row("empty.jpg", shape="none", split="train")]
         csv_path = _make_dataset_csv(tmp_path, rows)
-        args = _coco_args(tmp_path, csv_path, img_dir)
-        run_convert(args)
+        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
 
-        out_dir = tmp_path / "coco_out"
         json_path = out_dir / "train" / "_annotations.coco.json"
         with json_path.open() as f:
             coco = json.load(f)
@@ -743,10 +694,8 @@ class TestToCoco:
             csv_row("c.jpg", label="mango", split="train"),
         ]
         csv_path = _make_dataset_csv(tmp_path, rows)
-        args = _coco_args(tmp_path, csv_path, img_dir)
-        run_convert(args)
+        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
 
-        out_dir = tmp_path / "coco_out"
         json_path = out_dir / "train" / "_annotations.coco.json"
         with json_path.open() as f:
             coco = json.load(f)

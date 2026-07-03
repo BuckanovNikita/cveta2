@@ -10,7 +10,11 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2.client import CvatClient, _FetchAnnotationsOptions, _filter_tasks_for_fetch
+from cveta2.client import (
+    CvatClient,
+    _FetchAnnotationsOptions,
+    _filter_tasks_for_fetch,
+)
 from cveta2.commands.fetch import (
     _resolve_images_dir,
     _resolve_task_selector,
@@ -24,9 +28,13 @@ from cveta2.config import (
     _parse_ignore_entry,
     _serialize_ignore_entry,
 )
-from cveta2.exceptions import InteractiveModeRequiredError
+from cveta2.exceptions import InteractiveModeRequiredError, TaskNotFoundError
 from cveta2.models import CSV_COLUMNS, TaskInfo
-from cveta2.services.fetch import load_ignore_sets
+from cveta2.services.fetch import (
+    FetchOptions,
+    fetch_selected_tasks,
+    load_ignore_sets,
+)
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import CFG, build_fake, make_fake_client, make_fetch_args
 
@@ -38,38 +46,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _MODULE = "cveta2.commands.fetch"
-
-
-def _run_fetch_task_with_fake(
-    fixtures: LoadedFixtures,
-    args: argparse.Namespace,
-    *,
-    ignore_config: IgnoreConfig | None = None,
-) -> None:
-    """Execute ``run_fetch_task`` backed by fake CVAT data.
-
-    Patches all config loading so no real filesystem or CVAT server is
-    needed.  Uses FakeCvatApi for the API port via DI.
-    """
-    fake_api = FakeCvatApi(fixtures)
-
-    def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
-        return CvatClient(cfg, api=fake_api)
-
-    ic = ignore_config if ignore_config is not None else IgnoreConfig()
-
-    with (
-        patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
-        patch("cveta2.commands._bootstrap.require_host"),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-        patch("cveta2.services.fetch.load_ignore_config", return_value=ic),
-        patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
-        patch(
-            "cveta2.client.CvatClient.detect_project_cloud_storage",
-            return_value=None,
-        ),
-    ):
-        run_fetch_task(args)
 
 
 # ---------------------------------------------------------------------------
@@ -477,12 +453,12 @@ class TestResolveImagesDir:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests: run_fetch_task
+# Service tests: fetch_selected_tasks
 # ---------------------------------------------------------------------------
 
 
-class TestRunFetchTaskIntegration:
-    """Integration tests for ``run_fetch_task``."""
+class TestFetchSelectedTasks:
+    """Tests for ``fetch_selected_tasks`` (fetch-task at the service layer)."""
 
     def test_happy_path_writes_dataset_and_deleted(
         self,
@@ -496,13 +472,18 @@ class TestRunFetchTaskIntegration:
             statuses=["completed", "completed", "completed"],
         )
         out_dir = tmp_path / "nested" / "deep" / "output"
-        args = make_fetch_args(
-            project=str(fake.project.id),
-            task=[t.name for t in fake.tasks],
-            output_dir=str(out_dir),
-        )
 
-        _run_fetch_task_with_fake(fake, args)
+        fetch_selected_tasks(
+            make_fake_client(fake),
+            fake.project.id,
+            fake.project.name,
+            out_dir,
+            None,
+            FetchOptions(
+                task_selector=[t.name for t in fake.tasks],
+                use_cache=False,
+            ),
+        )
 
         dataset_csv = out_dir / "dataset.csv"
         deleted_csv = out_dir / "deleted.csv"
@@ -535,43 +516,94 @@ class TestRunFetchTaskIntegration:
         coco8_fixtures: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
-        """Tasks in the ignore config are excluded from results."""
+        """Tasks in ``ignore_task_ids`` are excluded from results."""
         fake = build_fake(
             coco8_fixtures,
             ["normal", "all-empty"],
             statuses=["completed", "completed"],
         )
         ignored_task_id = fake.tasks[1].id
-        ignore_cfg = IgnoreConfig(
-            projects={
-                fake.project.name: [IgnoredTask(id=ignored_task_id, name="ignored")],
-            },
-        )
-        args = make_fetch_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name],
-            output_dir=str(tmp_path / "out"),
+        out_dir = tmp_path / "out"
+
+        fetch_selected_tasks(
+            make_fake_client(fake),
+            fake.project.id,
+            fake.project.name,
+            out_dir,
+            None,
+            FetchOptions(
+                task_selector=[fake.tasks[0].name],
+                ignore_task_ids={ignored_task_id},
+                use_cache=False,
+            ),
         )
 
-        _run_fetch_task_with_fake(fake, args, ignore_config=ignore_cfg)
-
-        df = pd.read_csv(tmp_path / "out" / "dataset.csv")
+        df = pd.read_csv(out_dir / "dataset.csv")
         task_ids_in_csv = set(df["task_id"].unique())
         assert fake.tasks[0].id in task_ids_in_csv
         assert ignored_task_id not in task_ids_in_csv
+
+    def test_task_not_found_raises(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        tmp_path: Path,
+    ) -> None:
+        """Non-existent task selector raises ``TaskNotFoundError``."""
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+
+        with pytest.raises(TaskNotFoundError):
+            fetch_selected_tasks(
+                make_fake_client(fake),
+                fake.project.id,
+                fake.project.name,
+                tmp_path / "out",
+                None,
+                FetchOptions(
+                    task_selector=["nonexistent-task-xyz"],
+                    use_cache=False,
+                ),
+            )
+
+
+# ---------------------------------------------------------------------------
+# CLI smoke: run_fetch_task exits on Cveta2Error
+# ---------------------------------------------------------------------------
+
+
+class TestRunFetchTaskCliExit:
+    """Thin CLI-level test that ``run_fetch_task`` exits on ``Cveta2Error``."""
 
     def test_task_not_found_exits(
         self,
         coco8_fixtures: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
-        """Non-existent task name causes sys.exit via Cveta2Error."""
+        """Non-existent task name causes ``sys.exit`` via ``Cveta2Error``."""
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake_api = FakeCvatApi(fake)
+
+        def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
+            return CvatClient(cfg, api=fake_api)
+
         args = make_fetch_args(
             project=str(fake.project.id),
             task=["nonexistent-task-xyz"],
             output_dir=str(tmp_path / "out"),
         )
 
-        with pytest.raises(SystemExit):
-            _run_fetch_task_with_fake(fake, args)
+        with (
+            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
+            patch("cveta2.commands._bootstrap.require_host"),
+            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
+            patch(
+                "cveta2.services.fetch.load_ignore_config",
+                return_value=IgnoreConfig(),
+            ),
+            patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
+            patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=None,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            run_fetch_task(args)

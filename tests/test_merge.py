@@ -13,6 +13,7 @@ from cveta2.services.merge import (
     _propagate_splits,
     _read_deleted_names,
     _resolve_by_time,
+    merge_datasets,
 )
 from tests.helpers import csv_row, make_args, make_df, write_dataset_csv
 
@@ -524,16 +525,14 @@ class TestReadDatasetCsvMerge:
 
 
 # ---------------------------------------------------------------------------
-# CLI — run_merge
+# Public entry point — merge_datasets (path-based I/O)
 # ---------------------------------------------------------------------------
 
 
-class TestRunMerge:
-    """Tests for run_merge with real temp files."""
+class TestMergeDatasetsIO:
+    """Tests for merge_datasets with real temp files."""
 
     def test_basic_merge_output(self, tmp_path: Path) -> None:
-        from cveta2.commands.merge import run_merge
-
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
@@ -541,14 +540,7 @@ class TestRunMerge:
         write_dataset_csv(old_path, [_row("a.jpg", split="train")])
         write_dataset_csv(new_path, [_row("a.jpg"), _row("b.jpg")])
 
-        args = make_args(
-            old=str(old_path),
-            new=str(new_path),
-            output=str(out_path),
-            deleted=None,
-            by_time=False,
-        )
-        run_merge(args)
+        merge_datasets(old_path, new_path, out_path)
 
         result = pd.read_csv(out_path)
         names = set(result["image_name"])
@@ -557,8 +549,6 @@ class TestRunMerge:
         assert a_split == "train"
 
     def test_merge_with_deleted(self, tmp_path: Path) -> None:
-        from cveta2.commands.merge import run_merge
-
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         del_path = tmp_path / "deleted.csv"
@@ -568,14 +558,7 @@ class TestRunMerge:
         write_dataset_csv(new_path, [_row("a.jpg"), _row("c.jpg")])
         del_path.write_text("image_name\na.jpg\n", encoding="utf-8")
 
-        args = make_args(
-            old=str(old_path),
-            new=str(new_path),
-            output=str(out_path),
-            deleted=str(del_path),
-            by_time=False,
-        )
-        run_merge(args)
+        merge_datasets(old_path, new_path, out_path, deleted=del_path)
 
         result = pd.read_csv(out_path)
         names = set(result["image_name"])
@@ -583,8 +566,6 @@ class TestRunMerge:
         assert names == {"b.jpg", "c.jpg"}
 
     def test_merge_by_time(self, tmp_path: Path) -> None:
-        from cveta2.commands.merge import run_merge
-
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
@@ -598,21 +579,12 @@ class TestRunMerge:
             [_trow("a.jpg", date=_T_OLD, label="new_label")],
         )
 
-        args = make_args(
-            old=str(old_path),
-            new=str(new_path),
-            output=str(out_path),
-            deleted=None,
-            by_time=True,
-        )
-        run_merge(args)
+        merge_datasets(old_path, new_path, out_path, by_time=True)
 
         result = pd.read_csv(out_path)
         assert result.iloc[0]["instance_label"] == "old_label"
 
-    def test_by_time_missing_column_exits(self, tmp_path: Path) -> None:
-        from cveta2.commands.merge import run_merge
-
+    def test_by_time_missing_column_raises(self, tmp_path: Path) -> None:
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
@@ -622,13 +594,35 @@ class TestRunMerge:
         write_dataset_csv(old_path, [dict(no_time)])
         write_dataset_csv(new_path, [dict(no_time)])
 
-        args = make_args(
-            old=str(old_path),
-            new=str(new_path),
-            output=str(out_path),
-            deleted=None,
-            by_time=True,
-        )
+        with pytest.raises(Cveta2Error):
+            merge_datasets(old_path, new_path, out_path, by_time=True)
 
-        with pytest.raises(SystemExit):
-            run_merge(args)
+
+# ---------------------------------------------------------------------------
+# CLI smoke — run_merge sys.exit path
+# ---------------------------------------------------------------------------
+
+
+def test_run_merge_by_time_missing_column_exits(tmp_path: Path) -> None:
+    """The adapter maps a merge-logic error onto ``SystemExit``."""
+    from cveta2.commands.merge import run_merge
+
+    old_path = tmp_path / "old.csv"
+    new_path = tmp_path / "new.csv"
+    out_path = tmp_path / "merged.csv"
+
+    no_time = _row("a.jpg")
+    del no_time["task_updated_date"]
+    write_dataset_csv(old_path, [dict(no_time)])
+    write_dataset_csv(new_path, [dict(no_time)])
+
+    args = make_args(
+        old=str(old_path),
+        new=str(new_path),
+        output=str(out_path),
+        deleted=None,
+        by_time=True,
+    )
+
+    with pytest.raises(SystemExit):
+        run_merge(args)

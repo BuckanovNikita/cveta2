@@ -1,4 +1,9 @@
-"""Integration tests: full pipeline through FakeCvatApi + CvatClient."""
+"""Canonical fetch-service/client scenarios over FakeCvatApi + CvatClient.
+
+Owns the coco8 fixture scenarios (normal, all-empty, all-removed,
+frames-1-2-removed, zero-frame-empty-last-removed) exercised end-to-end
+through the fetch service and :class:`CvatClient`.
+"""
 
 from __future__ import annotations
 

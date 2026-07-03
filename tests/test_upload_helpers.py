@@ -181,7 +181,7 @@ def test_build_search_dirs_with_arg(
     img_dir = tmp_path / "imgs"
     img_dir.mkdir()
     monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
-    dirs = build_search_dirs(str(img_dir), "proj")
+    dirs = build_search_dirs([str(img_dir)], "proj")
     assert img_dir.resolve() in dirs
 
 

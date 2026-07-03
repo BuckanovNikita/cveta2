@@ -11,13 +11,12 @@ from loguru import logger
 from cveta2.config import (
     CvatConfig,
     get_config_path,
-    load_sync_roots_config,
     require_interactive,
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
-from cveta2.s3_utils import parse_sync_root
 from cveta2.services.output import read_dataset_csv as services_read_dataset_csv
+from cveta2.services.resolve import apply_sync_root_override
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -161,38 +160,8 @@ def resolve_project_and_cloud_storage(
     else:
         project_id, project_name = select_project_tui(client)
     cs_info = client.detect_project_cloud_storage(project_id)
-    cs_info = _apply_sync_root_override(project_name, cs_info, sync_root)
+    cs_info = apply_sync_root_override(project_name, cs_info, sync_root)
     return (project_id, project_name, cs_info)
-
-
-def _apply_sync_root_override(
-    project_name: str,
-    cs_info: CloudStorageInfo | None,
-    explicit_root: str | None,
-) -> CloudStorageInfo | None:
-    """Override cs_info bucket/prefix from an explicit root or sync_roots config."""
-    root = explicit_root or load_sync_roots_config().get_root(project_name)
-    if not root:
-        return cs_info
-    if cs_info is None:
-        logger.warning(
-            f"Проект {project_name!r}: задан корень синхронизации {root!r}, "
-            f"но у проекта нет cloud storage — переопределение не применено."
-        )
-        return None
-    try:
-        bucket, prefix = parse_sync_root(root)
-    except ValueError as e:
-        raise Cveta2Error(str(e)) from e
-    update: dict[str, str] = {"prefix": prefix}
-    if bucket is not None:
-        update["bucket"] = bucket
-    overridden = cs_info.model_copy(update=update)
-    logger.info(
-        f"Проект {project_name!r}: корень синхронизации переопределён на "
-        f"s3://{overridden.bucket}/{overridden.prefix}"
-    )
-    return overridden
 
 
 def read_dataset_csv(

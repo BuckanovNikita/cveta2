@@ -13,27 +13,14 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2._client.sdk_adapter import install_global_request_timeout
+from cveta2._client.connection import configure_data_timeout
 from cveta2.client import CvatClient
 from cveta2.commands._helpers import require_host
 from cveta2.config import CvatConfig, require_interactive
-from cveta2.s3_utils import set_default_data_timeout
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
-
-
-def configure_data_timeout(timeout: float | None) -> None:
-    """Apply the configured timeout to S3 clients and all CVAT SDK requests.
-
-    The class-level SDK patch covers requests made while the client is still
-    being created (server version check, login), where the per-instance
-    ``apply_request_timeout`` wrapper cannot reach yet.
-    """
-    set_default_data_timeout(timeout)
-    if timeout:
-        install_global_request_timeout(timeout)
 
 
 def prompt_credentials(cfg: CvatConfig) -> CvatConfig:

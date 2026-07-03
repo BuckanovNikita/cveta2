@@ -115,7 +115,9 @@ def run_upload(args: argparse.Namespace) -> None:
             client,
         )
         options = UploadOptions(
-            search_dirs=build_search_dirs(args.image_dir, project_name),
+            search_dirs=build_search_dirs(
+                [args.image_dir] if args.image_dir else None, project_name
+            ),
             segment_size=upload_cfg.images_per_job,
             image_quality=upload_cfg.image_quality,
             mark_all_deleted=args.mark_all_deleted,

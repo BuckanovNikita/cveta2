@@ -33,7 +33,6 @@ from cveta2.image_downloader import (
     S3Syncer,
 )
 from cveta2.models import (
-    CSV_COLUMNS,
     BBoxAnnotation,
     LabelInfo,
     ProjectAnnotations,
@@ -1089,36 +1088,3 @@ class CvatClient:
         manager (``with CvatClient(...) as c:``).
         """
         return self.set_task_jobs_status(task_id, stage="acceptance", state="completed")
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def fetch_annotations(
-    project_id: int,
-    cfg: CvatConfig | None = None,
-    *,
-    completed_only: bool = False,
-    ignore_task_ids: set[int] | None = None,
-    task_selector: list[int | str] | None = None,
-) -> pd.DataFrame:
-    """Fetch project annotations as a pandas DataFrame.
-
-    Includes one row per bbox annotation and one row per image that has no
-    annotations (missing bbox/annotation fields filled with None).
-    For full structured output (including deleted images), use ``CvatClient``.
-    """
-    resolved_cfg = cfg or CvatConfig.load()
-    with CvatClient(resolved_cfg) as client:
-        result = client.fetch_annotations(
-            project_id,
-            completed_only=completed_only,
-            ignore_task_ids=ignore_task_ids,
-            task_selector=task_selector,
-        )
-    rows = result.to_csv_rows()
-    if not rows:
-        return pd.DataFrame(columns=list(CSV_COLUMNS))
-    return pd.DataFrame(rows)
