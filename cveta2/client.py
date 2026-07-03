@@ -7,7 +7,7 @@ All CVAT SDK interaction goes through :class:`CvatApiPort`
 from __future__ import annotations
 
 import os
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -46,7 +46,7 @@ _HTTP_5XX_MIN = 500
 _HTTP_5XX_MAX = 600
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Iterable, Sequence
     from pathlib import Path
     from types import TracebackType
 
@@ -159,9 +159,8 @@ class CvatClient:
             projects = client.list_projects()
             result = client.fetch_annotations(project_id)
 
-    Without the context manager, read methods open and close their own
-    connection per call; write methods require the context manager (or
-    an injected ``api``).
+    The context manager is required for all remote calls unless an
+    ``api`` port is injected (tests).
     """
 
     def __init__(
@@ -197,7 +196,7 @@ class CvatClient:
         if self._api is not None:
             # DI api provided -- nothing to open.
             return self
-        resolved = self._cfg.ensure_credentials()
+        resolved = self._cfg.require_credentials()
         self._exit_stack = ExitStack()
         self._persistent_api = self._exit_stack.enter_context(
             open_sdk_api(resolved, self._client_factory)
@@ -220,20 +219,15 @@ class CvatClient:
     # API port lifecycle
     # ------------------------------------------------------------------
 
-    @contextmanager
-    def open_api(self) -> Iterator[CvatApiPort]:
-        """Context manager yielding the best available API port.
+    @property
+    def api(self) -> CvatApiPort:
+        """The active API port (requires entered context or injected api)."""
+        return self._require_api("api")
 
-        Uses injected or persistent API if available, otherwise opens
-        a fresh SDK adapter.
-        """
-        api = self._api or self._persistent_api
-        if api is not None:
-            yield api
-        else:
-            resolved = self._cfg.ensure_credentials()
-            with open_sdk_api(resolved, self._client_factory) as adapter:
-                yield adapter
+    @property
+    def host(self) -> str:
+        """The configured CVAT host."""
+        return self._cfg.host or ""
 
     def _require_api(self, method_name: str) -> CvatApiPort:
         """Return the injected or persistent API port, or raise."""
@@ -252,13 +246,11 @@ class CvatClient:
 
     def list_projects(self) -> list[ProjectInfo]:
         """Fetch list of projects from CVAT (id and name)."""
-        with self.open_api() as source:
-            return source.list_projects()
+        return self._require_api("list_projects").list_projects()
 
     def list_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Fetch the list of tasks for a project from CVAT."""
-        with self.open_api() as source:
-            return source.get_project_tasks(project_id)
+        return self._require_api("list_project_tasks").get_project_tasks(project_id)
 
     def list_tasks_completed_after(
         self,
@@ -283,8 +275,7 @@ class CvatClient:
 
     def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         """Fetch label definitions for a project from CVAT."""
-        with self.open_api() as source:
-            return source.get_project_labels(project_id)
+        return self._require_api("get_project_labels").get_project_labels(project_id)
 
     def count_label_usage(self, project_id: int) -> dict[int, int]:
         """Count annotations per label across all project tasks.
@@ -292,27 +283,25 @@ class CvatClient:
         Returns a mapping ``{label_id: annotation_count}``.
         Used to warn before label deletion.
         """
-        with self.open_api() as source:
-            tasks = source.get_project_tasks(project_id)
-            counts: dict[int, int] = {}
-            skipped: list[int] = []
-            for task in tqdm(
-                tasks, desc="Checking annotations", unit="task", leave=False
-            ):
-                try:
-                    annotations = source.get_task_annotations(task.id)
-                except CvatApiError:
-                    logger.warning(
-                        f"Не удалось получить аннотации задачи {task.id},"
-                        " подсчёт меток может быть неполным",
-                    )
-                    skipped.append(task.id)
-                    continue
-                for shape in annotations.shapes:
-                    counts[shape.label_id] = counts.get(shape.label_id, 0) + 1
-            if skipped:
-                logger.warning(f"Пропущено задач при подсчёте меток: {skipped}")
-            return counts
+        source = self._require_api("count_label_usage")
+        tasks = source.get_project_tasks(project_id)
+        counts: dict[int, int] = {}
+        skipped: list[int] = []
+        for task in tqdm(tasks, desc="Checking annotations", unit="task", leave=False):
+            try:
+                annotations = source.get_task_annotations(task.id)
+            except CvatApiError:
+                logger.warning(
+                    f"Не удалось получить аннотации задачи {task.id},"
+                    " подсчёт меток может быть неполным",
+                )
+                skipped.append(task.id)
+                continue
+            for shape in annotations.shapes:
+                counts[shape.label_id] = counts.get(shape.label_id, 0) + 1
+        if skipped:
+            logger.warning(f"Пропущено задач при подсчёте меток: {skipped}")
+        return counts
 
     def update_project_labels(
         self,
@@ -411,8 +400,8 @@ class CvatClient:
             host=(self._cfg.host or ""),
             project_name=project_name,
         )
-        with self.open_api() as source:
-            return self._fetch_annotations(source, project_id, options)
+        source = self._require_api("fetch_annotations")
+        return self._fetch_annotations(source, project_id, options)
 
     def prepare_fetch(  # noqa: PLR0913
         self,
@@ -437,8 +426,8 @@ class CvatClient:
             host=(self._cfg.host or ""),
             project_name=project_name,
         )
-        with self.open_api() as source:
-            return self._prepare_fetch(source, project_id, options)
+        source = self._require_api("prepare_fetch")
+        return self._prepare_fetch(source, project_id, options)
 
     # ------------------------------------------------------------------
     # Core annotation logic (single code path for all API backends)
@@ -1122,12 +1111,13 @@ def fetch_annotations(
     For full structured output (including deleted images), use ``CvatClient``.
     """
     resolved_cfg = cfg or CvatConfig.load()
-    result = CvatClient(resolved_cfg).fetch_annotations(
-        project_id,
-        completed_only=completed_only,
-        ignore_task_ids=ignore_task_ids,
-        task_selector=task_selector,
-    )
+    with CvatClient(resolved_cfg) as client:
+        result = client.fetch_annotations(
+            project_id,
+            completed_only=completed_only,
+            ignore_task_ids=ignore_task_ids,
+            task_selector=task_selector,
+        )
     rows = result.to_csv_rows()
     if not rows:
         return pd.DataFrame(columns=list(CSV_COLUMNS))

@@ -252,7 +252,7 @@ def test_cli_labels_list() -> None:
     mock_client = _mock_client_ctx(labels=_LABELS)
     with (
         patch(
-            "cveta2.commands.labels.CvatClient",
+            "cveta2.commands._bootstrap.CvatClient",
             return_value=mock_client,
         ),
         patch(
@@ -271,7 +271,7 @@ def test_cli_labels_list_empty() -> None:
     mock_client = _mock_client_ctx(labels=[])
     with (
         patch(
-            "cveta2.commands.labels.CvatClient",
+            "cveta2.commands._bootstrap.CvatClient",
             return_value=mock_client,
         ),
         patch(
@@ -295,7 +295,7 @@ def test_cli_labels_noninteractive_without_list_errors(
     mock_client = _mock_client_ctx(labels=_LABELS)
     with (
         patch(
-            "cveta2.commands.labels.CvatClient",
+            "cveta2.commands._bootstrap.CvatClient",
             return_value=mock_client,
         ),
         patch(

@@ -7,12 +7,11 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2.client import CvatClient
+from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
-    require_host,
     resolve_project_and_cloud_storage,
 )
-from cveta2.config import CvatConfig, load_image_cache_config
+from cveta2.config import load_image_cache_config
 from cveta2.exceptions import Cveta2Error
 
 if TYPE_CHECKING:
@@ -21,9 +20,6 @@ if TYPE_CHECKING:
 
 def run_s3_sync(args: argparse.Namespace) -> None:
     """Run the ``s3-sync`` command."""
-    cfg = CvatConfig.load()
-    require_host(cfg)
-
     if args.root and not args.project:
         sys.exit("Ошибка: --root требует явного указания проекта через --project.")
 
@@ -48,7 +44,7 @@ def run_s3_sync(args: argparse.Namespace) -> None:
     else:
         projects_to_sync = dict(ic_cfg.projects)
 
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         for project_name, cache_dir in projects_to_sync.items():
             logger.info(f"--- Синхронизация проекта: {project_name} ---")
             try:

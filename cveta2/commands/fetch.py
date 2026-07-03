@@ -13,15 +13,13 @@ import questionary
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2.client import CvatClient, FetchContext
+from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
-    require_host,
     resolve_project_and_cloud_storage,
     write_dataset_and_deleted,
 )
 from cveta2.commands._task_selector import select_tasks_tui
 from cveta2.config import (
-    CvatConfig,
     is_cache_disabled,
     is_interactive_disabled,
     load_ignore_config,
@@ -41,6 +39,7 @@ from cveta2.task_cache import (
 if TYPE_CHECKING:
     import argparse
 
+    from cveta2.client import CvatClient, FetchContext
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import ProjectAnnotations
 
@@ -80,10 +79,7 @@ def _fetch_common(
     of tasks that no longer exist in the project are removed.
     Returns ``(result, project_name)``.
     """
-    cfg = CvatConfig.load()
-    require_host(cfg)
-
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         try:
             project_id, project_name, cs_info = resolve_project_and_cloud_storage(
                 client, getattr(args, "project", None)
@@ -217,29 +213,29 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
     cache_hits = 0
     fetched = 0
     task_results: list[TaskAnnotations] = []
-    with client.open_api() as api:
-        for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
-            task_result = None if force or cache is None else cache.get(task)
-            if task_result is not None:
-                cache_hits += 1
-            else:
-                task_result = client.fetch_one_task(api, task, ctx)
-                if task_result is None:
-                    continue
-                fetched += 1
-                if cache is not None:
-                    cache.put(task, task_result)
+    api = client.api
+    for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
+        task_result = None if force or cache is None else cache.get(task)
+        if task_result is not None:
+            cache_hits += 1
+        else:
+            task_result = client.fetch_one_task(api, task, ctx)
+            if task_result is None:
+                continue
+            fetched += 1
+            if cache is not None:
+                cache.put(task, task_result)
 
-            rows = task_result.to_csv_rows()
-            if rows:
-                df = pd.DataFrame(rows)
-                task_csv = tasks_dir / f"task_{task.id}.csv"
-                df.to_csv(task_csv, index=False, encoding="utf-8")
-                logger.trace(
-                    f"Task {task.name!r} (id={task.id}): {len(rows)} rows → {task_csv}"
-                )
+        rows = task_result.to_csv_rows()
+        if rows:
+            df = pd.DataFrame(rows)
+            task_csv = tasks_dir / f"task_{task.id}.csv"
+            df.to_csv(task_csv, index=False, encoding="utf-8")
+            logger.trace(
+                f"Task {task.name!r} (id={task.id}): {len(rows)} rows → {task_csv}"
+            )
 
-            task_results.append(task_result)
+        task_results.append(task_result)
 
     if not save_tasks:
         shutil.rmtree(tasks_dir, ignore_errors=True)

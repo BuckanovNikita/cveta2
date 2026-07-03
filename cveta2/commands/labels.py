@@ -8,16 +8,16 @@ from typing import TYPE_CHECKING
 import questionary
 from loguru import logger
 
-from cveta2.client import CvatClient
+from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
-    require_host,
     resolve_project_or_exit,
 )
-from cveta2.config import CvatConfig, require_interactive
+from cveta2.config import require_interactive
 
 if TYPE_CHECKING:
     import argparse
 
+    from cveta2.client import CvatClient
     from cveta2.models import LabelInfo
 
 _ACTION_ADD = "add"
@@ -36,10 +36,7 @@ _HEX_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 
 def run_labels(args: argparse.Namespace) -> None:
     """Run the ``labels`` command: list or interactively edit project labels."""
-    cfg = CvatConfig.load()
-    require_host(cfg)
-
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, project_name = resolve_project_or_exit(args.project, client)
 
         if args.list_labels:

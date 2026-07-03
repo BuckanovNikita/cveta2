@@ -52,7 +52,7 @@ def test_s3_sync_all_projects(
     mock_client.resolve_project_id.side_effect = [1, 2]
 
     with (
-        patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
+        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
@@ -80,7 +80,7 @@ def test_s3_sync_single_project(
 
     mock_client = _mock_client_ctx()
     with (
-        patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
+        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
@@ -131,7 +131,7 @@ def test_s3_sync_continues_on_resolve_error(
     mock_client.resolve_project_id.side_effect = resolve_side_effect
 
     with (
-        patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
+        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
         app = CliApp()
@@ -155,7 +155,7 @@ def _run_s3_sync_with_cs(
         endpoint_url="http://minio:9000",
     )
     with (
-        patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
+        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
         app = CliApp()

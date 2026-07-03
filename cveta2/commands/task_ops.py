@@ -10,15 +10,16 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2.client import CvatClient
-from cveta2.commands._helpers import require_host, resolve_project_or_exit
-from cveta2.config import CvatConfig, is_interactive_disabled
+from cveta2.commands._bootstrap import open_client
+from cveta2.commands._helpers import resolve_project_or_exit
+from cveta2.config import is_interactive_disabled
 from cveta2.exceptions import TaskNotFoundError
 from cveta2.task_cache import invalidate_local_entry
 
 if TYPE_CHECKING:
     import argparse
 
+    from cveta2.client import CvatClient
     from cveta2.models import TaskInfo
 
 STATE_CLI_TO_CVAT: dict[str, str] = {
@@ -73,9 +74,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
     if not frames and not images:
         sys.exit("Ошибка: укажите хотя бы один --frame или --image.")
 
-    cfg = CvatConfig.load()
-    require_host(cfg)
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, _ = resolve_project_or_exit(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         marked = 0
@@ -91,9 +90,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
 
 def run_task_drop_label(args: argparse.Namespace) -> None:
     """Run ``cveta2 task drop-label``."""
-    cfg = CvatConfig.load()
-    require_host(cfg)
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, _ = resolve_project_or_exit(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         try:
@@ -120,9 +117,7 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
 
 def run_task_delete(args: argparse.Namespace) -> None:
     """Run ``cveta2 task delete``."""
-    cfg = CvatConfig.load()
-    require_host(cfg)
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, _ = resolve_project_or_exit(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         _confirm_or_exit(
@@ -140,9 +135,7 @@ def run_task_status(args: argparse.Namespace) -> None:
         sys.exit("Ошибка: укажите хотя бы один --stage или --state.")
     state = STATE_CLI_TO_CVAT[args.state] if args.state else None
 
-    cfg = CvatConfig.load()
-    require_host(cfg)
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, _ = resolve_project_or_exit(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         num_jobs = client.set_task_jobs_status(task.id, stage=args.stage, state=state)

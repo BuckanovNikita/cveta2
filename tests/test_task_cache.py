@@ -418,11 +418,11 @@ def _run_fetch_task_cached(
         return CvatClient(cfg, api=fake_api)
 
     with (
-        patch(f"{_MODULE}.CvatConfig.load", return_value=CFG),
-        patch(f"{_MODULE}.require_host"),
+        patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
+        patch("cveta2.commands._bootstrap.require_host"),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         patch(f"{_MODULE}.load_ignore_config", return_value=IgnoreConfig()),
-        patch(f"{_MODULE}.CvatClient", side_effect=make_client),
+        patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
         patch(
             "cveta2.client.CvatClient.detect_project_cloud_storage",
             return_value=cs_info,
@@ -575,11 +575,11 @@ class TestFullFetchPrunesCache:
             return CvatClient(cfg, api=api)
 
         with (
-            patch(f"{_MODULE}.CvatConfig.load", return_value=CFG),
-            patch(f"{_MODULE}.require_host"),
+            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
+            patch("cveta2.commands._bootstrap.require_host"),
             patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(f"{_MODULE}.load_ignore_config", return_value=IgnoreConfig()),
-            patch(f"{_MODULE}.CvatClient", side_effect=make_client),
+            patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
             patch(
                 "cveta2.client.CvatClient.detect_project_cloud_storage",
                 return_value=None,

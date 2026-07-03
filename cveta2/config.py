@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import getpass
 import importlib.resources
 import os
 from pathlib import Path
@@ -12,7 +11,7 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, field_validator
 
-from cveta2.exceptions import InteractiveModeRequiredError
+from cveta2.exceptions import InteractiveModeRequiredError, MissingCredentialsError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -260,20 +259,18 @@ class CvatConfig(BaseModel):
         logger.info(f"Config saved to {path}")
         return path
 
-    def ensure_credentials(self) -> CvatConfig:
-        """Prompt interactively for missing credentials.  Returns updated copy."""
-        username = self.username
-        password = self.password
+    def require_credentials(self) -> CvatConfig:
+        """Return self when credentials are present; raise otherwise.
 
-        if not username:
-            require_interactive("Задайте CVAT_USERNAME/CVAT_PASSWORD.")
-            logger.info("Учётные данные не указаны. Введите логин CVAT:")
-            username = input("Имя пользователя: ")
-        if not password:
-            require_interactive("Задайте CVAT_PASSWORD.")
-            password = getpass.getpass(f"Пароль для {username}: ")
-
-        return self.model_copy(update={"username": username, "password": password})
+        Never prompts.  The CLI layer prompts for missing credentials
+        before opening a client (``cveta2.commands._bootstrap``).
+        """
+        if self.username and self.password:
+            return self
+        raise MissingCredentialsError(
+            "Учётные данные CVAT не настроены. Задайте CVAT_USERNAME и "
+            f"CVAT_PASSWORD или заполните cvat.username/password в {CONFIG_PATH}."
+        )
 
 
 # ---------------------------------------------------------------------------

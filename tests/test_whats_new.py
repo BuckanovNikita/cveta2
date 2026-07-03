@@ -123,10 +123,10 @@ def _run_whats_new_with_fake(
 
     args = argparse.Namespace(project="1", dataset=str(dataset_path))
     with (
-        patch(f"{_MODULE}.CvatConfig.load", return_value=CFG),
-        patch(f"{_MODULE}.require_host"),
+        patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
+        patch("cveta2.commands._bootstrap.require_host"),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-        patch(f"{_MODULE}.CvatClient", side_effect=make_client),
+        patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
     ):
         run_whats_new(args)
 

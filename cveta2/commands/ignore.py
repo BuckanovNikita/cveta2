@@ -9,13 +9,12 @@ import questionary
 from loguru import logger
 
 from cveta2.client import CvatClient
+from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
-    require_host,
     resolve_project_from_args,
 )
 from cveta2.commands._task_selector import build_task_choices
 from cveta2.config import (
-    CvatConfig,
     IgnoreConfig,
     IgnoredTask,
     load_ignore_config,
@@ -65,11 +64,9 @@ def run_ignore(args: argparse.Namespace) -> None:
         run_ignore_list()
         return
 
-    cfg = CvatConfig.load()
-    require_host(cfg)
     ignore_cfg = load_ignore_config()
 
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, project_name = _resolve_project(args, client, ignore_cfg)
 
         if args.add:

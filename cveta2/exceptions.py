@@ -21,6 +21,14 @@ class InteractiveModeRequiredError(Cveta2Error):
     """Raised when interactive input is needed but disabled."""
 
 
+class MissingCredentialsError(Cveta2Error):
+    """Raised when CVAT credentials are required but not configured."""
+
+
+class MissingHostError(Cveta2Error):
+    """Raised when the CVAT host is required but not configured."""
+
+
 class CvatApiError(Cveta2Error):
     """CVAT API returned an error response.
 

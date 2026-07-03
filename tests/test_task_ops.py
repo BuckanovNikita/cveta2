@@ -186,7 +186,7 @@ class TestRunTaskCommands:
             project="1", task="task-a", stage=None, state="in-progress"
         )
         with (
-            patch("cveta2.commands.task_ops.CvatClient", return_value=client),
+            patch("cveta2.commands._bootstrap.CvatClient", return_value=client),
             patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         ):
             run_task_status(args)

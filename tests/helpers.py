@@ -34,7 +34,9 @@ if TYPE_CHECKING:
 
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
-CFG: Final = CvatConfig(host="http://fake-cvat")
+CFG: Final = CvatConfig(
+    host="http://fake-cvat", username="test-user", password="test-password"
+)
 
 
 def build_fake(

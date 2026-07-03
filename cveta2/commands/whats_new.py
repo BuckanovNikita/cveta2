@@ -8,13 +8,11 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2.client import CvatClient
+from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
     read_dataset_csv,
-    require_host,
     resolve_project_or_exit,
 )
-from cveta2.config import CvatConfig
 
 if TYPE_CHECKING:
     import argparse
@@ -26,15 +24,12 @@ _REQUIRED_COLUMNS = {"task_updated_date", "task_status", "task_id"}
 
 def run_whats_new(args: argparse.Namespace) -> None:
     """Run the ``whats-new`` command: list tasks completed after a fetched CSV."""
-    cfg = CvatConfig.load()
-    require_host(cfg)
-
     dataset_path = Path(args.dataset)
     df = read_dataset_csv(dataset_path, _REQUIRED_COLUMNS)
     cutoff = _compute_cutoff(df, dataset_path)
     known_task_ids = {int(v) for v in df["task_id"].dropna()}
 
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, project_name = resolve_project_or_exit(args.project, client)
         tasks = client.list_tasks_completed_after(project_id, cutoff)
 

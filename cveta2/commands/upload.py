@@ -10,14 +10,12 @@ import pandas as pd
 import questionary
 from loguru import logger
 
-from cveta2.client import CvatClient
+from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
     read_dataset_csv,
-    require_host,
     resolve_project_or_exit,
 )
 from cveta2.config import (
-    CvatConfig,
     load_image_cache_config,
     load_upload_config,
     require_interactive,
@@ -30,6 +28,7 @@ from cveta2.task_cache import invalidate_local_entry
 if TYPE_CHECKING:
     import argparse
 
+    from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
 
 _NO_ANNOTATION_LABEL = "__no_annotation__"
@@ -224,8 +223,6 @@ def _extract_deleted_names(df: pd.DataFrame) -> set[str]:
 
 def run_upload(args: argparse.Namespace) -> None:
     """Run the ``upload`` command."""
-    cfg = CvatConfig.load()
-    require_host(cfg)
     upload_cfg = load_upload_config()
 
     df = read_dataset_csv(Path(args.dataset), _UPLOAD_REQUIRED_COLUMNS)
@@ -251,7 +248,7 @@ def run_upload(args: argparse.Namespace) -> None:
     all_image_names = image_names | deleted_names
     task_name = _resolve_task_name(args.name)
 
-    with CvatClient(cfg) as client:
+    with open_client() as client:
         project_id, project_name = resolve_project_or_exit(
             args.project,
             client,
@@ -343,4 +340,4 @@ def run_upload(args: argparse.Namespace) -> None:
             f"issues={num_issues}, "
             f"jobs≈{num_jobs} (segment_size={upload_cfg.images_per_job})",
         )
-        logger.info(f"URL: {cfg.host}/tasks/{task_id}")
+        logger.info(f"URL: {client.host}/tasks/{task_id}")
