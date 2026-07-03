@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-import pandas as pd
 import questionary
 from loguru import logger
 
@@ -18,9 +17,12 @@ from cveta2.config import (
 from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
 from cveta2.s3_utils import parse_sync_root
+from cveta2.services.output import read_dataset_csv as services_read_dataset_csv
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    import pandas as pd
 
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
@@ -204,22 +206,14 @@ def read_dataset_csv(
     Exits with a message if the file is missing or columns are invalid.
     When *require_time_column* is True, ``task_updated_date`` must also be present.
     """
-    if not path.is_file():
-        sys.exit(f"Ошибка: файл не найден: {path}")
-    df = pd.read_csv(path, encoding="utf-8")
-    missing = required_columns - set(df.columns)
-    if missing:
-        sys.exit(
-            f"Ошибка: в {path} отсутствуют обязательные столбцы: "
-            f"{', '.join(sorted(missing))}"
+    try:
+        return services_read_dataset_csv(
+            path,
+            required_columns,
+            require_time_column=require_time_column,
         )
-    if require_time_column and "task_updated_date" not in df.columns:
-        sys.exit(
-            f"Ошибка: --by-time требует столбец 'task_updated_date' "
-            f"в {path}, но он отсутствует."
-        )
-    logger.info(f"Загружен {path}: {len(df)} строк")
-    return df
+    except Cveta2Error as e:
+        sys.exit(str(e))
 
 
 def require_host(cfg: CvatConfig) -> None:

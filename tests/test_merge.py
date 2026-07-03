@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from cveta2.commands.merge import (
+from cveta2.exceptions import Cveta2Error
+from cveta2.services.merge import (
     _merge_datasets,
     _propagate_splits,
     _read_deleted_names,
@@ -477,7 +478,7 @@ class TestReadDeletedNames:
     def test_missing_file_exits(self, tmp_path: Path) -> None:
         missing = tmp_path / "does_not_exist.csv"
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(Cveta2Error):
             _read_deleted_names(missing)
 
 
@@ -490,26 +491,26 @@ class TestReadDatasetCsvMerge:
     """Tests for _read_dataset_csv validation in merge context."""
 
     def test_by_time_without_time_column_exits(self, tmp_path: Path) -> None:
-        from cveta2.commands.merge import _read_dataset_csv
+        from cveta2.services.merge import _read_dataset_csv
 
         csv_path = tmp_path / "dataset.csv"
         cols = [*_REQUIRED, "split"]
         csv_path.write_text(",".join(cols) + "\n", encoding="utf-8")
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(Cveta2Error):
             _read_dataset_csv(csv_path, by_time=True)
 
     def test_missing_required_columns_exits(self, tmp_path: Path) -> None:
-        from cveta2.commands.merge import _read_dataset_csv
+        from cveta2.services.merge import _read_dataset_csv
 
         csv_path = tmp_path / "dataset.csv"
         csv_path.write_text("image_name,split\na.jpg,train\n", encoding="utf-8")
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(Cveta2Error):
             _read_dataset_csv(csv_path, by_time=False)
 
     def test_valid_csv_without_time_column_ok(self, tmp_path: Path) -> None:
-        from cveta2.commands.merge import _read_dataset_csv
+        from cveta2.services.merge import _read_dataset_csv
 
         csv_path = tmp_path / "dataset.csv"
         row = _row("a.jpg")

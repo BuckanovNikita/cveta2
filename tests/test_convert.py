@@ -12,20 +12,20 @@ import pandas as pd
 import pytest
 import yaml
 
-from cveta2.commands import convert
-from cveta2.commands.convert import (
+from cveta2.commands.convert import run_convert
+from cveta2.models import CSV_COLUMNS
+from cveta2.services.convert import common as convert
+from cveta2.services.convert.common import (
     CocoBox,
     PixelBox,
     YoloBox,
     _link_or_copy,
-    _parse_label_file,
     _pixel_to_coco,
     _pixel_to_yolo,
     _SizeCache,
     _yolo_to_pixel,
-    run_convert,
 )
-from cveta2.models import CSV_COLUMNS
+from cveta2.services.convert.yolo import _parse_label_file
 from tests.helpers import csv_row, make_args, make_bbox, write_dataset_csv
 
 if TYPE_CHECKING:

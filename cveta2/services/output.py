@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from loguru import logger
 
+from cveta2.exceptions import Cveta2Error
 from cveta2.models import CSV_COLUMNS
 from cveta2.s3_utils import build_s3_key
 
@@ -17,6 +18,35 @@ if TYPE_CHECKING:
     from cveta2.dataset_partition import PartitionResult
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import DeletedImage, ProjectAnnotations
+
+
+def read_dataset_csv(
+    path: Path,
+    required_columns: set[str],
+    *,
+    require_time_column: bool = False,
+) -> pd.DataFrame:
+    """Read a dataset CSV and validate required columns.
+
+    Raises ``Cveta2Error`` if the file is missing or columns are invalid.
+    When *require_time_column* is True, ``task_updated_date`` must also be present.
+    """
+    if not path.is_file():
+        raise Cveta2Error(f"Ошибка: файл не найден: {path}")
+    df = pd.read_csv(path, encoding="utf-8")
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise Cveta2Error(
+            f"Ошибка: в {path} отсутствуют обязательные столбцы: "
+            f"{', '.join(sorted(missing))}"
+        )
+    if require_time_column and "task_updated_date" not in df.columns:
+        raise Cveta2Error(
+            f"Ошибка: --by-time требует столбец 'task_updated_date' "
+            f"в {path}, но он отсутствует."
+        )
+    logger.info(f"Загружен {path}: {len(df)} строк")
+    return df
 
 
 def populate_record_paths(
