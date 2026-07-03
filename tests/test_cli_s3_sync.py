@@ -13,15 +13,12 @@ if TYPE_CHECKING:
 
 from cveta2.cli import CliApp
 from cveta2.image_downloader import CloudStorageInfo, DownloadStats
-from tests.conftest import write_test_config
+from tests.helpers import make_cs_info, mock_client_ctx, write_test_config
 
 
 def _mock_client_ctx() -> MagicMock:
     """Build a mock CvatClient for s3-sync tests."""
-    client = MagicMock()
-    client.__enter__ = MagicMock(return_value=client)
-    client.__exit__ = MagicMock(return_value=False)
-    client.resolve_project_id.return_value = 1
+    client = mock_client_ctx()
     client.detect_project_cloud_storage.return_value = MagicMock()
     client.sync_project_images.return_value = DownloadStats(
         downloaded=5, cached=10, failed=0, total=15
@@ -146,21 +143,17 @@ def test_s3_sync_continues_on_resolve_error(
     assert call_args[0][1] == tmp_path / "images-good"
 
 
-def _cvat_cs_info() -> CloudStorageInfo:
-    return CloudStorageInfo(
-        id=3,
-        bucket="cvat-bucket",
-        prefix="cvat/prefix",
-        endpoint_url="http://minio:9000",
-    )
-
-
 def _run_s3_sync_with_cs(
     mock_client: MagicMock,
     argv: list[str],
 ) -> CloudStorageInfo:
     """Run s3-sync via CLI and return the cs_info passed to sync_project_images."""
-    mock_client.detect_project_cloud_storage.return_value = _cvat_cs_info()
+    mock_client.detect_project_cloud_storage.return_value = make_cs_info(
+        cs_id=3,
+        bucket="cvat-bucket",
+        prefix="cvat/prefix",
+        endpoint_url="http://minio:9000",
+    )
     with (
         patch("cveta2.commands.s3_sync.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),

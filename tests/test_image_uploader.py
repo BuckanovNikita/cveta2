@@ -3,25 +3,21 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-from cveta2.image_downloader import CloudStorageInfo
 from cveta2.image_uploader import build_server_file_mapping
 from cveta2.s3_utils import build_s3_key
+from tests.helpers import make_cs_info
+
+if TYPE_CHECKING:
+    from cveta2.image_downloader import CloudStorageInfo
 
 _MONTH_PREFIX_RE = re.compile(r"\d{4}-\d{2}/.+")
 
 
-def _make_cs_info(
-    bucket: str = "test-bucket",
-    prefix: str = "project/images",
-) -> CloudStorageInfo:
-    return CloudStorageInfo(
-        id=1,
-        bucket=bucket,
-        prefix=prefix,
-        endpoint_url="http://localhost:9000",
-    )
+def _make_cs_info() -> CloudStorageInfo:
+    return make_cs_info(prefix="project/images")
 
 
 def _mock_s3_client(objects: list[tuple[str, str]]) -> MagicMock:

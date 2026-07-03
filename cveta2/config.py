@@ -28,6 +28,11 @@ def is_interactive_disabled() -> bool:
     return os.environ.get("CVETA2_NO_INTERACTIVE", "").lower() == "true"
 
 
+def is_cache_disabled() -> bool:
+    """Return True when CVETA2_DISABLE_CACHE is set to 'true' (case-insensitive)."""
+    return os.environ.get("CVETA2_DISABLE_CACHE", "").lower() == "true"
+
+
 def require_interactive(hint: str) -> None:
     """Raise if interactive prompts are disabled.
 

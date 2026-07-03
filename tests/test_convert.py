@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
 import errno
 import json
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
@@ -25,7 +25,16 @@ from cveta2.commands.convert import (
     _yolo_to_pixel,
     run_convert,
 )
-from cveta2.models import CSV_COLUMNS, BBoxAnnotation
+from cveta2.models import CSV_COLUMNS
+from tests.helpers import csv_row, make_args, make_bbox, write_dataset_csv
+
+if TYPE_CHECKING:
+    import argparse
+
+
+def _make_dataset_csv(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
+    return write_dataset_csv(tmp_path / "dataset.csv", rows, columns=CSV_COLUMNS)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -33,84 +42,6 @@ from cveta2.models import CSV_COLUMNS, BBoxAnnotation
 
 COCO8_ROOT = Path(__file__).parent / "fixtures" / "data" / "coco8"
 COCO8_YAML = Path(__file__).parent / "fixtures" / "data" / "coco8.yaml"
-
-
-def _make_dataset_csv(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
-    csv_path = tmp_path / "dataset.csv"
-    df = pd.DataFrame(rows, columns=list(CSV_COLUMNS))
-    df.to_csv(csv_path, index=False, encoding="utf-8")
-    return csv_path
-
-
-def _box_row(  # noqa: PLR0913
-    image_name: str,
-    label: str,
-    split: str,
-    *,
-    x_tl: float = 10.0,
-    y_tl: float = 20.0,
-    x_br: float = 100.0,
-    y_br: float = 200.0,
-    img_w: int = 640,
-    img_h: int = 480,
-) -> dict[str, object]:
-    row: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
-    row["image_name"] = image_name
-    row["image_width"] = img_w
-    row["image_height"] = img_h
-    row["instance_shape"] = "box"
-    row["instance_label"] = label
-    row["bbox_x_tl"] = x_tl
-    row["bbox_y_tl"] = y_tl
-    row["bbox_x_br"] = x_br
-    row["bbox_y_br"] = y_br
-    row["task_id"] = 1
-    row["task_name"] = "test"
-    row["task_status"] = "completed"
-    row["task_updated_date"] = "2026-01-01T00:00:00Z"
-    row["created_by_username"] = "admin"
-    row["frame_id"] = 0
-    row["split"] = split
-    row["subset"] = ""
-    row["occluded"] = False
-    row["z_order"] = 0
-    row["rotation"] = 0.0
-    row["source"] = "manual"
-    row["annotation_id"] = 1
-    row["confidence"] = None
-    row["attributes"] = json.dumps({})
-    return row
-
-
-def _none_row(
-    image_name: str,
-    split: str,
-    *,
-    img_w: int = 640,
-    img_h: int = 480,
-) -> dict[str, object]:
-    row: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
-    row["image_name"] = image_name
-    row["image_width"] = img_w
-    row["image_height"] = img_h
-    row["instance_shape"] = "none"
-    row["task_id"] = 1
-    row["task_name"] = "test"
-    row["task_status"] = "completed"
-    row["task_updated_date"] = "2026-01-01T00:00:00Z"
-    row["frame_id"] = 1
-    row["split"] = split
-    row["subset"] = ""
-    row["source"] = "manual"
-    row["attributes"] = json.dumps({})
-    return row
-
-
-def _make_args(**kwargs: object) -> argparse.Namespace:
-    ns = argparse.Namespace()
-    for k, v in kwargs.items():
-        setattr(ns, k, v)
-    return ns
 
 
 # ---------------------------------------------------------------------------
@@ -121,23 +52,29 @@ def _make_args(**kwargs: object) -> argparse.Namespace:
 class TestCoordinateConversion:
     """Tests for pixel <-> YOLO coordinate conversion."""
 
-    def test_pixel_to_yolo_basic(self) -> None:
-        yolo = _pixel_to_yolo(PixelBox(100, 50, 200, 150), 400, 300)
-        assert yolo.xc == pytest.approx(0.375)
-        assert yolo.yc == pytest.approx(1.0 / 3.0)
-        assert yolo.w == pytest.approx(0.25)
-        assert yolo.h == pytest.approx(1.0 / 3.0)
-
-    def test_yolo_to_pixel_basic(self) -> None:
-        pixel = _yolo_to_pixel(YoloBox(0.5, 0.5, 0.5, 0.5), 640, 480)
-        assert pixel.x_tl == pytest.approx(160.0)
-        assert pixel.y_tl == pytest.approx(120.0)
-        assert pixel.x_br == pytest.approx(480.0)
-        assert pixel.y_br == pytest.approx(360.0)
-
-    def test_pixel_to_coco_basic(self) -> None:
-        coco = _pixel_to_coco(PixelBox(100, 50, 300, 250))
-        assert coco == CocoBox(x=100, y=50, w=200, h=200)
+    @pytest.mark.parametrize(
+        ("result", "expected"),
+        [
+            (
+                _pixel_to_yolo(PixelBox(100, 50, 200, 150), 400, 300),
+                YoloBox(0.375, 1.0 / 3.0, 0.25, 1.0 / 3.0),
+            ),
+            (
+                _yolo_to_pixel(YoloBox(0.5, 0.5, 0.5, 0.5), 640, 480),
+                PixelBox(160.0, 120.0, 480.0, 360.0),
+            ),
+            (
+                _pixel_to_coco(PixelBox(100, 50, 300, 250)),
+                CocoBox(x=100, y=50, w=200, h=200),
+            ),
+        ],
+    )
+    def test_conversion_directions(
+        self,
+        result: tuple[float, ...],
+        expected: tuple[float, ...],
+    ) -> None:
+        assert result == pytest.approx(expected)
 
     def test_roundtrip(self) -> None:
         """Pixel -> yolo -> pixel should recover original coords."""
@@ -193,28 +130,17 @@ class TestParseLabelFile:
 class TestLinkOrCopy:
     """Tests for _link_or_copy file placement."""
 
-    def test_copy_mode(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("mode", ["copy", "symlink", "hardlink"])
+    def test_link_mode_places_file(self, tmp_path: Path, mode: str) -> None:
         src = tmp_path / "src.txt"
         src.write_text("hello")
         dst = tmp_path / "out" / "dst.txt"
-        _link_or_copy(src, dst, "copy")
+        _link_or_copy(src, dst, mode)
         assert dst.read_text() == "hello"
-
-    def test_symlink_mode(self, tmp_path: Path) -> None:
-        src = tmp_path / "src.txt"
-        src.write_text("hello")
-        dst = tmp_path / "out" / "dst.txt"
-        _link_or_copy(src, dst, "symlink")
-        assert dst.is_symlink()
-        assert dst.read_text() == "hello"
-
-    def test_hardlink_mode(self, tmp_path: Path) -> None:
-        src = tmp_path / "src.txt"
-        src.write_text("hello")
-        dst = tmp_path / "out" / "dst.txt"
-        _link_or_copy(src, dst, "hardlink")
-        assert dst.read_text() == "hello"
-        assert src.stat().st_ino == dst.stat().st_ino
+        if mode == "symlink":
+            assert dst.is_symlink()
+        if mode == "hardlink":
+            assert src.stat().st_ino == dst.stat().st_ino
 
     def test_skip_existing(self, tmp_path: Path) -> None:
         src = tmp_path / "src.txt"
@@ -238,35 +164,28 @@ class TestReflinkFallback:
         src.write_text("hello")
         return src
 
-    def test_reflink_mode_falls_back_on_exdev(
+    @pytest.mark.parametrize(
+        ("mode", "patch_target"),
+        [
+            ("reflink", "reflink_copy.reflink"),
+            ("auto", "reflink_copy.reflink_or_copy"),
+        ],
+    )
+    def test_falls_back_to_copy_on_oserror(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         capture_logs: list[str],
+        mode: str,
+        patch_target: str,
     ) -> None:
-        def failing_reflink(_src: str, _dst: str) -> None:
+        def failing(_src: str, _dst: str) -> None:
             raise OSError(errno.EXDEV, "Invalid cross-device link")
 
-        monkeypatch.setattr("reflink_copy.reflink", failing_reflink)
+        monkeypatch.setattr(patch_target, failing)
         src = self._make_src(tmp_path)
         dst = tmp_path / "out" / "dst.txt"
-        _link_or_copy(src, dst, "reflink")
-        assert dst.read_text() == "hello"
-        assert any("reflink недоступен" in m for m in capture_logs)
-
-    def test_auto_mode_falls_back_on_oserror(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        capture_logs: list[str],
-    ) -> None:
-        def failing_reflink_or_copy(_src: str, _dst: str) -> None:
-            raise OSError(errno.EXDEV, "Invalid cross-device link")
-
-        monkeypatch.setattr("reflink_copy.reflink_or_copy", failing_reflink_or_copy)
-        src = self._make_src(tmp_path)
-        dst = tmp_path / "out" / "dst.txt"
-        _link_or_copy(src, dst, "auto")
+        _link_or_copy(src, dst, mode)
         assert dst.read_text() == "hello"
         assert any("reflink недоступен" in m for m in capture_logs)
 
@@ -341,52 +260,13 @@ class TestConfidenceField:
         assert "confidence" in CSV_COLUMNS
 
     def test_bbox_annotation_with_confidence(self) -> None:
-        ann = BBoxAnnotation(
-            image_name="test.jpg",
-            image_width=640,
-            image_height=480,
-            instance_label="cat",
-            bbox_x_tl=10,
-            bbox_y_tl=20,
-            bbox_x_br=100,
-            bbox_y_br=200,
-            task_id=1,
-            task_name="test",
-            frame_id=0,
-            subset="",
-            occluded=False,
-            z_order=0,
-            rotation=0.0,
-            source="manual",
-            annotation_id=1,
-            confidence=0.95,
-            attributes={},
-        )
+        ann = make_bbox(confidence=0.95)
         assert ann.confidence == 0.95
         row = ann.to_csv_row()
         assert row["confidence"] == 0.95
 
     def test_bbox_annotation_without_confidence(self) -> None:
-        ann = BBoxAnnotation(
-            image_name="test.jpg",
-            image_width=640,
-            image_height=480,
-            instance_label="cat",
-            bbox_x_tl=10,
-            bbox_y_tl=20,
-            bbox_x_br=100,
-            bbox_y_br=200,
-            task_id=1,
-            task_name="test",
-            frame_id=0,
-            subset="",
-            occluded=False,
-            z_order=0,
-            rotation=0.0,
-            source="manual",
-            annotation_id=1,
-            attributes={},
-        )
+        ann = make_bbox()
         assert ann.confidence is None
         row = ann.to_csv_row()
         assert row["confidence"] is None
@@ -409,21 +289,21 @@ class TestToYolo:
         Image.new("RGB", (640, 480)).save(img_dir / "test.jpg")
 
         rows = [
-            _box_row("test.jpg", "cat", "train"),
-            _box_row(
+            csv_row("test.jpg", label="cat", split="train"),
+            csv_row(
                 "test.jpg",
-                "dog",
-                "train",
-                x_tl=200,
-                y_tl=100,
-                x_br=300,
-                y_br=250,
+                label="dog",
+                split="train",
+                bbox_x_tl=200,
+                bbox_y_tl=100,
+                bbox_x_br=300,
+                bbox_y_br=250,
             ),
         ]
         csv_path = _make_dataset_csv(tmp_path, rows)
 
         out_dir = tmp_path / "yolo_out"
-        args = _make_args(
+        args = make_args(
             to_yolo=True,
             from_yolo=False,
             dataset=str(csv_path),
@@ -456,11 +336,11 @@ class TestToYolo:
 
         Image.new("RGB", (640, 480)).save(img_dir / "empty.jpg")
 
-        rows = [_none_row("empty.jpg", "val")]
+        rows = [csv_row("empty.jpg", shape="none", split="val")]
         csv_path = _make_dataset_csv(tmp_path, rows)
 
         out_dir = tmp_path / "yolo_out"
-        args = _make_args(
+        args = make_args(
             to_yolo=True,
             from_yolo=False,
             dataset=str(csv_path),
@@ -475,25 +355,6 @@ class TestToYolo:
         assert label_path.is_file()
         assert label_path.read_text() == ""
 
-    def test_missing_split_error(self, tmp_path: Path) -> None:
-        """Should error if any image has no split."""
-        rows = [_box_row("test.jpg", "cat", "train")]
-        rows[0]["split"] = None
-        csv_path = _make_dataset_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        args = _make_args(
-            to_yolo=True,
-            from_yolo=False,
-            dataset=str(csv_path),
-            output=str(out_dir),
-            link_mode="copy",
-            image_dir=[],
-            names_file=None,
-        )
-        with pytest.raises(SystemExit):
-            run_convert(args)
-
     def test_only_existing_splits_in_yaml(self, tmp_path: Path) -> None:
         """dataset.yaml should only include splits that exist in data."""
         img_dir = tmp_path / "images"
@@ -502,11 +363,11 @@ class TestToYolo:
 
         Image.new("RGB", (640, 480)).save(img_dir / "test.jpg")
 
-        rows = [_box_row("test.jpg", "cat", "val")]
+        rows = [csv_row("test.jpg", label="cat", split="val")]
         csv_path = _make_dataset_csv(tmp_path, rows)
 
         out_dir = tmp_path / "yolo_out"
-        args = _make_args(
+        args = make_args(
             to_yolo=True,
             from_yolo=False,
             dataset=str(csv_path),
@@ -547,7 +408,7 @@ class TestFromYoloDataset:
             yaml.dump(coco_cfg, f)
 
         output_csv = tmp_path / "output.csv"
-        args = _make_args(
+        args = make_args(
             to_yolo=False,
             from_yolo=True,
             input=str(ds_copy),
@@ -587,7 +448,7 @@ class TestFromYoloDataset:
             yaml.dump({"names": {0: "cat", 1: "dog"}}, f)
 
         output_csv = tmp_path / "output.csv"
-        args = _make_args(
+        args = make_args(
             to_yolo=False,
             from_yolo=True,
             input=str(pred_dir),
@@ -625,23 +486,23 @@ class TestRoundtrip:
         Image.new("RGB", (640, 480)).save(img_dir / "test.jpg")
 
         original_rows = [
-            _box_row(
+            csv_row(
                 "test.jpg",
-                "cat",
-                "train",
-                x_tl=50.0,
-                y_tl=30.0,
-                x_br=200.0,
-                y_br=180.0,
+                label="cat",
+                split="train",
+                bbox_x_tl=50.0,
+                bbox_y_tl=30.0,
+                bbox_x_br=200.0,
+                bbox_y_br=180.0,
             ),
-            _box_row(
+            csv_row(
                 "test.jpg",
-                "dog",
-                "train",
-                x_tl=300.0,
-                y_tl=100.0,
-                x_br=500.0,
-                y_br=400.0,
+                label="dog",
+                split="train",
+                bbox_x_tl=300.0,
+                bbox_y_tl=100.0,
+                bbox_x_br=500.0,
+                bbox_y_br=400.0,
             ),
         ]
         original_rows[1]["annotation_id"] = 2
@@ -650,7 +511,7 @@ class TestRoundtrip:
         # CSV -> YOLO
         yolo_dir = tmp_path / "yolo"
         run_convert(
-            _make_args(
+            make_args(
                 to_yolo=True,
                 from_yolo=False,
                 dataset=str(csv_path),
@@ -664,7 +525,7 @@ class TestRoundtrip:
         # YOLO -> CSV
         roundtrip_csv = tmp_path / "roundtrip.csv"
         run_convert(
-            _make_args(
+            make_args(
                 to_yolo=False,
                 from_yolo=True,
                 input=str(yolo_dir),
@@ -740,7 +601,7 @@ class TestSizeCache:
 
 def _coco_args(tmp_path: Path, csv_path: Path, img_dir: Path) -> argparse.Namespace:
     out_dir = tmp_path / "coco_out"
-    return _make_args(
+    return make_args(
         to_yolo=False,
         from_yolo=False,
         to_coco=True,
@@ -750,6 +611,30 @@ def _coco_args(tmp_path: Path, csv_path: Path, img_dir: Path) -> argparse.Namesp
         image_dir=[str(img_dir)],
         names_file=None,
     )
+
+
+@pytest.mark.parametrize("export_format", ["yolo", "coco"])
+def test_missing_split_error(tmp_path: Path, export_format: str) -> None:
+    """--to-yolo and --to-coco both error when any image has no split."""
+    rows = [csv_row("test.jpg", label="cat", split="train")]
+    rows[0]["split"] = None
+    csv_path = _make_dataset_csv(tmp_path, rows)
+
+    if export_format == "yolo":
+        args = make_args(
+            to_yolo=True,
+            from_yolo=False,
+            dataset=str(csv_path),
+            output=str(tmp_path / "yolo_out"),
+            link_mode="copy",
+            image_dir=[],
+            names_file=None,
+        )
+    else:
+        args = _coco_args(tmp_path, csv_path, tmp_path)
+
+    with pytest.raises(SystemExit):
+        run_convert(args)
 
 
 class TestToCoco:
@@ -767,7 +652,15 @@ class TestToCoco:
         self._make_image(img_dir / "test.jpg")
 
         rows = [
-            _box_row("test.jpg", "cat", "train", x_tl=10, y_tl=20, x_br=110, y_br=120),
+            csv_row(
+                "test.jpg",
+                label="cat",
+                split="train",
+                bbox_x_tl=10,
+                bbox_y_tl=20,
+                bbox_x_br=110,
+                bbox_y_br=120,
+            ),
         ]
         csv_path = _make_dataset_csv(tmp_path, rows)
         args = _coco_args(tmp_path, csv_path, img_dir)
@@ -807,7 +700,7 @@ class TestToCoco:
         img_dir.mkdir()
         self._make_image(img_dir / "test.jpg")
 
-        rows = [_box_row("test.jpg", "cat", "val")]
+        rows = [csv_row("test.jpg", label="cat", split="val")]
         csv_path = _make_dataset_csv(tmp_path, rows)
         args = _coco_args(tmp_path, csv_path, img_dir)
         run_convert(args)
@@ -822,7 +715,7 @@ class TestToCoco:
         img_dir.mkdir()
         self._make_image(img_dir / "empty.jpg")
 
-        rows = [_none_row("empty.jpg", "train")]
+        rows = [csv_row("empty.jpg", shape="none", split="train")]
         csv_path = _make_dataset_csv(tmp_path, rows)
         args = _coco_args(tmp_path, csv_path, img_dir)
         run_convert(args)
@@ -836,15 +729,6 @@ class TestToCoco:
         assert coco["images"][0]["file_name"] == "empty.jpg"
         assert len(coco["annotations"]) == 0
 
-    def test_missing_split_error(self, tmp_path: Path) -> None:
-        """Should error if any image has no split."""
-        rows = [_box_row("test.jpg", "cat", "train")]
-        rows[0]["split"] = None
-        csv_path = _make_dataset_csv(tmp_path, rows)
-        args = _coco_args(tmp_path, csv_path, tmp_path)
-        with pytest.raises(SystemExit):
-            run_convert(args)
-
     def test_multiple_labels_1based_ids(self, tmp_path: Path) -> None:
         """Sorted labels should get 1-based category IDs."""
         img_dir = tmp_path / "images"
@@ -854,9 +738,9 @@ class TestToCoco:
         self._make_image(img_dir / "c.jpg")
 
         rows = [
-            _box_row("a.jpg", "zebra", "train"),
-            _box_row("b.jpg", "apple", "train"),
-            _box_row("c.jpg", "mango", "train"),
+            csv_row("a.jpg", label="zebra", split="train"),
+            csv_row("b.jpg", label="apple", split="train"),
+            csv_row("c.jpg", label="mango", split="train"),
         ]
         csv_path = _make_dataset_csv(tmp_path, rows)
         args = _coco_args(tmp_path, csv_path, img_dir)

@@ -20,8 +20,7 @@ from cveta2.commands.labels import (
 from cveta2.config import CvatConfig
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import LabelAttributeInfo, LabelInfo
-from tests.conftest import build_fake
-from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.helpers import build_fake, make_fake_client
 
 if TYPE_CHECKING:
     from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -136,7 +135,7 @@ def test_get_project_labels_returns_fixture_labels(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
     fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-    client = CvatClient(_CFG, api=FakeCvatApi(fake))
+    client = make_fake_client(fake)
     labels = client.get_project_labels(fake.project.id)
     assert len(labels) == len(fake.labels)
     assert all(isinstance(lbl, LabelInfo) for lbl in labels)
@@ -155,7 +154,7 @@ def test_count_label_usage_shapes_per_label(
 ) -> None:
     """Normal task has shapes; count_label_usage aggregates them."""
     fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-    client = CvatClient(_CFG, api=FakeCvatApi(fake))
+    client = make_fake_client(fake)
     counts = client.count_label_usage(fake.project.id)
     total = sum(counts.values())
     assert total == 30
@@ -165,7 +164,7 @@ def test_count_label_usage_empty_task(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
     fake = build_fake(coco8_fixtures, ["all-empty"], statuses=["completed"])
-    client = CvatClient(_CFG, api=FakeCvatApi(fake))
+    client = make_fake_client(fake)
     counts = client.count_label_usage(fake.project.id)
     assert sum(counts.values()) == 0
 
@@ -178,7 +177,7 @@ def test_count_label_usage_multiple_tasks(
         ["normal", "all-bboxes-moved"],
         statuses=["completed", "completed"],
     )
-    client = CvatClient(_CFG, api=FakeCvatApi(fake))
+    client = make_fake_client(fake)
     counts = client.count_label_usage(fake.project.id)
     total = sum(counts.values())
     assert total > 30
@@ -189,7 +188,7 @@ def test_count_label_usage_ids_match_labels(
 ) -> None:
     """All label_ids in usage come from the project's labels."""
     fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-    client = CvatClient(_CFG, api=FakeCvatApi(fake))
+    client = make_fake_client(fake)
     counts = client.count_label_usage(fake.project.id)
     label_ids = {lbl.id for lbl in fake.labels}
     for lid in counts:
@@ -201,7 +200,7 @@ def test_count_label_usage_deleted_frames_counted(
 ) -> None:
     """Shapes on deleted frames are still counted (they exist in CVAT)."""
     fake = build_fake(coco8_fixtures, ["all-removed"], statuses=["completed"])
-    client = CvatClient(_CFG, api=FakeCvatApi(fake))
+    client = make_fake_client(fake)
     counts = client.count_label_usage(fake.project.id)
     assert sum(counts.values()) == 30
 
@@ -336,46 +335,17 @@ def test_add_new_label() -> None:
     assert len(result) == 4
 
 
-def test_add_empty_name_cancels() -> None:
+@pytest.mark.parametrize("name", ["", None, "cat", "CAT"])
+def test_add_rejected_name_no_update(name: str | None) -> None:
+    """Empty/None cancels and duplicate (case-insensitive) names are rejected."""
     mock_client = MagicMock()
 
     with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.text.return_value.ask.return_value = ""
+        mock_q.text.return_value.ask.return_value = name
         result = _interactive_add(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-def test_add_none_cancels() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.text.return_value.ask.return_value = None
-        _interactive_add(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
-
-
-def test_add_duplicate_name_rejects() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.text.return_value.ask.return_value = "cat"
-        result = _interactive_add(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
-    assert result == list(_LABELS)
-
-
-def test_add_duplicate_case_insensitive() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.text.return_value.ask.return_value = "CAT"
-        _interactive_add(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
 
 
 def test_add_strips_whitespace() -> None:
@@ -446,23 +416,14 @@ def test_rename_same_name_noop() -> None:
     mock_client.update_project_labels.assert_not_called()
 
 
-def test_rename_to_existing_name_rejects() -> None:
+@pytest.mark.parametrize("new_name", ["dog", "DOG"])
+def test_rename_to_existing_name_rejects(new_name: str) -> None:
+    """Renaming to an existing name (case-insensitive) is rejected."""
     mock_client = MagicMock()
 
     with patch("cveta2.commands.labels.questionary") as mock_q:
         mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = "dog"
-        _interactive_rename(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
-
-
-def test_rename_to_existing_case_insensitive() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = "DOG"
+        mock_q.text.return_value.ask.return_value = new_name
         _interactive_rename(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_not_called()
@@ -562,26 +523,18 @@ def test_delete_multiple_labels_with_annotations() -> None:
     assert len(result) == 1
 
 
-def test_delete_empty_selection_cancels() -> None:
+@pytest.mark.parametrize("selection", [[], None])
+def test_delete_empty_selection_cancels(selection: list[int] | None) -> None:
+    """Empty or None checkbox selection cancels before any usage lookup."""
     mock_client = MagicMock()
 
     with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = []
+        mock_q.checkbox.return_value.ask.return_value = selection
         result = _interactive_delete(mock_client, 1, list(_LABELS))
 
     mock_client.count_label_usage.assert_not_called()
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-def test_delete_none_selection_cancels() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = None
-        _interactive_delete(mock_client, 1, list(_LABELS))
-
-    mock_client.count_label_usage.assert_not_called()
 
 
 def test_delete_label_no_annotations_among_annotated() -> None:
@@ -656,27 +609,18 @@ def test_recolor_cancel_select() -> None:
     assert result == list(_LABELS)
 
 
-def test_recolor_empty_cancels() -> None:
+@pytest.mark.parametrize("color", ["", None])
+def test_recolor_empty_cancels(color: str | None) -> None:
+    """Empty or None color entry cancels after selecting a label."""
     mock_client = MagicMock()
 
     with patch("cveta2.commands.labels.questionary") as mock_q:
         mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = ""
+        mock_q.text.return_value.ask.return_value = color
         result = _interactive_recolor(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-def test_recolor_none_cancels() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = None
-        _interactive_recolor(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
 
 
 def test_recolor_same_color_noop() -> None:

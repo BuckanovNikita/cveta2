@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pandas as pd
-from cvat_sdk.api_client.exceptions import ApiException
 
 from cveta2._client.context import _build_frame_issues, _TaskContext
 from cveta2._client.dtos import (
@@ -20,7 +19,6 @@ from cveta2._client.dtos import (
 from cveta2._client.extractors import _collect_shapes
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.client import CvatClient, FetchContext, _task_to_records
-from cveta2.config import CvatConfig
 from cveta2.models import (
     BBoxAnnotation,
     ImageWithoutAnnotations,
@@ -28,9 +26,9 @@ from cveta2.models import (
     ProjectInfo,
     TaskInfo,
 )
-from tests.conftest import make_bbox, make_fake_client
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
+from tests.helpers import CFG, make_bbox, make_fake_client, make_raw_shape, make_task
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,30 +38,12 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 
-def _make_task(task_id: int = 100) -> TaskInfo:
-    return TaskInfo(
-        id=task_id,
-        name="task-issues",
-        status="completed",
-        subset="train",
-        updated_date="2026-01-01T00:00:00+00:00",
-    )
+def _make_task() -> TaskInfo:
+    return make_task(100, name="task-issues", subset="train")
 
 
 def _make_shape(shape_id: int, frame: int) -> RawShape:
-    return RawShape(
-        id=shape_id,
-        type="rectangle",
-        frame=frame,
-        label_id=1,
-        points=[1.0, 2.0, 3.0, 4.0],
-        occluded=False,
-        z_order=0,
-        rotation=0.0,
-        source="manual",
-        attributes=[],
-        created_by="tester",
-    )
+    return make_raw_shape(id=shape_id, frame=frame, points=[1.0, 2.0, 3.0, 4.0])
 
 
 def _make_data_meta(num_frames: int) -> RawDataMeta:
@@ -76,7 +56,7 @@ def _make_data_meta(num_frames: int) -> RawDataMeta:
 def _client_with_mocked_sdk(
     sdk: MagicMock, adapter: MagicMock | None = None
 ) -> CvatClient:
-    client = CvatClient(CvatConfig(host="http://cvat.test"))
+    client = CvatClient(CFG)
     client._sdk_client = sdk
     persistent = adapter if adapter is not None else MagicMock()
     persistent.client = sdk
@@ -239,12 +219,14 @@ class TestFetchedRecordsCarryIssueColumns:
             },
         )
 
-        class _FailingIssuesApi(FakeCvatApi):
-            def get_task_issues(self, task_id: int) -> list[RawIssue]:
-                raise ApiException(status=403, reason=f"Forbidden for {task_id}")
-
+        failing_api = FakeCvatApi(
+            fixtures,
+            fail_task_ids={task.id},
+            fail_status=403,
+            fail_methods=("get_task_issues",),
+        )
         ctx = FetchContext(tasks=[task], label_names={1: "car"}, attr_names={})
-        result = CvatClient.fetch_one_task(_FailingIssuesApi(fixtures), task, ctx)
+        result = CvatClient.fetch_one_task(failing_api, task, ctx)
         assert result is not None
         assert len(result.annotations) == 1
         first = result.annotations[0]

@@ -20,21 +20,18 @@ from cveta2.models import (
     ProjectAnnotations,
     TaskInfo,
 )
-from tests.conftest import build_fake, make_fake_client
 from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.helpers import build_fake, make_fake_client
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue
-    from cveta2.models import LabelInfo, ProjectInfo
+    from cveta2._client.dtos import RawAnnotations, RawDataMeta
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_CFG = CvatConfig()
 
 _IMAGE_NAMES = [
     "000000000009.jpg",
@@ -46,36 +43,6 @@ _IMAGE_NAMES = [
     "000000000049.jpg",
     "000000000061.jpg",
 ]
-
-
-class _FailingTaskApi:
-    """CvatApiPort wrapper that raises ApiException(500) for a given task id."""
-
-    def __init__(self, delegate: FakeCvatApi, failing_task_id: int) -> None:
-        self._delegate = delegate
-        self._failing_task_id = failing_task_id
-
-    def list_projects(self) -> list[ProjectInfo]:
-        return self._delegate.list_projects()
-
-    def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
-        return self._delegate.get_project_tasks(project_id)
-
-    def get_project_labels(self, project_id: int) -> list[LabelInfo]:
-        return self._delegate.get_project_labels(project_id)
-
-    def get_task_data_meta(self, task_id: int) -> RawDataMeta:
-        if task_id == self._failing_task_id:
-            raise ApiException(status=500, reason="Internal Server Error")
-        return self._delegate.get_task_data_meta(task_id)
-
-    def get_task_annotations(self, task_id: int) -> RawAnnotations:
-        if task_id == self._failing_task_id:
-            raise ApiException(status=500, reason="Internal Server Error")
-        return self._delegate.get_task_annotations(task_id)
-
-    def get_task_issues(self, task_id: int) -> list[RawIssue]:
-        return self._delegate.get_task_issues(task_id)
 
 
 def _with_dates(
@@ -218,31 +185,6 @@ def test_mixed_tasks_aggregation(coco8_fixtures: LoadedFixtures) -> None:
     assert len(without_records) == 8  # only from all-empty
 
 
-def test_deleted_then_restored(coco8_fixtures: LoadedFixtures) -> None:
-    """Image deleted in older task, re-annotated in newer -- not deleted."""
-    fake = build_fake(
-        coco8_fixtures,
-        ["all-removed", "normal"],
-        statuses=["completed", "completed"],
-    )
-    fake = _with_dates(
-        fake,
-        {
-            0: "2026-01-01T00:00:00+00:00",
-            1: "2026-02-01T00:00:00+00:00",
-        },
-    )
-
-    _result, partition = _fetch_and_partition(fake)
-
-    assert partition.deleted_images == []
-    assert len(partition.dataset) > 0
-    assert fake.tasks[1].id in set(partition.dataset["task_id"].unique())
-    assert len(partition.obsolete) > 0
-    assert fake.tasks[0].id in set(partition.obsolete["task_id"].unique())
-    assert len(partition.in_progress) == 0
-
-
 def test_completed_only_filter(coco8_fixtures: LoadedFixtures) -> None:
     """completed_only=True skips non-completed tasks."""
     fake = build_fake(
@@ -280,72 +222,58 @@ def test_csv_rows_structure(coco8_fixtures: LoadedFixtures) -> None:
         assert isinstance(row["attributes"], str)
 
 
-def test_full_pipeline_fetch_to_partition(
+def test_fetch_to_partition_restore_and_three_way(
     coco8_fixtures: LoadedFixtures,
 ) -> None:
-    """Newer task's annotations go to dataset, older to obsolete."""
+    """Fetch feeds partition: restore wins, non-completed -> in_progress.
+
+    Combines three pipeline behaviours end-to-end:
+    - a frame deleted in an older completed task but re-annotated in a
+      newer completed task is NOT reported deleted (restore wins);
+    - a non-completed task fetched alongside produces ``in_progress`` rows;
+    - an externally-injected deletion newer than every task wins, sending
+      its images to ``deleted``/``obsolete``.
+    """
     fake = build_fake(
         coco8_fixtures,
-        ["normal", "all-bboxes-moved"],
-        statuses=["completed", "completed"],
-    )
-    fake = _with_dates(
-        fake,
-        {
-            0: "2026-02-01T00:00:00+00:00",
-            1: "2026-01-01T00:00:00+00:00",
-        },
-    )
-
-    _result, partition = _fetch_and_partition(fake)
-
-    assert fake.tasks[0].id in set(partition.dataset["task_id"].unique())
-    assert fake.tasks[1].id in set(partition.obsolete["task_id"].unique())
-
-
-def test_partition_with_deleted_and_in_progress(
-    coco8_fixtures: LoadedFixtures,
-) -> None:
-    """Three-way partition: completed + in_progress + external deletion."""
-    fake = build_fake(
-        coco8_fixtures,
-        ["normal", "all-empty"],
-        statuses=["completed", "annotation"],
+        ["all-removed", "normal", "all-empty"],
+        statuses=["completed", "completed", "annotation"],
     )
     fake = _with_dates(
         fake,
         {
             0: "2026-01-01T00:00:00+00:00",
-            1: "2026-01-15T00:00:00+00:00",
+            1: "2026-02-01T00:00:00+00:00",
+            2: "2026-01-15T00:00:00+00:00",
         },
     )
 
     result = make_fake_client(fake).fetch_annotations(fake.project.id)
-    rows = result.to_csv_rows()
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(result.to_csv_rows())
 
-    # Inject synthetic deletions newer than both tasks
-    deleted_extra = [
-        DeletedImage(
-            task_id=999,
-            task_name="external-delete",
-            task_status="completed",
-            task_updated_date="2026-02-01T00:00:00+00:00",
-            frame_id=i,
-            image_name=_IMAGE_NAMES[i],
-        )
-        for i in range(2)
-    ]
-    all_deleted = list(result.deleted_images) + deleted_extra
+    external_delete = DeletedImage(
+        task_id=999,
+        task_name="external-delete",
+        task_status="completed",
+        task_updated_date="2026-03-01T00:00:00+00:00",
+        frame_id=0,
+        image_name=_IMAGE_NAMES[0],
+    )
+    all_deleted = [*result.deleted_images, external_delete]
     partition = partition_annotations_df(df, all_deleted)
 
-    assert sorted(d.image_name for d in partition.deleted_images) == sorted(
-        _IMAGE_NAMES[:2]
-    )
-    for name in _IMAGE_NAMES[:2]:
-        assert name in set(partition.obsolete["image_name"])
-    assert len(partition.dataset) > 0
+    # Only the external deletion survives; the older all-removed deletions
+    # are overridden by the newer normal re-annotation (restore wins).
+    assert [d.image_name for d in partition.deleted_images] == [_IMAGE_NAMES[0]]
+    assert _IMAGE_NAMES[0] in set(partition.obsolete["image_name"])
+
+    # The non-completed all-empty task contributes in_progress rows.
     assert len(partition.in_progress) > 0
+    assert fake.tasks[2].id in set(partition.in_progress["task_id"].unique())
+
+    # The completed normal task feeds the dataset for its non-deleted frames.
+    assert len(partition.dataset) > 0
+    assert fake.tasks[1].id in set(partition.dataset["task_id"].unique())
 
 
 def test_5xx_task_skipped(coco8_fixtures: LoadedFixtures) -> None:
@@ -356,8 +284,8 @@ def test_5xx_task_skipped(coco8_fixtures: LoadedFixtures) -> None:
         statuses=["completed", "completed"],
     )
     failing_task_id = fake.tasks[1].id
-    api = _FailingTaskApi(FakeCvatApi(fake), failing_task_id=failing_task_id)
-    client = CvatClient(_CFG, api=api)
+    api = FakeCvatApi(fake, fail_task_ids={failing_task_id})
+    client = CvatClient(CvatConfig(), api=api)
 
     result = client.fetch_annotations(
         fake.project.id,
@@ -376,14 +304,8 @@ def test_4xx_error_propagated(coco8_fixtures: LoadedFixtures) -> None:
     """Non-5xx ApiException (e.g. 404) is re-raised, not swallowed."""
     fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
 
-    class _NotFoundApi(_FailingTaskApi):
-        def get_task_data_meta(self, task_id: int) -> RawDataMeta:
-            if task_id == self._failing_task_id:
-                raise ApiException(status=404, reason="Not Found")
-            return self._delegate.get_task_data_meta(task_id)
-
-    api = _NotFoundApi(FakeCvatApi(fake), failing_task_id=fake.tasks[0].id)
-    client = CvatClient(_CFG, api=api)
+    api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id}, fail_status=404)
+    client = CvatClient(CvatConfig(), api=api)
 
     with pytest.raises(ApiException) as exc_info:
         client.fetch_annotations(fake.project.id)
@@ -401,8 +323,8 @@ def test_5xx_raise_on_failure(
         statuses=["completed", "completed"],
     )
     failing_task_id = fake.tasks[1].id
-    api = _FailingTaskApi(FakeCvatApi(fake), failing_task_id=failing_task_id)
-    client = CvatClient(_CFG, api=api)
+    api = FakeCvatApi(fake, fail_task_ids={failing_task_id})
+    client = CvatClient(CvatConfig(), api=api)
 
     monkeypatch.setenv("CVETA2_RAISE_ON_FAILURE", "true")
     with pytest.raises(ApiException) as exc_info:

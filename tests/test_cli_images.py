@@ -9,17 +9,12 @@ import pytest
 
 from cveta2.cli import CliApp
 from cveta2.client import FetchContext
-from tests.conftest import write_test_config
+from tests.helpers import mock_client_ctx, write_test_config
 
 
-def _mock_client_ctx(
-    project_id: int = 1,
-) -> MagicMock:
+def _mock_client_ctx(project_id: int = 1) -> MagicMock:
     """Build a mock CvatClient that returns empty annotations."""
-    client = MagicMock()
-    client.__enter__ = MagicMock(return_value=client)
-    client.__exit__ = MagicMock(return_value=False)
-    client.resolve_project_id.return_value = project_id
+    client = mock_client_ctx(project_id=project_id)
     client.detect_project_cloud_storage.return_value = None
     client.prepare_fetch.return_value = FetchContext(
         tasks=[],

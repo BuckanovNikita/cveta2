@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from cveta2._client.context import _TaskContext
-from cveta2._client.dtos import RawAttribute, RawFrame, RawShape
+from cveta2._client.dtos import RawAttribute, RawFrame
 from cveta2._client.extractors import _collect_shapes
+from tests.helpers import make_raw_shape
 
 if TYPE_CHECKING:
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
@@ -37,27 +38,6 @@ def _make_ctx(
         task_updated_date="2026-01-01T00:00:00+00:00",
         subset="train",
     )
-
-
-_DEFAULT_POINTS = [10.0, 20.0, 100.0, 200.0]
-
-_SHAPE_DEFAULTS: dict[str, Any] = {
-    "id": 1,
-    "type": "rectangle",
-    "frame": 0,
-    "label_id": 1,
-    "points": _DEFAULT_POINTS,
-    "occluded": False,
-    "z_order": 0,
-    "rotation": 0.0,
-    "source": "manual",
-    "attributes": [],
-    "created_by": "tester",
-}
-
-
-def _make_shape(**overrides: Any) -> RawShape:
-    return RawShape(**{**_SHAPE_DEFAULTS, **overrides})
 
 
 def _ctx_for(
@@ -146,8 +126,8 @@ def test_all_except_first_empty(
 def test_non_rectangle_shape_skipped() -> None:
     """Non-rectangle shapes are skipped."""
     ctx = _make_ctx()
-    polygon = _make_shape(type="polygon")
-    rect = _make_shape(id=2)
+    polygon = make_raw_shape(type="polygon")
+    rect = make_raw_shape(id=2)
     result = _collect_shapes([polygon, rect], ctx)
 
     assert len(result) == 1
@@ -157,8 +137,8 @@ def test_non_rectangle_shape_skipped() -> None:
 def test_missing_frame_skipped() -> None:
     """Shape referencing a non-existent frame is skipped."""
     ctx = _make_ctx()
-    bad_frame = _make_shape(frame=999)
-    good = _make_shape(id=2, frame=0)
+    bad_frame = make_raw_shape(frame=999)
+    good = make_raw_shape(id=2, frame=0)
     result = _collect_shapes([bad_frame, good], ctx)
 
     assert len(result) == 1
@@ -168,7 +148,7 @@ def test_missing_frame_skipped() -> None:
 def test_unknown_label_fallback() -> None:
     """Shape with unknown label_id gets instance_label '<unknown>'."""
     ctx = _make_ctx(label_names={})
-    shape = _make_shape(label_id=9999)
+    shape = make_raw_shape(label_id=9999)
     result = _collect_shapes([shape], ctx)
 
     assert len(result) == 1
@@ -182,7 +162,7 @@ def test_attributes_resolved() -> None:
         RawAttribute(spec_id=10, value="red"),
         RawAttribute(spec_id=11, value="BMW"),
     ]
-    shape = _make_shape(attributes=attrs)
+    shape = make_raw_shape(attributes=attrs)
     result = _collect_shapes([shape], ctx)
 
     assert len(result) == 1
@@ -192,8 +172,8 @@ def test_attributes_resolved() -> None:
 def test_multiple_shapes_on_same_frame() -> None:
     """Two shapes on the same frame are both collected."""
     ctx = _make_ctx()
-    s1 = _make_shape(id=1, frame=0, label_id=1)
-    s2 = _make_shape(id=2, frame=0, label_id=2)
+    s1 = make_raw_shape(id=1, frame=0, label_id=1)
+    s2 = make_raw_shape(id=2, frame=0, label_id=2)
     result = _collect_shapes([s1, s2], ctx)
 
     assert len(result) == 2
@@ -204,7 +184,7 @@ def test_multiple_shapes_on_same_frame() -> None:
 def test_non_rectangle_shape_logs_warning(capture_logs: list[str]) -> None:
     """Non-rectangle shape is skipped and a warning is logged."""
     ctx = _make_ctx()
-    polygon = _make_shape(type="polygon")
+    polygon = make_raw_shape(type="polygon")
 
     result = _collect_shapes([polygon], ctx)
 

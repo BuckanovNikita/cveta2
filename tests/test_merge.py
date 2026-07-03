@@ -13,9 +13,9 @@ from cveta2.commands.merge import (
     _read_deleted_names,
     _resolve_by_time,
 )
+from tests.helpers import csv_row, make_args, make_df, write_dataset_csv
 
 if TYPE_CHECKING:
-    import argparse
     from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -38,26 +38,14 @@ def _row(
     label: str = "cat",
     split: str | None = None,
     task_updated_date: str | None = None,
-) -> dict[str, str | float | None]:
-    d: dict[str, str | float | None] = {
-        "image_name": image,
-        "instance_shape": "box",
-        "instance_label": label,
-        "bbox_x_tl": 0.0,
-        "bbox_y_tl": 0.0,
-        "bbox_x_br": 1.0,
-        "bbox_y_br": 1.0,
-        "split": split,
-    }
-    if task_updated_date is not None:
-        d["task_updated_date"] = task_updated_date
-    return d
+) -> dict[str, object]:
+    if task_updated_date is None:
+        return csv_row(image, label=label, split=split)
+    return csv_row(image, label=label, split=split, updated=task_updated_date)
 
 
-def _df(rows: list[dict[str, str | float | None]]) -> pd.DataFrame:
-    if not rows:
-        return pd.DataFrame(columns=[*_REQUIRED, "split"])
-    return pd.DataFrame(rows)
+def _df(rows: list[dict[str, object]]) -> pd.DataFrame:
+    return make_df(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -271,17 +259,15 @@ def _trow(
     date: str | None = None,
     label: str = "cat",
     split: str | None = None,
-) -> dict[str, str | float | None]:
+) -> dict[str, object]:
     """Row helper that always includes task_updated_date."""
     d = _row(image, label=label, split=split)
     d["task_updated_date"] = date
     return d
 
 
-def _tdf(rows: list[dict[str, str | float | None]]) -> pd.DataFrame:
-    if not rows:
-        return pd.DataFrame(columns=[*_REQUIRED, "split", "task_updated_date"])
-    return pd.DataFrame(rows)
+def _tdf(rows: list[dict[str, object]]) -> pd.DataFrame:
+    return make_df(rows)
 
 
 class TestResolveByTime:
@@ -527,6 +513,7 @@ class TestReadDatasetCsvMerge:
 
         csv_path = tmp_path / "dataset.csv"
         row = _row("a.jpg")
+        del row["task_updated_date"]
         df = pd.DataFrame([row])
         df.to_csv(csv_path, index=False, encoding="utf-8")
 
@@ -543,9 +530,6 @@ class TestReadDatasetCsvMerge:
 class TestRunMerge:
     """Tests for run_merge with real temp files."""
 
-    def _write_csv(self, path: Path, rows: list[dict[str, str | float | None]]) -> None:
-        pd.DataFrame(rows).to_csv(path, index=False, encoding="utf-8")
-
     def test_basic_merge_output(self, tmp_path: Path) -> None:
         from cveta2.commands.merge import run_merge
 
@@ -553,10 +537,10 @@ class TestRunMerge:
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
-        self._write_csv(old_path, [_row("a.jpg", split="train")])
-        self._write_csv(new_path, [_row("a.jpg"), _row("b.jpg")])
+        write_dataset_csv(old_path, [_row("a.jpg", split="train")])
+        write_dataset_csv(new_path, [_row("a.jpg"), _row("b.jpg")])
 
-        args = _make_args(
+        args = make_args(
             old=str(old_path),
             new=str(new_path),
             output=str(out_path),
@@ -579,11 +563,11 @@ class TestRunMerge:
         del_path = tmp_path / "deleted.csv"
         out_path = tmp_path / "merged.csv"
 
-        self._write_csv(old_path, [_row("a.jpg"), _row("b.jpg")])
-        self._write_csv(new_path, [_row("a.jpg"), _row("c.jpg")])
+        write_dataset_csv(old_path, [_row("a.jpg"), _row("b.jpg")])
+        write_dataset_csv(new_path, [_row("a.jpg"), _row("c.jpg")])
         del_path.write_text("image_name\na.jpg\n", encoding="utf-8")
 
-        args = _make_args(
+        args = make_args(
             old=str(old_path),
             new=str(new_path),
             output=str(out_path),
@@ -604,16 +588,16 @@ class TestRunMerge:
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
-        self._write_csv(
+        write_dataset_csv(
             old_path,
             [_trow("a.jpg", date=_T_NEW, label="old_label")],
         )
-        self._write_csv(
+        write_dataset_csv(
             new_path,
             [_trow("a.jpg", date=_T_OLD, label="new_label")],
         )
 
-        args = _make_args(
+        args = make_args(
             old=str(old_path),
             new=str(new_path),
             output=str(out_path),
@@ -632,10 +616,12 @@ class TestRunMerge:
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
-        self._write_csv(old_path, [_row("a.jpg")])
-        self._write_csv(new_path, [_row("a.jpg")])
+        no_time = _row("a.jpg")
+        del no_time["task_updated_date"]
+        write_dataset_csv(old_path, [dict(no_time)])
+        write_dataset_csv(new_path, [dict(no_time)])
 
-        args = _make_args(
+        args = make_args(
             old=str(old_path),
             new=str(new_path),
             output=str(out_path),
@@ -645,27 +631,3 @@ class TestRunMerge:
 
         with pytest.raises(SystemExit):
             run_merge(args)
-
-
-# ---------------------------------------------------------------------------
-# Helpers for CLI tests
-# ---------------------------------------------------------------------------
-
-
-def _make_args(
-    *,
-    old: str,
-    new: str,
-    output: str,
-    deleted: str | None,
-    by_time: bool,
-) -> argparse.Namespace:
-    import argparse
-
-    return argparse.Namespace(
-        old=old,
-        new=new,
-        output=output,
-        deleted=deleted,
-        by_time=by_time,
-    )

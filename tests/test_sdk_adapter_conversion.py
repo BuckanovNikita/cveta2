@@ -9,8 +9,11 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from cveta2._client.dtos import RawAttribute, RawDataMeta, RawFrame
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter, _log_retry
+from tests.helpers import make_sdk_shape
 
 # ---------------------------------------------------------------------------
 # _extract_updated_date
@@ -104,14 +107,12 @@ class TestDataMetaFromDict:
         assert result.frames == [RawFrame(name="a.jpg", width=100, height=200)]
         assert result.deleted_frames == [1]
 
-    def test_missing_keys_default(self) -> None:
-        result = SdkCvatApiAdapter._data_meta_from_dict({})
-        assert result == RawDataMeta(frames=[], deleted_frames=[])
-
-    def test_none_values_default(self) -> None:
-        result = SdkCvatApiAdapter._data_meta_from_dict(
-            {"frames": None, "deleted_frames": None}
-        )
+    @pytest.mark.parametrize(
+        "data",
+        [{}, {"frames": None, "deleted_frames": None}],
+    )
+    def test_empty_or_none_defaults(self, data: dict[str, object]) -> None:
+        result = SdkCvatApiAdapter._data_meta_from_dict(data)
         assert result == RawDataMeta(frames=[], deleted_frames=[])
 
     def test_frame_missing_fields_default_to_zero(self) -> None:
@@ -126,26 +127,8 @@ class TestDataMetaFromDict:
 
 
 class TestConvertShape:
-    def _make_shape(self, **overrides: object) -> SimpleNamespace:
-        defaults = {
-            "id": 1,
-            "type": SimpleNamespace(value="rectangle"),
-            "frame": 0,
-            "label_id": 10,
-            "points": [1.0, 2.0, 3.0, 4.0],
-            "occluded": False,
-            "z_order": 0,
-            "rotation": 0.0,
-            "source": "manual",
-            "attributes": [],
-            "created_by": None,
-            "owner": None,
-        }
-        defaults.update(overrides)
-        return SimpleNamespace(**defaults)
-
     def test_basic_rectangle(self) -> None:
-        shape = self._make_shape()
+        shape = make_sdk_shape()
         result = SdkCvatApiAdapter._convert_shape(shape)
         assert result.type == "rectangle"
         assert result.points == [1.0, 2.0, 3.0, 4.0]
@@ -153,12 +136,12 @@ class TestConvertShape:
 
     def test_with_attributes(self) -> None:
         attr = SimpleNamespace(spec_id=5, value="true")
-        shape = self._make_shape(attributes=[attr])
+        shape = make_sdk_shape(attributes=[attr])
         result = SdkCvatApiAdapter._convert_shape(shape)
         assert result.attributes == [RawAttribute(spec_id=5, value="true")]
 
     def test_none_attributes(self) -> None:
-        shape = self._make_shape(attributes=None)
+        shape = make_sdk_shape(attributes=None)
         result = SdkCvatApiAdapter._convert_shape(shape)
         assert result.attributes == []
 

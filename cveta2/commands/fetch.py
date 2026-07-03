@@ -22,6 +22,7 @@ from cveta2.commands._helpers import (
 from cveta2.commands._task_selector import select_tasks_tui
 from cveta2.config import (
     CvatConfig,
+    is_cache_disabled,
     is_interactive_disabled,
     load_ignore_config,
     load_image_cache_config,
@@ -174,11 +175,12 @@ def _build_task_cache(
 ) -> TaskAnnotationCache | None:
     """Build the task-annotation cache for a fetch run.
 
-    ``--no-cache`` disables caching entirely.  The S3 backend always uses
-    the project's original CVAT cloud storage prefix (never a user
-    override), so all users share one cache location.
+    ``--no-cache`` (or ``CVETA2_DISABLE_CACHE=true``) disables caching
+    entirely.  The S3 backend always uses the project's original CVAT
+    cloud storage prefix (never a user override), so all users share one
+    cache location.
     """
-    if args.no_cache:
+    if args.no_cache or is_cache_disabled():
         return None
     s3_backend = S3CacheBackend.from_cloud_storage(
         client.detect_project_cloud_storage(project_id)

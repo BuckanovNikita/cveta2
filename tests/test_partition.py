@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-import pandas as pd
+from typing import TYPE_CHECKING
+
+import pytest
 
 from cveta2.dataset_partition import partition_annotations_df
-from cveta2.models import DeletedImage
+from tests.helpers import csv_row, make_deleted, make_df
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,35 +25,12 @@ def _row(
     task_id: int,
     updated: str,
     status: str = "completed",
-) -> dict[str, str | int]:
-    return {
-        "image_name": image,
-        "task_id": task_id,
-        "task_updated_date": updated,
-        "task_status": status,
-    }
+) -> dict[str, object]:
+    return csv_row(image, task_id=task_id, updated=updated, status=status)
 
 
-def _df(rows: list[dict[str, str | int]]) -> pd.DataFrame:
-    if not rows:
-        return pd.DataFrame(columns=_COLS)
-    return pd.DataFrame(rows)
-
-
-def _deleted(
-    image: str,
-    task_id: int,
-    updated: str,
-    status: str = "completed",
-) -> DeletedImage:
-    return DeletedImage(
-        task_id=task_id,
-        task_name=f"task-{task_id}",
-        task_status=status,
-        task_updated_date=updated,
-        frame_id=0,
-        image_name=image,
-    )
+def _df(rows: list[dict[str, object]]) -> pd.DataFrame:
+    return make_df(rows, columns=_COLS)
 
 
 # ---------------------------------------------------------------------------
@@ -95,35 +77,35 @@ def test_single_in_progress_task() -> None:
     assert result.deleted_images == []
 
 
-def test_deleted_image_latest_task() -> None:
-    """Image deleted in a newer task -- annotation row goes to obsolete."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),  # older completed
-    ]
-    deleted = [
-        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # newer deletion
-    ]
+@pytest.mark.parametrize(
+    ("ann_task", "ann_date", "del_task", "del_date", "deletion_wins"),
+    [
+        (1, "2026-01-01T00:00:00", 2, "2026-01-02T00:00:00", True),
+        (2, "2026-01-02T00:00:00", 1, "2026-01-01T00:00:00", False),
+    ],
+)
+def test_deleted_image_by_date_relation(
+    ann_task: int,
+    ann_date: str,
+    del_task: int,
+    del_date: str,
+    *,
+    deletion_wins: bool,
+) -> None:
+    """Deletion newer than annotation -> obsolete/deleted; older -> dataset/alive."""
+    rows = [_row("a.jpg", ann_task, ann_date)]
+    deleted = [make_deleted("a.jpg", del_task, del_date)]
     result = partition_annotations_df(_df(rows), deleted)
 
-    assert len(result.dataset) == 0
-    assert len(result.obsolete) == 1
-    assert result.obsolete["image_name"].iloc[0] == "a.jpg"
-    assert [d.image_name for d in result.deleted_images] == ["a.jpg"]
-
-
-def test_deleted_image_older_task() -> None:
-    """Image deleted in an older task -- annotation row stays in dataset."""
-    rows = [
-        _row("a.jpg", 2, "2026-01-02T00:00:00"),  # newer completed
-    ]
-    deleted = [
-        _deleted("a.jpg", 1, "2026-01-01T00:00:00"),  # older deletion
-    ]
-    result = partition_annotations_df(_df(rows), deleted)
-
-    assert len(result.dataset) == 1
-    assert len(result.obsolete) == 0
-    assert result.deleted_images == []
+    if deletion_wins:
+        assert len(result.dataset) == 0
+        assert len(result.obsolete) == 1
+        assert result.obsolete["image_name"].iloc[0] == "a.jpg"
+        assert [d.image_name for d in result.deleted_images] == ["a.jpg"]
+    else:
+        assert len(result.dataset) == 1
+        assert len(result.obsolete) == 0
+        assert result.deleted_images == []
 
 
 def test_deleted_then_restored() -> None:
@@ -138,7 +120,7 @@ def test_deleted_then_restored() -> None:
         _row("a.jpg", 2, "2026-01-03T00:00:00"),  # T2 completed (newer)
     ]
     deleted = [
-        _deleted("a.jpg", 1, "2026-01-02T00:00:00"),  # deletion from T1
+        make_deleted("a.jpg", 1, "2026-01-02T00:00:00"),  # deletion from T1
     ]
     result = partition_annotations_df(_df(rows), deleted)
 
@@ -187,7 +169,7 @@ def test_image_only_in_deleted_registry() -> None:
         _row("a.jpg", 1, "2026-01-01T00:00:00"),
     ]
     deleted = [
-        _deleted("phantom.jpg", 2, "2026-01-02T00:00:00"),  # not in df
+        make_deleted("phantom.jpg", 2, "2026-01-02T00:00:00"),  # not in df
     ]
     result = partition_annotations_df(_df(rows), deleted)
 
@@ -203,8 +185,8 @@ def test_all_images_deleted() -> None:
         _row("b.jpg", 1, "2026-01-01T00:00:00"),
     ]
     deleted = [
-        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),
-        _deleted("b.jpg", 2, "2026-01-02T00:00:00"),
+        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),
+        make_deleted("b.jpg", 2, "2026-01-02T00:00:00"),
     ]
     result = partition_annotations_df(_df(rows), deleted)
 
@@ -235,7 +217,7 @@ def test_mixed_partition() -> None:
         _row("img_del.jpg", 1, "2026-01-01T00:00:00"),
     ]
     deleted = [
-        _deleted("img_del.jpg", 4, "2026-01-04T00:00:00"),
+        make_deleted("img_del.jpg", 4, "2026-01-04T00:00:00"),
     ]
 
     result = partition_annotations_df(_df(rows), deleted)
@@ -280,7 +262,7 @@ def test_deleted_image_with_annotations_in_same_task() -> None:
     ]
     deleted = [
         # Same task marks the image as deleted (same date as annotation)
-        _deleted("img.jpg", 2, "2026-01-02T00:00:00"),
+        make_deleted("img.jpg", 2, "2026-01-02T00:00:00"),
     ]
     result = partition_annotations_df(_df(rows), deleted)
 
@@ -349,8 +331,8 @@ def test_duplicate_deleted_image_entries() -> None:
         _row("a.jpg", 1, "2026-01-01T00:00:00"),
     ]
     deleted = [
-        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),
-        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # duplicate
+        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),
+        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # duplicate
     ]
     result = partition_annotations_df(_df(rows), deleted)
 
@@ -382,7 +364,7 @@ def test_deleted_then_restored_several_tasks_later() -> None:
         _row("a.jpg", 5, "2026-01-05T00:00:00"),  # T5: re-annotated
     ]
     deleted = [
-        _deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # T2: deletion
+        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # T2: deletion
     ]
     result = partition_annotations_df(_df(rows), deleted)
 

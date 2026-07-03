@@ -16,7 +16,7 @@ from cveta2.commands.upload import (
     _read_exclude_names,
     _warn_missing_images,
 )
-from cveta2.image_downloader import CloudStorageInfo
+from tests.helpers import make_cs_info
 
 # ---------------------------------------------------------------------------
 # _read_exclude_names
@@ -144,16 +144,10 @@ def test_warn_missing_many_items_truncated(capture_logs: list[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_cs_info() -> CloudStorageInfo:
-    return CloudStorageInfo(
-        id=1, bucket="test-bucket", prefix="images", endpoint_url="http://s3"
-    )
-
-
 def test_enrich_paths_adds_columns() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg", "b.jpg"], "label": ["x", "y"]})
     found = {"a.jpg": Path("/data/a.jpg")}
-    result = _enrich_paths(df, _make_cs_info(), found)
+    result = _enrich_paths(df, make_cs_info(), found)
     assert "s3_image_path" in result.columns
     assert "image_path" in result.columns
     assert result.iloc[0]["s3_image_path"] == "images/a.jpg"
@@ -164,7 +158,7 @@ def test_enrich_paths_adds_columns() -> None:
 def test_enrich_paths_with_server_file_mapping() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg"]})
     mapping = {"a.jpg": "2026-01/a.jpg"}
-    result = _enrich_paths(df, _make_cs_info(), {}, mapping)
+    result = _enrich_paths(df, make_cs_info(), {}, mapping)
     assert result.iloc[0]["s3_image_path"] == "images/2026-01/a.jpg"
 
 

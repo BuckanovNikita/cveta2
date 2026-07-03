@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 from unittest.mock import MagicMock
+
+import pytest
 
 from cveta2.image_downloader import (
     CloudStorageInfo,
@@ -18,11 +20,10 @@ from cveta2.models import (
     ProjectAnnotations,
 )
 from cveta2.s3_utils import build_s3_key, list_s3_objects, parse_sync_root
+from tests.helpers import make_bbox
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 class _FakeCloudStorage:
@@ -115,25 +116,11 @@ def _make_s3_client(objects: dict[str, bytes]) -> MagicMock:
 
 
 def _ann(task_id: int, frame_id: int, image_name: str) -> BBoxAnnotation:
-    return BBoxAnnotation(
+    return make_bbox(
         image_name=image_name,
-        image_width=640,
-        image_height=480,
-        instance_label="cat",
-        bbox_x_tl=0.0,
-        bbox_y_tl=0.0,
-        bbox_x_br=100.0,
-        bbox_y_br=100.0,
         task_id=task_id,
         task_name="task",
         frame_id=frame_id,
-        subset="",
-        occluded=False,
-        z_order=0,
-        rotation=0.0,
-        source="manual",
-        annotation_id=1,
-        attributes={},
     )
 
 
@@ -569,52 +556,66 @@ def testlist_s3_objects_skips_prefix_marker() -> None:
 # --- S3Syncer tests ---
 
 
-def test_s3_syncer_downloads_all_objects(
+class _SyncCase(NamedTuple):
+    s3_objects: dict[str, bytes]
+    pre_cached: dict[str, bytes]
+    expected: tuple[int, int, int, int]  # total, downloaded, cached, failed
+    expected_files: dict[str, bytes]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            _SyncCase(
+                {
+                    "images/a.jpg": b"data-a",
+                    "images/b.jpg": b"data-b",
+                    "images/c.png": b"data-c",
+                },
+                {},
+                (3, 3, 0, 0),
+                {"a.jpg": b"data-a", "b.jpg": b"data-b", "c.png": b"data-c"},
+            ),
+            id="downloads-all",
+        ),
+        pytest.param(
+            _SyncCase(
+                {"images/a.jpg": b"data-a", "images/b.jpg": b"data-b"},
+                {"a.jpg": b"old-data-a"},
+                (2, 1, 1, 0),
+                {"a.jpg": b"old-data-a", "b.jpg": b"data-b"},
+            ),
+            id="skips-already-cached",
+        ),
+        pytest.param(
+            _SyncCase(
+                {"images/a.jpg": b"data-a"},
+                {"a.jpg": b"existing"},
+                (1, 0, 1, 0),
+                {"a.jpg": b"existing"},
+            ),
+            id="all-cached",
+        ),
+        pytest.param(
+            _SyncCase({}, {}, (0, 0, 0, 0), {}),
+            id="empty-bucket",
+        ),
+    ],
+)
+def test_s3_syncer_stats(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    case: _SyncCase,
 ) -> None:
-    """S3Syncer downloads all objects from the prefix."""
-    s3_objects = {
-        "images/a.jpg": b"data-a",
-        "images/b.jpg": b"data-b",
-        "images/c.png": b"data-c",
-    }
-    fake_s3 = _make_list_s3_client(s3_objects)
-    _patch_boto_sync(monkeypatch, fake_s3)
-
-    cs_info = CloudStorageInfo(
-        id=1,
-        bucket="test-bucket",
-        prefix="images",
-        endpoint_url="http://minio:9000",
-    )
+    """S3Syncer download/cache/failed accounting and on-disk contents."""
     target = tmp_path / "sync-dir"
-    syncer = S3Syncer(target)
-    stats = syncer.sync(cs_info)
+    if case.pre_cached:
+        target.mkdir(parents=True)
+        for name, data in case.pre_cached.items():
+            (target / name).write_bytes(data)
 
-    assert stats.total == 3
-    assert stats.downloaded == 3
-    assert stats.cached == 0
-    assert stats.failed == 0
-    assert (target / "a.jpg").read_bytes() == b"data-a"
-    assert (target / "b.jpg").read_bytes() == b"data-b"
-    assert (target / "c.png").read_bytes() == b"data-c"
-
-
-def test_s3_syncer_skips_already_cached(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """S3Syncer skips files that already exist locally."""
-    s3_objects = {
-        "images/a.jpg": b"data-a",
-        "images/b.jpg": b"data-b",
-    }
-    target = tmp_path / "sync-dir"
-    target.mkdir(parents=True)
-    (target / "a.jpg").write_bytes(b"old-data-a")
-
-    fake_s3 = _make_list_s3_client(s3_objects)
+    fake_s3 = _make_list_s3_client(case.s3_objects)
     _patch_boto_sync(monkeypatch, fake_s3)
 
     cs_info = CloudStorageInfo(
@@ -623,66 +624,15 @@ def test_s3_syncer_skips_already_cached(
         prefix="images",
         endpoint_url="http://minio:9000",
     )
-    syncer = S3Syncer(target)
-    stats = syncer.sync(cs_info)
+    stats = S3Syncer(target).sync(cs_info)
 
-    assert stats.total == 2
-    assert stats.cached == 1
-    assert stats.downloaded == 1
-    assert stats.failed == 0
-    # Cached file should NOT be overwritten
-    assert (target / "a.jpg").read_bytes() == b"old-data-a"
-    assert (target / "b.jpg").read_bytes() == b"data-b"
-
-
-def test_s3_syncer_all_cached(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """S3Syncer reports all cached when everything is already local."""
-    s3_objects = {
-        "images/a.jpg": b"data-a",
-    }
-    target = tmp_path / "sync-dir"
-    target.mkdir(parents=True)
-    (target / "a.jpg").write_bytes(b"existing")
-
-    fake_s3 = _make_list_s3_client(s3_objects)
-    _patch_boto_sync(monkeypatch, fake_s3)
-
-    cs_info = CloudStorageInfo(
-        id=1,
-        bucket="test-bucket",
-        prefix="images",
-        endpoint_url="http://minio:9000",
-    )
-    syncer = S3Syncer(target)
-    stats = syncer.sync(cs_info)
-
-    assert stats.total == 1
-    assert stats.cached == 1
-    assert stats.downloaded == 0
-
-
-def test_s3_syncer_empty_bucket(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """S3Syncer handles empty bucket gracefully."""
-    fake_s3 = _make_list_s3_client({})
-    _patch_boto_sync(monkeypatch, fake_s3)
-
-    cs_info = CloudStorageInfo(
-        id=1,
-        bucket="test-bucket",
-        prefix="images",
-        endpoint_url="http://minio:9000",
-    )
-    syncer = S3Syncer(tmp_path / "sync-dir")
-    stats = syncer.sync(cs_info)
-
-    assert stats.total == 0
-    assert stats.downloaded == 0
+    total, downloaded, cached, failed = case.expected
+    assert stats.total == total
+    assert stats.downloaded == downloaded
+    assert stats.cached == cached
+    assert stats.failed == failed
+    for name, data in case.expected_files.items():
+        assert (target / name).read_bytes() == data
 
 
 def test_s3_syncer_creates_target_dir(

@@ -27,8 +27,8 @@ from cveta2.config import (
 )
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import CSV_COLUMNS, TaskInfo
-from tests.conftest import build_fake, make_fake_client
 from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.helpers import CFG, build_fake, make_fake_client, make_fetch_args
 
 if TYPE_CHECKING:
     from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -37,33 +37,7 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_CFG = CvatConfig(host="http://fake-cvat")
-
 _MODULE = "cveta2.commands.fetch"
-
-
-def _make_args(  # noqa: PLR0913
-    *,
-    project: str | None = "1",
-    task: list[str] | None = None,
-    output_dir: str,
-    completed_only: bool = False,
-    no_images: bool = True,
-    no_cache: bool = True,
-    force: bool = False,
-) -> argparse.Namespace:
-    """Build an argparse.Namespace that mimics parsed fetch-task CLI args."""
-    return argparse.Namespace(
-        project=project,
-        task=task,
-        output_dir=output_dir,
-        completed_only=completed_only,
-        no_images=no_images,
-        images_dir=None,
-        save_tasks=False,
-        no_cache=no_cache,
-        force=force,
-    )
 
 
 def _run_fetch_task_with_fake(
@@ -85,7 +59,7 @@ def _run_fetch_task_with_fake(
     ic = ignore_config if ignore_config is not None else IgnoreConfig()
 
     with (
-        patch(f"{_MODULE}.CvatConfig.load", return_value=_CFG),
+        patch(f"{_MODULE}.CvatConfig.load", return_value=CFG),
         patch(f"{_MODULE}.require_host"),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         patch(f"{_MODULE}.load_ignore_config", return_value=ic),
@@ -111,7 +85,7 @@ class TestResolveTaskSelector:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         client = make_fake_client(fake)
         task_id_str = str(fake.tasks[0].id)
-        args = _make_args(task=[task_id_str], output_dir="unused")
+        args = make_fetch_args(task=[task_id_str], output_dir="unused")
 
         result = _resolve_task_selector(args, client, fake.project.id, None)
 
@@ -122,7 +96,7 @@ class TestResolveTaskSelector:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         client = make_fake_client(fake)
         task_name = fake.tasks[0].name
-        args = _make_args(task=[task_name], output_dir="unused")
+        args = make_fetch_args(task=[task_name], output_dir="unused")
 
         result = _resolve_task_selector(args, client, fake.project.id, None)
 
@@ -137,7 +111,7 @@ class TestResolveTaskSelector:
         )
         client = make_fake_client(fake)
         ids = [str(t.id) for t in fake.tasks]
-        args = _make_args(task=ids, output_dir="unused")
+        args = make_fetch_args(task=ids, output_dir="unused")
 
         result = _resolve_task_selector(args, client, fake.project.id, None)
 
@@ -147,7 +121,7 @@ class TestResolveTaskSelector:
         """``-t`` without a value (empty string) falls through to TUI."""
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         client = make_fake_client(fake)
-        args = _make_args(task=[""], output_dir="unused")
+        args = make_fetch_args(task=[""], output_dir="unused")
 
         with (
             patch(
@@ -162,7 +136,7 @@ class TestResolveTaskSelector:
         """``task=None`` (no -t flag at all) falls through to TUI."""
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         client = make_fake_client(fake)
-        args = _make_args(task=None, output_dir="unused")
+        args = make_fetch_args(task=None, output_dir="unused")
 
         with (
             patch(
@@ -181,7 +155,7 @@ class TestResolveTaskSelector:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
         client = make_fake_client(fake)
         task_name = fake.tasks[0].name
-        args = _make_args(task=["  ", task_name, ""], output_dir="unused")
+        args = make_fetch_args(task=["  ", task_name, ""], output_dir="unused")
 
         result = _resolve_task_selector(args, client, fake.project.id, None)
 
@@ -348,29 +322,38 @@ class TestFilterTasksSilent:
 class TestIgnoredTaskSilent:
     """Tests for the ``silent`` field on ``IgnoredTask``."""
 
-    def test_parse_silent_true(self) -> None:
-        """``_parse_ignore_entry`` reads ``silent: true``."""
-        entry = _parse_ignore_entry({"id": 5, "name": "t5", "silent": True})
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (
+                {"id": 5, "name": "t5", "silent": True},
+                IgnoredTask(id=5, name="t5", silent=True),
+            ),
+            ({"id": 5, "name": "t5"}, IgnoredTask(id=5, name="t5", silent=False)),
+        ],
+    )
+    def test_parse_silent(self, raw: dict[str, object], expected: IgnoredTask) -> None:
+        """``_parse_ignore_entry`` reads ``silent`` (defaulting to False)."""
+        entry = _parse_ignore_entry(raw)
         assert entry is not None
-        assert entry.silent is True
+        assert entry.silent is expected.silent
 
-    def test_parse_silent_absent_defaults_false(self) -> None:
-        """Missing ``silent`` key defaults to False."""
-        entry = _parse_ignore_entry({"id": 5, "name": "t5"})
-        assert entry is not None
-        assert entry.silent is False
-
-    def test_serialize_silent_true(self) -> None:
+    @pytest.mark.parametrize(
+        ("entry", "expected"),
+        [
+            (IgnoredTask(id=5, name="t5", silent=True), {"silent": True}),
+            (IgnoredTask(id=5, name="t5", silent=False), {}),
+        ],
+    )
+    def test_serialize_silent(
+        self, entry: IgnoredTask, expected: dict[str, object]
+    ) -> None:
         """``_serialize_ignore_entry`` includes ``silent`` only when True."""
-        entry = IgnoredTask(id=5, name="t5", silent=True)
         data = _serialize_ignore_entry(entry)
-        assert data["silent"] is True
-
-    def test_serialize_silent_false_omitted(self) -> None:
-        """``_serialize_ignore_entry`` omits ``silent`` when False."""
-        entry = IgnoredTask(id=5, name="t5", silent=False)
-        data = _serialize_ignore_entry(entry)
-        assert "silent" not in data
+        if "silent" in expected:
+            assert data["silent"] == expected["silent"]
+        else:
+            assert "silent" not in data
 
     def test_get_silent_task_ids(self) -> None:
         """``get_silent_task_ids`` returns only IDs with ``silent=True``."""
@@ -501,97 +484,51 @@ class TestResolveImagesDir:
 class TestRunFetchTaskIntegration:
     """Integration tests for ``run_fetch_task``."""
 
-    def test_happy_path_output_files(
+    def test_happy_path_writes_dataset_and_deleted(
         self,
         coco8_fixtures: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
-        """Normal single-task fetch writes dataset.csv and deleted.csv."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        task_name = fake.tasks[0].name
-        args = _make_args(
+        """Combined fetch writes a full dataset.csv and deleted.csv output."""
+        fake = build_fake(
+            coco8_fixtures,
+            ["normal", "all-empty", "all-removed"],
+            statuses=["completed", "completed", "completed"],
+        )
+        out_dir = tmp_path / "nested" / "deep" / "output"
+        args = make_fetch_args(
             project=str(fake.project.id),
-            task=[task_name],
-            output_dir=str(tmp_path / "out"),
+            task=[t.name for t in fake.tasks],
+            output_dir=str(out_dir),
         )
 
         _run_fetch_task_with_fake(fake, args)
 
-        dataset_csv = tmp_path / "out" / "dataset.csv"
-        deleted_csv = tmp_path / "out" / "deleted.csv"
+        dataset_csv = out_dir / "dataset.csv"
+        deleted_csv = out_dir / "deleted.csv"
         assert dataset_csv.exists()
         assert deleted_csv.exists()
 
         df = pd.read_csv(dataset_csv)
-        assert len(df) > 0
-        assert set(CSV_COLUMNS).issubset(set(df.columns))
-
-        deleted_df = pd.read_csv(deleted_csv)
-        assert len(deleted_df) == 0
-        assert set(CSV_COLUMNS).issubset(set(deleted_df.columns))
-
-    def test_output_csv_has_all_columns(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """Output dataset.csv contains all canonical CSV_COLUMNS."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        args = _make_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name],
-            output_dir=str(tmp_path / "out"),
-        )
-
-        _run_fetch_task_with_fake(fake, args)
-
-        df = pd.read_csv(tmp_path / "out" / "dataset.csv")
         assert set(df.columns) == set(CSV_COLUMNS)
 
-    def test_with_deleted_frames(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """Task with deleted frames writes deleted.csv with instance_shape='deleted'."""
-        fake = build_fake(coco8_fixtures, ["all-removed"], statuses=["completed"])
-        args = _make_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name],
-            output_dir=str(tmp_path / "out"),
-        )
+        task_ids_in_csv = set(df["task_id"].unique())
+        assert {fake.tasks[0].id, fake.tasks[1].id}.issubset(task_ids_in_csv)
 
-        _run_fetch_task_with_fake(fake, args)
+        bbox_rows = df[df["instance_shape"] == "box"]
+        assert len(bbox_rows) > 0
+        for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
+            assert bbox_rows[col].notna().all()
 
-        deleted_csv = tmp_path / "out" / "deleted.csv"
+        without_rows = df[df["instance_shape"] == "none"]
+        assert len(without_rows) == 8
+        for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
+            assert without_rows[col].isna().all()
+
         deleted_df = pd.read_csv(deleted_csv)
+        assert set(CSV_COLUMNS).issubset(set(deleted_df.columns))
         assert len(deleted_df) == 8
         assert (deleted_df["instance_shape"] == "deleted").all()
-
-    def test_completed_only_filter(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """``--completed-only`` skips non-completed tasks."""
-        fake = build_fake(
-            coco8_fixtures,
-            ["normal", "all-empty"],
-            statuses=["completed", "annotation"],
-        )
-        args = _make_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name, fake.tasks[1].name],
-            output_dir=str(tmp_path / "out"),
-            completed_only=True,
-        )
-
-        _run_fetch_task_with_fake(fake, args)
-
-        df = pd.read_csv(tmp_path / "out" / "dataset.csv")
-        task_ids_in_csv = set(df["task_id"].unique())
-        assert fake.tasks[0].id in task_ids_in_csv
-        assert fake.tasks[1].id not in task_ids_in_csv
 
     def test_ignored_tasks_excluded(
         self,
@@ -610,7 +547,7 @@ class TestRunFetchTaskIntegration:
                 fake.project.name: [IgnoredTask(id=ignored_task_id, name="ignored")],
             },
         )
-        args = _make_args(
+        args = make_fetch_args(
             project=str(fake.project.id),
             task=[fake.tasks[0].name],
             output_dir=str(tmp_path / "out"),
@@ -630,7 +567,7 @@ class TestRunFetchTaskIntegration:
     ) -> None:
         """Non-existent task name causes sys.exit via Cveta2Error."""
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        args = _make_args(
+        args = make_fetch_args(
             project=str(fake.project.id),
             task=["nonexistent-task-xyz"],
             output_dir=str(tmp_path / "out"),
@@ -638,88 +575,3 @@ class TestRunFetchTaskIntegration:
 
         with pytest.raises(SystemExit):
             _run_fetch_task_with_fake(fake, args)
-
-    def test_multiple_tasks_combined(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """Fetching multiple tasks combines annotations in output."""
-        fake = build_fake(
-            coco8_fixtures,
-            ["normal", "all-empty"],
-            statuses=["completed", "completed"],
-        )
-        args = _make_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name, fake.tasks[1].name],
-            output_dir=str(tmp_path / "out"),
-        )
-
-        _run_fetch_task_with_fake(fake, args)
-
-        df = pd.read_csv(tmp_path / "out" / "dataset.csv")
-        task_ids_in_csv = set(df["task_id"].unique())
-        assert fake.tasks[0].id in task_ids_in_csv
-        assert fake.tasks[1].id in task_ids_in_csv
-
-    def test_output_dir_created_if_missing(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """Output directory is created automatically when it does not exist."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        out_dir = tmp_path / "nested" / "deep" / "output"
-        args = _make_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name],
-            output_dir=str(out_dir),
-        )
-
-        _run_fetch_task_with_fake(fake, args)
-
-        assert (out_dir / "dataset.csv").exists()
-        assert (out_dir / "deleted.csv").exists()
-
-    def test_bbox_annotations_in_csv(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """BBox annotations appear in the CSV with valid bbox coordinates."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        args = _make_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name],
-            output_dir=str(tmp_path / "out"),
-        )
-
-        _run_fetch_task_with_fake(fake, args)
-
-        df = pd.read_csv(tmp_path / "out" / "dataset.csv")
-        bbox_rows = df[df["instance_shape"] == "box"]
-        assert len(bbox_rows) > 0
-        for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
-            assert bbox_rows[col].notna().all()
-
-    def test_without_annotations_rows_in_csv(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """Images without annotations appear as instance_shape='none' rows."""
-        fake = build_fake(coco8_fixtures, ["all-empty"], statuses=["completed"])
-        args = _make_args(
-            project=str(fake.project.id),
-            task=[fake.tasks[0].name],
-            output_dir=str(tmp_path / "out"),
-        )
-
-        _run_fetch_task_with_fake(fake, args)
-
-        df = pd.read_csv(tmp_path / "out" / "dataset.csv")
-        without_rows = df[df["instance_shape"] == "none"]
-        assert len(without_rows) == 8
-        for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
-            assert without_rows[col].isna().all()

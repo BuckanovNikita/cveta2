@@ -13,7 +13,7 @@ from cveta2.models import (
     ProjectAnnotations,
     TaskAnnotations,
 )
-from tests.conftest import make_bbox
+from tests.helpers import make_bbox
 
 # ---------------------------------------------------------------------------
 # BBoxAnnotation.to_csv_row

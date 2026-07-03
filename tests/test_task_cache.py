@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pandas as pd
+import pytest
 from botocore.exceptions import EndpointConnectionError
 
 from cveta2.client import CvatClient
-from cveta2.commands.fetch import run_fetch_task
+from cveta2.commands.fetch import run_fetch, run_fetch_task
 from cveta2.config import CvatConfig, IgnoreConfig
 from cveta2.image_downloader import CloudStorageInfo
 from cveta2.models import (
@@ -29,38 +30,30 @@ from cveta2.task_cache import (
     get_task_cache_dir,
     invalidate_local_entry,
 )
-from tests.conftest import build_fake, make_bbox
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
+from tests.helpers import CFG, build_fake, make_bbox, make_fetch_args, make_task
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import pytest
-
-    from cveta2._client.dtos import RawAnnotations
     from tests.fixtures.fake_cvat_project import LoadedFixtures
+
+
+@pytest.fixture(autouse=True)
+def _enable_task_cache(
+    _disable_task_cache: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-enable the task cache disabled globally by conftest."""
+    monkeypatch.delenv("CVETA2_DISABLE_CACHE", raising=False)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _UPDATED = "2026-01-01T00:00:00"
-
-
-def _task(
-    task_id: int = 1,
-    *,
-    status: str = "completed",
-    updated_date: str = _UPDATED,
-) -> TaskInfo:
-    return TaskInfo(
-        id=task_id,
-        name=f"task-{task_id}",
-        status=status,
-        subset="",
-        updated_date=updated_date,
-    )
 
 
 def _payload(task_id: int = 1) -> TaskAnnotations:
@@ -122,7 +115,7 @@ def _s3_key(task_id: int, prefix: str = "pfx") -> str:
 class TestLocalCache:
     def test_put_then_get_hit(self, tmp_path: Path) -> None:
         cache = TaskAnnotationCache(tmp_path / "cache")
-        task = _task()
+        task = make_task(updated=_UPDATED)
         payload = _payload()
 
         cache.put(task, payload)
@@ -132,12 +125,12 @@ class TestLocalCache:
     def test_get_miss_on_empty_dir(self, tmp_path: Path) -> None:
         cache = TaskAnnotationCache(tmp_path / "cache")
 
-        assert cache.get(_task()) is None
+        assert cache.get(make_task(updated=_UPDATED)) is None
 
     def test_stale_updated_date_miss_and_deletes_file(self, tmp_path: Path) -> None:
         cache = TaskAnnotationCache(tmp_path / "cache")
-        cache.put(_task(updated_date="2026-01-01T00:00:00"), _payload())
-        newer_task = _task(updated_date="2026-02-02T00:00:00")
+        cache.put(make_task(updated="2026-01-01T00:00:00"), _payload())
+        newer_task = make_task(updated="2026-02-02T00:00:00")
 
         assert cache.get(newer_task) is None
         assert not (tmp_path / "cache" / "task_1.json").exists()
@@ -145,7 +138,7 @@ class TestLocalCache:
     def test_wrong_schema_version_miss_and_deletes_file(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"
         cache = TaskAnnotationCache(cache_dir)
-        task = _task()
+        task = make_task(updated=_UPDATED)
         cache.put(task, _payload())
         entry_path = cache_dir / "task_1.json"
         data = json.loads(entry_path.read_text(encoding="utf-8"))
@@ -161,13 +154,13 @@ class TestLocalCache:
         (cache_dir / "task_1.json").write_bytes(b"{not json!!")
         cache = TaskAnnotationCache(cache_dir)
 
-        assert cache.get(_task()) is None
+        assert cache.get(make_task(updated=_UPDATED)) is None
         assert not (cache_dir / "task_1.json").exists()
 
     def test_non_completed_task_get_none_put_noop(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"
         cache = TaskAnnotationCache(cache_dir)
-        task = _task(status="annotation")
+        task = make_task(status="annotation", updated=_UPDATED)
 
         cache.put(task, _payload())
 
@@ -178,7 +171,7 @@ class TestLocalCache:
         cache_dir = tmp_path / "cache"
         cache = TaskAnnotationCache(cache_dir)
         for task_id in (1, 2, 3):
-            cache.put(_task(task_id), _payload(task_id))
+            cache.put(make_task(task_id, updated=_UPDATED), _payload(task_id))
 
         removed = cache.prune({1, 3})
 
@@ -196,7 +189,7 @@ class TestLocalCache:
         cache_dir = tmp_path / "cache"
         cache = TaskAnnotationCache(cache_dir)
 
-        cache.put(_task(), _payload())
+        cache.put(make_task(updated=_UPDATED), _payload())
 
         leftovers = [p.name for p in cache_dir.iterdir() if ".tmp" in p.name]
         assert leftovers == []
@@ -204,7 +197,7 @@ class TestLocalCache:
     def test_invalidate_local_removes_entry(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"
         cache = TaskAnnotationCache(cache_dir)
-        cache.put(_task(), _payload())
+        cache.put(make_task(updated=_UPDATED), _payload())
 
         cache.invalidate_local(1)
 
@@ -213,7 +206,7 @@ class TestLocalCache:
 
     def test_envelope_round_trip_preserves_record_types(self, tmp_path: Path) -> None:
         cache = TaskAnnotationCache(tmp_path / "cache")
-        task = _task()
+        task = make_task(updated=_UPDATED)
         payload = _payload()
         cache.put(task, payload)
 
@@ -259,7 +252,7 @@ class TestCacheDir:
     ) -> None:
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
         cache = TaskAnnotationCache(get_task_cache_dir(5))
-        cache.put(_task(), _payload())
+        cache.put(make_task(updated=_UPDATED), _payload())
         entry = get_task_cache_dir(5) / "task_1.json"
         assert entry.exists()
 
@@ -302,7 +295,7 @@ class _FailingS3Client:
 
 class TestS3Backend:
     def test_s3_hit_backfills_local(self, tmp_path: Path) -> None:
-        task = _task()
+        task = make_task(updated=_UPDATED)
         payload = _payload()
         fake_s3 = FakeS3Client({f"bkt/{_s3_key(1)}": _envelope_bytes(task, payload)})
         cache = TaskAnnotationCache(
@@ -313,7 +306,7 @@ class TestS3Backend:
         assert (tmp_path / "local" / "task_1.json").exists()
 
     def test_local_hit_never_touches_s3(self, tmp_path: Path) -> None:
-        task = _task()
+        task = make_task(updated=_UPDATED)
         payload = _payload()
         local_dir = tmp_path / "local"
         TaskAnnotationCache(local_dir).put(task, payload)
@@ -329,20 +322,20 @@ class TestS3Backend:
             tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx")
         )
 
-        cache.put(_task(), _payload())
+        cache.put(make_task(updated=_UPDATED), _payload())
 
         assert (tmp_path / "local" / "task_1.json").exists()
         assert fake_s3.put_calls == [f"bkt/{_s3_key(1)}"]
 
     def test_stale_s3_entry_ignored_without_remote_delete(self, tmp_path: Path) -> None:
-        stale_task = _task(updated_date="2025-01-01T00:00:00")
+        stale_task = make_task(updated="2025-01-01T00:00:00")
         key = f"bkt/{_s3_key(1)}"
         fake_s3 = FakeS3Client({key: _envelope_bytes(stale_task, _payload())})
         cache = TaskAnnotationCache(
             tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx")
         )
 
-        assert cache.get(_task(updated_date="2026-06-06T00:00:00")) is None
+        assert cache.get(make_task(updated="2026-06-06T00:00:00")) is None
         assert key in fake_s3.objects
         assert not (tmp_path / "local" / "task_1.json").exists()
 
@@ -351,8 +344,8 @@ class TestS3Backend:
         backend = S3CacheBackend(fake_s3, "bkt", "pfx")
         cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
 
-        assert cache.get(_task(1)) is None
-        assert cache.get(_task(2)) is None
+        assert cache.get(make_task(1, updated=_UPDATED)) is None
+        assert cache.get(make_task(2, updated=_UPDATED)) is None
         assert len(fake_s3.get_calls) == 2
 
     def test_get_failure_warns_once_and_disables(
@@ -363,9 +356,9 @@ class TestS3Backend:
             tmp_path / "local", s3=S3CacheBackend(failing, "bkt", "pfx")
         )
 
-        assert cache.get(_task(1)) is None
-        assert cache.get(_task(2)) is None
-        cache.put(_task(3), _payload(3))
+        assert cache.get(make_task(1, updated=_UPDATED)) is None
+        assert cache.get(make_task(2, updated=_UPDATED)) is None
+        cache.put(make_task(3, updated=_UPDATED), _payload(3))
 
         assert failing.calls == 1
         assert sum("S3-кэш" in m for m in capture_logs) == 1
@@ -377,7 +370,7 @@ class TestS3Backend:
         cache = TaskAnnotationCache(
             tmp_path / "local", s3=S3CacheBackend(failing, "bkt", "pfx")
         )
-        task = _task()
+        task = make_task(updated=_UPDATED)
         payload = _payload()
 
         cache.put(task, payload)
@@ -410,43 +403,7 @@ class TestS3Backend:
 # Fetch flow integration (fake CVAT API)
 # ---------------------------------------------------------------------------
 
-_CFG = CvatConfig(host="http://fake-cvat")
 _MODULE = "cveta2.commands.fetch"
-
-
-class CountingFakeCvatApi(FakeCvatApi):
-    """FakeCvatApi that counts get_task_annotations calls."""
-
-    def __init__(self, fixtures: LoadedFixtures) -> None:
-        """Wrap fixtures and start with an empty call log."""
-        super().__init__(fixtures)
-        self.annotation_calls: list[int] = []
-
-    def get_task_annotations(self, task_id: int) -> RawAnnotations:
-        self.annotation_calls.append(task_id)
-        return super().get_task_annotations(task_id)
-
-
-def _make_args(  # noqa: PLR0913
-    *,
-    project: str,
-    task: list[str],
-    output_dir: str,
-    no_cache: bool = False,
-    force: bool = False,
-    save_tasks: bool = False,
-) -> argparse.Namespace:
-    return argparse.Namespace(
-        project=project,
-        task=task,
-        output_dir=output_dir,
-        completed_only=False,
-        no_images=True,
-        images_dir=None,
-        save_tasks=save_tasks,
-        no_cache=no_cache,
-        force=force,
-    )
 
 
 def _run_fetch_task_cached(
@@ -461,7 +418,7 @@ def _run_fetch_task_cached(
         return CvatClient(cfg, api=fake_api)
 
     with (
-        patch(f"{_MODULE}.CvatConfig.load", return_value=_CFG),
+        patch(f"{_MODULE}.CvatConfig.load", return_value=CFG),
         patch(f"{_MODULE}.require_host"),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         patch(f"{_MODULE}.load_ignore_config", return_value=IgnoreConfig()),
@@ -480,26 +437,28 @@ class TestFetchWithCache:
         self, coco8_fixtures: LoadedFixtures, tmp_path: Path
     ) -> None:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        api = CountingFakeCvatApi(fake)
+        api = FakeCvatApi(fake)
         task_name = fake.tasks[0].name
 
         _run_fetch_task_cached(
             api,
-            _make_args(
+            make_fetch_args(
                 project=str(fake.project.id),
                 task=[task_name],
                 output_dir=str(tmp_path / "out1"),
+                no_cache=False,
             ),
         )
         assert len(api.annotation_calls) == 1
 
         _run_fetch_task_cached(
             api,
-            _make_args(
+            make_fetch_args(
                 project=str(fake.project.id),
                 task=[task_name],
                 output_dir=str(tmp_path / "out2"),
                 save_tasks=True,
+                no_cache=False,
             ),
         )
 
@@ -514,13 +473,13 @@ class TestFetchWithCache:
         self, coco8_fixtures: LoadedFixtures, tmp_path: Path
     ) -> None:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        api = CountingFakeCvatApi(fake)
+        api = FakeCvatApi(fake)
         task_name = fake.tasks[0].name
 
         def fetch(out: str, *, no_cache: bool = False, force: bool = False) -> None:
             _run_fetch_task_cached(
                 api,
-                _make_args(
+                make_fetch_args(
                     project=str(fake.project.id),
                     task=[task_name],
                     output_dir=str(tmp_path / out),
@@ -543,16 +502,17 @@ class TestFetchWithCache:
         self, coco8_fixtures: LoadedFixtures, tmp_path: Path
     ) -> None:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["annotation"])
-        api = CountingFakeCvatApi(fake)
+        api = FakeCvatApi(fake)
         task_name = fake.tasks[0].name
 
         for out in ("out1", "out2"):
             _run_fetch_task_cached(
                 api,
-                _make_args(
+                make_fetch_args(
                     project=str(fake.project.id),
                     task=[task_name],
                     output_dir=str(tmp_path / out),
+                    no_cache=False,
                 ),
             )
 
@@ -562,15 +522,16 @@ class TestFetchWithCache:
         self, coco8_fixtures: LoadedFixtures, tmp_path: Path
     ) -> None:
         fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-        api = CountingFakeCvatApi(fake)
+        api = FakeCvatApi(fake)
         cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
 
         _run_fetch_task_cached(
             api,
-            _make_args(
+            make_fetch_args(
                 project=str(fake.project.id),
                 task=[fake.tasks[0].name],
                 output_dir=str(tmp_path / "out"),
+                no_cache=False,
             ),
             cs_info=cs_info,
         )
@@ -586,3 +547,47 @@ class TestFetchWithCache:
         for deleted in envelope.payload.deleted_images:
             assert deleted.s3_image_path is None
             assert deleted.image_path is None
+
+
+class TestFullFetchPrunesCache:
+    def test_full_fetch_prunes_orphaned_entries(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        api = FakeCvatApi(fake)
+        cache_dir = get_task_cache_dir(fake.project.id)
+        TaskAnnotationCache(cache_dir).put(
+            make_task(999, updated=_UPDATED), _payload(999)
+        )
+        args = argparse.Namespace(
+            project=str(fake.project.id),
+            output_dir=str(tmp_path / "out"),
+            raw=False,
+            completed_only=False,
+            no_images=True,
+            images_dir=None,
+            save_tasks=False,
+            no_cache=False,
+            force=False,
+        )
+
+        def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
+            return CvatClient(cfg, api=api)
+
+        with (
+            patch(f"{_MODULE}.CvatConfig.load", return_value=CFG),
+            patch(f"{_MODULE}.require_host"),
+            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
+            patch(f"{_MODULE}.load_ignore_config", return_value=IgnoreConfig()),
+            patch(f"{_MODULE}.CvatClient", side_effect=make_client),
+            patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=None,
+            ),
+            patch(f"{_MODULE}.S3CacheBackend.from_cloud_storage", return_value=None),
+            patch("cveta2._clearml.maybe_publish_clearml"),
+        ):
+            run_fetch(args)
+
+        assert not (cache_dir / "task_999.json").exists()
+        assert (cache_dir / f"task_{fake.tasks[0].id}.json").exists()
