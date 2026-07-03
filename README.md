@@ -2,8 +2,6 @@
 
 CLI и Python API для работы с аннотациями CVAT-проектов. Выгружает bbox-аннотации, разделяет на актуальные/устаревшие/в работе, скачивает изображения из S3, создаёт задачи с переносом аннотаций, конвертирует между CSV, YOLO и COCO.
 
-> ⚠️ **Несовместимое изменение:** колонка CSV `s3_path` переименована в `s3_image_path`. Старое имя больше не поддерживается — CSV-файлы, выгруженные прошлыми версиями, нужно выгрузить заново (`cveta2 fetch`).
-
 ## Что умеет
 
 - Собирает **все bbox-аннотации** проекта в плоский список — одна запись на каждый bounding box
@@ -287,7 +285,7 @@ cveta2 upload -d output/dataset.csv
 1. Загрузка недостающих изображений на S3 (уже загруженные пропускаются; новые изображения помещаются в подпапку по месяцу: `YYYY-MM/img.jpg`)
 1. Создание задачи в CVAT с cloud storage и автоматическим разбиением на jobs
 1. Загрузка bbox-аннотаций в новую задачу (привязка по `image_name` → `frame_id` из CVAT)
-1. Создание issues из строк с `issue_state="new"` и непустым `issue_text` (см. [DATASET_FORMAT.md](DATASET_FORMAT.md))
+1. Создание issues из строк с `issue_state="new"` и непустым `issue_text` (см. [DATASET_FORMAT.md](DATASET_FORMAT.md)). Issue прикрепляется к bbox своей строки; строки с `issue_text`, но без полного bbox, пропускаются с предупреждением (полнокадровых issues больше нет)
 
 **Выбор классов работает по кадрам**: выбранная метка отбирает изображения, на которых она встречается, и загружаются **все** аннотации этих изображений — включая сопутствующие метки, которые вы не выбирали. Все метки загружаемых кадров (в том числе сопутствующие) проверяются на существование в проекте CVAT.
 
@@ -504,7 +502,7 @@ cveta2 fetch -p coco8-dev -o output/ --images-dir /tmp/my-images
 
 Поведение:
 
-- **`--no-cache`** — полностью отключить кэш на этот запуск (ни чтения, ни записи).
+- **`--no-cache`** — полностью отключить кэш на этот запуск (ни чтения, ни записи). Переменная окружения `CVETA2_DISABLE_CACHE=true` делает то же самое для всех запусков.
 - **`--force`** — перечитать все задачи с CVAT и перезаписать кэш.
 - Команды, изменяющие задачу (`upload`, `task mark-deleted`, `task drop-label`, `task delete`, `task status`), сбрасывают локальную запись кэша этой задачи.
 - Полный `fetch` удаляет локальные записи задач, которых больше нет в проекте.
@@ -578,6 +576,7 @@ cveta2 содержит встроенный пресет (`cveta2/presets/defau
 | `CVETA2_CONFIG` | Путь к файлу конфигурации (по умолчанию `~/.config/cveta2/config.yaml`) |
 | `CVETA2_NO_INTERACTIVE` | Установите `true`, чтобы отключить все интерактивные промпты (см. ниже) |
 | `CVETA2_DATA_TIMEOUT` | Таймаут чтения (в секундах) для всех HTTP-запросов к CVAT и операций с S3; таймаут соединения — 10 секунд. Не задан или `0` — без таймаутов (поведение по умолчанию). Переопределяет `cvat.request_timeout` из конфига |
+| `CVETA2_DISABLE_CACHE` | При `true` — полностью отключить кэш аннотаций задач: ни чтения, ни записи, ни синхронизации с S3. Эквивалент постоянного `--no-cache` (см. [Кэш аннотаций задач](#кэш-аннотаций-задач)) |
 | `CVETA2_RAISE_ON_FAILURE` | При `true` — при первой ошибке CVAT 5xx по задаче вызов `fetch`/`fetch-task` сразу падает (исключение пробрасывается). По умолчанию такие задачи пропускаются, ошибка и ссылка на задачу пишутся в лог |
 
 ### Ошибки сервера CVAT (5xx)
@@ -619,12 +618,66 @@ cveta2 fetch -p 123 -o output/ --images-dir /data/images
 
 ## Python API
 
-### Выгрузка аннотаций
+### Функции-команды (рекомендуемый способ)
+
+Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие команды CLI один в один. Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI; `fetch` / `fetch_task` дополнительно возвращают partition `dataset` как `pandas.DataFrame`.
 
 ```python
-from cveta2 import CvatClient, fetch_annotations
+import cveta2
 
-# Вариант 1: CvatClient — полный контроль
+# Выгрузка проекта: пишет dataset/obsolete/in_progress/deleted CSV в out/,
+# возвращает partition dataset как DataFrame
+df = cveta2.fetch("my-project", output_dir="out")
+
+# Выгрузка отдельных задач (по ID или имени)
+df = cveta2.fetch_task("my-project", tasks=[456, "Партия 3"], output_dir="out")
+
+# Загрузка датасета обратно в CVAT (labels=None → все кадры)
+result = cveta2.upload("out/dataset.csv", project="my-project", name="Партия 4")
+print(result.task_id, result.url, result.annotations, result.issues)
+
+# Конвертация форматов
+cveta2.convert_to_yolo("out/dataset.csv", "yolo_out/")
+cveta2.convert_from_yolo("preds/", "out/dataset.csv", "predicted.csv")
+cveta2.convert_to_coco("out/dataset.csv", "coco_out/")
+
+# Прочие операции
+cveta2.merge("old/dataset.csv", "new/dataset.csv", "merged.csv")
+tasks = cveta2.whats_new("my-project", "out/dataset.csv")   # завершённые после выгрузки
+stats = cveta2.s3_sync("my-project", "/mnt/data/my-project") # синхронизация изображений из S3
+labels = cveta2.get_labels("my-project")
+cveta2.update_labels("my-project", add=["cat", "dog"])
+
+# Операции над задачами
+cveta2.task_mark_deleted("my-project", task=456, images=["img003.jpg"])
+cveta2.task_drop_label("my-project", task=456, label="cat")
+cveta2.task_set_status("my-project", task=456, state="completed")
+cveta2.task_delete("my-project", task=456)
+```
+
+Все функции, обращающиеся к CVAT, принимают необязательные параметры подключения `host=`, `username=`, `password=`, `organization=`, `config_path=`. Если они не заданы, конфигурация берётся в порядке: переменные окружения → `~/.config/cveta2/config.yaml` → встроенный пресет. **API никогда не спрашивает интерактивно** — при отсутствии настроек поднимается `MissingHostError` / `MissingCredentialsError`. Чтобы переиспользовать одно соединение для нескольких вызовов, передайте готовый `client=` (уже открытый `CvatClient`).
+
+```python
+import cveta2
+
+df = cveta2.fetch(
+    "my-project",
+    output_dir="out",
+    host="https://app.cvat.ai",
+    username="bot",
+    password="secret",
+)
+```
+
+Параметры `upload`: `labels=None` загружает все кадры (и включает кадры без аннотаций), список меток `labels=[...]` отбирает кадры по меткам (со всеми сопутствующими метками этих кадров), `include_unannotated=True` дополнительно включает кадры без аннотаций.
+
+### Продвинутый уровень: `CvatClient`
+
+`CvatClient` даёт низкоуровневый доступ к CVAT для сценариев, которых нет среди функций-команд. Для любых обращений к серверу он **требует** контекстного менеджера (`with ... as client:`) и, как и функции API, **не спрашивает** учётные данные интерактивно — при их отсутствии поднимается `MissingCredentialsError`. Интерактивные промпты живут только в CLI.
+
+```python
+from cveta2 import CvatClient
+
 # Конфигурация загружается автоматически (env, config file, preset)
 with CvatClient() as client:
     result = client.fetch_annotations(project_id=123, completed_only=True)
@@ -644,16 +697,12 @@ with CvatClient() as client:
     for img in result.deleted_images:
         print(f"Удалено: {img.image_name} (task={img.task_id})")
 
-# Вариант 1б: явная конфигурация (если нужны нестандартные настройки)
+# Явная конфигурация (если нужны нестандартные настройки)
 from cveta2 import CvatConfig
 
 cfg = CvatConfig.load()
 with CvatClient(cfg) as client:
     result = client.fetch_annotations(project_id=123)
-
-# Вариант 2: функция-обёртка — сразу DataFrame
-df = fetch_annotations(project_id=123)
-print(df.head())
 ```
 
 ### Работа с проектами

@@ -43,35 +43,55 @@ uv run vulture             # dead code detection
 **Layered architecture** enforced by import-linter (see `pyproject.toml`):
 
 ```
-cli → commands → client → _client
-      ↓          ↓
+cli → commands → api → services → _clearml → client → _client
+      ↓
    models, exceptions, config (foundation - no upward imports)
 ```
+
+Higher layers may import lower ones, never the reverse. `commands` are thin
+CLI adapters (prompts + arg mapping + `sys.exit` only); the real orchestration
+lives in `services` (pure, no prompts/`sys.exit`, raise `Cveta2Error`). `api`
+exposes those services as prompt-free module-level functions. All `cvat_sdk`
+code is confined to `_client`.
 
 ### Module Organization
 
 - **`cveta2/cli.py`** - Argparse CLI entry point, dispatches to commands
-- **`cveta2/commands/`** - Command implementations:
+- **`cveta2/commands/`** - Thin CLI adapters (prompts, arg mapping, `sys.exit`; delegate to `services`):
   - `fetch.py` - Fetch annotations from CVAT project
   - `upload.py` - Upload annotated dataset back to CVAT
   - `convert.py` - Bidirectional CSV ↔ YOLO conversion, plus CSV → COCO export
   - `merge.py` - Merge multiple fetch outputs
   - `labels.py` - Manage project labels
   - `s3_sync.py` - Download images from S3
-  - `setup.py` / `setup-cache` - Initial config and project cache setup
+  - `setup.py` / `setup_clearml.py` - Initial config and project cache setup
   - `ignore.py` - Mark tasks to skip during fetch
   - `task_ops.py` - `task` subcommands: mark-deleted, drop-label, delete, status
   - `whats_new.py` - List tasks completed after a fetched dataset CSV
   - `doctor.py` - Diagnostic checks
+  - `_bootstrap.py` - `open_client()`: single config load, host check, timeout setup, credential prompt (the ONLY place prompting happens)
   - `_task_selector.py` / `_helpers.py` - Shared internals
-- **`cveta2/client.py`** - High-level `CvatClient` API (public interface)
-- **`cveta2/_client/`** - Low-level CVAT SDK adapter (internal)
-  - `sdk_adapter.py` - Wraps `cvat_sdk` with our DTOs
+- **`cveta2/api.py`** - Public workflow functions mirroring the CLI 1:1 (`fetch`, `upload`, `convert_*`, `merge`, `whats_new`, `s3_sync`, `get_labels`, `update_labels`, `task_*`), re-exported from `cveta2/__init__.py`. Never prompts — missing settings raise `MissingHostError` / `MissingCredentialsError`.
+- **`cveta2/services/`** - Orchestration (no prompts, no `sys.exit`; raise `Cveta2Error`):
+  - `fetch.py` - `fetch_project()` / `fetch_selected_tasks()` pipelines
+  - `upload.py` - `upload_dataset()` + plan building / filtering helpers
+  - `convert/{common,yolo,coco}.py` - CSV ↔ YOLO / COCO conversion
+  - `merge.py` - `merge_datasets()`
+  - `output.py` - CSV read/write, path enrichment
+  - `resolve.py` - project resolution and `sync_roots` override
+  - `whats_new.py` - cutoff computation
+- **`cveta2/client.py`** - High-level `CvatClient` domain orchestration over the port (SDK-free; requires a context manager for remote calls, never prompts)
+- **`cveta2/_client/`** - All CVAT SDK code (internal):
+  - `ports.py` - `CvatReadPort` + `CvatWritePort` protocols (combined as `CvatApiPort`; enables test fakes)
+  - `sdk_adapter.py` - Implements both ports over `cvat_sdk`; translates SDK errors to `CvatApiError`
+  - `sdk_requests.py` - Builds SDK request models
+  - `connection.py` - Opens SDK clients, configures data timeout
+  - `assembly.py` - Pure DTO → domain transforms
   - `extractors.py` - Converts CVAT shapes to `BBoxAnnotation`
   - `dtos.py` - Raw CVAT data transfer objects
-  - `ports.py` - Protocol for CVAT API (enables test fakes)
   - `context.py` - API context management
   - `mapping.py` - Data mapping utilities
+- **`cveta2/_clearml/`** - Optional ClearML dataset publishing (isolated layer)
 - **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation with optional `confidence`, DeletedImage, etc.)
 - **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
 - **`cveta2/dataset_partition.py`** - Core logic: splits annotations into dataset/obsolete/in_progress
@@ -83,18 +103,18 @@ cli → commands → client → _client
 
 ### Key Data Flow
 
-1. **Fetch**: `cli` → `commands/fetch.py` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
-   - Completed tasks are served from `task_cache.py` when the cached `task_updated_date` matches (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); `--no-cache` / `--force` override, full fetch prunes orphaned local entries
+1. **Fetch**: `cli`/`api.fetch` → `commands/fetch.py` (or `api.py`) → `services/fetch.py:fetch_project()` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
+   - Completed tasks are served from `task_cache.py` when the cached `task_updated_date` matches (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
    - Annotations converted to `BBoxAnnotation` by `extractors.py`
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
 
-2. **Upload**: `commands/upload.py` → `client.create_upload_task()` + `client.upload_task_annotations()`
+2. **Upload**: `commands/upload.py` (or `api.upload`) → `services/upload.py:upload_dataset()` → `client.create_upload_task()` + `client.upload_task_annotations()`
    - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
    - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels)
-   - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues on the created task
+   - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues **attached to the row's bbox**; rows with issue text but no complete bbox are skipped with a warning (no full-frame issues)
 
-3. **Convert**: `commands/convert.py` — `--to-yolo` exports CSV to YOLO format (images + labels), `--from-yolo` imports YOLO predictions back to CSV, `--to-coco` exports COCO detection format. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
+3. **Convert**: `commands/convert.py` (or `api.convert_*`) → `services/convert/`: `convert_to_yolo` exports CSV to YOLO format (images + labels), `convert_from_yolo` imports YOLO predictions back to CSV, `convert_to_coco` exports COCO detection format. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
 
 4. **Partition Logic** (`dataset_partition.py`):
    - For each image, finds **latest task** by `task_updated_date` (comparing annotations + deletions)
@@ -151,6 +171,10 @@ uv run pytest -x                 # stop on first failure
 - Unit tests mock `CvatApiPort` using `FakeCvatApi`
 - Integration tests (`tests/integration/`) require `CVAT_INTEGRATION_HOST`
 - Fixtures in `tests/fixtures/cvat/` contain real CVAT JSON snapshots
+- **`tests/helpers.py`** holds shared builders (annotations, DataFrames, fakes); `conftest.py` holds fixtures only
+- An autouse fixture in `conftest.py` sets `CVETA2_DISABLE_CACHE=true` for every test — cache tests opt back in explicitly
+- **`tests/test_fetch_service.py`** is the canonical owner of the coco8 fetch scenarios
+- **`tests/test_api.py`** covers the public `cveta2.*` workflow functions; **`tests/test_cli_parsing.py`** covers argparse wiring
 
 ## Configuration
 
@@ -160,6 +184,8 @@ Config loaded via `CvatConfig.load()` from:
 3. Built-in preset (`cveta2/presets/default.yaml`)
 
 **Request timeouts**: opt-in via `CVETA2_DATA_TIMEOUT` env var or `cvat.request_timeout` config field (read timeout in seconds; connect timeout fixed at 10s). Applies to all CVAT HTTP requests (including client creation) and S3 operations. Unset or `0` = no timeout.
+
+**Cache disable**: `CVETA2_DISABLE_CACHE=true` fully disables the task-annotation cache (no reads, writes, S3 backfill, or prune) — equivalent to always passing `--no-cache`.
 
 **Sync roots**: the `sync_roots` config section (project name → `s3://bucket/prefix` or bare prefix) overrides the image download source for `s3-sync` and `fetch`; `s3-sync --root` is a one-run override. Upload always targets the project's own storage.
 
@@ -177,14 +203,16 @@ Config loaded via `CvatConfig.load()` from:
 ## Common Tasks
 
 **Add new command**:
-1. Create `cveta2/commands/mycommand.py` with `run_mycommand(args, cfg, client)`
-2. Add subparser in `cveta2/cli.py`
-3. Update README.md (Russian)
+1. Add the orchestration to `cveta2/services/` (pure, no prompts/`sys.exit`; raise `Cveta2Error`)
+2. Create `cveta2/commands/mycommand.py` with `run_mycommand(args: argparse.Namespace)` — a thin adapter that resolves prompts, opens a client via `open_client()`, and calls the service
+3. Expose it as a `cveta2.mycommand(...)` function in `cveta2/api.py` (no prompts; raise on missing settings)
+4. Add subparser in `cveta2/cli.py`
+5. Update README.md (Russian)
 
 **Modify partition logic**:
 1. Edit `cveta2/dataset_partition.py`
 2. Add test case in `tests/test_partition.py`
-3. Run `uv run pytest tests/test_partition.py tests/test_pipeline_integration.py`
+3. Run `uv run pytest tests/test_partition.py tests/test_fetch_service.py`
 
 **Update data models**:
 1. Edit pydantic models in `cveta2/models.py`

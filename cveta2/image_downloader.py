@@ -19,8 +19,6 @@ from tqdm import tqdm
 from cveta2.s3_utils import list_s3_objects, make_s3_client, s3_retry
 
 if TYPE_CHECKING:
-    from cvat_sdk import Client as CvatSdkClient
-
     from cveta2.models import ProjectAnnotations
     from cveta2.s3_types import S3Client
 
@@ -247,46 +245,6 @@ class ImageDownloader:
             if base not in name_to_key:
                 name_to_key[base] = key
         return name_to_key
-
-    @staticmethod
-    def detect_cloud_storage(
-        sdk_client: CvatSdkClient,
-        task_id: int,
-        cs_cache: dict[int, CloudStorageInfo],
-    ) -> CloudStorageInfo | None:
-        """Detect cloud storage for a task via its ``source_storage``.
-
-        Uses ``getattr`` because the CVAT SDK task object may expose
-        ``source_storage`` as a dict or typed model depending on SDK
-        version.  This is an intentional exception to the project style
-        rule "avoid getattr" (see CLAUDE.md).
-        """
-        task = sdk_client.tasks.retrieve(task_id)
-
-        source_storage = getattr(task, "source_storage", None)
-        if source_storage is None:
-            return None
-
-        if isinstance(source_storage, dict):
-            cs_id: int | None = source_storage.get("cloud_storage_id")
-        else:
-            cs_id = getattr(source_storage, "cloud_storage_id", None)
-
-        if cs_id is None:
-            return None
-
-        if cs_id in cs_cache:
-            return cs_cache[cs_id]
-
-        cs_api = sdk_client.api_client.cloudstorages_api
-        cs_raw, _ = cs_api.retrieve(cs_id)
-        cs_info = parse_cloud_storage(cs_raw)
-        cs_cache[cs_id] = cs_info
-        logger.trace(
-            f"Cloud storage #{cs_info.id}: bucket={cs_info.bucket}, "
-            f"prefix={cs_info.prefix}, endpoint={cs_info.endpoint_url}"
-        )
-        return cs_info
 
 
 # ---------------------------------------------------------------------------
