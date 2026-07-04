@@ -19,7 +19,7 @@ from cveta2.image_downloader import DownloadStats
 from tests.helpers import mock_client_ctx, write_test_config
 
 
-def _mock_client_ctx() -> MagicMock:
+def _s3_sync_client() -> MagicMock:
     client = mock_client_ctx()
     client.detect_project_cloud_storage.return_value = MagicMock()
     client.sync_project_images.return_value = DownloadStats(
@@ -47,7 +47,7 @@ def test_s3_sync_all_projects(
         },
     )
 
-    mock_client = _mock_client_ctx()
+    mock_client = _s3_sync_client()
     mock_client.resolve_project_id.side_effect = [1, 2]
 
     with (

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from cveta2.commands.interactive import wizard
 from cveta2.config import (
     ClearmlProjectMapping,
     load_clearml_config,
@@ -43,15 +44,9 @@ def run_setup_clearml(
 
     cfg = load_clearml_config(config_path)
 
-    enabled_str = (
-        input(f"Включить ClearML интеграцию? [{'да' if cfg.enabled else 'нет'}]: ")
-        .strip()
-        .lower()
-    )
-    if enabled_str in ("да", "yes", "y", "true", "1"):
-        cfg = cfg.model_copy(update={"enabled": True})
-    elif enabled_str in ("нет", "no", "n", "false", "0"):
-        cfg = cfg.model_copy(update={"enabled": False})
+    enabled = wizard.prompt_clearml_enabled(current=cfg.enabled)
+    if enabled is not None:
+        cfg = cfg.model_copy(update={"enabled": enabled})
 
     logger.info(
         f"Найдено проектов: {len(projects)}. "
@@ -99,22 +94,14 @@ def _prompt_project_mapping(
     default_proj = existing.clearml_project if existing else ""
     default_ds = existing.clearml_dataset if existing else ""
 
-    proj_prompt = f"  {project_name} (id={project_id})"
-    if default_proj:
-        proj_prompt += f" clearml_project [{default_proj}]: "
-    else:
-        proj_prompt += " clearml_project [пропустить]: "
-    clearml_project = input(proj_prompt).strip() or default_proj
+    clearml_project = wizard.prompt_clearml_project(
+        f"  {project_name} (id={project_id})", default_proj
+    )
 
     if not clearml_project:
         return None
 
-    ds_prompt = "    clearml_dataset"
-    if default_ds:
-        ds_prompt += f" [{default_ds}]: "
-    else:
-        ds_prompt += f" [{project_name}]: "
-    clearml_dataset = input(ds_prompt).strip() or default_ds or project_name
+    clearml_dataset = wizard.prompt_clearml_dataset(default_ds, project_name)
 
     return ClearmlProjectMapping(
         clearml_project=clearml_project,

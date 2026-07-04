@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -22,9 +23,11 @@ from cveta2.commands.labels import (
 from cveta2.config import CvatConfig
 from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import LabelAttributeInfo, LabelInfo
-from tests.helpers import build_fake, make_fake_client
+from tests.helpers import build_fake, client_with_api, make_fake_client, mock_client_ctx
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
@@ -49,14 +52,9 @@ _LABELS = [
 ]
 
 
-def _mock_client_ctx(
-    labels: list[LabelInfo] | None = None,
-) -> MagicMock:
-    """Build a mock CvatClient for CLI tests."""
-    client = MagicMock()
-    client.__enter__ = MagicMock(return_value=client)
-    client.__exit__ = MagicMock(return_value=False)
-    client.resolve_project_id.return_value = 1
+def _cli_client(labels: list[LabelInfo] | None = None) -> MagicMock:
+    """Mock CvatClient context manager for CLI-level labels tests."""
+    client = mock_client_ctx()
     client.get_project_labels.return_value = labels or []
     client.count_label_usage.return_value = {}
     return client
@@ -65,7 +63,19 @@ def _mock_client_ctx(
 def _client_with_api_mock() -> tuple[CvatClient, MagicMock]:
     """Build a CvatClient over a mocked API port for update_project_labels tests."""
     api = MagicMock(spec=CvatApiPort)
-    return CvatClient(_CFG, api=api), api
+    return client_with_api(api), api
+
+
+@contextmanager
+def _patch_prompts(**returns: object) -> Iterator[None]:
+    """Patch ``cveta2.commands.labels.interactive.<name>`` to fixed return values."""
+    with pytest.MonkeyPatch.context() as mp:
+        for name, value in returns.items():
+            mp.setattr(
+                f"cveta2.commands.labels.interactive.{name}",
+                lambda *_a, _v=value, **_kw: _v,
+            )
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -247,42 +257,23 @@ def test_update_labels_requires_context_manager() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.usefixtures("test_config")
-def test_cli_labels_list() -> None:
-    mock_client = _mock_client_ctx(labels=_LABELS)
+@contextmanager
+def _patched_cli(mock_client: MagicMock) -> Iterator[None]:
     with (
-        patch(
-            "cveta2.commands._bootstrap.CvatClient",
-            return_value=mock_client,
-        ),
-        patch(
-            "cveta2.commands._helpers.load_projects_cache",
-            return_value=[],
-        ),
+        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
+        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
     ):
-        app = CliApp()
-        app.run(["labels", "--project", "1", "--list"])
+        yield
+
+
+@pytest.mark.usefixtures("test_config")
+@pytest.mark.parametrize("labels", [_LABELS, []], ids=["with-labels", "empty"])
+def test_cli_labels_list(labels: list[LabelInfo]) -> None:
+    mock_client = _cli_client(labels=labels)
+    with _patched_cli(mock_client):
+        CliApp().run(["labels", "--project", "1", "--list"])
 
     mock_client.get_project_labels.assert_called_once_with(1)
-
-
-@pytest.mark.usefixtures("test_config")
-def test_cli_labels_list_empty() -> None:
-    mock_client = _mock_client_ctx(labels=[])
-    with (
-        patch(
-            "cveta2.commands._bootstrap.CvatClient",
-            return_value=mock_client,
-        ),
-        patch(
-            "cveta2.commands._helpers.load_projects_cache",
-            return_value=[],
-        ),
-    ):
-        app = CliApp()
-        app.run(["labels", "--project", "1", "--list"])
-
-    mock_client.get_project_labels.assert_called_once()
 
 
 @pytest.mark.usefixtures("test_config")
@@ -292,20 +283,11 @@ def test_cli_labels_noninteractive_without_list_errors(
     """Non-interactive mode without --list should fail."""
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
 
-    mock_client = _mock_client_ctx(labels=_LABELS)
     with (
-        patch(
-            "cveta2.commands._bootstrap.CvatClient",
-            return_value=mock_client,
-        ),
-        patch(
-            "cveta2.commands._helpers.load_projects_cache",
-            return_value=[],
-        ),
+        _patched_cli(_cli_client(labels=_LABELS)),
+        pytest.raises(InteractiveModeRequiredError),
     ):
-        app = CliApp()
-        with pytest.raises(InteractiveModeRequiredError):
-            app.run(["labels", "--project", "1"])
+        CliApp().run(["labels", "--project", "1"])
 
 
 # ---------------------------------------------------------------------------
@@ -315,11 +297,12 @@ def test_cli_labels_noninteractive_without_list_errors(
 
 def test_add_new_label() -> None:
     mock_client = MagicMock()
-    updated = [*_LABELS, LabelInfo(id=4, name="fish", attributes=[])]
-    mock_client.get_project_labels.return_value = updated
+    mock_client.get_project_labels.return_value = [
+        *_LABELS,
+        LabelInfo(id=4, name="fish", attributes=[]),
+    ]
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.text.return_value.ask.return_value = "fish"
+    with _patch_prompts(text="fish"):
         result = _interactive_add(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_called_once_with(1, add=["fish"])
@@ -331,24 +314,11 @@ def test_add_rejected_name_no_update(name: str | None) -> None:
     """Empty/None cancels and duplicate (case-insensitive) names are rejected."""
     mock_client = MagicMock()
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.text.return_value.ask.return_value = name
+    with _patch_prompts(text=name):
         result = _interactive_add(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-def test_add_strips_whitespace() -> None:
-    mock_client = MagicMock()
-    updated = [*_LABELS, LabelInfo(id=4, name="fish", attributes=[])]
-    mock_client.get_project_labels.return_value = updated
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.text.return_value.ask.return_value = "  fish  "
-        _interactive_add(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_called_once_with(1, add=["fish"])
 
 
 # ---------------------------------------------------------------------------
@@ -358,66 +328,39 @@ def test_add_strips_whitespace() -> None:
 
 def test_rename_label() -> None:
     mock_client = MagicMock()
-    updated = [
+    mock_client.get_project_labels.return_value = [
         LabelInfo(id=1, name="kitty", attributes=[], color="#ff0000"),
         _LABELS[1],
         _LABELS[2],
     ]
-    mock_client.get_project_labels.return_value = updated
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = "kitty"
+    with _patch_prompts(select_label=1, text="kitty"):
         result = _interactive_rename(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_called_once_with(1, rename={1: "kitty"})
     assert len(result) == 3
 
 
-def test_rename_cancel_select() -> None:
+@pytest.mark.parametrize(
+    ("select", "text"),
+    [
+        (None, None),  # cancel at label selection
+        (1, None),  # empty new name
+        (1, "cat"),  # same name (noop)
+        (1, "dog"),  # existing name
+        (1, "DOG"),  # existing name, case-insensitive
+    ],
+    ids=["cancel-select", "empty-name", "same-name", "existing", "existing-ci"],
+)
+def test_rename_no_update(select: int | None, text: str | None) -> None:
+    """Selection cancel, empty/same/duplicate names all skip the API call."""
     mock_client = MagicMock()
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = None
+    with _patch_prompts(select_label=select, text=text):
         result = _interactive_rename(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-def test_rename_empty_name_cancels() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = ""
-        _interactive_rename(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
-
-
-def test_rename_same_name_noop() -> None:
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = "cat"
-        _interactive_rename(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
-
-
-@pytest.mark.parametrize("new_name", ["dog", "DOG"])
-def test_rename_to_existing_name_rejects(new_name: str) -> None:
-    """Renaming to an existing name (case-insensitive) is rejected."""
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = new_name
-        _interactive_rename(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -425,89 +368,67 @@ def test_rename_to_existing_name_rejects(new_name: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_delete_no_annotations_confirmed() -> None:
-    """Delete label with 0 annotations, user confirms."""
+def _delete_client(usage: dict[int, int], remaining: list[LabelInfo]) -> MagicMock:
     mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = {}
-    remaining = [_LABELS[1], _LABELS[2]]
+    mock_client.count_label_usage.return_value = usage
     mock_client.get_project_labels.return_value = remaining
+    return mock_client
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = [1]
-        mock_q.confirm.return_value.ask.return_value = True
+
+@pytest.mark.parametrize(
+    ("usage", "selection", "prompts"),
+    [
+        ({}, [1], {"confirm": True}),  # 0 annotations, confirm
+        ({1: 42}, [1], {"text": "cat"}),  # annotated, correct name typed
+        ({2: 100}, [1], {"confirm": True}),  # selected label unannotated → confirm
+    ],
+    ids=[
+        "no-annotations-confirm",
+        "annotated-name-typed",
+        "unannotated-among-annotated",
+    ],
+)
+def test_delete_single_label_proceeds(
+    usage: dict[int, int],
+    selection: list[int],
+    prompts: dict[str, object],
+) -> None:
+    """A confirmed single-label delete calls the API and drops the label."""
+    mock_client = _delete_client(usage, [_LABELS[1], _LABELS[2]])
+
+    with _patch_prompts(select_labels=selection, **prompts):
         result = _interactive_delete(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_called_once_with(1, delete=[1])
     assert len(result) == 2
 
 
-def test_delete_no_annotations_declined() -> None:
-    """Delete label with 0 annotations, user declines."""
+@pytest.mark.parametrize(
+    ("usage", "prompts"),
+    [
+        ({}, {"confirm": False}),  # 0 annotations, declined
+        ({1: 42}, {"text": "wrong_name"}),  # annotated, wrong name typed
+        ({1: 10}, {"text": None}),  # annotated, cancelled (None)
+    ],
+    ids=["declined", "wrong-name", "cancelled"],
+)
+def test_delete_no_update(usage: dict[int, int], prompts: dict[str, object]) -> None:
+    """Decline / wrong-name / cancel all skip the API call."""
     mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = {}
+    mock_client.count_label_usage.return_value = usage
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = [1]
-        mock_q.confirm.return_value.ask.return_value = False
+    with _patch_prompts(select_labels=[1], **prompts):
         result = _interactive_delete(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-def test_delete_with_annotations_correct_confirmation() -> None:
-    """Delete label that has annotations, user types correct name."""
-    mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = {1: 42}
-    remaining = [_LABELS[1], _LABELS[2]]
-    mock_client.get_project_labels.return_value = remaining
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = [1]
-        mock_q.text.return_value.ask.return_value = "cat"
-        result = _interactive_delete(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_called_once_with(1, delete=[1])
-    assert len(result) == 2
-
-
-def test_delete_with_annotations_wrong_confirmation() -> None:
-    """Delete label that has annotations, user types wrong name."""
-    mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = {1: 42}
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = [1]
-        mock_q.text.return_value.ask.return_value = "wrong_name"
-        result = _interactive_delete(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
-    assert result == list(_LABELS)
-
-
-def test_delete_with_annotations_none_confirmation() -> None:
-    """Delete label that has annotations, user cancels (None)."""
-    mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = {1: 10}
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = [1]
-        mock_q.text.return_value.ask.return_value = None
-        _interactive_delete(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
 
 
 def test_delete_multiple_labels_with_annotations() -> None:
     """Delete two labels with annotations, confirm both names."""
-    mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = {1: 10, 2: 5}
-    remaining = [_LABELS[2]]
-    mock_client.get_project_labels.return_value = remaining
+    mock_client = _delete_client({1: 10, 2: 5}, [_LABELS[2]])
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = [1, 2]
-        mock_q.text.return_value.ask.return_value = "cat, dog"
+    with _patch_prompts(select_labels=[1, 2], text="cat, dog"):
         result = _interactive_delete(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_called_once_with(1, delete=[1, 2])
@@ -519,32 +440,12 @@ def test_delete_empty_selection_cancels(selection: list[int] | None) -> None:
     """Empty or None checkbox selection cancels before any usage lookup."""
     mock_client = MagicMock()
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = selection
+    with _patch_prompts(select_labels=selection or []):
         result = _interactive_delete(mock_client, 1, list(_LABELS))
 
     mock_client.count_label_usage.assert_not_called()
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-def test_delete_label_no_annotations_among_annotated() -> None:
-    """Select a label with 0 annotations while other labels have annotations.
-
-    The selected label (id=1) has no annotations, so the simple confirm
-    path is used, not the name-typing safety gate.
-    """
-    mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = {2: 100}
-    remaining = [_LABELS[1], _LABELS[2]]
-    mock_client.get_project_labels.return_value = remaining
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.checkbox.return_value.ask.return_value = [1]
-        mock_q.confirm.return_value.ask.return_value = True
-        _interactive_delete(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_called_once_with(1, delete=[1])
 
 
 # ---------------------------------------------------------------------------
@@ -573,69 +474,49 @@ def test_validate_hex_color_invalid() -> None:
 
 def test_recolor_label() -> None:
     mock_client = MagicMock()
-    updated = [
+    mock_client.get_project_labels.return_value = [
         LabelInfo(id=1, name="cat", attributes=[], color="#0000ff"),
         _LABELS[1],
         _LABELS[2],
     ]
-    mock_client.get_project_labels.return_value = updated
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = "#0000ff"
+    with _patch_prompts(select_label=1, text="#0000ff"):
         result = _interactive_recolor(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_called_once_with(1, recolor={1: "#0000ff"})
     assert len(result) == 3
 
 
-def test_recolor_cancel_select() -> None:
+@pytest.mark.parametrize(
+    ("select", "color"),
+    [
+        (None, None),  # cancel at label selection
+        (1, ""),  # empty color
+        (1, None),  # None color
+        (1, "#FF0000"),  # same color (case-insensitive noop)
+    ],
+    ids=["cancel-select", "empty", "none", "same-color"],
+)
+def test_recolor_no_update(select: int | None, color: str | None) -> None:
+    """Selection cancel, empty/None/same color all skip the API call."""
     mock_client = MagicMock()
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = None
+    with _patch_prompts(select_label=select, text=color):
         result = _interactive_recolor(mock_client, 1, list(_LABELS))
 
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
-
-
-@pytest.mark.parametrize("color", ["", None])
-def test_recolor_empty_cancels(color: str | None) -> None:
-    """Empty or None color entry cancels after selecting a label."""
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = color
-        result = _interactive_recolor(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
-    assert result == list(_LABELS)
-
-
-def test_recolor_same_color_noop() -> None:
-    """Entering the same color (case-insensitive) does nothing."""
-    mock_client = MagicMock()
-
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 1
-        mock_q.text.return_value.ask.return_value = "#FF0000"
-        _interactive_recolor(mock_client, 1, list(_LABELS))
-
-    mock_client.update_project_labels.assert_not_called()
 
 
 def test_recolor_label_without_color() -> None:
     """Recolor a label that has no color set."""
     labels = [LabelInfo(id=10, name="fish", attributes=[], color="")]
     mock_client = MagicMock()
-    updated = [LabelInfo(id=10, name="fish", attributes=[], color="#abcdef")]
-    mock_client.get_project_labels.return_value = updated
+    mock_client.get_project_labels.return_value = [
+        LabelInfo(id=10, name="fish", attributes=[], color="#abcdef")
+    ]
 
-    with patch("cveta2.commands.labels.questionary") as mock_q:
-        mock_q.select.return_value.ask.return_value = 10
-        mock_q.text.return_value.ask.return_value = "#abcdef"
+    with _patch_prompts(select_label=10, text="#abcdef"):
         result = _interactive_recolor(mock_client, 1, labels)
 
     mock_client.update_project_labels.assert_called_once_with(

@@ -10,12 +10,12 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import questionary
 from loguru import logger
 
+from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import resolve_project_and_cloud_storage
-from cveta2.commands._task_selector import select_tasks_tui
+from cveta2.commands.interactive import select_tasks
 from cveta2.config import (
     is_interactive_disabled,
     load_image_cache_config,
@@ -110,23 +110,25 @@ def _resolve_output_dir(output_dir: Path) -> Path:
             f"Папка {output_dir} уже существует — перезапись (неинтерактивный режим)."
         )
         return output_dir
-    answer = questionary.select(
+    answer = interactive.select_one(
         f"Папка {output_dir} уже существует. Что делать?",
-        choices=[
-            questionary.Choice(title="Перезаписать", value="overwrite"),
-            questionary.Choice(title="Указать другой путь", value="change"),
-            questionary.Choice(title="Отмена", value="cancel"),
+        [
+            interactive.Choice(title="Перезаписать", value="overwrite"),
+            interactive.Choice(title="Указать другой путь", value="change"),
+            interactive.Choice(title="Отмена", value="cancel"),
         ],
-        use_shortcuts=False,
-        use_indicator=True,
-    ).ask()
-    if answer is None or answer == "cancel":
+        hint="Pass --output / -o to specify the output directory.",
+    )
+    if answer == "cancel":
         sys.exit("Отменено.")
     if answer == "change":
-        new_path = input("Новый путь: ").strip()
-        if not new_path:
-            sys.exit("Путь не указан.")
-        return Path(new_path)
+        new_path = interactive.text(
+            "Новый путь: ",
+            hint="Pass --output / -o to specify the output directory.",
+            allow_empty=False,
+            empty_message="Путь не указан.",
+        )
+        return Path(new_path)  # type: ignore[arg-type]
     return output_dir
 
 
@@ -147,7 +149,7 @@ def _resolve_task_selector(
         explicit: list[int | str] = [v.strip() for v in raw if v.strip()]
         if explicit:
             return explicit
-    selected = select_tasks_tui(client, project_id, exclude_ids=ignore_task_ids)
+    selected = select_tasks(client, project_id, exclude_ids=ignore_task_ids)
     return [t.id for t in selected]
 
 
@@ -181,14 +183,17 @@ def _resolve_images_dir(
             f"image_cache.{project_name} в конфигурацию."
         )
 
-    path_str = input(
-        f"Укажите путь для кэширования изображений проекта {project_name!r}: "
-    ).strip()
-    if not path_str:
+    new_path = interactive.path(
+        f"Укажите путь для кэширования изображений проекта {project_name!r}: ",
+        hint=(
+            f"Укажите --images-dir, --no-images или добавьте "
+            f"image_cache.{project_name} в конфигурацию."
+        ),
+    )
+    if new_path is None:
         logger.warning("Путь не указан — загрузка изображений пропущена.")
         return None
 
-    new_path = Path(path_str).resolve()
     ic_cfg.set_cache_dir(project_name, new_path)
     save_image_cache_config(ic_cfg)
     return new_path

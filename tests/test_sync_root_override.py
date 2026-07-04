@@ -10,15 +10,17 @@ import yaml
 
 from cveta2.commands._helpers import resolve_project_and_cloud_storage
 from cveta2.exceptions import Cveta2Error
-from cveta2.image_downloader import CloudStorageInfo
+from tests.helpers import make_cs_info
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from cveta2.image_downloader import CloudStorageInfo
+
 
 def _cvat_cs_info() -> CloudStorageInfo:
-    return CloudStorageInfo(
-        id=7,
+    return make_cs_info(
+        cs_id=7,
         bucket="cvat-bucket",
         prefix="cvat/prefix",
         endpoint_url="http://minio:9000",

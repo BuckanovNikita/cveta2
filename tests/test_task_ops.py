@@ -16,9 +16,8 @@ from cveta2.commands.task_ops import (
     run_task_mark_deleted,
     run_task_status,
 )
-from cveta2.config import CvatConfig
 from cveta2.models import LabelInfo, TaskInfo
-from tests.helpers import make_raw_shape
+from tests.helpers import client_with_api, make_raw_shape, mock_client_ctx
 
 # ---------------------------------------------------------------------------
 # _confirm_or_exit
@@ -26,12 +25,10 @@ from tests.helpers import make_raw_shape
 
 
 class TestConfirmOrExit:
-    def test_yes_flag_skips_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def fail_input(_prompt: str) -> str:
-            pytest.fail("input() must not be called with --yes")
-
-        monkeypatch.setattr("builtins.input", fail_input)
-        _confirm_or_exit("Удалить?", yes=True)
+    def test_yes_flag_skips_prompt(self) -> None:
+        with patch("cveta2.commands.task_ops.interactive.confirm") as mock_confirm:
+            _confirm_or_exit("Удалить?", yes=True)
+        mock_confirm.assert_not_called()
 
     def test_noninteractive_exits_with_yes_hint(
         self, monkeypatch: pytest.MonkeyPatch
@@ -41,21 +38,17 @@ class TestConfirmOrExit:
             _confirm_or_exit("Удалить?", yes=False)
         assert "--yes" in str(exc_info.value)
 
-    @pytest.mark.parametrize("answer", ["y", "Y", "yes", " y "])
-    def test_interactive_yes_proceeds(
-        self, monkeypatch: pytest.MonkeyPatch, answer: str
-    ) -> None:
+    def test_interactive_yes_proceeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
-        monkeypatch.setattr("builtins.input", lambda _prompt: answer)
-        _confirm_or_exit("Удалить?", yes=False)
+        with patch("cveta2.commands.task_ops.interactive.confirm", return_value=True):
+            _confirm_or_exit("Удалить?", yes=False)
 
-    @pytest.mark.parametrize("answer", ["", "n", "no", "nope"])
-    def test_interactive_no_exits(
-        self, monkeypatch: pytest.MonkeyPatch, answer: str
-    ) -> None:
+    def test_interactive_no_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
-        monkeypatch.setattr("builtins.input", lambda _prompt: answer)
-        with pytest.raises(SystemExit):
+        with (
+            patch("cveta2.commands.task_ops.interactive.confirm", return_value=False),
+            pytest.raises(SystemExit),
+        ):
             _confirm_or_exit("Удалить?", yes=False)
 
 
@@ -65,10 +58,7 @@ class TestConfirmOrExit:
 
 
 def _mock_client_with_task(task: TaskInfo) -> MagicMock:
-    client = MagicMock()
-    client.__enter__ = MagicMock(return_value=client)
-    client.__exit__ = MagicMock(return_value=False)
-    client.resolve_project_id.return_value = 1
+    client = mock_client_ctx()
     client.list_project_tasks.return_value = [task]
     client.resolve_task_selectors = CvatClient.resolve_task_selectors
     return client
@@ -116,7 +106,7 @@ class TestRunTaskCommands:
 
 
 def _client_with_api(api: MagicMock) -> CvatClient:
-    return CvatClient(CvatConfig(host="http://cvat.test"), api=api)
+    return client_with_api(api)
 
 
 class TestDropLabelAnnotations:

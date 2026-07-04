@@ -56,9 +56,9 @@ _MODULE = "cveta2.commands.fetch"
 class TestResolveTaskSelector:
     """Tests for ``_resolve_task_selector``."""
 
-    def test_explicit_task_id(self, coco8_fixtures: LoadedFixtures) -> None:
+    def test_explicit_task_id(self, normal_fake: LoadedFixtures) -> None:
         """Explicit task ID string is returned as-is."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         client = make_fake_client(fake)
         task_id_str = str(fake.tasks[0].id)
         args = make_fetch_args(task=[task_id_str], output_dir="unused")
@@ -67,9 +67,9 @@ class TestResolveTaskSelector:
 
         assert result == [task_id_str]
 
-    def test_explicit_task_name(self, coco8_fixtures: LoadedFixtures) -> None:
+    def test_explicit_task_name(self, normal_fake: LoadedFixtures) -> None:
         """Explicit task name is returned as-is."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         client = make_fake_client(fake)
         task_name = fake.tasks[0].name
         args = make_fetch_args(task=[task_name], output_dir="unused")
@@ -93,30 +93,30 @@ class TestResolveTaskSelector:
 
         assert result == ids
 
-    def test_empty_task_triggers_tui(self, coco8_fixtures: LoadedFixtures) -> None:
+    def test_empty_task_triggers_tui(self, normal_fake: LoadedFixtures) -> None:
         """``-t`` without a value (empty string) falls through to TUI."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         client = make_fake_client(fake)
         args = make_fetch_args(task=[""], output_dir="unused")
 
         with (
             patch(
-                "cveta2.commands._task_selector.require_interactive",
+                "cveta2.commands.interactive.primitives.require_interactive",
                 side_effect=InteractiveModeRequiredError("non-interactive"),
             ),
             pytest.raises(InteractiveModeRequiredError),
         ):
             _resolve_task_selector(args, client, fake.project.id, None)
 
-    def test_none_task_triggers_tui(self, coco8_fixtures: LoadedFixtures) -> None:
+    def test_none_task_triggers_tui(self, normal_fake: LoadedFixtures) -> None:
         """``task=None`` (no -t flag at all) falls through to TUI."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         client = make_fake_client(fake)
         args = make_fetch_args(task=None, output_dir="unused")
 
         with (
             patch(
-                "cveta2.commands._task_selector.require_interactive",
+                "cveta2.commands.interactive.primitives.require_interactive",
                 side_effect=InteractiveModeRequiredError("non-interactive"),
             ),
             pytest.raises(InteractiveModeRequiredError),
@@ -125,10 +125,10 @@ class TestResolveTaskSelector:
 
     def test_whitespace_only_values_filtered(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
     ) -> None:
         """Whitespace-only task values are stripped and filtered out."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         client = make_fake_client(fake)
         task_name = fake.tasks[0].name
         args = make_fetch_args(task=["  ", task_name, ""], output_dir="unused")
@@ -424,7 +424,7 @@ class TestResolveImagesDir:
                 return_value=ImageCacheConfig(),
             ),
             patch(f"{_MODULE}.is_interactive_disabled", return_value=False),
-            patch("builtins.input", return_value=""),
+            patch(f"{_MODULE}.interactive.path", return_value=None),
         ):
             result = _resolve_images_dir(args, "project-x")
 
@@ -442,7 +442,10 @@ class TestResolveImagesDir:
                 return_value=ic_cfg,
             ),
             patch(f"{_MODULE}.is_interactive_disabled", return_value=False),
-            patch("builtins.input", return_value=entered_path),
+            patch(
+                f"{_MODULE}.interactive.path",
+                return_value=Path(entered_path).resolve(),
+            ),
             patch(f"{_MODULE}.save_image_cache_config") as mock_save,
         ):
             result = _resolve_images_dir(args, "project-x")
@@ -496,19 +499,20 @@ class TestFetchSelectedTasks:
         task_ids_in_csv = set(df["task_id"].unique())
         assert {fake.tasks[0].id, fake.tasks[1].id}.issubset(task_ids_in_csv)
 
+        # This test owns CSV *writing*; annotation-count semantics are covered
+        # by test_fetch_service.py::test_mixed_tasks_aggregation. Assert only
+        # that bbox rows carry coords and "none" rows leave them empty.
         bbox_rows = df[df["instance_shape"] == "box"]
         assert len(bbox_rows) > 0
         for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
             assert bbox_rows[col].notna().all()
 
         without_rows = df[df["instance_shape"] == "none"]
-        assert len(without_rows) == 8
         for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
             assert without_rows[col].isna().all()
 
         deleted_df = pd.read_csv(deleted_csv)
         assert set(CSV_COLUMNS).issubset(set(deleted_df.columns))
-        assert len(deleted_df) == 8
         assert (deleted_df["instance_shape"] == "deleted").all()
 
     def test_ignored_tasks_excluded(
@@ -545,11 +549,11 @@ class TestFetchSelectedTasks:
 
     def test_task_not_found_raises(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
         """Non-existent task selector raises ``TaskNotFoundError``."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
 
         with pytest.raises(TaskNotFoundError):
             fetch_selected_tasks(
@@ -575,11 +579,11 @@ class TestRunFetchTaskCliExit:
 
     def test_task_not_found_exits(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
         """Non-existent task name causes ``sys.exit`` via ``Cveta2Error``."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         fake_api = FakeCvatApi(fake)
 
         def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:

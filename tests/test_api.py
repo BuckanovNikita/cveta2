@@ -110,9 +110,9 @@ class TestFetchApi:
         assert len(pd.read_csv(out / "obsolete.csv")) > 0
 
     def test_fetch_task_returns_dataframe(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         out = tmp_path / "out"
 
         df = cveta2.fetch_task(
@@ -130,9 +130,9 @@ class TestFetchApi:
         assert len(df) == len(pd.read_csv(out / "dataset.csv"))
 
     def test_fetch_by_project_name(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
 
         df = cveta2.fetch(
             fake.project.name,
@@ -145,9 +145,9 @@ class TestFetchApi:
         assert not df.empty
 
     def test_fetch_without_images_dir_config_raises(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
 
         with pytest.raises(Cveta2Error, match="image_cache"):
             cveta2.fetch(
@@ -160,9 +160,9 @@ class TestFetchApi:
 
 class TestUploadApi:
     def test_unknown_labels_raise_mismatch_end_to_end(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         dataset = write_dataset_csv(
             tmp_path / "dataset.csv",
             [csv_row("a.jpg", label="ghost-label")],
@@ -178,9 +178,9 @@ class TestUploadApi:
             )
 
     def test_empty_after_filtering_raises(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         dataset = write_dataset_csv(
             tmp_path / "dataset.csv",
             [csv_row("a.jpg", label="cat")],
@@ -224,8 +224,8 @@ class TestWhatsNewApi:
 
 
 class TestLabelsApi:
-    def test_get_labels(self, coco8_fixtures: LoadedFixtures) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    def test_get_labels(self, normal_fake: LoadedFixtures) -> None:
+        fake = normal_fake
 
         labels = cveta2.get_labels(fake.project.id, client=make_fake_client(fake))
 

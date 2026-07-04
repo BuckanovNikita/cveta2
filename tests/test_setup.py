@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
-import getpass
 from typing import TYPE_CHECKING
 
 import pytest
 import yaml
 
 from cveta2.commands import setup as setup_cmd
+from cveta2.commands.interactive import _questionary, primitives
 from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.config import CvatConfig, load_image_cache_config
 from cveta2.models import ProjectInfo
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# Yes/No tokens the wizard treats as an affirmative confirm answer.
+_CONFIRM_YES = {"y", "yes", "да"}
 
 
 @pytest.fixture(autouse=True)
@@ -24,15 +27,31 @@ def interactive_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def feed_inputs(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str]:
-    """Replace builtins.input with scripted answers; return prompt log."""
+    """Script the interactive text/confirm prompts; return the prompt log.
+
+    Each scripted answer feeds the next ``text``/``confirm`` prompt in order.
+    A ``confirm`` prompt consumes a ``y``/``n`` style token and yields a bool.
+    """
     prompts: list[str] = []
     answers_iter = iter(answers)
 
-    def fake_input(prompt: str) -> str:
-        prompts.append(prompt)
+    def fake_text(
+        message: str,
+        *,
+        validate: object = None,  # noqa: ARG001
+    ) -> str:
+        prompts.append(message)
         return next(answers_iter)
 
-    monkeypatch.setattr("builtins.input", fake_input)
+    def fake_confirm(message: str, *, default: bool = False) -> bool:
+        prompts.append(message)
+        answer = next(answers_iter).strip().lower()
+        if not answer:
+            return default
+        return answer in _CONFIRM_YES
+
+    monkeypatch.setattr(_questionary, "ask_text", fake_text)
+    monkeypatch.setattr(_questionary, "ask_confirm", fake_confirm)
     return prompts
 
 
@@ -43,7 +62,7 @@ def run_setup_with_inputs(
 ) -> list[str]:
     """Run run_setup with scripted input answers; return prompt log."""
     prompts = feed_inputs(monkeypatch, answers)
-    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "secret")
+    monkeypatch.setattr(primitives, "prompt_password", lambda _prompt: "secret")
     run_setup(config_path)
     return prompts
 

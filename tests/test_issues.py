@@ -32,7 +32,13 @@ from cveta2.models import (
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
-from tests.helpers import CFG, make_bbox, make_fake_client, make_raw_shape, make_task
+from tests.helpers import (
+    client_with_api,
+    make_bbox,
+    make_fake_client,
+    make_raw_shape,
+    make_task,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,7 +64,7 @@ def _make_data_meta(num_frames: int) -> RawDataMeta:
 
 
 def _client_with_api(api: MagicMock) -> CvatClient:
-    return CvatClient(CFG, api=api)
+    return client_with_api(api)
 
 
 def _single_page(results: list[Any]) -> tuple[SimpleNamespace, SimpleNamespace]:
@@ -86,6 +92,23 @@ _TWO_JOBS = [
     RawJob(id=201, start_frame=0, stop_frame=99),
     RawJob(id=202, start_frame=100, stop_frame=199),
 ]
+
+
+def _issue_row(
+    image_name: str,
+    issue_text: str,
+    *,
+    issue_state: str = "new",
+    bbox: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """One create_task_issues input row; ``bbox=_BBOX`` by default, ``{}`` to omit."""
+    row: dict[str, Any] = {
+        "image_name": image_name,
+        "issue_text": issue_text,
+        "issue_state": issue_state,
+    }
+    row.update(_BBOX if bbox is None else bbox)
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -245,20 +268,7 @@ class TestCreateTaskIssues:
         api = _api_for_issue_creation(200, _TWO_JOBS)
         client = _client_with_api(api)
         df = pd.DataFrame(
-            [
-                {
-                    "image_name": "img_5.jpg",
-                    "issue_text": "первая",
-                    "issue_state": "new",
-                    **_BBOX,
-                },
-                {
-                    "image_name": "img_150.jpg",
-                    "issue_text": "вторая",
-                    "issue_state": "new",
-                    **_BBOX,
-                },
-            ]
+            [_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")]
         )
 
         created = client.create_task_issues(7, df)
@@ -283,16 +293,7 @@ class TestCreateTaskIssues:
     ) -> None:
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
-        df = pd.DataFrame(
-            [
-                {
-                    "image_name": "img_0.jpg",
-                    "issue_text": "t",
-                    "issue_state": "new",
-                    **partial_coords,
-                }
-            ]
-        )
+        df = pd.DataFrame([_issue_row("img_0.jpg", "t", bbox=partial_coords)])
 
         assert client.create_task_issues(7, df) == 0
         api.create_issue.assert_not_called()
@@ -301,12 +302,7 @@ class TestCreateTaskIssues:
     def test_dedupe_on_image_name_and_text(self) -> None:
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
-        row = {
-            "image_name": "img_0.jpg",
-            "issue_text": "same",
-            "issue_state": "new",
-            **_BBOX,
-        }
+        row = _issue_row("img_0.jpg", "same")
         df = pd.DataFrame([row, row])
 
         assert client.create_task_issues(7, df) == 1
@@ -321,8 +317,12 @@ class TestCreateTaskIssues:
             "bbox_x_br": 30.0,
             "bbox_y_br": 40.0,
         }
-        base = {"image_name": "img_0.jpg", "issue_text": "same", "issue_state": "new"}
-        df = pd.DataFrame([{**base, **_BBOX}, {**base, **other_bbox}])
+        df = pd.DataFrame(
+            [
+                _issue_row("img_0.jpg", "same"),
+                _issue_row("img_0.jpg", "same", bbox=other_bbox),
+            ]
+        )
 
         assert client.create_task_issues(7, df) == 2
         positions = [c.args[0].position for c in api.create_issue.call_args_list]
@@ -332,20 +332,7 @@ class TestCreateTaskIssues:
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
         df = pd.DataFrame(
-            [
-                {
-                    "image_name": "img_0.jpg",
-                    "issue_text": "ok",
-                    "issue_state": "new",
-                    **_BBOX,
-                },
-                {
-                    "image_name": "ghost.jpg",
-                    "issue_text": "no",
-                    "issue_state": "new",
-                    **_BBOX,
-                },
-            ]
+            [_issue_row("img_0.jpg", "ok"), _issue_row("ghost.jpg", "no")]
         )
 
         assert client.create_task_issues(7, df) == 1
@@ -358,16 +345,7 @@ class TestCreateTaskIssues:
         jobs = [RawJob(id=201, start_frame=0, stop_frame=0)]
         api = _api_for_issue_creation(2, jobs)
         client = _client_with_api(api)
-        df = pd.DataFrame(
-            [
-                {
-                    "image_name": "img_1.jpg",
-                    "issue_text": "t",
-                    "issue_state": "new",
-                    **_BBOX,
-                }
-            ]
-        )
+        df = pd.DataFrame([_issue_row("img_1.jpg", "t")])
 
         assert client.create_task_issues(7, df) == 0
         api.create_issue.assert_not_called()

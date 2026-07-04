@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import resolve_project_or_exit
 from cveta2.config import is_interactive_disabled
@@ -48,8 +49,10 @@ def _confirm_or_exit(prompt: str, *, yes: bool) -> None:
             "Ошибка: требуется подтверждение, но интерактивный режим отключён. "
             "Запустите команду с флагом --yes."
         )
-    answer = input(f"{prompt} [y/N]: ").strip().lower()
-    if answer not in ("y", "yes"):
+    if not interactive.confirm(
+        f"{prompt} [y/N]",
+        hint="Run the command with --yes to skip confirmation.",
+    ):
         sys.exit("Отменено.")
 
 

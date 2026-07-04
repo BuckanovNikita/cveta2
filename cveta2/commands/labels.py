@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-import questionary
 from loguru import logger
 
+from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
     resolve_project_or_exit,
@@ -81,40 +81,40 @@ def _interactive_loop(
         _print_labels(labels, project_name)
 
         choices = [
-            questionary.Choice(
+            interactive.Choice(
                 title="Добавить метку",
                 value=_ACTION_ADD,
             ),
         ]
         if labels:
             choices.append(
-                questionary.Choice(
+                interactive.Choice(
                     title="Переименовать метку",
                     value=_ACTION_RENAME,
                 ),
             )
             choices.append(
-                questionary.Choice(
+                interactive.Choice(
                     title="Изменить цвет метки",
                     value=_ACTION_RECOLOR,
                 ),
             )
             choices.append(
-                questionary.Choice(
+                interactive.Choice(
                     title="Удалить метку",
                     value=_ACTION_DELETE,
                 ),
             )
         choices.append(
-            questionary.Choice(title="Готово", value=_ACTION_EXIT),
+            interactive.Choice(title="Готово", value=_ACTION_EXIT),
         )
 
-        action = questionary.select(
+        action = interactive.select_one(
             "Что сделать?",
-            choices=choices,
-            use_shortcuts=False,
-            use_indicator=True,
-        ).ask()
+            choices,
+            hint="Pass --list to view labels non-interactively.",
+            on_cancel="none",
+        )
 
         if action is None or action == _ACTION_EXIT:
             break
@@ -145,12 +145,15 @@ def _interactive_add(
     """Prompt for a new label name and add it to the project."""
     existing_names = {lbl.name.casefold() for lbl in labels}
 
-    name: str | None = questionary.text("Имя новой метки (Enter — отмена):").ask()
+    name = interactive.text(
+        "Имя новой метки (Enter — отмена):",
+        hint="Pass --list to view labels non-interactively.",
+        on_cancel="none",
+    )
 
-    if not name or not name.strip():
+    if not name:
         return labels
 
-    name = name.strip()
     if name.casefold() in existing_names:
         logger.warning(f"Метка {name!r} уже существует")
         return labels
@@ -171,20 +174,7 @@ def _interactive_rename(
     labels: list[LabelInfo],
 ) -> list[LabelInfo]:
     """Select a label and rename it."""
-    sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
-    choices = [
-        questionary.Choice(title=lbl.format_display(), value=lbl.id)
-        for lbl in sorted_labels
-    ]
-
-    label_id: int | None = questionary.select(
-        "Какую метку переименовать?",
-        choices=choices,
-        use_shortcuts=False,
-        use_indicator=True,
-        use_search_filter=True,
-        use_jk_keys=False,
-    ).ask()
+    label_id = interactive.select_label(labels, message="Какую метку переименовать?")
 
     if label_id is None:
         return labels
@@ -192,14 +182,15 @@ def _interactive_rename(
     old_label = next(lbl for lbl in labels if lbl.id == label_id)
     existing_names = {lbl.name.casefold() for lbl in labels if lbl.id != label_id}
 
-    new_name: str | None = questionary.text(
-        f"Новое имя для {old_label.name!r} (Enter — отмена):"
-    ).ask()
+    new_name = interactive.text(
+        f"Новое имя для {old_label.name!r} (Enter — отмена):",
+        hint="Pass --list to view labels non-interactively.",
+        on_cancel="none",
+    )
 
-    if not new_name or not new_name.strip():
+    if not new_name:
         return labels
 
-    new_name = new_name.strip()
     if new_name.casefold() in existing_names:
         logger.warning(f"Метка {new_name!r} уже существует")
         return labels
@@ -231,20 +222,7 @@ def _interactive_recolor(
     labels: list[LabelInfo],
 ) -> list[LabelInfo]:
     """Select a label and change its color."""
-    sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
-    choices = [
-        questionary.Choice(title=lbl.format_display(), value=lbl.id)
-        for lbl in sorted_labels
-    ]
-
-    label_id: int | None = questionary.select(
-        "Какой метке изменить цвет?",
-        choices=choices,
-        use_shortcuts=False,
-        use_indicator=True,
-        use_search_filter=True,
-        use_jk_keys=False,
-    ).ask()
+    label_id = interactive.select_label(labels, message="Какой метке изменить цвет?")
 
     if label_id is None:
         return labels
@@ -252,18 +230,20 @@ def _interactive_recolor(
     old_label = next(lbl for lbl in labels if lbl.id == label_id)
     default_color = old_label.color or ""
 
-    new_color: str | None = questionary.text(
+    new_color = interactive.text(
         f"Новый цвет для {old_label.name!r} (текущий: {default_color or 'не задан'}, "
         "Enter — отмена):",
+        hint="Pass --list to view labels non-interactively.",
+        on_cancel="none",
         validate=lambda val: (
             True if not val.strip() else _validate_hex_color(val.strip())
         ),
-    ).ask()
+    )
 
-    if not new_color or not new_color.strip():
+    if not new_color:
         return labels
 
-    new_color = new_color.strip().lower()
+    new_color = new_color.lower()
     if new_color == old_label.color.lower():
         logger.info("Цвет не изменился")
         return labels
@@ -284,18 +264,9 @@ def _interactive_delete(
     labels: list[LabelInfo],
 ) -> list[LabelInfo]:
     """Select labels to delete with annotation-count safety checks."""
-    sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
-    choices = [
-        questionary.Choice(title=lbl.format_display(), value=lbl.id)
-        for lbl in sorted_labels
-    ]
-
-    selected_ids: list[int] | None = questionary.checkbox(
-        "Выберите метки для удаления:",
-        choices=choices,
-        use_jk_keys=False,
-        use_search_filter=True,
-    ).ask()
+    selected_ids = interactive.select_labels(
+        labels, message="Выберите метки для удаления:"
+    )
 
     if not selected_ids:
         return labels
@@ -323,9 +294,12 @@ def _interactive_delete(
             "аннотации (shapes), использующие эти метки!"
         )
         names_to_confirm = ", ".join(lbl.name for lbl in selected_labels)
-        confirm: str | None = questionary.text(
-            f"Для подтверждения введите имена меток через запятую ({names_to_confirm}):"
-        ).ask()
+        confirm = interactive.text(
+            f"Для подтверждения введите имена меток через запятую "
+            f"({names_to_confirm}):",
+            hint="Pass --list to view labels non-interactively.",
+            on_cancel="none",
+        )
 
         if confirm is None:
             logger.info("Удаление отменено")
@@ -340,10 +314,10 @@ def _interactive_delete(
             )
             return labels
     else:
-        confirm_delete: bool | None = questionary.confirm(
+        confirm_delete = interactive.confirm(
             f"Удалить {len(selected_labels)} меток (аннотаций нет)?",
-            default=False,
-        ).ask()
+            hint="Pass --list to view labels non-interactively.",
+        )
         if not confirm_delete:
             logger.info("Удаление отменено")
             return labels

@@ -7,36 +7,18 @@ live only in the CLI layer.
 
 from __future__ import annotations
 
-import getpass
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
-
-from loguru import logger
 
 from cveta2._client.connection import configure_data_timeout
 from cveta2.client import CvatClient
 from cveta2.commands._helpers import require_host
-from cveta2.config import CvatConfig, require_interactive
+from cveta2.commands.interactive import prompt_credentials
+from cveta2.config import CvatConfig
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
-
-
-def prompt_credentials(cfg: CvatConfig) -> CvatConfig:
-    """Prompt interactively for missing credentials.  Returns updated copy."""
-    username = cfg.username
-    password = cfg.password
-
-    if not username:
-        require_interactive("Задайте CVAT_USERNAME/CVAT_PASSWORD.")
-        logger.info("Учётные данные не указаны. Введите логин CVAT:")
-        username = input("Имя пользователя: ")
-    if not password:
-        require_interactive("Задайте CVAT_PASSWORD.")
-        password = getpass.getpass(f"Пароль для {username}: ")
-
-    return cfg.model_copy(update={"username": username, "password": password})
 
 
 @contextmanager

@@ -12,7 +12,7 @@ from loguru import logger
 
 from cveta2._client.mapping import _build_label_maps
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
-from tests.helpers import write_test_config
+from tests.helpers import build_fake, write_test_config
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -50,6 +50,12 @@ def coco8_fixtures(request: pytest.FixtureRequest) -> LoadedFixtures:
     from tests.integration.conftest import fetch_live_fixtures
 
     return fetch_live_fixtures()
+
+
+@pytest.fixture
+def normal_fake(coco8_fixtures: LoadedFixtures) -> LoadedFixtures:
+    """Build a single completed ``normal`` task — the most-used fetch scenario."""
+    return build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
 
 
 @pytest.fixture(scope="session")

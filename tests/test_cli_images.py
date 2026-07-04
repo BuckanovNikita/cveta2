@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _mock_client_ctx(project_id: int = 1) -> MagicMock:
+def _fetch_images_client(project_id: int = 1) -> MagicMock:
     client = mock_client_ctx(project_id=project_id)
     client.detect_project_cloud_storage.return_value = None
     client.prepare_fetch.return_value = FetchContext(
@@ -36,7 +36,7 @@ def _mock_client_ctx(project_id: int = 1) -> MagicMock:
 
 
 def test_fetch_no_images_flag_skips_download(test_config: Path) -> None:
-    mock_client = _mock_client_ctx()
+    mock_client = _fetch_images_client()
     with (
         patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
@@ -62,7 +62,7 @@ def test_fetch_images_dir_reaches_download(
     write_test_config(test_config, image_cache={"coco8-dev": "/other/path"})
     custom_dir = tmp_path / "custom-images"
 
-    mock_client = _mock_client_ctx()
+    mock_client = _fetch_images_client()
     with (
         patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),

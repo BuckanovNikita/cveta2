@@ -14,13 +14,12 @@ from cveta2.image_downloader import (
     parse_cloud_storage,
 )
 from cveta2.models import (
-    BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
 from cveta2.s3_utils import build_s3_key, list_s3_objects, parse_sync_root
-from tests.helpers import make_bbox
+from tests.helpers import make_bbox, make_cs_info
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,20 +75,22 @@ class _FakeSdkClient:
         return self._cloud_storages[cs_id], None
 
 
-def _make_s3_client(objects: dict[str, bytes]) -> MagicMock:
-    """Build a mock S3 client backed by a dict.
+def _fake_s3(objects: dict[str, bytes], *, keyed_by_bucket: bool) -> MagicMock:
+    """Build a dict-backed mock S3 client.
 
-    Keys in *objects* are "bucket/key" (e.g. "test-bucket/images/a.jpg").
-    Implements get_object and list_objects_v2 for project-storage name lookup.
+    ``keyed_by_bucket`` selects the object-key convention:
+    ``True`` stores ``"bucket/key"`` (download path, matches CVAT task storage);
+    ``False`` stores bare ``key`` (sync / project-storage path).
+    Missing keys raise ``KeyError`` — the exception the downloader retries on.
     """
 
-    def get_object(Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
-        full_key = f"{Bucket}/{Key}"
-        if full_key not in objects:
-            msg = f"NoSuchKey: {full_key}"
+    def get_object(Bucket: str = "", Key: str = "") -> dict[str, Any]:  # noqa: N803
+        lookup = f"{Bucket}/{Key}" if keyed_by_bucket else Key
+        if lookup not in objects:
+            msg = f"NoSuchKey: {lookup}"
             raise KeyError(msg)
         body = MagicMock()
-        body.read.return_value = objects[full_key]
+        body.read.return_value = objects[lookup]
         return {"Body": body}
 
     def list_objects_v2(
@@ -99,11 +100,11 @@ def _make_s3_client(objects: dict[str, bytes]) -> MagicMock:
     ) -> dict[str, Any]:
         contents = []
         for full_key, value in objects.items():
-            if "/" not in full_key:
-                continue
-            bucket_part, key_part = full_key.split("/", 1)
-            if bucket_part != Bucket:
-                continue
+            key_part = full_key
+            if keyed_by_bucket:
+                bucket_part, _, key_part = full_key.partition("/")
+                if not key_part or bucket_part != Bucket:
+                    continue
             if Prefix and not key_part.startswith(Prefix):
                 continue
             contents.append({"Key": key_part, "Size": len(value)})
@@ -115,7 +116,15 @@ def _make_s3_client(objects: dict[str, bytes]) -> MagicMock:
     return mock
 
 
-def _ann(task_id: int, frame_id: int, image_name: str) -> BBoxAnnotation:
+def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: MagicMock) -> None:
+    """Route make_s3_client to the fake S3 client."""
+    monkeypatch.setattr(
+        "cveta2.image_downloader.make_s3_client",
+        lambda *_a, **_kw: fake_s3,
+    )
+
+
+def _ann(task_id: int, frame_id: int, image_name: str) -> Any:
     return make_bbox(
         image_name=image_name,
         task_id=task_id,
@@ -137,26 +146,8 @@ def _img_no_ann(
     )
 
 
-def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: MagicMock) -> None:
-    """Patch make_s3_client to return the fake S3 client."""
-    monkeypatch.setattr(
-        "cveta2.image_downloader.make_s3_client",
-        lambda *_a, **_kw: fake_s3,
-    )
-
-
-def _project_cs(
-    bucket: str = "test-bucket",
-    prefix: str = "images",
-    endpoint_url: str = "http://minio:9000",
-) -> CloudStorageInfo:
-    """CloudStorageInfo matching the default fake S3 layout in tests."""
-    return CloudStorageInfo(
-        id=1,
-        bucket=bucket,
-        prefix=prefix,
-        endpoint_url=endpoint_url,
-    )
+def _project_cs() -> CloudStorageInfo:
+    return make_cs_info(bucket="test-bucket", prefix="images")
 
 
 def _make_downloader_env(
@@ -164,12 +155,9 @@ def _make_downloader_env(
     annotations: ProjectAnnotations,
     s3_data: dict[str, bytes],
     prefix: str = "images",
-) -> tuple[ImageDownloader, _FakeSdkClient]:
-    """Build an ImageDownloader + fake SDK for testing."""
-    task_ids = set()
-    for record in annotations.annotations:
-        task_ids.add(record.task_id)
-
+) -> ImageDownloader:
+    """Build an ImageDownloader with a fake SDK backing its task lookups."""
+    task_ids = {record.task_id for record in annotations.annotations}
     cloud_storage = _FakeCloudStorage(
         cs_id=1,
         resource="test-bucket",
@@ -178,13 +166,12 @@ def _make_downloader_env(
     task_storages: dict[int, dict[str, Any] | None] = {
         tid: {"cloud_storage_id": 1} for tid in task_ids
     }
-    sdk = _FakeSdkClient(
+    _FakeSdkClient(
         task_storages=task_storages,
         cloud_storages={1: cloud_storage},
         s3_objects=s3_data,
     )
-    downloader = ImageDownloader(tmp_path / "images")
-    return downloader, sdk
+    return ImageDownloader(tmp_path / "images")
 
 
 def test_parse_cloud_storage() -> None:
@@ -236,8 +223,8 @@ def test_download_saves_to_target_dir_flat(
         "test-bucket/images/a.jpg": b"data-a",
         "test-bucket/images/b.jpg": b"data-b",
     }
-    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
-    _patch_boto(monkeypatch, _make_s3_client(s3_data))
+    downloader = _make_downloader_env(tmp_path, annotations, s3_data)
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=True))
 
     stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
@@ -266,8 +253,8 @@ def test_download_skips_already_cached(
     target.mkdir(parents=True)
     (target / "a.jpg").write_bytes(b"old-data-a")
 
-    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
-    _patch_boto(monkeypatch, _make_s3_client(s3_data))
+    downloader = _make_downloader_env(tmp_path, annotations, s3_data)
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=True))
 
     stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
@@ -288,19 +275,8 @@ def test_download_creates_target_dir(
         deleted_images=[],
     )
     s3_data = {"test-bucket/images/img.jpg": b"data"}
-
-    cloud_storage = _FakeCloudStorage(
-        cs_id=1,
-        resource="test-bucket",
-        specific_attributes="prefix=images&endpoint_url=http://minio:9000",
-    )
-    task_storages: dict[int, dict[str, Any] | None] = {10: {"cloud_storage_id": 1}}
-    _ = _FakeSdkClient(
-        task_storages=task_storages,
-        cloud_storages={1: cloud_storage},
-        s3_objects=s3_data,
-    )
-    _patch_boto(monkeypatch, _make_s3_client(s3_data))
+    _make_downloader_env(tmp_path, annotations, s3_data)
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=True))
 
     downloader = ImageDownloader(target)
     stats = downloader.download(annotations, project_cloud_storage=_project_cs())
@@ -311,10 +287,7 @@ def test_download_creates_target_dir(
 
 
 def test_download_empty_annotations(tmp_path: Path) -> None:
-    annotations = ProjectAnnotations(
-        annotations=[],
-        deleted_images=[],
-    )
+    annotations = ProjectAnnotations(annotations=[], deleted_images=[])
     downloader = ImageDownloader(tmp_path / "images")
     stats = downloader.download(annotations)
     assert stats.total == 0
@@ -342,8 +315,8 @@ def test_download_skips_deleted_images(
         "test-bucket/images/alive.jpg": b"data",
         "test-bucket/images/dead.jpg": b"should-not-download",
     }
-    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
-    _patch_boto(monkeypatch, _make_s3_client(s3_data))
+    downloader = _make_downloader_env(tmp_path, annotations, s3_data)
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=True))
 
     stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
@@ -375,8 +348,8 @@ def test_download_stats_counts(
         "test-bucket/images/new.jpg": b"data-new",
         "test-bucket/images/also-new.jpg": b"data-also-new",
     }
-    downloader, _ = _make_downloader_env(tmp_path, annotations, s3_data)
-    _patch_boto(monkeypatch, _make_s3_client(s3_data))
+    downloader = _make_downloader_env(tmp_path, annotations, s3_data)
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=True))
 
     stats = downloader.download(annotations, project_cloud_storage=_project_cs())
 
@@ -392,12 +365,7 @@ def test_download_no_cloud_storage_marks_failed(tmp_path: Path) -> None:
         annotations=[_ann(10, 0, "img.jpg")],
         deleted_images=[],
     )
-    task_storages: dict[int, dict[str, Any] | None] = {10: None}
-    _ = _FakeSdkClient(
-        task_storages=task_storages,
-        cloud_storages={},
-        s3_objects={},
-    )
+    _FakeSdkClient(task_storages={10: None}, cloud_storages={}, s3_objects={})
     downloader = ImageDownloader(tmp_path / "images")
 
     stats = downloader.download(annotations)
@@ -416,44 +384,11 @@ def test_download_fallback_project_storage(
         annotations=[_ann(10, 0, "img.jpg")],
         deleted_images=[],
     )
-    task_storages: dict[int, dict[str, Any] | None] = {10: None}
-    _ = _FakeSdkClient(
-        task_storages=task_storages,
-        cloud_storages={},
-        s3_objects={},
-    )
-    project_cs = CloudStorageInfo(
-        id=1,
-        bucket="test-bucket",
-        prefix="proj/",
-        endpoint_url="http://minio:9000",
-    )
-    # S3 keys under project prefix; get_object receives Key as S3 key
-    s3_objects_by_key: dict[str, bytes] = {"proj/img.jpg": b"project-data"}
-
-    def list_objects_v2(
-        Bucket: str = "",  # noqa: N803, ARG001
-        Prefix: str = "",  # noqa: N803
-        **_kwargs: object,
-    ) -> dict[str, Any]:
-        contents = [
-            {"Key": k, "Size": len(v)}
-            for k, v in s3_objects_by_key.items()
-            if k.startswith(Prefix)
-        ]
-        return {"Contents": contents, "IsTruncated": False}
-
-    def get_object(Bucket: str = "", Key: str = "") -> dict[str, Any]:  # noqa: N803, ARG001
-        if Key not in s3_objects_by_key:
-            raise KeyError(f"NoSuchKey: {Key}")
-        body = MagicMock()
-        body.read.return_value = s3_objects_by_key[Key]
-        return {"Body": body}
-
-    fake_s3 = MagicMock()
-    fake_s3.list_objects_v2.side_effect = list_objects_v2
-    fake_s3.get_object.side_effect = get_object
-    _patch_boto(monkeypatch, fake_s3)
+    _FakeSdkClient(task_storages={10: None}, cloud_storages={}, s3_objects={})
+    project_cs = make_cs_info(bucket="test-bucket", prefix="proj/")
+    # Project-storage path receives S3 keys directly (not "bucket/key").
+    s3_data = {"proj/img.jpg": b"project-data"}
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=False))
 
     downloader = ImageDownloader(tmp_path / "images")
     stats = downloader.download(annotations, project_cloud_storage=project_cs)
@@ -469,86 +404,42 @@ def test_download_fallback_project_storage(
 # ======================================================================
 
 
-def _make_list_s3_client(
-    objects: dict[str, bytes],
-) -> MagicMock:
-    """Build a mock S3 client that supports list_objects_v2 and get_object."""
-
-    def list_objects_v2(
-        Bucket: str = "",  # noqa: N803, ARG001
-        Prefix: str = "",  # noqa: N803
-        **_kwargs: object,
-    ) -> dict[str, Any]:
-        contents = []
-        for key, data in objects.items():
-            if key.startswith(Prefix):
-                contents.append({"Key": key, "Size": len(data)})
-        return {"Contents": contents, "IsTruncated": False}
-
-    def get_object(Bucket: str = "", Key: str = "") -> dict[str, Any]:  # noqa: N803, ARG001
-        if Key not in objects:
-            msg = f"NoSuchKey: {Key}"
-            raise KeyError(msg)
-        body = MagicMock()
-        body.read.return_value = objects[Key]
-        return {"Body": body}
-
-    mock = MagicMock()
-    mock.list_objects_v2.side_effect = list_objects_v2
-    mock.get_object.side_effect = get_object
-    return mock
-
-
-def _patch_boto_sync(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_s3: MagicMock,
-) -> None:
-    """Patch make_s3_client to return the fake S3 client (for sync tests)."""
-    monkeypatch.setattr(
-        "cveta2.image_downloader.make_s3_client",
-        lambda *_a, **_kw: fake_s3,
-    )
-
-
 # --- list_s3_objects tests ---
 
 
 def testlist_s3_objects_returns_keys_stripped_of_prefix() -> None:
     """list_s3_objects strips the prefix from keys."""
-    s3_objects = {
-        "images/a.jpg": b"data-a",
-        "images/b.jpg": b"data-b",
-    }
-    fake_s3 = _make_list_s3_client(s3_objects)
+    fake_s3 = _fake_s3(
+        {"images/a.jpg": b"data-a", "images/b.jpg": b"data-b"},
+        keyed_by_bucket=False,
+    )
     result = list_s3_objects(fake_s3, "test-bucket", "images")
     assert sorted(result) == [("images/a.jpg", "a.jpg"), ("images/b.jpg", "b.jpg")]
 
 
 def testlist_s3_objects_no_prefix() -> None:
     """list_s3_objects with empty prefix returns keys as-is."""
-    s3_objects = {
-        "cat.jpg": b"cat",
-        "dog.jpg": b"dog",
-    }
-    fake_s3 = _make_list_s3_client(s3_objects)
+    fake_s3 = _fake_s3(
+        {"cat.jpg": b"cat", "dog.jpg": b"dog"},
+        keyed_by_bucket=False,
+    )
     result = list_s3_objects(fake_s3, "bucket", "")
     assert sorted(result) == [("cat.jpg", "cat.jpg"), ("dog.jpg", "dog.jpg")]
 
 
 def testlist_s3_objects_empty_bucket() -> None:
     """list_s3_objects returns empty list for empty bucket."""
-    fake_s3 = _make_list_s3_client({})
+    fake_s3 = _fake_s3({}, keyed_by_bucket=False)
     result = list_s3_objects(fake_s3, "bucket", "prefix")
     assert result == []
 
 
 def testlist_s3_objects_skips_prefix_marker() -> None:
     """list_s3_objects skips the prefix directory marker (empty name after strip)."""
-    s3_objects = {
-        "images/": b"",  # directory marker
-        "images/a.jpg": b"data",
-    }
-    fake_s3 = _make_list_s3_client(s3_objects)
+    fake_s3 = _fake_s3(
+        {"images/": b"", "images/a.jpg": b"data"},
+        keyed_by_bucket=False,
+    )
     result = list_s3_objects(fake_s3, "bucket", "images/")
     assert result == [("images/a.jpg", "a.jpg")]
 
@@ -561,69 +452,93 @@ class _SyncCase(NamedTuple):
     pre_cached: dict[str, bytes]
     expected: tuple[int, int, int, int]  # total, downloaded, cached, failed
     expected_files: dict[str, bytes]
+    absent_files: tuple[str, ...] = ()
+    sync_root: str | None = None
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        pytest.param(
-            _SyncCase(
-                {
-                    "images/a.jpg": b"data-a",
-                    "images/b.jpg": b"data-b",
-                    "images/c.png": b"data-c",
-                },
-                {},
-                (3, 3, 0, 0),
-                {"a.jpg": b"data-a", "b.jpg": b"data-b", "c.png": b"data-c"},
-            ),
-            id="downloads-all",
+_SYNC_CASES = [
+    pytest.param(
+        _SyncCase(
+            {
+                "images/a.jpg": b"data-a",
+                "images/b.jpg": b"data-b",
+                "images/c.png": b"data-c",
+            },
+            {},
+            (3, 3, 0, 0),
+            {"a.jpg": b"data-a", "b.jpg": b"data-b", "c.png": b"data-c"},
         ),
-        pytest.param(
-            _SyncCase(
-                {"images/a.jpg": b"data-a", "images/b.jpg": b"data-b"},
-                {"a.jpg": b"old-data-a"},
-                (2, 1, 1, 0),
-                {"a.jpg": b"old-data-a", "b.jpg": b"data-b"},
-            ),
-            id="skips-already-cached",
+        id="downloads-all",
+    ),
+    pytest.param(
+        _SyncCase(
+            {"images/a.jpg": b"data-a", "images/b.jpg": b"data-b"},
+            {"a.jpg": b"old-data-a"},
+            (2, 1, 1, 0),
+            {"a.jpg": b"old-data-a", "b.jpg": b"data-b"},
         ),
-        pytest.param(
-            _SyncCase(
-                {"images/a.jpg": b"data-a"},
-                {"a.jpg": b"existing"},
-                (1, 0, 1, 0),
-                {"a.jpg": b"existing"},
-            ),
-            id="all-cached",
+        id="skips-already-cached",
+    ),
+    pytest.param(
+        _SyncCase(
+            {"images/a.jpg": b"data-a"},
+            {"a.jpg": b"existing"},
+            (1, 0, 1, 0),
+            {"a.jpg": b"existing"},
         ),
-        pytest.param(
-            _SyncCase({}, {}, (0, 0, 0, 0), {}),
-            id="empty-bucket",
+        id="all-cached",
+    ),
+    pytest.param(
+        _SyncCase({}, {}, (0, 0, 0, 0), {}),
+        id="empty-bucket",
+    ),
+    pytest.param(
+        _SyncCase(
+            {"images/my_favourite/a.jpg": b"data-a", "images/other/b.jpg": b"data-b"},
+            {},
+            (1, 1, 0, 0),
+            {"a.jpg": b"data-a"},
+            absent_files=("b.jpg",),
+            sync_root="s3://custom-bucket/images/my_favourite",
         ),
-    ],
-)
+        id="custom-sync-root-scopes-subtree",
+    ),
+    pytest.param(
+        _SyncCase(
+            {"images/a.jpg": b"data-a"},
+            {"a.jpg": b"existing-a", "local-only.jpg": b"local-data"},
+            (1, 0, 1, 0),
+            {"a.jpg": b"existing-a", "local-only.jpg": b"local-data"},
+        ),
+        id="never-deletes-local-only",
+    ),
+]
+
+
+@pytest.mark.parametrize("case", _SYNC_CASES)
 def test_s3_syncer_stats(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     case: _SyncCase,
 ) -> None:
-    """S3Syncer download/cache/failed accounting and on-disk contents."""
+    """S3Syncer accounting, subtree scoping, and on-disk contents."""
     target = tmp_path / "sync-dir"
     if case.pre_cached:
         target.mkdir(parents=True)
         for name, data in case.pre_cached.items():
             (target / name).write_bytes(data)
 
-    fake_s3 = _make_list_s3_client(case.s3_objects)
-    _patch_boto_sync(monkeypatch, fake_s3)
+    _patch_boto(monkeypatch, _fake_s3(case.s3_objects, keyed_by_bucket=False))
 
-    cs_info = CloudStorageInfo(
-        id=1,
-        bucket="test-bucket",
-        prefix="images",
-        endpoint_url="http://minio:9000",
+    if case.sync_root is not None:
+        bucket, prefix = parse_sync_root(case.sync_root)
+        assert bucket is not None
+    else:
+        bucket, prefix = "test-bucket", "images"
+    cs_info = make_cs_info(
+        bucket=bucket, prefix=prefix, endpoint_url="http://minio:9000"
     )
+
     stats = S3Syncer(target).sync(cs_info)
 
     total, downloaded, cached, failed = case.expected
@@ -633,6 +548,8 @@ def test_s3_syncer_stats(
     assert stats.failed == failed
     for name, data in case.expected_files.items():
         assert (target / name).read_bytes() == data
+    for name in case.absent_files:
+        assert not (target / name).exists()
 
 
 def test_s3_syncer_creates_target_dir(
@@ -640,77 +557,16 @@ def test_s3_syncer_creates_target_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """S3Syncer creates the target directory if it doesn't exist."""
-    s3_objects = {"prefix/img.jpg": b"data"}
-    fake_s3 = _make_list_s3_client(s3_objects)
-    _patch_boto_sync(monkeypatch, fake_s3)
-
-    cs_info = CloudStorageInfo(
-        id=1,
-        bucket="bucket",
-        prefix="prefix",
-        endpoint_url="http://s3:9000",
+    _patch_boto(
+        monkeypatch, _fake_s3({"prefix/img.jpg": b"data"}, keyed_by_bucket=False)
+    )
+    cs_info = make_cs_info(
+        bucket="bucket", prefix="prefix", endpoint_url="http://s3:9000"
     )
     target = tmp_path / "deep" / "nested" / "dir"
-    syncer = S3Syncer(target)
-    stats = syncer.sync(cs_info)
+
+    stats = S3Syncer(target).sync(cs_info)
 
     assert stats.downloaded == 1
     assert target.exists()
     assert (target / "img.jpg").read_bytes() == b"data"
-
-
-def test_s3_syncer_with_custom_sync_root(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """S3Syncer with a parse_sync_root-derived prefix lists only that subtree."""
-    s3_objects = {
-        "images/my_favourite/a.jpg": b"data-a",
-        "images/other/b.jpg": b"data-b",
-    }
-    fake_s3 = _make_list_s3_client(s3_objects)
-    _patch_boto_sync(monkeypatch, fake_s3)
-
-    bucket, prefix = parse_sync_root("s3://custom-bucket/images/my_favourite")
-    assert bucket is not None
-    cs_info = CloudStorageInfo(
-        id=1,
-        bucket=bucket,
-        prefix=prefix,
-        endpoint_url="http://minio:9000",
-    )
-    target = tmp_path / "sync-dir"
-    stats = S3Syncer(target).sync(cs_info)
-
-    assert stats.total == 1
-    assert stats.downloaded == 1
-    assert (target / "a.jpg").read_bytes() == b"data-a"
-    assert not (target / "b.jpg").exists()
-
-
-def test_s3_syncer_never_deletes_local_files(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """S3Syncer never deletes files that exist locally but not in S3."""
-    s3_objects = {"images/a.jpg": b"data-a"}
-    target = tmp_path / "sync-dir"
-    target.mkdir(parents=True)
-    (target / "a.jpg").write_bytes(b"existing-a")
-    (target / "local-only.jpg").write_bytes(b"local-data")
-
-    fake_s3 = _make_list_s3_client(s3_objects)
-    _patch_boto_sync(monkeypatch, fake_s3)
-
-    cs_info = CloudStorageInfo(
-        id=1,
-        bucket="test-bucket",
-        prefix="images",
-        endpoint_url="http://minio:9000",
-    )
-    syncer = S3Syncer(target)
-    syncer.sync(cs_info)
-
-    # Local-only file must still exist
-    assert (target / "local-only.jpg").read_bytes() == b"local-data"
-    assert (target / "a.jpg").read_bytes() == b"existing-a"

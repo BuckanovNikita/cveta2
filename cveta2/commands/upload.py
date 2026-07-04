@@ -10,12 +10,12 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import questionary
 from loguru import logger
 
+from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import read_dataset_csv, resolve_project_or_exit
-from cveta2.config import load_upload_config, require_interactive
+from cveta2.config import load_upload_config
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.upload import (
     UploadOptions,
@@ -50,25 +50,23 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
     has_no_annotation = df["instance_label"].isna().any()
     if not all_labels and not has_no_annotation:
         sys.exit("Ошибка: не найдено ни одного instance_label в dataset.csv.")
-    require_interactive(
-        "The 'upload' command requires interactive class selection.",
-    )
-    choices: list[questionary.Choice] = [
-        questionary.Choice(title=label, value=label) for label in all_labels
+    choices: list[interactive.Choice] = [
+        interactive.Choice(title=label, value=label) for label in all_labels
     ]
     if has_no_annotation:
         choices.append(
-            questionary.Choice(
+            interactive.Choice(
                 title="(без аннотаций)",
                 value=_NO_ANNOTATION_LABEL,
             ),
         )
-    selected: list[str] | None = questionary.checkbox(
+    raw = interactive.select_many(
         "Выберите классы для загрузки:",
-        choices=choices,
-    ).ask()
-    if not selected:
-        sys.exit("Не выбрано ни одного класса — отмена.")
+        choices,
+        hint="The 'upload' command requires interactive class selection.",
+        empty_message="Не выбрано ни одного класса — отмена.",
+    )
+    selected = [str(v) for v in raw or []]
     display = ["(без аннотаций)" if s == _NO_ANNOTATION_LABEL else s for s in selected]
     logger.info(
         f"Выбрано классов: {len(selected)}: {', '.join(display)}",
@@ -80,11 +78,13 @@ def _resolve_task_name(name_arg: str | None) -> str:
     """Return task name from argument or interactive prompt."""
     if name_arg:
         return name_arg
-    require_interactive("Pass --name to specify the task name.")
-    task_name = input("Имя задачи: ").strip()
-    if not task_name:
-        sys.exit("Имя задачи не указано — отмена.")
-    return task_name
+    task_name = interactive.text(
+        "Имя задачи: ",
+        hint="Pass --name to specify the task name.",
+        allow_empty=False,
+        empty_message="Имя задачи не указано — отмена.",
+    )
+    return str(task_name)
 
 
 def run_upload(args: argparse.Namespace) -> None:

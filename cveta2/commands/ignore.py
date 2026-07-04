@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-import questionary
 from loguru import logger
 
 from cveta2.client import CvatClient
+from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
     resolve_project_from_args,
 )
-from cveta2.commands._task_selector import build_task_choices
 from cveta2.config import (
     IgnoreConfig,
     IgnoredTask,
     load_ignore_config,
-    require_interactive,
     save_ignore_config,
 )
 from cveta2.exceptions import Cveta2Error
@@ -130,31 +128,11 @@ def _select_project_tui(
     ignore_cfg: IgnoreConfig,
 ) -> tuple[int, str]:
     """Interactive project selection, returning ``(project_id, project_name)``."""
-    require_interactive("Pass --project / -p to specify the project name.")
-
     cached_projects = load_projects_cache()
     known_names = _build_project_names(cached_projects, ignore_cfg)
 
-    if not known_names:
-        sys.exit(
-            "Нет известных проектов. "
-            "Укажите --project или запустите cveta2 fetch для заполнения кэша."
-        )
+    project_name = interactive.select_project_name(known_names)
 
-    choices = [questionary.Choice(title=name, value=name) for name in known_names]
-    answer: str | None = questionary.select(
-        "Выберите проект:",
-        choices=choices,
-        use_shortcuts=False,
-        use_indicator=True,
-        use_search_filter=True,
-        use_jk_keys=False,
-    ).ask()
-
-    if answer is None:
-        sys.exit("Выбор отменён.")
-
-    project_name = answer
     cached = load_projects_cache()
     try:
         project_id = client.resolve_project_id(project_name, cached=cached)
@@ -231,28 +209,28 @@ def _interactive_loop(
 
         ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
         choices = [
-            questionary.Choice(
+            interactive.Choice(
                 title="Добавить задачи в ignore-список",
                 value=_ACTION_ADD,
             ),
         ]
         if ignored_ids:
             choices.append(
-                questionary.Choice(
+                interactive.Choice(
                     title="Убрать задачи из ignore-списка",
                     value=_ACTION_REMOVE,
                 ),
             )
         choices.append(
-            questionary.Choice(title="Готово", value=_ACTION_EXIT),
+            interactive.Choice(title="Готово", value=_ACTION_EXIT),
         )
 
-        action = questionary.select(
+        action = interactive.select_one(
             "Что сделать?",
-            choices=choices,
-            use_shortcuts=False,
-            use_indicator=True,
-        ).ask()
+            choices,
+            hint="Pass --project / -p to specify the project name.",
+            on_cancel="none",
+        )
 
         if action is None or action == _ACTION_EXIT:
             break
@@ -279,7 +257,7 @@ def _interactive_add(
 ) -> bool:
     """Show TUI checkbox of project tasks to add to the ignore list.
 
-    Unlike ``select_tasks_tui``, a cancel or empty selection here returns
+    Unlike ``select_tasks``, a cancel or empty selection here returns
     False instead of terminating the program, so the interactive loop can
     continue.
     """
@@ -291,31 +269,30 @@ def _interactive_add(
         logger.info("Нет доступных задач для добавления.")
         return False
 
-    choices = build_task_choices(tasks)
-    answer = questionary.checkbox(
-        "Выберите задачи для добавления в ignore-список:",
-        choices=choices,
-        use_jk_keys=False,
-        use_search_filter=True,
-    ).ask()
-    if not answer:
+    selected = interactive.pick_tasks(
+        tasks, message="Выберите задачи для добавления в ignore-список:"
+    )
+    if not selected:
         return False
 
     description = (
-        questionary.text("Описание / причина (Enter — пропустить):").ask() or ""
-    ).strip()
-    silent = questionary.confirm(
-        "Не показывать предупреждение при fetch (silent)?", default=False
-    ).ask()
+        interactive.text(
+            "Описание / причина (Enter — пропустить):",
+            hint="Pass task ID(s) with --task to add non-interactively.",
+            on_cancel="none",
+        )
+        or ""
+    )
+    silent = interactive.confirm(
+        "Не показывать предупреждение при fetch (silent)?",
+        hint="Pass task ID(s) with --task to add non-interactively.",
+    )
 
-    tasks_by_id = {t.id: t for t in tasks}
-    for val in answer:
-        task = tasks_by_id.get(int(val))
-        if task is not None:
-            ignore_cfg.add_task(
-                project_name, task.id, task.name, description, silent=bool(silent)
-            )
-            logger.info(f"Задача {task.name!r} (id={task.id}) добавлена")
+    for task in selected:
+        ignore_cfg.add_task(
+            project_name, task.id, task.name, description, silent=silent
+        )
+        logger.info(f"Задача {task.name!r} (id={task.id}) добавлена")
     return True
 
 
@@ -330,23 +307,25 @@ def _interactive_remove(
         return False
 
     choices = [
-        questionary.Choice(
+        interactive.Choice(
             title=_format_ignored_entry(e),
             value=e.id,
         )
         for e in entries
     ]
-    selected: list[int] | None = questionary.checkbox(
+    answer = interactive.select_many(
         "Выберите задачи для удаления из ignore-списка:",
-        choices=choices,
-        use_jk_keys=False,
-        use_search_filter=True,
-    ).ask()
+        choices,
+        hint="Pass task ID(s) with --task to remove non-interactively.",
+        on_cancel="none",
+        allow_empty=True,
+    )
 
-    if not selected:
+    if not answer:
         return False
 
-    for task_id in selected:
+    for value in answer:
+        task_id = cast("int", value)
         ignore_cfg.remove_task(project_name, task_id)
         logger.info(f"Задача id={task_id} удалена")
 

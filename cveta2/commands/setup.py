@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import getpass
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from cveta2.commands._bootstrap import open_client
+from cveta2.commands.interactive import wizard
 from cveta2.config import (
     CvatConfig,
     ImageCacheConfig,
@@ -20,6 +19,8 @@ from cveta2.config import (
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from cveta2.models import ProjectInfo
 
 
@@ -33,16 +34,11 @@ def run_setup(config_path: Path) -> None:
     existing = CvatConfig.from_file(config_path)
 
     host_default = existing.host or "https://app.cvat.ai"
-    host = input(f"Хост CVAT [{host_default}]: ").strip() or host_default
-    organization = _prompt_organization(existing.organization)
+    host = wizard.prompt_host(host_default)
+    organization = wizard.prompt_organization(existing.organization)
 
-    username_default = existing.username or ""
-    prompt = "Имя пользователя"
-    if username_default:
-        prompt += f" [{username_default}]"
-    prompt += ": "
-    username = input(prompt).strip() or username_default
-    password = getpass.getpass("Пароль: ")
+    username = wizard.prompt_username(existing.username or "")
+    password = wizard.prompt_password()
     if not password and existing.password:
         password = existing.password
         logger.info("Пароль не изменён (использован существующий).")
@@ -56,24 +52,6 @@ def run_setup(config_path: Path) -> None:
 
     saved_path = cfg.save_to_file(config_path)
     logger.info(f"Готово! Конфигурация сохранена в {saved_path}")
-
-
-def _prompt_organization(existing_org: str | None) -> str | None:
-    """Ask for org slug until one is given or its absence is confirmed."""
-    org_default = existing_org or ""
-    org_prompt = "Slug организации"
-    if org_default:
-        org_prompt += f" [{org_default}]"
-    org_prompt += ": "
-    while True:
-        organization = input(org_prompt).strip() or org_default
-        if organization:
-            return organization
-        confirmation = input(
-            "Организация не указана. Подтвердите, что у вас нет организации (y/N): "
-        ).strip()
-        if confirmation.lower() == "y":
-            return None
 
 
 def run_setup_cache(
@@ -97,7 +75,7 @@ def run_setup_cache(
         sys.exit("Нет доступных проектов.")
 
     image_cache = load_image_cache_config(config_path)
-    cache_root = _prompt_cache_root()
+    cache_root = wizard.prompt_cache_root()
 
     if cache_root is not None and _apply_root_to_all_projects(
         projects, image_cache, cache_root, reset=reset
@@ -133,14 +111,6 @@ def _list_cache_paths(config_path: Path) -> None:
         logger.info(f"  {name}: {path}")
 
 
-def _prompt_cache_root() -> Path | None:
-    """Ask user for cache root; return resolved path or None if empty."""
-    raw = input(
-        "Корневая директория кэша (по умолчанию для проектов: корень/имя_проекта) []: "
-    ).strip()
-    return Path(raw).expanduser().resolve() if raw else None
-
-
 def _apply_root_to_all_projects(
     projects: list[ProjectInfo],
     image_cache: ImageCacheConfig,
@@ -155,8 +125,7 @@ def _apply_root_to_all_projects(
     }
     for name, path in defaults.items():
         logger.info(f"  {name} -> {path}")
-    answer = input("Применить ко всем проектам? (Y/n): ").strip().lower()
-    if answer not in ("", "y"):
+    if not wizard.confirm_apply_to_all():
         return False
     for name, path in defaults.items():
         if path is not None:
@@ -185,14 +154,10 @@ def _prompt_project_cache_dir(
     default_path: Path | None,
 ) -> bool:
     """Prompt for one project's cache dir; update config. Return True if changed."""
-    prompt = (
-        f"  {project.name} (id={project.id}) [{default_path}]: "
-        if default_path is not None
-        else f"  {project.name} (id={project.id}) [не задан]: "
+    resolved = wizard.prompt_project_cache_dir(
+        f"  {project.name} (id={project.id})", default_path
     )
-    raw = input(prompt).strip()
-    if raw:
-        resolved = Path(raw).expanduser().resolve()
+    if resolved is not None:
         image_cache.set_cache_dir(project.name, resolved)
         logger.info(f"    → {resolved}")
         return True

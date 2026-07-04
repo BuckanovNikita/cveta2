@@ -60,6 +60,11 @@ def make_fake_client(fixtures: LoadedFixtures) -> CvatClient:
     return CvatClient(CvatConfig(), api=FakeCvatApi(fixtures))
 
 
+def client_with_api(api: Any) -> CvatClient:
+    """Wrap an injected API port (real or mock) in a CvatClient."""
+    return CvatClient(CFG, api=api)
+
+
 def write_test_config(
     path: Path,
     *,

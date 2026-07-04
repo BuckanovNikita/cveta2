@@ -75,20 +75,26 @@ def _fetch_and_partition(
     return result, partition
 
 
+def _split_records(
+    result: ProjectAnnotations,
+) -> tuple[list[BBoxAnnotation], list[ImageWithoutAnnotations]]:
+    """Partition fetched annotations into (bbox, without-annotation) records."""
+    bbox = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    without = [a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)]
+    return bbox, without
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 
-def test_normal_project_annotations(coco8_fixtures: LoadedFixtures) -> None:
+def test_normal_project_annotations(normal_fake: LoadedFixtures) -> None:
     """Normal task produces the expected number of annotations."""
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = normal_fake
     result = make_fake_client(fake).fetch_annotations(fake.project.id)
 
-    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
-    without_records = [
-        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-    ]
+    bbox_records, without_records = _split_records(result)
     assert len(bbox_records) == 30
     assert len(result.deleted_images) == 0
     annotated_frames = {a.frame_id for a in bbox_records}
@@ -103,9 +109,7 @@ def test_all_empty_images_without_annotations(
     fake = build_fake(coco8_fixtures, ["all-empty"], statuses=["completed"])
     result = make_fake_client(fake).fetch_annotations(fake.project.id)
 
-    without_records = [
-        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-    ]
+    _, without_records = _split_records(result)
     assert len(result.annotations) == 8
     assert len(result.deleted_images) == 0
     assert len(without_records) == 8
@@ -121,10 +125,7 @@ def test_all_removed_only_deleted(coco8_fixtures: LoadedFixtures) -> None:
     assert len(result.deleted_images) == 8
     assert {d.image_name for d in result.deleted_images} == set(_IMAGE_NAMES)
     # Shapes exist but reference deleted frames -- still extracted
-    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
-    without_records = [
-        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-    ]
+    bbox_records, without_records = _split_records(result)
     assert len(bbox_records) == 30
     assert len(without_records) == 0
 
@@ -137,10 +138,7 @@ def test_frames_1_2_removed(coco8_fixtures: LoadedFixtures) -> None:
     deleted_frame_ids = {d.frame_id for d in result.deleted_images}
     assert deleted_frame_ids == {1, 2}
 
-    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
-    without_records = [
-        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-    ]
+    bbox_records, without_records = _split_records(result)
     annotated_frames = {a.frame_id for a in bbox_records}
     without_frames = {w.frame_id for w in without_records}
     # Together they cover all 8 frames
@@ -161,12 +159,9 @@ def test_zero_frame_empty_last_removed(
     result = make_fake_client(fake).fetch_annotations(fake.project.id)
 
     assert result.deleted_images[0].frame_id == 7
-    without_records = [
-        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-    ]
+    bbox_records, without_records = _split_records(result)
     without_frame_ids = {w.frame_id for w in without_records}
     assert 0 in without_frame_ids
-    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
     assert 0 not in {a.frame_id for a in bbox_records}
     assert len(bbox_records) == 17
 
@@ -180,10 +175,7 @@ def test_mixed_tasks_aggregation(coco8_fixtures: LoadedFixtures) -> None:
     )
     result = make_fake_client(fake).fetch_annotations(fake.project.id)
 
-    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
-    without_records = [
-        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-    ]
+    bbox_records, without_records = _split_records(result)
     assert len(bbox_records) == 60  # 30 + 0 + 30
     assert len(result.deleted_images) == 8  # only from all-removed
     assert len(without_records) == 8  # only from all-empty
@@ -201,10 +193,7 @@ def test_completed_only_filter(coco8_fixtures: LoadedFixtures) -> None:
     )
 
     # Only the "normal" (completed) task processed; "all-empty" skipped entirely
-    bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
-    without_records = [
-        a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-    ]
+    bbox_records, without_records = _split_records(result)
     assert len(bbox_records) == 30
     # All 8 frames accounted for across annotations + without_annotations
     annotated_frames = {a.frame_id for a in bbox_records}
@@ -212,9 +201,9 @@ def test_completed_only_filter(coco8_fixtures: LoadedFixtures) -> None:
     assert annotated_frames | without_frames == set(range(8))
 
 
-def test_csv_rows_structure(coco8_fixtures: LoadedFixtures) -> None:
+def test_csv_rows_structure(normal_fake: LoadedFixtures) -> None:
     """to_csv_rows() output has all CSV_COLUMNS keys."""
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = normal_fake
     result = make_fake_client(fake).fetch_annotations(fake.project.id)
 
     rows = result.to_csv_rows()
@@ -304,9 +293,9 @@ def test_5xx_task_skipped(coco8_fixtures: LoadedFixtures) -> None:
     assert failing_task_id not in task_ids
 
 
-def test_4xx_error_propagated(coco8_fixtures: LoadedFixtures) -> None:
+def test_4xx_error_propagated(normal_fake: LoadedFixtures) -> None:
     """Non-5xx CvatApiError (e.g. 404) is re-raised, not swallowed."""
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = normal_fake
 
     api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id}, fail_status=404)
     client = CvatClient(CvatConfig(), api=api)
@@ -341,16 +330,15 @@ def test_5xx_raise_on_failure(
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_project_id_digit_string(coco8_fixtures: LoadedFixtures) -> None:
+def test_resolve_project_id_digit_string(normal_fake: LoadedFixtures) -> None:
     """Digit-string input returns the integer directly."""
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-    client = make_fake_client(fake)
+    client = make_fake_client(normal_fake)
     assert client.resolve_project_id("42") == 42
 
 
-def test_resolve_project_id_casefold_name(coco8_fixtures: LoadedFixtures) -> None:
+def test_resolve_project_id_casefold_name(normal_fake: LoadedFixtures) -> None:
     """Name matching is case-insensitive."""
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = normal_fake
     client = make_fake_client(fake)
     name = fake.project.name
     # Use uppercased name — should still resolve
@@ -358,12 +346,11 @@ def test_resolve_project_id_casefold_name(coco8_fixtures: LoadedFixtures) -> Non
     assert result == fake.project.id
 
 
-def test_resolve_project_id_not_found(coco8_fixtures: LoadedFixtures) -> None:
+def test_resolve_project_id_not_found(normal_fake: LoadedFixtures) -> None:
     """Non-existent project name raises ProjectNotFoundError."""
     from cveta2.exceptions import ProjectNotFoundError
 
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-    client = make_fake_client(fake)
+    client = make_fake_client(normal_fake)
 
     with pytest.raises(ProjectNotFoundError):
         client.resolve_project_id("does-not-exist")

@@ -5,16 +5,13 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-import questionary
-from loguru import logger
-
+from cveta2.commands.interactive import select_project
 from cveta2.config import (
     CvatConfig,
     get_config_path,
-    require_interactive,
 )
 from cveta2.exceptions import Cveta2Error
-from cveta2.projects_cache import load_projects_cache, save_projects_cache
+from cveta2.projects_cache import load_projects_cache
 from cveta2.services.output import read_dataset_csv as services_read_dataset_csv
 from cveta2.services.resolve import apply_sync_root_override
 
@@ -25,8 +22,6 @@ if TYPE_CHECKING:
 
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
-
-_RESCAN_VALUE = "__rescan__"
 
 
 def resolve_project_from_args(
@@ -59,54 +54,6 @@ def resolve_project_from_args(
     return (project_id, project_name)
 
 
-def select_project_tui(client: CvatClient) -> tuple[int, str]:
-    """Interactive project selection via TUI list with rescan option.
-
-    Returns ``(project_id, project_name)``.
-    """
-    require_interactive("Pass --project / -p to specify the project ID or name.")
-    projects = load_projects_cache()
-    while True:
-        if not projects:
-            logger.info("Кэш проектов пуст. Загружаю список с CVAT...")
-            projects = client.list_projects()
-            save_projects_cache(projects)
-            if not projects:
-                sys.exit("Нет доступных проектов.")
-        choices: list[questionary.Choice] = [
-            questionary.Choice(title=f"{p.name} (id={p.id})", value=p.id)
-            for p in projects
-        ]
-        choices.append(
-            questionary.Choice(
-                title="↻ Обновить список проектов с CVAT",
-                value=_RESCAN_VALUE,
-            ),
-        )
-        answer = questionary.select(
-            "Выберите проект:",
-            choices=choices,
-            use_shortcuts=False,
-            use_indicator=True,
-            use_search_filter=True,
-            use_jk_keys=False,
-        ).ask()
-        if answer is None:
-            sys.exit("Выбор отменён.")
-        if answer == _RESCAN_VALUE:
-            projects = client.list_projects()
-            save_projects_cache(projects)
-            logger.info(f"Загружено проектов: {len(projects)}")
-            continue
-        project_id = int(answer)
-        project_name = str(project_id)
-        for p in projects:
-            if p.id == project_id:
-                project_name = p.name
-                break
-        return (project_id, project_name)
-
-
 def resolve_project_or_exit(
     project_arg: str | None,
     client: CvatClient,
@@ -114,7 +61,7 @@ def resolve_project_or_exit(
     """Resolve project ID and name, falling back to interactive TUI.
 
     Calls :func:`resolve_project_from_args` and exits on error.
-    When *project_arg* is empty, falls back to :func:`select_project_tui`.
+    When *project_arg* is empty, falls back to :func:`select_project`.
     """
     try:
         resolved = resolve_project_from_args(project_arg, client)
@@ -123,7 +70,7 @@ def resolve_project_or_exit(
 
     if resolved is not None:
         return resolved
-    return select_project_tui(client)
+    return select_project(client)
 
 
 def resolve_project_and_cloud_storage(
@@ -154,11 +101,11 @@ def resolve_project_and_cloud_storage(
     if project_spec and project_spec.strip():
         resolved = resolve_project_from_args(project_spec.strip(), client)
         if resolved is None:
-            project_id, project_name = select_project_tui(client)
+            project_id, project_name = select_project(client)
         else:
             project_id, project_name = resolved
     else:
-        project_id, project_name = select_project_tui(client)
+        project_id, project_name = select_project(client)
     cs_info = client.detect_project_cloud_storage(project_id)
     cs_info = apply_sync_root_override(project_name, cs_info, sync_root)
     return (project_id, project_name, cs_info)
