@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from cveta2.exceptions import InteractiveModeRequiredError, MissingCredentialsError
 
@@ -30,6 +30,11 @@ def is_interactive_disabled() -> bool:
 def is_cache_disabled() -> bool:
     """Return True when CVETA2_DISABLE_CACHE is set to 'true' (case-insensitive)."""
     return os.environ.get("CVETA2_DISABLE_CACHE", "").lower() == "true"
+
+
+def should_raise_on_fetch_failure() -> bool:
+    """Return True when CVETA2_RAISE_ON_FAILURE requests aborting on first error."""
+    return os.environ.get("CVETA2_RAISE_ON_FAILURE", "").lower() == "true"
 
 
 def require_interactive(hint: str) -> None:
@@ -281,7 +286,7 @@ class CvatConfig(BaseModel):
 class ImageCacheConfig(BaseModel):
     """Per-project mapping: project_name -> local directory for images."""
 
-    projects: dict[str, Path] = {}
+    projects: dict[str, Path] = Field(default_factory=dict)
 
     def get_cache_dir(self, project_name: str) -> Path | None:
         """Return the cache directory for *project_name*, or None if not configured."""
@@ -311,7 +316,7 @@ class SyncRootsConfig(BaseModel):
     string applied to the project's own CVAT bucket.
     """
 
-    projects: dict[str, str] = {}
+    projects: dict[str, str] = Field(default_factory=dict)
 
     def get_root(self, project_name: str) -> str | None:
         """Return the sync root for *project_name*, or None if not configured."""
@@ -365,7 +370,7 @@ class IgnoreConfig(BaseModel):
     Each entry stores both the task ID and its human-readable name.
     """
 
-    projects: dict[str, list[IgnoredTask]] = {}
+    projects: dict[str, list[IgnoredTask]] = Field(default_factory=dict)
 
     def get_ignored_tasks(self, project_name: str) -> list[int]:
         """Return the list of ignored task IDs for *project_name*."""
@@ -545,7 +550,7 @@ class ClearmlConfig(BaseModel):
     """ClearML integration settings."""
 
     enabled: bool = False
-    projects: dict[str, ClearmlProjectMapping] = {}
+    projects: dict[str, ClearmlProjectMapping] = Field(default_factory=dict)
 
     def get_mapping(self, project_name: str) -> ClearmlProjectMapping | None:
         """Return the ClearML mapping for *project_name*, or None if not configured."""

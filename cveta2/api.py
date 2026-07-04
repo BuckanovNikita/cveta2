@@ -90,14 +90,37 @@ class UploadResult(BaseModel):
     issues: int
 
 
-@contextmanager
-def _resolve_client(  # noqa: PLR0913
-    client: CvatClient | None,
+class _ConnectionSettings(BaseModel):
+    """Bundle of optional connection overrides shared by every API function."""
+
+    host: str | None = None
+    username: str | None = None
+    password: str | None = None
+    organization: str | None = None
+    config_path: Path | None = None
+
+
+def _conn(
     host: str | None,
     username: str | None,
     password: str | None,
     organization: str | None,
     config_path: Path | None,
+) -> _ConnectionSettings:
+    """Build a ``_ConnectionSettings`` from the shared per-function kwargs."""
+    return _ConnectionSettings(
+        host=host,
+        username=username,
+        password=password,
+        organization=organization,
+        config_path=config_path,
+    )
+
+
+@contextmanager
+def _resolve_client(
+    client: CvatClient | None,
+    conn: _ConnectionSettings,
 ) -> Iterator[CvatClient]:
     """Yield a ready CvatClient: injected as-is, or opened from config.
 
@@ -107,13 +130,13 @@ def _resolve_client(  # noqa: PLR0913
     if client is not None:
         yield client
         return
-    cfg = CvatConfig.load(config_path)
+    cfg = CvatConfig.load(conn.config_path)
     cfg = cfg.merge(
         CvatConfig(
-            host=host or "",
-            username=username,
-            password=password,
-            organization=organization,
+            host=conn.host or "",
+            username=conn.username,
+            password=conn.password,
+            organization=conn.organization,
         )
     )
     if not cfg.host:
@@ -171,7 +194,7 @@ def fetch(  # noqa: PLR0913
     *raw*) into *output_dir* and returns the ``dataset`` partition.
     """
     with _resolve_client(
-        client, host, username, password, organization, config_path
+        client, _conn(host, username, password, organization, config_path)
     ) as c:
         project_id, project_name = resolve_project(c, project)
         cs_info = apply_sync_root_override(
@@ -219,7 +242,7 @@ def fetch_task(  # noqa: PLR0913
     dataset rows as a DataFrame.
     """
     with _resolve_client(
-        client, host, username, password, organization, config_path
+        client, _conn(host, username, password, organization, config_path)
     ) as c:
         project_id, project_name = resolve_project(c, project)
         cs_info = apply_sync_root_override(
@@ -288,7 +311,7 @@ def upload(  # noqa: PLR0913
     )
     upload_cfg = load_upload_config()
     with _resolve_client(
-        client, host, username, password, organization, config_path
+        client, _conn(host, username, password, organization, config_path)
     ) as c:
         project_id, project_name = resolve_project(c, project)
         options = UploadOptions(
@@ -338,7 +361,7 @@ def whats_new(  # noqa: PLR0913
     df = read_dataset_csv(dataset_path, REQUIRED_COLUMNS)
     cutoff = compute_cutoff(df, dataset_path)
     with _resolve_client(
-        client, host, username, password, organization, config_path
+        client, _conn(host, username, password, organization, config_path)
     ) as c:
         project_id, _ = resolve_project(c, project)
         return c.list_tasks_completed_after(project_id, cutoff)
@@ -358,7 +381,7 @@ def s3_sync(  # noqa: PLR0913
 ) -> DownloadStats:
     """Sync all project images from S3 into *target_dir* like ``cveta2 s3-sync``."""
     with _resolve_client(
-        client, host, username, password, organization, config_path
+        client, _conn(host, username, password, organization, config_path)
     ) as c:
         project_id, project_name = resolve_project(c, project)
         cs_info = apply_sync_root_override(
@@ -379,7 +402,7 @@ def get_labels(  # noqa: PLR0913
 ) -> list[LabelInfo]:
     """Return the project's label definitions."""
     with _resolve_client(
-        client, host, username, password, organization, config_path
+        client, _conn(host, username, password, organization, config_path)
     ) as c:
         project_id, _ = resolve_project(c, project)
         return c.get_project_labels(project_id)
@@ -404,7 +427,7 @@ def update_labels(  # noqa: PLR0913
     Deleting labels destroys all annotations using them permanently.
     """
     with _resolve_client(
-        client, host, username, password, organization, config_path
+        client, _conn(host, username, password, organization, config_path)
     ) as c:
         project_id, _ = resolve_project(c, project)
         c.update_project_labels(
@@ -416,6 +439,28 @@ def _resolve_task(client: CvatClient, project_id: int, task: int | str) -> TaskI
     """Resolve a task selector within a project."""
     tasks = client.list_project_tasks(project_id)
     return client.resolve_task_selectors(tasks, [task])[0]
+
+
+@contextmanager
+def _resolved_task(
+    client: CvatClient | None,
+    conn: _ConnectionSettings,
+    project: int | str,
+    task: int | str,
+) -> Iterator[tuple[CvatClient, TaskInfo]]:
+    """Open a client, resolve *project*/*task*, and invalidate the cache on exit.
+
+    Every task mutation shares this scaffold; centralising the local
+    cache-invalidation here keeps a stale entry from surviving a future
+    mutation that forgets to call ``invalidate_local_entry``.
+    """
+    with _resolve_client(client, conn) as c:
+        project_id, _ = resolve_project(c, project)
+        task_info = _resolve_task(c, project_id, task)
+        try:
+            yield c, task_info
+        finally:
+            invalidate_local_entry(project_id, task_info.id)
 
 
 def task_mark_deleted(  # noqa: PLR0913
@@ -434,17 +479,13 @@ def task_mark_deleted(  # noqa: PLR0913
     """Mark frames of a task as deleted (by frame ids and/or image names)."""
     if not frames and not images:
         raise Cveta2Error("Укажите хотя бы один frame или image.")
-    with _resolve_client(
-        client, host, username, password, organization, config_path
-    ) as c:
-        project_id, _ = resolve_project(c, project)
-        task_info = _resolve_task(c, project_id, task)
+    conn = _conn(host, username, password, organization, config_path)
+    with _resolved_task(client, conn, project, task) as (c, task_info):
         marked = 0
         if images:
             marked += c.mark_frames_deleted(task_info.id, set(images))
         if frames:
             marked += c.mark_frames_deleted_by_ids(task_info.id, frames)
-        invalidate_local_entry(project_id, task_info.id)
         return marked
 
 
@@ -461,14 +502,9 @@ def task_drop_label(  # noqa: PLR0913
     client: CvatClient | None = None,
 ) -> int:
     """Delete all annotation shapes with *label* from a task."""
-    with _resolve_client(
-        client, host, username, password, organization, config_path
-    ) as c:
-        project_id, _ = resolve_project(c, project)
-        task_info = _resolve_task(c, project_id, task)
-        dropped = c.drop_label_annotations(task_info.id, label)
-        invalidate_local_entry(project_id, task_info.id)
-        return dropped
+    conn = _conn(host, username, password, organization, config_path)
+    with _resolved_task(client, conn, project, task) as (c, task_info):
+        return c.drop_label_annotations(task_info.id, label)
 
 
 def task_delete(  # noqa: PLR0913
@@ -483,13 +519,9 @@ def task_delete(  # noqa: PLR0913
     client: CvatClient | None = None,
 ) -> None:
     """Delete a CVAT task permanently."""
-    with _resolve_client(
-        client, host, username, password, organization, config_path
-    ) as c:
-        project_id, _ = resolve_project(c, project)
-        task_info = _resolve_task(c, project_id, task)
+    conn = _conn(host, username, password, organization, config_path)
+    with _resolved_task(client, conn, project, task) as (c, task_info):
         c.delete_task(task_info.id)
-        invalidate_local_entry(project_id, task_info.id)
 
 
 def task_set_status(  # noqa: PLR0913
@@ -506,11 +538,6 @@ def task_set_status(  # noqa: PLR0913
     client: CvatClient | None = None,
 ) -> int:
     """Set stage and/or state on every job of a task (CVAT-native values)."""
-    with _resolve_client(
-        client, host, username, password, organization, config_path
-    ) as c:
-        project_id, _ = resolve_project(c, project)
-        task_info = _resolve_task(c, project_id, task)
-        num_jobs = c.set_task_jobs_status(task_info.id, stage=stage, state=state)
-        invalidate_local_entry(project_id, task_info.id)
-        return num_jobs
+    conn = _conn(host, username, password, organization, config_path)
+    with _resolved_task(client, conn, project, task) as (c, task_info):
+        return c.set_task_jobs_status(task_info.id, stage=stage, state=state)

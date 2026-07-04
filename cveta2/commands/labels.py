@@ -10,7 +10,7 @@ from loguru import logger
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
-    resolve_project_or_exit,
+    resolve_project,
 )
 from cveta2.config import require_interactive
 
@@ -37,7 +37,7 @@ _HEX_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 def run_labels(args: argparse.Namespace) -> None:
     """Run the ``labels`` command: list or interactively edit project labels."""
     with open_client() as client:
-        project_id, project_name = resolve_project_or_exit(args.project, client)
+        project_id, project_name = resolve_project(args.project, client)
 
         if args.list_labels:
             labels = client.get_project_labels(project_id)
@@ -258,24 +258,8 @@ def _interactive_recolor(
 # ------------------------------------------------------------------
 
 
-def _interactive_delete(
-    client: CvatClient,
-    project_id: int,
-    labels: list[LabelInfo],
-) -> list[LabelInfo]:
-    """Select labels to delete with annotation-count safety checks."""
-    selected_ids = interactive.select_labels(
-        labels, message="Выберите метки для удаления:"
-    )
-
-    if not selected_ids:
-        return labels
-
-    selected_labels = [lbl for lbl in labels if lbl.id in set(selected_ids)]
-
-    logger.info("Подсчёт аннотаций, использующих выбранные метки...")
-    usage = client.count_label_usage(project_id)
-
+def _log_label_usage(selected_labels: list[LabelInfo], usage: dict[int, int]) -> bool:
+    """Log per-label annotation counts; return True if any label has annotations."""
     has_annotations = False
     for label in selected_labels:
         count = usage.get(label.id, 0)
@@ -287,40 +271,72 @@ def _interactive_delete(
             )
         else:
             logger.info(f"Метка {label.name!r} (id={label.id}): 0 аннотаций")
+    return has_annotations
 
-    if has_annotations:
+
+def _confirm_destructive_delete(selected_labels: list[LabelInfo]) -> bool:
+    """Confirm deletion that destroys annotations by re-typing the label names."""
+    logger.warning(
+        "ВНИМАНИЕ: удаление меток НЕОБРАТИМО уничтожит все "
+        "аннотации (shapes), использующие эти метки!"
+    )
+    names_to_confirm = ", ".join(lbl.name for lbl in selected_labels)
+    confirm = interactive.text(
+        f"Для подтверждения введите имена меток через запятую ({names_to_confirm}):",
+        hint="Pass --list to view labels non-interactively.",
+        on_cancel="none",
+    )
+    if confirm is None:
+        logger.info("Удаление отменено")
+        return False
+
+    expected = {lbl.name.strip() for lbl in selected_labels}
+    entered = {s.strip() for s in confirm.split(",")}
+    if entered != expected:
         logger.warning(
-            "ВНИМАНИЕ: удаление меток НЕОБРАТИМО уничтожит все "
-            "аннотации (shapes), использующие эти метки!"
+            f"Введённые имена не совпадают. "
+            f"Ожидалось: {names_to_confirm}. Удаление отменено."
         )
-        names_to_confirm = ", ".join(lbl.name for lbl in selected_labels)
-        confirm = interactive.text(
-            f"Для подтверждения введите имена меток через запятую "
-            f"({names_to_confirm}):",
-            hint="Pass --list to view labels non-interactively.",
-            on_cancel="none",
-        )
+        return False
+    return True
 
-        if confirm is None:
-            logger.info("Удаление отменено")
-            return labels
 
-        expected = {lbl.name.strip() for lbl in selected_labels}
-        entered = {s.strip() for s in confirm.split(",")}
-        if entered != expected:
-            logger.warning(
-                f"Введённые имена не совпадают. "
-                f"Ожидалось: {names_to_confirm}. Удаление отменено."
-            )
-            return labels
-    else:
-        confirm_delete = interactive.confirm(
-            f"Удалить {len(selected_labels)} меток (аннотаций нет)?",
-            hint="Pass --list to view labels non-interactively.",
-        )
-        if not confirm_delete:
-            logger.info("Удаление отменено")
-            return labels
+def _confirm_simple_delete(selected_labels: list[LabelInfo]) -> bool:
+    """Confirm deletion of labels that carry no annotations."""
+    confirmed = interactive.confirm(
+        f"Удалить {len(selected_labels)} меток (аннотаций нет)?",
+        hint="Pass --list to view labels non-interactively.",
+    )
+    if not confirmed:
+        logger.info("Удаление отменено")
+    return confirmed
+
+
+def _interactive_delete(
+    client: CvatClient,
+    project_id: int,
+    labels: list[LabelInfo],
+) -> list[LabelInfo]:
+    """Select labels to delete with annotation-count safety checks."""
+    selected_ids = interactive.select_labels(
+        labels, message="Выберите метки для удаления:"
+    )
+    if not selected_ids:
+        return labels
+
+    selected_labels = [lbl for lbl in labels if lbl.id in set(selected_ids)]
+
+    logger.info("Подсчёт аннотаций, использующих выбранные метки...")
+    usage = client.count_label_usage(project_id)
+    has_annotations = _log_label_usage(selected_labels, usage)
+
+    confirmed = (
+        _confirm_destructive_delete(selected_labels)
+        if has_annotations
+        else _confirm_simple_delete(selected_labels)
+    )
+    if not confirmed:
+        return labels
 
     client.update_project_labels(project_id, delete=selected_ids)
     deleted_names = ", ".join(lbl.name for lbl in selected_labels)

@@ -22,6 +22,76 @@ class PartitionResult:
     deleted_images: list[DeletedImage] = field(default_factory=list)
 
 
+def _parse_task_dates(dates: pd.Series[str]) -> pd.Series[pd.Timestamp]:
+    """Parse ``task_updated_date`` strings to UTC timestamps (NaT on failure)."""
+    return pd.to_datetime(dates, errors="coerce", utc=True)
+
+
+def _deleted_registry_frame(
+    deleted_images: list[DeletedImage],
+) -> pd.DataFrame:
+    """Build a frame of deletion records (one row per deleted task/image)."""
+    columns = ["image_name", "task_id", "task_updated_date", "_is_deleted"]
+    rows = [
+        {
+            "image_name": d.image_name,
+            "task_id": d.task_id,
+            "task_updated_date": d.task_updated_date,
+            "_is_deleted": 1,
+        }
+        for d in deleted_images
+    ]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _latest_task_per_image(
+    df: pd.DataFrame,
+    deleted_images: list[DeletedImage],
+) -> pd.DataFrame:
+    """Return the latest task per ``image_name`` across df rows and deletions.
+
+    Deletion records are concatenated **first** so they win ties on an
+    identical ``task_updated_date`` (annotations may exist for a frame the
+    same task also deleted).  Indexed by ``image_name``.
+    """
+    latest_from_df = (
+        df[["image_name", "task_id", "task_updated_date"]]
+        .drop_duplicates(subset=["image_name", "task_id"])
+        .copy()
+    )
+    latest_from_df["_is_deleted"] = 0
+
+    combined = pd.concat(
+        [_deleted_registry_frame(deleted_images), latest_from_df],
+        ignore_index=True,
+    )
+    combined["_parsed_date"] = _parse_task_dates(combined["task_updated_date"])
+    idx_latest = combined.groupby("image_name")["_parsed_date"].idxmax()
+    latest_per_image: pd.DataFrame = combined.loc[idx_latest].set_index("image_name")
+    return latest_per_image
+
+
+def _split_completed(
+    completed_non_deleted: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split completed rows into (latest-task dataset, stale obsolete)."""
+    if completed_non_deleted.empty:
+        return completed_non_deleted.copy(), completed_non_deleted.copy()
+
+    cnd = completed_non_deleted.copy()
+    cnd["_parsed_date"] = _parse_task_dates(cnd["task_updated_date"])
+    latest_completed = (
+        cnd.sort_values("_parsed_date", ascending=False)
+        .drop_duplicates(subset=["image_name"], keep="first")[["image_name", "task_id"]]
+        .rename(columns={"task_id": "_latest_task_id"})
+    )
+    merged = completed_non_deleted.merge(latest_completed, on="image_name", how="left")
+    is_latest = (merged["task_id"] == merged["_latest_task_id"]).to_numpy()
+    return completed_non_deleted[is_latest], completed_non_deleted[~is_latest]
+
+
 def _filter_deleted_images(
     deleted_images: list[DeletedImage],
     deleted_image_names: set[str],
@@ -63,18 +133,14 @@ def partition_annotations_df(
 
     Algorithm
     ---------
-    1. Build a *deleted registry* — ``{image_name: [(task_id, task_updated_date)]}``
-       from ``deleted_images``.
-    2. For every unique ``image_name`` that appears in *df* **or** the deleted
-       registry, determine the **latest task** (max ``task_updated_date`` across
-       both sources).
-    3. If the latest task for an image is a deletion record → the image is
-       "deleted": all its rows in *df* go to **obsolete** and the filename is
-       collected into ``deleted_images``.
-    4. For non-deleted images:
+    1. :func:`_latest_task_per_image` finds the latest task per ``image_name``
+       across *df* rows and ``deleted_images`` (deletions win ties).
+    2. If that latest task is a deletion → the image is "deleted": all its rows
+       go to **obsolete** and it is collected via :func:`_filter_deleted_images`.
+    3. For non-deleted images:
        - rows where ``task_status != "completed"`` → **in_progress**
-       - among completed rows, those from the *latest completed task* per image
-         → **dataset**, the rest → **obsolete**
+       - :func:`_split_completed` sends the *latest completed task* per image to
+         **dataset** and the rest to **obsolete**.
     """
     if df.empty:
         empty = df.copy()
@@ -82,62 +148,8 @@ def partition_annotations_df(
             dataset=empty, obsolete=empty.copy(), in_progress=empty.copy()
         )
 
-    # ------------------------------------------------------------------
-    # 1. Build deleted registry: image_name → [(task_id, task_updated_date)]
-    # ------------------------------------------------------------------
-    deleted_registry: dict[str, list[tuple[int, str]]] = {}
-    for d in deleted_images:
-        deleted_registry.setdefault(d.image_name, []).append(
-            (d.task_id, d.task_updated_date),
-        )
+    latest_per_image = _latest_task_per_image(df, deleted_images)
 
-    # ------------------------------------------------------------------
-    # 2. Per-image latest task (across df rows + deleted records)
-    # ------------------------------------------------------------------
-    # Latest task_updated_date per (image_name, task_id) from df rows
-    latest_from_df = df[["image_name", "task_id", "task_updated_date"]].drop_duplicates(
-        subset=["image_name", "task_id"]
-    )
-
-    # Build a parallel frame from deleted records
-    deleted_rows: list[dict[str, str | int]] = []
-    for image_name, entries in deleted_registry.items():
-        for task_id, task_updated_date in entries:
-            deleted_rows.append(
-                {
-                    "image_name": image_name,
-                    "task_id": task_id,
-                    "task_updated_date": task_updated_date,
-                    "_is_deleted": 1,
-                },
-            )
-
-    if deleted_rows:
-        deleted_df = pd.DataFrame(deleted_rows)
-    else:
-        deleted_df = pd.DataFrame(
-            columns=["image_name", "task_id", "task_updated_date", "_is_deleted"],
-        )
-
-    latest_from_df = latest_from_df.copy()
-    latest_from_df["_is_deleted"] = 0
-
-    # Put deletion records first so they win ties (same task_updated_date)
-    # This handles edge cases where annotations exist for deleted frames
-    combined = pd.concat([deleted_df, latest_from_df], ignore_index=True)
-    # Parse dates properly so comparisons work regardless of format/timezone.
-    combined["_parsed_date"] = pd.to_datetime(
-        combined["task_updated_date"],
-        errors="coerce",
-        utc=True,
-    )
-    # For each image, find the row with the maximum task_updated_date
-    idx_latest = combined.groupby("image_name")["_parsed_date"].idxmax()
-    latest_per_image = combined.loc[idx_latest].set_index("image_name")
-
-    # ------------------------------------------------------------------
-    # 3. Identify deleted images (latest task is a deletion)
-    # ------------------------------------------------------------------
     deleted_mask_map = latest_per_image["_is_deleted"] == 1
     deleted_image_names: set[str] = set(deleted_mask_map[deleted_mask_map].index)
 
@@ -149,47 +161,14 @@ def partition_annotations_df(
     if unique_deleted:
         logger.debug(f"Images deleted in their latest task: {len(unique_deleted)}")
 
-    # ------------------------------------------------------------------
-    # 4. Partition the DataFrame
-    # ------------------------------------------------------------------
     is_deleted = df["image_name"].isin(deleted_image_names)
     is_completed = df["task_status"] == "completed"
 
-    # 4a. All rows for deleted images → obsolete
     obsolete_deleted = df[is_deleted]
-
-    # 4b. Non-deleted, non-completed → in_progress
     in_progress = df[~is_deleted & ~is_completed]
-
-    # 4c. Non-deleted, completed → partition into dataset vs obsolete
     completed_non_deleted = df[~is_deleted & is_completed]
 
-    if completed_non_deleted.empty:
-        dataset = completed_non_deleted.copy()
-        obsolete_stale = completed_non_deleted.copy()
-    else:
-        # For each image_name, find the latest completed task_id
-        cnd = completed_non_deleted.copy()
-        cnd["_parsed_date"] = pd.to_datetime(
-            cnd["task_updated_date"],
-            errors="coerce",
-            utc=True,
-        )
-        latest_completed = (
-            cnd.sort_values("_parsed_date", ascending=False)
-            .drop_duplicates(subset=["image_name"], keep="first")[
-                ["image_name", "task_id"]
-            ]
-            .rename(columns={"task_id": "_latest_task_id"})
-        )
-        merged = completed_non_deleted.merge(
-            latest_completed, on="image_name", how="left"
-        )
-        is_latest = merged["task_id"] == merged["_latest_task_id"]
-
-        dataset = completed_non_deleted[is_latest.to_numpy()]
-        obsolete_stale = completed_non_deleted[~is_latest.to_numpy()]
-
+    dataset, obsolete_stale = _split_completed(completed_non_deleted)
     obsolete = pd.concat([obsolete_deleted, obsolete_stale], ignore_index=True)
 
     logger.debug(

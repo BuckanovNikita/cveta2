@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
@@ -19,7 +18,6 @@ from cveta2.config import (
     load_ignore_config,
     save_ignore_config,
 )
-from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import load_projects_cache
 
 if TYPE_CHECKING:
@@ -113,11 +111,7 @@ def _resolve_project(
     ignore_cfg: IgnoreConfig,
 ) -> tuple[int, str]:
     """Resolve project ID and name from CLI args or interactive TUI."""
-    try:
-        resolved = resolve_project_from_args(args.project, client)
-    except Cveta2Error as e:
-        sys.exit(str(e))
-
+    resolved = resolve_project_from_args(args.project, client)
     if resolved is not None:
         return resolved
     return _select_project_tui(client, ignore_cfg)
@@ -134,10 +128,7 @@ def _select_project_tui(
     project_name = interactive.select_project_name(known_names)
 
     cached = load_projects_cache()
-    try:
-        project_id = client.resolve_project_id(project_name, cached=cached)
-    except Cveta2Error as e:
-        sys.exit(str(e))
+    project_id = client.resolve_project_id(project_name, cached=cached)
     return project_id, project_name
 
 

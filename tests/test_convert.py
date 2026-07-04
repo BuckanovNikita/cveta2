@@ -27,6 +27,7 @@ from cveta2.services.convert.common import (
     _link_or_copy,
     _pixel_to_coco,
     _pixel_to_yolo,
+    _require_positive_dimensions,
     _SizeCache,
     _yolo_to_pixel,
 )
@@ -88,6 +89,14 @@ class TestCoordinateConversion:
         assert recovered.y_tl == pytest.approx(original.y_tl, abs=0.01)
         assert recovered.x_br == pytest.approx(original.x_br, abs=0.01)
         assert recovered.y_br == pytest.approx(original.y_br, abs=0.01)
+
+    @pytest.mark.parametrize(("width", "height"), [(0, 100), (100, 0), (0, 0), (-1, 5)])
+    def test_non_positive_dimensions_raise(self, width: int, height: int) -> None:
+        with pytest.raises(Cveta2Error, match="некорректный размер"):
+            _require_positive_dimensions(width, height, "bad.jpg")
+
+    def test_positive_dimensions_pass(self) -> None:
+        _require_positive_dimensions(640, 480, "ok.jpg")
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +167,7 @@ class TestReflinkFallback:
 
     @pytest.fixture(autouse=True)
     def _reset_warned_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setitem(convert._reflink_fallback, "warned", value=False)
+        monkeypatch.setattr(convert, "_reflink_warner", convert._OnceWarner())
 
     @staticmethod
     def _make_src(tmp_path: Path, name: str = "src.txt") -> Path:

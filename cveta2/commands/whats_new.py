@@ -11,7 +11,7 @@ from loguru import logger
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
     read_dataset_csv,
-    resolve_project_or_exit,
+    resolve_project,
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.whats_new import REQUIRED_COLUMNS, compute_cutoff
@@ -31,7 +31,7 @@ def run_whats_new(args: argparse.Namespace) -> None:
     known_task_ids = {int(v) for v in df["task_id"].dropna()}
 
     with open_client() as client:
-        project_id, project_name = resolve_project_or_exit(args.project, client)
+        project_id, project_name = resolve_project(args.project, client)
         tasks = client.list_tasks_completed_after(project_id, cutoff)
 
     logger.info(f"Дата отсечки (из {dataset_path}): {cutoff}")

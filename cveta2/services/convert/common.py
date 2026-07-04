@@ -53,6 +53,15 @@ class CocoBox(NamedTuple):
     h: float
 
 
+def _require_positive_dimensions(img_w: int, img_h: int, image_name: str) -> None:
+    """Raise ``Cveta2Error`` when an image dimension is missing or non-positive."""
+    if img_w <= 0 or img_h <= 0:
+        raise Cveta2Error(
+            f"Ошибка: некорректный размер изображения {image_name!r} "
+            f"({img_w}x{img_h}). Ширина и высота должны быть положительными."
+        )
+
+
 def _pixel_to_yolo(box: PixelBox, img_w: int, img_h: int) -> YoloBox:
     """Convert pixel bbox (top-left, bottom-right) to YOLO normalized (xc, yc, w, h)."""
     xc = ((box.x_tl + box.x_br) / 2.0) / img_w
@@ -81,14 +90,24 @@ def _pixel_to_coco(box: PixelBox) -> CocoBox:
 # ---------------------------------------------------------------------------
 
 
-_reflink_fallback = {"warned": False}
+class _OnceWarner:
+    """Emit a given warning at most once over its lifetime."""
+
+    def __init__(self) -> None:
+        self._warned = False
+
+    def warn(self, message: str) -> None:
+        if not self._warned:
+            logger.warning(message)
+            self._warned = True
+
+
+_reflink_warner = _OnceWarner()
 
 
 def _copy_after_reflink_failure(src: Path, dst: Path, error: OSError) -> None:
-    """Fall back to plain copy after a failed reflink attempt."""
-    if not _reflink_fallback["warned"]:
-        logger.warning(f"reflink недоступен ({error}): используется копирование")
-        _reflink_fallback["warned"] = True
+    """Fall back to plain copy after a failed reflink attempt (warn once)."""
+    _reflink_warner.warn(f"reflink недоступен ({error}): используется копирование")
     dst.unlink(missing_ok=True)
     shutil.copy2(src, dst)
 

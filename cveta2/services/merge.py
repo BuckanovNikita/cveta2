@@ -53,25 +53,19 @@ def _read_deleted_names(path: Path | None) -> set[str]:
         return set()
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
+
+    text = path.read_text(encoding="utf-8")
+    first_line = text.split("\n", 1)[0]
+    if "image_name" not in first_line:
+        names = {line.strip() for line in text.splitlines() if line.strip()}
+        logger.info(f"Загружен {path}: {len(names)} удалённых изображений")
+        return names
+
     try:
         df = pd.read_csv(path, encoding="utf-8")
-        if "image_name" in df.columns:
-            names = set(df["image_name"].dropna().unique())
-            logger.info(f"Загружен {path}: {len(names)} удалённых изображений")
-            return names
-    except (
-        pd.errors.ParserError,
-        pd.errors.EmptyDataError,
-        UnicodeDecodeError,
-        KeyError,
-    ):
-        logger.debug(f"Не удалось прочитать {path} как CSV, пробую текстовый формат")
-    # Fallback: legacy plain-text format (one name per line)
-    names = {
-        line.strip()
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
+    except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
+        raise Cveta2Error(f"Ошибка: не удалось прочитать CSV {path}: {e}") from e
+    names = set(df["image_name"].dropna().unique())
     logger.info(f"Загружен {path}: {len(names)} удалённых изображений")
     return names
 

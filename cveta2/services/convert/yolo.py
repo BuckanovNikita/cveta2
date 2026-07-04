@@ -19,6 +19,7 @@ from cveta2.services.convert.common import (
     _make_csv_row_box,
     _make_csv_row_none,
     _pixel_to_yolo,
+    _require_positive_dimensions,
     _SizeCache,
     _write_csv,
     _yolo_to_pixel,
@@ -57,6 +58,7 @@ def _write_box_labels(  # noqa: PLR0913
 
         img_w = int(group.iloc[0]["image_width"])
         img_h = int(group.iloc[0]["image_height"])
+        _require_positive_dimensions(img_w, img_h, name_s)
         stem = Path(name_s).stem
         label_path = output_dir / "labels" / split_s / f"{stem}.txt"
 
@@ -279,6 +281,7 @@ def _from_yolo_dataset(
                 continue
 
             img_w, img_h = sizes.get(img_path)
+            _require_positive_dimensions(img_w, img_h, img_path.name)
             labels = _parse_label_file(labels_dir / f"{img_path.stem}.txt")
 
             if not labels:
@@ -350,6 +353,7 @@ def _from_yolo_predictions(
             continue
 
         img_w, img_h = sizes.get(img_path)
+        _require_positive_dimensions(img_w, img_h, img_path.name)
         for fields in labels:
             rows.append(
                 _yolo_fields_to_row(

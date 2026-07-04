@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from cveta2.client import CvatClient, FetchContext
     from cveta2.dataset_partition import PartitionResult
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import ProjectAnnotations
+    from cveta2.models import ProjectAnnotations, TaskInfo
 
 
 @dataclass(frozen=True)
@@ -155,14 +155,14 @@ def _fetch_core(  # noqa: PLR0913
     )
 
     cache = _build_task_cache(client, project_id, options)
+    policy = _CachePolicy(cache=cache, force=options.force)
 
     result = _fetch_and_save_tasks(
         client,
         ctx,
         output_dir,
+        policy,
         save_tasks=options.save_tasks,
-        cache=cache,
-        force=options.force,
     )
 
     if cache is not None and prune_cache:
@@ -209,22 +209,92 @@ def _build_task_cache(
     return TaskAnnotationCache(get_task_cache_dir(project_id), s3=s3_backend)
 
 
-def _fetch_and_save_tasks(  # noqa: PLR0913
+@dataclass(frozen=True)
+class _CachePolicy:
+    """How the fetch loop uses the task-annotation cache."""
+
+    cache: TaskAnnotationCache | None = None
+    force: bool = False
+
+    def read(self, task: TaskInfo) -> TaskAnnotations | None:
+        """Return a cached result, or None when reading is disabled/absent."""
+        if self.force or self.cache is None:
+            return None
+        return self.cache.get(task)
+
+    def write(self, task: TaskInfo, result: TaskAnnotations) -> None:
+        if self.cache is not None:
+            self.cache.put(task, result)
+
+
+@dataclass
+class _FetchStats:
+    """Cache-hit vs live-fetch counts and elapsed seconds for the fetch loop."""
+
+    cache_hits: int = 0
+    fetched: int = 0
+    hit_seconds: float = 0.0
+    fetch_seconds: float = 0.0
+
+    def log_summary(self) -> None:
+        logger.info(
+            f"Задач из кэша: {self.cache_hits} ({self.hit_seconds:.1f} с), "
+            f"загружено с CVAT: {self.fetched} ({self.fetch_seconds:.1f} с)"
+        )
+
+
+def _retrieve_task(
+    client: CvatClient,
+    task: TaskInfo,
+    ctx: FetchContext,
+    policy: _CachePolicy,
+    stats: _FetchStats,
+) -> TaskAnnotations | None:
+    """Return a task's annotations from cache or a live fetch, updating *stats*.
+
+    Returns ``None`` when a live fetch skipped the task (5xx).  Fresh
+    results are cached before path population so shared S3 entries stay
+    machine-independent.
+    """
+    started = time.monotonic()
+    cached = policy.read(task)
+    if cached is not None:
+        stats.cache_hits += 1
+        stats.hit_seconds += time.monotonic() - started
+        return cached
+
+    fetched = client.fetch_one_task(client.api, task, ctx)
+    if fetched is None:
+        return None
+    stats.fetched += 1
+    policy.write(task, fetched)
+    stats.fetch_seconds += time.monotonic() - started
+    return fetched
+
+
+def _write_task_csv(task: TaskInfo, result: TaskAnnotations, tasks_dir: Path) -> None:
+    """Write one task's rows to ``tasks_dir/task_<id>.csv`` (skips empty results)."""
+    rows = result.to_csv_rows()
+    if not rows:
+        return
+    task_csv = tasks_dir / f"task_{task.id}.csv"
+    pd.DataFrame(rows).to_csv(task_csv, index=False, encoding="utf-8")
+    logger.trace(f"Task {task.name!r} (id={task.id}): {len(rows)} rows → {task_csv}")
+
+
+def _fetch_and_save_tasks(
     client: CvatClient,
     ctx: FetchContext,
     output_dir: Path,
+    policy: _CachePolicy,
     *,
     save_tasks: bool = False,
-    cache: TaskAnnotationCache | None = None,
-    force: bool = False,
 ) -> ProjectAnnotations:
     """Fetch tasks one by one, saving per-task CSVs into ``output_dir/.tasks/``.
 
-    Completed tasks are served from *cache* when possible; fresh results
-    are cached before any path population so shared S3 entries stay
-    machine-independent.  With *force* the cache is only written, never
-    read.  When *save_tasks* is False (default), the ``.tasks/``
-    directory is removed after merging.
+    Completed tasks are served from *policy*'s cache when possible.  When
+    *save_tasks* is False (default), the ``.tasks/`` directory is removed
+    after merging.
 
     Returns the merged :class:`ProjectAnnotations` from all fetched tasks.
     """
@@ -235,45 +305,19 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
     tasks_dir = output_dir / ".tasks"
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_hits = 0
-    fetched = 0
-    hit_seconds = 0.0
-    fetch_seconds = 0.0
+    stats = _FetchStats()
     task_results: list[TaskAnnotations] = []
-    api = client.api
     for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
-        started = time.monotonic()
-        task_result = None if force or cache is None else cache.get(task)
-        if task_result is not None:
-            cache_hits += 1
-            hit_seconds += time.monotonic() - started
-        else:
-            task_result = client.fetch_one_task(api, task, ctx)
-            if task_result is None:
-                continue
-            fetched += 1
-            if cache is not None:
-                cache.put(task, task_result)
-            fetch_seconds += time.monotonic() - started
-
-        rows = task_result.to_csv_rows()
-        if rows:
-            df = pd.DataFrame(rows)
-            task_csv = tasks_dir / f"task_{task.id}.csv"
-            df.to_csv(task_csv, index=False, encoding="utf-8")
-            logger.trace(
-                f"Task {task.name!r} (id={task.id}): {len(rows)} rows → {task_csv}"
-            )
-
-        task_results.append(task_result)
+        result = _retrieve_task(client, task, ctx, policy, stats)
+        if result is None:
+            continue
+        _write_task_csv(task, result, tasks_dir)
+        task_results.append(result)
 
     if not save_tasks:
         shutil.rmtree(tasks_dir, ignore_errors=True)
 
-    if cache is not None:
-        logger.info(
-            f"Задач из кэша: {cache_hits} ({hit_seconds:.1f} с), "
-            f"загружено с CVAT: {fetched} ({fetch_seconds:.1f} с)"
-        )
+    if policy.cache is not None:
+        stats.log_summary()
 
     return TaskAnnotations.merge(task_results)

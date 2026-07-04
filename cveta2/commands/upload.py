@@ -14,9 +14,8 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import read_dataset_csv, resolve_project_or_exit
+from cveta2.commands._helpers import read_dataset_csv, resolve_project
 from cveta2.config import load_upload_config
-from cveta2.exceptions import Cveta2Error
 from cveta2.services.upload import (
     UploadOptions,
     build_search_dirs,
@@ -94,26 +93,20 @@ def run_upload(args: argparse.Namespace) -> None:
     df = read_dataset_csv(Path(args.dataset), _UPLOAD_REQUIRED_COLUMNS)
     df_normal, deleted_names = split_deleted_rows(df)
 
-    try:
-        exclude_names = read_exclude_names(args.in_progress)
-        selected = _select_labels(df_normal)
-        plan = build_upload_plan(
-            df_normal,
-            deleted_names,
-            labels=[lbl for lbl in selected if lbl != _NO_ANNOTATION_LABEL],
-            include_unannotated=_NO_ANNOTATION_LABEL in selected,
-            exclude_names=exclude_names,
-        )
-    except Cveta2Error as e:
-        sys.exit(str(e))
+    exclude_names = read_exclude_names(args.in_progress)
+    selected = _select_labels(df_normal)
+    plan = build_upload_plan(
+        df_normal,
+        deleted_names,
+        labels=[lbl for lbl in selected if lbl != _NO_ANNOTATION_LABEL],
+        include_unannotated=_NO_ANNOTATION_LABEL in selected,
+        exclude_names=exclude_names,
+    )
 
     task_name = _resolve_task_name(args.name)
 
     with open_client() as client:
-        project_id, project_name = resolve_project_or_exit(
-            args.project,
-            client,
-        )
+        project_id, project_name = resolve_project(args.project, client)
         options = UploadOptions(
             search_dirs=build_search_dirs(
                 [args.image_dir] if args.image_dir else None, project_name
@@ -123,7 +116,4 @@ def run_upload(args: argparse.Namespace) -> None:
             mark_all_deleted=args.mark_all_deleted,
             complete=args.complete,
         )
-        try:
-            upload_dataset(client, project_id, project_name, plan, task_name, options)
-        except Cveta2Error as e:
-            sys.exit(str(e))
+        upload_dataset(client, project_id, project_name, plan, task_name, options)

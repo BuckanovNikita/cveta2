@@ -482,6 +482,15 @@ class TestReadDeletedNames:
         with pytest.raises(Cveta2Error):
             _read_deleted_names(missing)
 
+    def test_malformed_csv_raises_instead_of_silent_fallback(
+        self, tmp_path: Path
+    ) -> None:
+        csv_path = tmp_path / "deleted.csv"
+        csv_path.write_text('image_name\n"unterminated,quote\n', encoding="utf-8")
+
+        with pytest.raises(Cveta2Error):
+            _read_deleted_names(csv_path)
+
 
 # ---------------------------------------------------------------------------
 # I/O helpers — _read_dataset_csv (merge wrapper)

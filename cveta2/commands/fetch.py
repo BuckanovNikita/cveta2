@@ -21,7 +21,6 @@ from cveta2.config import (
     load_image_cache_config,
     save_image_cache_config,
 )
-from cveta2.exceptions import Cveta2Error
 from cveta2.services.fetch import (
     FetchOptions,
     fetch_project,
@@ -40,39 +39,28 @@ def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
     output_dir = _resolve_output_dir(Path(args.output_dir))
     with open_client() as client:
-        project_id, project_name, cs_info = _resolve_project_or_exit(client, args)
+        project_id, project_name, cs_info = _resolve_project(client, args)
         options = _build_fetch_options(args, client, project_id, project_name)
-        try:
-            fetch_project(
-                client, project_id, project_name, output_dir, cs_info, options
-            )
-        except Cveta2Error as e:
-            sys.exit(str(e))
+        fetch_project(client, project_id, project_name, output_dir, cs_info, options)
 
 
 def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
     output_dir = Path(args.output_dir)
     with open_client() as client:
-        project_id, project_name, cs_info = _resolve_project_or_exit(client, args)
+        project_id, project_name, cs_info = _resolve_project(client, args)
         options = _build_fetch_options(args, client, project_id, project_name)
-        try:
-            fetch_selected_tasks(
-                client, project_id, project_name, output_dir, cs_info, options
-            )
-        except Cveta2Error as e:
-            sys.exit(str(e))
+        fetch_selected_tasks(
+            client, project_id, project_name, output_dir, cs_info, options
+        )
 
 
-def _resolve_project_or_exit(
+def _resolve_project(
     client: CvatClient,
     args: argparse.Namespace,
 ) -> tuple[int, str, CloudStorageInfo | None]:
-    """Resolve project id/name and cloud storage; exit with message on failure."""
-    try:
-        return resolve_project_and_cloud_storage(client, getattr(args, "project", None))
-    except Cveta2Error as e:
-        sys.exit(str(e))
+    """Resolve project id/name and cloud storage for a fetch command."""
+    return resolve_project_and_cloud_storage(client, getattr(args, "project", None))
 
 
 def _build_fetch_options(

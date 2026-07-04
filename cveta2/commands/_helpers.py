@@ -10,7 +10,6 @@ from cveta2.config import (
     CvatConfig,
     get_config_path,
 )
-from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import load_projects_cache
 from cveta2.services.output import read_dataset_csv as services_read_dataset_csv
 from cveta2.services.resolve import apply_sync_root_override
@@ -54,20 +53,17 @@ def resolve_project_from_args(
     return (project_id, project_name)
 
 
-def resolve_project_or_exit(
+def resolve_project(
     project_arg: str | None,
     client: CvatClient,
 ) -> tuple[int, str]:
     """Resolve project ID and name, falling back to interactive TUI.
 
-    Calls :func:`resolve_project_from_args` and exits on error.
-    When *project_arg* is empty, falls back to :func:`select_project`.
+    Calls :func:`resolve_project_from_args`; a :class:`Cveta2Error` (e.g.
+    project not found) propagates to the CLI dispatch boundary.  When
+    *project_arg* is empty, falls back to :func:`select_project`.
     """
-    try:
-        resolved = resolve_project_from_args(project_arg, client)
-    except Cveta2Error as e:
-        sys.exit(str(e))
-
+    resolved = resolve_project_from_args(project_arg, client)
     if resolved is not None:
         return resolved
     return select_project(client)
@@ -119,17 +115,15 @@ def read_dataset_csv(
 ) -> pd.DataFrame:
     """Read a dataset CSV and validate required columns.
 
-    Exits with a message if the file is missing or columns are invalid.
-    When *require_time_column* is True, ``task_updated_date`` must also be present.
+    A missing file or invalid columns raise :class:`Cveta2Error`, which
+    surfaces at the CLI dispatch boundary.  When *require_time_column* is
+    True, ``task_updated_date`` must also be present.
     """
-    try:
-        return services_read_dataset_csv(
-            path,
-            required_columns,
-            require_time_column=require_time_column,
-        )
-    except Cveta2Error as e:
-        sys.exit(str(e))
+    return services_read_dataset_csv(
+        path,
+        required_columns,
+        require_time_column=require_time_column,
+    )
 
 
 def require_host(cfg: CvatConfig) -> None:

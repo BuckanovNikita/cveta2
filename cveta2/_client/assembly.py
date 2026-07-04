@@ -6,12 +6,14 @@ functions are deterministic transformations over DTOs and models.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
 from cveta2._client.context import _TaskContext
+from cveta2._client.dtos import NewIssue, NewShape
 from cveta2._client.extractors import _collect_shapes
 from cveta2.models import DeletedImage, ImageWithoutAnnotations
 
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
     from cveta2.models import AnnotationRecord, TaskInfo
 
 ISSUE_BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
+UPLOAD_BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
 
 
 def build_name_to_frame(data_meta: RawDataMeta) -> dict[str, int]:
@@ -103,3 +106,92 @@ def task_to_records(  # noqa: PLR0913
         list(task_annotations) + task_without,
         task_deleted,
     )
+
+
+@dataclass
+class ShapeBuildResult:
+    """Shapes to upload plus per-reason skip diagnostics."""
+
+    shapes: list[NewShape] = field(default_factory=list)
+    unknown_images: int = 0
+    unknown_labels: list[str] = field(default_factory=list)
+
+
+def build_upload_shapes(
+    annotations_df: pd.DataFrame,
+    name_to_frame: dict[str, int],
+    label_name_to_id: dict[str, int],
+) -> ShapeBuildResult:
+    """Translate annotated rows into ``NewShape`` DTOs (pure).
+
+    Rows whose image is absent from *name_to_frame* or whose label is
+    unknown are counted/collected in the returned result instead of being
+    uploaded.
+    """
+    has_annotation = annotations_df["instance_label"].notna() & annotations_df[
+        list(UPLOAD_BBOX_COLUMNS)
+    ].notna().all(axis=1)
+    result = ShapeBuildResult()
+    for _, row in annotations_df[has_annotation].iterrows():
+        img_name = str(row["image_name"])
+        label_name = str(row["instance_label"])
+        if img_name not in name_to_frame:
+            result.unknown_images += 1
+            continue
+        if label_name not in label_name_to_id:
+            result.unknown_labels.append(label_name)
+            continue
+        result.shapes.append(
+            NewShape(
+                frame=name_to_frame[img_name],
+                label_id=label_name_to_id[label_name],
+                points=[float(row[col]) for col in UPLOAD_BBOX_COLUMNS],
+            ),
+        )
+    return result
+
+
+@dataclass
+class IssueBuildResult:
+    """Issues to open plus per-reason skip diagnostics (image names)."""
+
+    issues: list[NewIssue] = field(default_factory=list)
+    unknown_images: list[str] = field(default_factory=list)
+    unmapped_frames: list[str] = field(default_factory=list)
+    missing_bbox: list[str] = field(default_factory=list)
+
+
+def build_task_issues(
+    new_rows: pd.DataFrame,
+    name_to_frame: dict[str, int],
+    jobs: list[RawJob],
+) -> IssueBuildResult:
+    """Translate ``issue_state == "new"`` rows into ``NewIssue`` DTOs (pure).
+
+    Rows with an unknown image, no job for the frame, or an incomplete
+    bbox are recorded in the returned result rather than opened.
+    """
+    result = IssueBuildResult()
+    for _, row in new_rows.iterrows():
+        image_name = str(row["image_name"])
+        frame = name_to_frame.get(image_name)
+        if frame is None:
+            result.unknown_images.append(image_name)
+            continue
+        position = issue_position_from_row(row)
+        if position is None:
+            result.missing_bbox.append(image_name)
+            continue
+        job_id = find_job_for_frame(jobs, frame)
+        if job_id is None:
+            result.unmapped_frames.append(image_name)
+            continue
+        result.issues.append(
+            NewIssue(
+                job_id=job_id,
+                frame=frame,
+                position=position,
+                message=str(row["issue_text"]),
+            ),
+        )
+    return result

@@ -570,19 +570,19 @@ class TestFetchSelectedTasks:
 
 
 # ---------------------------------------------------------------------------
-# CLI smoke: run_fetch_task exits on Cveta2Error
+# CLI smoke: run_fetch_task propagates Cveta2Error to the dispatch boundary
 # ---------------------------------------------------------------------------
 
 
 class TestRunFetchTaskCliExit:
-    """Thin CLI-level test that ``run_fetch_task`` exits on ``Cveta2Error``."""
+    """``run_fetch_task`` raises ``Cveta2Error``; the CLI boundary exits."""
 
-    def test_task_not_found_exits(
+    def test_task_not_found_raises(
         self,
         normal_fake: LoadedFixtures,
         tmp_path: Path,
     ) -> None:
-        """Non-existent task name causes ``sys.exit`` via ``Cveta2Error``."""
+        """Non-existent task name raises ``TaskNotFoundError`` from the command."""
         fake = normal_fake
         fake_api = FakeCvatApi(fake)
 
@@ -608,6 +608,6 @@ class TestRunFetchTaskCliExit:
                 "cveta2.client.CvatClient.detect_project_cloud_storage",
                 return_value=None,
             ),
-            pytest.raises(SystemExit),
+            pytest.raises(TaskNotFoundError),
         ):
             run_fetch_task(args)

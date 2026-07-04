@@ -21,7 +21,6 @@ from cveta2.commands.labels import (
     _validate_hex_color,
 )
 from cveta2.config import CvatConfig
-from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import LabelAttributeInfo, LabelInfo
 from tests.helpers import build_fake, client_with_api, make_fake_client, mock_client_ctx
 
@@ -280,12 +279,16 @@ def test_cli_labels_list(labels: list[LabelInfo]) -> None:
 def test_cli_labels_noninteractive_without_list_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Non-interactive mode without --list should fail."""
+    """Non-interactive mode without --list should fail.
+
+    The command raises ``InteractiveModeRequiredError``; the CLI dispatch
+    boundary turns it into a clean ``sys.exit``.
+    """
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
 
     with (
         _patched_cli(_cli_client(labels=_LABELS)),
-        pytest.raises(InteractiveModeRequiredError),
+        pytest.raises(SystemExit),
     ):
         CliApp().run(["labels", "--project", "1"])
 

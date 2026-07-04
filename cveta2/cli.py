@@ -30,6 +30,7 @@ from cveta2.commands.task_ops import (
 from cveta2.commands.upload import run_upload
 from cveta2.commands.whats_new import run_whats_new
 from cveta2.config import get_config_path
+from cveta2.exceptions import Cveta2Error
 
 _TASK_ACTIONS: dict[str, Callable[[argparse.Namespace], None]] = {
     "mark-deleted": run_task_mark_deleted,
@@ -719,25 +720,36 @@ class CliApp:
         )
 
     def _run_command(self, args: argparse.Namespace) -> None:
-        """Dispatch parsed args to the target command implementation."""
-        if args.command in ("setup", "setup-cache", "setup-clearml"):
-            setup_path = Path(args.config) if args.config else get_config_path()
-            if args.command == "setup":
-                run_setup(setup_path)
-            elif args.command == "setup-cache":
-                run_setup_cache(
-                    setup_path,
-                    reset=getattr(args, "reset", False),
-                    list_paths=getattr(args, "list_paths", False),
-                )
-            else:
-                run_setup_clearml(
-                    setup_path,
-                    list_mappings=getattr(args, "list_mappings", False),
-                )
-            return
+        """Dispatch parsed args to the target command implementation.
 
-        dispatch: dict[str, Callable[[], None]] = {
+        Domain errors (:class:`Cveta2Error`) raised by any command surface
+        here as a clean ``sys.exit`` message, so individual commands never
+        embed exit plumbing.
+        """
+        handler = self._dispatch(args).get(args.command)
+        if handler is None:
+            sys.exit(f"Неизвестная команда: {args.command}")
+        try:
+            handler()
+        except Cveta2Error as e:
+            sys.exit(str(e))
+
+    @staticmethod
+    def _dispatch(args: argparse.Namespace) -> dict[str, Callable[[], None]]:
+        """Build the command-name → handler table for *args*."""
+        config_arg = getattr(args, "config", None)
+        setup_path = Path(config_arg) if config_arg else get_config_path()
+        return {
+            "setup": lambda: run_setup(setup_path),
+            "setup-cache": lambda: run_setup_cache(
+                setup_path,
+                reset=getattr(args, "reset", False),
+                list_paths=getattr(args, "list_paths", False),
+            ),
+            "setup-clearml": lambda: run_setup_clearml(
+                setup_path,
+                list_mappings=getattr(args, "list_mappings", False),
+            ),
             "fetch": lambda: run_fetch(args),
             "fetch-task": lambda: run_fetch_task(args),
             "s3-sync": lambda: run_s3_sync(args),
@@ -750,10 +762,6 @@ class CliApp:
             "doctor": run_doctor,
             "whats-new": lambda: run_whats_new(args),
         }
-        handler = dispatch.get(args.command)
-        if handler is None:
-            sys.exit(f"Неизвестная команда: {args.command}")
-        handler()
 
     def run(self, argv: list[str] | None = None) -> None:
         """Run the CLI with the given arguments."""

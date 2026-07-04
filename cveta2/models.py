@@ -6,7 +6,7 @@ import json
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, field_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, field_validator
 
 # ------------------------------------------------------------------
 # CVAT entity models (project / task / label)
@@ -55,7 +55,7 @@ class LabelInfo(BaseModel):
     id: int
     name: str
     color: str = ""
-    attributes: list[LabelAttributeInfo] = []
+    attributes: list[LabelAttributeInfo] = Field(default_factory=list)
 
     def format_display(self) -> str:
         """Human-readable label description for TUI menus."""

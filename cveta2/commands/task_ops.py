@@ -12,7 +12,7 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import resolve_project_or_exit
+from cveta2.commands._helpers import resolve_project
 from cveta2.config import is_interactive_disabled
 from cveta2.exceptions import TaskNotFoundError
 from cveta2.task_cache import invalidate_local_entry
@@ -78,7 +78,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
         sys.exit("Ошибка: укажите хотя бы один --frame или --image.")
 
     with open_client() as client:
-        project_id, _ = resolve_project_or_exit(args.project, client)
+        project_id, _ = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         marked = 0
         if images:
@@ -94,7 +94,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
 def run_task_drop_label(args: argparse.Namespace) -> None:
     """Run ``cveta2 task drop-label``."""
     with open_client() as client:
-        project_id, _ = resolve_project_or_exit(args.project, client)
+        project_id, _ = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         try:
             count = client.count_task_label_shapes(task.id, args.label)
@@ -121,7 +121,7 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
 def run_task_delete(args: argparse.Namespace) -> None:
     """Run ``cveta2 task delete``."""
     with open_client() as client:
-        project_id, _ = resolve_project_or_exit(args.project, client)
+        project_id, _ = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         _confirm_or_exit(
             f"Удалить задачу {task.name!r} (id={task.id}) безвозвратно?",
@@ -139,7 +139,7 @@ def run_task_status(args: argparse.Namespace) -> None:
     state = STATE_CLI_TO_CVAT[args.state] if args.state else None
 
     with open_client() as client:
-        project_id, _ = resolve_project_or_exit(args.project, client)
+        project_id, _ = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         num_jobs = client.set_task_jobs_status(task.id, stage=args.stage, state=state)
         invalidate_local_entry(project_id, task.id)
