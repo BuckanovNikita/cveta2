@@ -11,14 +11,9 @@ from cveta2.config import (
     get_config_path,
 )
 from cveta2.projects_cache import load_projects_cache
-from cveta2.services.output import read_dataset_csv as services_read_dataset_csv
 from cveta2.services.resolve import apply_sync_root_override
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    import pandas as pd
-
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
 
@@ -105,25 +100,6 @@ def resolve_project_and_cloud_storage(
     cs_info = client.detect_project_cloud_storage(project_id)
     cs_info = apply_sync_root_override(project_name, cs_info, sync_root)
     return (project_id, project_name, cs_info)
-
-
-def read_dataset_csv(
-    path: Path,
-    required_columns: set[str],
-    *,
-    require_time_column: bool = False,
-) -> pd.DataFrame:
-    """Read a dataset CSV and validate required columns.
-
-    A missing file or invalid columns raise :class:`Cveta2Error`, which
-    surfaces at the CLI dispatch boundary.  When *require_time_column* is
-    True, ``task_updated_date`` must also be present.
-    """
-    return services_read_dataset_csv(
-        path,
-        required_columns,
-        require_time_column=require_time_column,
-    )
 
 
 def require_host(cfg: CvatConfig) -> None:

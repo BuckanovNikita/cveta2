@@ -14,8 +14,9 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import read_dataset_csv, resolve_project
+from cveta2.commands._helpers import resolve_project
 from cveta2.config import load_upload_config
+from cveta2.services.output import read_dataset_csv
 from cveta2.services.upload import (
     UploadOptions,
     build_search_dirs,

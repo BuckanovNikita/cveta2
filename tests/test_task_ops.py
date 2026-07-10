@@ -12,45 +12,11 @@ from cveta2._client.ports import CvatApiPort
 from cveta2.client import CvatClient
 from cveta2.commands.task_ops import (
     STATE_CLI_TO_CVAT,
-    _confirm_or_exit,
     run_task_mark_deleted,
     run_task_status,
 )
 from cveta2.models import LabelInfo, TaskInfo
 from tests.helpers import client_with_api, make_raw_shape, mock_client_ctx
-
-# ---------------------------------------------------------------------------
-# _confirm_or_exit
-# ---------------------------------------------------------------------------
-
-
-class TestConfirmOrExit:
-    def test_yes_flag_skips_prompt(self) -> None:
-        with patch("cveta2.commands.task_ops.interactive.confirm") as mock_confirm:
-            _confirm_or_exit("Удалить?", yes=True)
-        mock_confirm.assert_not_called()
-
-    def test_noninteractive_exits_with_yes_hint(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-        with pytest.raises(SystemExit) as exc_info:
-            _confirm_or_exit("Удалить?", yes=False)
-        assert "--yes" in str(exc_info.value)
-
-    def test_interactive_yes_proceeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
-        with patch("cveta2.commands.task_ops.interactive.confirm", return_value=True):
-            _confirm_or_exit("Удалить?", yes=False)
-
-    def test_interactive_no_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
-        with (
-            patch("cveta2.commands.task_ops.interactive.confirm", return_value=False),
-            pytest.raises(SystemExit),
-        ):
-            _confirm_or_exit("Удалить?", yes=False)
-
 
 # ---------------------------------------------------------------------------
 # Command validation and state mapping

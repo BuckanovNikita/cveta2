@@ -83,6 +83,38 @@ class TestConfirm:
             assert primitives.confirm("Удалить?", hint=_HINT) is False
 
 
+class TestConfirmOrExit:
+    def test_yes_flag_skips_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
+        primitives.confirm_or_exit("Удалить?", yes=True, hint=_HINT)
+
+    def test_noninteractive_raises_with_hint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
+        with pytest.raises(InteractiveModeRequiredError, match=_HINT):
+            primitives.confirm_or_exit("Удалить?", yes=False, hint=_HINT)
+
+    def test_interactive_yes_proceeds(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+        with patch(
+            "cveta2.commands.interactive._questionary.ask_confirm",
+            return_value=True,
+        ):
+            primitives.confirm_or_exit("Удалить?", yes=False, hint=_HINT)
+
+    def test_interactive_no_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+        with (
+            patch(
+                "cveta2.commands.interactive._questionary.ask_confirm",
+                return_value=False,
+            ),
+            pytest.raises(SystemExit),
+        ):
+            primitives.confirm_or_exit("Удалить?", yes=False, hint=_HINT)
+
+
 class TestSelectMany:
     def test_empty_disallowed_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)

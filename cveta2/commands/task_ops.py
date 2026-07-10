@@ -13,7 +13,6 @@ from loguru import logger
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import resolve_project
-from cveta2.config import is_interactive_disabled
 from cveta2.exceptions import TaskNotFoundError
 from cveta2.task_cache import invalidate_local_entry
 
@@ -35,25 +34,7 @@ JOB_STAGES: list[str] = ["annotation", "validation", "acceptance"]
 """Valid CVAT job stages for the CLI ``--stage`` choices."""
 
 
-def _confirm_or_exit(prompt: str, *, yes: bool) -> None:
-    """Ask for confirmation before a destructive operation.
-
-    Proceeds silently when *yes* is set.  In noninteractive mode
-    (``CVETA2_NO_INTERACTIVE=true``) exits with a hint to pass ``--yes``.
-    Otherwise asks a y/N question and exits unless the answer is yes.
-    """
-    if yes:
-        return
-    if is_interactive_disabled():
-        sys.exit(
-            "Ошибка: требуется подтверждение, но интерактивный режим отключён. "
-            "Запустите команду с флагом --yes."
-        )
-    if not interactive.confirm(
-        f"{prompt} [y/N]",
-        hint="Run the command with --yes to skip confirmation.",
-    ):
-        sys.exit("Отменено.")
+_CONFIRM_HINT = "Запустите команду с флагом --yes."
 
 
 def _resolve_single_task(
@@ -106,10 +87,11 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
                 f"нет аннотаций с меткой {args.label!r}."
             )
             return
-        _confirm_or_exit(
+        interactive.confirm_or_exit(
             f"Удалить {count} аннотаций с меткой {args.label!r} "
             f"из задачи {task.name!r} (id={task.id})?",
             yes=args.yes,
+            hint=_CONFIRM_HINT,
         )
         deleted = client.drop_label_annotations(task.id, args.label)
         invalidate_local_entry(project_id, task.id, project_name)
@@ -123,9 +105,10 @@ def run_task_delete(args: argparse.Namespace) -> None:
     with open_client() as client:
         project_id, project_name = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
-        _confirm_or_exit(
+        interactive.confirm_or_exit(
             f"Удалить задачу {task.name!r} (id={task.id}) безвозвратно?",
             yes=args.yes,
+            hint=_CONFIRM_HINT,
         )
         client.delete_task(task.id)
         invalidate_local_entry(project_id, task.id, project_name)

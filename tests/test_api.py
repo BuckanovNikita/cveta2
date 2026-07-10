@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 import cveta2
-from cveta2.api import _ConnectionSettings, _resolve_client
+from cveta2.api import _resolve_client
 from cveta2.exceptions import (
     Cveta2Error,
     LabelsMismatchError,
@@ -36,7 +36,7 @@ def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 class TestResolveClient:
     def test_injected_client_used_as_is(self) -> None:
         sentinel = object()
-        with _resolve_client(sentinel, _ConnectionSettings()) as client:  # type: ignore[arg-type]
+        with _resolve_client(sentinel, None, None, None, None, None) as client:  # type: ignore[arg-type]
             assert client is sentinel
 
     def test_missing_host_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,7 +45,7 @@ class TestResolveClient:
         )
         with (
             pytest.raises(MissingHostError, match="CVAT_HOST"),
-            _resolve_client(None, _ConnectionSettings()),
+            _resolve_client(None, None, None, None, None, None),
         ):
             pytest.fail("must not yield")
 
@@ -55,7 +55,7 @@ class TestResolveClient:
         )
         with (
             pytest.raises(MissingCredentialsError, match="CVAT_USERNAME"),
-            _resolve_client(None, _ConnectionSettings(host="http://cvat.test")),
+            _resolve_client(None, "http://cvat.test", None, None, None, None),
         ):
             pytest.fail("must not yield")
 
@@ -78,10 +78,7 @@ class TestResolveClient:
                 return None
 
         monkeypatch.setattr("cveta2.api.CvatClient", _FakeClient)
-        conn = _ConnectionSettings(
-            host="http://explicit", username="user", password="pass"
-        )
-        with _resolve_client(None, conn):
+        with _resolve_client(None, "http://explicit", "user", "pass", None, None):
             pass
         assert captured["host"] == "http://explicit"
         assert captured["user"] == "user"

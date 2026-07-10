@@ -9,9 +9,7 @@ from loguru import logger
 from cveta2.client import CvatClient
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import (
-    resolve_project_from_args,
-)
+from cveta2.commands._helpers import resolve_project_from_args
 from cveta2.config import (
     IgnoreConfig,
     IgnoredTask,
@@ -23,7 +21,7 @@ from cveta2.projects_cache import load_projects_cache
 if TYPE_CHECKING:
     import argparse
 
-    from cveta2.models import ProjectInfo, TaskInfo
+    from cveta2.models import TaskInfo
 
 _ACTION_ADD = "add"
 _ACTION_REMOVE = "remove"
@@ -114,35 +112,11 @@ def _resolve_project(
     resolved = resolve_project_from_args(args.project, client)
     if resolved is not None:
         return resolved
-    return _select_project_tui(client, ignore_cfg)
-
-
-def _select_project_tui(
-    client: CvatClient,
-    ignore_cfg: IgnoreConfig,
-) -> tuple[int, str]:
-    """Interactive project selection, returning ``(project_id, project_name)``."""
-    cached_projects = load_projects_cache()
-    known_names = _build_project_names(cached_projects, ignore_cfg)
-
-    project_name = interactive.select_project_name(known_names)
-
     cached = load_projects_cache()
+    known_names = sorted({p.name for p in cached} | set(ignore_cfg.projects))
+    project_name = interactive.select_project_name(known_names)
     project_id = client.resolve_project_id(project_name, cached=cached)
     return project_id, project_name
-
-
-def _build_project_names(
-    cached_projects: list[ProjectInfo],
-    ignore_cfg: IgnoreConfig,
-) -> list[str]:
-    """Build a deduplicated sorted list of project names."""
-    names: set[str] = set()
-    for p in cached_projects:
-        names.add(p.name)
-    for name in ignore_cfg.projects:
-        names.add(name)
-    return sorted(names)
 
 
 # ------------------------------------------------------------------

@@ -34,14 +34,15 @@ if TYPE_CHECKING:
     import argparse
 
     from cveta2.client import CvatClient
-    from cveta2.image_downloader import CloudStorageInfo
 
 
 def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
     output_dir = _resolve_output_dir(Path(args.output_dir))
     with open_client() as client:
-        project_id, project_name, cs_info = _resolve_project(client, args)
+        project_id, project_name, cs_info = resolve_project_and_cloud_storage(
+            client, args.project
+        )
         options = _build_fetch_options(args, client, project_id, project_name)
         fetch_project(client, project_id, project_name, output_dir, cs_info, options)
 
@@ -50,19 +51,13 @@ def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
     output_dir = Path(args.output_dir)
     with open_client() as client:
-        project_id, project_name, cs_info = _resolve_project(client, args)
+        project_id, project_name, cs_info = resolve_project_and_cloud_storage(
+            client, args.project
+        )
         options = _build_fetch_options(args, client, project_id, project_name)
         fetch_selected_tasks(
             client, project_id, project_name, output_dir, cs_info, options
         )
-
-
-def _resolve_project(
-    client: CvatClient,
-    args: argparse.Namespace,
-) -> tuple[int, str, CloudStorageInfo | None]:
-    """Resolve project id/name and cloud storage for a fetch command."""
-    return resolve_project_and_cloud_storage(client, getattr(args, "project", None))
 
 
 def _build_fetch_options(
