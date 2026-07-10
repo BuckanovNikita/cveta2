@@ -14,13 +14,13 @@ from urllib.parse import parse_qs
 
 from loguru import logger
 from pydantic import BaseModel
-from tqdm import tqdm
 
 from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
     make_s3_client,
     names_with_basename_fallback,
+    run_s3_transfers,
     s3_get_bytes,
     strip_key_prefix,
 )
@@ -183,32 +183,36 @@ class ImageDownloader:
             project_cloud_storage.bucket,
             project_cloud_storage.prefix,
         )
-        for image_name, frame_ref in tqdm(
-            pending.items(),
-            desc="Downloading from project storage",
-            unit="img",
-            leave=False,
-        ):
+        to_download: list[tuple[str, str, Path]] = []
+        missing: list[str] = []
+        for image_name, frame_ref in pending.items():
             s3_key: str | None = (
                 name_to_key.get(frame_ref)
                 or name_to_key.get(image_name)
                 or name_to_key.get(Path(image_name).name)
             )
             if s3_key is None:
-                stats.failed += 1
+                missing.append(image_name)
                 continue
             dest = self._dest_path(image_name, frame_ref, project_cloud_storage)
-            try:
-                _download_one_s3(
-                    s3_client,
-                    project_cloud_storage.bucket,
-                    s3_key,
-                    dest,
-                )
-                stats.downloaded += 1
-            except (OSError, ConnectionError, KeyError):
-                logger.exception(f"Не удалось загрузить {image_name} (key={s3_key})")
-                stats.failed += 1
+            to_download.append((image_name, s3_key, dest))
+        if missing:
+            stats.failed += len(missing)
+            logger.warning(
+                f"Не найдены на S3 ({len(missing)} шт.): "
+                f"{', '.join(missing[:10])}"
+                f"{'...' if len(missing) > 10 else ''}"
+            )
+        bucket = project_cloud_storage.bucket
+        ok, failed = run_s3_transfers(
+            to_download,
+            lambda item: _download_one_s3(s3_client, bucket, item[1], item[2]),
+            lambda item: f"{item[0]} (key={item[1]})",
+            desc="Downloading from project storage",
+            unit="img",
+        )
+        stats.downloaded += ok
+        stats.failed += failed
 
     @staticmethod
     def _build_project_storage_name_map(
@@ -277,16 +281,15 @@ class S3Syncer:
             return stats
 
         self._target_dir.mkdir(parents=True, exist_ok=True)
-        for key, name in tqdm(
-            to_download, desc="Syncing from S3", unit="file", leave=False
-        ):
-            dest = self._target_dir / name
-            try:
-                _download_one_s3(s3, cs_info.bucket, key, dest)
-                stats.downloaded += 1
-            except (OSError, ConnectionError, KeyError):
-                logger.exception(f"Не удалось загрузить {name} (key={key})")
-                stats.failed += 1
+        stats.downloaded, stats.failed = run_s3_transfers(
+            to_download,
+            lambda item: _download_one_s3(
+                s3, cs_info.bucket, item[0], self._target_dir / item[1]
+            ),
+            lambda item: f"{item[1]} (key={item[0]})",
+            desc="Syncing from S3",
+            unit="file",
+        )
 
         logger.info(
             f"S3 sync: {stats.downloaded} загружено, "

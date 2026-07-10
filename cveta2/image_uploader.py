@@ -12,9 +12,14 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from pydantic import BaseModel
-from tqdm import tqdm
 
-from cveta2.s3_utils import build_s3_key, list_s3_objects, make_s3_client, s3_retry
+from cveta2.s3_utils import (
+    build_s3_key,
+    list_s3_objects,
+    make_s3_client,
+    run_s3_transfers,
+    s3_retry,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -204,15 +209,13 @@ class S3Uploader:
             )
             return stats
 
-        for name, s3_key, local_path in tqdm(
-            to_upload, desc="Uploading to S3", unit="file", leave=False
-        ):
-            try:
-                _upload_one_s3(s3, local_path, cs_info.bucket, s3_key)
-                stats.uploaded += 1
-            except (OSError, ConnectionError):
-                logger.exception(f"Не удалось загрузить {name} (key={s3_key})")
-                stats.failed += 1
+        stats.uploaded, stats.failed = run_s3_transfers(
+            to_upload,
+            lambda item: _upload_one_s3(s3, item[2], cs_info.bucket, item[1]),
+            lambda item: f"{item[0]} (key={item[1]})",
+            desc="Uploading to S3",
+            unit="file",
+        )
 
         logger.info(
             f"S3 upload: {stats.uploaded} загружено, "

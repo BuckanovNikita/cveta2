@@ -3,20 +3,48 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, Final, TypeVar, cast
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
+from loguru import logger
+from tqdm import tqdm
 
 from cveta2._retry import RETRY_ATTEMPTS, network_retry
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Sequence
 
     from cveta2.s3_types import S3Client
 
 _T = TypeVar("_T")
+
+S3_TRANSFER_ERRORS: Final = (OSError, ConnectionError, KeyError)
+
+
+def run_s3_transfers(
+    items: Sequence[_T],
+    transfer: Callable[[_T], None],
+    describe: Callable[[_T], str],
+    *,
+    desc: str,
+    unit: str,
+) -> tuple[int, int]:
+    """Run *transfer* per item under a tqdm bar; return ``(ok, failed)``.
+
+    Each failure is logged with ``logger.exception``; callers log the
+    summary line after the loop.
+    """
+    ok = failed = 0
+    for item in tqdm(items, desc=desc, unit=unit, leave=False):
+        try:
+            transfer(item)
+            ok += 1
+        except S3_TRANSFER_ERRORS:
+            logger.exception(f"Не удалось загрузить {describe(item)}")
+            failed += 1
+    return ok, failed
 
 
 def names_with_basename_fallback(pairs: Iterable[tuple[str, _T]]) -> dict[str, _T]:
