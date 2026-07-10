@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, ClassVar
 
 import yaml
 from loguru import logger
@@ -14,9 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from cveta2.exceptions import InteractiveModeRequiredError, MissingCredentialsError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-_T = TypeVar("_T")
+    from typing_extensions import Self
 
 CONFIG_DIR = Path.home() / ".config" / "cveta2"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
@@ -92,50 +90,63 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
     return data
 
 
-def _load_section(
-    section_key: str,
-    parse_fn: Callable[[object], _T],
-    config_path: Path | None = None,
-) -> _T:
-    """Load a config section: path, raw YAML, then parse with *parse_fn*."""
-    path = get_config_path(config_path)
-    data = _load_raw_yaml(path)
-    return parse_fn(data.get(section_key))
+class SectionConfig(BaseModel):
+    """Base for config-YAML sections: generic ``load``/``save`` via pydantic.
 
-
-def _save_section(
-    section_key: str,
-    value: _T,
-    serialize_fn: Callable[[_T], object | None],
-    config_path: Path | None = None,
-    *,
-    log_message: str | None = None,
-) -> Path:
-    """Update one section of the config YAML.
-
-    If *serialize_fn* returns None, the section key is removed.
+    Subclasses set ``section_key`` (their top-level YAML key) and may
+    override ``_wrap_raw`` (map the raw section value onto model fields)
+    and ``_to_raw`` (model → YAML value; ``None`` removes the section).
     """
-    path = get_config_path(config_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = _load_raw_yaml(path)
-    serialized = serialize_fn(value)
-    if serialized is None:
-        existing.pop(section_key, None)
-    else:
-        existing[section_key] = serialized
-    content = yaml.safe_dump(
-        existing,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-    if not content.endswith("\n"):
-        content += "\n"
-    path.write_text(content, encoding="utf-8")
-    if log_message and "{path}" in log_message:
-        logger.info(log_message.format(path=path))
-    else:
-        logger.info(log_message or f"Config saved to {path}")
-    return path
+
+    section_key: ClassVar[str]
+    save_log: ClassVar[str] = "Config saved to {path}"
+
+    @classmethod
+    def _wrap_raw(cls, raw: dict[str, object]) -> dict[str, object]:
+        """Map the raw YAML section mapping onto model fields."""
+        return raw
+
+    def _to_raw(self) -> object | None:
+        """Serialize to the YAML section value; ``None`` removes the section."""
+        data = self.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
+        return data or None
+
+    @classmethod
+    def load(cls, config_path: Path | None = None) -> Self:
+        """Load this section from the config YAML (defaults when absent)."""
+        raw = _load_raw_yaml(get_config_path(config_path)).get(cls.section_key)
+        if not isinstance(raw, dict):
+            return cls()
+        return cls.model_validate(cls._wrap_raw(raw))
+
+    def save(self, config_path: Path | None = None) -> Path:
+        """Update only this section of the config YAML, keeping the rest."""
+        path = get_config_path(config_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = _load_raw_yaml(path)
+        serialized = self._to_raw()
+        if serialized is None:
+            existing.pop(self.section_key, None)
+        else:
+            existing[self.section_key] = serialized
+        content = yaml.safe_dump(existing, default_flow_style=False, sort_keys=False)
+        if not content.endswith("\n"):
+            content += "\n"
+        path.write_text(content, encoding="utf-8")
+        logger.info(self.save_log.format(path=path))
+        return path
+
+
+class _ProjectsSection(SectionConfig):
+    """Section whose YAML value is directly the ``projects`` mapping."""
+
+    @classmethod
+    def _wrap_raw(cls, raw: dict[str, object]) -> dict[str, object]:
+        return {"projects": raw}
+
+    def _to_raw(self) -> object | None:
+        data = self.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
+        return data.get("projects") or None
 
 
 def _parse_timeout_env(raw: str | None) -> float | None:
@@ -270,10 +281,20 @@ class CvatConfig(BaseModel):
         )
 
 
-class ImageCacheConfig(BaseModel):
+class ImageCacheConfig(_ProjectsSection):
     """Per-project mapping: project_name -> local directory for images."""
 
+    section_key: ClassVar[str] = "image_cache"
+    save_log: ClassVar[str] = "Image cache config saved to {path}"
+
     projects: dict[str, Path] = Field(default_factory=dict)
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def _coerce_scalars(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return {str(k): str(v) for k, v in value.items()}
+        return value
 
     def get_cache_dir(self, project_name: str) -> Path | None:
         """Return the cache directory for *project_name*, or None if not configured."""
@@ -282,18 +303,6 @@ class ImageCacheConfig(BaseModel):
     def set_cache_dir(self, project_name: str, path: Path) -> None:
         """Add or update the cache directory for *project_name*."""
         self.projects[project_name] = path
-
-
-def _parse_image_cache_section(raw: object) -> ImageCacheConfig:
-    """Parse ``image_cache`` section from raw YAML value."""
-    if not isinstance(raw, dict):
-        return ImageCacheConfig()
-    return ImageCacheConfig(projects={k: Path(str(v)) for k, v in raw.items()})
-
-
-def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig:
-    """Load the ``image_cache`` section from the config YAML."""
-    return _load_section("image_cache", _parse_image_cache_section, config_path)
 
 
 class CacheProjectSettings(BaseModel):
@@ -311,13 +320,49 @@ class CacheProjectSettings(BaseModel):
     ignored_prefix: str | None = None
     task_cache_s3: str | None = None
 
+    @field_validator(
+        "images_root", "tasks_root", "ignored_prefix", "task_cache_s3", mode="before"
+    )
+    @classmethod
+    def _none_if_falsy(cls, value: object) -> object:
+        return str(value) if value else None
 
-class CacheConfig(BaseModel):
+
+class CacheConfig(SectionConfig):
     """Global cache settings plus per-project overrides."""
+
+    section_key: ClassVar[str] = "cache"
+    save_log: ClassVar[str] = "Cache config saved to {path}"
 
     images_root: Path | None = None
     tasks_root: Path | None = None
     projects: dict[str, CacheProjectSettings] = Field(default_factory=dict)
+
+    @field_validator("images_root", "tasks_root", mode="before")
+    @classmethod
+    def _none_if_falsy(cls, value: object) -> object:
+        return str(value) if value else None
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def _drop_non_mapping_projects(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(k): v if isinstance(v, (dict, CacheProjectSettings)) else {}
+            for k, v in value.items()
+        }
+
+    def _to_raw(self) -> object | None:
+        data = self.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
+        projects = data.get("projects")
+        if isinstance(projects, dict):
+            pruned = {name: entry for name, entry in projects.items() if entry}
+            if pruned:
+                data["projects"] = pruned
+            else:
+                data.pop("projects")
+        return data or None
 
     def for_project(self, project_name: str) -> CacheProjectSettings:
         """Resolve effective settings for *project_name* (overrides win)."""
@@ -336,130 +381,28 @@ def cache_dir_for_project(root: Path, project_name: str) -> Path:
     return root / safe
 
 
-def _parse_cache_project(raw: object) -> CacheProjectSettings:
-    """Parse one per-project entry of the ``cache.projects`` mapping."""
-    if not isinstance(raw, dict):
-        return CacheProjectSettings()
-    return CacheProjectSettings(
-        images_root=Path(str(raw["images_root"])) if raw.get("images_root") else None,
-        tasks_root=Path(str(raw["tasks_root"])) if raw.get("tasks_root") else None,
-        ignored_prefix=str(raw["ignored_prefix"])
-        if raw.get("ignored_prefix")
-        else None,
-        task_cache_s3=str(raw["task_cache_s3"]) if raw.get("task_cache_s3") else None,
-    )
-
-
-def _parse_cache_section(raw: object) -> CacheConfig:
-    """Parse the ``cache`` section from raw YAML value."""
-    if not isinstance(raw, dict):
-        return CacheConfig()
-    projects_raw = raw.get("projects")
-    projects = (
-        {str(k): _parse_cache_project(v) for k, v in projects_raw.items()}
-        if isinstance(projects_raw, dict)
-        else {}
-    )
-    return CacheConfig(
-        images_root=Path(str(raw["images_root"])) if raw.get("images_root") else None,
-        tasks_root=Path(str(raw["tasks_root"])) if raw.get("tasks_root") else None,
-        projects=projects,
-    )
-
-
-def load_cache_config(config_path: Path | None = None) -> CacheConfig:
-    """Load the ``cache`` section from the config YAML."""
-    return _load_section("cache", _parse_cache_section, config_path)
-
-
-def _serialize_cache_project(settings: CacheProjectSettings) -> dict[str, str]:
-    """Serialize one per-project cache entry, omitting unset fields."""
-    data: dict[str, str] = {}
-    if settings.images_root is not None:
-        data["images_root"] = str(settings.images_root)
-    if settings.tasks_root is not None:
-        data["tasks_root"] = str(settings.tasks_root)
-    if settings.ignored_prefix:
-        data["ignored_prefix"] = settings.ignored_prefix
-    if settings.task_cache_s3:
-        data["task_cache_s3"] = settings.task_cache_s3
-    return data
-
-
-def _serialize_cache_section(cfg: CacheConfig) -> dict[str, object] | None:
-    """Serialize cache config to a YAML-friendly dict, or None if empty."""
-    result: dict[str, object] = {}
-    if cfg.images_root is not None:
-        result["images_root"] = str(cfg.images_root)
-    if cfg.tasks_root is not None:
-        result["tasks_root"] = str(cfg.tasks_root)
-    projects = {
-        name: serialized
-        for name, settings in cfg.projects.items()
-        if (serialized := _serialize_cache_project(settings))
-    }
-    if projects:
-        result["projects"] = projects
-    return result or None
-
-
-def save_cache_config(
-    cfg: CacheConfig,
-    config_path: Path | None = None,
-) -> Path:
-    """Update only the ``cache`` section of the config YAML."""
-    return _save_section(
-        "cache",
-        cfg,
-        _serialize_cache_section,
-        config_path,
-        log_message="Cache config saved to {path}",
-    )
-
-
-class SyncRootsConfig(BaseModel):
+class SyncRootsConfig(_ProjectsSection):
     """Per-project mapping: project_name -> S3 root for image downloads.
 
     A root is either a full ``s3://bucket/prefix`` URL or a bare prefix
     string applied to the project's own CVAT bucket.
     """
 
+    section_key: ClassVar[str] = "sync_roots"
+    save_log: ClassVar[str] = "Sync roots config saved to {path}"
+
     projects: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def _coerce_scalars(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return {str(k): str(v) for k, v in value.items()}
+        return value
 
     def get_root(self, project_name: str) -> str | None:
         """Return the sync root for *project_name*, or None if not configured."""
         return self.projects.get(project_name)
-
-
-def _parse_sync_roots_section(raw: object) -> SyncRootsConfig:
-    """Parse ``sync_roots`` section from raw YAML value."""
-    if not isinstance(raw, dict):
-        return SyncRootsConfig()
-    return SyncRootsConfig(projects={str(k): str(v) for k, v in raw.items()})
-
-
-def load_sync_roots_config(config_path: Path | None = None) -> SyncRootsConfig:
-    """Load the ``sync_roots`` section from the config YAML."""
-    return _load_section("sync_roots", _parse_sync_roots_section, config_path)
-
-
-def _serialize_sync_roots_section(cfg: SyncRootsConfig) -> dict[str, str] | None:
-    """Serialize sync roots config to YAML-friendly dict, or None if empty."""
-    return dict(cfg.projects) or None
-
-
-def save_sync_roots_config(
-    cfg: SyncRootsConfig,
-    config_path: Path | None = None,
-) -> Path:
-    """Update only the ``sync_roots`` section of the config YAML."""
-    return _save_section(
-        "sync_roots",
-        cfg,
-        _serialize_sync_roots_section,
-        config_path,
-        log_message="Sync roots config saved to {path}",
-    )
 
 
 class IgnoredTask(BaseModel):
@@ -471,14 +414,38 @@ class IgnoredTask(BaseModel):
     silent: bool = False
 
 
-class IgnoreConfig(BaseModel):
+class IgnoreConfig(_ProjectsSection):
     """Per-project mapping of ignored tasks.
 
     Ignored tasks are treated as permanently in-progress and skipped entirely.
     Each entry stores both the task ID and its human-readable name.
+    Loading supports both the new format (list of ``{id, name}`` dicts)
+    and the legacy format (list of bare ints); saving always writes the
+    new format.
     """
 
+    section_key: ClassVar[str] = "ignore"
+    save_log: ClassVar[str] = "Ignore config saved to {path}"
+
     projects: dict[str, list[IgnoredTask]] = Field(default_factory=dict)
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def _parse_entries(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return {}
+        projects: dict[str, list[IgnoredTask]] = {}
+        for project_name, entries in value.items():
+            if not isinstance(entries, list):
+                continue
+            parsed = [
+                item if isinstance(item, IgnoredTask) else _parse_ignore_entry(item)
+                for item in entries
+            ]
+            cleaned = [entry for entry in parsed if entry is not None]
+            if cleaned:
+                projects[str(project_name)] = cleaned
+        return projects
 
     def get_ignored_tasks(self, project_name: str) -> list[int]:
         """Return the list of ignored task IDs for *project_name*."""
@@ -547,94 +514,13 @@ def _parse_ignore_entry(raw: object) -> IgnoredTask | None:
     return None
 
 
-def _parse_ignore_section(raw: object) -> IgnoreConfig:
-    """Parse ``ignore`` section from raw YAML value (supports dict of lists format)."""
-    if not isinstance(raw, dict):
-        return IgnoreConfig()
-    projects: dict[str, list[IgnoredTask]] = {}
-    for project_name, entries in raw.items():
-        if not isinstance(entries, list):
-            continue
-        parsed: list[IgnoredTask] = []
-        for item in entries:
-            entry = _parse_ignore_entry(item)
-            if entry is not None:
-                parsed.append(entry)
-        if parsed:
-            projects[str(project_name)] = parsed
-    return IgnoreConfig(projects=projects)
-
-
-def load_ignore_config(config_path: Path | None = None) -> IgnoreConfig:
-    """Load the ``ignore`` section from the config YAML.
-
-    Supports both the new format (list of ``{id, name}`` dicts) and the
-    legacy format (list of bare ints).
-    """
-    return _load_section("ignore", _parse_ignore_section, config_path)
-
-
-def _serialize_ignore_entry(entry: IgnoredTask) -> dict[str, object]:
-    """Serialize an ``IgnoredTask`` to a dict for YAML output."""
-    data: dict[str, object] = {"id": entry.id, "name": entry.name}
-    if entry.description:
-        data["description"] = entry.description
-    if entry.silent:
-        data["silent"] = True
-    return data
-
-
-def _serialize_ignore_section(ignore: IgnoreConfig) -> dict[str, object] | None:
-    """Serialize ignore config to YAML-friendly dict, or None if empty."""
-    if not ignore.projects:
-        return None
-    return {
-        proj: [_serialize_ignore_entry(e) for e in entries]
-        for proj, entries in ignore.projects.items()
-    }
-
-
-def save_ignore_config(
-    ignore: IgnoreConfig,
-    config_path: Path | None = None,
-) -> Path:
-    """Update only the ``ignore`` section of the config YAML.
-
-    Always writes the new ``{id, name}`` dict format.
-    Preserves the existing ``cvat``, ``image_cache`` and other sections.
-    """
-    return _save_section(
-        "ignore",
-        ignore,
-        _serialize_ignore_section,
-        config_path,
-        log_message="Ignore config saved to {path}",
-    )
-
-
-class UploadConfig(BaseModel):
+class UploadConfig(SectionConfig):
     """Settings for the ``upload`` command."""
+
+    section_key: ClassVar[str] = "upload"
 
     images_per_job: int = 100
     image_quality: int = 100
-
-
-def _parse_upload_section(raw: object) -> UploadConfig:
-    """Parse ``upload`` section from raw YAML value."""
-    if not isinstance(raw, dict):
-        return UploadConfig()
-    filtered = {k: v for k, v in raw.items() if k in UploadConfig.model_fields}
-    return UploadConfig(**filtered)
-
-
-def load_upload_config(config_path: Path | None = None) -> UploadConfig:
-    """Load the ``upload`` section from the config YAML."""
-    return _load_section("upload", _parse_upload_section, config_path)
-
-
-def _serialize_image_cache_section(image_cache: ImageCacheConfig) -> dict[str, str]:
-    """Serialize image cache config to YAML-friendly dict."""
-    return {k: str(v) for k, v in image_cache.projects.items()}
 
 
 def is_clearml_disabled() -> bool:
@@ -649,87 +535,48 @@ class ClearmlProjectMapping(BaseModel):
     clearml_dataset: str
 
 
-class ClearmlConfig(BaseModel):
-    """ClearML integration settings."""
+class ClearmlConfig(SectionConfig):
+    """ClearML integration settings.
+
+    A present ``clearml:`` section without a boolean ``enabled`` key is
+    treated as enabled; a missing section keeps the ``False`` default.
+    """
+
+    section_key: ClassVar[str] = "clearml"
+    save_log: ClassVar[str] = "ClearML config saved to {path}"
 
     enabled: bool = False
     projects: dict[str, ClearmlProjectMapping] = Field(default_factory=dict)
 
+    @classmethod
+    def _wrap_raw(cls, raw: dict[str, object]) -> dict[str, object]:
+        enabled = raw.get("enabled", True)
+        return {**raw, "enabled": enabled if isinstance(enabled, bool) else True}
+
+    @field_validator("projects", mode="before")
+    @classmethod
+    def _drop_invalid_mappings(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(name): mapping
+            for name, mapping in value.items()
+            if isinstance(mapping, ClearmlProjectMapping)
+            or (
+                isinstance(mapping, dict)
+                and isinstance(mapping.get("clearml_project"), str)
+                and isinstance(mapping.get("clearml_dataset"), str)
+            )
+        }
+
+    def _to_raw(self) -> object | None:
+        if not self.projects and not self.enabled:
+            return None
+        result: dict[str, object] = {"enabled": self.enabled}
+        if self.projects:
+            result["projects"] = self.model_dump(mode="json")["projects"]
+        return result
+
     def get_mapping(self, project_name: str) -> ClearmlProjectMapping | None:
         """Return the ClearML mapping for *project_name*, or None if not configured."""
         return self.projects.get(project_name)
-
-
-def _parse_clearml_section(raw: object) -> ClearmlConfig:
-    """Parse ``clearml`` section from raw YAML value."""
-    if not isinstance(raw, dict):
-        return ClearmlConfig()
-    enabled = raw.get("enabled", True)
-    if not isinstance(enabled, bool):
-        enabled = True
-    projects_raw = raw.get("projects")
-    if not isinstance(projects_raw, dict):
-        return ClearmlConfig(enabled=enabled)
-    projects: dict[str, ClearmlProjectMapping] = {}
-    for proj_name, mapping in projects_raw.items():
-        if not isinstance(mapping, dict):
-            continue
-        cp = mapping.get("clearml_project")
-        cd = mapping.get("clearml_dataset")
-        if isinstance(cp, str) and isinstance(cd, str):
-            projects[str(proj_name)] = ClearmlProjectMapping(
-                clearml_project=cp, clearml_dataset=cd
-            )
-    return ClearmlConfig(enabled=enabled, projects=projects)
-
-
-def _serialize_clearml_section(cfg: ClearmlConfig) -> dict[str, object] | None:
-    """Serialize ClearML config to YAML-friendly dict, or None if empty."""
-    if not cfg.projects and not cfg.enabled:
-        return None
-    result: dict[str, object] = {"enabled": cfg.enabled}
-    if cfg.projects:
-        result["projects"] = {
-            name: {
-                "clearml_project": m.clearml_project,
-                "clearml_dataset": m.clearml_dataset,
-            }
-            for name, m in cfg.projects.items()
-        }
-    return result
-
-
-def load_clearml_config(config_path: Path | None = None) -> ClearmlConfig:
-    """Load the ``clearml`` section from the config YAML."""
-    return _load_section("clearml", _parse_clearml_section, config_path)
-
-
-def save_clearml_config(
-    cfg: ClearmlConfig,
-    config_path: Path | None = None,
-) -> Path:
-    """Update only the ``clearml`` section of the config YAML."""
-    return _save_section(
-        "clearml",
-        cfg,
-        _serialize_clearml_section,
-        config_path,
-        log_message="ClearML config saved to {path}",
-    )
-
-
-def save_image_cache_config(
-    image_cache: ImageCacheConfig,
-    config_path: Path | None = None,
-) -> Path:
-    """Update only the ``image_cache`` section of the config YAML.
-
-    Preserves the existing ``cvat`` and any other sections.
-    """
-    return _save_section(
-        "image_cache",
-        image_cache,
-        _serialize_image_cache_section,
-        config_path,
-        log_message="Image cache config saved to {path}",
-    )

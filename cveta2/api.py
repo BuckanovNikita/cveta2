@@ -20,11 +20,11 @@ from pydantic import BaseModel
 from cveta2._client.connection import configure_data_timeout
 from cveta2.client import CvatClient
 from cveta2.config import (
+    CacheConfig,
     CvatConfig,
+    ImageCacheConfig,
+    UploadConfig,
     cache_dir_for_project,
-    load_cache_config,
-    load_image_cache_config,
-    load_upload_config,
 )
 from cveta2.exceptions import Cveta2Error, MissingHostError
 from cveta2.services.convert import (
@@ -151,10 +151,10 @@ def _resolve_images_dir(
         return None
     if images_dir:
         return Path(images_dir).resolve()
-    cached_dir = load_image_cache_config().get_cache_dir(project_name)
+    cached_dir = ImageCacheConfig.load().get_cache_dir(project_name)
     if cached_dir is not None:
         return cached_dir
-    images_root = load_cache_config().for_project(project_name).images_root
+    images_root = CacheConfig.load().for_project(project_name).images_root
     if images_root is not None:
         return cache_dir_for_project(images_root, project_name)
     raise Cveta2Error(
@@ -286,7 +286,7 @@ def upload(  # noqa: PLR0913
         include_unannotated=include_unannotated,
         exclude_names=exclude_names,
     )
-    upload_cfg = load_upload_config()
+    upload_cfg = UploadConfig.load()
     with _open(connection) as c:
         project_id, project_name = resolve_project(c, project)
         options = UploadOptions(
@@ -357,7 +357,7 @@ def s3_sync(
             project_name, c.detect_project_cloud_storage(project_id), root
         )
         ignored_prefix = (
-            load_cache_config(config_path).for_project(project_name).ignored_prefix
+            CacheConfig.load(config_path).for_project(project_name).ignored_prefix
         )
         return c.sync_project_images(
             project_id, Path(target_dir), cs_info, ignored_prefix=ignored_prefix

@@ -9,10 +9,9 @@ from loguru import logger
 from cveta2.commands._helpers import config_path_from_args
 from cveta2.commands.interactive import wizard
 from cveta2.config import (
+    ClearmlConfig,
     ClearmlProjectMapping,
-    load_clearml_config,
     require_interactive,
-    save_clearml_config,
 )
 from cveta2.projects_cache import load_projects_cache
 
@@ -41,7 +40,7 @@ def run_setup_clearml(args: argparse.Namespace) -> None:
         )
         return
 
-    cfg = load_clearml_config(config_path)
+    cfg = ClearmlConfig.load(config_path)
 
     enabled = wizard.prompt_clearml_enabled(current=cfg.enabled)
     if enabled is not None:
@@ -64,7 +63,7 @@ def run_setup_clearml(args: argparse.Namespace) -> None:
             changed = True
 
     if changed:
-        save_clearml_config(cfg, config_path)
+        cfg.save(config_path)
         logger.info("Готово! ClearML маппинг обновлён.")
     else:
         logger.info("Ничего не изменено.")
@@ -72,7 +71,7 @@ def run_setup_clearml(args: argparse.Namespace) -> None:
 
 def _list_mappings(config_path: Path) -> None:
     """Print current ClearML project mappings and exit."""
-    cfg = load_clearml_config(config_path)
+    cfg = ClearmlConfig.load(config_path)
     logger.info(f"ClearML enabled: {cfg.enabled}")
     if not cfg.projects:
         logger.info("ClearML маппинг не задан.")

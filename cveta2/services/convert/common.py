@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import pandas as pd
 from loguru import logger
 
-from cveta2.config import load_image_cache_config
+from cveta2.config import ImageCacheConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.image_uploader import resolve_images
 from cveta2.models import CSV_COLUMNS
@@ -138,7 +138,7 @@ def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
 def _build_search_dirs(image_dir_args: Sequence[str | Path] | None) -> list[Path]:
     """Combine --image-dir args with all dirs from ImageCacheConfig."""
     dirs: list[Path] = [Path(d) for d in image_dir_args] if image_dir_args else []
-    cache_cfg = load_image_cache_config()
+    cache_cfg = ImageCacheConfig.load()
     for cache_dir in cache_cfg.projects.values():
         if cache_dir not in dirs:
             dirs.append(cache_dir)

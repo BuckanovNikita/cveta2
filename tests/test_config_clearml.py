@@ -9,11 +9,7 @@ import yaml
 from cveta2.config import (
     ClearmlConfig,
     ClearmlProjectMapping,
-    _parse_clearml_section,
-    _serialize_clearml_section,
     is_clearml_disabled,
-    load_clearml_config,
-    save_clearml_config,
 )
 from tests.helpers import write_config_yaml
 
@@ -23,8 +19,15 @@ if TYPE_CHECKING:
     import pytest
 
 
+def _parse_clearml_section(raw: object) -> ClearmlConfig:
+    """Mirror ``ClearmlConfig.load``'s section handling for an in-memory value."""
+    if not isinstance(raw, dict):
+        return ClearmlConfig()
+    return ClearmlConfig.model_validate(ClearmlConfig._wrap_raw(raw))
+
+
 class TestParseClearmlSection:
-    """Tests for _parse_clearml_section."""
+    """Tests for the clearml section parsing (load path)."""
 
     def test_none_returns_defaults(self) -> None:
         cfg = _parse_clearml_section(None)
@@ -77,16 +80,16 @@ class TestParseClearmlSection:
 
 
 class TestSerializeClearmlSection:
-    """Tests for _serialize_clearml_section."""
+    """Tests for the clearml section serialization (save path)."""
 
     def test_default_disabled_returns_none(self) -> None:
         cfg = ClearmlConfig(enabled=False, projects={})
-        assert _serialize_clearml_section(cfg) is None
+        assert cfg._to_raw() is None
 
     def test_enabled_no_projects_serializes(self) -> None:
         cfg = ClearmlConfig(enabled=True, projects={})
-        result = _serialize_clearml_section(cfg)
-        assert result is not None
+        result = cfg._to_raw()
+        assert isinstance(result, dict)
         assert result["enabled"] is True
 
     def test_roundtrip(self) -> None:
@@ -99,8 +102,8 @@ class TestSerializeClearmlSection:
                 )
             },
         )
-        serialized = _serialize_clearml_section(original)
-        assert serialized is not None
+        serialized = original._to_raw()
+        assert isinstance(serialized, dict)
         parsed = _parse_clearml_section(serialized)
         assert parsed.enabled == original.enabled
         assert parsed.projects["Proj"].clearml_project == "team/ds"
@@ -126,10 +129,10 @@ class TestGetMapping:
 
 
 class TestLoadSaveClearmlConfig:
-    """Tests for load_clearml_config and save_clearml_config."""
+    """Tests for ClearmlConfig.load / ClearmlConfig.save."""
 
     def test_load_missing_file(self, tmp_path: Path) -> None:
-        cfg = load_clearml_config(tmp_path / "nonexistent.yaml")
+        cfg = ClearmlConfig.load(tmp_path / "nonexistent.yaml")
         assert cfg.enabled is False
         assert cfg.projects == {}
 
@@ -144,8 +147,8 @@ class TestLoadSaveClearmlConfig:
                 )
             },
         )
-        save_clearml_config(original, config_path)
-        loaded = load_clearml_config(config_path)
+        original.save(config_path)
+        loaded = ClearmlConfig.load(config_path)
         assert loaded.enabled is True
         assert "Proj" in loaded.projects
         assert loaded.projects["Proj"].clearml_dataset == "annot"
@@ -160,7 +163,7 @@ class TestLoadSaveClearmlConfig:
                 "P": ClearmlProjectMapping(clearml_project="cp", clearml_dataset="cd")
             },
         )
-        save_clearml_config(cfg, config_path)
+        cfg.save(config_path)
 
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert raw["cvat"]["host"] == "https://example.com"

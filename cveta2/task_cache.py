@@ -18,7 +18,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
-from cveta2.config import load_cache_config
+from cveta2.config import CacheConfig
 from cveta2.models import TaskAnnotations
 from cveta2.s3_utils import (
     build_s3_key,
@@ -69,7 +69,7 @@ def invalidate_local_entry(
     project_id: int, task_id: int, project_name: str = ""
 ) -> None:
     """Drop the local cache entry for *task_id* after a task mutation."""
-    root = load_cache_config().for_project(project_name).tasks_root
+    root = CacheConfig.load().for_project(project_name).tasks_root
     cache_dir = get_task_cache_dir(project_id, root=root)
     TaskAnnotationCache(cache_dir).invalidate_local(task_id)
 

@@ -17,11 +17,10 @@ from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import resolve_project_and_cloud_storage
 from cveta2.commands.interactive import select_tasks
 from cveta2.config import (
+    CacheConfig,
+    ImageCacheConfig,
     cache_dir_for_project,
     is_interactive_disabled,
-    load_cache_config,
-    load_image_cache_config,
-    save_image_cache_config,
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.fetch import (
@@ -155,12 +154,12 @@ def _resolve_images_dir(
         return Path(args.images_dir).resolve()
 
     # Look up per-project mapping in config
-    ic_cfg = load_image_cache_config()
+    ic_cfg = ImageCacheConfig.load()
     cached_dir = ic_cfg.get_cache_dir(project_name)
     if cached_dir is not None:
         return cached_dir
 
-    images_root = load_cache_config().for_project(project_name).images_root
+    images_root = CacheConfig.load().for_project(project_name).images_root
     if images_root is not None:
         return cache_dir_for_project(images_root, project_name)
 
@@ -185,5 +184,5 @@ def _resolve_images_dir(
         return None
 
     ic_cfg.set_cache_dir(project_name, new_path)
-    save_image_cache_config(ic_cfg)
+    ic_cfg.save()
     return new_path

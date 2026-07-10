@@ -22,7 +22,7 @@ def test_run_doctor_no_crash() -> None:
         ),
         patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch("cveta2.commands.doctor.CvatConfig.load", return_value=cfg),
-        patch("cveta2.commands.doctor.load_image_cache_config", return_value=ic_cfg),
+        patch("cveta2.config.ImageCacheConfig.load", return_value=ic_cfg),
         patch("cveta2.commands.doctor.check_aws_credentials", return_value=True),
     ):
         run_doctor()

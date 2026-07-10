@@ -10,7 +10,7 @@ import pytest
 from cveta2.commands import setup as setup_cmd
 from cveta2.commands.interactive import _questionary, primitives
 from cveta2.commands.setup import run_setup, run_setup_cache
-from cveta2.config import CvatConfig, load_cache_config, load_image_cache_config
+from cveta2.config import CacheConfig, CvatConfig, ImageCacheConfig
 from cveta2.models import ProjectInfo
 from tests.helpers import write_config_yaml
 
@@ -159,12 +159,12 @@ def test_setup_cache_root_applied_to_all_without_per_project_prompts(
 
     run_setup_cache(_args(config_path))
 
-    saved = load_image_cache_config(config_path)
+    saved = ImageCacheConfig.load(config_path)
     assert saved.get_cache_dir("alpha") == root / "alpha"
     assert saved.get_cache_dir("beta") == root / "beta"
     assert any("Применить ко всем проектам" in prompt for prompt in prompts)
     assert not any("id=1" in prompt for prompt in prompts)
-    assert load_cache_config(config_path).images_root == root
+    assert CacheConfig.load(config_path).images_root == root
 
 
 @pytest.mark.usefixtures("two_projects")
@@ -179,7 +179,7 @@ def test_setup_cache_root_rejected_falls_back_to_per_project(
 
     run_setup_cache(_args(config_path))
 
-    saved = load_image_cache_config(config_path)
+    saved = ImageCacheConfig.load(config_path)
     assert saved.get_cache_dir("alpha") == custom
     assert saved.get_cache_dir("beta") == root / "beta"
     assert any("id=1" in prompt for prompt in prompts)
@@ -197,7 +197,7 @@ def test_setup_cache_no_root_keeps_per_project_flow(
 
     run_setup_cache(_args(config_path))
 
-    saved = load_image_cache_config(config_path)
+    saved = ImageCacheConfig.load(config_path)
     assert saved.get_cache_dir("alpha") == custom
     assert saved.get_cache_dir("beta") is None
     assert not any("Применить ко всем проектам" in prompt for prompt in prompts)
@@ -215,7 +215,7 @@ def test_setup_cache_root_apply_keeps_existing_paths_without_reset(
 
     run_setup_cache(_args(config_path))
 
-    saved = load_image_cache_config(config_path)
+    saved = ImageCacheConfig.load(config_path)
     assert saved.get_cache_dir("alpha") == existing
     assert saved.get_cache_dir("beta") == root / "beta"
 
@@ -231,7 +231,7 @@ def test_setup_cache_root_apply_overrides_existing_paths_with_reset(
 
     run_setup_cache(_args(config_path, reset=True))
 
-    saved = load_image_cache_config(config_path)
+    saved = ImageCacheConfig.load(config_path)
     assert saved.get_cache_dir("alpha") == root / "alpha"
     assert saved.get_cache_dir("beta") == root / "beta"
 
@@ -258,7 +258,7 @@ def test_setup_cache_saves_tasks_root_and_project_settings(
 
     run_setup_cache(_args(config_path))
 
-    cache_cfg = load_cache_config(config_path)
+    cache_cfg = CacheConfig.load(config_path)
     assert cache_cfg.images_root == root
     assert cache_cfg.tasks_root == tasks_root
     alpha = cache_cfg.for_project("alpha")

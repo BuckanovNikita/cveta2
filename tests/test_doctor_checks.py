@@ -30,7 +30,7 @@ def test_check_config_missing_file_falls_back_to_env() -> None:
         ),
         patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.commands.doctor.load_image_cache_config",
+            "cveta2.config.ImageCacheConfig.load",
             return_value=ImageCacheConfig(),
         ),
     ):
@@ -46,7 +46,7 @@ def test_check_config_empty_host_returns_false() -> None:
         ),
         patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.commands.doctor.load_image_cache_config",
+            "cveta2.config.ImageCacheConfig.load",
             return_value=ImageCacheConfig(),
         ),
     ):
@@ -62,7 +62,7 @@ def test_check_config_no_credentials_returns_false() -> None:
         ),
         patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.commands.doctor.load_image_cache_config",
+            "cveta2.config.ImageCacheConfig.load",
             return_value=ImageCacheConfig(),
         ),
     ):
@@ -79,7 +79,7 @@ def test_check_config_bad_image_cache_dir(tmp_path: Path) -> None:
         ),
         patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.commands.doctor.load_image_cache_config",
+            "cveta2.config.ImageCacheConfig.load",
             return_value=ic_cfg,
         ),
     ):
@@ -98,7 +98,7 @@ def test_check_config_valid_image_cache_dir(tmp_path: Path) -> None:
         ),
         patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.commands.doctor.load_image_cache_config",
+            "cveta2.config.ImageCacheConfig.load",
             return_value=ic_cfg,
         ),
     ):

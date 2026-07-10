@@ -11,9 +11,9 @@ from cveta2.commands._helpers import (
     resolve_project_and_cloud_storage,
 )
 from cveta2.config import (
+    CacheConfig,
+    ImageCacheConfig,
     cache_dir_for_project,
-    load_cache_config,
-    load_image_cache_config,
 )
 from cveta2.exceptions import Cveta2Error
 
@@ -28,8 +28,8 @@ def _resolve_sync_dirs(project_filter: str | None) -> dict[str, Path]:
     Per-project ``image_cache`` entries win; projects known only to the
     ``cache`` section fall back to ``images_root/<sanitized_name>``.
     """
-    ic_cfg = load_image_cache_config()
-    cache_cfg = load_cache_config()
+    ic_cfg = ImageCacheConfig.load()
+    cache_cfg = CacheConfig.load()
 
     names = set(ic_cfg.projects) | set(cache_cfg.projects)
     if project_filter:
@@ -85,9 +85,7 @@ def run_s3_sync(args: argparse.Namespace) -> None:
                 )
                 continue
 
-            ignored_prefix = (
-                load_cache_config().for_project(project_name).ignored_prefix
-            )
+            ignored_prefix = CacheConfig.load().for_project(project_name).ignored_prefix
             stats = client.sync_project_images(
                 project_id,
                 cache_dir,

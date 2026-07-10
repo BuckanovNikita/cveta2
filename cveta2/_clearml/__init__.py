@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2.config import is_clearml_disabled, load_clearml_config
+from cveta2.config import ClearmlConfig, is_clearml_disabled
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +36,7 @@ def maybe_publish_clearml(project_name: str, output_dir: Path) -> None:
         logger.debug("ClearML package not installed — skipping dataset publish")
         return
 
-    cfg = load_clearml_config()
+    cfg = ClearmlConfig.load()
     if not cfg.enabled:
         logger.debug("ClearML disabled in config")
         return

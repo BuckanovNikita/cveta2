@@ -13,8 +13,6 @@ from cveta2.commands._helpers import resolve_project_from_args
 from cveta2.config import (
     IgnoreConfig,
     IgnoredTask,
-    load_ignore_config,
-    save_ignore_config,
 )
 from cveta2.projects_cache import load_projects_cache
 
@@ -30,7 +28,7 @@ _ACTION_EXIT = "exit"
 
 def run_ignore_list() -> None:
     """Print ignored tasks for every project in the config."""
-    ignore_cfg = load_ignore_config()
+    ignore_cfg = IgnoreConfig.load()
 
     if not ignore_cfg.projects:
         logger.info("Ignore-списки пусты — нет игнорируемых задач ни в одном проекте")
@@ -58,7 +56,7 @@ def run_ignore(args: argparse.Namespace) -> None:
         run_ignore_list()
         return
 
-    ignore_cfg = load_ignore_config()
+    ignore_cfg = IgnoreConfig.load()
 
     with open_client() as client:
         project_id, project_name = _resolve_project(args, client, ignore_cfg)
@@ -75,7 +73,7 @@ def run_ignore(args: argparse.Namespace) -> None:
                     f"Задача {task.name!r} (id={task.id}) добавлена "
                     f"в ignore-список проекта {project_name!r}"
                 )
-            save_ignore_config(ignore_cfg)
+            ignore_cfg.save()
             return
 
         if args.remove:
@@ -92,7 +90,7 @@ def run_ignore(args: argparse.Namespace) -> None:
                         f"Задача {task.name!r} (id={task.id}) не найдена "
                         f"в ignore-списке проекта {project_name!r}"
                     )
-            save_ignore_config(ignore_cfg)
+            ignore_cfg.save()
             return
 
         _interactive_loop(client, project_id, project_name, ignore_cfg)
@@ -196,7 +194,7 @@ def _interactive_loop(
                 changed = True
 
     if changed:
-        save_ignore_config(ignore_cfg)
+        ignore_cfg.save()
 
 
 def _interactive_add(

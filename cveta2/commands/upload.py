@@ -14,7 +14,7 @@ from loguru import logger
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import resolve_project
-from cveta2.config import load_upload_config
+from cveta2.config import UploadConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.output import read_dataset_csv
 from cveta2.services.upload import (
@@ -90,7 +90,7 @@ def _resolve_task_name(name_arg: str | None) -> str:
 
 def run_upload(args: argparse.Namespace) -> None:
     """Run the ``upload`` command."""
-    upload_cfg = load_upload_config()
+    upload_cfg = UploadConfig.load()
 
     df = read_dataset_csv(Path(args.dataset), _UPLOAD_REQUIRED_COLUMNS)
     df_normal, deleted_names = split_deleted_rows(df)

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from loguru import logger
 
-from cveta2.config import load_image_cache_config
+from cveta2.config import ImageCacheConfig
 from cveta2.exceptions import Cveta2Error, LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
 from cveta2.s3_utils import build_s3_key
@@ -199,7 +199,7 @@ def build_search_dirs(
     if isinstance(image_dirs, (str, Path)):
         image_dirs = [image_dirs]
     dirs: list[Path] = [Path(d).resolve() for d in (image_dirs or [])]
-    ic_cfg = load_image_cache_config()
+    ic_cfg = ImageCacheConfig.load()
     cache_dir = ic_cfg.get_cache_dir(project_name)
     if cache_dir is not None:
         dirs.append(cache_dir)

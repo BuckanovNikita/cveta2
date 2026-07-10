@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2.config import CvatConfig, get_config_path, load_image_cache_config
+from cveta2.config import CvatConfig, ImageCacheConfig, get_config_path
 
 if TYPE_CHECKING:
     import argparse
@@ -67,7 +67,7 @@ def check_config() -> bool:
     if not has_password:
         problems.append("No credentials: provide CVAT_USERNAME + CVAT_PASSWORD")
 
-    ic_cfg = load_image_cache_config()
+    ic_cfg = ImageCacheConfig.load()
     if not ic_cfg.projects:
         logger.info("image_cache: no projects configured (optional)")
     else:
@@ -142,7 +142,7 @@ def check_cache_permissions() -> bool:
 
     Returns ``True`` when everything is fine.
     """
-    ic_cfg = load_image_cache_config()
+    ic_cfg = ImageCacheConfig.load()
     if not ic_cfg.projects:
         logger.info("doctor: no image_cache directories to check permissions for")
         return True

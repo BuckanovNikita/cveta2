@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2.config import load_sync_roots_config
+from cveta2.config import SyncRootsConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.s3_utils import parse_sync_root
 
@@ -33,7 +33,7 @@ def apply_sync_root_override(
     explicit_root: str | None = None,
 ) -> CloudStorageInfo | None:
     """Override cs_info bucket/prefix from an explicit root or sync_roots config."""
-    root = explicit_root or load_sync_roots_config().get_root(project_name)
+    root = explicit_root or SyncRootsConfig.load().get_root(project_name)
     if not root:
         return cs_info
     if cs_info is None:

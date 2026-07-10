@@ -16,7 +16,7 @@ import pandas as pd
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2.config import is_cache_disabled, load_cache_config, load_ignore_config
+from cveta2.config import CacheConfig, IgnoreConfig, is_cache_disabled
 from cveta2.dataset_partition import partition_annotations_df
 from cveta2.models import TaskAnnotations
 from cveta2.services.output import (
@@ -66,7 +66,7 @@ def load_ignore_sets(
     *ignore_set* contains all ignored task IDs (or None if empty).
     *silent_set* contains IDs of tasks marked ``silent=True``.
     """
-    ignore_cfg = load_ignore_config()
+    ignore_cfg = IgnoreConfig.load()
     ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
     if not ignored_ids:
         return None, None
@@ -156,7 +156,7 @@ def _fetch_core(  # noqa: PLR0913
         project_name=project_name,
     )
 
-    cache_settings = load_cache_config().for_project(project_name)
+    cache_settings = CacheConfig.load().for_project(project_name)
     cache = _build_task_cache(client, project_id, options, cache_settings)
     policy = _CachePolicy(cache=cache, force=options.force)
 

@@ -275,7 +275,7 @@ class TestRealCliFetchTask:
             patch("cveta2.commands._bootstrap.require_host"),
             patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.services.fetch.load_ignore_config",
+                "cveta2.config.IgnoreConfig.load",
                 return_value=IgnoreConfig(),
             ),
             patch(

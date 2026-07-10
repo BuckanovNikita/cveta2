@@ -118,7 +118,6 @@ class TestMaybePublishSkipPaths:
         from cveta2.config import (
             ClearmlConfig,
             ClearmlProjectMapping,
-            save_clearml_config,
         )
 
         (tmp_path / "dataset.csv").write_text("col\nval\n", encoding="utf-8")
@@ -136,7 +135,7 @@ class TestMaybePublishSkipPaths:
                 )
             },
         )
-        save_clearml_config(cfg, config_path)
+        cfg.save(config_path)
         monkeypatch.setenv("CVETA2_CONFIG", str(config_path))
         monkeypatch.setenv("CVETA2_CLEARML", "false")
 
@@ -153,13 +152,13 @@ class TestMaybePublishSkipPaths:
     ) -> None:
         """Verify no dataset is created when project has no mapping."""
         from cveta2._clearml import maybe_publish_clearml
-        from cveta2.config import ClearmlConfig, save_clearml_config
+        from cveta2.config import ClearmlConfig
 
         (tmp_path / "dataset.csv").write_text("col\nval\n", encoding="utf-8")
         config_path = tmp_path / "config.yaml"
 
         cfg = ClearmlConfig(enabled=True, projects={})
-        save_clearml_config(cfg, config_path)
+        cfg.save(config_path)
         monkeypatch.setenv("CVETA2_CONFIG", str(config_path))
         monkeypatch.delenv("CVETA2_CLEARML", raising=False)
 

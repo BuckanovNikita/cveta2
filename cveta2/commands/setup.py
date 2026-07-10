@@ -15,11 +15,7 @@ from cveta2.config import (
     CvatConfig,
     ImageCacheConfig,
     cache_dir_for_project,
-    load_cache_config,
-    load_image_cache_config,
     require_interactive,
-    save_cache_config,
-    save_image_cache_config,
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
@@ -78,7 +74,7 @@ def run_setup_cache(args: argparse.Namespace) -> None:
     if not projects:
         raise Cveta2Error("Нет доступных проектов.")
 
-    image_cache = load_image_cache_config(config_path)
+    image_cache = ImageCacheConfig.load(config_path)
     cache_root = wizard.prompt_cache_root()
 
     if _setup_image_cache_dirs(
@@ -103,7 +99,7 @@ def _setup_image_cache_dirs(
     if cache_root is not None and _apply_root_to_all_projects(
         projects, image_cache, cache_root, reset=reset
     ):
-        save_image_cache_config(image_cache, config_path)
+        image_cache.save(config_path)
         return True
 
     logger.info(f"Найдено проектов: {len(projects)}. Укажите путь кэша для каждого.")
@@ -117,7 +113,7 @@ def _setup_image_cache_dirs(
         changed |= _prompt_project_cache_dir(project, image_cache, default_path)
 
     if changed:
-        save_image_cache_config(image_cache, config_path)
+        image_cache.save(config_path)
     return changed
 
 
@@ -127,7 +123,7 @@ def _setup_cache_settings(
     config_path: Path,
 ) -> bool:
     """Interactive ``cache`` section stage; returns True when saved."""
-    cache_cfg = load_cache_config(config_path)
+    cache_cfg = CacheConfig.load(config_path)
     changed = False
 
     if cache_root is not None and cache_cfg.images_root != cache_root:
@@ -144,7 +140,7 @@ def _setup_cache_settings(
             changed |= _prompt_project_cache_settings(cache_cfg, project.name)
 
     if changed:
-        save_cache_config(cache_cfg, config_path)
+        cache_cfg.save(config_path)
     return changed
 
 
@@ -163,8 +159,8 @@ def _prompt_project_cache_settings(cache_cfg: CacheConfig, name: str) -> bool:
 
 def _list_cache_paths(config_path: Path) -> None:
     """Print current image_cache paths and cache settings, then exit."""
-    image_cache = load_image_cache_config(config_path)
-    cache_cfg = load_cache_config(config_path)
+    image_cache = ImageCacheConfig.load(config_path)
+    cache_cfg = CacheConfig.load(config_path)
     if not image_cache.projects and not cache_cfg.model_dump(exclude_defaults=True):
         logger.info("Пути кэша не заданы.")
         return

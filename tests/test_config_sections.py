@@ -8,16 +8,11 @@ from typing import TYPE_CHECKING
 import yaml
 
 from cveta2.config import (
+    CacheConfig,
     CacheProjectSettings,
     CvatConfig,
     ImageCacheConfig,
     SyncRootsConfig,
-    load_cache_config,
-    load_image_cache_config,
-    load_sync_roots_config,
-    save_cache_config,
-    save_image_cache_config,
-    save_sync_roots_config,
 )
 from tests.helpers import write_config_yaml
 
@@ -34,7 +29,7 @@ def test_load_config_with_image_cache(tmp_path: Path) -> None:
             "other-project": "/mnt/data/other",
         },
     )
-    ic = load_image_cache_config(cfg_path)
+    ic = ImageCacheConfig.load(cfg_path)
     assert ic.get_cache_dir("coco8-dev") == Path("/mnt/data/coco8")
     assert ic.get_cache_dir("other-project") == Path("/mnt/data/other")
 
@@ -43,12 +38,12 @@ def test_load_config_without_image_cache(tmp_path: Path) -> None:
     cfg_path = write_config_yaml(
         tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
     )
-    ic = load_image_cache_config(cfg_path)
+    ic = ImageCacheConfig.load(cfg_path)
     assert ic.projects == {}
 
 
 def test_image_cache_missing_file(tmp_path: Path) -> None:
-    ic = load_image_cache_config(tmp_path / "nonexistent.yaml")
+    ic = ImageCacheConfig.load(tmp_path / "nonexistent.yaml")
     assert ic.projects == {}
 
 
@@ -59,9 +54,9 @@ def test_save_config_preserves_image_cache(tmp_path: Path) -> None:
         image_cache={"proj-a": "/data/a"},
     )
 
-    ic = load_image_cache_config(cfg_path)
+    ic = ImageCacheConfig.load(cfg_path)
     ic.set_cache_dir("proj-b", Path("/data/b"))
-    save_image_cache_config(ic, cfg_path)
+    ic.save(cfg_path)
 
     # Reload and verify both sections exist
     with cfg_path.open("r", encoding="utf-8") as fh:
@@ -103,7 +98,7 @@ def test_load_config_with_sync_roots(tmp_path: Path) -> None:
             "other-project": "bare/prefix",
         },
     )
-    cfg = load_sync_roots_config(cfg_path)
+    cfg = SyncRootsConfig.load(cfg_path)
     assert cfg.get_root("coco8-dev") == "s3://bucket/images/my_favourite"
     assert cfg.get_root("other-project") == "bare/prefix"
 
@@ -112,12 +107,12 @@ def test_load_config_without_sync_roots(tmp_path: Path) -> None:
     cfg_path = write_config_yaml(
         tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
     )
-    cfg = load_sync_roots_config(cfg_path)
+    cfg = SyncRootsConfig.load(cfg_path)
     assert cfg.projects == {}
 
 
 def test_sync_roots_missing_file(tmp_path: Path) -> None:
-    cfg = load_sync_roots_config(tmp_path / "nonexistent.yaml")
+    cfg = SyncRootsConfig.load(tmp_path / "nonexistent.yaml")
     assert cfg.projects == {}
 
 
@@ -125,7 +120,7 @@ def test_load_config_invalid_section(tmp_path: Path) -> None:
     cfg_path = write_config_yaml(
         tmp_path / "config.yaml", sync_roots=["not", "a", "dict"]
     )
-    cfg = load_sync_roots_config(cfg_path)
+    cfg = SyncRootsConfig.load(cfg_path)
     assert cfg.projects == {}
 
 
@@ -136,12 +131,9 @@ def test_save_load_round_trip_preserves_other_sections(tmp_path: Path) -> None:
         image_cache={"proj-a": "/data/a"},
     )
 
-    save_sync_roots_config(
-        SyncRootsConfig(projects={"proj-a": "s3://custom/images"}),
-        cfg_path,
-    )
+    SyncRootsConfig(projects={"proj-a": "s3://custom/images"}).save(cfg_path)
 
-    reloaded = load_sync_roots_config(cfg_path)
+    reloaded = SyncRootsConfig.load(cfg_path)
     assert reloaded.projects == {"proj-a": "s3://custom/images"}
 
     with cfg_path.open("r", encoding="utf-8") as fh:
@@ -156,7 +148,7 @@ def test_save_empty_config_removes_section(tmp_path: Path) -> None:
         tmp_path / "config.yaml", sync_roots={"proj": "old/root"}
     )
 
-    save_sync_roots_config(SyncRootsConfig(), cfg_path)
+    SyncRootsConfig().save(cfg_path)
 
     with cfg_path.open("r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
@@ -273,7 +265,7 @@ def _write_cache_yaml(cfg_path: Path) -> None:
 def test_load_cache_config_resolves_overrides(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     _write_cache_yaml(cfg_path)
-    cache = load_cache_config(cfg_path)
+    cache = CacheConfig.load(cfg_path)
 
     proj_a = cache.for_project("projA")
     assert proj_a.images_root == Path("/mnt/datasets")
@@ -296,8 +288,8 @@ def test_cache_config_missing_section_and_file(tmp_path: Path) -> None:
     cfg_path = write_config_yaml(
         tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
     )
-    assert load_cache_config(cfg_path).for_project("x") == CacheProjectSettings()
-    missing = load_cache_config(tmp_path / "nonexistent.yaml")
+    assert CacheConfig.load(cfg_path).for_project("x") == CacheProjectSettings()
+    missing = CacheConfig.load(tmp_path / "nonexistent.yaml")
     assert missing.images_root is None
     assert missing.tasks_root is None
     assert missing.projects == {}
@@ -306,11 +298,11 @@ def test_cache_config_missing_section_and_file(tmp_path: Path) -> None:
 def test_save_cache_config_round_trip(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     _write_cache_yaml(cfg_path)
-    cache = load_cache_config(cfg_path)
+    cache = CacheConfig.load(cfg_path)
 
-    save_cache_config(cache, cfg_path)
+    cache.save(cfg_path)
 
-    reloaded = load_cache_config(cfg_path)
+    reloaded = CacheConfig.load(cfg_path)
     assert reloaded == cache
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert data["cvat"]["host"] == "http://localhost:8080"
@@ -323,7 +315,7 @@ def test_setup_save_preserves_cache_section(tmp_path: Path) -> None:
 
     CvatConfig(host="http://new-host:8080").save_to_file(cfg_path)
 
-    reloaded = load_cache_config(cfg_path)
+    reloaded = CacheConfig.load(cfg_path)
     assert reloaded.images_root == Path("/mnt/datasets")
     assert reloaded.for_project("projA").ignored_prefix == "data/projA"
     assert CvatConfig.from_file(cfg_path).host == "http://new-host:8080"

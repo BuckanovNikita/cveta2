@@ -92,7 +92,7 @@ class TestMaybePublishClearml:
 
         with (
             patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2._clearml.load_clearml_config", return_value=cfg),
+            patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
         ):
             from cveta2._clearml import maybe_publish_clearml
 
@@ -104,7 +104,7 @@ class TestMaybePublishClearml:
 
         with (
             patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2._clearml.load_clearml_config", return_value=cfg),
+            patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
         ):
             from cveta2._clearml import maybe_publish_clearml
 
@@ -123,7 +123,7 @@ class TestMaybePublishClearml:
 
         with (
             patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2._clearml.load_clearml_config", return_value=cfg),
+            patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
             patch(
                 "cveta2._clearml._dataset.publish_to_clearml",
                 side_effect=RuntimeError("ClearML server unreachable"),

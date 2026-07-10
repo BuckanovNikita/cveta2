@@ -26,7 +26,6 @@ from cveta2.config import (
     IgnoredTask,
     ImageCacheConfig,
     _parse_ignore_entry,
-    _serialize_ignore_entry,
 )
 from cveta2.exceptions import (
     Cveta2Error,
@@ -159,7 +158,7 @@ class TestWarnIgnoredTasks:
     def test_no_ignored_tasks(self) -> None:
         """Returns (None, None) when ignore config is empty for the project."""
         with patch(
-            "cveta2.services.fetch.load_ignore_config",
+            "cveta2.config.IgnoreConfig.load",
             return_value=IgnoreConfig(),
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -179,7 +178,7 @@ class TestWarnIgnoredTasks:
             },
         )
         with patch(
-            "cveta2.services.fetch.load_ignore_config",
+            "cveta2.config.IgnoreConfig.load",
             return_value=ignore_cfg,
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -193,7 +192,7 @@ class TestWarnIgnoredTasks:
             projects={"other-project": [IgnoredTask(id=10, name="t10")]},
         )
         with patch(
-            "cveta2.services.fetch.load_ignore_config",
+            "cveta2.config.IgnoreConfig.load",
             return_value=ignore_cfg,
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -213,7 +212,7 @@ class TestWarnIgnoredTasks:
             },
         )
         with patch(
-            "cveta2.services.fetch.load_ignore_config",
+            "cveta2.config.IgnoreConfig.load",
             return_value=ignore_cfg,
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -334,8 +333,10 @@ class TestIgnoredTaskSilent:
     def test_serialize_silent(
         self, entry: IgnoredTask, expected: dict[str, object]
     ) -> None:
-        """``_serialize_ignore_entry`` includes ``silent`` only when True."""
-        data = _serialize_ignore_entry(entry)
+        """The saved ignore entry includes ``silent`` only when True."""
+        raw = IgnoreConfig(projects={"p": [entry]})._to_raw()
+        assert isinstance(raw, dict)
+        data = raw["p"][0]
         if "silent" in expected:
             assert data["silent"] == expected["silent"]
         else:
@@ -391,7 +392,7 @@ class TestResolveImagesDir:
         images_dir = tmp_path / "images"
         args = argparse.Namespace(no_images=False, images_dir=str(images_dir))
 
-        with patch(f"{_MODULE}.load_image_cache_config"):
+        with patch(f"{_MODULE}.ImageCacheConfig.load"):
             result = _resolve_images_dir(args, "project-x")
 
         assert result == images_dir.resolve()
@@ -403,7 +404,7 @@ class TestResolveImagesDir:
         args = argparse.Namespace(no_images=False, images_dir=None)
 
         with patch(
-            f"{_MODULE}.load_image_cache_config",
+            f"{_MODULE}.ImageCacheConfig.load",
             return_value=ic_cfg,
         ):
             result = _resolve_images_dir(args, "project-x")
@@ -416,7 +417,7 @@ class TestResolveImagesDir:
 
         with (
             patch(
-                f"{_MODULE}.load_image_cache_config",
+                f"{_MODULE}.ImageCacheConfig.load",
                 return_value=ImageCacheConfig(),
             ),
             patch(f"{_MODULE}.is_interactive_disabled", return_value=True),
@@ -430,7 +431,7 @@ class TestResolveImagesDir:
 
         with (
             patch(
-                f"{_MODULE}.load_image_cache_config",
+                f"{_MODULE}.ImageCacheConfig.load",
                 return_value=ImageCacheConfig(),
             ),
             patch(f"{_MODULE}.is_interactive_disabled", return_value=False),
@@ -448,7 +449,7 @@ class TestResolveImagesDir:
 
         with (
             patch(
-                f"{_MODULE}.load_image_cache_config",
+                f"{_MODULE}.ImageCacheConfig.load",
                 return_value=ic_cfg,
             ),
             patch(f"{_MODULE}.is_interactive_disabled", return_value=False),
@@ -456,12 +457,12 @@ class TestResolveImagesDir:
                 f"{_MODULE}.interactive.path",
                 return_value=Path(entered_path).resolve(),
             ),
-            patch(f"{_MODULE}.save_image_cache_config") as mock_save,
+            patch(f"{_MODULE}.ImageCacheConfig.save") as mock_save,
         ):
             result = _resolve_images_dir(args, "project-x")
 
         assert result == Path(entered_path).resolve()
-        mock_save.assert_called_once_with(ic_cfg)
+        mock_save.assert_called_once_with()
         assert ic_cfg.get_cache_dir("project-x") == Path(entered_path).resolve()
 
 
@@ -608,7 +609,7 @@ class TestRunFetchTaskCliExit:
         with (
             patch_cli_client(factory=make_client, config=CFG),
             patch(
-                "cveta2.services.fetch.load_ignore_config",
+                "cveta2.config.IgnoreConfig.load",
                 return_value=IgnoreConfig(),
             ),
             patch(
