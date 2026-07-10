@@ -20,7 +20,8 @@ from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
     make_s3_client,
-    s3_retry,
+    names_with_basename_fallback,
+    s3_get_bytes,
     strip_key_prefix,
 )
 
@@ -192,39 +193,16 @@ class ImageDownloader:
     ) -> None:
         """Download all pending images from project cloud storage by name lookup."""
         if project_cloud_storage is None:
-            for _ in pending:
-                stats.failed += 1
+            stats.failed += len(pending)
             if pending:
                 logger.warning(
                     "Project cloud storage не задан — все изображения помечены "
                     "как failed. Укажите project_id при вызове download_images."
                 )
             return
-        ep_key = f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
-        s3_clients = {
-            ep_key: make_s3_client(project_cloud_storage.endpoint_url or None)
-        }
-        self._download_from_project_storage(
-            pending, project_cloud_storage, s3_clients, stats
-        )
-
-    def _download_from_project_storage(
-        self,
-        pending: dict[str, str],
-        project_cloud_storage: CloudStorageInfo | None,
-        s3_clients: dict[str, S3Client],
-        stats: DownloadStats,
-    ) -> None:
-        """Download pending images from project cloud storage by name lookup."""
-        if project_cloud_storage is None:
-            for _ in pending:
-                stats.failed += 1
-            return
-        if not pending:
-            return
-        ep_key = f"{project_cloud_storage.endpoint_url}|{project_cloud_storage.bucket}"
+        s3_client = make_s3_client(project_cloud_storage.endpoint_url or None)
         name_to_key = self._build_project_storage_name_map(
-            s3_clients[ep_key],
+            s3_client,
             project_cloud_storage.bucket,
             project_cloud_storage.prefix,
         )
@@ -245,7 +223,7 @@ class ImageDownloader:
             dest = self._dest_path(image_name, frame_ref, project_cloud_storage)
             try:
                 _download_one_s3(
-                    s3_clients[ep_key],
+                    s3_client,
                     project_cloud_storage.bucket,
                     s3_key,
                     dest,
@@ -263,13 +241,7 @@ class ImageDownloader:
     ) -> dict[str, str]:
         """List objects under prefix; return name -> S3 key (full name + basename)."""
         pairs = list_s3_objects(s3_client, bucket, prefix)
-        name_to_key: dict[str, str] = {}
-        for key, name in pairs:
-            name_to_key[name] = key
-            base = Path(name).name
-            if base not in name_to_key:
-                name_to_key[base] = key
-        return name_to_key
+        return names_with_basename_fallback((name, key) for key, name in pairs)
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +249,6 @@ class ImageDownloader:
 # ---------------------------------------------------------------------------
 
 
-@s3_retry
 def _download_one_s3(
     s3_client: S3Client,
     bucket: str,
@@ -285,8 +256,7 @@ def _download_one_s3(
     dest: Path,
 ) -> None:
     """Download a single S3 object to *dest*."""
-    resp = s3_client.get_object(Bucket=bucket, Key=key)
-    data: bytes = resp["Body"].read()
+    data = s3_get_bytes(s3_client, bucket, key)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
 

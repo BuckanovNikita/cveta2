@@ -114,7 +114,27 @@ def _validate_image_path(v: str | None) -> str | None:
     return v
 
 
-class BBoxAnnotation(BaseModel):
+class _ImageRecordBase(BaseModel):
+    """Shared validators and sparse CSV row for per-image record models.
+
+    Declares no fields so each subclass keeps its own field order
+    (``CSV_COLUMNS`` is derived from ``BBoxAnnotation`` field order).
+    """
+
+    capture_frame_path = model_validator(mode="before")(_capture_frame_path)
+    validate_image_name = field_validator(
+        "image_name", mode="before", check_fields=False
+    )(_validate_image_name)
+    validate_image_path = field_validator(
+        "image_path", mode="before", check_fields=False
+    )(_validate_image_path)
+
+    def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
+        """Return a row matching ``CSV_COLUMNS``; absent fields become None."""
+        return _sparse_csv_row(self)
+
+
+class BBoxAnnotation(_ImageRecordBase):
     """Single bounding-box annotation record."""
 
     image_name: str
@@ -147,14 +167,6 @@ class BBoxAnnotation(BaseModel):
     s3_image_path: str | None = None
     image_path: str | None = None
     attributes: dict[str, str]
-
-    capture_frame_path = model_validator(mode="before")(_capture_frame_path)
-    validate_image_name = field_validator("image_name", mode="before")(
-        _validate_image_name
-    )
-    validate_image_path = field_validator("image_path", mode="before")(
-        _validate_image_path
-    )
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON)."""
@@ -190,7 +202,7 @@ def _sparse_csv_row(model: BaseModel) -> dict[str, str | int | float | bool | No
     return row
 
 
-class ImageWithoutAnnotations(BaseModel):
+class ImageWithoutAnnotations(_ImageRecordBase):
     """Image without bbox annotations.
 
     The row is still included in CSV with empty bbox-related fields.
@@ -214,20 +226,8 @@ class ImageWithoutAnnotations(BaseModel):
     s3_image_path: str | None = None
     image_path: str | None = None
 
-    capture_frame_path = model_validator(mode="before")(_capture_frame_path)
-    validate_image_name = field_validator("image_name", mode="before")(
-        _validate_image_name
-    )
-    validate_image_path = field_validator("image_path", mode="before")(
-        _validate_image_path
-    )
 
-    def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
-        """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""
-        return _sparse_csv_row(self)
-
-
-class DeletedImage(BaseModel):
+class DeletedImage(_ImageRecordBase):
     """Record of a deleted image.
 
     Written to ``deleted.csv`` with ``instance_shape="deleted"`` so the
@@ -248,18 +248,6 @@ class DeletedImage(BaseModel):
     s3_image_path: str | None = None
     image_path: str | None = None
 
-    capture_frame_path = model_validator(mode="before")(_capture_frame_path)
-    validate_image_name = field_validator("image_name", mode="before")(
-        _validate_image_name
-    )
-    validate_image_path = field_validator("image_path", mode="before")(
-        _validate_image_path
-    )
-
-    def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
-        """Return a row matching ``CSV_COLUMNS`` with bbox fields set to None."""
-        return _sparse_csv_row(self)
-
 
 AnnotationRecord = Annotated[
     BBoxAnnotation | ImageWithoutAnnotations,
@@ -276,24 +264,15 @@ class ProjectAnnotations(BaseModel):
     deleted_images: list[DeletedImage]
 
     def to_csv_rows(self) -> list[dict[str, str | int | float | bool | None]]:
-        """Build flat CSV rows from all annotation records.
-
-        Each row has the keys from ``CSV_COLUMNS``.
-        """
+        """Build flat CSV rows (keys = ``CSV_COLUMNS``) from all records."""
         return [record.to_csv_row() for record in self.annotations]
 
 
-class TaskAnnotations(BaseModel):
+class TaskAnnotations(ProjectAnnotations):
     """Result of fetching annotations from a single CVAT task."""
 
     task_id: int
     task_name: str
-    annotations: list[AnnotationRecord]
-    deleted_images: list[DeletedImage]
-
-    def to_csv_rows(self) -> list[dict[str, str | int | float | bool | None]]:
-        """Build flat CSV rows from annotation records for this task."""
-        return [record.to_csv_row() for record in self.annotations]
 
     @staticmethod
     def merge(task_results: list[TaskAnnotations]) -> ProjectAnnotations:

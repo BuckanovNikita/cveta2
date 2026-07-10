@@ -16,8 +16,8 @@ from cveta2.services.convert.common import (
     _build_search_dirs,
     _find_image_by_stem,
     _link_or_copy,
+    _make_csv_row_base,
     _make_csv_row_box,
-    _make_csv_row_none,
     _pixel_to_yolo,
     _require_positive_dimensions,
     _SizeCache,
@@ -286,10 +286,10 @@ def _from_yolo_dataset(
 
             if not labels:
                 rows.append(
-                    _make_csv_row_none(
-                        image_name=img_path.name,
-                        img_w=img_w,
-                        img_h=img_h,
+                    _make_csv_row_base(
+                        "none",
+                        img_path.name,
+                        (img_w, img_h),
                         split=split_key,
                         frame_id=frame_id,
                     )

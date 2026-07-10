@@ -7,7 +7,6 @@ functions are deterministic transformations over DTOs and models.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -16,28 +15,20 @@ from cveta2._client.context import _TaskContext
 from cveta2._client.dtos import NewIssue, NewShape
 from cveta2._client.extractors import _collect_shapes
 from cveta2.models import DeletedImage, ImageWithoutAnnotations
+from cveta2.s3_utils import names_with_basename_fallback
 
 if TYPE_CHECKING:
     from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue, RawJob
     from cveta2.models import AnnotationRecord, TaskInfo
 
-ISSUE_BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
-UPLOAD_BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
+BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
 
 
 def build_name_to_frame(data_meta: RawDataMeta) -> dict[str, int]:
-    """Build frame-name -> frame-index mapping from task data_meta.
-
-    Basename fallback handles month-subfolder frame names
-    (e.g. ``"2026-02/img.jpg"`` -> also accessible via ``"img.jpg"``).
-    """
-    name_to_frame: dict[str, int] = {}
-    for idx, frame in enumerate(data_meta.frames):
-        name_to_frame[frame.name] = idx
-        base = PurePosixPath(frame.name).name
-        if base not in name_to_frame:
-            name_to_frame[base] = idx
-    return name_to_frame
+    """Build frame-name -> frame-index mapping (with basename fallback)."""
+    return names_with_basename_fallback(
+        (frame.name, idx) for idx, frame in enumerate(data_meta.frames)
+    )
 
 
 def find_job_for_frame(jobs: list[RawJob], frame: int) -> int | None:
@@ -50,9 +41,9 @@ def find_job_for_frame(jobs: list[RawJob], frame: int) -> int | None:
 
 def issue_position_from_row(row: pd.Series[Any]) -> list[float] | None:
     """Return the row's bbox as an issue rectangle, or None without full bbox."""
-    values = [row.get(col) for col in ISSUE_BBOX_COLUMNS]
+    values = [row.get(col) for col in BBOX_COLUMNS]
     coords = [value for value in values if value is not None and pd.notna(value)]
-    if len(coords) == len(ISSUE_BBOX_COLUMNS):
+    if len(coords) == len(BBOX_COLUMNS):
         return [float(value) for value in coords]
     return None
 
@@ -129,7 +120,7 @@ def build_upload_shapes(
     uploaded.
     """
     has_annotation = annotations_df["instance_label"].notna() & annotations_df[
-        list(UPLOAD_BBOX_COLUMNS)
+        list(BBOX_COLUMNS)
     ].notna().all(axis=1)
     result = ShapeBuildResult()
     for _, row in annotations_df[has_annotation].iterrows():
@@ -145,7 +136,7 @@ def build_upload_shapes(
             NewShape(
                 frame=name_to_frame[img_name],
                 label_id=label_name_to_id[label_name],
-                points=[float(row[col]) for col in UPLOAD_BBOX_COLUMNS],
+                points=[float(row[col]) for col in BBOX_COLUMNS],
             ),
         )
     return result

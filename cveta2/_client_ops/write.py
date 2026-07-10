@@ -8,6 +8,7 @@ import pandas as pd
 from loguru import logger
 
 from cveta2._client.assembly import (
+    BBOX_COLUMNS,
     build_name_to_frame,
     build_task_issues,
     build_upload_shapes,
@@ -35,9 +36,7 @@ def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
     df["issue_text"] = df["issue_text"].fillna("").astype(str).str.strip()
     new_rows: pd.DataFrame = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
     dedup_key = ["image_name", "issue_text"] + [
-        col
-        for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
-        if col in new_rows.columns
+        col for col in BBOX_COLUMNS if col in new_rows.columns
     ]
     deduped: pd.DataFrame = new_rows.drop_duplicates(subset=dedup_key)
     return deduped

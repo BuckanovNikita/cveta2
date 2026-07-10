@@ -355,31 +355,9 @@ def _make_csv_row_box(  # noqa: PLR0913
     return row
 
 
-def _make_csv_row_none(
-    *,
-    image_name: str,
-    img_w: int,
-    img_h: int,
-    split: str | None,
-    frame_id: int,
-) -> dict[str, object]:
-    """Build a CSV row dict for an image without annotations."""
-    return _make_csv_row_base(
-        "none",
-        image_name,
-        (img_w, img_h),
-        split=split,
-        frame_id=frame_id,
-    )
-
-
 def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
     """Write rows to CSV with proper column order."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    df = (
-        pd.DataFrame(rows, columns=list(CSV_COLUMNS))
-        if rows
-        else pd.DataFrame(columns=list(CSV_COLUMNS))
-    )
+    df = pd.DataFrame(rows, columns=list(CSV_COLUMNS))
     df.to_csv(path, index=False, encoding="utf-8")
     logger.info(f"CSV сохранён: {path} ({format_counts_ru(df)})")

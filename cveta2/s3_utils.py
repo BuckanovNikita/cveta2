@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import boto3
 from botocore.config import Config
@@ -15,7 +16,27 @@ from tenacity import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from cveta2.s3_types import S3Client
+
+_T = TypeVar("_T")
+
+
+def names_with_basename_fallback(pairs: Iterable[tuple[str, _T]]) -> dict[str, _T]:
+    """Map each name to its value, also keyed by basename (first wins).
+
+    Basename fallback handles subfolder frame names
+    (e.g. ``"2026-02/img.jpg"`` is also accessible via ``"img.jpg"``).
+    """
+    result: dict[str, _T] = {}
+    for name, value in pairs:
+        result[name] = value
+        base = PurePosixPath(name).name
+        if base not in result:
+            result[base] = value
+    return result
+
 
 s3_retry = retry(
     retry=retry_if_exception_type(
@@ -57,6 +78,14 @@ def make_s3_client(endpoint_url: str | None = None) -> S3Client:
             session.client("s3", endpoint_url=endpoint_url, config=timeout_config),
         )
     return cast("S3Client", session.client("s3", endpoint_url=endpoint_url))
+
+
+@s3_retry
+def s3_get_bytes(s3_client: S3Client, bucket: str, key: str) -> bytes:
+    """Download an S3 object body as bytes."""
+    resp = s3_client.get_object(Bucket=bucket, Key=key)
+    data: bytes = resp["Body"].read()
+    return data
 
 
 def parse_sync_root(root: str) -> tuple[str | None, str]:

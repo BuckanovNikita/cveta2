@@ -20,7 +20,13 @@ from pydantic import BaseModel, ValidationError
 
 from cveta2.config import load_cache_config
 from cveta2.models import TaskAnnotations
-from cveta2.s3_utils import build_s3_key, make_s3_client, parse_sync_root, s3_retry
+from cveta2.s3_utils import (
+    build_s3_key,
+    make_s3_client,
+    parse_sync_root,
+    s3_get_bytes,
+    s3_retry,
+)
 
 if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
@@ -66,14 +72,6 @@ def invalidate_local_entry(
     root = load_cache_config().for_project(project_name).tasks_root
     cache_dir = get_task_cache_dir(project_id, root=root)
     TaskAnnotationCache(cache_dir).invalidate_local(task_id)
-
-
-@s3_retry
-def _s3_get_bytes(s3_client: S3Client, bucket: str, key: str) -> bytes:
-    """Download an S3 object body as bytes."""
-    resp = s3_client.get_object(Bucket=bucket, Key=key)
-    data: bytes = resp["Body"].read()
-    return data
 
 
 @s3_retry
@@ -149,7 +147,7 @@ class S3CacheBackend:
         if self._disabled:
             return None
         try:
-            data = _s3_get_bytes(self._s3, self._bucket, self._entry_key(task_id))
+            data = s3_get_bytes(self._s3, self._bucket, self._entry_key(task_id))
         except ClientError as e:
             if _client_error_code(e) in _MISSING_KEY_CODES:
                 return None

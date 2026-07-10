@@ -116,15 +116,18 @@ def format_counts_ru(df: pd.DataFrame) -> str:
     return f"{count_images(df)} изображений, {len(df)} строк"
 
 
+def save_csv(df: pd.DataFrame, path: Path, label: str) -> None:
+    """Write *df* to *path* and log ``{label} saved to ...`` with row counts."""
+    df.to_csv(path, index=False, encoding="utf-8")
+    logger.info(f"{label} saved to {path} ({format_counts(df)})")
+
+
 def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     """Write raw.csv with all annotation and deleted rows, unpartitioned."""
     rows = result.to_csv_rows()
     deleted_rows = [d.to_csv_row() for d in result.deleted_images]
-    raw_df = pd.DataFrame(rows + deleted_rows)
     output_dir.mkdir(parents=True, exist_ok=True)
-    raw_path = output_dir / "raw.csv"
-    raw_df.to_csv(raw_path, index=False, encoding="utf-8")
-    logger.info(f"Raw CSV saved to {raw_path} ({format_counts(raw_df)})")
+    save_csv(pd.DataFrame(rows + deleted_rows), output_dir / "raw.csv", "Raw CSV")
 
 
 def _write_deleted_csv(
@@ -132,40 +135,25 @@ def _write_deleted_csv(
 ) -> None:
     """Write deleted.csv with full CSV columns (empty frame when no rows)."""
     deleted_rows = [img.to_csv_row() for img in deleted_images]
-    deleted_df = (
-        pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))
-        if deleted_rows
-        else pd.DataFrame(columns=list(CSV_COLUMNS))
-    )
-    deleted_path = output_dir / "deleted.csv"
-    deleted_df.to_csv(deleted_path, index=False, encoding="utf-8")
-    logger.info(f"Deleted CSV saved to {deleted_path} ({format_counts(deleted_df)})")
+    deleted_df = pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))
+    save_csv(deleted_df, output_dir / "deleted.csv", "Deleted CSV")
 
 
 def write_partition_csvs(partition: PartitionResult, output_dir: Path) -> None:
     """Write dataset/obsolete/in_progress CSVs and deleted.csv into *output_dir*."""
     output_dir.mkdir(parents=True, exist_ok=True)
-
     for df, name, label in [
         (partition.dataset, "dataset.csv", "Dataset CSV"),
         (partition.obsolete, "obsolete.csv", "Obsolete CSV"),
         (partition.in_progress, "in_progress.csv", "In-progress CSV"),
     ]:
-        path = output_dir / name
-        df.to_csv(path, index=False, encoding="utf-8")
-        logger.info(f"{label} saved to {path} ({format_counts(df)})")
-
+        save_csv(df, output_dir / name, label)
     _write_deleted_csv(partition.deleted_images, output_dir)
 
 
 def write_dataset_and_deleted(result: ProjectAnnotations, output_dir: Path) -> None:
     """Write dataset.csv and deleted.csv from annotation result into *output_dir*."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    rows = result.to_csv_rows()
-    df = pd.DataFrame(rows)
-
-    dataset_path = output_dir / "dataset.csv"
-    df.to_csv(dataset_path, index=False, encoding="utf-8")
-    logger.info(f"Dataset CSV saved to {dataset_path} ({format_counts(df)})")
-
+    df = pd.DataFrame(result.to_csv_rows())
+    save_csv(df, output_dir / "dataset.csv", "Dataset CSV")
     _write_deleted_csv(result.deleted_images, output_dir)
