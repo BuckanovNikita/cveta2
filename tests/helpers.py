@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Final
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import yaml
 
 import cveta2
 from cveta2._client.dtos import RawShape
+from cveta2.cli import CliApp
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
 from cveta2.image_downloader import CloudStorageInfo
@@ -38,7 +40,7 @@ from tests.fixtures.fake_cvat_project import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from pathlib import Path
 
     from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -77,6 +79,52 @@ def fake_connection(fixtures: LoadedFixtures) -> cveta2.Connection:
 def client_with_api(api: Any) -> CvatClient:
     """Wrap an injected API port (real or mock) in a CvatClient."""
     return CvatClient(CFG, api=api)
+
+
+def parse_cli_args(*argv: str) -> argparse.Namespace:
+    """Parse argv with the real CLI parser so test args match its defaults."""
+    return CliApp()._parser.parse_args(list(argv))
+
+
+@contextmanager
+def patch_cli_client(
+    client: Any | None = None,
+    *,
+    factory: Callable[..., Any] | None = None,
+    cached_projects: Sequence[Any] = (),
+    config: CvatConfig | None = None,
+) -> Iterator[Any]:
+    """Patch the CLI bootstrap seam: CvatClient constructor + projects cache.
+
+    *client* (default: a fresh ``mock_client_ctx()``) is returned by the
+    patched constructor; *factory* replaces the constructor instead (for
+    FakeCvatApi-backed clients).  With *config* set, ``CvatConfig.load``
+    and ``require_host`` are stubbed too, so no config file is needed.
+    Yields the client (``None`` when *factory* is used).
+    """
+    if client is None and factory is None:
+        client = mock_client_ctx()
+    with ExitStack() as stack:
+        if factory is not None:
+            stack.enter_context(
+                patch("cveta2.commands._bootstrap.CvatClient", side_effect=factory)
+            )
+        else:
+            stack.enter_context(
+                patch("cveta2.commands._bootstrap.CvatClient", return_value=client)
+            )
+        stack.enter_context(
+            patch(
+                "cveta2.commands._helpers.load_projects_cache",
+                return_value=list(cached_projects),
+            )
+        )
+        if config is not None:
+            stack.enter_context(
+                patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=config)
+            )
+            stack.enter_context(patch("cveta2.commands._bootstrap.require_host"))
+        yield client
 
 
 def fetch_all_annotations(

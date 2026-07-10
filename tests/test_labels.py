@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,7 +22,13 @@ from cveta2.commands.labels import (
 )
 from cveta2.config import CvatConfig
 from cveta2.models import LabelAttributeInfo, LabelInfo
-from tests.helpers import build_fake, client_with_api, make_fake_client, mock_client_ctx
+from tests.helpers import (
+    build_fake,
+    client_with_api,
+    make_fake_client,
+    mock_client_ctx,
+    patch_cli_client,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -265,20 +271,11 @@ def test_update_labels_requires_context_manager() -> None:
 # ---------------------------------------------------------------------------
 
 
-@contextmanager
-def _patched_cli(mock_client: MagicMock) -> Iterator[None]:
-    with (
-        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-    ):
-        yield
-
-
 @pytest.mark.usefixtures("test_config")
 @pytest.mark.parametrize("labels", [_LABELS, []], ids=["with-labels", "empty"])
 def test_cli_labels_list(labels: list[LabelInfo]) -> None:
     mock_client = _cli_client(labels=labels)
-    with _patched_cli(mock_client):
+    with patch_cli_client(mock_client):
         CliApp().run(["labels", "--project", "1", "--list"])
 
     mock_client.get_project_labels.assert_called_once_with(1)
@@ -296,7 +293,7 @@ def test_cli_labels_noninteractive_without_list_errors(
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
 
     with (
-        _patched_cli(_cli_client(labels=_LABELS)),
+        patch_cli_client(_cli_client(labels=_LABELS)),
         pytest.raises(SystemExit),
     ):
         CliApp().run(["labels", "--project", "1"])

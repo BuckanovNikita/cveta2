@@ -8,13 +8,14 @@ from unittest.mock import patch
 import pytest
 
 from cveta2.cli import CliApp
+from tests.helpers import parse_cli_args
 
 if TYPE_CHECKING:
     import argparse
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
-    return CliApp()._parser.parse_args(argv)
+    return parse_cli_args(*argv)
 
 
 _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [

@@ -8,11 +8,11 @@ assert the wiring reaches (or skips) ``download_images``.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from cveta2.cli import CliApp
 from cveta2.client import FetchContext
-from tests.helpers import mock_client_ctx, write_test_config
+from tests.helpers import mock_client_ctx, patch_cli_client, write_test_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,10 +37,7 @@ def _fetch_images_client(project_id: int = 1) -> MagicMock:
 
 def test_fetch_no_images_flag_skips_download(test_config: Path) -> None:
     mock_client = _fetch_images_client()
-    with (
-        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-    ):
+    with patch_cli_client(mock_client):
         CliApp().run(
             [
                 "fetch",
@@ -63,10 +60,7 @@ def test_fetch_images_dir_reaches_download(
     custom_dir = tmp_path / "custom-images"
 
     mock_client = _fetch_images_client()
-    with (
-        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-    ):
+    with patch_cli_client(mock_client):
         CliApp().run(
             [
                 "fetch",

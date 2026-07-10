@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -15,7 +13,13 @@ from cveta2.config import CvatConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.whats_new import compute_cutoff
 from tests.fixtures.fake_cvat_api import FakeCvatApi
-from tests.helpers import CFG, make_task, write_dataset_csv
+from tests.helpers import (
+    CFG,
+    make_task,
+    parse_cli_args,
+    patch_cli_client,
+    write_dataset_csv,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -178,12 +182,9 @@ def test_run_whats_new_empty_date_column_exits(tmp_path: Path) -> None:
     def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
         return CvatClient(cfg, api=FakeCvatApi.from_tasks([]))
 
-    args = argparse.Namespace(project="1", dataset=str(csv_path))
+    args = parse_cli_args("whats-new", "-p", "1", "-d", str(csv_path))
     with (
-        patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
-        patch("cveta2.commands._bootstrap.require_host"),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-        patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
+        patch_cli_client(factory=make_client, config=CFG),
         pytest.raises(Cveta2Error, match="пуст"),
     ):
         run_whats_new(args)

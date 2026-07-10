@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,7 +17,13 @@ from cveta2.commands.task_ops import (
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.models import LabelInfo, TaskInfo
-from tests.helpers import client_with_api, make_raw_shape, mock_client_ctx
+from tests.helpers import (
+    client_with_api,
+    make_raw_shape,
+    mock_client_ctx,
+    parse_cli_args,
+    patch_cli_client,
+)
 
 # ---------------------------------------------------------------------------
 # Command validation and state mapping
@@ -54,13 +60,10 @@ class TestRunTaskCommands:
             id=42, name="task-a", status="annotation", subset="", updated_date=""
         )
         client = _mock_client_with_task(task)
-        args = argparse.Namespace(
-            project="1", task="task-a", stage=None, state="in-progress"
+        args = parse_cli_args(
+            "task", "status", "-p", "1", "-t", "task-a", "--state", "in-progress"
         )
-        with (
-            patch("cveta2.commands._bootstrap.CvatClient", return_value=client),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-        ):
+        with patch_cli_client(client):
             run_task_status(args)
         client.set_task_jobs_status.assert_called_once_with(
             42, stage=None, state="in progress"

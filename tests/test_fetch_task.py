@@ -40,7 +40,13 @@ from cveta2.services.fetch import (
     load_ignore_sets,
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
-from tests.helpers import CFG, build_fake, make_fake_client, make_fetch_args
+from tests.helpers import (
+    CFG,
+    build_fake,
+    make_fake_client,
+    make_fetch_args,
+    patch_cli_client,
+)
 
 if TYPE_CHECKING:
     from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -600,14 +606,11 @@ class TestRunFetchTaskCliExit:
         )
 
         with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=CFG),
-            patch("cveta2.commands._bootstrap.require_host"),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
+            patch_cli_client(factory=make_client, config=CFG),
             patch(
                 "cveta2.services.fetch.load_ignore_config",
                 return_value=IgnoreConfig(),
             ),
-            patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
             patch(
                 "cveta2.client.CvatClient.detect_project_cloud_storage",
                 return_value=None,

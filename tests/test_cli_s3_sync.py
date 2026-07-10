@@ -7,7 +7,7 @@ section) is covered by ``tests/test_sync_root_override.py``.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 from cveta2.cli import CliApp
 from cveta2.image_downloader import DownloadStats
-from tests.helpers import mock_client_ctx, write_test_config
+from tests.helpers import mock_client_ctx, patch_cli_client, write_test_config
 
 
 def _s3_sync_client() -> MagicMock:
@@ -50,10 +50,7 @@ def test_s3_sync_all_projects(
     mock_client = _s3_sync_client()
     mock_client.resolve_project_id.side_effect = [1, 2]
 
-    with (
-        patch("cveta2.commands._bootstrap.CvatClient", return_value=mock_client),
-        patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
-    ):
+    with patch_cli_client(mock_client):
         app = CliApp()
         app.run(["s3-sync"])
 

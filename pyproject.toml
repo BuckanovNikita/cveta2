@@ -112,10 +112,8 @@ branch = true
 omit = [
     "cveta2/__main__.py",
     "cveta2/s3_types.py",
-    "cveta2/commands/setup.py",
     "cveta2/commands/setup_clearml.py",
     "cveta2/commands/ignore.py",
-    "cveta2/commands/_task_selector.py",
 ]
 
 [tool.coverage.report]
