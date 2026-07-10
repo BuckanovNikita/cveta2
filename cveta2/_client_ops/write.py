@@ -9,7 +9,6 @@ from loguru import logger
 
 from cveta2._client.assembly import (
     BBOX_COLUMNS,
-    build_name_to_frame,
     build_task_issues,
     build_upload_shapes,
 )
@@ -18,6 +17,7 @@ from cveta2._client_ops.base import _ClientBase
 
 if TYPE_CHECKING:
     from cveta2._client.assembly import IssueBuildResult
+    from cveta2._client_ops.session import TaskWriteSession
 
 
 def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
@@ -157,6 +157,8 @@ class _WriteMixin(_ClientBase):
         self,
         task_id: int,
         annotations_df: pd.DataFrame,
+        *,
+        session: TaskWriteSession | None = None,
     ) -> int:
         """Upload bbox annotations from a DataFrame to an existing task.
 
@@ -172,6 +174,9 @@ class _WriteMixin(_ClientBase):
             ``image_name``, ``instance_label``, ``bbox_x_tl``,
             ``bbox_y_tl``, ``bbox_x_br``, ``bbox_y_br``).
             Rows with NaN in ``instance_label`` are skipped.
+        session:
+            Optional pre-populated :class:`TaskWriteSession` to reuse
+            already-fetched task metadata.
 
         Returns
         -------
@@ -182,15 +187,13 @@ class _WriteMixin(_ClientBase):
 
         """
         api = self._require_api("upload_task_annotations")
+        session = session or self.open_task_session(task_id)
 
-        # Read actual frame mapping from CVAT (authoritative source).
-        raw_meta = api.get_task_data_meta(task_id)
-        name_to_frame = build_name_to_frame(raw_meta)
-
+        # Frame mapping comes from CVAT data_meta (authoritative source).
+        name_to_frame = session.name_to_frame
         logger.debug(f"Задача {task_id}: получено {len(name_to_frame)} фреймов из CVAT")
 
-        task_labels = api.get_task_labels(task_id)
-        label_name_to_id: dict[str, int] = {lbl.name: lbl.id for lbl in task_labels}
+        label_name_to_id: dict[str, int] = {lbl.name: lbl.id for lbl in session.labels}
 
         built = build_upload_shapes(annotations_df, name_to_frame, label_name_to_id)
         for label_name in dict.fromkeys(built.unknown_labels):
@@ -219,6 +222,8 @@ class _WriteMixin(_ClientBase):
         self,
         task_id: int,
         annotations_df: pd.DataFrame,
+        *,
+        session: TaskWriteSession | None = None,
     ) -> int:
         """Create open CVAT issues from rows with ``issue_state == "new"``.
 
@@ -233,16 +238,13 @@ class _WriteMixin(_ClientBase):
         manager (``with CvatClient(...) as c:``).
         """
         api = self._require_api("create_task_issues")
+        session = session or self.open_task_session(task_id)
 
         new_rows = _select_new_issue_rows(annotations_df)
         if new_rows.empty:
             return 0
 
-        raw_meta = api.get_task_data_meta(task_id)
-        name_to_frame = build_name_to_frame(raw_meta)
-        jobs = api.get_task_jobs(task_id)
-
-        built = build_task_issues(new_rows, name_to_frame, jobs)
+        built = build_task_issues(new_rows, session.name_to_frame, session.jobs)
         for issue in built.issues:
             api.create_issue(issue)
 

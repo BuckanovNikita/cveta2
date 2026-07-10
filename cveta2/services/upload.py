@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from cveta2.client import CvatClient
+    from cveta2.image_downloader import CloudStorageInfo
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,26 @@ class UploadOptions:
     image_quality: int = 100
     mark_all_deleted: bool = False
     complete: bool = False
+
+
+@dataclass(frozen=True)
+class UploadRequest:
+    """Fully-resolved inputs for one upload run."""
+
+    project_id: int
+    project_name: str
+    task_name: str
+    plan: UploadPlan
+    options: UploadOptions
+
+
+@dataclass(frozen=True)
+class _StagedUpload:
+    """Result of the S3 staging step: storage info and enriched rows."""
+
+    cs_info: CloudStorageInfo
+    annotations: pd.DataFrame
+    task_image_names: list[str]
 
 
 @dataclass(frozen=True)
@@ -203,36 +224,24 @@ def _warn_missing_images(missing: list[str]) -> None:
     )
 
 
-def upload_dataset(  # noqa: PLR0913
-    client: CvatClient,
-    project_id: int,
-    project_name: str,
-    plan: UploadPlan,
-    task_name: str,
-    options: UploadOptions,
-) -> UploadOutcome:
-    """Run the full upload chain: S3 → task → annotations → issues → deleted.
-
-    Validates labels, uploads missing images to the project cloud storage,
-    creates the CVAT task, uploads annotations, opens issues, marks
-    deleted frames, optionally completes the task, and invalidates the
-    local annotation cache entry.
-    """
+def _stage_images(client: CvatClient, request: UploadRequest) -> _StagedUpload:
+    """Validate labels, upload local images to S3, enrich annotation rows."""
+    plan = request.plan
     upload_labels = sorted(plan.annotations["instance_label"].dropna().unique())
-    validate_labels(client, project_id, project_name, upload_labels)
+    validate_labels(client, request.project_id, request.project_name, upload_labels)
 
     all_image_names = plan.image_names | plan.deleted_names
 
-    found_images, missing = resolve_images(all_image_names, options.search_dirs)
+    found_images, missing = resolve_images(all_image_names, request.options.search_dirs)
     logger.info(
         f"Найдено локально: {len(found_images)}, не найдено: {len(missing)}",
     )
 
-    cs_info = client.detect_project_cloud_storage(project_id)
+    cs_info = client.detect_project_cloud_storage(request.project_id)
     if cs_info is None:
         raise Cveta2Error(
             f"Ошибка: cloud storage не найден для проекта "
-            f"{project_name!r} (id={project_id})."
+            f"{request.project_name!r} (id={request.project_id})."
         )
     logger.info(
         f"Cloud storage: s3://{cs_info.bucket}/{cs_info.prefix} (id={cs_info.id})",
@@ -265,42 +274,78 @@ def upload_dataset(  # noqa: PLR0913
     task_image_names = sorted(
         build_s3_key(cs_info.prefix, name_to_server_file[n]) for n in all_image_names
     )
+    return _StagedUpload(
+        cs_info=cs_info,
+        annotations=annotations,
+        task_image_names=task_image_names,
+    )
+
+
+def _push_to_cvat(
+    client: CvatClient,
+    request: UploadRequest,
+    staged: _StagedUpload,
+) -> tuple[int, int, int]:
+    """Create the task and push annotations, issues and deleted frames.
+
+    Returns ``(task_id, num_shapes, num_issues)``.
+    """
+    plan, options = request.plan, request.options
     task_id = client.create_upload_task(
-        project_id=project_id,
-        name=task_name,
-        image_names=task_image_names,
-        cloud_storage_id=cs_info.id,
+        project_id=request.project_id,
+        name=request.task_name,
+        image_names=staged.task_image_names,
+        cloud_storage_id=staged.cs_info.id,
         segment_size=options.segment_size,
         image_quality=options.image_quality,
     )
+    session = client.open_task_session(task_id)
 
     num_shapes = client.upload_task_annotations(
-        task_id=task_id,
-        annotations_df=annotations,
+        task_id,
+        staged.annotations,
+        session=session,
     )
 
     num_issues = 0
-    if "issue_state" in annotations.columns:
-        num_issues = client.create_task_issues(task_id, annotations)
+    if "issue_state" in staged.annotations.columns:
+        num_issues = client.create_task_issues(
+            task_id, staged.annotations, session=session
+        )
 
     if options.mark_all_deleted:
-        client.mark_frames_deleted(task_id, all_image_names)
+        client.mark_frames_deleted(
+            task_id, plan.image_names | plan.deleted_names, session=session
+        )
     elif plan.deleted_names:
-        client.mark_frames_deleted(task_id, plan.deleted_names)
+        client.mark_frames_deleted(task_id, plan.deleted_names, session=session)
 
     if options.complete:
         client.complete_task(task_id)
 
-    invalidate_local_entry(project_id, task_id, project_name)
+    return task_id, num_shapes, num_issues
 
-    num_jobs = (
-        len(task_image_names) + options.segment_size - 1
-    ) // options.segment_size
+
+def upload_dataset(client: CvatClient, request: UploadRequest) -> UploadOutcome:
+    """Run the full upload chain: S3 → task → annotations → issues → deleted.
+
+    Validates labels, uploads missing images to the project cloud storage,
+    creates the CVAT task, uploads annotations, opens issues, marks
+    deleted frames, optionally completes the task, and invalidates the
+    local annotation cache entry.
+    """
+    staged = _stage_images(client, request)
+    task_id, num_shapes, num_issues = _push_to_cvat(client, request, staged)
+
+    invalidate_local_entry(request.project_id, task_id, request.project_name)
+
+    segment_size = request.options.segment_size
+    num_jobs = (len(staged.task_image_names) + segment_size - 1) // segment_size
     outcome = UploadOutcome(
         task_id=task_id,
-        task_name=task_name,
-        images=len(task_image_names),
-        deleted=len(plan.deleted_names),
+        task_name=request.task_name,
+        images=len(staged.task_image_names),
+        deleted=len(request.plan.deleted_names),
         annotations=num_shapes,
         issues=num_issues,
         jobs=num_jobs,
@@ -312,7 +357,7 @@ def upload_dataset(  # noqa: PLR0913
         f"удалённых={outcome.deleted}, "
         f"аннотаций={outcome.annotations}, "
         f"issues={outcome.issues}, "
-        f"jobs≈{outcome.jobs} (segment_size={options.segment_size})",
+        f"jobs≈{outcome.jobs} (segment_size={segment_size})",
     )
     logger.info(f"URL: {client.host}/tasks/{outcome.task_id}")
     return outcome

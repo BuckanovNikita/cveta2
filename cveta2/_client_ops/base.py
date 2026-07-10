@@ -11,6 +11,7 @@ from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from cveta2._client.connection import open_sdk_api
+from cveta2._client_ops.session import TaskWriteSession
 from cveta2.config import CvatConfig
 
 if TYPE_CHECKING:
@@ -82,6 +83,10 @@ class _ClientBase:
     def host(self) -> str:
         """The configured CVAT host."""
         return self._cfg.host or ""
+
+    def open_task_session(self, task_id: int) -> TaskWriteSession:
+        """Create a metadata session for consecutive writes to one task."""
+        return TaskWriteSession(self._require_api("open_task_session"), task_id)
 
     def _require_api(self, method_name: str) -> CvatApiPort:
         """Return the injected or persistent API port, or raise."""

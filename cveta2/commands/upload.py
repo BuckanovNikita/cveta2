@@ -19,6 +19,7 @@ from cveta2.config import load_upload_config
 from cveta2.services.output import read_dataset_csv
 from cveta2.services.upload import (
     UploadOptions,
+    UploadRequest,
     build_search_dirs,
     build_upload_plan,
     read_exclude_names,
@@ -117,4 +118,11 @@ def run_upload(args: argparse.Namespace) -> None:
             mark_all_deleted=args.mark_all_deleted,
             complete=args.complete,
         )
-        upload_dataset(client, project_id, project_name, plan, task_name, options)
+        request = UploadRequest(
+            project_id=project_id,
+            project_name=project_name,
+            task_name=task_name,
+            plan=plan,
+            options=options,
+        )
+        upload_dataset(client, request)

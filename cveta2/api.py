@@ -45,6 +45,7 @@ from cveta2.services.output import read_dataset_csv
 from cveta2.services.resolve import apply_sync_root_override, resolve_project
 from cveta2.services.upload import (
     UploadOptions,
+    UploadRequest,
     build_search_dirs,
     build_upload_plan,
     read_exclude_names,
@@ -304,7 +305,14 @@ def upload(  # noqa: PLR0913
             mark_all_deleted=mark_all_deleted,
             complete=complete,
         )
-        outcome = upload_dataset(c, project_id, project_name, plan, name, options)
+        request = UploadRequest(
+            project_id=project_id,
+            project_name=project_name,
+            task_name=name,
+            plan=plan,
+            options=options,
+        )
+        outcome = upload_dataset(c, request)
         return UploadResult(
             task_id=outcome.task_id,
             task_name=outcome.task_name,

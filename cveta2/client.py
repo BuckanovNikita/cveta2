@@ -15,6 +15,7 @@ from cveta2._client_ops.base import _ClientBase
 from cveta2._client_ops.fetch import _FetchMixin, _filter_tasks_for_fetch
 from cveta2._client_ops.images import _ImageMixin
 from cveta2._client_ops.read import _ReadMixin
+from cveta2._client_ops.session import TaskWriteSession
 from cveta2._client_ops.shared import (
     _HTTP_5XX_MAX,
     _HTTP_5XX_MIN,
@@ -34,6 +35,7 @@ __all__ = [
     "_HTTP_5XX_MIN",
     "CvatClient",
     "FetchContext",
+    "TaskWriteSession",
     "_FetchAnnotationsOptions",
     "_filter_tasks_for_fetch",
     "_log_issue_skips",

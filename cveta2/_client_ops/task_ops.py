@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cveta2._client.assembly import build_name_to_frame
 from cveta2._client_ops.base import _ClientBase
 
 if TYPE_CHECKING:
@@ -14,6 +13,7 @@ if TYPE_CHECKING:
 
     from cveta2._client.dtos import RawDataMeta, RawShape
     from cveta2._client.ports import CvatApiPort
+    from cveta2._client_ops.session import TaskWriteSession
 
 
 class _TaskOpsMixin(_ClientBase):
@@ -23,6 +23,8 @@ class _TaskOpsMixin(_ClientBase):
         self,
         task_id: int,
         image_names: set[str],
+        *,
+        session: TaskWriteSession | None = None,
     ) -> int:
         """Mark frames as deleted in an existing CVAT task.
 
@@ -35,6 +37,9 @@ class _TaskOpsMixin(_ClientBase):
             CVAT task ID.
         image_names:
             Image file names to mark as deleted.
+        session:
+            Optional pre-populated :class:`TaskWriteSession` to reuse
+            already-fetched task metadata.
 
         Returns
         -------
@@ -45,11 +50,11 @@ class _TaskOpsMixin(_ClientBase):
 
         """
         api = self._require_api("mark_frames_deleted")
+        session = session or self.open_task_session(task_id)
 
-        raw_meta = api.get_task_data_meta(task_id)
-        name_to_frame = build_name_to_frame(raw_meta)
+        name_to_frame = session.name_to_frame
         frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
-        return self._patch_deleted_frames(api, task_id, raw_meta, frame_ids)
+        return self._patch_deleted_frames(api, task_id, session.data_meta, frame_ids)
 
     def mark_frames_deleted_by_ids(
         self,
