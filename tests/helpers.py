@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import yaml
 
+import cveta2
 from cveta2._client.dtos import RawShape
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
@@ -66,6 +67,11 @@ def build_fake(
 def make_fake_client(fixtures: LoadedFixtures) -> CvatClient:
     """Create a CvatClient backed by fake API data."""
     return CvatClient(CvatConfig(), api=FakeCvatApi(fixtures))
+
+
+def fake_connection(fixtures: LoadedFixtures) -> cveta2.Connection:
+    """Build an API ``Connection`` around a fake-backed client."""
+    return cveta2.Connection(client=make_fake_client(fixtures))
 
 
 def client_with_api(api: Any) -> CvatClient:

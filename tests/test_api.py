@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 import cveta2
-from cveta2.api import _resolve_client
+from cveta2.api import _open
 from cveta2.exceptions import (
     Cveta2Error,
     LabelsMismatchError,
@@ -16,7 +16,7 @@ from cveta2.exceptions import (
     MissingHostError,
 )
 from cveta2.models import CSV_COLUMNS
-from tests.helpers import build_fake, csv_row, make_fake_client, write_dataset_csv
+from tests.helpers import build_fake, csv_row, fake_connection, write_dataset_csv
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -33,10 +33,11 @@ def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-class TestResolveClient:
+class TestOpenConnection:
     def test_injected_client_used_as_is(self) -> None:
         sentinel = object()
-        with _resolve_client(sentinel, None, None, None, None, None) as client:  # type: ignore[arg-type]
+        connection = cveta2.Connection(client=sentinel)  # type: ignore[arg-type]
+        with _open(connection) as client:
             assert client is sentinel
 
     def test_missing_host_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,7 +46,7 @@ class TestResolveClient:
         )
         with (
             pytest.raises(MissingHostError, match="CVAT_HOST"),
-            _resolve_client(None, None, None, None, None, None),
+            _open(None),
         ):
             pytest.fail("must not yield")
 
@@ -55,11 +56,13 @@ class TestResolveClient:
         )
         with (
             pytest.raises(MissingCredentialsError, match="CVAT_USERNAME"),
-            _resolve_client(None, "http://cvat.test", None, None, None, None),
+            _open(cveta2.Connection(host="http://cvat.test")),
         ):
             pytest.fail("must not yield")
 
-    def test_kwargs_override_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_explicit_settings_override_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setattr(
             "cveta2.api.CvatConfig.load",
             lambda *_a, **_k: cveta2.CvatConfig(host="http://from-config"),
@@ -78,7 +81,10 @@ class TestResolveClient:
                 return None
 
         monkeypatch.setattr("cveta2.api.CvatClient", _FakeClient)
-        with _resolve_client(None, "http://explicit", "user", "pass", None, None):
+        connection = cveta2.Connection(
+            host="http://explicit", username="user", password="pass"
+        )
+        with _open(connection):
             pass
         assert captured["host"] == "http://explicit"
         assert captured["user"] == "user"
@@ -98,7 +104,7 @@ class TestFetchApi:
             out,
             download_images=False,
             publish_clearml=False,
-            client=make_fake_client(fake),
+            connection=fake_connection(fake),
         )
 
         assert (out / "dataset.csv").exists()
@@ -120,7 +126,7 @@ class TestFetchApi:
             [fake.tasks[0].name],
             out,
             download_images=False,
-            client=make_fake_client(fake),
+            connection=fake_connection(fake),
         )
 
         assert (out / "dataset.csv").exists()
@@ -138,7 +144,7 @@ class TestFetchApi:
             tmp_path / "out",
             download_images=False,
             publish_clearml=False,
-            client=make_fake_client(fake),
+            connection=fake_connection(fake),
         )
 
         assert not df.empty
@@ -153,7 +159,7 @@ class TestFetchApi:
                 fake.project.id,
                 tmp_path / "out",
                 publish_clearml=False,
-                client=make_fake_client(fake),
+                connection=fake_connection(fake),
             )
 
 
@@ -173,7 +179,7 @@ class TestUploadApi:
                 dataset,
                 project=fake.project.id,
                 name="api-upload",
-                client=make_fake_client(fake),
+                connection=fake_connection(fake),
             )
 
     def test_empty_after_filtering_raises(
@@ -192,7 +198,7 @@ class TestUploadApi:
                 project=fake.project.id,
                 name="api-upload",
                 labels=["nonexistent"],
-                client=make_fake_client(fake),
+                connection=fake_connection(fake),
             )
 
 
@@ -216,7 +222,7 @@ class TestWhatsNewApi:
         )
 
         tasks = cveta2.whats_new(
-            fake.project.id, dataset, client=make_fake_client(fake)
+            fake.project.id, dataset, connection=fake_connection(fake)
         )
 
         assert {t.id for t in tasks} == {old_task.id, new_task.id}
@@ -226,6 +232,6 @@ class TestLabelsApi:
     def test_get_labels(self, normal_fake: LoadedFixtures) -> None:
         fake = normal_fake
 
-        labels = cveta2.get_labels(fake.project.id, client=make_fake_client(fake))
+        labels = cveta2.get_labels(fake.project.id, connection=fake_connection(fake))
 
         assert labels == fake.labels

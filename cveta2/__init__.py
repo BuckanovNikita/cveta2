@@ -11,6 +11,7 @@ Workflow functions mirror the CLI commands::
 
 from cveta2._client.ports import CvatApiPort
 from cveta2.api import (
+    Connection,
     UploadResult,
     convert_from_yolo,
     convert_to_coco,
@@ -60,6 +61,7 @@ __all__ = [
     "CSV_COLUMNS",
     "AnnotationRecord",
     "BBoxAnnotation",
+    "Connection",
     "CvatApiError",
     "CvatApiPort",
     "CvatClient",
