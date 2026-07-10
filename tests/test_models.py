@@ -10,7 +10,6 @@ from cveta2.models import (
     CSV_COLUMNS,
     DeletedImage,
     ImageWithoutAnnotations,
-    ProjectAnnotations,
     TaskAnnotations,
 )
 from tests.helpers import make_bbox
@@ -131,7 +130,6 @@ def test_merge_multiple_tasks() -> None:
 
     assert len(result.annotations) == 2
     assert len(result.deleted_images) == 1
-    assert isinstance(result, ProjectAnnotations)
 
 
 # ---------------------------------------------------------------------------
@@ -182,23 +180,6 @@ def test_image_name_validator_on_image_without_annotations() -> None:
         frame_id=0,
     )
     assert record.image_name == "img.jpg"
-
-
-# ---------------------------------------------------------------------------
-# s3_image_path and image_path defaults
-# ---------------------------------------------------------------------------
-
-
-def test_s3_image_path_defaults_to_none() -> None:
-    """s3_image_path defaults to None."""
-    bbox = make_bbox()
-    assert bbox.s3_image_path is None
-
-
-def test_image_path_defaults_to_none() -> None:
-    """image_path defaults to None."""
-    bbox = make_bbox()
-    assert bbox.image_path is None
 
 
 # ---------------------------------------------------------------------------

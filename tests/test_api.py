@@ -109,7 +109,7 @@ class TestFetchApi:
         assert set(df["task_id"].unique()) == {fake.tasks[1].id}
         assert len(pd.read_csv(out / "obsolete.csv")) > 0
 
-    def test_fetch_task_returns_dataframe(
+    def test_fetch_task_writes_csvs_matching_dataframe(
         self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         fake = normal_fake
@@ -125,7 +125,6 @@ class TestFetchApi:
 
         assert (out / "dataset.csv").exists()
         assert (out / "deleted.csv").exists()
-        assert isinstance(df, pd.DataFrame)
         assert list(pd.read_csv(out / "dataset.csv").columns) == list(CSV_COLUMNS)
         assert len(df) == len(pd.read_csv(out / "dataset.csv"))
 

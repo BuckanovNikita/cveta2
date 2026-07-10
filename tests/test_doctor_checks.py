@@ -165,10 +165,9 @@ def test_check_aws_valid_credentials() -> None:
 
 
 def test_scan_permissions_empty_dir(tmp_path: Path) -> None:
-    broken_dirs, broken_files = _scan_permissions(tmp_path)
-    # tmp_path itself is checked — it may or may not have group bits
-    # depending on umask, so just verify we get lists back
-    assert isinstance(broken_dirs, list)
+    # broken_dirs is not asserted: tmp_path itself is checked and may or may
+    # not have group bits depending on umask
+    _, broken_files = _scan_permissions(tmp_path)
     assert broken_files == []
 
 

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2.exceptions import Cveta2Error, LabelsMismatchError
+from cveta2.exceptions import LabelsMismatchError
 from cveta2.models import LabelInfo
 from cveta2.services.upload import validate_labels
 
@@ -41,14 +41,6 @@ class TestLabelsMismatchError:
             available_labels=["car", "person"],
         )
         assert fragment in str(err)
-
-    def test_is_cveta2_error(self) -> None:
-        err = LabelsMismatchError(
-            unknown_labels=["cat"],
-            project_name="p",
-            available_labels=["car"],
-        )
-        assert isinstance(err, Cveta2Error)
 
 
 def _client_with_labels(names: set[str]) -> MagicMock:

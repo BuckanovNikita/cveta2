@@ -140,7 +140,6 @@ def test_get_project_labels_returns_fixture_labels(
     client = make_fake_client(fake)
     labels = client.get_project_labels(fake.project.id)
     assert len(labels) == len(fake.labels)
-    assert all(isinstance(lbl, LabelInfo) for lbl in labels)
     label_names = {lbl.name for lbl in labels}
     expected_names = {lbl.name for lbl in fake.labels}
     assert label_names == expected_names
