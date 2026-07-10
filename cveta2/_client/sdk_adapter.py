@@ -12,13 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 import urllib3.exceptions
 from loguru import logger
-from tenacity import (
-    RetryCallState,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 from cveta2._client.dtos import (
     RawAnnotations,
@@ -39,6 +32,7 @@ from cveta2._client.sdk_requests import (
     build_new_shapes_payload,
     build_task_write_request,
 )
+from cveta2._retry import network_retry
 from cveta2.exceptions import CvatApiError
 from cveta2.image_downloader import parse_cloud_storage
 from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
@@ -80,25 +74,9 @@ def _translate_api_errors(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapper
 
 
-def _log_retry(retry_state: RetryCallState) -> None:
-    """Log a warning before each retry attempt."""
-    exc = retry_state.outcome.exception() if retry_state.outcome else None
-    logger.warning(
-        f"CVAT API call failed (attempt {retry_state.attempt_number}), "
-        f"retrying: {exc!r}"
-    )
-
-
-# Retry on network / server errors with exponential backoff.
 # urllib3 timeout errors are not OSError, hence urllib3.exceptions.HTTPError.
-_api_retry = retry(
-    retry=retry_if_exception_type(
-        (OSError, ConnectionError, urllib3.exceptions.HTTPError)
-    ),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    before_sleep=_log_retry,
-    reraise=True,
+_api_retry = network_retry(
+    (OSError, ConnectionError, urllib3.exceptions.HTTPError), label="CVAT API"
 )
 
 _CONNECT_TIMEOUT = 10.0

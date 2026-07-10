@@ -8,12 +8,8 @@ from typing import TYPE_CHECKING, TypeVar, cast
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
+
+from cveta2._retry import RETRY_ATTEMPTS, network_retry
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -38,13 +34,8 @@ def names_with_basename_fallback(pairs: Iterable[tuple[str, _T]]) -> dict[str, _
     return result
 
 
-s3_retry = retry(
-    retry=retry_if_exception_type(
-        (OSError, ConnectionError, ConnectTimeoutError, ReadTimeoutError)
-    ),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    reraise=True,
+s3_retry = network_retry(
+    (OSError, ConnectionError, ConnectTimeoutError, ReadTimeoutError), label="S3"
 )
 
 _S3_CONNECT_TIMEOUT = 10.0
@@ -71,7 +62,7 @@ def make_s3_client(endpoint_url: str | None = None) -> S3Client:
         timeout_config = Config(
             connect_timeout=_S3_CONNECT_TIMEOUT,
             read_timeout=_DataTimeoutDefault.value,
-            retries={"max_attempts": 3, "mode": "standard"},
+            retries={"max_attempts": RETRY_ATTEMPTS, "mode": "standard"},
         )
         return cast(
             "S3Client",

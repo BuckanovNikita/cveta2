@@ -12,7 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from cveta2._client.dtos import RawAttribute, RawDataMeta, RawFrame
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter, _log_retry
+from cveta2._client.sdk_adapter import SdkCvatApiAdapter
+from cveta2._retry import _log_retry
 from tests.helpers import make_sdk_shape
 
 # ---------------------------------------------------------------------------
@@ -218,4 +219,4 @@ def test_log_retry_does_not_crash() -> None:
     state = MagicMock()
     state.outcome.exception.return_value = RuntimeError("connection lost")
     state.attempt_number = 2
-    _log_retry(state)
+    _log_retry("CVAT API", state)
