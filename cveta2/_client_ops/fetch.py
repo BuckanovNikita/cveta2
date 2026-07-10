@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from loguru import logger
-from tqdm import tqdm
 
 from cveta2._client.assembly import task_to_records
 from cveta2._client.mapping import _build_label_maps
@@ -19,7 +18,7 @@ from cveta2._client_ops.shared import (
 )
 from cveta2.config import should_raise_on_fetch_failure
 from cveta2.exceptions import CvatApiError, TaskNotFoundError
-from cveta2.models import BBoxAnnotation, ProjectAnnotations, TaskAnnotations
+from cveta2.models import TaskAnnotations
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -54,35 +53,6 @@ def _filter_tasks_for_fetch(
 
 class _FetchMixin(_ClientBase):
     """Fetch bbox annotations for a project, task by task."""
-
-    def fetch_annotations(  # noqa: PLR0913
-        self,
-        project_id: int,
-        *,
-        completed_only: bool = False,
-        ignore_task_ids: set[int] | None = None,
-        silent_task_ids: set[int] | None = None,
-        task_selector: list[int | str] | None = None,
-        project_name: str = "",
-    ) -> ProjectAnnotations:
-        """Fetch all bbox annotations and deleted images from a project.
-
-        If ``completed_only`` is True, only completed tasks are processed.
-        Tasks whose IDs are in ``ignore_task_ids`` are silently skipped.
-        ``silent_task_ids`` suppresses the skip-warning for those IDs.
-        If ``task_selector`` is given (list of task IDs or names), only
-        matching tasks are processed.
-        """
-        options = _FetchAnnotationsOptions(
-            completed_only=completed_only,
-            ignore_task_ids=ignore_task_ids,
-            silent_task_ids=silent_task_ids,
-            task_selector=task_selector,
-            host=(self._cfg.host or ""),
-            project_name=project_name,
-        )
-        source = self._require_api("fetch_annotations")
-        return self._fetch_annotations(source, project_id, options)
 
     def prepare_fetch(  # noqa: PLR0913
         self,
@@ -214,34 +184,3 @@ class _FetchMixin(_ClientBase):
             annotations=records,
             deleted_images=deleted,
         )
-
-    @staticmethod
-    def _fetch_annotations(
-        api: CvatApiPort,
-        project_id: int,
-        options: _FetchAnnotationsOptions,
-    ) -> ProjectAnnotations:
-        """Fetch annotations through a ``CvatApiPort`` implementation."""
-        ctx = _FetchMixin._prepare_fetch(api, project_id, options)
-        if not ctx.tasks:
-            logger.warning("No tasks in this project.")
-            return ProjectAnnotations(
-                annotations=[],
-                deleted_images=[],
-            )
-
-        task_results: list[TaskAnnotations] = []
-        for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
-            result = _FetchMixin.fetch_one_task(api, task, ctx)
-            if result is not None:
-                task_results.append(result)
-
-        merged = TaskAnnotations.merge(task_results)
-        bbox_count = sum(1 for r in merged.annotations if isinstance(r, BBoxAnnotation))
-        without_count = len(merged.annotations) - bbox_count
-        logger.trace(
-            f"Fetched {bbox_count} bbox annotation(s), "
-            f"{len(merged.deleted_images)} deleted image(s), "
-            f"{without_count} image(s) without annotations",
-        )
-        return merged

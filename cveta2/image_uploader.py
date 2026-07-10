@@ -12,15 +12,9 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from pydantic import BaseModel
-from tenacity import (
-    Retrying,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 from tqdm import tqdm
 
-from cveta2.s3_utils import build_s3_key, list_s3_objects, make_s3_client
+from cveta2.s3_utils import build_s3_key, list_s3_objects, make_s3_client, s3_retry
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -134,6 +128,12 @@ def build_server_file_mapping(
     return name_to_server_file, existing_keys
 
 
+@s3_retry
+def _upload_one_s3(s3: S3Client, local_path: Path, bucket: str, key: str) -> None:
+    """Upload a single local file to S3."""
+    s3.upload_file(str(local_path), bucket, key)
+
+
 class S3Uploader:
     """Upload images to S3 cloud storage, skipping already-existing files.
 
@@ -208,14 +208,7 @@ class S3Uploader:
             to_upload, desc="Uploading to S3", unit="file", leave=False
         ):
             try:
-                for attempt in Retrying(
-                    retry=retry_if_exception_type((OSError, ConnectionError)),
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=1, min=1, max=10),
-                    reraise=True,
-                ):
-                    with attempt:
-                        s3.upload_file(str(local_path), cs_info.bucket, s3_key)
+                _upload_one_s3(s3, local_path, cs_info.bucket, s3_key)
                 stats.uploaded += 1
             except (OSError, ConnectionError):
                 logger.exception(f"Не удалось загрузить {name} (key={s3_key})")

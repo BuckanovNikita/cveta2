@@ -57,7 +57,7 @@ class CvatClient(
 
         with CvatClient(cfg) as client:
             projects = client.list_projects()
-            result = client.fetch_annotations(project_id)
+            ctx = client.prepare_fetch(project_id)
 
     The context manager is required for all remote calls unless an
     ``api`` port is injected (tests).

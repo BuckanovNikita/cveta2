@@ -21,7 +21,7 @@ _HTTP_5XX_MAX = 600
 
 @dataclass(frozen=True)
 class _FetchAnnotationsOptions:
-    """Options for _fetch_annotations (filters + display/hint)."""
+    """Options for prepare_fetch (filters + display/hint)."""
 
     completed_only: bool = False
     ignore_task_ids: set[int] | None = None

@@ -17,6 +17,7 @@ from cvat_sdk.core.helpers import get_paginated_collection
 
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.client import CvatClient
+from tests.helpers import fetch_all_annotations
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import (
     IMAGE_NAMES,
@@ -73,7 +74,7 @@ def _fetch_frame_records(
     cfg: CvatConfig, project_id: int, task_name: str, frame_id: int
 ) -> list[AnnotationRecord]:
     with CvatClient(cfg) as client:
-        result = client.fetch_annotations(project_id, task_selector=[task_name])
+        result = fetch_all_annotations(client, project_id, task_selector=[task_name])
     return [r for r in result.annotations if r.frame_id == frame_id]
 
 

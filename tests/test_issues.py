@@ -34,10 +34,12 @@ from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.helpers import (
     client_with_api,
+    fetch_all_annotations,
     make_bbox,
     make_fake_client,
     make_raw_shape,
     make_task,
+    split_records,
 )
 
 if TYPE_CHECKING:
@@ -215,11 +217,8 @@ class TestFetchedRecordsCarryIssueColumns:
                 ],
             },
         )
-        result = make_fake_client(fixtures).fetch_annotations(1)
-        boxes = [r for r in result.annotations if isinstance(r, BBoxAnnotation)]
-        without = [
-            r for r in result.annotations if isinstance(r, ImageWithoutAnnotations)
-        ]
+        result = fetch_all_annotations(make_fake_client(fixtures), 1)
+        boxes, without = split_records(result)
         assert boxes[0].issue_text == "открытая"
         assert boxes[0].issue_state == "open"
         assert without[0].issue_text == "решённая"

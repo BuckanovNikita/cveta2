@@ -27,6 +27,7 @@ from cveta2.models import (
 )
 from cveta2.services.fetch import FetchOptions, fetch_selected_tasks
 from cveta2.task_cache import get_task_cache_dir
+from tests.helpers import fetch_all_annotations
 from tests.integration.conftest import _env, _make_sdk_client
 from tests.integration.test_upload import (
     IMAGE_NAMES,
@@ -118,7 +119,7 @@ class TestSdkAdapterRoundTrip:
 
 
 class TestRealClientFetchAnnotations:
-    """CvatClient.fetch_annotations with real SdkCvatApiAdapter."""
+    """Full project fetch through the real SdkCvatApiAdapter."""
 
     def test_fetch_normal_project(self) -> None:
         sdk_client = _make_sdk_client()
@@ -130,7 +131,7 @@ class TestRealClientFetchAnnotations:
 
             projects = adapter.list_projects()
             project = next(p for p in projects if p.name == "coco8-dev")
-            result = client.fetch_annotations(project.id)
+            result = fetch_all_annotations(client, project.id)
 
             bbox_records = [
                 a for a in result.annotations if isinstance(a, BBoxAnnotation)

@@ -1,7 +1,7 @@
 """Fake CvatApiPort implementation backed by loaded fixture data.
 
-Used in integration tests to exercise ``CvatClient.fetch_annotations``
-without the real CVAT SDK.
+Used in tests to exercise the ``prepare_fetch`` / ``fetch_one_task``
+pipeline without the real CVAT SDK.
 """
 
 from __future__ import annotations
