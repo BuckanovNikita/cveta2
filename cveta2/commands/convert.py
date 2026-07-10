@@ -1,12 +1,11 @@
 """CLI adapter for the ``cveta2 convert`` command.
 
-Only argument mapping and ``sys.exit`` UX live here; the conversion logic
-itself is :mod:`cveta2.services.convert`.
+Only argument mapping lives here; the conversion logic itself is
+:mod:`cveta2.services.convert`.
 """
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING
 
 from cveta2.exceptions import Cveta2Error
@@ -21,14 +20,6 @@ if TYPE_CHECKING:
 
 
 def run_convert(args: argparse.Namespace) -> None:
-    """Dispatch to the appropriate conversion direction."""
-    try:
-        _dispatch(args)
-    except Cveta2Error as e:
-        sys.exit(str(e))
-
-
-def _dispatch(args: argparse.Namespace) -> None:
     """Map CLI arguments onto the conversion service functions."""
     if getattr(args, "to_yolo", False):
         convert_to_yolo(

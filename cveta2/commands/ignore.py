@@ -54,7 +54,7 @@ def run_ignore_list() -> None:
 
 def run_ignore(args: argparse.Namespace) -> None:
     """Run the ``ignore`` command: add, remove, list-all, or interactive menu."""
-    if args.list_all:
+    if args.list_only:
         run_ignore_list()
         return
 
@@ -104,7 +104,7 @@ def _resolve_project(
     ignore_cfg: IgnoreConfig,
 ) -> tuple[int, str]:
     """Resolve project ID and name from CLI args or interactive TUI."""
-    resolved = resolve_project_from_args(args.project, client)
+    resolved = resolve_project_from_args(client, args.project)
     if resolved is not None:
         return resolved
     cached = load_projects_cache()

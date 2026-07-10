@@ -163,7 +163,7 @@ class TestComputeCutoff:
 
 
 def test_run_whats_new_empty_date_column_exits(tmp_path: Path) -> None:
-    """The adapter maps a ``compute_cutoff`` error onto ``SystemExit``."""
+    """A ``compute_cutoff`` error propagates to the CLI boundary."""
     csv_path = write_dataset_csv(
         tmp_path / "dataset.csv",
         [
@@ -184,6 +184,6 @@ def test_run_whats_new_empty_date_column_exits(tmp_path: Path) -> None:
         patch("cveta2.commands._bootstrap.require_host"),
         patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
         patch("cveta2.commands._bootstrap.CvatClient", side_effect=make_client),
-        pytest.raises(SystemExit, match="пуст"),
+        pytest.raises(Cveta2Error, match="пуст"),
     ):
         run_whats_new(args)

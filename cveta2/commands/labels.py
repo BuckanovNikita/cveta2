@@ -32,9 +32,9 @@ _HEX_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 def run_labels(args: argparse.Namespace) -> None:
     """Run the ``labels`` command: list or interactively edit project labels."""
     with open_client() as client:
-        project_id, project_name = resolve_project(args.project, client)
+        project_id, project_name = resolve_project(client, args.project)
 
-        if args.list_labels:
+        if args.list_only:
             labels = client.get_project_labels(project_id)
             _print_labels(labels, project_name)
             return

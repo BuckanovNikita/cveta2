@@ -559,7 +559,7 @@ def test_missing_split_error(tmp_path: Path, export_format: str) -> None:
 
 
 def test_run_convert_missing_split_exits(tmp_path: Path) -> None:
-    """The adapter maps a conversion-logic error onto ``SystemExit``."""
+    """A conversion-logic error propagates to the CLI boundary."""
     rows = [csv_row("test.jpg", label="cat", split="train")]
     rows[0]["split"] = None
     csv_path = _make_dataset_csv(tmp_path, rows)
@@ -574,7 +574,7 @@ def test_run_convert_missing_split_exits(tmp_path: Path) -> None:
         names_file=None,
     )
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(Cveta2Error):
         run_convert(args)
 
 

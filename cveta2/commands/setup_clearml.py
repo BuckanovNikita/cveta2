@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from cveta2.commands._helpers import config_path_from_args
 from cveta2.commands.interactive import wizard
 from cveta2.config import (
     ClearmlProjectMapping,
@@ -16,16 +17,14 @@ from cveta2.config import (
 from cveta2.projects_cache import load_projects_cache
 
 if TYPE_CHECKING:
+    import argparse
     from pathlib import Path
 
 
-def run_setup_clearml(
-    config_path: Path,
-    *,
-    list_mappings: bool = False,
-) -> None:
+def run_setup_clearml(args: argparse.Namespace) -> None:
     """Configure ClearML project mappings for dataset publishing."""
-    if list_mappings:
+    config_path = config_path_from_args(args)
+    if args.list_only:
         _list_mappings(config_path)
         return
 

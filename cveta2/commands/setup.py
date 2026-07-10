@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from cveta2.commands._bootstrap import open_client
+from cveta2.commands._helpers import config_path_from_args
 from cveta2.commands.interactive import wizard
 from cveta2.config import (
     CacheConfig,
@@ -21,16 +21,19 @@ from cveta2.config import (
     save_cache_config,
     save_image_cache_config,
 )
+from cveta2.exceptions import Cveta2Error
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
 
 if TYPE_CHECKING:
+    import argparse
     from pathlib import Path
 
     from cveta2.models import ProjectInfo
 
 
-def run_setup(config_path: Path) -> None:
+def run_setup(args: argparse.Namespace) -> None:
     """Interactively ask user for CVAT credentials and core settings."""
+    config_path = config_path_from_args(args)
     require_interactive(
         "The 'setup' command is fully interactive. "
         "Configure via env vars (CVAT_HOST, CVAT_USERNAME, CVAT_PASSWORD) "
@@ -59,14 +62,10 @@ def run_setup(config_path: Path) -> None:
     logger.info(f"Готово! Конфигурация сохранена в {saved_path}")
 
 
-def run_setup_cache(
-    config_path: Path,
-    *,
-    reset: bool = False,
-    list_paths: bool = False,
-) -> None:
+def run_setup_cache(args: argparse.Namespace) -> None:
     """Interactively configure image cache directories for all known projects."""
-    if list_paths:
+    config_path = config_path_from_args(args)
+    if args.list_only:
         _list_cache_paths(config_path)
         return
 
@@ -77,13 +76,13 @@ def run_setup_cache(
 
     projects = _ensure_projects_list(config_path)
     if not projects:
-        sys.exit("Нет доступных проектов.")
+        raise Cveta2Error("Нет доступных проектов.")
 
     image_cache = load_image_cache_config(config_path)
     cache_root = wizard.prompt_cache_root()
 
     if _setup_image_cache_dirs(
-        projects, image_cache, cache_root, config_path, reset=reset
+        projects, image_cache, cache_root, config_path, reset=args.reset
     ):
         logger.info("Пути кэширования изображений обновлены.")
 

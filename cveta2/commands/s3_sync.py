@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -50,19 +49,21 @@ def _resolve_sync_dirs(project_filter: str | None) -> dict[str, Path]:
 def run_s3_sync(args: argparse.Namespace) -> None:
     """Run the ``s3-sync`` command."""
     if args.root and not args.project:
-        sys.exit("Ошибка: --root требует явного указания проекта через --project.")
+        raise Cveta2Error(
+            "Ошибка: --root требует явного указания проекта через --project."
+        )
 
     project_filter = args.project.strip() if args.project else None
     projects_to_sync = _resolve_sync_dirs(project_filter)
     if not projects_to_sync:
         if project_filter:
-            sys.exit(
+            raise Cveta2Error(
                 f"Ошибка: для проекта {project_filter!r} не настроен путь "
                 f"кэширования изображений.\n"
                 f"Добавьте image_cache.{project_filter} или cache.images_root "
                 f"в конфигурацию (cveta2 setup-cache)."
             )
-        sys.exit(
+        raise Cveta2Error(
             "Ошибка: image_cache не настроен — нет проектов для синхронизации.\n"
             "Добавьте секцию image_cache в конфигурацию или запустите: cveta2 setup"
         )

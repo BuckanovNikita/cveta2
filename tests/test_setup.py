@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,6 +16,14 @@ from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def _args(
+    config_path: Path, *, reset: bool = False, list_only: bool = False
+) -> argparse.Namespace:
+    """Build a setup-command Namespace mirroring the CLI parser defaults."""
+    return argparse.Namespace(config=str(config_path), reset=reset, list_only=list_only)
+
 
 # Yes/No tokens the wizard treats as an affirmative confirm answer.
 _CONFIRM_YES = {"y", "yes", "да"}
@@ -63,7 +72,7 @@ def run_setup_with_inputs(
     """Run run_setup with scripted input answers; return prompt log."""
     prompts = feed_inputs(monkeypatch, answers)
     monkeypatch.setattr(primitives, "prompt_password", lambda _prompt: "secret")
-    run_setup(config_path)
+    run_setup(_args(config_path))
     return prompts
 
 
@@ -148,7 +157,7 @@ def test_setup_cache_root_applied_to_all_without_per_project_prompts(
     root = tmp_path / "cache"
     prompts = feed_inputs(monkeypatch, [str(root), "", "", ""])
 
-    run_setup_cache(config_path)
+    run_setup_cache(_args(config_path))
 
     saved = load_image_cache_config(config_path)
     assert saved.get_cache_dir("alpha") == root / "alpha"
@@ -168,7 +177,7 @@ def test_setup_cache_root_rejected_falls_back_to_per_project(
     custom = tmp_path / "custom-alpha"
     prompts = feed_inputs(monkeypatch, [str(root), "n", str(custom), "", "", ""])
 
-    run_setup_cache(config_path)
+    run_setup_cache(_args(config_path))
 
     saved = load_image_cache_config(config_path)
     assert saved.get_cache_dir("alpha") == custom
@@ -186,7 +195,7 @@ def test_setup_cache_no_root_keeps_per_project_flow(
     custom = tmp_path / "custom-alpha"
     prompts = feed_inputs(monkeypatch, ["", str(custom), "", "", ""])
 
-    run_setup_cache(config_path)
+    run_setup_cache(_args(config_path))
 
     saved = load_image_cache_config(config_path)
     assert saved.get_cache_dir("alpha") == custom
@@ -204,7 +213,7 @@ def test_setup_cache_root_apply_keeps_existing_paths_without_reset(
     root = tmp_path / "cache"
     feed_inputs(monkeypatch, [str(root), "", "", ""])
 
-    run_setup_cache(config_path)
+    run_setup_cache(_args(config_path))
 
     saved = load_image_cache_config(config_path)
     assert saved.get_cache_dir("alpha") == existing
@@ -220,7 +229,7 @@ def test_setup_cache_root_apply_overrides_existing_paths_with_reset(
     root = tmp_path / "cache"
     feed_inputs(monkeypatch, [str(root), "", "", ""])
 
-    run_setup_cache(config_path, reset=True)
+    run_setup_cache(_args(config_path, reset=True))
 
     saved = load_image_cache_config(config_path)
     assert saved.get_cache_dir("alpha") == root / "alpha"
@@ -247,7 +256,7 @@ def test_setup_cache_saves_tasks_root_and_project_settings(
     ]
     feed_inputs(monkeypatch, answers)
 
-    run_setup_cache(config_path)
+    run_setup_cache(_args(config_path))
 
     cache_cfg = load_cache_config(config_path)
     assert cache_cfg.images_root == root

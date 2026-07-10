@@ -1,12 +1,11 @@
 """CLI adapter for the ``cveta2 upload`` command.
 
-Only argument mapping, interactive prompts and ``sys.exit`` UX live here;
+Only argument mapping and interactive prompts live here;
 the pipeline itself is :mod:`cveta2.services.upload`.
 """
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +15,7 @@ from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import resolve_project
 from cveta2.config import load_upload_config
+from cveta2.exceptions import Cveta2Error
 from cveta2.services.output import read_dataset_csv
 from cveta2.services.upload import (
     UploadOptions,
@@ -50,7 +50,7 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
     )
     has_no_annotation = df["instance_label"].isna().any()
     if not all_labels and not has_no_annotation:
-        sys.exit("Ошибка: не найдено ни одного instance_label в dataset.csv.")
+        raise Cveta2Error("Ошибка: не найдено ни одного instance_label в dataset.csv.")
     choices: list[interactive.Choice] = [
         interactive.Choice(title=label, value=label) for label in all_labels
     ]
@@ -108,7 +108,7 @@ def run_upload(args: argparse.Namespace) -> None:
     task_name = _resolve_task_name(args.name)
 
     with open_client() as client:
-        project_id, project_name = resolve_project(args.project, client)
+        project_id, project_name = resolve_project(client, args.project)
         options = UploadOptions(
             search_dirs=build_search_dirs(
                 [args.image_dir] if args.image_dir else None, project_name

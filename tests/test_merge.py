@@ -608,12 +608,12 @@ class TestMergeDatasetsIO:
 
 
 # ---------------------------------------------------------------------------
-# CLI smoke — run_merge sys.exit path
+# CLI smoke — run_merge error path
 # ---------------------------------------------------------------------------
 
 
 def test_run_merge_by_time_missing_column_exits(tmp_path: Path) -> None:
-    """The adapter maps a merge-logic error onto ``SystemExit``."""
+    """A merge-logic error propagates to the CLI boundary."""
     from cveta2.commands.merge import run_merge
 
     old_path = tmp_path / "old.csv"
@@ -633,5 +633,5 @@ def test_run_merge_by_time_missing_column_exits(tmp_path: Path) -> None:
         by_time=True,
     )
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(Cveta2Error):
         run_merge(args)

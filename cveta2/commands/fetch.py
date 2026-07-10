@@ -23,6 +23,7 @@ from cveta2.config import (
     load_image_cache_config,
     save_image_cache_config,
 )
+from cveta2.exceptions import Cveta2Error
 from cveta2.services.fetch import (
     FetchOptions,
     fetch_project,
@@ -165,7 +166,7 @@ def _resolve_images_dir(
 
     # Not configured — interactive prompt or error
     if is_interactive_disabled():
-        sys.exit(
+        raise Cveta2Error(
             f"Ошибка: путь кэширования изображений для проекта "
             f"{project_name!r} не настроен.\n"
             f"Укажите --images-dir, --no-images или добавьте "

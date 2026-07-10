@@ -15,6 +15,7 @@ from cveta2.commands.task_ops import (
     run_task_mark_deleted,
     run_task_status,
 )
+from cveta2.exceptions import Cveta2Error
 from cveta2.models import LabelInfo, TaskInfo
 from tests.helpers import client_with_api, make_raw_shape, mock_client_ctx
 
@@ -33,12 +34,12 @@ def _mock_client_with_task(task: TaskInfo) -> MagicMock:
 class TestRunTaskCommands:
     def test_mark_deleted_requires_frame_or_image(self) -> None:
         args = argparse.Namespace(project="p", task="1", frame=None, image=None)
-        with pytest.raises(SystemExit):
+        with pytest.raises(Cveta2Error):
             run_task_mark_deleted(args)
 
     def test_status_requires_stage_or_state(self) -> None:
         args = argparse.Namespace(project="p", task="1", stage=None, state=None)
-        with pytest.raises(SystemExit):
+        with pytest.raises(Cveta2Error):
             run_task_status(args)
 
     def test_state_mapping_covers_all_cli_values(self) -> None:

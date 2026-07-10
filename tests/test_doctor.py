@@ -30,10 +30,12 @@ def test_run_doctor_no_crash() -> None:
 
 def test_run_setup_requires_interactive(tmp_path: Path) -> None:
     """run_setup raises when interactive mode is disabled."""
+    import argparse
+
     from cveta2.commands.setup import run_setup
     from cveta2.exceptions import InteractiveModeRequiredError
 
-    config_path = tmp_path / "fake-config.yaml"
+    args = argparse.Namespace(config=str(tmp_path / "fake-config.yaml"))
     with (
         patch(
             "cveta2.commands.setup.require_interactive",
@@ -41,4 +43,4 @@ def test_run_setup_requires_interactive(tmp_path: Path) -> None:
         ),
         pytest.raises(InteractiveModeRequiredError),
     ):
-        run_setup(config_path)
+        run_setup(args)

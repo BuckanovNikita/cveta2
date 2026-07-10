@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -170,7 +170,7 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
     ),
     (
         ["labels", "-p", "proj", "--list"],
-        {"command": "labels", "project": "proj", "list_labels": True},
+        {"command": "labels", "project": "proj", "list_only": True},
     ),
     (
         [
@@ -290,16 +290,21 @@ def test_run_dispatches_to_handler(handler: str, argv: list[str]) -> None:
 
 
 _TASK_DISPATCH_CASES: list[tuple[str, list[str]]] = [
-    ("mark-deleted", ["task", "mark-deleted", "-p", "1", "-t", "1", "--image", "a"]),
-    ("drop-label", ["task", "drop-label", "-p", "1", "-t", "1", "--label", "c"]),
-    ("delete", ["task", "delete", "-p", "1", "-t", "1"]),
-    ("status", ["task", "status", "-p", "1", "-t", "1", "--state", "new"]),
+    (
+        "run_task_mark_deleted",
+        ["task", "mark-deleted", "-p", "1", "-t", "1", "--image", "a"],
+    ),
+    (
+        "run_task_drop_label",
+        ["task", "drop-label", "-p", "1", "-t", "1", "--label", "c"],
+    ),
+    ("run_task_delete", ["task", "delete", "-p", "1", "-t", "1"]),
+    ("run_task_status", ["task", "status", "-p", "1", "-t", "1", "--state", "new"]),
 ]
 
 
-@pytest.mark.parametrize(("action", "argv"), _TASK_DISPATCH_CASES)
-def test_task_run_dispatches_to_action(action: str, argv: list[str]) -> None:
-    mock_handler = MagicMock()
-    with patch.dict("cveta2.cli._TASK_ACTIONS", {action: mock_handler}):
+@pytest.mark.parametrize(("handler", "argv"), _TASK_DISPATCH_CASES)
+def test_task_run_dispatches_to_action(handler: str, argv: list[str]) -> None:
+    with patch(f"cveta2.cli.{handler}") as mock_handler:
         CliApp().run(argv)
     mock_handler.assert_called_once()

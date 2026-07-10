@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cveta2.commands.interactive import select_project
@@ -10,17 +10,26 @@ from cveta2.config import (
     CvatConfig,
     get_config_path,
 )
+from cveta2.exceptions import MissingHostError
 from cveta2.projects_cache import load_projects_cache
 from cveta2.services.resolve import apply_sync_root_override
 
 if TYPE_CHECKING:
+    import argparse
+
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
 
 
+def config_path_from_args(args: argparse.Namespace) -> Path:
+    """Resolve the ``--config`` argument into a concrete config path."""
+    config_arg = getattr(args, "config", None)
+    return Path(config_arg) if config_arg else get_config_path()
+
+
 def resolve_project_from_args(
-    project_arg: str | None,
     client: CvatClient,
+    project_arg: str | None,
 ) -> tuple[int, str] | None:
     """Resolve project ID and name from CLI project argument.
 
@@ -49,8 +58,8 @@ def resolve_project_from_args(
 
 
 def resolve_project(
-    project_arg: str | None,
     client: CvatClient,
+    project_arg: str | None,
 ) -> tuple[int, str]:
     """Resolve project ID and name, falling back to interactive TUI.
 
@@ -58,7 +67,7 @@ def resolve_project(
     project not found) propagates to the CLI dispatch boundary.  When
     *project_arg* is empty, falls back to :func:`select_project`.
     """
-    resolved = resolve_project_from_args(project_arg, client)
+    resolved = resolve_project_from_args(client, project_arg)
     if resolved is not None:
         return resolved
     return select_project(client)
@@ -89,25 +98,18 @@ def resolve_project_and_cloud_storage(
         sync root is invalid.
 
     """
-    if project_spec and project_spec.strip():
-        resolved = resolve_project_from_args(project_spec.strip(), client)
-        if resolved is None:
-            project_id, project_name = select_project(client)
-        else:
-            project_id, project_name = resolved
-    else:
-        project_id, project_name = select_project(client)
+    project_id, project_name = resolve_project(client, project_spec)
     cs_info = client.detect_project_cloud_storage(project_id)
     cs_info = apply_sync_root_override(project_name, cs_info, sync_root)
     return (project_id, project_name, cs_info)
 
 
 def require_host(cfg: CvatConfig) -> None:
-    """Abort with a friendly message when host is not configured."""
+    """Raise a friendly error when host is not configured."""
     if cfg.host:
         return
     config_path = get_config_path()
-    sys.exit(
+    raise MissingHostError(
         "Ошибка: хост CVAT не настроен.\n"
         "Запустите setup для сохранения настроек:\n  cveta2 setup\n"
         "Или задайте переменные окружения: CVAT_HOST и "

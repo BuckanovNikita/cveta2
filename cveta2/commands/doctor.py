@@ -10,13 +10,17 @@ import os
 import pwd
 import stat
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from cveta2.config import CvatConfig, get_config_path, load_image_cache_config
 
+if TYPE_CHECKING:
+    import argparse
 
-def run_doctor() -> None:
+
+def run_doctor(_args: argparse.Namespace | None = None) -> None:
     """Run all doctor checks and log a final summary."""
     ok = True
     if not check_config():

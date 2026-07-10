@@ -28,7 +28,11 @@ from cveta2.config import (
     _parse_ignore_entry,
     _serialize_ignore_entry,
 )
-from cveta2.exceptions import InteractiveModeRequiredError, TaskNotFoundError
+from cveta2.exceptions import (
+    Cveta2Error,
+    InteractiveModeRequiredError,
+    TaskNotFoundError,
+)
 from cveta2.models import CSV_COLUMNS, TaskInfo
 from cveta2.services.fetch import (
     FetchOptions,
@@ -401,7 +405,7 @@ class TestResolveImagesDir:
         assert result == cached_path
 
     def test_non_interactive_exits_when_no_config(self) -> None:
-        """Exits when no images dir is configured and interactive is disabled."""
+        """Raises when no images dir is configured and interactive is disabled."""
         args = argparse.Namespace(no_images=False, images_dir=None)
 
         with (
@@ -410,7 +414,7 @@ class TestResolveImagesDir:
                 return_value=ImageCacheConfig(),
             ),
             patch(f"{_MODULE}.is_interactive_disabled", return_value=True),
-            pytest.raises(SystemExit),
+            pytest.raises(Cveta2Error),
         ):
             _resolve_images_dir(args, "project-x")
 
