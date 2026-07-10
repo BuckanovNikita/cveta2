@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-import yaml
 
 from cveta2.commands import setup as setup_cmd
 from cveta2.commands.interactive import _questionary, primitives
 from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.config import CvatConfig, load_cache_config, load_image_cache_config
 from cveta2.models import ProjectInfo
+from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,19 +108,14 @@ def test_setup_direct_org_slug_accepted(
 def test_setup_existing_org_kept_on_enter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {
-                    "host": "http://localhost:8080",
-                    "organization": "old-org",
-                    "username": "user1",
-                    "password": "pw",
-                }
-            }
-        ),
-        encoding="utf-8",
+    config_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={
+            "host": "http://localhost:8080",
+            "organization": "old-org",
+            "username": "user1",
+            "password": "pw",
+        },
     )
     prompts = run_setup_with_inputs(monkeypatch, config_path, ["", "", ""])
 
@@ -137,14 +132,10 @@ def two_projects(monkeypatch: pytest.MonkeyPatch) -> list[ProjectInfo]:
 
 
 def write_cache_config(config_path: Path, image_cache: dict[str, str]) -> None:
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {"host": "http://localhost:8080"},
-                "image_cache": image_cache,
-            }
-        ),
-        encoding="utf-8",
+    write_config_yaml(
+        config_path,
+        cvat={"host": "http://localhost:8080"},
+        image_cache=image_cache,
     )
 
 

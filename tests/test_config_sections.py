@@ -19,24 +19,20 @@ from cveta2.config import (
     save_image_cache_config,
     save_sync_roots_config,
 )
+from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
     import pytest
 
 
 def test_load_config_with_image_cache(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {"host": "http://localhost:8080"},
-                "image_cache": {
-                    "coco8-dev": "/mnt/data/coco8",
-                    "other-project": "/mnt/data/other",
-                },
-            }
-        ),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        image_cache={
+            "coco8-dev": "/mnt/data/coco8",
+            "other-project": "/mnt/data/other",
+        },
     )
     ic = load_image_cache_config(cfg_path)
     assert ic.get_cache_dir("coco8-dev") == Path("/mnt/data/coco8")
@@ -44,10 +40,8 @@ def test_load_config_with_image_cache(tmp_path: Path) -> None:
 
 
 def test_load_config_without_image_cache(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump({"cvat": {"host": "http://localhost:8080"}}),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
     )
     ic = load_image_cache_config(cfg_path)
     assert ic.projects == {}
@@ -59,15 +53,10 @@ def test_image_cache_missing_file(tmp_path: Path) -> None:
 
 
 def test_save_config_preserves_image_cache(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {"host": "http://localhost:8080"},
-                "image_cache": {"proj-a": "/data/a"},
-            }
-        ),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        image_cache={"proj-a": "/data/a"},
     )
 
     ic = load_image_cache_config(cfg_path)
@@ -106,18 +95,13 @@ def test_set_cache_dir_overwrites_existing() -> None:
 
 
 def test_load_config_with_sync_roots(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {"host": "http://localhost:8080"},
-                "sync_roots": {
-                    "coco8-dev": "s3://bucket/images/my_favourite",
-                    "other-project": "bare/prefix",
-                },
-            }
-        ),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        sync_roots={
+            "coco8-dev": "s3://bucket/images/my_favourite",
+            "other-project": "bare/prefix",
+        },
     )
     cfg = load_sync_roots_config(cfg_path)
     assert cfg.get_root("coco8-dev") == "s3://bucket/images/my_favourite"
@@ -125,10 +109,8 @@ def test_load_config_with_sync_roots(tmp_path: Path) -> None:
 
 
 def test_load_config_without_sync_roots(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump({"cvat": {"host": "http://localhost:8080"}}),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
     )
     cfg = load_sync_roots_config(cfg_path)
     assert cfg.projects == {}
@@ -140,25 +122,18 @@ def test_sync_roots_missing_file(tmp_path: Path) -> None:
 
 
 def test_load_config_invalid_section(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump({"sync_roots": ["not", "a", "dict"]}),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml", sync_roots=["not", "a", "dict"]
     )
     cfg = load_sync_roots_config(cfg_path)
     assert cfg.projects == {}
 
 
 def test_save_load_round_trip_preserves_other_sections(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {"host": "http://localhost:8080"},
-                "image_cache": {"proj-a": "/data/a"},
-            }
-        ),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        image_cache={"proj-a": "/data/a"},
     )
 
     save_sync_roots_config(
@@ -177,10 +152,8 @@ def test_save_load_round_trip_preserves_other_sections(tmp_path: Path) -> None:
 
 
 def test_save_empty_config_removes_section(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump({"sync_roots": {"proj": "old/root"}}),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml", sync_roots={"proj": "old/root"}
     )
 
     save_sync_roots_config(SyncRootsConfig(), cfg_path)
@@ -228,10 +201,8 @@ def test_user_config_overrides_preset(
     """User config file values override the preset."""
     _clear_cvat_env(monkeypatch)
 
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump({"cvat": {"host": "https://custom-cvat.example.com"}}),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml", cvat={"host": "https://custom-cvat.example.com"}
     )
 
     cfg = CvatConfig.load(config_path=cfg_path)
@@ -247,10 +218,8 @@ def test_env_overrides_all(
     for var in ("CVAT_ORGANIZATION", "CVAT_USERNAME", "CVAT_PASSWORD"):
         monkeypatch.delenv(var, raising=False)
 
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump({"cvat": {"host": "https://file-cvat.example.com"}}),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml", cvat={"host": "https://file-cvat.example.com"}
     )
 
     cfg = CvatConfig.load(config_path=cfg_path)
@@ -264,18 +233,13 @@ def test_preset_does_not_override_credentials(
     """Preset has no credentials; user-provided ones are preserved."""
     _clear_cvat_env(monkeypatch)
 
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {
-                    "host": "http://localhost:8080",
-                    "username": "admin",
-                    "password": "secret",
-                }
-            }
-        ),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={
+            "host": "http://localhost:8080",
+            "username": "admin",
+            "password": "secret",
+        },
     )
 
     cfg = CvatConfig.load(config_path=cfg_path)
@@ -289,24 +253,20 @@ def test_preset_does_not_override_credentials(
 
 
 def _write_cache_yaml(cfg_path: Path) -> None:
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "cvat": {"host": "http://localhost:8080"},
-                "cache": {
-                    "images_root": "/mnt/datasets",
-                    "tasks_root": "/mnt/task-cache",
-                    "projects": {
-                        "projA": {
-                            "ignored_prefix": "data/projA",
-                            "task_cache_s3": "s3://ml-cache/projA",
-                        },
-                        "projB": {"images_root": "/mnt/projB-images"},
-                    },
+    write_config_yaml(
+        cfg_path,
+        cvat={"host": "http://localhost:8080"},
+        cache={
+            "images_root": "/mnt/datasets",
+            "tasks_root": "/mnt/task-cache",
+            "projects": {
+                "projA": {
+                    "ignored_prefix": "data/projA",
+                    "task_cache_s3": "s3://ml-cache/projA",
                 },
-            }
-        ),
-        encoding="utf-8",
+                "projB": {"images_root": "/mnt/projB-images"},
+            },
+        },
     )
 
 
@@ -333,10 +293,8 @@ def test_load_cache_config_resolves_overrides(tmp_path: Path) -> None:
 
 
 def test_cache_config_missing_section_and_file(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump({"cvat": {"host": "http://localhost:8080"}}),
-        encoding="utf-8",
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
     )
     assert load_cache_config(cfg_path).for_project("x") == CacheProjectSettings()
     missing = load_cache_config(tmp_path / "nonexistent.yaml")

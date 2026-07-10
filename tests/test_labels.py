@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -220,29 +220,39 @@ def test_update_labels_no_ops_does_nothing() -> None:
     api.patch_project_labels.assert_not_called()
 
 
-def test_update_labels_add_calls_patch() -> None:
+@pytest.mark.parametrize(
+    ("kwargs", "expected_patches"),
+    [
+        pytest.param(
+            {"add": ["new_label"]},
+            [LabelPatch(name="new_label")],
+            id="add",
+        ),
+        pytest.param(
+            {"delete": [1, 2]},
+            [LabelPatch(id=1, deleted=True), LabelPatch(id=2, deleted=True)],
+            id="delete",
+        ),
+        pytest.param(
+            {"rename": {1: "renamed"}},
+            [LabelPatch(id=1, name="renamed")],
+            id="rename",
+        ),
+        pytest.param(
+            {"recolor": {1: "#00ff00"}},
+            [LabelPatch(id=1, color="#00ff00")],
+            id="recolor",
+        ),
+    ],
+)
+def test_update_labels_calls_patch(
+    kwargs: dict[str, Any],
+    expected_patches: list[LabelPatch],
+) -> None:
     client, api = _client_with_api_mock()
 
-    client.update_project_labels(42, add=["new_label"])
-    api.patch_project_labels.assert_called_once_with(42, [LabelPatch(name="new_label")])
-
-
-def test_update_labels_delete_calls_patch() -> None:
-    client, api = _client_with_api_mock()
-
-    client.update_project_labels(42, delete=[1, 2])
-    api.patch_project_labels.assert_called_once_with(
-        42, [LabelPatch(id=1, deleted=True), LabelPatch(id=2, deleted=True)]
-    )
-
-
-def test_update_labels_rename_calls_patch() -> None:
-    client, api = _client_with_api_mock()
-
-    client.update_project_labels(42, rename={1: "renamed"})
-    api.patch_project_labels.assert_called_once_with(
-        42, [LabelPatch(id=1, name="renamed")]
-    )
+    client.update_project_labels(42, **kwargs)
+    api.patch_project_labels.assert_called_once_with(42, expected_patches)
 
 
 def test_update_labels_requires_context_manager() -> None:
@@ -526,17 +536,3 @@ def test_recolor_label_without_color() -> None:
         1, recolor={10: "#abcdef"}
     )
     assert len(result) == 1
-
-
-# ---------------------------------------------------------------------------
-# CvatClient.update_project_labels — recolor
-# ---------------------------------------------------------------------------
-
-
-def test_update_labels_recolor_calls_patch() -> None:
-    client, api = _client_with_api_mock()
-
-    client.update_project_labels(42, recolor={1: "#00ff00"})
-    api.patch_project_labels.assert_called_once_with(
-        42, [LabelPatch(id=1, color="#00ff00")]
-    )

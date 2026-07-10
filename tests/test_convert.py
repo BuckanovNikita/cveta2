@@ -32,7 +32,7 @@ from cveta2.services.convert.common import (
     _yolo_to_pixel,
 )
 from cveta2.services.convert.yolo import _parse_label_file
-from tests.helpers import csv_row, make_args, make_bbox, write_dataset_csv
+from tests.helpers import csv_row, make_args, make_bbox, make_image, write_dataset_csv
 
 
 def _make_dataset_csv(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
@@ -294,10 +294,7 @@ class TestToYolo:
     def test_basic_structure(self, tmp_path: Path) -> None:
         """Check that --to-yolo creates proper directory structure."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        from PIL import Image
-
-        Image.new("RGB", (640, 480)).save(img_dir / "test.jpg")
+        make_image(img_dir / "test.jpg")
 
         rows = [
             csv_row("test.jpg", label="cat", split="train"),
@@ -338,10 +335,7 @@ class TestToYolo:
     def test_empty_labels_for_none_shape(self, tmp_path: Path) -> None:
         """Images with instance_shape=none should get empty label files."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        from PIL import Image
-
-        Image.new("RGB", (640, 480)).save(img_dir / "empty.jpg")
+        make_image(img_dir / "empty.jpg")
 
         rows = [csv_row("empty.jpg", shape="none", split="val")]
         csv_path = _make_dataset_csv(tmp_path, rows)
@@ -361,10 +355,7 @@ class TestToYolo:
     def test_only_existing_splits_in_yaml(self, tmp_path: Path) -> None:
         """dataset.yaml should only include splits that exist in data."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        from PIL import Image
-
-        Image.new("RGB", (640, 480)).save(img_dir / "test.jpg")
+        make_image(img_dir / "test.jpg")
 
         rows = [csv_row("test.jpg", label="cat", split="val")]
         csv_path = _make_dataset_csv(tmp_path, rows)
@@ -425,11 +416,8 @@ class TestFromYoloDataset:
             "0 0.5 0.5 0.3 0.4 0.95\n1 0.2 0.3 0.1 0.2 0.87\n"
         )
 
-        from PIL import Image
-
         img_dir = tmp_path / "imgs"
-        img_dir.mkdir()
-        Image.new("RGB", (640, 480)).save(img_dir / "img1.jpg")
+        make_image(img_dir / "img1.jpg")
 
         names_path = tmp_path / "names.yaml"
         with names_path.open("w") as f:
@@ -462,11 +450,8 @@ class TestRoundtrip:
 
     def test_csv_to_yolo_to_csv(self, tmp_path: Path) -> None:
         """CSV -> YOLO -> CSV should preserve bbox coordinates."""
-        from PIL import Image
-
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        Image.new("RGB", (640, 480)).save(img_dir / "test.jpg")
+        make_image(img_dir / "test.jpg")
 
         original_rows = [
             csv_row(
@@ -531,18 +516,10 @@ class TestRoundtrip:
 class TestSizeCache:
     """Tests for _SizeCache image dimension caching."""
 
-    def _make_image(self, path: Path, width: int, height: int) -> None:
-        from PIL import Image
-
-        img = Image.new("RGB", (width, height))
-        img.save(path)
-
     def test_read_all_false_returns_first_size(self, tmp_path: Path) -> None:
         """When read_all=False, all calls return the first image's size."""
-        img1 = tmp_path / "a.jpg"
-        img2 = tmp_path / "b.jpg"
-        self._make_image(img1, 640, 480)
-        self._make_image(img2, 320, 240)
+        img1 = make_image(tmp_path / "a.jpg", 640, 480)
+        img2 = make_image(tmp_path / "b.jpg", 320, 240)
 
         cache = _SizeCache(read_all=False)
         assert cache.get(img1) == (640, 480)
@@ -550,10 +527,8 @@ class TestSizeCache:
 
     def test_read_all_true_reads_each_image(self, tmp_path: Path) -> None:
         """When read_all=True, each image is read individually."""
-        img1 = tmp_path / "a.jpg"
-        img2 = tmp_path / "b.jpg"
-        self._make_image(img1, 640, 480)
-        self._make_image(img2, 320, 240)
+        img1 = make_image(tmp_path / "a.jpg", 640, 480)
+        img2 = make_image(tmp_path / "b.jpg", 320, 240)
 
         cache = _SizeCache(read_all=True)
         assert cache.get(img1) == (640, 480)
@@ -606,16 +581,10 @@ def test_run_convert_missing_split_exits(tmp_path: Path) -> None:
 class TestToCoco:
     """Tests for --to-coco CSV to COCO conversion."""
 
-    def _make_image(self, path: Path, width: int = 640, height: int = 480) -> None:
-        from PIL import Image
-
-        Image.new("RGB", (width, height)).save(path)
-
     def test_basic_structure(self, tmp_path: Path) -> None:
         """Check directory layout, JSON schema, bbox/area/category values."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        self._make_image(img_dir / "test.jpg")
+        make_image(img_dir / "test.jpg")
 
         rows = [
             csv_row(
@@ -661,8 +630,7 @@ class TestToCoco:
     def test_val_renamed_to_valid(self, tmp_path: Path) -> None:
         """Val split directory should be renamed to valid/."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        self._make_image(img_dir / "test.jpg")
+        make_image(img_dir / "test.jpg")
 
         rows = [csv_row("test.jpg", label="cat", split="val")]
         csv_path = _make_dataset_csv(tmp_path, rows)
@@ -674,8 +642,7 @@ class TestToCoco:
     def test_none_shape_in_images_not_annotations(self, tmp_path: Path) -> None:
         """Images with shape=none appear in images but not annotations."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        self._make_image(img_dir / "empty.jpg")
+        make_image(img_dir / "empty.jpg")
 
         rows = [csv_row("empty.jpg", shape="none", split="train")]
         csv_path = _make_dataset_csv(tmp_path, rows)
@@ -692,10 +659,9 @@ class TestToCoco:
     def test_multiple_labels_1based_ids(self, tmp_path: Path) -> None:
         """Sorted labels should get 1-based category IDs."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        self._make_image(img_dir / "a.jpg")
-        self._make_image(img_dir / "b.jpg")
-        self._make_image(img_dir / "c.jpg")
+        make_image(img_dir / "a.jpg")
+        make_image(img_dir / "b.jpg")
+        make_image(img_dir / "c.jpg")
 
         rows = [
             csv_row("a.jpg", label="zebra", split="train"),

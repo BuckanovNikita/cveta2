@@ -20,7 +20,15 @@ from cveta2._client.dtos import RawShape
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
 from cveta2.image_downloader import CloudStorageInfo
-from cveta2.models import CSV_COLUMNS, BBoxAnnotation, DeletedImage, TaskInfo
+from cveta2.models import (
+    CSV_COLUMNS,
+    BBoxAnnotation,
+    DeletedImage,
+    ImageWithoutAnnotations,
+    ProjectAnnotations,
+    TaskAnnotations,
+    TaskInfo,
+)
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
@@ -65,6 +73,34 @@ def client_with_api(api: Any) -> CvatClient:
     return CvatClient(CFG, api=api)
 
 
+def fetch_all_annotations(
+    client: CvatClient,
+    project_id: int,
+    **kwargs: Any,
+) -> ProjectAnnotations:
+    """Fetch a whole project in-memory via the production per-task pipeline.
+
+    Mirrors what ``services.fetch`` does (``prepare_fetch`` +
+    ``fetch_one_task`` per task) without CSV output or the cache.
+    """
+    ctx = client.prepare_fetch(project_id, **kwargs)
+    results: list[TaskAnnotations] = []
+    for task in ctx.tasks:
+        fetched = client.fetch_one_task(client.api, task, ctx)
+        if fetched is not None:
+            results.append(fetched)
+    return TaskAnnotations.merge(results)
+
+
+def split_records(
+    result: ProjectAnnotations,
+) -> tuple[list[BBoxAnnotation], list[ImageWithoutAnnotations]]:
+    """Partition fetched annotations into (bbox, without-annotation) records."""
+    bbox = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+    without = [a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)]
+    return bbox, without
+
+
 def write_test_config(
     path: Path,
     *,
@@ -81,6 +117,21 @@ def write_test_config(
     if image_cache:
         data["image_cache"] = image_cache
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def write_config_yaml(path: Path, **sections: object) -> Path:
+    """Write a config YAML with the given top-level sections."""
+    path.write_text(yaml.safe_dump(sections), encoding="utf-8")
+    return path
+
+
+def make_image(path: Path, width: int = 640, height: int = 480) -> Path:
+    """Create a real RGB image file for conversion tests."""
+    from PIL import Image
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (width, height)).save(path)
+    return path
 
 
 def make_bbox(**overrides: Any) -> BBoxAnnotation:

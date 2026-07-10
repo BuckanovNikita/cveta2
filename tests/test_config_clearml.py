@@ -15,6 +15,7 @@ from cveta2.config import (
     load_clearml_config,
     save_clearml_config,
 )
+from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -150,10 +151,8 @@ class TestLoadSaveClearmlConfig:
         assert loaded.projects["Proj"].clearml_dataset == "annot"
 
     def test_save_preserves_other_sections(self, tmp_path: Path) -> None:
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text(
-            yaml.safe_dump({"cvat": {"host": "https://example.com"}}),
-            encoding="utf-8",
+        config_path = write_config_yaml(
+            tmp_path / "config.yaml", cvat={"host": "https://example.com"}
         )
         cfg = ClearmlConfig(
             enabled=False,
