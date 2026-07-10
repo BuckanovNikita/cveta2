@@ -187,3 +187,7 @@ forbidden_modules = [
     "cveta2._client",
     "cveta2.models",
 ]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
