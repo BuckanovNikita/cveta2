@@ -11,11 +11,40 @@ from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
     resolve_project_and_cloud_storage,
 )
-from cveta2.config import load_image_cache_config
+from cveta2.config import (
+    cache_dir_for_project,
+    load_cache_config,
+    load_image_cache_config,
+)
 from cveta2.exceptions import Cveta2Error
 
 if TYPE_CHECKING:
     import argparse
+    from pathlib import Path
+
+
+def _resolve_sync_dirs(project_filter: str | None) -> dict[str, Path]:
+    """Map project name → local image dir from ``image_cache`` + ``cache``.
+
+    Per-project ``image_cache`` entries win; projects known only to the
+    ``cache`` section fall back to ``images_root/<sanitized_name>``.
+    """
+    ic_cfg = load_image_cache_config()
+    cache_cfg = load_cache_config()
+
+    names = set(ic_cfg.projects) | set(cache_cfg.projects)
+    if project_filter:
+        names = {project_filter}
+    resolved: dict[str, Path] = {}
+    for name in sorted(names):
+        cache_dir = ic_cfg.get_cache_dir(name)
+        if cache_dir is None:
+            images_root = cache_cfg.for_project(name).images_root
+            if images_root is None:
+                continue
+            cache_dir = cache_dir_for_project(images_root, name)
+        resolved[name] = cache_dir
+    return resolved
 
 
 def run_s3_sync(args: argparse.Namespace) -> None:
@@ -23,26 +52,20 @@ def run_s3_sync(args: argparse.Namespace) -> None:
     if args.root and not args.project:
         sys.exit("Ошибка: --root требует явного указания проекта через --project.")
 
-    ic_cfg = load_image_cache_config()
-    if not ic_cfg.projects:
+    project_filter = args.project.strip() if args.project else None
+    projects_to_sync = _resolve_sync_dirs(project_filter)
+    if not projects_to_sync:
+        if project_filter:
+            sys.exit(
+                f"Ошибка: для проекта {project_filter!r} не настроен путь "
+                f"кэширования изображений.\n"
+                f"Добавьте image_cache.{project_filter} или cache.images_root "
+                f"в конфигурацию (cveta2 setup-cache)."
+            )
         sys.exit(
             "Ошибка: image_cache не настроен — нет проектов для синхронизации.\n"
             "Добавьте секцию image_cache в конфигурацию или запустите: cveta2 setup"
         )
-
-    # Filter to a single project if --project was given
-    if args.project:
-        project_name = args.project.strip()
-        cache_dir = ic_cfg.get_cache_dir(project_name)
-        if cache_dir is None:
-            sys.exit(
-                f"Ошибка: проект {project_name!r} не найден в image_cache.\n"
-                f"Настроенные проекты: "
-                f"{', '.join(ic_cfg.projects) or '(нет)'}"
-            )
-        projects_to_sync = {project_name: cache_dir}
-    else:
-        projects_to_sync = dict(ic_cfg.projects)
 
     with open_client() as client:
         for project_name, cache_dir in projects_to_sync.items():
@@ -61,8 +84,14 @@ def run_s3_sync(args: argparse.Namespace) -> None:
                 )
                 continue
 
+            ignored_prefix = (
+                load_cache_config().for_project(project_name).ignored_prefix
+            )
             stats = client.sync_project_images(
-                project_id, cache_dir, project_cloud_storage=cs_info
+                project_id,
+                cache_dir,
+                project_cloud_storage=cs_info,
+                ignored_prefix=ignored_prefix,
             )
             logger.info(
                 f"Проект {project_name!r}: {stats.downloaded} загружено, "

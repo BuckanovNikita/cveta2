@@ -17,7 +17,9 @@ from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import resolve_project_and_cloud_storage
 from cveta2.commands.interactive import select_tasks
 from cveta2.config import (
+    cache_dir_for_project,
     is_interactive_disabled,
+    load_cache_config,
     load_image_cache_config,
     save_image_cache_config,
 )
@@ -161,6 +163,10 @@ def _resolve_images_dir(
     cached_dir = ic_cfg.get_cache_dir(project_name)
     if cached_dir is not None:
         return cached_dir
+
+    images_root = load_cache_config().for_project(project_name).images_root
+    if images_root is not None:
+        return cache_dir_for_project(images_root, project_name)
 
     # Not configured — interactive prompt or error
     if is_interactive_disabled():

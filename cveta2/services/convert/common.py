@@ -14,7 +14,7 @@ from cveta2.config import load_image_cache_config
 from cveta2.exceptions import Cveta2Error
 from cveta2.image_uploader import resolve_images
 from cveta2.models import CSV_COLUMNS
-from cveta2.services.output import read_dataset_csv
+from cveta2.services.output import format_counts_ru, read_dataset_csv
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -382,4 +382,4 @@ def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
         else pd.DataFrame(columns=list(CSV_COLUMNS))
     )
     df.to_csv(path, index=False, encoding="utf-8")
-    logger.info(f"CSV сохранён: {path} ({len(df)} строк)")
+    logger.info(f"CSV сохранён: {path} ({format_counts_ru(df)})")

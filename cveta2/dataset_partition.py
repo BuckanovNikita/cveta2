@@ -172,8 +172,12 @@ def partition_annotations_df(
     obsolete = pd.concat([obsolete_deleted, obsolete_stale], ignore_index=True)
 
     logger.debug(
-        f"Partition result: dataset={len(dataset)}, obsolete={len(obsolete)}, "
-        f"in_progress={len(in_progress)}, deleted_images={len(unique_deleted)}",
+        f"Partition result: "
+        f"dataset={len(dataset)} rows/{dataset['image_name'].nunique()} images, "
+        f"obsolete={len(obsolete)} rows/{obsolete['image_name'].nunique()} images, "
+        f"in_progress={len(in_progress)} rows/"
+        f"{in_progress['image_name'].nunique()} images, "
+        f"deleted_images={len(unique_deleted)}",
     )
 
     return PartitionResult(

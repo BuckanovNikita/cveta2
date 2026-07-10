@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cveta2.s3_utils import build_s3_key, parse_sync_root
+from cveta2.s3_utils import build_s3_key, parse_sync_root, strip_key_prefix
 
 
 class TestBuildS3Key:
@@ -78,3 +78,29 @@ class TestParseSyncRoot:
     def test_invalid_roots(self, root: str) -> None:
         with pytest.raises(ValueError, match="sync root"):
             parse_sync_root(root)
+
+
+class TestStripKeyPrefix:
+    """Tests for strip_key_prefix() subfolder-preserving stripping."""
+
+    @pytest.mark.parametrize(
+        ("key", "prefix", "expected"),
+        [
+            ("data/projA/2026-01/img.jpg", "data/projA", "2026-01/img.jpg"),
+            ("data/projA/img.jpg", "data/projA", "img.jpg"),
+            ("data/projA/a/b/img.jpg", "data", "projA/a/b/img.jpg"),
+            ("data/projA/img.jpg", "", "data/projA/img.jpg"),
+            ("other/img.jpg", "data/projA", "other/img.jpg"),
+            ("data/projA/img.jpg", "data/projA/", "img.jpg"),
+        ],
+        ids=[
+            "keeps_subfolders",
+            "single_level",
+            "partial_prefix",
+            "empty_prefix",
+            "unrelated_prefix_unchanged",
+            "trailing_slash_prefix",
+        ],
+    )
+    def test_strip_key_prefix(self, key: str, prefix: str, expected: str) -> None:
+        assert strip_key_prefix(key, prefix) == expected

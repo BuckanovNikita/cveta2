@@ -18,15 +18,19 @@ from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
+from cveta2.config import load_cache_config
 from cveta2.models import TaskAnnotations
-from cveta2.s3_utils import build_s3_key, make_s3_client, s3_retry
+from cveta2.s3_utils import build_s3_key, make_s3_client, parse_sync_root, s3_retry
 
 if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import TaskInfo
     from cveta2.s3_types import S3Client
 
-CACHE_SCHEMA_VERSION = 1
+# v2: payload records carry ``frame_path`` (nested CVAT frame names); v1
+# entries were saved after basename collapse and would rebuild a wrong
+# ``s3_image_path`` for multilevel S3 hierarchies.
+CACHE_SCHEMA_VERSION = 2
 
 _COMPLETED_STATUS = "completed"
 _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})
@@ -42,16 +46,26 @@ class CachedTaskEnvelope(BaseModel):
     payload: TaskAnnotations
 
 
-def get_task_cache_dir(project_id: int) -> Path:
-    """Return the local cache directory for a project's task annotations."""
+def get_task_cache_dir(project_id: int, root: Path | None = None) -> Path:
+    """Return the local cache directory for a project's task annotations.
+
+    *root* (the ``cache.tasks_root`` setting) replaces the default
+    ``~/.cache/cveta2/task_annotations`` base when provided.
+    """
+    if root is not None:
+        return root / f"project_{project_id}"
     xdg_cache = os.environ.get("XDG_CACHE_HOME", "")
     base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
     return base / "cveta2" / "task_annotations" / f"project_{project_id}"
 
 
-def invalidate_local_entry(project_id: int, task_id: int) -> None:
+def invalidate_local_entry(
+    project_id: int, task_id: int, project_name: str = ""
+) -> None:
     """Drop the local cache entry for *task_id* after a task mutation."""
-    TaskAnnotationCache(get_task_cache_dir(project_id)).invalidate_local(task_id)
+    root = load_cache_config().for_project(project_name).tasks_root
+    cache_dir = get_task_cache_dir(project_id, root=root)
+    TaskAnnotationCache(cache_dir).invalidate_local(task_id)
 
 
 @s3_retry
@@ -76,24 +90,52 @@ def _client_error_code(error: ClientError) -> str:
 class S3CacheBackend:
     """Shared S3 mirror of the task-annotation cache.
 
-    Entries live under ``{key_prefix}/.cveta2_cache/task_annotations/``
-    next to the project images.  Any S3 failure (except a plain missing
-    key) disables the backend for the rest of the run.
+    By default entries live under
+    ``{key_prefix}/.cveta2_cache/task_annotations/`` next to the project
+    images; an explicit ``cache.projects.<name>.task_cache_s3`` location
+    stores them under ``{key_prefix}/task_annotations/`` instead.  Any S3
+    failure (except a plain missing key) disables the backend for the
+    rest of the run.
     """
 
-    def __init__(self, s3_client: S3Client, bucket: str, key_prefix: str) -> None:
-        """Store the S3 client and target bucket/prefix."""
+    def __init__(
+        self,
+        s3_client: S3Client,
+        bucket: str,
+        key_prefix: str,
+        *,
+        explicit_location: bool = False,
+    ) -> None:
+        """Store the S3 client, target bucket/prefix and layout mode."""
         self._s3 = s3_client
         self._bucket = bucket
         self._key_prefix = key_prefix
+        self._explicit_location = explicit_location
         self._disabled = False
 
     @classmethod
     def from_cloud_storage(
         cls,
         cs_info: CloudStorageInfo | None,
+        task_cache_s3: str | None = None,
     ) -> S3CacheBackend | None:
-        """Build a backend from CVAT cloud storage info (None when absent)."""
+        """Build a backend from CVAT cloud storage info (None when absent).
+
+        *task_cache_s3* (the ``cache.projects.<name>.task_cache_s3``
+        setting) overrides the location: a full ``s3://bucket/prefix``
+        may target another bucket; a bare prefix stays in the project
+        bucket.  The project storage endpoint is used in both cases.
+        """
+        if task_cache_s3:
+            bucket, prefix = parse_sync_root(task_cache_s3)
+            if bucket is None and cs_info is None:
+                return None
+            return cls(
+                make_s3_client((cs_info.endpoint_url if cs_info else "") or None),
+                bucket or (cs_info.bucket if cs_info else ""),
+                prefix,
+                explicit_location=True,
+            )
         if cs_info is None:
             return None
         return cls(
@@ -129,10 +171,10 @@ class S3CacheBackend:
 
     def _entry_key(self, task_id: int) -> str:
         """Build the S3 key of the cache entry for *task_id*."""
-        return build_s3_key(
-            self._key_prefix,
-            f".cveta2_cache/task_annotations/task_{task_id}.json",
-        )
+        entry = f"task_annotations/task_{task_id}.json"
+        if not self._explicit_location:
+            entry = f".cveta2_cache/{entry}"
+        return build_s3_key(self._key_prefix, entry)
 
     def _disable(self, error: Exception) -> None:
         """Log one Russian warning and stop using S3 for the rest of the run."""

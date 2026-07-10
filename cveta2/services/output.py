@@ -9,7 +9,7 @@ from loguru import logger
 
 from cveta2.exceptions import Cveta2Error
 from cveta2.models import CSV_COLUMNS
-from cveta2.s3_utils import build_s3_key
+from cveta2.s3_utils import build_s3_key, strip_key_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -53,13 +53,26 @@ def populate_record_paths(
     result: ProjectAnnotations,
     cs_info: CloudStorageInfo | None,
     images_dir: Path | None,
+    ignored_prefix: str | None = None,
 ) -> None:
-    """Set ``s3_image_path`` and ``image_path`` on all annotation/deleted records."""
+    """Set ``s3_image_path`` and ``image_path`` on all annotation/deleted records.
+
+    ``s3_image_path`` is built from the full frame key (``frame_path`` when
+    the CVAT frame name was nested).  With *ignored_prefix* set, the local
+    path mirrors the S3 key below that prefix (subfolders preserved);
+    otherwise images are expected flat as ``images_dir / image_name``.
+    """
     for record in (*result.annotations, *result.deleted_images):
+        frame_ref = record.frame_path or record.image_name
         if cs_info is not None:
-            record.s3_image_path = build_s3_key(cs_info.prefix, record.image_name)
+            record.s3_image_path = build_s3_key(cs_info.prefix, frame_ref)
         if images_dir is not None:
-            local = images_dir / record.image_name
+            local_rel = record.image_name
+            if ignored_prefix and cs_info is not None:
+                local_rel = strip_key_prefix(
+                    build_s3_key(cs_info.prefix, frame_ref), ignored_prefix
+                )
+            local = images_dir / local_rel
             if local.exists():
                 record.image_path = str(local.resolve())
 
@@ -93,6 +106,16 @@ def count_images(df: pd.DataFrame) -> int:
     return int(df["image_name"].nunique())
 
 
+def format_counts(df: pd.DataFrame) -> str:
+    """English ``N images, M rows`` summary for log messages."""
+    return f"{count_images(df)} images, {len(df)} rows"
+
+
+def format_counts_ru(df: pd.DataFrame) -> str:
+    """Russian ``N изображений, M строк`` summary for log messages."""
+    return f"{count_images(df)} изображений, {len(df)} строк"
+
+
 def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     """Write raw.csv with all annotation and deleted rows, unpartitioned."""
     rows = result.to_csv_rows()
@@ -101,10 +124,7 @@ def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_path = output_dir / "raw.csv"
     raw_df.to_csv(raw_path, index=False, encoding="utf-8")
-    logger.info(
-        f"Raw CSV saved to {raw_path} "
-        f"({count_images(raw_df)} images, {len(raw_df)} rows)"
-    )
+    logger.info(f"Raw CSV saved to {raw_path} ({format_counts(raw_df)})")
 
 
 def _write_deleted_csv(
@@ -119,7 +139,7 @@ def _write_deleted_csv(
     )
     deleted_path = output_dir / "deleted.csv"
     deleted_df.to_csv(deleted_path, index=False, encoding="utf-8")
-    logger.info(f"Deleted CSV saved to {deleted_path} ({len(deleted_df)} rows)")
+    logger.info(f"Deleted CSV saved to {deleted_path} ({format_counts(deleted_df)})")
 
 
 def write_partition_csvs(partition: PartitionResult, output_dir: Path) -> None:
@@ -133,9 +153,7 @@ def write_partition_csvs(partition: PartitionResult, output_dir: Path) -> None:
     ]:
         path = output_dir / name
         df.to_csv(path, index=False, encoding="utf-8")
-        logger.info(
-            f"{label} saved to {path} ({count_images(df)} images, {len(df)} rows)"
-        )
+        logger.info(f"{label} saved to {path} ({format_counts(df)})")
 
     _write_deleted_csv(partition.deleted_images, output_dir)
 
@@ -148,9 +166,6 @@ def write_dataset_and_deleted(result: ProjectAnnotations, output_dir: Path) -> N
 
     dataset_path = output_dir / "dataset.csv"
     df.to_csv(dataset_path, index=False, encoding="utf-8")
-    logger.info(
-        f"Dataset CSV saved to {dataset_path} "
-        f"({count_images(df)} images, {len(df)} rows)"
-    )
+    logger.info(f"Dataset CSV saved to {dataset_path} ({format_counts(df)})")
 
     _write_deleted_csv(result.deleted_images, output_dir)

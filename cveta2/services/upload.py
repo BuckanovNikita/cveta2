@@ -71,7 +71,9 @@ def read_exclude_names(in_progress_path: str | None) -> set[str]:
     if "image_name" not in ip_df.columns:
         return set()
     names: set[str] = set(ip_df["image_name"].dropna().unique())
-    logger.info(f"Исключено {len(names)} изображений из in_progress.csv")
+    logger.info(
+        f"Исключено {len(names)} изображений ({len(ip_df)} строк) из in_progress.csv"
+    )
     return names
 
 
@@ -85,7 +87,10 @@ def split_deleted_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, set[str]]:
     deleted_mask = df["instance_shape"] == "deleted"
     names: set[str] = set(df.loc[deleted_mask, "image_name"].dropna().unique())
     if names:
-        logger.info(f"Найдено удалённых изображений: {len(names)}")
+        logger.info(
+            f"Найдено удалённых изображений: {len(names)} "
+            f"({int(deleted_mask.sum())} строк)"
+        )
     df_normal: pd.DataFrame = df[~deleted_mask]
     return df_normal, names
 
@@ -134,7 +139,10 @@ def build_upload_plan(
     image_names = set(filtered["image_name"].dropna().unique())
     if not image_names and not deleted_names:
         raise Cveta2Error("Ошибка: после фильтрации не осталось изображений.")
-    logger.info(f"Изображений для загрузки: {len(image_names)}")
+    logger.info(
+        f"Изображений для загрузки: {len(image_names)} "
+        f"({len(filtered)} строк аннотаций)"
+    )
     return UploadPlan(
         annotations=filtered,
         image_names=image_names,
@@ -283,7 +291,7 @@ def upload_dataset(  # noqa: PLR0913
     if options.complete:
         client.complete_task(task_id)
 
-    invalidate_local_entry(project_id, task_id)
+    invalidate_local_entry(project_id, task_id, project_name)
 
     num_jobs = (
         len(task_image_names) + options.segment_size - 1

@@ -100,6 +100,17 @@ def build_s3_key(prefix: str, frame_name: str) -> str:
     return f"{prefix}/{frame_name}"
 
 
+def strip_key_prefix(key: str, prefix: str) -> str:
+    """Return *key* with a leading *prefix* removed, keeping subfolders.
+
+    When *key* does not start with *prefix* (or *prefix* is empty), the
+    key is returned unchanged.
+    """
+    if prefix and key.startswith(prefix):
+        return key[len(prefix) :].lstrip("/")
+    return key
+
+
 def list_s3_objects(
     s3_client: S3Client,
     bucket: str,
@@ -119,7 +130,7 @@ def list_s3_objects(
         resp = s3_client.list_objects_v2(**kwargs)
         for obj in resp.get("Contents", []):
             key: str = obj["Key"]
-            name = key[len(prefix) :].lstrip("/") if prefix else key
+            name = strip_key_prefix(key, prefix)
             if name:
                 objects.append((key, name))
         if not resp.get("IsTruncated"):

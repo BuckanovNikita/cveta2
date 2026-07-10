@@ -8,7 +8,8 @@ import pandas as pd
 import pytest
 
 from cveta2.exceptions import Cveta2Error
-from cveta2.services.output import enrich_dataframe_paths
+from cveta2.models import ProjectAnnotations
+from cveta2.services.output import enrich_dataframe_paths, populate_record_paths
 from cveta2.services.upload import (
     _warn_missing_images,
     build_search_dirs,
@@ -16,7 +17,7 @@ from cveta2.services.upload import (
     read_exclude_names,
     split_deleted_rows,
 )
-from tests.helpers import make_cs_info
+from tests.helpers import make_bbox, make_cs_info
 
 # ---------------------------------------------------------------------------
 # _read_exclude_names
@@ -206,3 +207,55 @@ def test_build_search_dirs_includes_cache(
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
     dirs = build_search_dirs(None, "my-project")
     assert cache_dir in dirs
+
+
+# ---------------------------------------------------------------------------
+# populate_record_paths
+# ---------------------------------------------------------------------------
+
+
+def test_populate_paths_nested_frame_builds_full_s3_key() -> None:
+    ann = make_bbox(image_name="sub1/sub2/img.jpg")
+    result = ProjectAnnotations(annotations=[ann], deleted_images=[])
+
+    populate_record_paths(result, make_cs_info(prefix="images"), None)
+
+    assert ann.image_name == "img.jpg"
+    assert ann.s3_image_path == "images/sub1/sub2/img.jpg"
+
+
+def test_populate_paths_flat_frame_unchanged() -> None:
+    ann = make_bbox(image_name="img.jpg")
+    result = ProjectAnnotations(annotations=[ann], deleted_images=[])
+
+    populate_record_paths(result, make_cs_info(prefix="images"), None)
+
+    assert ann.s3_image_path == "images/img.jpg"
+
+
+def test_populate_paths_local_flat_by_default(tmp_path: Path) -> None:
+    (tmp_path / "img.jpg").write_bytes(b"x")
+    ann = make_bbox(image_name="sub/img.jpg")
+    result = ProjectAnnotations(annotations=[ann], deleted_images=[])
+
+    populate_record_paths(result, make_cs_info(prefix="images"), tmp_path)
+
+    assert ann.image_path == str((tmp_path / "img.jpg").resolve())
+
+
+def test_populate_paths_local_nested_with_ignored_prefix(tmp_path: Path) -> None:
+    nested = tmp_path / "projA" / "2026-01" / "img.jpg"
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(b"x")
+    ann = make_bbox(image_name="2026-01/img.jpg")
+    result = ProjectAnnotations(annotations=[ann], deleted_images=[])
+
+    populate_record_paths(
+        result,
+        make_cs_info(prefix="data/projA"),
+        tmp_path,
+        ignored_prefix="data",
+    )
+
+    assert ann.s3_image_path == "data/projA/2026-01/img.jpg"
+    assert ann.image_path == str(nested.resolve())

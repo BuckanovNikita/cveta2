@@ -10,7 +10,7 @@ import yaml
 from cveta2.commands import setup as setup_cmd
 from cveta2.commands.interactive import _questionary, primitives
 from cveta2.commands.setup import run_setup, run_setup_cache
-from cveta2.config import CvatConfig, load_image_cache_config
+from cveta2.config import CvatConfig, load_cache_config, load_image_cache_config
 from cveta2.models import ProjectInfo
 
 if TYPE_CHECKING:
@@ -155,7 +155,7 @@ def test_setup_cache_root_applied_to_all_without_per_project_prompts(
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {})
     root = tmp_path / "cache"
-    prompts = feed_inputs(monkeypatch, [str(root), ""])
+    prompts = feed_inputs(monkeypatch, [str(root), "", "", ""])
 
     run_setup_cache(config_path)
 
@@ -164,6 +164,7 @@ def test_setup_cache_root_applied_to_all_without_per_project_prompts(
     assert saved.get_cache_dir("beta") == root / "beta"
     assert any("Применить ко всем проектам" in prompt for prompt in prompts)
     assert not any("id=1" in prompt for prompt in prompts)
+    assert load_cache_config(config_path).images_root == root
 
 
 @pytest.mark.usefixtures("two_projects")
@@ -174,7 +175,7 @@ def test_setup_cache_root_rejected_falls_back_to_per_project(
     write_cache_config(config_path, {})
     root = tmp_path / "cache"
     custom = tmp_path / "custom-alpha"
-    prompts = feed_inputs(monkeypatch, [str(root), "n", str(custom), ""])
+    prompts = feed_inputs(monkeypatch, [str(root), "n", str(custom), "", "", ""])
 
     run_setup_cache(config_path)
 
@@ -192,7 +193,7 @@ def test_setup_cache_no_root_keeps_per_project_flow(
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {})
     custom = tmp_path / "custom-alpha"
-    prompts = feed_inputs(monkeypatch, ["", str(custom), ""])
+    prompts = feed_inputs(monkeypatch, ["", str(custom), "", "", ""])
 
     run_setup_cache(config_path)
 
@@ -210,7 +211,7 @@ def test_setup_cache_root_apply_keeps_existing_paths_without_reset(
     existing = tmp_path / "existing-alpha"
     write_cache_config(config_path, {"alpha": str(existing)})
     root = tmp_path / "cache"
-    feed_inputs(monkeypatch, [str(root), ""])
+    feed_inputs(monkeypatch, [str(root), "", "", ""])
 
     run_setup_cache(config_path)
 
@@ -226,10 +227,44 @@ def test_setup_cache_root_apply_overrides_existing_paths_with_reset(
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {"alpha": str(tmp_path / "existing-alpha")})
     root = tmp_path / "cache"
-    feed_inputs(monkeypatch, [str(root), ""])
+    feed_inputs(monkeypatch, [str(root), "", "", ""])
 
     run_setup_cache(config_path, reset=True)
 
     saved = load_image_cache_config(config_path)
     assert saved.get_cache_dir("alpha") == root / "alpha"
     assert saved.get_cache_dir("beta") == root / "beta"
+
+
+@pytest.mark.usefixtures("two_projects")
+def test_setup_cache_saves_tasks_root_and_project_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    write_cache_config(config_path, {})
+    root = tmp_path / "cache"
+    tasks_root = tmp_path / "tasks"
+    answers = [
+        str(root),  # image cache root
+        "",  # apply to all -> default yes
+        str(tasks_root),  # tasks_root
+        "y",  # configure per-project settings
+        "data/alpha",  # alpha ignored_prefix
+        "s3://ml-cache/alpha",  # alpha task_cache_s3
+        "",  # beta ignored_prefix (skip)
+        "",  # beta task_cache_s3 (skip)
+    ]
+    feed_inputs(monkeypatch, answers)
+
+    run_setup_cache(config_path)
+
+    cache_cfg = load_cache_config(config_path)
+    assert cache_cfg.images_root == root
+    assert cache_cfg.tasks_root == tasks_root
+    alpha = cache_cfg.for_project("alpha")
+    assert alpha.ignored_prefix == "data/alpha"
+    assert alpha.task_cache_s3 == "s3://ml-cache/alpha"
+    beta = cache_cfg.for_project("beta")
+    assert beta.ignored_prefix is None
+    assert beta.task_cache_s3 is None
+    assert beta.tasks_root == tasks_root

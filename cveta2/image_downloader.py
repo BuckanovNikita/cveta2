@@ -16,7 +16,13 @@ from loguru import logger
 from pydantic import BaseModel
 from tqdm import tqdm
 
-from cveta2.s3_utils import list_s3_objects, make_s3_client, s3_retry
+from cveta2.s3_utils import (
+    build_s3_key,
+    list_s3_objects,
+    make_s3_client,
+    s3_retry,
+    strip_key_prefix,
+)
 
 if TYPE_CHECKING:
     from cveta2.models import ProjectAnnotations
@@ -80,13 +86,16 @@ class DownloadStats(BaseModel):
 class ImageDownloader:
     """Download project images from S3 into a user-specified directory.
 
-    Images are saved directly as ``target_dir / image_name`` — no
-    additional subdirectories are created.
+    By default images are saved flat as ``target_dir / image_name``.
+    With *ignored_prefix* set (the ``cache.projects.<name>.ignored_prefix``
+    setting), the local layout mirrors the S3 key below that prefix, so
+    subfolders are preserved.
     """
 
-    def __init__(self, target_dir: Path) -> None:
-        """Store the target directory for image downloads."""
+    def __init__(self, target_dir: Path, ignored_prefix: str | None = None) -> None:
+        """Store the target directory and optional S3 prefix to strip."""
         self._target_dir = target_dir
+        self._ignored_prefix = ignored_prefix
 
     # ------------------------------------------------------------------
     # Public API
@@ -110,7 +119,7 @@ class ImageDownloader:
             return DownloadStats(total=0)
 
         stats = DownloadStats(total=len(image_tasks))
-        pending = self._filter_cached(image_tasks, stats)
+        pending = self._filter_cached(image_tasks, stats, project_cloud_storage)
         if not pending:
             logger.info(
                 f"Все {stats.cached} изображений уже загружены в {self._target_dir}"
@@ -134,36 +143,50 @@ class ImageDownloader:
     @staticmethod
     def _collect_unique_images(
         annotations: ProjectAnnotations,
-    ) -> dict[str, int]:
-        """Return ``{image_name: task_id}`` for unique images.
+    ) -> dict[str, str]:
+        """Return ``{image_name: frame_ref}`` for unique images.
 
-        First occurrence wins (keeps a stable task_id per image).
-        Deleted images are not included (they live in
-        ``deleted_images``, not ``annotations``).
+        *frame_ref* is the original (possibly nested) CVAT frame name
+        used for S3 key lookup; first occurrence wins.  Deleted images
+        are not included (they live in ``deleted_images``, not
+        ``annotations``).
         """
-        result: dict[str, int] = {}
+        result: dict[str, str] = {}
         for record in annotations.annotations:
             if record.image_name not in result:
-                result[record.image_name] = record.task_id
+                result[record.image_name] = record.frame_path or record.image_name
         return result
+
+    def _dest_path(
+        self,
+        image_name: str,
+        frame_ref: str,
+        project_cloud_storage: CloudStorageInfo | None,
+    ) -> Path:
+        """Local destination: flat by default, nested with ``ignored_prefix``."""
+        if self._ignored_prefix and project_cloud_storage is not None:
+            full_key = build_s3_key(project_cloud_storage.prefix, frame_ref)
+            return self._target_dir / strip_key_prefix(full_key, self._ignored_prefix)
+        return self._target_dir / image_name
 
     def _filter_cached(
         self,
-        image_tasks: dict[str, int],
+        image_tasks: dict[str, str],
         stats: DownloadStats,
-    ) -> dict[str, int]:
+        project_cloud_storage: CloudStorageInfo | None,
+    ) -> dict[str, str]:
         """Remove already-cached images, updating *stats*. Return pending."""
-        pending: dict[str, int] = {}
-        for image_name, task_id in image_tasks.items():
-            if (self._target_dir / image_name).exists():
+        pending: dict[str, str] = {}
+        for image_name, frame_ref in image_tasks.items():
+            if self._dest_path(image_name, frame_ref, project_cloud_storage).exists():
                 stats.cached += 1
             else:
-                pending[image_name] = task_id
+                pending[image_name] = frame_ref
         return pending
 
     def _download_all(
         self,
-        pending: dict[str, int],
+        pending: dict[str, str],
         stats: DownloadStats,
         project_cloud_storage: CloudStorageInfo | None = None,
     ) -> None:
@@ -187,7 +210,7 @@ class ImageDownloader:
 
     def _download_from_project_storage(
         self,
-        pending: dict[str, int],
+        pending: dict[str, str],
         project_cloud_storage: CloudStorageInfo | None,
         s3_clients: dict[str, S3Client],
         stats: DownloadStats,
@@ -205,19 +228,21 @@ class ImageDownloader:
             project_cloud_storage.bucket,
             project_cloud_storage.prefix,
         )
-        for image_name in tqdm(
-            pending,
+        for image_name, frame_ref in tqdm(
+            pending.items(),
             desc="Downloading from project storage",
             unit="img",
             leave=False,
         ):
-            s3_key: str | None = name_to_key.get(image_name) or name_to_key.get(
-                Path(image_name).name
+            s3_key: str | None = (
+                name_to_key.get(frame_ref)
+                or name_to_key.get(image_name)
+                or name_to_key.get(Path(image_name).name)
             )
             if s3_key is None:
                 stats.failed += 1
                 continue
-            dest = self._target_dir / image_name
+            dest = self._dest_path(image_name, frame_ref, project_cloud_storage)
             try:
                 _download_one_s3(
                     s3_clients[ep_key],
@@ -277,12 +302,14 @@ class S3Syncer:
     Unlike :class:`ImageDownloader` which downloads only images referenced
     in annotations, this class lists **all** objects in the S3 prefix and
     downloads any that are missing locally.  It never deletes local files
-    and never uploads to S3.
+    and never uploads to S3.  With *ignored_prefix* set, local names are
+    the S3 keys below that prefix instead of below the storage prefix.
     """
 
-    def __init__(self, target_dir: Path) -> None:
-        """Store the target directory for synced files."""
+    def __init__(self, target_dir: Path, ignored_prefix: str | None = None) -> None:
+        """Store the target directory and optional S3 prefix to strip."""
         self._target_dir = target_dir
+        self._ignored_prefix = ignored_prefix
 
     def sync(self, cs_info: CloudStorageInfo) -> DownloadStats:
         """List all objects under *cs_info* prefix and download missing ones.
@@ -291,6 +318,10 @@ class S3Syncer:
         """
         s3 = make_s3_client(cs_info.endpoint_url or None)
         objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
+        if self._ignored_prefix:
+            objects = [
+                (key, strip_key_prefix(key, self._ignored_prefix)) for key, _ in objects
+            ]
         if not objects:
             logger.info(f"Нет объектов в s3://{cs_info.bucket}/{cs_info.prefix}")
             return DownloadStats(total=0)

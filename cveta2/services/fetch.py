@@ -16,10 +16,11 @@ import pandas as pd
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2.config import is_cache_disabled, load_ignore_config
+from cveta2.config import is_cache_disabled, load_cache_config, load_ignore_config
 from cveta2.dataset_partition import partition_annotations_df
 from cveta2.models import TaskAnnotations
 from cveta2.services.output import (
+    format_counts,
     populate_record_paths,
     write_dataset_and_deleted,
     write_partition_csvs,
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from cveta2.client import CvatClient, FetchContext
+    from cveta2.config import CacheProjectSettings
     from cveta2.dataset_partition import PartitionResult
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import ProjectAnnotations, TaskInfo
@@ -154,7 +156,8 @@ def _fetch_core(  # noqa: PLR0913
         project_name=project_name,
     )
 
-    cache = _build_task_cache(client, project_id, options)
+    cache_settings = load_cache_config().for_project(project_name)
+    cache = _build_task_cache(client, project_id, options, cache_settings)
     policy = _CachePolicy(cache=cache, force=options.force)
 
     result = _fetch_and_save_tasks(
@@ -178,13 +181,19 @@ def _fetch_core(  # noqa: PLR0913
             options.images_dir,
             project_id=project_id,
             project_cloud_storage=cs_info,
+            ignored_prefix=cache_settings.ignored_prefix,
         )
         logger.info(
             f"Изображения: {stats.downloaded} загружено, "
             f"{stats.cached} из кэша, {stats.failed} ошибок "
             f"({time.monotonic() - started:.1f} с)"
         )
-    populate_record_paths(result, cs_info, options.images_dir)
+    populate_record_paths(
+        result,
+        cs_info,
+        options.images_dir,
+        ignored_prefix=cache_settings.ignored_prefix,
+    )
 
     return result
 
@@ -193,20 +202,24 @@ def _build_task_cache(
     client: CvatClient,
     project_id: int,
     options: FetchOptions,
+    cache_settings: CacheProjectSettings,
 ) -> TaskAnnotationCache | None:
     """Build the task-annotation cache for a fetch run.
 
     ``use_cache=False`` (``--no-cache``) or ``CVETA2_DISABLE_CACHE=true``
-    disables caching entirely.  The S3 backend always uses the project's
-    original CVAT cloud storage prefix (never a user override), so all
-    users share one cache location.
+    disables caching entirely.  The S3 backend uses the project's CVAT
+    cloud storage prefix (never a sync-root override) unless the
+    ``cache.projects.<name>.task_cache_s3`` setting points elsewhere, so
+    all users share one cache location.
     """
     if not options.use_cache or is_cache_disabled():
         return None
     s3_backend = S3CacheBackend.from_cloud_storage(
-        client.detect_project_cloud_storage(project_id)
+        client.detect_project_cloud_storage(project_id),
+        task_cache_s3=cache_settings.task_cache_s3,
     )
-    return TaskAnnotationCache(get_task_cache_dir(project_id), s3=s3_backend)
+    local_dir = get_task_cache_dir(project_id, root=cache_settings.tasks_root)
+    return TaskAnnotationCache(local_dir, s3=s3_backend)
 
 
 @dataclass(frozen=True)
@@ -278,8 +291,11 @@ def _write_task_csv(task: TaskInfo, result: TaskAnnotations, tasks_dir: Path) ->
     if not rows:
         return
     task_csv = tasks_dir / f"task_{task.id}.csv"
-    pd.DataFrame(rows).to_csv(task_csv, index=False, encoding="utf-8")
-    logger.trace(f"Task {task.name!r} (id={task.id}): {len(rows)} rows → {task_csv}")
+    task_df = pd.DataFrame(rows)
+    task_df.to_csv(task_csv, index=False, encoding="utf-8")
+    logger.trace(
+        f"Task {task.name!r} (id={task.id}): {format_counts(task_df)} → {task_csv}"
+    )
 
 
 def _fetch_and_save_tasks(

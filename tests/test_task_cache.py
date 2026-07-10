@@ -516,3 +516,91 @@ class TestFullFetchPrunesCache:
 
         assert not (cache_dir / "task_999.json").exists()
         assert (cache_dir / f"task_{fake.tasks[0].id}.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# Cache settings (tasks_root / task_cache_s3)
+# ---------------------------------------------------------------------------
+
+
+class TestCacheSettings:
+    def test_cache_dir_with_custom_root(self, tmp_path: Path) -> None:
+        result = get_task_cache_dir(5, root=tmp_path / "tasks")
+
+        assert result == tmp_path / "tasks" / "project_5"
+
+    def test_invalidate_local_entry_honors_tasks_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cfg_path = tmp_path / "config.yaml"
+        cfg_path.write_text(
+            f"cache:\n  tasks_root: {tmp_path / 'tasks'}\n", encoding="utf-8"
+        )
+        monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
+        cache_dir = get_task_cache_dir(5, root=tmp_path / "tasks")
+        TaskAnnotationCache(cache_dir).put(make_task(updated=_UPDATED), _payload())
+        entry = cache_dir / "task_1.json"
+        assert entry.exists()
+
+        invalidate_local_entry(5, 1)
+
+        assert not entry.exists()
+
+    def test_explicit_location_uses_plain_task_annotations_key(
+        self, tmp_path: Path
+    ) -> None:
+        fake_s3 = FakeS3Client()
+        backend = S3CacheBackend(fake_s3, "ml-cache", "proj", explicit_location=True)
+        cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
+
+        cache.put(make_task(updated=_UPDATED), _payload())
+
+        assert fake_s3.put_calls == ["ml-cache/proj/task_annotations/task_1.json"]
+
+    def test_from_cloud_storage_with_full_url_targets_other_bucket(
+        self, tmp_path: Path
+    ) -> None:
+        fake_s3 = FakeS3Client()
+        cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
+        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+            backend = S3CacheBackend.from_cloud_storage(
+                cs_info, task_cache_s3="s3://ml-cache/proj"
+            )
+        assert backend is not None
+        cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
+
+        cache.put(make_task(updated=_UPDATED), _payload())
+
+        assert fake_s3.put_calls == ["ml-cache/proj/task_annotations/task_1.json"]
+
+    def test_from_cloud_storage_with_bare_prefix_stays_in_project_bucket(
+        self, tmp_path: Path
+    ) -> None:
+        fake_s3 = FakeS3Client()
+        cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
+        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+            backend = S3CacheBackend.from_cloud_storage(
+                cs_info, task_cache_s3="_cveta2_cache"
+            )
+        assert backend is not None
+        cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
+
+        cache.put(make_task(updated=_UPDATED), _payload())
+
+        assert fake_s3.put_calls == ["bkt/_cveta2_cache/task_annotations/task_1.json"]
+
+    def test_from_cloud_storage_default_keeps_cveta2_cache_layout(
+        self, tmp_path: Path
+    ) -> None:
+        fake_s3 = FakeS3Client()
+        cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
+        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+            backend = S3CacheBackend.from_cloud_storage(cs_info)
+        assert backend is not None
+        cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
+
+        cache.put(make_task(updated=_UPDATED), _payload())
+
+        assert fake_s3.put_calls == [
+            "bkt/pfx/.cveta2_cache/task_annotations/task_1.json"
+        ]

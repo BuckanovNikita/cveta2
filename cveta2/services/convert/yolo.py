@@ -168,7 +168,7 @@ def convert_to_yolo(
     _write_dataset_yaml(ctx.output_dir, ctx.splits, ctx.label_map)
 
     logger.info(
-        f"Готово: {len(images_processed)} изображений, "
+        f"Готово: {len(images_processed)} изображений, {len(box_df)} боксов, "
         f"{len(ctx.label_map)} классов -> {ctx.output_dir}"
     )
     return ctx.output_dir

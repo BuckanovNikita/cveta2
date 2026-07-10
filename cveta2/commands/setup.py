@@ -10,10 +10,15 @@ from loguru import logger
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands.interactive import wizard
 from cveta2.config import (
+    CacheConfig,
+    CacheProjectSettings,
     CvatConfig,
     ImageCacheConfig,
+    cache_dir_for_project,
+    load_cache_config,
     load_image_cache_config,
     require_interactive,
+    save_cache_config,
     save_image_cache_config,
 )
 from cveta2.projects_cache import load_projects_cache, save_projects_cache
@@ -77,12 +82,30 @@ def run_setup_cache(
     image_cache = load_image_cache_config(config_path)
     cache_root = wizard.prompt_cache_root()
 
+    if _setup_image_cache_dirs(
+        projects, image_cache, cache_root, config_path, reset=reset
+    ):
+        logger.info("Пути кэширования изображений обновлены.")
+
+    if _setup_cache_settings(projects, cache_root, config_path):
+        logger.info("Настройки кэша обновлены.")
+    logger.info("Готово!")
+
+
+def _setup_image_cache_dirs(
+    projects: list[ProjectInfo],
+    image_cache: ImageCacheConfig,
+    cache_root: Path | None,
+    config_path: Path,
+    *,
+    reset: bool,
+) -> bool:
+    """Interactive ``image_cache`` stage; returns True when saved."""
     if cache_root is not None and _apply_root_to_all_projects(
         projects, image_cache, cache_root, reset=reset
     ):
         save_image_cache_config(image_cache, config_path)
-        logger.info("Готово! Пути кэширования обновлены.")
-        return
+        return True
 
     logger.info(f"Найдено проектов: {len(projects)}. Укажите путь кэша для каждого.")
     logger.info("Нажмите Enter, чтобы принять значение по умолчанию или пропустить.\n")
@@ -96,19 +119,71 @@ def run_setup_cache(
 
     if changed:
         save_image_cache_config(image_cache, config_path)
-        logger.info("Готово! Пути кэширования обновлены.")
-    else:
-        logger.info("Ничего не изменено.")
+    return changed
+
+
+def _setup_cache_settings(
+    projects: list[ProjectInfo],
+    cache_root: Path | None,
+    config_path: Path,
+) -> bool:
+    """Interactive ``cache`` section stage; returns True when saved."""
+    cache_cfg = load_cache_config(config_path)
+    changed = False
+
+    if cache_root is not None and cache_cfg.images_root != cache_root:
+        cache_cfg.images_root = cache_root
+        changed = True
+
+    tasks_root = wizard.prompt_tasks_root(cache_cfg.tasks_root)
+    if tasks_root is not None and tasks_root != cache_cfg.tasks_root:
+        cache_cfg.tasks_root = tasks_root
+        changed = True
+
+    if wizard.confirm_project_cache_settings():
+        for project in projects:
+            changed |= _prompt_project_cache_settings(cache_cfg, project.name)
+
+    if changed:
+        save_cache_config(cache_cfg, config_path)
+    return changed
+
+
+def _prompt_project_cache_settings(cache_cfg: CacheConfig, name: str) -> bool:
+    """Prompt one project's ignored_prefix / task_cache_s3. True if changed."""
+    current = cache_cfg.projects.get(name) or CacheProjectSettings()
+    ignored = wizard.prompt_ignored_prefix(name, current.ignored_prefix)
+    task_cache_s3 = wizard.prompt_task_cache_s3(name, current.task_cache_s3)
+    if ignored == current.ignored_prefix and task_cache_s3 == current.task_cache_s3:
+        return False
+    cache_cfg.projects[name] = current.model_copy(
+        update={"ignored_prefix": ignored, "task_cache_s3": task_cache_s3}
+    )
+    return True
 
 
 def _list_cache_paths(config_path: Path) -> None:
-    """Print current image_cache paths and exit."""
+    """Print current image_cache paths and cache settings, then exit."""
     image_cache = load_image_cache_config(config_path)
-    if not image_cache.projects:
+    cache_cfg = load_cache_config(config_path)
+    if not image_cache.projects and not cache_cfg.model_dump(exclude_defaults=True):
         logger.info("Пути кэша не заданы.")
         return
     for name, path in sorted(image_cache.projects.items()):
         logger.info(f"  {name}: {path}")
+    if cache_cfg.images_root is not None:
+        logger.info(f"  images_root: {cache_cfg.images_root}")
+    if cache_cfg.tasks_root is not None:
+        logger.info(f"  tasks_root: {cache_cfg.tasks_root}")
+    for name, settings in sorted(cache_cfg.projects.items()):
+        if settings.ignored_prefix:
+            logger.info(f"  {name}: ignored_prefix: {settings.ignored_prefix}")
+        if settings.task_cache_s3:
+            logger.info(f"  {name}: task_cache_s3: {settings.task_cache_s3}")
+        if settings.images_root is not None:
+            logger.info(f"  {name}: images_root: {settings.images_root}")
+        if settings.tasks_root is not None:
+            logger.info(f"  {name}: tasks_root: {settings.tasks_root}")
 
 
 def _apply_root_to_all_projects(
@@ -144,7 +219,7 @@ def _default_cache_path(
     if not reset and image_cache.get_cache_dir(project.name) is not None:
         return image_cache.get_cache_dir(project.name)
     if cache_root is not None:
-        return _cache_dir_for_project(cache_root, project.name)
+        return cache_dir_for_project(cache_root, project.name)
     return None
 
 
@@ -166,12 +241,6 @@ def _prompt_project_cache_dir(
         logger.info(f"    → {default_path}")
         return True
     return False
-
-
-def _cache_dir_for_project(cache_root: Path, project_name: str) -> Path:
-    """Return cache_root / sanitized(project_name). Replaces path-unsafe chars."""
-    safe = project_name.replace("/", "_").replace("\\", "_").replace("\x00", "_")
-    return cache_root / safe
 
 
 def _ensure_projects_list(config_path: Path) -> list[ProjectInfo]:

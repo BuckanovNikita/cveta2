@@ -59,7 +59,7 @@ cveta2 stores bbox annotations in CSV files. The record type is determined by th
 | `confidence` | `float \| None` | Prediction confidence (filled when converting from YOLO) |
 | `issue_text` | `str` | Text of the frame's CVAT issue(s) (comments; see the note below), `""` when there are no issues |
 | `issue_state` | `str` | Issue state: `open`, `resolved` or `""` (no issue); the value `new` is reserved for upload |
-| `s3_image_path` | `str \| None` | Full S3 key relative to the bucket (e.g. `prefix/img.jpg`, or `prefix/2026-02/img.jpg` for new uploads), `None` when unknown |
+| `s3_image_path` | `str \| None` | Full S3 key relative to the bucket, including any subfolders of the CVAT frame name (e.g. `prefix/img.jpg`, `prefix/sub1/sub2/img.jpg`, or `prefix/2026-02/img.jpg` for new uploads), `None` when unknown. `image_name` stays a bare basename | 
 | `image_path` | `str \| None` | Absolute local path to the image file, `None` when unknown |
 | `attributes` | `dict[str, str]` | Custom attributes (serialized as JSON in CSV) |
 

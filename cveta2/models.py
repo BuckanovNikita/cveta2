@@ -6,7 +6,14 @@ import json
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 # ------------------------------------------------------------------
 # CVAT entity models (project / task / label)
@@ -85,6 +92,20 @@ def _validate_image_name(v: str) -> str:
     return name
 
 
+def _capture_frame_path(data: object) -> object:
+    """Preserve a nested CVAT frame name before ``image_name`` is collapsed.
+
+    CVAT frame names may contain subfolders (``2026-02/img.jpg``); the
+    ``image_name`` validator keeps only the basename, so the original
+    relative key is stored in ``frame_path`` for S3 path construction.
+    """
+    if isinstance(data, dict) and not data.get("frame_path"):
+        raw = data.get("image_name")
+        if isinstance(raw, str) and PurePosixPath(raw).name != raw:
+            data["frame_path"] = raw
+    return data
+
+
 def _validate_image_path(v: str | None) -> str | None:
     """Ensure *image_path* is absolute when provided."""
     if v is not None and not PurePosixPath(v).is_absolute():
@@ -97,6 +118,7 @@ class BBoxAnnotation(BaseModel):
     """Single bounding-box annotation record."""
 
     image_name: str
+    frame_path: str | None = None
     image_width: int
     image_height: int
     instance_shape: Literal["box"] = "box"
@@ -126,6 +148,7 @@ class BBoxAnnotation(BaseModel):
     image_path: str | None = None
     attributes: dict[str, str]
 
+    capture_frame_path = model_validator(mode="before")(_capture_frame_path)
     validate_image_name = field_validator("image_name", mode="before")(
         _validate_image_name
     )
@@ -136,14 +159,18 @@ class BBoxAnnotation(BaseModel):
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON)."""
         row = self.model_dump()
+        row.pop("frame_path", None)
         attrs = row.pop("attributes")
         row["attributes"] = json.dumps(attrs, ensure_ascii=False)
         return row
 
 
 # Canonical CSV column order shared by all AnnotationRecord variants.
-# Inferred from BBoxAnnotation (full schema); every to_csv_row() must use these keys.
-CSV_COLUMNS: tuple[str, ...] = tuple(BBoxAnnotation.model_fields.keys())
+# Inferred from BBoxAnnotation (full schema); every to_csv_row() must use these
+# keys.  ``frame_path`` is internal (kept in cache JSON, not written to CSV).
+CSV_COLUMNS: tuple[str, ...] = tuple(
+    name for name in BBoxAnnotation.model_fields if name != "frame_path"
+)
 
 
 def _sparse_csv_row(model: BaseModel) -> dict[str, str | int | float | bool | None]:
@@ -171,6 +198,7 @@ class ImageWithoutAnnotations(BaseModel):
     """
 
     image_name: str
+    frame_path: str | None = None
     image_width: int
     image_height: int
     instance_shape: Literal["none"] = "none"
@@ -186,6 +214,7 @@ class ImageWithoutAnnotations(BaseModel):
     s3_image_path: str | None = None
     image_path: str | None = None
 
+    capture_frame_path = model_validator(mode="before")(_capture_frame_path)
     validate_image_name = field_validator("image_name", mode="before")(
         _validate_image_name
     )
@@ -206,6 +235,7 @@ class DeletedImage(BaseModel):
     """
 
     image_name: str
+    frame_path: str | None = None
     image_width: int = 0
     image_height: int = 0
     instance_shape: Literal["deleted"] = "deleted"
@@ -218,6 +248,7 @@ class DeletedImage(BaseModel):
     s3_image_path: str | None = None
     image_path: str | None = None
 
+    capture_frame_path = model_validator(mode="before")(_capture_frame_path)
     validate_image_name = field_validator("image_name", mode="before")(
         _validate_image_name
     )

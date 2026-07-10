@@ -206,7 +206,11 @@ class _WriteMixin(_ClientBase):
 
         if built.shapes:
             api.put_task_shapes(task_id, built.shapes)
-            logger.info(f"Загружено {len(built.shapes)} аннотаций в задачу {task_id}")
+            unique_frames = len({shape.frame for shape in built.shapes})
+            logger.info(
+                f"Загружено {len(built.shapes)} аннотаций "
+                f"({unique_frames} изображений) в задачу {task_id}"
+            )
         else:
             logger.info(f"Нет аннотаций для загрузки в задачу {task_id}")
 

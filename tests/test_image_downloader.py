@@ -570,3 +570,73 @@ def test_s3_syncer_creates_target_dir(
     assert stats.downloaded == 1
     assert target.exists()
     assert (target / "img.jpg").read_bytes() == b"data"
+
+
+def test_download_nested_frame_saves_flat_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nested CVAT frame names download into a flat layout when unconfigured."""
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "2026-01/a.jpg")],
+        deleted_images=[],
+    )
+    s3_data = {"test-bucket/images/2026-01/a.jpg": b"data-a"}
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=True))
+
+    target = tmp_path / "images"
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.downloaded == 1
+    assert (target / "a.jpg").read_bytes() == b"data-a"
+
+
+def test_download_ignored_prefix_preserves_subfolders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With ignored_prefix set, the local layout mirrors the key below it."""
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "2026-01/a.jpg"), _ann(10, 1, "b.jpg")],
+        deleted_images=[],
+    )
+    s3_data = {
+        "test-bucket/images/2026-01/a.jpg": b"data-a",
+        "test-bucket/images/b.jpg": b"data-b",
+    }
+    _patch_boto(monkeypatch, _fake_s3(s3_data, keyed_by_bucket=True))
+
+    target = tmp_path / "images"
+    downloader = ImageDownloader(target, ignored_prefix="images")
+    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
+
+    assert stats.downloaded == 2
+    assert (target / "2026-01" / "a.jpg").read_bytes() == b"data-a"
+    assert (target / "b.jpg").read_bytes() == b"data-b"
+
+    rerun = downloader.download(annotations, project_cloud_storage=_project_cs())
+    assert rerun.cached == 2
+
+
+def test_s3_syncer_ignored_prefix_keeps_remainder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3Syncer strips only the ignored prefix and keeps the rest as dirs."""
+    s3_objects = {
+        "data/projA/2026-01/a.jpg": b"data-a",
+        "data/projA/b.jpg": b"data-b",
+    }
+    _patch_boto(monkeypatch, _fake_s3(s3_objects, keyed_by_bucket=False))
+    cs_info = make_cs_info(
+        bucket="test-bucket", prefix="data/projA", endpoint_url="http://minio:9000"
+    )
+
+    target = tmp_path / "sync-dir"
+    stats = S3Syncer(target, ignored_prefix="data").sync(cs_info)
+
+    assert stats.downloaded == 2
+    assert (target / "projA" / "2026-01" / "a.jpg").read_bytes() == b"data-a"
+    assert (target / "projA" / "b.jpg").read_bytes() == b"data-b"

@@ -8,7 +8,7 @@ import pandas as pd
 from loguru import logger
 
 from cveta2.exceptions import Cveta2Error
-from cveta2.services.output import read_dataset_csv
+from cveta2.services.output import format_counts, read_dataset_csv
 
 # Minimal columns that every dataset CSV must contain.
 _REQUIRED_COLUMNS: set[str] = {
@@ -255,5 +255,5 @@ def merge_datasets(
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     merged.to_csv(output_path, index=False, encoding="utf-8")
-    logger.info(f"Merged CSV saved to {output_path} ({len(merged)} rows)")
+    logger.info(f"Merged CSV saved to {output_path} ({format_counts(merged)})")
     return merged

@@ -23,6 +23,8 @@ from cveta2._client.connection import configure_data_timeout
 from cveta2.client import CvatClient
 from cveta2.config import (
     CvatConfig,
+    cache_dir_for_project,
+    load_cache_config,
     load_image_cache_config,
     load_upload_config,
 )
@@ -162,10 +164,14 @@ def _resolve_images_dir(
     cached_dir = load_image_cache_config().get_cache_dir(project_name)
     if cached_dir is not None:
         return cached_dir
+    images_root = load_cache_config().for_project(project_name).images_root
+    if images_root is not None:
+        return cache_dir_for_project(images_root, project_name)
     raise Cveta2Error(
         f"Путь кэширования изображений для проекта {project_name!r} не "
         f"настроен. Передайте images_dir=, download_images=False или "
-        f"добавьте image_cache.{project_name} в конфигурацию."
+        f"добавьте image_cache.{project_name} (или cache.images_root) "
+        f"в конфигурацию."
     )
 
 
@@ -387,7 +393,12 @@ def s3_sync(  # noqa: PLR0913
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id), root
         )
-        return c.sync_project_images(project_id, Path(target_dir), cs_info)
+        ignored_prefix = (
+            load_cache_config(config_path).for_project(project_name).ignored_prefix
+        )
+        return c.sync_project_images(
+            project_id, Path(target_dir), cs_info, ignored_prefix=ignored_prefix
+        )
 
 
 def get_labels(  # noqa: PLR0913
@@ -455,12 +466,12 @@ def _resolved_task(
     mutation that forgets to call ``invalidate_local_entry``.
     """
     with _resolve_client(client, conn) as c:
-        project_id, _ = resolve_project(c, project)
+        project_id, project_name = resolve_project(c, project)
         task_info = _resolve_task(c, project_id, task)
         try:
             yield c, task_info
         finally:
-            invalidate_local_entry(project_id, task_info.id)
+            invalidate_local_entry(project_id, task_info.id, project_name)
 
 
 def task_mark_deleted(  # noqa: PLR0913

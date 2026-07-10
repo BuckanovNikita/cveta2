@@ -85,6 +85,49 @@ def prompt_cache_root() -> Path | None:
     )
 
 
+def prompt_tasks_root(default: Path | None) -> Path | None:
+    """Ask for the local task-annotation cache root; ``None`` keeps current."""
+    shown = str(default) if default else "~/.cache/cveta2/task_annotations"
+    return primitives.path(
+        f"Локальный кэш аннотаций задач [{shown}]: ", hint=_CACHE_HINT
+    )
+
+
+def confirm_project_cache_settings() -> bool:
+    """Ask whether to configure per-project S3 cache settings."""
+    return primitives.confirm(
+        "Настроить ignored_prefix / task_cache_s3 по проектам?",
+        default=False,
+        hint=_CACHE_HINT,
+    )
+
+
+def prompt_ignored_prefix(project_name: str, default: str | None) -> str | None:
+    """Ask for a project's ignored S3 prefix; empty input keeps *default*."""
+    shown = default or "не задан"
+    return (
+        primitives.text(
+            f"  {project_name}: игнорируемый префикс S3 [{shown}]: ",
+            hint=_CACHE_HINT,
+            allow_empty=True,
+        )
+        or default
+    )
+
+
+def prompt_task_cache_s3(project_name: str, default: str | None) -> str | None:
+    """Ask for a project's task-cache S3 location; empty input keeps *default*."""
+    shown = default or "по умолчанию (<префикс изображений>/.cveta2_cache)"
+    return (
+        primitives.text(
+            f"  {project_name}: S3-путь кэша задач [{shown}]: ",
+            hint=_CACHE_HINT,
+            allow_empty=True,
+        )
+        or default
+    )
+
+
 def confirm_apply_to_all() -> bool:
     """Ask whether to apply the derived cache paths to all projects."""
     return primitives.confirm(

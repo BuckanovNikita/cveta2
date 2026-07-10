@@ -78,14 +78,14 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
         sys.exit("Ошибка: укажите хотя бы один --frame или --image.")
 
     with open_client() as client:
-        project_id, _ = resolve_project(args.project, client)
+        project_id, project_name = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         marked = 0
         if images:
             marked += client.mark_frames_deleted(task.id, set(images))
         if frames:
             marked += client.mark_frames_deleted_by_ids(task.id, frames)
-        invalidate_local_entry(project_id, task.id)
+        invalidate_local_entry(project_id, task.id, project_name)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): помечено удалёнными кадров: {marked}"
         )
@@ -94,7 +94,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
 def run_task_drop_label(args: argparse.Namespace) -> None:
     """Run ``cveta2 task drop-label``."""
     with open_client() as client:
-        project_id, _ = resolve_project(args.project, client)
+        project_id, project_name = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         try:
             count = client.count_task_label_shapes(task.id, args.label)
@@ -112,7 +112,7 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
             yes=args.yes,
         )
         deleted = client.drop_label_annotations(task.id, args.label)
-        invalidate_local_entry(project_id, task.id)
+        invalidate_local_entry(project_id, task.id, project_name)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): удалено аннотаций: {deleted}"
         )
@@ -121,14 +121,14 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
 def run_task_delete(args: argparse.Namespace) -> None:
     """Run ``cveta2 task delete``."""
     with open_client() as client:
-        project_id, _ = resolve_project(args.project, client)
+        project_id, project_name = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         _confirm_or_exit(
             f"Удалить задачу {task.name!r} (id={task.id}) безвозвратно?",
             yes=args.yes,
         )
         client.delete_task(task.id)
-        invalidate_local_entry(project_id, task.id)
+        invalidate_local_entry(project_id, task.id, project_name)
         logger.info(f"Задача {task.name!r} (id={task.id}) удалена.")
 
 
@@ -139,10 +139,10 @@ def run_task_status(args: argparse.Namespace) -> None:
     state = STATE_CLI_TO_CVAT[args.state] if args.state else None
 
     with open_client() as client:
-        project_id, _ = resolve_project(args.project, client)
+        project_id, project_name = resolve_project(args.project, client)
         task = _resolve_single_task(client, project_id, args.task)
         num_jobs = client.set_task_jobs_status(task.id, stage=args.stage, state=state)
-        invalidate_local_entry(project_id, task.id)
+        invalidate_local_entry(project_id, task.id, project_name)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): обновлено jobs: {num_jobs} "
             f"(stage={args.stage or '-'}, state={state or '-'})"

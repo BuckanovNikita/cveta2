@@ -222,3 +222,62 @@ def test_image_path_accepts_none() -> None:
     """None image_path is accepted."""
     bbox = make_bbox(image_path=None)
     assert bbox.image_path is None
+
+
+# ---------------------------------------------------------------------------
+# frame_path capture (nested CVAT frame names)
+# ---------------------------------------------------------------------------
+
+
+def test_nested_image_name_keeps_frame_path() -> None:
+    """A nested frame name collapses to basename but keeps the full key."""
+    bbox = make_bbox(image_name="sub1/sub2/img.jpg")
+    assert bbox.image_name == "img.jpg"
+    assert bbox.frame_path == "sub1/sub2/img.jpg"
+
+
+def test_flat_image_name_has_no_frame_path() -> None:
+    """A bare filename leaves frame_path unset."""
+    bbox = make_bbox(image_name="img.jpg")
+    assert bbox.frame_path is None
+
+
+def test_explicit_frame_path_is_not_overwritten() -> None:
+    """A frame_path given explicitly wins over the captured image_name."""
+    bbox = make_bbox(image_name="sub/img.jpg", frame_path="other/img.jpg")
+    assert bbox.frame_path == "other/img.jpg"
+
+
+def test_frame_path_captured_on_sparse_models() -> None:
+    """ImageWithoutAnnotations and DeletedImage capture frame_path too."""
+    record = ImageWithoutAnnotations(
+        image_name="2026-02/img.jpg",
+        image_width=640,
+        image_height=480,
+        task_id=1,
+        task_name="t",
+        frame_id=0,
+    )
+    deleted = DeletedImage(
+        image_name="2026-02/del.jpg", task_id=1, task_name="t", frame_id=1
+    )
+    assert (record.image_name, record.frame_path) == ("img.jpg", "2026-02/img.jpg")
+    assert (deleted.image_name, deleted.frame_path) == ("del.jpg", "2026-02/del.jpg")
+
+
+def test_frame_path_excluded_from_csv() -> None:
+    """frame_path is internal: absent from CSV_COLUMNS and to_csv_row()."""
+    assert "frame_path" not in CSV_COLUMNS
+    bbox = make_bbox(image_name="sub/img.jpg")
+    assert "frame_path" not in bbox.to_csv_row()
+    deleted = DeletedImage(
+        image_name="sub/del.jpg", task_id=1, task_name="t", frame_id=0
+    )
+    assert "frame_path" not in deleted.to_csv_row()
+
+
+def test_frame_path_survives_json_round_trip() -> None:
+    """frame_path is kept in model JSON (task-cache serialization)."""
+    bbox = make_bbox(image_name="sub/img.jpg")
+    restored = type(bbox).model_validate_json(bbox.model_dump_json())
+    assert restored.frame_path == "sub/img.jpg"

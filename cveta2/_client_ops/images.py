@@ -25,13 +25,14 @@ class _ImageMixin(_ReadMixin):
         target_dir: Path,
         project_id: int | None = None,
         project_cloud_storage: CloudStorageInfo | None = None,
+        ignored_prefix: str | None = None,
     ) -> DownloadStats:
         """Download project images from S3 cloud storage into *target_dir*.
 
         Requires an active context manager (``with CvatClient(...) as c:``).
-        Images are saved directly as ``target_dir / image_name`` — no
-        additional subdirectories are created.  Already-cached files are
-        skipped.
+        Images are saved flat as ``target_dir / image_name``; with
+        *ignored_prefix* set, the local layout mirrors the S3 key below
+        that prefix.  Already-cached files are skipped.
 
         Images are always downloaded from the **project** cloud storage
         (project's ``source_storage`` via :meth:`detect_project_cloud_storage`
@@ -41,7 +42,7 @@ class _ImageMixin(_ReadMixin):
         """
         if project_cloud_storage is None and project_id is not None:
             project_cloud_storage = self.detect_project_cloud_storage(project_id)
-        downloader = ImageDownloader(target_dir)
+        downloader = ImageDownloader(target_dir, ignored_prefix=ignored_prefix)
         return downloader.download(
             annotations, project_cloud_storage=project_cloud_storage
         )
@@ -51,6 +52,7 @@ class _ImageMixin(_ReadMixin):
         project_id: int,
         target_dir: Path,
         project_cloud_storage: CloudStorageInfo | None = None,
+        ignored_prefix: str | None = None,
     ) -> DownloadStats:
         """Sync all S3 objects for *project_id* into *target_dir*.
 
@@ -77,5 +79,5 @@ class _ImageMixin(_ReadMixin):
             f"Проект {project_id}: синхронизация из "
             f"s3://{cs_info.bucket}/{cs_info.prefix} → {target_dir}"
         )
-        syncer = S3Syncer(target_dir)
+        syncer = S3Syncer(target_dir, ignored_prefix=ignored_prefix)
         return syncer.sync(cs_info)

@@ -228,18 +228,9 @@ class CvatConfig(BaseModel):
         *,
         image_cache: ImageCacheConfig | None = None,
     ) -> Path:
-        """Write config to a YAML file, preserving ``image_cache`` section."""
+        """Write config to a YAML file, preserving all non-``cvat`` sections."""
         path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Preserve existing image_cache if not explicitly provided
-        existing_image_cache = image_cache
-        if existing_image_cache is None:
-            existing_data = _load_raw_yaml(path)
-            raw_ic = existing_data.get("image_cache")
-            if isinstance(raw_ic, dict):
-                existing_image_cache = ImageCacheConfig(
-                    projects={k: Path(str(v)) for k, v in raw_ic.items()},
-                )
+        existing_data = _load_raw_yaml(path)
 
         cvat_data: dict[str, str | float] = {"host": self.host}
         if self.organization:
@@ -252,10 +243,11 @@ class CvatConfig(BaseModel):
             cvat_data["request_timeout"] = self.request_timeout
 
         output: dict[str, object] = {"cvat": cvat_data}
-        if existing_image_cache and existing_image_cache.projects:
-            output["image_cache"] = {
-                k: str(v) for k, v in existing_image_cache.projects.items()
-            }
+        output.update(
+            (key, value) for key, value in existing_data.items() if key != "cvat"
+        )
+        if image_cache is not None and image_cache.projects:
+            output["image_cache"] = {k: str(v) for k, v in image_cache.projects.items()}
 
         content = yaml.safe_dump(output, default_flow_style=False, sort_keys=False)
         if not content.endswith("\n"):
@@ -307,6 +299,132 @@ def _parse_image_cache_section(raw: object) -> ImageCacheConfig:
 def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig:
     """Load the ``image_cache`` section from the config YAML."""
     return _load_section("image_cache", _parse_image_cache_section, config_path)
+
+
+# ---------------------------------------------------------------------------
+# Cache settings (image/task cache roots, S3 layout)
+# ---------------------------------------------------------------------------
+
+
+class CacheProjectSettings(BaseModel):
+    """Cache settings for one project (unset fields fall back to globals).
+
+    ``images_root``/``tasks_root`` are local roots for downloaded images
+    and the task-annotation cache.  ``ignored_prefix`` is the leading part
+    of S3 keys stripped on local save (the remainder keeps its subfolders).
+    ``task_cache_s3`` points the shared task cache at an explicit
+    ``s3://bucket/prefix`` (or a bare prefix within the project bucket).
+    """
+
+    images_root: Path | None = None
+    tasks_root: Path | None = None
+    ignored_prefix: str | None = None
+    task_cache_s3: str | None = None
+
+
+class CacheConfig(BaseModel):
+    """Global cache settings plus per-project overrides."""
+
+    images_root: Path | None = None
+    tasks_root: Path | None = None
+    projects: dict[str, CacheProjectSettings] = Field(default_factory=dict)
+
+    def for_project(self, project_name: str) -> CacheProjectSettings:
+        """Resolve effective settings for *project_name* (overrides win)."""
+        proj = self.projects.get(project_name) or CacheProjectSettings()
+        return CacheProjectSettings(
+            images_root=proj.images_root or self.images_root,
+            tasks_root=proj.tasks_root or self.tasks_root,
+            ignored_prefix=proj.ignored_prefix,
+            task_cache_s3=proj.task_cache_s3,
+        )
+
+
+def cache_dir_for_project(root: Path, project_name: str) -> Path:
+    """Return ``root / sanitized(project_name)``. Replaces path-unsafe chars."""
+    safe = project_name.replace("/", "_").replace("\\", "_").replace("\x00", "_")
+    return root / safe
+
+
+def _parse_cache_project(raw: object) -> CacheProjectSettings:
+    """Parse one per-project entry of the ``cache.projects`` mapping."""
+    if not isinstance(raw, dict):
+        return CacheProjectSettings()
+    return CacheProjectSettings(
+        images_root=Path(str(raw["images_root"])) if raw.get("images_root") else None,
+        tasks_root=Path(str(raw["tasks_root"])) if raw.get("tasks_root") else None,
+        ignored_prefix=str(raw["ignored_prefix"])
+        if raw.get("ignored_prefix")
+        else None,
+        task_cache_s3=str(raw["task_cache_s3"]) if raw.get("task_cache_s3") else None,
+    )
+
+
+def _parse_cache_section(raw: object) -> CacheConfig:
+    """Parse the ``cache`` section from raw YAML value."""
+    if not isinstance(raw, dict):
+        return CacheConfig()
+    projects_raw = raw.get("projects")
+    projects = (
+        {str(k): _parse_cache_project(v) for k, v in projects_raw.items()}
+        if isinstance(projects_raw, dict)
+        else {}
+    )
+    return CacheConfig(
+        images_root=Path(str(raw["images_root"])) if raw.get("images_root") else None,
+        tasks_root=Path(str(raw["tasks_root"])) if raw.get("tasks_root") else None,
+        projects=projects,
+    )
+
+
+def load_cache_config(config_path: Path | None = None) -> CacheConfig:
+    """Load the ``cache`` section from the config YAML."""
+    return _load_section("cache", _parse_cache_section, config_path)
+
+
+def _serialize_cache_project(settings: CacheProjectSettings) -> dict[str, str]:
+    """Serialize one per-project cache entry, omitting unset fields."""
+    data: dict[str, str] = {}
+    if settings.images_root is not None:
+        data["images_root"] = str(settings.images_root)
+    if settings.tasks_root is not None:
+        data["tasks_root"] = str(settings.tasks_root)
+    if settings.ignored_prefix:
+        data["ignored_prefix"] = settings.ignored_prefix
+    if settings.task_cache_s3:
+        data["task_cache_s3"] = settings.task_cache_s3
+    return data
+
+
+def _serialize_cache_section(cfg: CacheConfig) -> dict[str, object] | None:
+    """Serialize cache config to a YAML-friendly dict, or None if empty."""
+    result: dict[str, object] = {}
+    if cfg.images_root is not None:
+        result["images_root"] = str(cfg.images_root)
+    if cfg.tasks_root is not None:
+        result["tasks_root"] = str(cfg.tasks_root)
+    projects = {
+        name: serialized
+        for name, settings in cfg.projects.items()
+        if (serialized := _serialize_cache_project(settings))
+    }
+    if projects:
+        result["projects"] = projects
+    return result or None
+
+
+def save_cache_config(
+    cfg: CacheConfig,
+    config_path: Path | None = None,
+) -> Path:
+    """Update only the ``cache`` section of the config YAML."""
+    return _save_section(
+        "cache",
+        cfg,
+        _serialize_cache_section,
+        config_path,
+        log_message="Cache config saved to {path}",
+    )
 
 
 class SyncRootsConfig(BaseModel):

@@ -8,11 +8,14 @@ from typing import TYPE_CHECKING
 import yaml
 
 from cveta2.config import (
+    CacheProjectSettings,
     CvatConfig,
     ImageCacheConfig,
     SyncRootsConfig,
+    load_cache_config,
     load_image_cache_config,
     load_sync_roots_config,
+    save_cache_config,
     save_image_cache_config,
     save_sync_roots_config,
 )
@@ -278,3 +281,91 @@ def test_preset_does_not_override_credentials(
     cfg = CvatConfig.load(config_path=cfg_path)
     assert cfg.username == "admin"
     assert cfg.password == "secret"
+
+
+# ---------------------------------------------------------------------------
+# cache section
+# ---------------------------------------------------------------------------
+
+
+def _write_cache_yaml(cfg_path: Path) -> None:
+    cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "cvat": {"host": "http://localhost:8080"},
+                "cache": {
+                    "images_root": "/mnt/datasets",
+                    "tasks_root": "/mnt/task-cache",
+                    "projects": {
+                        "projA": {
+                            "ignored_prefix": "data/projA",
+                            "task_cache_s3": "s3://ml-cache/projA",
+                        },
+                        "projB": {"images_root": "/mnt/projB-images"},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_load_cache_config_resolves_overrides(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    _write_cache_yaml(cfg_path)
+    cache = load_cache_config(cfg_path)
+
+    proj_a = cache.for_project("projA")
+    assert proj_a.images_root == Path("/mnt/datasets")
+    assert proj_a.tasks_root == Path("/mnt/task-cache")
+    assert proj_a.ignored_prefix == "data/projA"
+    assert proj_a.task_cache_s3 == "s3://ml-cache/projA"
+
+    proj_b = cache.for_project("projB")
+    assert proj_b.images_root == Path("/mnt/projB-images")
+    assert proj_b.tasks_root == Path("/mnt/task-cache")
+    assert proj_b.ignored_prefix is None
+    assert proj_b.task_cache_s3 is None
+
+    unknown = cache.for_project("unknown")
+    assert unknown.images_root == Path("/mnt/datasets")
+    assert unknown.ignored_prefix is None
+
+
+def test_cache_config_missing_section_and_file(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        yaml.safe_dump({"cvat": {"host": "http://localhost:8080"}}),
+        encoding="utf-8",
+    )
+    assert load_cache_config(cfg_path).for_project("x") == CacheProjectSettings()
+    missing = load_cache_config(tmp_path / "nonexistent.yaml")
+    assert missing.images_root is None
+    assert missing.tasks_root is None
+    assert missing.projects == {}
+
+
+def test_save_cache_config_round_trip(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "config.yaml"
+    _write_cache_yaml(cfg_path)
+    cache = load_cache_config(cfg_path)
+
+    save_cache_config(cache, cfg_path)
+
+    reloaded = load_cache_config(cfg_path)
+    assert reloaded == cache
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    assert data["cvat"]["host"] == "http://localhost:8080"
+
+
+def test_setup_save_preserves_cache_section(tmp_path: Path) -> None:
+    """CvatConfig.save_to_file (the ``setup`` path) keeps the cache section."""
+    cfg_path = tmp_path / "config.yaml"
+    _write_cache_yaml(cfg_path)
+
+    CvatConfig(host="http://new-host:8080").save_to_file(cfg_path)
+
+    reloaded = load_cache_config(cfg_path)
+    assert reloaded.images_root == Path("/mnt/datasets")
+    assert reloaded.for_project("projA").ignored_prefix == "data/projA"
+    assert CvatConfig.from_file(cfg_path).host == "http://new-host:8080"
