@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
 
 from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
@@ -17,13 +19,18 @@ from cveta2.commands.task_ops import (
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.models import LabelInfo, TaskInfo
+from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
     client_with_api,
+    csv_row,
     make_raw_shape,
     mock_client_ctx,
     parse_cli_args,
     patch_cli_client,
 )
+
+if TYPE_CHECKING:
+    from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 # ---------------------------------------------------------------------------
 # Command validation and state mapping
@@ -77,6 +84,35 @@ class TestRunTaskCommands:
 
 def _client_with_api(api: MagicMock) -> CvatClient:
     return client_with_api(api)
+
+
+class TestFakeWriteChain:
+    """The recording FakeCvatApi supports the full CVAT upload half."""
+
+    def test_upload_chain_runs_against_fake(self, normal_fake: LoadedFixtures) -> None:
+        fake_api = FakeCvatApi(normal_fake)
+        client = client_with_api(fake_api)
+        label = normal_fake.labels[0].name
+
+        task_id = client.create_upload_task(
+            project_id=normal_fake.project.id,
+            name="upload-1",
+            image_names=["2026-01/a.jpg", "2026-01/b.jpg"],
+            cloud_storage_id=1,
+        )
+        session = client.open_task_session(task_id)
+        df = pd.DataFrame([csv_row("a.jpg", label=label)])
+        num_shapes = client.upload_task_annotations(task_id, df, session=session)
+        marked = client.mark_frames_deleted(task_id, {"b.jpg"}, session=session)
+        num_jobs = client.complete_task(task_id)
+
+        assert num_shapes == 1
+        assert marked == 1
+        assert num_jobs == 1
+        assert [s.frame for s in fake_api.writes.shapes[task_id]] == [0]
+        assert fake_api.writes.deleted_frames[task_id] == [1]
+        assert fake_api.writes.job_updates == [(task_id, "acceptance", "completed")]
+        assert fake_api.get_task_data_meta(task_id).deleted_frames == [1]
 
 
 class TestDropLabelAnnotations:

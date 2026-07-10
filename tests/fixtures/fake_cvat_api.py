@@ -6,10 +6,13 @@ pipeline without the real CVAT SDK.
 
 from __future__ import annotations
 
+import dataclasses
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
 from cveta2.exceptions import CvatApiError
-from cveta2.models import ProjectInfo
+from cveta2.models import ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
@@ -19,17 +22,29 @@ if TYPE_CHECKING:
         LabelPatch,
         NewIssue,
         NewShape,
-        RawAnnotations,
-        RawDataMeta,
         RawIssue,
         RawJob,
         RawShape,
         UploadTaskSpec,
     )
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import LabelInfo, TaskInfo
+    from cveta2.models import LabelInfo
 
 _DEFAULT_FAIL_METHODS = ("get_task_data_meta", "get_task_annotations")
+
+
+@dataclass
+class RecordedWrites:
+    """Everything a test can assert about the fake's write traffic."""
+
+    created_tasks: list[UploadTaskSpec] = field(default_factory=list)
+    shapes: dict[int, list[NewShape]] = field(default_factory=dict)
+    issues: list[NewIssue] = field(default_factory=list)
+    deleted_frames: dict[int, list[int]] = field(default_factory=dict)
+    deleted_shapes: dict[int, list[RawShape]] = field(default_factory=dict)
+    deleted_tasks: list[int] = field(default_factory=list)
+    job_updates: list[tuple[int, str | None, str | None]] = field(default_factory=list)
+    label_patches: dict[int, list[LabelPatch]] = field(default_factory=dict)
 
 
 class FakeCvatApi:
@@ -39,8 +54,14 @@ class FakeCvatApi:
     Task-scoped methods can be made to fail for selected task ids via
     *fail_task_ids* / *fail_status* / *fail_methods*; every call to
     ``get_task_annotations`` is recorded in ``annotation_calls``.
-    Write methods are not implemented — inject a
-    ``MagicMock(spec=CvatApiPort)`` for write-path tests.
+
+    Write methods record their traffic on ``self.writes`` and keep the
+    in-memory task store consistent (``create_task_with_data`` allocates
+    an id and synthesizes frame metadata, ``set_deleted_frames`` updates
+    the stored ``data_meta``), so full upload flows run against the fake.
+    A ``MagicMock(spec=CvatApiPort)`` remains acceptable only for narrow
+    single-method interaction tests (error injection, exact call-arg
+    assertions where a one-line ``return_value`` beats fixture setup).
     """
 
     def __init__(
@@ -51,16 +72,17 @@ class FakeCvatApi:
         fail_status: int = 500,
         fail_methods: Collection[str] = _DEFAULT_FAIL_METHODS,
     ) -> None:
-        """Unpack fixture data into internal stores."""
+        """Unpack fixture data into internal stores (copies: writes stay local)."""
         self._project = fixtures.project
-        self._tasks = fixtures.tasks
+        self._tasks = list(fixtures.tasks)
         self._labels = fixtures.labels
-        self._task_data = fixtures.task_data
+        self._task_data = dict(fixtures.task_data)
         self._issues = fixtures.issues or {}
         self._fail_task_ids = frozenset(fail_task_ids)
         self._fail_status = fail_status
         self._fail_methods = frozenset(fail_methods)
         self.annotation_calls: list[int] = []
+        self.writes = RecordedWrites()
 
     @classmethod
     def from_tasks(
@@ -137,32 +159,54 @@ class FakeCvatApi:
         return len(data_meta.frames)
 
     # ------------------------------------------------------------------
-    # Write port (not supported by the fixture fake)
+    # Write port (records traffic; keeps the task store consistent)
     # ------------------------------------------------------------------
 
     def create_task_with_data(self, spec: UploadTaskSpec) -> int:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Allocate a task id and synthesize frame metadata from the spec."""
+        self.writes.created_tasks.append(spec)
+        task_id = max((t.id for t in self._tasks), default=0) + 1
+        data_meta = RawDataMeta(
+            frames=[RawFrame(name=f, width=640, height=480) for f in spec.server_files]
+        )
+        self._task_data[task_id] = (data_meta, RawAnnotations())
+        self._tasks.append(
+            TaskInfo(
+                id=task_id,
+                name=spec.name,
+                status="annotation",
+                subset="",
+                updated_date="",
+            )
+        )
+        return task_id
 
     def put_task_shapes(self, task_id: int, shapes: list[NewShape]) -> None:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Record uploaded shapes per task."""
+        self.writes.shapes.setdefault(task_id, []).extend(shapes)
 
     def create_issue(self, issue: NewIssue) -> None:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Record a created issue."""
+        self.writes.issues.append(issue)
 
     def set_deleted_frames(self, task_id: int, frame_ids: list[int]) -> None:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Record deleted frames and update the stored ``data_meta``."""
+        self.writes.deleted_frames[task_id] = list(frame_ids)
+        data_meta, annotations = self._task_data[task_id]
+        self._task_data[task_id] = (
+            dataclasses.replace(data_meta, deleted_frames=list(frame_ids)),
+            annotations,
+        )
 
     def delete_shapes(self, task_id: int, shapes: list[RawShape]) -> None:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Record deleted shapes per task."""
+        self.writes.deleted_shapes.setdefault(task_id, []).extend(shapes)
 
     def delete_task(self, task_id: int) -> None:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Record the deletion and drop the task from the store."""
+        self.writes.deleted_tasks.append(task_id)
+        self._tasks = [t for t in self._tasks if t.id != task_id]
+        self._task_data.pop(task_id, None)
 
     def update_job(
         self,
@@ -171,13 +215,13 @@ class FakeCvatApi:
         stage: str | None = None,
         state: str | None = None,
     ) -> None:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Record a job stage/state update."""
+        self.writes.job_updates.append((job_id, stage, state))
 
     def patch_project_labels(
         self,
         project_id: int,
         patches: list[LabelPatch],
     ) -> None:
-        """Unsupported in the fixture fake."""
-        raise NotImplementedError
+        """Record label patches per project."""
+        self.writes.label_patches.setdefault(project_id, []).extend(patches)
