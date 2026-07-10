@@ -32,11 +32,6 @@ def run_doctor() -> None:
         logger.warning("doctor: some checks failed (see messages above)")
 
 
-# ------------------------------------------------------------------
-# 1. Config validation
-# ------------------------------------------------------------------
-
-
 def check_config() -> bool:
     """Validate that the user config is correct.
 
@@ -89,11 +84,6 @@ def check_config() -> bool:
     return True
 
 
-# ------------------------------------------------------------------
-# 2. AWS credentials
-# ------------------------------------------------------------------
-
-
 def check_aws_credentials() -> bool:
     """Check that AWS/S3 credentials are resolvable by boto3.
 
@@ -137,10 +127,6 @@ def check_aws_credentials() -> bool:
     return True
 
 
-# ------------------------------------------------------------------
-# 3. Cache group-permission check
-# ------------------------------------------------------------------
-
 _MAX_EXAMPLES = 10
 
 
@@ -174,10 +160,6 @@ def check_cache_permissions() -> bool:
 
     return all_ok
 
-
-# ------------------------------------------------------------------
-# Internal helpers
-# ------------------------------------------------------------------
 
 _BrokenList = list[tuple[Path, str]]
 

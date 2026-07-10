@@ -270,11 +270,6 @@ class CvatConfig(BaseModel):
         )
 
 
-# ---------------------------------------------------------------------------
-# Image cache config
-# ---------------------------------------------------------------------------
-
-
 class ImageCacheConfig(BaseModel):
     """Per-project mapping: project_name -> local directory for images."""
 
@@ -299,11 +294,6 @@ def _parse_image_cache_section(raw: object) -> ImageCacheConfig:
 def load_image_cache_config(config_path: Path | None = None) -> ImageCacheConfig:
     """Load the ``image_cache`` section from the config YAML."""
     return _load_section("image_cache", _parse_image_cache_section, config_path)
-
-
-# ---------------------------------------------------------------------------
-# Cache settings (image/task cache roots, S3 layout)
-# ---------------------------------------------------------------------------
 
 
 class CacheProjectSettings(BaseModel):
@@ -650,11 +640,6 @@ def _serialize_image_cache_section(image_cache: ImageCacheConfig) -> dict[str, s
 def is_clearml_disabled() -> bool:
     """Return True when ``CVETA2_CLEARML`` is ``'false'``."""
     return os.environ.get("CVETA2_CLEARML", "").lower() == "false"
-
-
-# ---------------------------------------------------------------------------
-# ClearML config
-# ---------------------------------------------------------------------------
 
 
 class ClearmlProjectMapping(BaseModel):

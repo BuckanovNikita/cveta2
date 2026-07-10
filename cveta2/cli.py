@@ -96,7 +96,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``fetch`` command parser."""
         parser = subparsers.add_parser(
             "fetch",
             help="Fetch all project bbox annotations and deleted images.",
@@ -121,7 +120,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``fetch-task`` command parser."""
         parser = subparsers.add_parser(
             "fetch-task",
             help="Fetch bbox annotations for specific task(s) in a project.",
@@ -198,7 +196,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``setup`` command parser."""
         parser = subparsers.add_parser(
             "setup",
             help="Interactively configure CVAT connection settings.",
@@ -209,7 +206,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``setup-cache`` command parser."""
         parser = subparsers.add_parser(
             "setup-cache",
             help="Interactively configure image cache directories for all projects.",
@@ -234,7 +230,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``s3-sync`` command parser."""
         parser = subparsers.add_parser(
             "s3-sync",
             help=(
@@ -265,7 +260,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``upload`` command parser."""
         parser = subparsers.add_parser(
             "upload",
             help=(
@@ -316,7 +310,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``merge`` command parser."""
         parser = subparsers.add_parser(
             "merge",
             help=(
@@ -361,7 +354,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``ignore`` command parser."""
         parser = subparsers.add_parser(
             "ignore",
             help=(
@@ -419,7 +411,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``labels`` command parser."""
         parser = subparsers.add_parser(
             "labels",
             help=(
@@ -440,7 +431,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``convert`` command parser."""
         parser = subparsers.add_parser(
             "convert",
             help=("Convert between cveta2 CSV and YOLO/COCO detection formats."),
@@ -617,7 +607,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``doctor`` command parser."""
         subparsers.add_parser(
             "doctor",
             help="Check configuration and image cache health.",
@@ -627,7 +616,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``setup-clearml`` command parser."""
         parser = subparsers.add_parser(
             "setup-clearml",
             help=(
@@ -647,7 +635,6 @@ class CliApp:
         self,
         subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
     ) -> None:
-        """Add the ``whats-new`` command parser."""
         parser = subparsers.add_parser(
             "whats-new",
             help=("List tasks completed after the tasks in a fetched dataset CSV."),

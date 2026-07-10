@@ -98,11 +98,6 @@ def run_ignore(args: argparse.Namespace) -> None:
         _interactive_loop(client, project_id, project_name, ignore_cfg)
 
 
-# ------------------------------------------------------------------
-# Project resolution
-# ------------------------------------------------------------------
-
-
 def _resolve_project(
     args: argparse.Namespace,
     client: CvatClient,
@@ -119,11 +114,6 @@ def _resolve_project(
     return project_id, project_name
 
 
-# ------------------------------------------------------------------
-# Selector resolution
-# ------------------------------------------------------------------
-
-
 def _resolve_selectors(
     client: CvatClient,
     project_id: int,
@@ -132,11 +122,6 @@ def _resolve_selectors(
     """Fetch project tasks and resolve selectors to ``TaskInfo`` objects."""
     tasks = client.list_project_tasks(project_id)
     return CvatClient.resolve_task_selectors(tasks, selectors)
-
-
-# ------------------------------------------------------------------
-# Interactive loop
-# ------------------------------------------------------------------
 
 
 def _format_ignored_entry(e: IgnoredTask) -> str:

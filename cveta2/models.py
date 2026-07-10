@@ -15,10 +15,6 @@ from pydantic import (
     model_validator,
 )
 
-# ------------------------------------------------------------------
-# CVAT entity models (project / task / label)
-# ------------------------------------------------------------------
-
 
 class ProjectInfo(BaseModel):
     """CVAT project summary (id + name)."""
@@ -74,10 +70,6 @@ class LabelInfo(BaseModel):
             parts.append(f"атрибуты: {attr_names}")
         return "  ".join(parts)
 
-
-# ------------------------------------------------------------------
-# Annotation models
-# ------------------------------------------------------------------
 
 Split = Literal["train", "val", "test"]
 """Allowed values for the ``split`` field (our convention for dataset splits)."""

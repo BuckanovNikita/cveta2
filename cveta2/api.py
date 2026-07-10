@@ -424,7 +424,6 @@ def update_labels(  # noqa: PLR0913
 
 
 def _resolve_task(client: CvatClient, project_id: int, task: int | str) -> TaskInfo:
-    """Resolve a task selector within a project."""
     tasks = client.list_project_tasks(project_id)
     return client.resolve_task_selectors(tasks, [task])[0]
 

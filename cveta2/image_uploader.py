@@ -29,11 +29,6 @@ if TYPE_CHECKING:
     from cveta2.s3_types import S3Client
 
 
-# ---------------------------------------------------------------------------
-# Upload stats
-# ---------------------------------------------------------------------------
-
-
 class UploadStats(BaseModel):
     """Result counters for an image upload run."""
 
@@ -41,11 +36,6 @@ class UploadStats(BaseModel):
     skipped_existing: int = 0
     failed: int = 0
     total: int = 0
-
-
-# ---------------------------------------------------------------------------
-# Image resolution
-# ---------------------------------------------------------------------------
 
 
 def resolve_images(
@@ -79,11 +69,6 @@ def resolve_images(
 
     missing = sorted(remaining)
     return found, missing
-
-
-# ---------------------------------------------------------------------------
-# Server-file mapping (month-based subfolders)
-# ---------------------------------------------------------------------------
 
 
 def build_server_file_mapping(
@@ -147,11 +132,6 @@ def build_server_file_mapping(
             name_to_server_file[image_name] = f"{month_prefix}/{image_name}"
 
     return name_to_server_file, existing_keys
-
-
-# ---------------------------------------------------------------------------
-# S3 uploader
-# ---------------------------------------------------------------------------
 
 
 class S3Uploader:

@@ -30,11 +30,6 @@ if TYPE_CHECKING:
     from cveta2.s3_types import S3Client
 
 
-# ---------------------------------------------------------------------------
-# Cloud storage info
-# ---------------------------------------------------------------------------
-
-
 class CloudStorageInfo(BaseModel):
     """Parsed cloud storage metadata from CVAT."""
 
@@ -65,11 +60,6 @@ def parse_cloud_storage(cs_raw: object) -> CloudStorageInfo:
     )
 
 
-# ---------------------------------------------------------------------------
-# Download stats
-# ---------------------------------------------------------------------------
-
-
 class DownloadStats(BaseModel):
     """Result counters for an image download run."""
 
@@ -77,11 +67,6 @@ class DownloadStats(BaseModel):
     cached: int = 0
     failed: int = 0
     total: int = 0
-
-
-# ---------------------------------------------------------------------------
-# Image downloader
-# ---------------------------------------------------------------------------
 
 
 class ImageDownloader:
@@ -97,10 +82,6 @@ class ImageDownloader:
         """Store the target directory and optional S3 prefix to strip."""
         self._target_dir = target_dir
         self._ignored_prefix = ignored_prefix
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def download(
         self,
@@ -136,10 +117,6 @@ class ImageDownloader:
             f"(всего {stats.total})"
         )
         return stats
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _collect_unique_images(
@@ -244,11 +221,6 @@ class ImageDownloader:
         return names_with_basename_fallback((name, key) for key, name in pairs)
 
 
-# ---------------------------------------------------------------------------
-# S3 download helper
-# ---------------------------------------------------------------------------
-
-
 def _download_one_s3(
     s3_client: S3Client,
     bucket: str,
@@ -259,11 +231,6 @@ def _download_one_s3(
     data = s3_get_bytes(s3_client, bucket, key)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
-
-
-# ---------------------------------------------------------------------------
-# S3 sync (full prefix → local directory)
-# ---------------------------------------------------------------------------
 
 
 class S3Syncer:

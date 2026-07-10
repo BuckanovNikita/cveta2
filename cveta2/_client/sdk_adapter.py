@@ -168,10 +168,6 @@ class SdkCvatApiAdapter:
         """Wrap an already-opened ``cvat_sdk`` client."""
         self.client = client
 
-    # ------------------------------------------------------------------
-    # Public API (satisfies CvatApiPort)
-    # ------------------------------------------------------------------
-
     @_api_retry
     @_translate_api_errors
     def list_projects(self) -> list[ProjectInfo]:
@@ -306,10 +302,6 @@ class SdkCvatApiAdapter:
         task_obj = self.client.tasks.retrieve(task_id)
         return int(task_obj.size or 0)
 
-    # ------------------------------------------------------------------
-    # Write operations (no blind retry: POST/CREATE are not idempotent)
-    # ------------------------------------------------------------------
-
     @_translate_api_errors
     def create_task_with_data(self, spec: UploadTaskSpec) -> int:
         """Create a task, attach cloud-storage data, wait; return task id.
@@ -407,10 +399,6 @@ class SdkCvatApiAdapter:
             project_id,
             patched_project_write_request=build_labels_patch_request(patches),
         )
-
-    # ------------------------------------------------------------------
-    # Conversion helpers (SDK objects -> DTOs)
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _convert_task(task: cvat_models.TaskRead) -> TaskInfo:

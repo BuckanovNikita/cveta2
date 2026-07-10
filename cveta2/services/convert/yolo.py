@@ -32,11 +32,6 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-# ---------------------------------------------------------------------------
-# CSV -> YOLO
-# ---------------------------------------------------------------------------
-
-
 def _write_box_labels(  # noqa: PLR0913
     box_df: pd.DataFrame,
     output_dir: Path,
@@ -172,11 +167,6 @@ def convert_to_yolo(
         f"{len(ctx.label_map)} классов -> {ctx.output_dir}"
     )
     return ctx.output_dir
-
-
-# ---------------------------------------------------------------------------
-# YOLO -> CSV
-# ---------------------------------------------------------------------------
 
 
 def _parse_label_file(path: Path) -> list[list[float]]:

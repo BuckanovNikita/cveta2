@@ -29,11 +29,6 @@ _ACTION_EXIT = "exit"
 _HEX_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
 
 
-# ------------------------------------------------------------------
-# Entry point
-# ------------------------------------------------------------------
-
-
 def run_labels(args: argparse.Namespace) -> None:
     """Run the ``labels`` command: list or interactively edit project labels."""
     with open_client() as client:
@@ -47,11 +42,6 @@ def run_labels(args: argparse.Namespace) -> None:
         _interactive_loop(client, project_id, project_name)
 
 
-# ------------------------------------------------------------------
-# Display helpers
-# ------------------------------------------------------------------
-
-
 def _print_labels(labels: list[LabelInfo], project_name: str) -> None:
     """Display current labels for a project."""
     if not labels:
@@ -60,11 +50,6 @@ def _print_labels(labels: list[LabelInfo], project_name: str) -> None:
     logger.info(f"Проект {project_name!r}: {len(labels)} меток:")
     for label in sorted(labels, key=lambda lbl: lbl.name):
         logger.info(f"  - {label.format_display()}")
-
-
-# ------------------------------------------------------------------
-# Interactive loop
-# ------------------------------------------------------------------
 
 
 def _interactive_loop(
@@ -132,11 +117,6 @@ def _interactive_loop(
             labels = _interactive_delete(client, project_id, labels)
 
 
-# ------------------------------------------------------------------
-# Add
-# ------------------------------------------------------------------
-
-
 def _interactive_add(
     client: CvatClient,
     project_id: int,
@@ -161,11 +141,6 @@ def _interactive_add(
     client.update_project_labels(project_id, add=[name])
     logger.info(f"Метка {name!r} добавлена")
     return client.get_project_labels(project_id)
-
-
-# ------------------------------------------------------------------
-# Rename
-# ------------------------------------------------------------------
 
 
 def _interactive_rename(
@@ -202,11 +177,6 @@ def _interactive_rename(
     client.update_project_labels(project_id, rename={label_id: new_name})
     logger.info(f"Метка {old_label.name!r} → {new_name!r}")
     return client.get_project_labels(project_id)
-
-
-# ------------------------------------------------------------------
-# Recolor
-# ------------------------------------------------------------------
 
 
 def _validate_hex_color(value: str) -> bool | str:
@@ -251,11 +221,6 @@ def _interactive_recolor(
     client.update_project_labels(project_id, recolor={label_id: new_color})
     logger.info(f"Цвет метки {old_label.name!r}: {default_color} → {new_color}")
     return client.get_project_labels(project_id)
-
-
-# ------------------------------------------------------------------
-# Delete (with safety checks)
-# ------------------------------------------------------------------
 
 
 def _log_label_usage(selected_labels: list[LabelInfo], usage: dict[int, int]) -> bool:

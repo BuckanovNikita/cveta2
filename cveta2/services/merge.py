@@ -25,11 +25,6 @@ _REQUIRED_COLUMNS: set[str] = {
 _TIME_COLUMN = "task_updated_date"
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _read_dataset_csv(path: Path, *, by_time: bool = False) -> pd.DataFrame:
     """Read a dataset CSV and validate required columns.
 
@@ -227,11 +222,6 @@ def _resolve_by_time(
         if pd.isna(old_ts) or pd.isna(new_ts) or new_ts >= old_ts:
             keep_from_new.add(img)
     return keep_from_new
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
 
 
 def merge_datasets(

@@ -19,9 +19,6 @@ from cveta2.services.output import format_counts_ru, read_dataset_csv
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-# ---------------------------------------------------------------------------
-# Coordinate conversion
-# ---------------------------------------------------------------------------
 
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 
@@ -85,11 +82,6 @@ def _pixel_to_coco(box: PixelBox) -> CocoBox:
     return CocoBox(box.x_tl, box.y_tl, box.x_br - box.x_tl, box.y_br - box.y_tl)
 
 
-# ---------------------------------------------------------------------------
-# File placement
-# ---------------------------------------------------------------------------
-
-
 class _OnceWarner:
     """Emit a given warning at most once over its lifetime."""
 
@@ -141,11 +133,6 @@ def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
             reflink_or_copy(str(src), str(dst))
         except OSError as exc:
             _copy_after_reflink_failure(src, dst, exc)
-
-
-# ---------------------------------------------------------------------------
-# Image search / sizes
-# ---------------------------------------------------------------------------
 
 
 def _build_search_dirs(image_dir_args: Sequence[str | Path] | None) -> list[Path]:
@@ -218,11 +205,6 @@ class _SizeCache:
         return self._cached
 
 
-# ---------------------------------------------------------------------------
-# CSV loading and split validation
-# ---------------------------------------------------------------------------
-
-
 def _validate_splits(df: pd.DataFrame) -> None:
     """Raise ``Cveta2Error`` if any images have no split value."""
     missing_split = df[df["split"].isna() | (df["split"] == "")]
@@ -281,11 +263,6 @@ def prepare_export(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     return ExportContext(df, out_dir, link_mode, label_map, found, splits)
-
-
-# ---------------------------------------------------------------------------
-# CSV row builders
-# ---------------------------------------------------------------------------
 
 
 def _make_csv_row_base(
