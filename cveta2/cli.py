@@ -39,6 +39,28 @@ _TASK_ACTIONS: dict[str, Callable[[argparse.Namespace], None]] = {
     "status": run_task_status,
 }
 
+_PROJECT_HELP = (
+    "Project ID or name. If omitted, interactive project selection is shown."
+)
+
+
+def _add_project_arg(
+    parser: argparse.ArgumentParser,
+    help_text: str = _PROJECT_HELP,
+) -> None:
+    parser.add_argument("--project", "-p", type=str, default=None, help=help_text)
+
+
+def _add_config_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Path to YAML config (default: ~/.config/cveta2/config.yaml "
+            "or CVETA2_CONFIG)."
+        ),
+    )
+
 
 class CliApp:
     """Command-line interface for cveta2."""
@@ -79,16 +101,7 @@ class CliApp:
             "fetch",
             help="Fetch all project bbox annotations and deleted images.",
         )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
-                "Project ID or name. If omitted, "
-                "interactive project selection is shown."
-            ),
-        )
+        _add_project_arg(parser)
         parser.add_argument(
             "--output-dir",
             "-o",
@@ -113,16 +126,7 @@ class CliApp:
             "fetch-task",
             help="Fetch bbox annotations for specific task(s) in a project.",
         )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
-                "Project ID or name. If omitted, "
-                "interactive project selection is shown."
-            ),
-        )
+        _add_project_arg(parser)
         parser.add_argument(
             "--task",
             "-t",
@@ -199,14 +203,7 @@ class CliApp:
             "setup",
             help="Interactively configure CVAT connection settings.",
         )
-        parser.add_argument(
-            "--config",
-            default=None,
-            help=(
-                "Path to YAML config (default: ~/.config/cveta2/config.yaml "
-                "or CVETA2_CONFIG)."
-            ),
-        )
+        _add_config_arg(parser)
 
     def _add_setup_cache_parser(
         self,
@@ -217,14 +214,7 @@ class CliApp:
             "setup-cache",
             help="Interactively configure image cache directories for all projects.",
         )
-        parser.add_argument(
-            "--config",
-            default=None,
-            help=(
-                "Path to YAML config (default: ~/.config/cveta2/config.yaml "
-                "or CVETA2_CONFIG)."
-            ),
-        )
+        _add_config_arg(parser)
         parser.add_argument(
             "--reset",
             action="store_true",
@@ -252,12 +242,9 @@ class CliApp:
                 "for all configured projects."
             ),
         )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
+        _add_project_arg(
+            parser,
+            help_text=(
                 "Sync only this project (name from image_cache config). "
                 "If omitted, syncs every configured project."
             ),
@@ -286,16 +273,7 @@ class CliApp:
                 "upload images to S3, create task with cloud storage."
             ),
         )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
-                "Project ID or name. If omitted, "
-                "interactive project selection is shown."
-            ),
-        )
+        _add_project_arg(parser)
         parser.add_argument(
             "--dataset",
             "-d",
@@ -391,12 +369,9 @@ class CliApp:
                 "(always treated as in-progress during fetch)."
             ),
         )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
+        _add_project_arg(
+            parser,
+            help_text=(
                 "Project name (as used in config). "
                 "If omitted, interactive project selection is shown."
             ),
@@ -452,16 +427,7 @@ class CliApp:
                 "Includes safety checks before label deletion."
             ),
         )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
-                "Project ID or name. If omitted, "
-                "interactive project selection is shown."
-            ),
-        )
+        _add_project_arg(parser)
         parser.add_argument(
             "--list",
             action="store_true",
@@ -638,16 +604,7 @@ class CliApp:
     @staticmethod
     def _add_task_common_args(parser: argparse.ArgumentParser) -> None:
         """Add ``--project`` / ``--task`` arguments shared by task actions."""
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
-                "Project ID or name. If omitted, "
-                "interactive project selection is shown."
-            ),
-        )
+        _add_project_arg(parser)
         parser.add_argument(
             "--task",
             "-t",
@@ -678,14 +635,7 @@ class CliApp:
                 "for dataset publishing."
             ),
         )
-        parser.add_argument(
-            "--config",
-            default=None,
-            help=(
-                "Path to YAML config (default: ~/.config/cveta2/config.yaml "
-                "or CVETA2_CONFIG)."
-            ),
-        )
+        _add_config_arg(parser)
         parser.add_argument(
             "--list",
             dest="list_mappings",
@@ -702,16 +652,7 @@ class CliApp:
             "whats-new",
             help=("List tasks completed after the tasks in a fetched dataset CSV."),
         )
-        parser.add_argument(
-            "--project",
-            "-p",
-            type=str,
-            default=None,
-            help=(
-                "Project ID or name. If omitted, "
-                "interactive project selection is shown."
-            ),
-        )
+        _add_project_arg(parser)
         parser.add_argument(
             "--dataset",
             "-d",
