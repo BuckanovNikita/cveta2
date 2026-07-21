@@ -21,18 +21,15 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from cveta2.client import CvatClient
-    from cveta2.models import TaskInfo
+    from cveta2.models import JobState, TaskInfo
 
-STATE_CLI_TO_CVAT: dict[str, str] = {
+STATE_CLI_TO_CVAT: dict[str, JobState] = {
     "new": "new",
     "in-progress": "in progress",
     "completed": "completed",
     "rejected": "rejected",
 }
 """Mapping from CLI ``--state`` values to CVAT job state values."""
-
-JOB_STAGES: list[str] = ["annotation", "validation", "acceptance"]
-"""Valid CVAT job stages for the CLI ``--stage`` choices."""
 
 
 _CONFIRM_HINT = "Запустите команду с флагом --yes."

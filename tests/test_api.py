@@ -35,10 +35,18 @@ def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestOpenConnection:
     def test_injected_client_used_as_is(self) -> None:
-        sentinel = object()
-        connection = cveta2.Connection(client=sentinel)  # type: ignore[arg-type]
+        injected = cveta2.CvatClient(cveta2.CvatConfig(), api=object())  # type: ignore[arg-type]
+        connection = cveta2.Connection(client=injected)
         with _open(connection) as client:
-            assert client is sentinel
+            assert client is injected
+
+    def test_unentered_client_rejected(self) -> None:
+        connection = cveta2.Connection(client=cveta2.CvatClient(cveta2.CvatConfig()))
+        with (
+            pytest.raises(Cveta2Error, match="не готов"),
+            _open(connection),
+        ):
+            pytest.fail("must not yield")
 
     def test_missing_host_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -99,7 +107,7 @@ class TestFetchApi:
         )
         out = tmp_path / "out"
 
-        df = cveta2.fetch(
+        result = cveta2.fetch(
             fake.project.id,
             out,
             download_images=False,
@@ -111,9 +119,10 @@ class TestFetchApi:
         assert (out / "obsolete.csv").exists()
         assert (out / "in_progress.csv").exists()
         assert (out / "deleted.csv").exists()
-        assert not df.empty
-        assert set(df["task_id"].unique()) == {fake.tasks[1].id}
-        assert len(pd.read_csv(out / "obsolete.csv")) > 0
+        assert not result.dataset.empty
+        assert set(result.dataset["task_id"].unique()) == {fake.tasks[1].id}
+        assert len(result.obsolete) > 0
+        assert len(pd.read_csv(out / "obsolete.csv")) == len(result.obsolete)
 
     def test_fetch_task_writes_csvs_matching_dataframe(
         self, normal_fake: LoadedFixtures, tmp_path: Path
@@ -139,7 +148,7 @@ class TestFetchApi:
     ) -> None:
         fake = normal_fake
 
-        df = cveta2.fetch(
+        result = cveta2.fetch(
             fake.project.name,
             tmp_path / "out",
             download_images=False,
@@ -147,7 +156,31 @@ class TestFetchApi:
             connection=fake_connection(fake),
         )
 
-        assert not df.empty
+        assert not result.dataset.empty
+
+    def test_invalid_cache_mode_raises(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        with pytest.raises(Cveta2Error, match="cache"):
+            cveta2.fetch(
+                normal_fake.project.id,
+                tmp_path / "out",
+                download_images=False,
+                cache="bogus",  # type: ignore[arg-type]
+                connection=fake_connection(normal_fake),
+            )
+
+    def test_images_dir_with_download_disabled_raises(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        with pytest.raises(Cveta2Error, match="несовместимы"):
+            cveta2.fetch(
+                normal_fake.project.id,
+                tmp_path / "out",
+                images_dir=tmp_path / "imgs",
+                download_images=False,
+                connection=fake_connection(normal_fake),
+            )
 
     def test_fetch_without_images_dir_config_raises(
         self, normal_fake: LoadedFixtures, tmp_path: Path
@@ -221,11 +254,46 @@ class TestWhatsNewApi:
             ],
         )
 
-        tasks = cveta2.whats_new(
+        result = cveta2.whats_new(
             fake.project.id, dataset, connection=fake_connection(fake)
         )
 
-        assert {t.id for t in tasks} == {old_task.id, new_task.id}
+        assert {t.id for t in result.tasks} == {old_task.id, new_task.id}
+        assert result.updated_task_ids == {old_task.id}
+
+
+class TestIgnoreApi:
+    def test_add_list_remove_roundtrip(self, normal_fake: LoadedFixtures) -> None:
+        fake = normal_fake
+        task = fake.tasks[0]
+        connection = fake_connection(fake)
+
+        added = cveta2.ignore(
+            fake.project.id,
+            add=[task.id],
+            description="broken",
+            silent=True,
+            connection=connection,
+        )
+        assert [(e.id, e.silent) for e in added] == [(task.id, True)]
+
+        listed = cveta2.ignore(fake.project.id, connection=connection)
+        assert [e.id for e in listed] == [task.id]
+
+        remaining = cveta2.ignore(
+            fake.project.id, remove=[task.id], connection=connection
+        )
+        assert remaining == []
+
+
+class TestTaskSetStatusApi:
+    def test_invalid_state_rejected_before_remote_call(self) -> None:
+        with pytest.raises(Cveta2Error, match="state"):
+            cveta2.task_set_status(1, 1, state="in-progress")  # type: ignore[arg-type]
+
+    def test_requires_stage_or_state(self) -> None:
+        with pytest.raises(Cveta2Error, match="stage"):
+            cveta2.task_set_status(1, 1)
 
 
 class TestLabelsApi:

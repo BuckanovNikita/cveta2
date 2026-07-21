@@ -44,11 +44,16 @@ def run_fetch(args: argparse.Namespace) -> None:
         project_id, project_name, cs_info = resolve_project_and_cloud_storage(
             client, args.project
         )
-        options = _build_fetch_options(args, client, project_id, project_name)
+        options = _build_project_fetch_options(args, project_name)
         if prompted:
             echo_cli_command(
                 "fetch",
-                {"-p": project_name, "-o": str(output_dir), "--raw": options.raw}
+                {
+                    "-p": project_name,
+                    "-o": str(output_dir),
+                    "--raw": options.raw,
+                    "--no-clearml": args.no_clearml,
+                }
                 | _common_fetch_echo_args(args),
             )
         fetch_project(client, project_id, project_name, output_dir, cs_info, options)
@@ -63,7 +68,7 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         project_id, project_name, cs_info = resolve_project_and_cloud_storage(
             client, args.project
         )
-        options = _build_fetch_options(args, client, project_id, project_name)
+        options = _build_task_fetch_options(args, client, project_id, project_name)
         if prompted:
             echo_cli_command(
                 "fetch-task",
@@ -91,29 +96,42 @@ def _common_fetch_echo_args(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
-def _build_fetch_options(
+def _build_project_fetch_options(
     args: argparse.Namespace,
-    client: CvatClient,
-    project_id: int,
     project_name: str,
 ) -> FetchOptions:
-    """Resolve interactive inputs and map CLI args onto FetchOptions."""
+    """Map ``fetch`` CLI args onto FetchOptions (whole-project run)."""
     ignore_set, silent_set = load_ignore_sets(project_name)
-
-    task_selector: list[int | str] | None = None
-    if hasattr(args, "task"):
-        task_selector = _resolve_task_selector(args, client, project_id, ignore_set)
-
     return FetchOptions(
         completed_only=args.completed_only,
-        task_selector=task_selector,
         ignore_task_ids=ignore_set,
         silent_task_ids=silent_set,
         use_cache=not args.no_cache,
         force=args.force,
         save_tasks=args.save_tasks,
         images_dir=_resolve_images_dir(args, project_name),
-        raw=getattr(args, "raw", False),
+        raw=args.raw,
+        publish_clearml=not args.no_clearml,
+    )
+
+
+def _build_task_fetch_options(
+    args: argparse.Namespace,
+    client: CvatClient,
+    project_id: int,
+    project_name: str,
+) -> FetchOptions:
+    """Resolve the task selector and map ``fetch-task`` CLI args onto FetchOptions."""
+    ignore_set, silent_set = load_ignore_sets(project_name)
+    return FetchOptions(
+        completed_only=args.completed_only,
+        task_selector=_resolve_task_selector(args, client, project_id, ignore_set),
+        ignore_task_ids=ignore_set,
+        silent_task_ids=silent_set,
+        use_cache=not args.no_cache,
+        force=args.force,
+        save_tasks=args.save_tasks,
+        images_dir=_resolve_images_dir(args, project_name),
     )
 
 

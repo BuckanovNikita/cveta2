@@ -1,11 +1,12 @@
 """cveta2 -- CVAT project annotation utilities.
 
-Workflow functions mirror the CLI commands::
+Workflow functions mirror the data CLI commands::
 
     import cveta2
 
-    df = cveta2.fetch("my-project", output_dir="out")
-    cveta2.upload("out/dataset.csv", project="my-project", name="task-1")
+    result = cveta2.fetch("my-project", output_dir="out")
+    print(result.dataset)  # + .obsolete / .in_progress / .deleted_images
+    cveta2.upload("out/dataset.csv", "my-project", "task-1")
     cveta2.convert_to_yolo("out/dataset.csv", "yolo_out/")
 """
 
@@ -13,12 +14,14 @@ from cveta2._client.ports import CvatApiPort
 from cveta2.api import (
     Connection,
     UploadResult,
+    WhatsNewResult,
     convert_from_yolo,
     convert_to_coco,
     convert_to_yolo,
     fetch,
     fetch_task,
     get_labels,
+    ignore,
     merge,
     s3_sync,
     task_delete,
@@ -30,7 +33,7 @@ from cveta2.api import (
     whats_new,
 )
 from cveta2.client import CvatClient, FetchContext
-from cveta2.config import CvatConfig
+from cveta2.config import CvatConfig, IgnoredTask
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import (
     CvatApiError,
@@ -44,10 +47,14 @@ from cveta2.exceptions import (
 )
 from cveta2.models import (
     CSV_COLUMNS,
+    JOB_STAGES,
+    JOB_STATES,
     AnnotationRecord,
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
+    JobStage,
+    JobState,
     LabelAttributeInfo,
     LabelInfo,
     ProjectAnnotations,
@@ -59,6 +66,8 @@ from cveta2.models import (
 
 __all__ = [
     "CSV_COLUMNS",
+    "JOB_STAGES",
+    "JOB_STATES",
     "AnnotationRecord",
     "BBoxAnnotation",
     "Connection",
@@ -69,8 +78,11 @@ __all__ = [
     "Cveta2Error",
     "DeletedImage",
     "FetchContext",
+    "IgnoredTask",
     "ImageWithoutAnnotations",
     "InteractiveModeRequiredError",
+    "JobStage",
+    "JobState",
     "LabelAttributeInfo",
     "LabelInfo",
     "LabelsMismatchError",
@@ -85,12 +97,14 @@ __all__ = [
     "TaskInfo",
     "TaskNotFoundError",
     "UploadResult",
+    "WhatsNewResult",
     "convert_from_yolo",
     "convert_to_coco",
     "convert_to_yolo",
     "fetch",
     "fetch_task",
     "get_labels",
+    "ignore",
     "merge",
     "partition_annotations_df",
     "s3_sync",

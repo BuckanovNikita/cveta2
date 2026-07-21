@@ -10,11 +10,9 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2.client import (
-    CvatClient,
-    _FetchAnnotationsOptions,
-    _filter_tasks_for_fetch,
-)
+from cveta2._client_ops.fetch import _filter_tasks_for_fetch
+from cveta2._client_ops.shared import _FetchAnnotationsOptions
+from cveta2.client import CvatClient
 from cveta2.commands.fetch import (
     _resolve_images_dir,
     _resolve_task_selector,

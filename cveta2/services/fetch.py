@@ -56,17 +56,19 @@ class FetchOptions:
     images_dir: Path | None = None
     raw: bool = False
     publish_clearml: bool = True
+    config_path: Path | None = None
 
 
 def load_ignore_sets(
     project_name: str,
+    config_path: Path | None = None,
 ) -> tuple[set[int] | None, set[int] | None]:
     """Load ignore config, return ``(ignore_set, silent_set)``.
 
     *ignore_set* contains all ignored task IDs (or None if empty).
     *silent_set* contains IDs of tasks marked ``silent=True``.
     """
-    ignore_cfg = IgnoreConfig.load()
+    ignore_cfg = IgnoreConfig.load(config_path)
     ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
     if not ignored_ids:
         return None, None
@@ -156,7 +158,7 @@ def _fetch_core(  # noqa: PLR0913
         project_name=project_name,
     )
 
-    cache_settings = CacheConfig.load().for_project(project_name)
+    cache_settings = CacheConfig.load(options.config_path).for_project(project_name)
     cache = _build_task_cache(client, project_id, options, cache_settings)
     policy = _CachePolicy(cache=cache, force=options.force)
 

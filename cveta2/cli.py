@@ -17,7 +17,6 @@ from cveta2.commands.s3_sync import run_s3_sync
 from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.commands.setup_clearml import run_setup_clearml
 from cveta2.commands.task_ops import (
-    JOB_STAGES,
     STATE_CLI_TO_CVAT,
     run_task_delete,
     run_task_drop_label,
@@ -27,6 +26,7 @@ from cveta2.commands.task_ops import (
 from cveta2.commands.upload import run_upload
 from cveta2.commands.whats_new import run_whats_new
 from cveta2.exceptions import Cveta2Error
+from cveta2.models import JOB_STAGES
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -138,6 +138,11 @@ def _configure_fetch(parser: argparse.ArgumentParser) -> None:
         "--raw",
         action="store_true",
         help="Save all records (including deletions) as raw.csv without partitioning.",
+    )
+    parser.add_argument(
+        "--no-clearml",
+        action="store_true",
+        help="Skip publishing the fetched dataset to ClearML.",
     )
     _add_common_fetch_args(parser)
 

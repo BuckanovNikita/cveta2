@@ -1,4 +1,8 @@
-"""Public workflow API: module-level functions mirroring the CLI commands.
+"""Public workflow API: module-level functions mirroring the data CLI commands.
+
+Every data command (fetch, upload, convert, merge, labels, task ops,
+whats-new, ignore, s3-sync) has a counterpart here; the interactive-only
+commands (``setup``, ``setup-cache``, ``setup-clearml``, ``doctor``) do not.
 
 Every remote function accepts an optional ``connection=`` argument (a
 :class:`Connection`); when omitted or partially filled, configuration is
@@ -12,7 +16,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 from pydantic import BaseModel
@@ -22,11 +26,13 @@ from cveta2.client import CvatClient
 from cveta2.config import (
     CacheConfig,
     CvatConfig,
+    IgnoreConfig,
     ImageCacheConfig,
     UploadConfig,
     cache_dir_for_project,
 )
 from cveta2.exceptions import Cveta2Error, MissingHostError
+from cveta2.models import JOB_STAGES, JOB_STATES, TaskInfo
 from cveta2.services.convert import (
     convert_from_yolo,
     convert_to_coco,
@@ -50,24 +56,28 @@ from cveta2.services.upload import (
     split_deleted_rows,
     upload_dataset,
 )
-from cveta2.services.whats_new import REQUIRED_COLUMNS, compute_cutoff
+from cveta2.services.whats_new import REQUIRED_COLUMNS, compute_baseline
 from cveta2.task_cache import invalidate_local_entry
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
+    from cveta2.config import IgnoredTask
+    from cveta2.dataset_partition import PartitionResult
     from cveta2.image_downloader import DownloadStats
-    from cveta2.models import LabelInfo, TaskInfo
+    from cveta2.models import JobStage, JobState, LabelInfo
 
 __all__ = [
     "Connection",
     "UploadResult",
+    "WhatsNewResult",
     "convert_from_yolo",
     "convert_to_coco",
     "convert_to_yolo",
     "fetch",
     "fetch_task",
     "get_labels",
+    "ignore",
     "merge",
     "s3_sync",
     "task_delete",
@@ -78,6 +88,15 @@ __all__ = [
     "upload",
     "whats_new",
 ]
+
+CacheMode = Literal["use", "refresh", "off"]
+"""Task-annotation cache modes for :func:`fetch` / :func:`fetch_task`."""
+
+_CACHE_FLAGS: dict[str, tuple[bool, bool]] = {
+    "use": (True, False),
+    "refresh": (True, True),
+    "off": (False, False),
+}
 
 
 class UploadResult(BaseModel):
@@ -120,6 +139,12 @@ def _open(connection: Connection | None) -> Iterator[CvatClient]:
     """
     conn = connection or Connection()
     if conn.client is not None:
+        if not conn.client.is_ready:
+            raise Cveta2Error(
+                "Переданный client не готов к работе: войдите в его контекст "
+                "(with CvatClient(cfg) as client: ...) или создайте его "
+                "с фейковым api=."
+            )
         yield conn.client
         return
     cfg = CvatConfig.load(conn.config_path)
@@ -141,20 +166,40 @@ def _open(connection: Connection | None) -> Iterator[CvatClient]:
         yield opened
 
 
+def _config_path(connection: Connection | None) -> Path | None:
+    """Explicit config file from the connection, or None for the default."""
+    return connection.config_path if connection else None
+
+
+def _cache_flags(cache: CacheMode) -> tuple[bool, bool]:
+    """Map a cache mode onto the ``(use_cache, force)`` fetch options."""
+    try:
+        return _CACHE_FLAGS[cache]
+    except KeyError:
+        raise Cveta2Error(
+            f"Недопустимое значение cache={cache!r}; допустимые: use, refresh, off."
+        ) from None
+
+
 def _resolve_images_dir(
     images_dir: str | Path | None,
     download_images: bool,  # noqa: FBT001
     project_name: str,
+    config_path: Path | None,
 ) -> Path | None:
     """Resolve the image download directory without prompting."""
+    if images_dir and not download_images:
+        raise Cveta2Error(
+            "Параметры несовместимы: передан images_dir= при download_images=False."
+        )
     if not download_images:
         return None
     if images_dir:
         return Path(images_dir).resolve()
-    cached_dir = ImageCacheConfig.load().get_cache_dir(project_name)
+    cached_dir = ImageCacheConfig.load(config_path).get_cache_dir(project_name)
     if cached_dir is not None:
         return cached_dir
-    images_root = CacheConfig.load().for_project(project_name).images_root
+    images_root = CacheConfig.load(config_path).for_project(project_name).images_root
     if images_root is not None:
         return cache_dir_for_project(images_root, project_name)
     raise Cveta2Error(
@@ -173,23 +218,33 @@ def fetch(  # noqa: PLR0913
     raw: bool = False,
     images_dir: str | Path | None = None,
     download_images: bool = True,
-    use_cache: bool = True,
-    force: bool = False,
+    cache: CacheMode = "use",
     save_tasks: bool = False,
     publish_clearml: bool = True,
     connection: Connection | None = None,
-) -> pd.DataFrame:
+) -> PartitionResult:
     """Fetch a whole project like ``cveta2 fetch``.
 
     Writes dataset/obsolete/in_progress/deleted CSVs (plus raw.csv when
-    *raw*) into *output_dir* and returns the ``dataset`` partition.
+    *raw*) into *output_dir* and returns the full
+    :class:`~cveta2.dataset_partition.PartitionResult` — the
+    ``dataset`` / ``obsolete`` / ``in_progress`` DataFrames plus
+    ``deleted_images``.  DataFrame columns follow
+    :data:`cveta2.CSV_COLUMNS`; rows are flattened
+    :data:`cveta2.AnnotationRecord` variants (see ``DATASET_FORMAT.md``).
+
+    *cache* controls the task-annotation cache: ``"use"`` reads and
+    updates it, ``"refresh"`` re-downloads every task and updates it,
+    ``"off"`` disables it entirely.
     """
+    use_cache, force = _cache_flags(cache)
+    config_path = _config_path(connection)
     with _open(connection) as c:
         project_id, project_name = resolve_project(c, project)
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id)
         )
-        ignore_set, silent_set = load_ignore_sets(project_name)
+        ignore_set, silent_set = load_ignore_sets(project_name, config_path)
         options = FetchOptions(
             completed_only=completed_only,
             ignore_task_ids=ignore_set,
@@ -197,14 +252,16 @@ def fetch(  # noqa: PLR0913
             use_cache=use_cache,
             force=force,
             save_tasks=save_tasks,
-            images_dir=_resolve_images_dir(images_dir, download_images, project_name),
+            images_dir=_resolve_images_dir(
+                images_dir, download_images, project_name, config_path
+            ),
             raw=raw,
             publish_clearml=publish_clearml,
+            config_path=config_path,
         )
-        partition = fetch_project(
+        return fetch_project(
             c, project_id, project_name, Path(output_dir), cs_info, options
         )
-    return partition.dataset
 
 
 def fetch_task(  # noqa: PLR0913
@@ -215,22 +272,25 @@ def fetch_task(  # noqa: PLR0913
     completed_only: bool = False,
     images_dir: str | Path | None = None,
     download_images: bool = True,
-    use_cache: bool = True,
-    force: bool = False,
+    cache: CacheMode = "use",
     save_tasks: bool = False,
     connection: Connection | None = None,
 ) -> pd.DataFrame:
     """Fetch selected tasks like ``cveta2 fetch-task``.
 
-    Writes dataset.csv and deleted.csv into *output_dir* and returns the
-    dataset rows as a DataFrame.
+    Writes dataset.csv and deleted.csv into *output_dir* and returns all
+    fetched rows as a DataFrame with :data:`cveta2.CSV_COLUMNS` columns
+    (unpartitioned, unlike :func:`fetch`).  *cache* works as in
+    :func:`fetch`.
     """
+    use_cache, force = _cache_flags(cache)
+    config_path = _config_path(connection)
     with _open(connection) as c:
         project_id, project_name = resolve_project(c, project)
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id)
         )
-        ignore_set, silent_set = load_ignore_sets(project_name)
+        ignore_set, silent_set = load_ignore_sets(project_name, config_path)
         options = FetchOptions(
             completed_only=completed_only,
             task_selector=list(tasks),
@@ -239,7 +299,10 @@ def fetch_task(  # noqa: PLR0913
             use_cache=use_cache,
             force=force,
             save_tasks=save_tasks,
-            images_dir=_resolve_images_dir(images_dir, download_images, project_name),
+            images_dir=_resolve_images_dir(
+                images_dir, download_images, project_name, config_path
+            ),
+            config_path=config_path,
         )
         result = fetch_selected_tasks(
             c, project_id, project_name, Path(output_dir), cs_info, options
@@ -249,9 +312,9 @@ def fetch_task(  # noqa: PLR0913
 
 def upload(  # noqa: PLR0913
     dataset: str | Path | pd.DataFrame,
-    *,
     project: int | str,
     name: str,
+    *,
     labels: Sequence[str] | None = None,
     include_unannotated: bool = False,
     exclude_in_progress: str | Path | None = None,
@@ -286,7 +349,7 @@ def upload(  # noqa: PLR0913
         include_unannotated=include_unannotated,
         exclude_names=exclude_names,
     )
-    upload_cfg = UploadConfig.load()
+    upload_cfg = UploadConfig.load(_config_path(connection))
     with _open(connection) as c:
         project_id, project_name = resolve_project(c, project)
         options = UploadOptions(
@@ -327,19 +390,36 @@ def merge(
     return merge_datasets(old, new, output, deleted=deleted, by_time=by_time)
 
 
+class WhatsNewResult(BaseModel):
+    """Completed tasks newer than a fetched dataset CSV."""
+
+    tasks: list[TaskInfo]
+    updated_task_ids: set[int]
+    cutoff: str
+
+
 def whats_new(
     project: int | str,
     dataset: str | Path,
     *,
     connection: Connection | None = None,
-) -> list[TaskInfo]:
-    """List completed tasks newer than a fetched dataset CSV."""
+) -> WhatsNewResult:
+    """List completed tasks newer than a fetched dataset CSV.
+
+    ``updated_task_ids`` marks the returned tasks that are already
+    present in the CSV (updated since the fetch, rather than new).
+    """
     dataset_path = Path(dataset)
     df = read_dataset_csv(dataset_path, REQUIRED_COLUMNS)
-    cutoff = compute_cutoff(df, dataset_path)
+    baseline = compute_baseline(df, dataset_path)
     with _open(connection) as c:
         project_id, _ = resolve_project(c, project)
-        return c.list_tasks_completed_after(project_id, cutoff)
+        tasks = c.list_tasks_completed_after(project_id, baseline.cutoff)
+    return WhatsNewResult(
+        tasks=tasks,
+        updated_task_ids={t.id for t in tasks if t.id in baseline.known_task_ids},
+        cutoff=baseline.cutoff,
+    )
 
 
 def s3_sync(
@@ -350,7 +430,7 @@ def s3_sync(
     connection: Connection | None = None,
 ) -> DownloadStats:
     """Sync all project images from S3 into *target_dir* like ``cveta2 s3-sync``."""
-    config_path = connection.config_path if connection else None
+    config_path = _config_path(connection)
     with _open(connection) as c:
         project_id, project_name = resolve_project(c, project)
         cs_info = apply_sync_root_override(
@@ -386,13 +466,47 @@ def update_labels(  # noqa: PLR0913
 ) -> None:
     """Add/rename/delete/recolor project labels.
 
-    Deleting labels destroys all annotations using them permanently.
+    *add* takes new label names; *delete* takes label IDs (from
+    :func:`get_labels`).  *rename* maps label ID → new name and *recolor*
+    maps label ID → hex color (``"#rrggbb"``).  Deleting labels destroys
+    all annotations using them permanently.
     """
     with _open(connection) as c:
         project_id, _ = resolve_project(c, project)
         c.update_project_labels(
             project_id, add=add, rename=rename, delete=delete, recolor=recolor
         )
+
+
+def ignore(  # noqa: PLR0913
+    project: int | str,
+    *,
+    add: Sequence[int | str] | None = None,
+    remove: Sequence[int | str] | None = None,
+    description: str = "",
+    silent: bool = False,
+    connection: Connection | None = None,
+) -> list[IgnoredTask]:
+    """Manage the project's fetch ignore list like ``cveta2 ignore``.
+
+    *add* / *remove* take task IDs or names; *description* and *silent*
+    apply to added tasks.  Returns the project's ignore entries after the
+    change (with neither *add* nor *remove*, just lists them).
+    """
+    config_path = _config_path(connection)
+    ignore_cfg = IgnoreConfig.load(config_path)
+    with _open(connection) as c:
+        project_id, project_name = resolve_project(c, project)
+        if add or remove:
+            tasks = c.list_project_tasks(project_id)
+            for task in c.resolve_task_selectors(tasks, list(add or [])):
+                ignore_cfg.add_task(
+                    project_name, task.id, task.name, description, silent=silent
+                )
+            for task in c.resolve_task_selectors(tasks, list(remove or [])):
+                ignore_cfg.remove_task(project_name, task.id)
+            ignore_cfg.save(config_path)
+    return ignore_cfg.get_ignored_entries(project_name)
 
 
 def _resolve_task(client: CvatClient, project_id: int, task: int | str) -> TaskInfo:
@@ -468,10 +582,23 @@ def task_set_status(
     project: int | str,
     task: int | str,
     *,
-    stage: str | None = None,
-    state: str | None = None,
+    stage: JobStage | None = None,
+    state: JobState | None = None,
     connection: Connection | None = None,
 ) -> int:
-    """Set stage and/or state on every job of a task (CVAT-native values)."""
+    """Set stage and/or state on every job of a task (CVAT-native values).
+
+    Valid values: :data:`cveta2.JOB_STAGES` / :data:`cveta2.JOB_STATES`.
+    """
+    if stage is None and state is None:
+        raise Cveta2Error("Укажите хотя бы один stage или state.")
+    if stage is not None and stage not in JOB_STAGES:
+        raise Cveta2Error(
+            f"Недопустимый stage {stage!r}; допустимые: {', '.join(JOB_STAGES)}."
+        )
+    if state is not None and state not in JOB_STATES:
+        raise Cveta2Error(
+            f"Недопустимый state {state!r}; допустимые: {', '.join(JOB_STATES)}."
+        )
     with _resolved_task(connection, project, task) as (c, task_info):
         return c.set_task_jobs_status(task_info.id, stage=stage, state=state)

@@ -80,6 +80,11 @@ class _ClientBase:
         return self._require_api("api")
 
     @property
+    def is_ready(self) -> bool:
+        """True when remote calls can be made (entered context or injected api)."""
+        return (self._api or self._persistent_api) is not None
+
+    @property
     def host(self) -> str:
         """The configured CVAT host."""
         return self._cfg.host or ""

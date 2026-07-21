@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cveta2.exceptions import Cveta2Error
@@ -12,6 +13,26 @@ if TYPE_CHECKING:
     import pandas as pd
 
 REQUIRED_COLUMNS = {"task_updated_date", "task_status", "task_id"}
+
+
+@dataclass(frozen=True)
+class WhatsNewBaseline:
+    """What a fetched dataset CSV already contains: cutoff date + task ids."""
+
+    cutoff: str
+    known_task_ids: set[int]
+
+
+def compute_baseline(df: pd.DataFrame, path: Path) -> WhatsNewBaseline:
+    """Build the comparison baseline from a fetched dataset CSV.
+
+    ``known_task_ids`` lets callers mark returned tasks that are already
+    present in the CSV as *updated* rather than new.
+    """
+    return WhatsNewBaseline(
+        cutoff=compute_cutoff(df, path),
+        known_task_ids={int(v) for v in df["task_id"].dropna()},
+    )
 
 
 def compute_cutoff(df: pd.DataFrame, path: Path) -> str:

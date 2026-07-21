@@ -75,6 +75,19 @@ Split = Literal["train", "val", "test"]
 """Allowed values for the ``split`` field (our convention for dataset splits)."""
 
 
+JobStage = Literal["annotation", "validation", "acceptance"]
+"""CVAT-native job stage values."""
+
+JOB_STAGES: tuple[JobStage, ...] = ("annotation", "validation", "acceptance")
+"""All valid CVAT job stages (runtime counterpart of :data:`JobStage`)."""
+
+JobState = Literal["new", "in progress", "completed", "rejected"]
+"""CVAT-native job state values."""
+
+JOB_STATES: tuple[JobState, ...] = ("new", "in progress", "completed", "rejected")
+"""All valid CVAT job states (runtime counterpart of :data:`JobState`)."""
+
+
 def _validate_image_name(v: str) -> str:
     """Ensure *image_name* is a bare filename (no directory components)."""
     name = PurePosixPath(v).name
