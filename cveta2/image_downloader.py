@@ -16,6 +16,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from cveta2.fs_utils import ensure_shared_dir, write_shared_bytes
+from cveta2.s3_types import Transfer
 from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
@@ -70,6 +71,36 @@ class DownloadStats(BaseModel):
     total: int = 0
 
 
+def _download_pending(  # noqa: PLR0913
+    s3_client: S3Client,
+    bucket: str,
+    pending: list[Transfer],
+    stats: DownloadStats,
+    *,
+    desc: str,
+    unit: str,
+) -> None:
+    """Download *pending* transfers, adding the outcome counts to *stats*."""
+    ok, failed = run_s3_transfers(
+        pending,
+        lambda t: _download_one_s3(s3_client, bucket, t.key, t.path),
+        lambda t: f"{t.name} (key={t.key})",
+        desc=desc,
+        unit=unit,
+    )
+    stats.downloaded += ok
+    stats.failed += failed
+
+
+def _log_download_summary(what: str, stats: DownloadStats) -> None:
+    """Log the downloaded / cached / failed / total counters."""
+    logger.info(
+        f"{what}: {stats.downloaded} загружено, "
+        f"{stats.cached} из кэша, {stats.failed} ошибок "
+        f"(всего {stats.total})"
+    )
+
+
 class ImageDownloader:
     """Download project images from S3 into a user-specified directory.
 
@@ -112,11 +143,7 @@ class ImageDownloader:
         ensure_shared_dir(self._target_dir)
         self._download_all(pending, stats, project_cloud_storage)
 
-        logger.info(
-            f"Загрузка изображений: {stats.downloaded} новых, "
-            f"{stats.cached} из кэша, {stats.failed} ошибок "
-            f"(всего {stats.total})"
-        )
+        _log_download_summary("Загрузка изображений", stats)
         return stats
 
     @staticmethod
@@ -188,7 +215,7 @@ class ImageDownloader:
             project_cloud_storage.bucket,
             project_cloud_storage.prefix,
         )
-        to_download: list[tuple[str, str, Path]] = []
+        to_download: list[Transfer] = []
         missing: list[str] = []
         for image_name, frame_ref in pending.items():
             s3_key: str | None = (
@@ -200,7 +227,7 @@ class ImageDownloader:
                 missing.append(image_name)
                 continue
             dest = self._dest_path(frame_ref, project_cloud_storage)
-            to_download.append((image_name, s3_key, dest))
+            to_download.append(Transfer(name=image_name, key=s3_key, path=dest))
         if missing:
             stats.failed += len(missing)
             logger.warning(
@@ -208,16 +235,14 @@ class ImageDownloader:
                 f"{', '.join(missing[:10])}"
                 f"{'...' if len(missing) > 10 else ''}"
             )
-        bucket = project_cloud_storage.bucket
-        ok, failed = run_s3_transfers(
+        _download_pending(
+            s3_client,
+            project_cloud_storage.bucket,
             to_download,
-            lambda item: _download_one_s3(s3_client, bucket, item[1], item[2]),
-            lambda item: f"{item[0]} (key={item[1]})",
+            stats,
             desc="Downloading from project storage",
             unit="img",
         )
-        stats.downloaded += ok
-        stats.failed += failed
 
     @staticmethod
     def _build_project_storage_name_map(
@@ -273,32 +298,26 @@ class S3Syncer:
             return DownloadStats(total=0)
 
         stats = DownloadStats(total=len(objects))
-        to_download: list[tuple[str, str]] = []
-        for key, name in objects:
-            dest = self._target_dir / name
-            if dest.exists():
-                stats.cached += 1
-            else:
-                to_download.append((key, name))
+        to_download = [
+            Transfer(name=name, key=key, path=self._target_dir / name)
+            for key, name in objects
+            if not (self._target_dir / name).exists()
+        ]
+        stats.cached = stats.total - len(to_download)
 
         if not to_download:
             logger.info(f"Все {stats.cached} файлов уже загружены в {self._target_dir}")
             return stats
 
         ensure_shared_dir(self._target_dir)
-        stats.downloaded, stats.failed = run_s3_transfers(
+        _download_pending(
+            s3,
+            cs_info.bucket,
             to_download,
-            lambda item: _download_one_s3(
-                s3, cs_info.bucket, item[0], self._target_dir / item[1]
-            ),
-            lambda item: f"{item[1]} (key={item[0]})",
+            stats,
             desc="Syncing from S3",
             unit="file",
         )
 
-        logger.info(
-            f"S3 sync: {stats.downloaded} загружено, "
-            f"{stats.cached} из кэша, {stats.failed} ошибок "
-            f"(всего {stats.total})"
-        )
+        _log_download_summary("S3 sync", stats)
         return stats

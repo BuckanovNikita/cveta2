@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from pydantic import BaseModel
 
+from cveta2.s3_types import Transfer
 from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
     make_s3_client,
+    pick_latest_duplicate,
     run_s3_transfers,
     s3_retry,
 )
@@ -64,12 +66,7 @@ def _match_recursive(
     candidates = index.get(PurePosixPath(name).name)
     if not candidates:
         return None
-    if len(candidates) > 1:
-        logger.warning(
-            f"Дубликаты в {search_dir} для {name!r}: "
-            f"{[str(c) for c in candidates]} — используем {str(candidates[-1])!r}"
-        )
-    return candidates[-1]
+    return pick_latest_duplicate(str(search_dir), name, candidates)
 
 
 def resolve_images(
@@ -147,37 +144,30 @@ def build_server_file_mapping(
     client = s3_client or make_s3_client(cs_info.endpoint_url or None)
     objects = list_s3_objects(client, cs_info.bucket, cs_info.prefix)
     existing_keys: set[str] = {key for key, _name in objects}
+    resolved = _resolve_duplicate_basenames(name for _key, name in objects)
 
-    # Build basename → relative-name lookup.
-    # If multiple objects share the same basename, keep the lexicographic max
-    # (latest month folder).
-    basename_to_name: dict[str, list[str]] = {}
-    for _key, name in objects:
-        base = PurePosixPath(name).name
-        basename_to_name.setdefault(base, []).append(name)
-
-    resolved: dict[str, str] = {}
-    for base, names in basename_to_name.items():
-        if len(names) > 1:
-            names_sorted = sorted(names)
-            logger.warning(
-                f"Дубликат на S3 для {base!r}: {names_sorted} — "
-                f"используем {names_sorted[-1]!r}"
-            )
-            resolved[base] = names_sorted[-1]
-        else:
-            resolved[base] = names[0]
-
-    month_prefix = datetime.now(tz=timezone.utc).strftime("%Y-%m")
-
-    name_to_server_file: dict[str, str] = {}
-    for image_name in image_names:
-        if image_name in resolved:
-            name_to_server_file[image_name] = resolved[image_name]
-        else:
-            name_to_server_file[image_name] = f"{month_prefix}/{image_name}"
-
+    name_to_server_file = {
+        image_name: resolved.get(image_name) or _assign_month_folder(image_name)
+        for image_name in image_names
+    }
     return name_to_server_file, existing_keys
+
+
+def _resolve_duplicate_basenames(names: Iterable[str]) -> dict[str, str]:
+    """Map each basename to its relative S3 name, latest month folder winning."""
+    basename_to_names: dict[str, list[str]] = {}
+    for name in names:
+        basename_to_names.setdefault(PurePosixPath(name).name, []).append(name)
+    return {
+        base: pick_latest_duplicate("S3", base, candidates)
+        for base, candidates in basename_to_names.items()
+    }
+
+
+def _assign_month_folder(image_name: str) -> str:
+    """Place a new image into the current UTC month folder (``YYYY-MM/name``)."""
+    month_prefix = datetime.now(tz=timezone.utc).strftime("%Y-%m")
+    return f"{month_prefix}/{image_name}"
 
 
 @s3_retry
@@ -236,7 +226,7 @@ class S3Uploader:
             objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
             existing_keys = {key for key, _name in objects}
 
-        to_upload: list[tuple[str, str, Path]] = []  # (name, key, path)
+        to_upload: list[Transfer] = []
         for name, local_path in images.items():
             server_file = (
                 name_to_server_file[name]
@@ -247,7 +237,7 @@ class S3Uploader:
             if s3_key in existing_keys:
                 stats.skipped_existing += 1
             else:
-                to_upload.append((name, s3_key, local_path))
+                to_upload.append(Transfer(name=name, key=s3_key, path=local_path))
 
         if not to_upload:
             logger.info(
@@ -258,8 +248,8 @@ class S3Uploader:
 
         stats.uploaded, stats.failed = run_s3_transfers(
             to_upload,
-            lambda item: _upload_one_s3(s3, item[2], cs_info.bucket, item[1]),
-            lambda item: f"{item[0]} (key={item[1]})",
+            lambda t: _upload_one_s3(s3, t.path, cs_info.bucket, t.key),
+            lambda t: f"{t.name} (key={t.key})",
             desc="Uploading to S3",
             unit="file",
         )

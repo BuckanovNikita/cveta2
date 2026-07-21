@@ -41,11 +41,13 @@ def find_job_for_frame(jobs: list[RawJob], frame: int) -> int | None:
 
 def issue_position_from_row(row: pd.Series[Any]) -> list[float] | None:
     """Return the row's bbox as an issue rectangle, or None without full bbox."""
-    values = [row.get(col) for col in BBOX_COLUMNS]
-    coords = [value for value in values if value is not None and pd.notna(value)]
-    if len(coords) == len(BBOX_COLUMNS):
-        return [float(value) for value in coords]
-    return None
+    coords: list[float] = []
+    for col in BBOX_COLUMNS:
+        value = row.get(col)
+        if value is None or pd.isna(value):
+            return None
+        coords.append(float(value))
+    return coords
 
 
 def task_to_records(  # noqa: PLR0913

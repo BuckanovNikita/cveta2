@@ -41,14 +41,25 @@ def _deleted_registry_frame(
         }
         for d in deleted_images
     ]
-    if not rows:
-        return pd.DataFrame(columns=columns)
     return pd.DataFrame(rows, columns=columns)
+
+
+def _latest_row_per_image(df: pd.DataFrame) -> pd.DataFrame:
+    """Return one row per ``image_name``: the one with the max ``_parsed_date``.
+
+    The stable sort keeps the original row order among equal dates, so
+    callers break ties by ordering *df* (deletion records first).
+    """
+    latest: pd.DataFrame = df.sort_values(
+        "_parsed_date", ascending=False, kind="stable"
+    ).drop_duplicates(subset=["image_name"], keep="first")
+    return latest
 
 
 def _latest_task_per_image(
     df: pd.DataFrame,
     deleted_images: list[DeletedImage],
+    parsed_dates: pd.Series[pd.Timestamp],
 ) -> pd.DataFrame:
     """Return the latest task per ``image_name`` across df rows and deletions.
 
@@ -57,35 +68,35 @@ def _latest_task_per_image(
     same task also deleted).  Indexed by ``image_name``.
     """
     latest_from_df = (
-        df[["image_name", "task_id", "task_updated_date"]]
+        df[["image_name", "task_id"]]
+        .assign(_parsed_date=parsed_dates, _is_deleted=0)
         .drop_duplicates(subset=["image_name", "task_id"])
-        .copy()
     )
-    latest_from_df["_is_deleted"] = 0
+
+    registry = _deleted_registry_frame(deleted_images)
+    registry["_parsed_date"] = _parse_task_dates(registry["task_updated_date"])
 
     combined = pd.concat(
-        [_deleted_registry_frame(deleted_images), latest_from_df],
+        [registry[latest_from_df.columns], latest_from_df],
         ignore_index=True,
     )
-    combined["_parsed_date"] = _parse_task_dates(combined["task_updated_date"])
-    idx_latest = combined.groupby("image_name")["_parsed_date"].idxmax()
-    latest_per_image: pd.DataFrame = combined.loc[idx_latest].set_index("image_name")
+    latest_per_image: pd.DataFrame = _latest_row_per_image(combined).set_index(
+        "image_name"
+    )
     return latest_per_image
 
 
 def _split_completed(
     completed_non_deleted: pd.DataFrame,
+    parsed_dates: pd.Series[pd.Timestamp],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split completed rows into (latest-task dataset, stale obsolete)."""
     if completed_non_deleted.empty:
         return completed_non_deleted.copy(), completed_non_deleted.copy()
 
-    cnd = completed_non_deleted.copy()
-    cnd["_parsed_date"] = _parse_task_dates(cnd["task_updated_date"])
-    latest_completed = (
-        cnd.sort_values("_parsed_date", ascending=False)
-        .drop_duplicates(subset=["image_name"], keep="first")[["image_name", "task_id"]]
-        .rename(columns={"task_id": "_latest_task_id"})
+    cnd = completed_non_deleted.assign(_parsed_date=parsed_dates)
+    latest_completed = _latest_row_per_image(cnd)[["image_name", "task_id"]].rename(
+        columns={"task_id": "_latest_task_id"}
     )
     merged = completed_non_deleted.merge(latest_completed, on="image_name", how="left")
     is_latest = (merged["task_id"] == merged["_latest_task_id"]).to_numpy()
@@ -148,10 +159,12 @@ def partition_annotations_df(
             dataset=empty, obsolete=empty.copy(), in_progress=empty.copy()
         )
 
-    latest_per_image = _latest_task_per_image(df, deleted_images)
+    parsed_dates = _parse_task_dates(df["task_updated_date"])
+    latest_per_image = _latest_task_per_image(df, deleted_images, parsed_dates)
 
-    deleted_mask_map = latest_per_image["_is_deleted"] == 1
-    deleted_image_names: set[str] = set(deleted_mask_map[deleted_mask_map].index)
+    deleted_image_names: set[str] = set(
+        latest_per_image.index[latest_per_image["_is_deleted"] == 1]
+    )
 
     unique_deleted = _filter_deleted_images(
         deleted_images,
@@ -168,7 +181,9 @@ def partition_annotations_df(
     in_progress = df[~is_deleted & ~is_completed]
     completed_non_deleted = df[~is_deleted & is_completed]
 
-    dataset, obsolete_stale = _split_completed(completed_non_deleted)
+    dataset, obsolete_stale = _split_completed(
+        completed_non_deleted, parsed_dates[completed_non_deleted.index]
+    )
     obsolete = pd.concat([obsolete_deleted, obsolete_stale], ignore_index=True)
 
     logger.debug(

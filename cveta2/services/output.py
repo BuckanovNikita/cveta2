@@ -99,6 +99,17 @@ def enrich_dataframe_paths(
     return df
 
 
+PREVIEW_LIMIT = 10
+"""How many example names log messages show before collapsing the rest."""
+
+
+def preview_names(names: Sequence[str], limit: int = PREVIEW_LIMIT) -> str:
+    """Format ``"a, b, c (и ещё N)"``: the first *limit* names plus a rest count."""
+    shown = ", ".join(str(name) for name in names[:limit])
+    extra = len(names) - limit
+    return f"{shown} (и ещё {extra})" if extra > 0 else shown
+
+
 def count_images(df: pd.DataFrame) -> int:
     """Count unique images in an annotation DataFrame (0 when empty)."""
     if "image_name" not in df.columns:

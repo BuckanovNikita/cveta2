@@ -18,7 +18,7 @@ from cveta2.config import ImageCacheConfig
 from cveta2.exceptions import Cveta2Error, LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
 from cveta2.s3_utils import build_s3_key
-from cveta2.services.output import enrich_dataframe_paths
+from cveta2.services.output import enrich_dataframe_paths, preview_names
 from cveta2.task_cache import invalidate_local_entry
 
 if TYPE_CHECKING:
@@ -222,10 +222,8 @@ def _warn_missing_images(missing: list[str]) -> None:
     """Log a warning about images not found locally."""
     if not missing:
         return
-    preview = ", ".join(missing[:10])
-    extra = f" (и ещё {len(missing) - 10})" if len(missing) > 10 else ""
     logger.warning(
-        f"{len(missing)} изображений не найдено локально: {preview}{extra}",
+        f"{len(missing)} изображений не найдено локально: {preview_names(missing)}",
     )
 
 

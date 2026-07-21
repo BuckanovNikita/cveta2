@@ -25,6 +25,7 @@ from cveta2.services.convert.common import (
     _yolo_to_pixel,
     prepare_export,
 )
+from cveta2.services.output import preview_names
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -363,7 +364,7 @@ def _from_yolo_predictions(
     if missing_images:
         logger.warning(
             f"Не найдены изображения для {len(missing_images)} файлов: "
-            f"{missing_images[:10]}"
+            f"{preview_names(missing_images)}"
         )
 
     _write_csv(rows, output_path)

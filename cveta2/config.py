@@ -281,20 +281,32 @@ class CvatConfig(BaseModel):
         )
 
 
+def _none_if_falsy(value: object) -> object:
+    """Coerce falsy YAML values (``""`` / ``0`` / ``null``) to None, else str."""
+    return str(value) if value else None
+
+
+def _coerce_mapping_scalars(value: object) -> object:
+    """Coerce a raw YAML mapping's keys and values to str (pre-validation)."""
+    if isinstance(value, dict):
+        return {str(k): str(v) for k, v in value.items()}
+    return value
+
+
 class ImageCacheConfig(_ProjectsSection):
-    """Per-project mapping: project_name -> local directory for images."""
+    """Per-project mapping: project_name -> local directory for images.
+
+    The explicit entry here wins; projects without one fall back to the
+    ``cache.images_root`` setting (see :class:`CacheConfig` and
+    :func:`resolve_images_cache_dir`).
+    """
 
     section_key: ClassVar[str] = "image_cache"
     save_log: ClassVar[str] = "Image cache config saved to {path}"
 
     projects: dict[str, Path] = Field(default_factory=dict)
 
-    @field_validator("projects", mode="before")
-    @classmethod
-    def _coerce_scalars(cls, value: object) -> object:
-        if isinstance(value, dict):
-            return {str(k): str(v) for k, v in value.items()}
-        return value
+    coerce_scalars = field_validator("projects", mode="before")(_coerce_mapping_scalars)
 
     def get_cache_dir(self, project_name: str) -> Path | None:
         """Return the cache directory for *project_name*, or None if not configured."""
@@ -320,16 +332,18 @@ class CacheProjectSettings(BaseModel):
     ignored_prefix: str | None = None
     task_cache_s3: str | None = None
 
-    @field_validator(
+    none_if_falsy = field_validator(
         "images_root", "tasks_root", "ignored_prefix", "task_cache_s3", mode="before"
-    )
-    @classmethod
-    def _none_if_falsy(cls, value: object) -> object:
-        return str(value) if value else None
+    )(_none_if_falsy)
 
 
 class CacheConfig(SectionConfig):
-    """Global cache settings plus per-project overrides."""
+    """Global cache settings plus per-project overrides.
+
+    ``images_root`` is only the fallback image-cache root: an explicit
+    per-project path in the ``image_cache`` section
+    (:class:`ImageCacheConfig`) always wins.
+    """
 
     section_key: ClassVar[str] = "cache"
     save_log: ClassVar[str] = "Cache config saved to {path}"
@@ -338,10 +352,9 @@ class CacheConfig(SectionConfig):
     tasks_root: Path | None = None
     projects: dict[str, CacheProjectSettings] = Field(default_factory=dict)
 
-    @field_validator("images_root", "tasks_root", mode="before")
-    @classmethod
-    def _none_if_falsy(cls, value: object) -> object:
-        return str(value) if value else None
+    none_if_falsy = field_validator("images_root", "tasks_root", mode="before")(
+        _none_if_falsy
+    )
 
     @field_validator("projects", mode="before")
     @classmethod
@@ -411,12 +424,7 @@ class SyncRootsConfig(_ProjectsSection):
 
     projects: dict[str, str] = Field(default_factory=dict)
 
-    @field_validator("projects", mode="before")
-    @classmethod
-    def _coerce_scalars(cls, value: object) -> object:
-        if isinstance(value, dict):
-            return {str(k): str(v) for k, v in value.items()}
-        return value
+    coerce_scalars = field_validator("projects", mode="before")(_coerce_mapping_scalars)
 
     def get_root(self, project_name: str) -> str | None:
         """Return the sync root for *project_name*, or None if not configured."""

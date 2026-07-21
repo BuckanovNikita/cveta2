@@ -14,7 +14,7 @@ from cveta2.config import ImageCacheConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.image_uploader import resolve_images
 from cveta2.models import CSV_COLUMNS
-from cveta2.services.output import format_counts_ru, read_dataset_csv
+from cveta2.services.output import format_counts_ru, preview_names, read_dataset_csv
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -104,10 +104,26 @@ def _copy_after_reflink_failure(src: Path, dst: Path, error: OSError) -> None:
     shutil.copy2(src, dst)
 
 
+def _reflink_or_fallback_copy(src: Path, dst: Path, *, allow_copy: bool) -> None:
+    """Reflink *src* to *dst*; *allow_copy* falls straight through to copy.
+
+    Either way an ``OSError`` from the reflink attempt degrades to a
+    plain copy with a one-time warning.
+    """
+    from reflink_copy import reflink, reflink_or_copy  # noqa: PLC0415
+
+    link = reflink_or_copy if allow_copy else reflink
+    try:
+        link(str(src), str(dst))
+    except OSError as exc:
+        _copy_after_reflink_failure(src, dst, exc)
+
+
 def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
     """Place *src* at *dst* using the specified link mode.
 
-    Modes: auto, reflink, hardlink, symlink, copy.
+    Modes: auto (reflink, falling back to copy), reflink, hardlink,
+    symlink, copy.
     """
     if dst.exists():
         return
@@ -119,20 +135,10 @@ def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
         dst.hardlink_to(src)
     elif mode == "copy":
         shutil.copy2(src, dst)
-    elif mode == "reflink":
-        from reflink_copy import reflink  # noqa: PLC0415
-
-        try:
-            reflink(str(src), str(dst))
-        except OSError as exc:
-            _copy_after_reflink_failure(src, dst, exc)
+    elif mode in {"reflink", "auto"}:
+        _reflink_or_fallback_copy(src, dst, allow_copy=mode == "auto")
     else:
-        from reflink_copy import reflink_or_copy  # noqa: PLC0415
-
-        try:
-            reflink_or_copy(str(src), str(dst))
-        except OSError as exc:
-            _copy_after_reflink_failure(src, dst, exc)
+        raise Cveta2Error(f"Неизвестный link-mode: {mode!r}")
 
 
 def _build_search_dirs(image_dir_args: Sequence[str | Path] | None) -> list[Path]:
@@ -209,10 +215,10 @@ def _validate_splits(df: pd.DataFrame) -> None:
     """Raise ``Cveta2Error`` if any images have no split value."""
     missing_split = df[df["split"].isna() | (df["split"] == "")]
     if not missing_split.empty:
-        bad_images = sorted(missing_split["image_name"].unique()[:10])
+        bad_images = sorted(missing_split["image_name"].unique())
         raise Cveta2Error(
-            f"Ошибка: у {len(missing_split['image_name'].unique())} изображений "
-            f"не задан split. Примеры: {', '.join(bad_images)}"
+            f"Ошибка: у {len(bad_images)} изображений "
+            f"не задан split. Примеры: {preview_names(bad_images)}"
         )
 
 
@@ -256,7 +262,9 @@ def prepare_export(
     search_dirs = _build_search_dirs(image_dirs)
     found, missing = resolve_images(set(df["image_name"].unique()), search_dirs)
     if missing:
-        logger.warning(f"Не найдено {len(missing)} изображений: {missing[:10]}")
+        logger.warning(
+            f"Не найдено {len(missing)} изображений: {preview_names(missing)}"
+        )
 
     splits = sorted(df["split"].unique())
     logger.info(f"Сплиты: {splits}")

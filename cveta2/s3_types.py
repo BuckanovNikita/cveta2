@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+class Transfer(NamedTuple):
+    """One S3 transfer: display *name*, object *key*, local *path*."""
+
+    name: str
+    key: str
+    path: Path
 
 
 class S3Client(Protocol):

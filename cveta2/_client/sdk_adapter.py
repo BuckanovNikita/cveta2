@@ -8,19 +8,21 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import urllib3.exceptions
 from loguru import logger
 
 from cveta2._client.dtos import (
-    RawAnnotations,
-    RawAttribute,
-    RawDataMeta,
-    RawFrame,
     RawIssue,
     RawJob,
-    RawShape,
+)
+from cveta2._client.sdk_convert import (
+    convert_annotations,
+    convert_data_meta,
+    convert_label,
+    convert_task,
+    data_meta_from_dict,
 )
 from cveta2._client.sdk_requests import (
     build_data_request,
@@ -35,16 +37,24 @@ from cveta2._client.sdk_requests import (
 from cveta2._retry import network_retry
 from cveta2.exceptions import CvatApiError
 from cveta2.image_downloader import parse_cloud_storage
-from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
+from cveta2.models import ProjectInfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from cvat_sdk import Client as CvatSdkClient
-    from cvat_sdk.api_client import models as cvat_models
 
-    from cveta2._client.dtos import LabelPatch, NewIssue, NewShape, UploadTaskSpec
+    from cveta2._client.dtos import (
+        LabelPatch,
+        NewIssue,
+        NewShape,
+        RawAnnotations,
+        RawDataMeta,
+        RawShape,
+        UploadTaskSpec,
+    )
     from cveta2.image_downloader import CloudStorageInfo
+    from cveta2.models import LabelInfo, TaskInfo
 
 from typing import ParamSpec, TypeVar
 
@@ -159,7 +169,7 @@ class SdkCvatApiAdapter:
         """Return tasks belonging to a project."""
         project = self.client.projects.retrieve(project_id)
         tasks = project.get_tasks()
-        return [self._convert_task(t) for t in tasks]
+        return [convert_task(t) for t in tasks]
 
     @_api_retry
     @_translate_api_errors
@@ -167,7 +177,7 @@ class SdkCvatApiAdapter:
         """Return label definitions for a project."""
         project = self.client.projects.retrieve(project_id)
         labels = project.get_labels()
-        return [self._convert_label(lbl) for lbl in labels]
+        return [convert_label(lbl) for lbl in labels]
 
     @_api_retry
     @_translate_api_errors
@@ -176,7 +186,7 @@ class SdkCvatApiAdapter:
         tasks_api = self.client.api_client.tasks_api
         try:
             data_meta, _ = tasks_api.retrieve_data_meta(task_id)
-            return self._convert_data_meta(data_meta)
+            return convert_data_meta(data_meta)
         except ApiTypeError as e:
             if "chunks_updated_date" not in str(e):
                 raise
@@ -191,7 +201,7 @@ class SdkCvatApiAdapter:
                 else getattr(response, "data", b"")
             )
             data = json.loads(body.decode("utf-8"))
-            return self._data_meta_from_dict(data)
+            return data_meta_from_dict(data)
 
     @_api_retry
     @_translate_api_errors
@@ -199,7 +209,7 @@ class SdkCvatApiAdapter:
         """Return shapes for a task."""
         tasks_api = self.client.api_client.tasks_api
         labeled_data, _ = tasks_api.retrieve_annotations(task_id)
-        return self._convert_annotations(labeled_data)
+        return convert_annotations(labeled_data)
 
     @_api_retry
     @_translate_api_errors
@@ -254,7 +264,7 @@ class SdkCvatApiAdapter:
     def get_task_labels(self, task_id: int) -> list[LabelInfo]:
         """Return label definitions available in a task."""
         task_obj = self.client.tasks.retrieve(task_id)
-        return [self._convert_label(lbl) for lbl in task_obj.get_labels()]
+        return [convert_label(lbl) for lbl in task_obj.get_labels()]
 
     @_api_retry
     @_translate_api_errors
@@ -377,145 +387,3 @@ class SdkCvatApiAdapter:
             project_id,
             patched_project_write_request=build_labels_patch_request(patches),
         )
-
-    @staticmethod
-    def _convert_task(task: cvat_models.TaskRead) -> TaskInfo:
-        return TaskInfo(
-            id=task.id,
-            name=task.name or "",
-            status=str(task.status or ""),
-            subset=task.subset or "",
-            updated_date=SdkCvatApiAdapter._extract_updated_date(task),
-        )
-
-    @staticmethod
-    def _extract_updated_date(task: cvat_models.TaskRead) -> str:
-        """Normalize ``updated_date`` / ``updated_at`` to ISO string.
-
-        Uses ``getattr`` because the CVAT SDK renamed ``updated_date`` to
-        ``updated_at`` between versions, and the returned value may be a
-        ``datetime`` (with ``.isoformat()``) or a plain string depending on
-        the SDK release.  This is an intentional exception to the project
-        style rule "avoid getattr" (see CLAUDE.md).
-        """
-        raw: object | None = getattr(task, "updated_date", None)
-        if raw is None:
-            raw = getattr(task, "updated_at", None)
-        if raw is None:
-            return ""
-        isoformat = getattr(raw, "isoformat", None)
-        if callable(isoformat):
-            return str(isoformat())
-        return str(raw)
-
-    @staticmethod
-    def _convert_label(label: cvat_models.Label) -> LabelInfo:
-        raw_attrs = label.attributes or []
-        attrs = [LabelAttributeInfo(id=a.id, name=a.name or "") for a in raw_attrs]
-        return LabelInfo(
-            id=label.id, name=label.name, attributes=attrs, color=label.color or ""
-        )
-
-    @staticmethod
-    def _convert_data_meta(
-        data_meta: cvat_models.DataMetaRead,
-    ) -> RawDataMeta:
-        frames_raw = data_meta.frames or []
-        frames = [
-            RawFrame(
-                name=f.name or "",
-                width=int(f.width or 0),
-                height=int(f.height or 0),
-            )
-            for f in frames_raw
-        ]
-        deleted = list(data_meta.deleted_frames or [])
-        return RawDataMeta(frames=frames, deleted_frames=deleted)
-
-    @staticmethod
-    def _data_meta_from_dict(data: dict[str, Any]) -> RawDataMeta:
-        """Build RawDataMeta from API response dict when SDK deserialization fails."""
-        frames_raw = data.get("frames") or []
-        frames = [
-            RawFrame(
-                name=f.get("name") or "",
-                width=int(f.get("width") or 0),
-                height=int(f.get("height") or 0),
-            )
-            for f in frames_raw
-        ]
-        deleted = list(data.get("deleted_frames") or [])
-        return RawDataMeta(frames=frames, deleted_frames=deleted)
-
-    @staticmethod
-    def _convert_annotations(
-        labeled_data: cvat_models.LabeledData,
-    ) -> RawAnnotations:
-        raw_shapes = labeled_data.shapes or []
-        return RawAnnotations(
-            shapes=[SdkCvatApiAdapter._convert_shape(s) for s in raw_shapes],
-        )
-
-    @staticmethod
-    def _convert_shape(
-        shape: cvat_models.LabeledShape,
-    ) -> RawShape:
-        type_val = shape.type.value if shape.type else str(shape.type)
-        return RawShape(
-            id=shape.id or 0,
-            type=type_val,
-            frame=shape.frame,
-            label_id=shape.label_id,
-            points=list(shape.points or []),
-            occluded=bool(shape.occluded),
-            z_order=int(shape.z_order or 0),
-            rotation=float(shape.rotation or 0.0),
-            source=str(shape.source or ""),
-            attributes=SdkCvatApiAdapter._convert_attributes(
-                shape.attributes,
-            ),
-            created_by=SdkCvatApiAdapter._extract_creator_username(
-                shape,
-            ),
-        )
-
-    @staticmethod
-    def _convert_attributes(
-        raw_attrs: list[cvat_models.AttributeVal] | None,
-    ) -> list[RawAttribute]:
-        if not raw_attrs:
-            return []
-        return [
-            RawAttribute(spec_id=a.spec_id, value=str(a.value or "")) for a in raw_attrs
-        ]
-
-    @staticmethod
-    def _extract_creator_username(item: object) -> str:
-        """Extract creator username from a CVAT SDK entity.
-
-        Uses ``getattr`` because the CVAT SDK represents the creator
-        inconsistently across entity types and versions: ``created_by`` may
-        be a user object, a dict, or absent (in which case ``owner`` is
-        used).  The user object itself may expose ``username`` or ``name``.
-        This is an intentional exception to the project style rule
-        "avoid getattr" (see CLAUDE.md).
-        """
-        user_obj = getattr(item, "created_by", None) or getattr(
-            item,
-            "owner",
-            None,
-        )
-        if user_obj is None:
-            return ""
-        username = getattr(user_obj, "username", None) or getattr(
-            user_obj,
-            "name",
-            None,
-        )
-        if username is not None:
-            return str(username)
-        if isinstance(user_obj, dict):
-            return str(
-                user_obj.get("username") or user_obj.get("name") or "",
-            )
-        return ""

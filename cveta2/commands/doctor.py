@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cveta2.config import CvatConfig, ImageCacheConfig, get_config_path
+from cveta2.services.output import PREVIEW_LIMIT
 
 if TYPE_CHECKING:
     import argparse
@@ -131,9 +132,6 @@ def check_aws_credentials() -> bool:
     return True
 
 
-_MAX_EXAMPLES = 10
-
-
 def check_cache_permissions() -> bool:
     """Check that images in cache dirs are group-accessible.
 
@@ -225,7 +223,7 @@ def _log_broken_summary(
         f"not group-accessible. Owners: {owners_str}"
     )
 
-    examples = (broken_dirs + broken_files)[:_MAX_EXAMPLES]
+    examples = (broken_dirs + broken_files)[:PREVIEW_LIMIT]
     for path, owner in examples:
         mode_str = stat.filemode(path.stat().st_mode)
         logger.warning(f"  {mode_str}  {owner}  {path}")

@@ -71,10 +71,11 @@ def _propagate_splits(
     new: pd.DataFrame,
     common_images: set[str],
 ) -> pd.DataFrame:
-    """Propagate ``split`` values from *old* into *merged* rows that lack them.
+    """Return *merged* with ``split`` values filled in from *old* where absent.
 
     For images present in both datasets where **new** won the merge, the
     ``split`` from *old* is copied over when the merged row has no split.
+    *merged* itself is not modified.
 
     Warnings are emitted when:
     - *old* has no ``split`` data at all (column missing or all NaN).
@@ -108,6 +109,7 @@ def _propagate_splits(
     if "split" not in merged.columns:
         return merged
 
+    merged = merged.copy()
     mask = merged["split"].isna() & merged["image_name"].isin(old_splits.keys())
     merged.loc[mask, "split"] = merged.loc[mask, "image_name"].map(old_splits)
 
@@ -118,6 +120,47 @@ def _propagate_splits(
         )
 
     return merged
+
+
+def _split_winners(
+    old: pd.DataFrame,
+    new: pd.DataFrame,
+    common_images: set[str],
+    *,
+    by_time: bool,
+) -> tuple[set[str], set[str]]:
+    """Return ``(keep_from_new, keep_from_old)`` for the conflicting images.
+
+    By default **new** wins every conflict; in *by_time* mode each image
+    goes to the side with the more recent ``task_updated_date``.
+    """
+    if by_time and common_images:
+        keep_from_new = _resolve_by_time(old, new, common_images)
+        return keep_from_new, common_images - keep_from_new
+    return common_images, set()
+
+
+def _log_merge_summary(  # noqa: PLR0913
+    old_images: set[str],
+    new_images: set[str],
+    deleted: set[str],
+    keep_from_new: set[str],
+    keep_from_old: set[str],
+    total_rows: int,
+) -> None:
+    """Log per-category image counts for a completed merge."""
+    only_old = old_images - new_images - deleted
+    only_new = new_images - old_images - deleted
+    deleted_hit = (old_images | new_images) & deleted
+    logger.info(
+        f"Результат слияния: "
+        f"только в old={len(only_old)}, "
+        f"только в new={len(only_new)}, "
+        f"конфликт→new={len(keep_from_new - deleted)}, "
+        f"конфликт→old={len(keep_from_old - deleted)}, "
+        f"удалено={len(deleted_hit)}, "
+        f"итого строк={total_rows}"
+    )
 
 
 def _merge_datasets(
@@ -140,47 +183,33 @@ def _merge_datasets(
     new_images: set[str] = set(new["image_name"].dropna().unique())
     common_images = old_images & new_images
 
-    # --- determine which side wins for each conflicting image ---------------
-    keep_from_old: set[str]
-    if by_time and common_images:
-        keep_from_new = _resolve_by_time(old, new, common_images)
-        keep_from_old = common_images - keep_from_new
-    else:
-        # Default: new always wins
-        keep_from_new = common_images
-        keep_from_old = set()
+    keep_from_new, keep_from_old = _split_winners(
+        old, new, common_images, by_time=by_time
+    )
 
-    # Build masks
     old_keep_mask = old["image_name"].isin(
         (old_images - common_images - deleted) | keep_from_old
     )
     new_keep_mask = new["image_name"].isin((new_images - deleted) - keep_from_old)
-
-    old_filtered = old[old_keep_mask]
-    new_filtered = new[new_keep_mask]
-
-    merged: pd.DataFrame = pd.concat([old_filtered, new_filtered], ignore_index=True)
-
-    # --- propagate split from old to new ------------------------------------
+    merged: pd.DataFrame = pd.concat(
+        [old[old_keep_mask], new[new_keep_mask]], ignore_index=True
+    )
     merged = _propagate_splits(merged, old, new, common_images)
 
-    # --- log summary --------------------------------------------------------
-    only_old = old_images - new_images - deleted
-    only_new = new_images - old_images - deleted
-    deleted_hit = (old_images | new_images) & deleted
-    overridden_by_new = keep_from_new - deleted
-    overridden_by_old = keep_from_old - deleted
-
-    logger.info(
-        f"Результат слияния: "
-        f"только в old={len(only_old)}, "
-        f"только в new={len(only_new)}, "
-        f"конфликт→new={len(overridden_by_new)}, "
-        f"конфликт→old={len(overridden_by_old)}, "
-        f"удалено={len(deleted_hit)}, "
-        f"итого строк={len(merged)}"
+    _log_merge_summary(
+        old_images, new_images, deleted, keep_from_new, keep_from_old, len(merged)
     )
     return merged
+
+
+def _max_updated_per_image(
+    df: pd.DataFrame, images: set[str]
+) -> pd.Series[pd.Timestamp]:
+    """Return the max parsed ``task_updated_date`` per image within *images*."""
+    subset = df[df["image_name"].isin(images)]
+    parsed = pd.to_datetime(subset[_TIME_COLUMN], errors="coerce", utc=True)
+    latest: pd.Series[pd.Timestamp] = parsed.groupby(subset["image_name"]).max()
+    return latest
 
 
 def _resolve_by_time(
@@ -194,28 +223,11 @@ def _resolve_by_time(
     ``task_updated_date``.  If new >= old the image goes to the
     "keep from new" set, otherwise it stays with old.
     """
-    common_list = sorted(common_images)
-
-    old_common = old[old["image_name"].isin(common_images)]
-    new_common = new[new["image_name"].isin(common_images)]
-
-    old_max = (
-        old_common.assign(
-            _parsed=pd.to_datetime(old_common[_TIME_COLUMN], errors="coerce", utc=True)
-        )
-        .groupby("image_name")["_parsed"]
-        .max()
-    )
-    new_max = (
-        new_common.assign(
-            _parsed=pd.to_datetime(new_common[_TIME_COLUMN], errors="coerce", utc=True)
-        )
-        .groupby("image_name")["_parsed"]
-        .max()
-    )
+    old_max = _max_updated_per_image(old, common_images)
+    new_max = _max_updated_per_image(new, common_images)
 
     keep_from_new: set[str] = set()
-    for img in common_list:
+    for img in sorted(common_images):
         old_ts = old_max.get(img)
         new_ts = new_max.get(img)
         # If either side has no parseable date, fall back to new-wins.

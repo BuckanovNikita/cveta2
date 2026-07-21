@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 _T = TypeVar("_T")
 
+# KeyError covers malformed S3 responses (missing "Body"/"Contents" keys),
+# which surface exactly like transport failures for a transfer.
 S3_TRANSFER_ERRORS: Final = (OSError, ConnectionError, KeyError)
 
 
@@ -45,6 +47,22 @@ def run_s3_transfers(
             logger.exception(f"Не удалось загрузить {describe(item)}")
             failed += 1
     return ok, failed
+
+
+def pick_latest_duplicate(context: str, name: str, candidates: Sequence[_T]) -> _T:
+    """Return the lexicographic max of *candidates*, warning when several exist.
+
+    Both the uploader and the downloader resolve duplicate basenames the
+    same way: the lexicographically last path wins (i.e. the most recent
+    ``YYYY-MM`` month folder).
+    """
+    ordered = sorted(str(c) for c in candidates)
+    if len(ordered) > 1:
+        logger.warning(
+            f"Дубликаты в {context} для {name!r}: {ordered} — "
+            f"используем {ordered[-1]!r}"
+        )
+    return max(candidates, key=str)
 
 
 def names_with_basename_fallback(pairs: Iterable[tuple[str, _T]]) -> dict[str, _T]:
