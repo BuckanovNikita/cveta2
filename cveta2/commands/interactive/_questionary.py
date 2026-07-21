@@ -15,6 +15,8 @@ import questionary
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from prompt_toolkit.history import History
+
 Choice = questionary.Choice
 
 
@@ -46,13 +48,21 @@ def ask_text(
     message: str,
     *,
     validate: Callable[[str], bool | str] | None = None,
+    history: History | None = None,
 ) -> str | None:
-    """Free-text prompt.  Returns the entered string or None on cancel."""
-    prompt = (
-        questionary.text(message, validate=validate)
-        if validate is not None
-        else questionary.text(message)
-    )
+    """Free-text prompt.  Returns the entered string or None on cancel.
+
+    *history* (a prompt_toolkit history) enables arrow-up recall of
+    previously entered values; accepted input is appended automatically.
+    """
+    if validate is not None and history is not None:
+        prompt = questionary.text(message, validate=validate, history=history)
+    elif validate is not None:
+        prompt = questionary.text(message, validate=validate)
+    elif history is not None:
+        prompt = questionary.text(message, history=history)
+    else:
+        prompt = questionary.text(message)
     result: str | None = prompt.ask()
     return result
 

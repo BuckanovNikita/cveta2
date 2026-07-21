@@ -15,6 +15,7 @@ from urllib.parse import parse_qs
 from loguru import logger
 from pydantic import BaseModel
 
+from cveta2.fs_utils import ensure_shared_dir, write_shared_bytes
 from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
@@ -108,7 +109,7 @@ class ImageDownloader:
             )
             return stats
 
-        self._target_dir.mkdir(parents=True, exist_ok=True)
+        ensure_shared_dir(self._target_dir)
         self._download_all(pending, stats, project_cloud_storage)
 
         logger.info(
@@ -137,15 +138,19 @@ class ImageDownloader:
 
     def _dest_path(
         self,
-        image_name: str,
         frame_ref: str,
         project_cloud_storage: CloudStorageInfo | None,
     ) -> Path:
-        """Local destination: flat by default, nested with ``ignored_prefix``."""
+        """Local destination mirroring the S3 layout below the storage prefix.
+
+        With ``ignored_prefix`` set, only that leading key part is
+        stripped instead of the full storage prefix (keeping more of the
+        S3 hierarchy locally).
+        """
         if self._ignored_prefix and project_cloud_storage is not None:
             full_key = build_s3_key(project_cloud_storage.prefix, frame_ref)
             return self._target_dir / strip_key_prefix(full_key, self._ignored_prefix)
-        return self._target_dir / image_name
+        return self._target_dir / frame_ref
 
     def _filter_cached(
         self,
@@ -156,7 +161,7 @@ class ImageDownloader:
         """Remove already-cached images, updating *stats*. Return pending."""
         pending: dict[str, str] = {}
         for image_name, frame_ref in image_tasks.items():
-            if self._dest_path(image_name, frame_ref, project_cloud_storage).exists():
+            if self._dest_path(frame_ref, project_cloud_storage).exists():
                 stats.cached += 1
             else:
                 pending[image_name] = frame_ref
@@ -194,7 +199,7 @@ class ImageDownloader:
             if s3_key is None:
                 missing.append(image_name)
                 continue
-            dest = self._dest_path(image_name, frame_ref, project_cloud_storage)
+            dest = self._dest_path(frame_ref, project_cloud_storage)
             to_download.append((image_name, s3_key, dest))
         if missing:
             stats.failed += len(missing)
@@ -233,8 +238,8 @@ def _download_one_s3(
 ) -> None:
     """Download a single S3 object to *dest*."""
     data = s3_get_bytes(s3_client, bucket, key)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(data)
+    ensure_shared_dir(dest.parent)
+    write_shared_bytes(dest, data)
 
 
 class S3Syncer:
@@ -280,7 +285,7 @@ class S3Syncer:
             logger.info(f"Все {stats.cached} файлов уже загружены в {self._target_dir}")
             return stats
 
-        self._target_dir.mkdir(parents=True, exist_ok=True)
+        ensure_shared_dir(self._target_dir)
         stats.downloaded, stats.failed = run_s3_transfers(
             to_download,
             lambda item: _download_one_s3(

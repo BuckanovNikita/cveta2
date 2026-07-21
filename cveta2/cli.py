@@ -148,14 +148,12 @@ def _configure_fetch_task(parser: argparse.ArgumentParser) -> None:
         "--task",
         "-t",
         type=str,
-        nargs="?",
-        const="",
-        action="append",
+        nargs="*",
         default=None,
+        metavar="TASK",
         help=(
-            "Task ID or name to fetch. "
-            "Can be repeated: -t 42 -t 43. "
-            "If passed without a value (-t), interactive "
+            "Task ID(s) or name(s) to fetch: -t 42 43. "
+            "If passed without values (-t), interactive "
             "multi-select is shown."
         ),
     )
@@ -209,6 +207,18 @@ def _configure_upload(parser: argparse.ArgumentParser) -> None:
         "-d",
         required=True,
         help="Path to dataset.csv produced by the fetch command.",
+    )
+    parser.add_argument(
+        "--labels",
+        nargs="+",
+        type=str,
+        default=None,
+        metavar="LABEL",
+        help=(
+            "Instance labels selecting frames to upload "
+            "(use __no_annotation__ for frames without annotations). "
+            "If omitted, interactive selection is shown."
+        ),
     )
     parser.add_argument(
         "--in-progress",
@@ -382,10 +392,11 @@ def _configure_convert(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--image-dir",
+        nargs="+",
         type=str,
-        action="append",
         default=None,
-        help=("Additional directory to search for images. Can be repeated."),
+        metavar="DIR",
+        help=("Additional directories to search for images: --image-dir d1 d2."),
     )
     parser.add_argument(
         "--names-file",
@@ -413,19 +424,19 @@ def _configure_task_mark_deleted(parser: argparse.ArgumentParser) -> None:
     _add_task_common_args(parser)
     parser.add_argument(
         "--frame",
+        nargs="+",
         type=int,
-        action="append",
         default=None,
         metavar="N",
-        help="Frame ID to mark as deleted. Can be repeated.",
+        help="Frame ID(s) to mark as deleted: --frame 1 2.",
     )
     parser.add_argument(
         "--image",
+        nargs="+",
         type=str,
-        action="append",
         default=None,
         metavar="NAME",
-        help="Image name to mark as deleted. Can be repeated.",
+        help="Image name(s) to mark as deleted: --image a.jpg b.jpg.",
     )
 
 

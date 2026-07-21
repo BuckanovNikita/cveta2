@@ -48,6 +48,7 @@ def feed_inputs(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str
         message: str,
         *,
         validate: object = None,  # noqa: ARG001
+        history: object = None,  # noqa: ARG001
     ) -> str:
         prompts.append(message)
         return next(answers_iter)

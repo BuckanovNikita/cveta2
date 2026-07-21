@@ -210,12 +210,40 @@ def test_check_one_file_missing_group_read(tmp_path: Path) -> None:
     assert out[0][0] == f
 
 
-def test_check_one_file_with_group_read(tmp_path: Path) -> None:
-    f = tmp_path / "ok.txt"
+def test_check_one_file_with_group_read_only_is_broken(tmp_path: Path) -> None:
+    f = tmp_path / "readonly.txt"
     f.write_text("x", encoding="utf-8")
-    f.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
+    f.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)  # 0o640 — no group write
     out: list[tuple[Path, str]] = []
     _check_one(f, is_dir=False, out=out)
+    assert len(out) == 1
+    assert out[0][0] == f
+
+
+def test_check_one_file_with_group_read_write(tmp_path: Path) -> None:
+    f = tmp_path / "ok.txt"
+    f.write_text("x", encoding="utf-8")
+    f.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP)  # 0o660
+    out: list[tuple[Path, str]] = []
+    _check_one(f, is_dir=False, out=out)
+    assert out == []
+
+
+def test_check_one_dir_without_group_write_is_broken(tmp_path: Path) -> None:
+    d = tmp_path / "subdir"
+    d.mkdir()
+    d.chmod(stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)  # 0o750 — no group write
+    out: list[tuple[Path, str]] = []
+    _check_one(d, is_dir=True, out=out)
+    assert len(out) == 1
+
+
+def test_check_one_dir_with_group_rwx(tmp_path: Path) -> None:
+    d = tmp_path / "shared"
+    d.mkdir()
+    d.chmod(0o775)
+    out: list[tuple[Path, str]] = []
+    _check_one(d, is_dir=True, out=out)
     assert out == []
 
 

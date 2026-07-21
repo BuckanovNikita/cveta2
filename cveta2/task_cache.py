@@ -19,6 +19,7 @@ from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 from cveta2.config import CacheConfig
+from cveta2.fs_utils import ensure_shared_dir, write_shared_bytes
 from cveta2.models import TaskAnnotations
 from cveta2.s3_utils import (
     build_s3_key,
@@ -267,9 +268,9 @@ class TaskAnnotationCache:
     def _write_local(self, task_id: int, data: bytes) -> None:
         """Atomically write the local entry (best effort)."""
         try:
-            self._local_dir.mkdir(parents=True, exist_ok=True)
+            ensure_shared_dir(self._local_dir)
             tmp_path = self._local_dir / f"task_{task_id}.json.tmp{os.getpid()}"
-            tmp_path.write_bytes(data)
+            write_shared_bytes(tmp_path, data)
             tmp_path.replace(self._local_path(task_id))
         except OSError as e:
             logger.warning(f"Не удалось сохранить локальный кэш задачи {task_id}: {e}")

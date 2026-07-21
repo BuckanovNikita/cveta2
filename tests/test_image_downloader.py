@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from typing import TYPE_CHECKING, Any, NamedTuple
 from unittest.mock import MagicMock
 
@@ -195,6 +197,29 @@ def test_download_saves_to_target_dir_flat(
     assert (target / "a.jpg").read_bytes() == b"data-a"
     assert (target / "b.jpg").read_bytes() == b"data-b"
     assert sorted(f.name for f in target.iterdir()) == ["a.jpg", "b.jpg"]
+
+
+def test_download_creates_group_writable_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "a.jpg")],
+        deleted_images=[],
+    )
+    s3_data = {"test-bucket/images/a.jpg": b"data-a"}
+    downloader = _make_downloader_env(tmp_path, annotations, s3_data)
+    _patch_boto(monkeypatch, FakeS3Client(s3_data))
+
+    old_umask = os.umask(0o077)
+    try:
+        downloader.download(annotations, project_cloud_storage=_project_cs())
+    finally:
+        os.umask(old_umask)
+
+    target = tmp_path / "images"
+    assert stat.S_IMODE(target.stat().st_mode) == 0o775
+    assert stat.S_IMODE((target / "a.jpg").stat().st_mode) == 0o664
 
 
 def test_download_skips_already_cached(
@@ -529,11 +554,11 @@ def test_s3_syncer_creates_target_dir(
     assert (target / "img.jpg").read_bytes() == b"data"
 
 
-def test_download_nested_frame_saves_flat_by_default(
+def test_download_nested_frame_mirrors_s3_layout_by_default(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Nested CVAT frame names download into a flat layout when unconfigured."""
+    """Nested CVAT frame names keep their S3 subfolders locally."""
     annotations = ProjectAnnotations(
         annotations=[_ann(10, 0, "2026-01/a.jpg")],
         deleted_images=[],
@@ -547,7 +572,12 @@ def test_download_nested_frame_saves_flat_by_default(
     )
 
     assert stats.downloaded == 1
-    assert (target / "a.jpg").read_bytes() == b"data-a"
+    assert (target / "2026-01" / "a.jpg").read_bytes() == b"data-a"
+
+    rerun_stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+    assert rerun_stats.cached == 1
 
 
 def test_download_ignored_prefix_preserves_subfolders(

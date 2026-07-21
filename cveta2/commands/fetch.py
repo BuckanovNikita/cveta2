@@ -14,7 +14,7 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import resolve_project_and_cloud_storage
+from cveta2.commands._helpers import echo_cli_command, resolve_project_and_cloud_storage
 from cveta2.commands.interactive import select_tasks
 from cveta2.config import (
     CacheConfig,
@@ -39,25 +39,56 @@ if TYPE_CHECKING:
 def run_fetch(args: argparse.Namespace) -> None:
     """Run the ``fetch`` command (all project tasks)."""
     output_dir = _resolve_output_dir(Path(args.output_dir))
+    prompted = not args.project or output_dir != Path(args.output_dir)
     with open_client() as client:
         project_id, project_name, cs_info = resolve_project_and_cloud_storage(
             client, args.project
         )
         options = _build_fetch_options(args, client, project_id, project_name)
+        if prompted:
+            echo_cli_command(
+                "fetch",
+                {"-p": project_name, "-o": str(output_dir), "--raw": options.raw}
+                | _common_fetch_echo_args(args),
+            )
         fetch_project(client, project_id, project_name, output_dir, cs_info, options)
 
 
 def run_fetch_task(args: argparse.Namespace) -> None:
     """Run the ``fetch-task`` command (selected task(s) only)."""
     output_dir = Path(args.output_dir)
+    tasks_prompted = not args.task or not any(v.strip() for v in args.task)
+    prompted = not args.project or tasks_prompted
     with open_client() as client:
         project_id, project_name, cs_info = resolve_project_and_cloud_storage(
             client, args.project
         )
         options = _build_fetch_options(args, client, project_id, project_name)
+        if prompted:
+            echo_cli_command(
+                "fetch-task",
+                {
+                    "-p": project_name,
+                    "-t": options.task_selector,
+                    "-o": str(output_dir),
+                }
+                | _common_fetch_echo_args(args),
+            )
         fetch_selected_tasks(
             client, project_id, project_name, output_dir, cs_info, options
         )
+
+
+def _common_fetch_echo_args(args: argparse.Namespace) -> dict[str, object]:
+    """Map the shared fetch/fetch-task flags onto echo_cli_command pairs."""
+    return {
+        "--completed-only": args.completed_only,
+        "--no-images": args.no_images,
+        "--images-dir": args.images_dir,
+        "--save-tasks": args.save_tasks,
+        "--no-cache": args.no_cache,
+        "--force": args.force,
+    }
 
 
 def _build_fetch_options(
@@ -112,6 +143,7 @@ def _resolve_output_dir(output_dir: Path) -> Path:
             hint="Pass --output / -o to specify the output directory.",
             allow_empty=False,
             empty_message="Путь не указан.",
+            history_key="output-dir",
         )
         return Path(new_path)  # type: ignore[arg-type]
     return output_dir
@@ -178,6 +210,7 @@ def _resolve_images_dir(
             f"Укажите --images-dir, --no-images или добавьте "
             f"image_cache.{project_name} в конфигурацию."
         ),
+        history_key="image-cache-dir",
     )
     if new_path is None:
         logger.warning("Путь не указан — загрузка изображений пропущена.")

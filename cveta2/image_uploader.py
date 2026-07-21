@@ -6,8 +6,9 @@ and S3 utilities from :mod:`cveta2.s3_utils`.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -22,7 +23,7 @@ from cveta2.s3_utils import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterable
 
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.s3_types import S3Client
@@ -37,11 +38,49 @@ class UploadStats(BaseModel):
     total: int = 0
 
 
+def _build_basename_index(search_dir: Path) -> dict[str, list[Path]]:
+    """Walk *search_dir* recursively, mapping basename → sorted file paths."""
+    index: dict[str, list[Path]] = {}
+    for root, _dirs, files in os.walk(search_dir):
+        root_path = Path(root)
+        for file_name in files:
+            index.setdefault(file_name, []).append(root_path / file_name)
+    for paths in index.values():
+        paths.sort()
+    return index
+
+
+def _match_recursive(
+    search_dir: Path,
+    name: str,
+    index: dict[str, list[Path]],
+) -> Path | None:
+    """Match *name* by basename in the recursive *index* of *search_dir*.
+
+    When the same basename exists at several paths the lexicographic max
+    wins (mirrors the "latest month folder" convention of
+    :func:`build_server_file_mapping`).
+    """
+    candidates = index.get(PurePosixPath(name).name)
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        logger.warning(
+            f"Дубликаты в {search_dir} для {name!r}: "
+            f"{[str(c) for c in candidates]} — используем {str(candidates[-1])!r}"
+        )
+    return candidates[-1]
+
+
 def resolve_images(
-    image_names: set[str],
+    image_names: Iterable[str],
     search_dirs: list[Path],
 ) -> tuple[dict[str, Path], list[str]]:
     """Find image files on disk by searching *search_dirs* in order.
+
+    Each directory is probed in two passes: a direct path join (supports
+    names containing subpaths), then a recursive basename search over the
+    whole tree.  Earlier search directories always win over later ones.
 
     Returns
     -------
@@ -55,6 +94,8 @@ def resolve_images(
     remaining = set(image_names)
 
     for search_dir in search_dirs:
+        if not remaining:
+            break
         if not search_dir.is_dir():
             logger.debug(f"Директория поиска не существует: {search_dir}")
             continue
@@ -65,6 +106,12 @@ def resolve_images(
                 remaining.discard(name)
         if not remaining:
             break
+        index = _build_basename_index(search_dir)
+        for name in list(remaining):
+            match = _match_recursive(search_dir, name, index)
+            if match is not None:
+                found[name] = match
+                remaining.discard(name)
 
     missing = sorted(remaining)
     return found, missing
@@ -72,7 +119,7 @@ def resolve_images(
 
 def build_server_file_mapping(
     cs_info: CloudStorageInfo,
-    image_names: set[str],
+    image_names: Iterable[str],
     s3_client: S3Client | None = None,
 ) -> tuple[dict[str, str], set[str]]:
     """Map image names to their S3 ``server_file`` paths relative to prefix.

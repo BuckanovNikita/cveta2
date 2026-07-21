@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from cveta2.commands.interactive import _questionary
+from cveta2.commands.interactive._history import history_for
 from cveta2.config import require_interactive
 
 if TYPE_CHECKING:
@@ -68,15 +69,18 @@ def text(  # noqa: PLR0913
     empty_message: str = "Значение не указано.",
     on_cancel: OnCancel = "exit",
     validate: Callable[[str], bool | str] | None = None,
+    history_key: str | None = None,
 ) -> str | None:
     """Prompt for free text.
 
     Returns the stripped value.  On cancel, exits or returns ``None`` per
     *on_cancel*.  When *allow_empty* is False an empty value exits with
     *empty_message* (``on_cancel="exit"``) or returns ``None``.
+    *history_key* enables arrow-up recall of values from previous runs.
     """
     require_interactive(hint)
-    answer = _questionary.ask_text(message, validate=validate)
+    history = history_for(history_key) if history_key else None
+    answer = _questionary.ask_text(message, validate=validate, history=history)
     if answer is None:
         _handle_cancel(on_cancel)
         return None
@@ -93,9 +97,16 @@ def path(
     *,
     hint: str,
     on_cancel: OnCancel = "exit",
+    history_key: str | None = None,
 ) -> Path | None:
     """Prompt for a filesystem path.  Returns a resolved ``Path`` or ``None``."""
-    raw = text(message, hint=hint, allow_empty=True, on_cancel=on_cancel)
+    raw = text(
+        message,
+        hint=hint,
+        allow_empty=True,
+        on_cancel=on_cancel,
+        history_key=history_key,
+    )
     if not raw:
         return None
     return Path(raw).expanduser().resolve()

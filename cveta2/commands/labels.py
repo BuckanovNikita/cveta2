@@ -10,6 +10,7 @@ from loguru import logger
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
+    echo_cli_command,
     resolve_project,
 )
 from cveta2.config import require_interactive
@@ -33,6 +34,8 @@ def run_labels(args: argparse.Namespace) -> None:
     """Run the ``labels`` command: list or interactively edit project labels."""
     with open_client() as client:
         project_id, project_name = resolve_project(client, args.project)
+        if not args.project:
+            echo_cli_command("labels", {"-p": project_name, "--list": args.list_only})
 
         if args.list_only:
             labels = client.get_project_labels(project_id)
@@ -129,6 +132,7 @@ def _interactive_add(
         "Имя новой метки (Enter — отмена):",
         hint="Pass --list to view labels non-interactively.",
         on_cancel="none",
+        history_key="label-name",
     )
 
     if not name:
@@ -161,6 +165,7 @@ def _interactive_rename(
         f"Новое имя для {old_label.name!r} (Enter — отмена):",
         hint="Pass --list to view labels non-interactively.",
         on_cancel="none",
+        history_key="label-name",
     )
 
     if not new_name:
@@ -208,6 +213,7 @@ def _interactive_recolor(
         validate=lambda val: (
             True if not val.strip() else _validate_hex_color(val.strip())
         ),
+        history_key="label-color",
     )
 
     if not new_color:

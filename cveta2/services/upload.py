@@ -30,11 +30,15 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class UploadPlan:
-    """Resolved upload inputs: filtered rows and image-name sets."""
+    """Resolved upload inputs: filtered rows and ordered image-name lists.
+
+    Name lists keep CSV row order (deduped by first occurrence) so the
+    created CVAT task shows frames in the same order as the source CSV.
+    """
 
     annotations: pd.DataFrame
-    image_names: set[str]
-    deleted_names: set[str]
+    image_names: list[str]
+    deleted_names: list[str]
 
 
 @dataclass(frozen=True)
@@ -98,15 +102,16 @@ def read_exclude_names(in_progress_path: str | None) -> set[str]:
     return names
 
 
-def split_deleted_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, set[str]]:
+def split_deleted_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """Split rows with ``instance_shape="deleted"`` out of the dataset.
 
-    Returns ``(df_without_deleted, deleted_image_names)``.
+    Returns ``(df_without_deleted, deleted_image_names)`` with names in
+    CSV row order (deduped by first occurrence).
     """
     if "instance_shape" not in df.columns:
-        return df, set()
+        return df, []
     deleted_mask = df["instance_shape"] == "deleted"
-    names: set[str] = set(df.loc[deleted_mask, "image_name"].dropna().unique())
+    names: list[str] = list(df.loc[deleted_mask, "image_name"].dropna().unique())
     if names:
         logger.info(
             f"Найдено удалённых изображений: {len(names)} "
@@ -141,7 +146,7 @@ def filter_frames_by_labels(
 
 def build_upload_plan(
     df_normal: pd.DataFrame,
-    deleted_names: set[str],
+    deleted_names: list[str],
     *,
     labels: Sequence[str],
     include_unannotated: bool = False,
@@ -157,7 +162,7 @@ def build_upload_plan(
         include_unannotated=include_unannotated,
         exclude_names=exclude_names,
     )
-    image_names = set(filtered["image_name"].dropna().unique())
+    image_names: list[str] = list(filtered["image_name"].dropna().unique())
     if not image_names and not deleted_names:
         raise Cveta2Error("Ошибка: после фильтрации не осталось изображений.")
     logger.info(
@@ -230,7 +235,7 @@ def _stage_images(client: CvatClient, request: UploadRequest) -> _StagedUpload:
     upload_labels = sorted(plan.annotations["instance_label"].dropna().unique())
     validate_labels(client, request.project_id, request.project_name, upload_labels)
 
-    all_image_names = plan.image_names | plan.deleted_names
+    all_image_names = list(dict.fromkeys([*plan.image_names, *plan.deleted_names]))
 
     found_images, missing = resolve_images(all_image_names, request.options.search_dirs)
     logger.info(
@@ -271,9 +276,9 @@ def _stage_images(client: CvatClient, request: UploadRequest) -> _StagedUpload:
 
     _warn_missing_images(missing)
 
-    task_image_names = sorted(
+    task_image_names = [
         build_s3_key(cs_info.prefix, name_to_server_file[n]) for n in all_image_names
-    )
+    ]
     return _StagedUpload(
         cs_info=cs_info,
         annotations=annotations,
@@ -315,10 +320,10 @@ def _push_to_cvat(
 
     if options.mark_all_deleted:
         client.mark_frames_deleted(
-            task_id, plan.image_names | plan.deleted_names, session=session
+            task_id, {*plan.image_names, *plan.deleted_names}, session=session
         )
     elif plan.deleted_names:
-        client.mark_frames_deleted(task_id, plan.deleted_names, session=session)
+        client.mark_frames_deleted(task_id, set(plan.deleted_names), session=session)
 
     if options.complete:
         client.complete_task(task_id)

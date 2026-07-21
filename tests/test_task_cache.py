@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
@@ -120,6 +122,19 @@ class TestLocalCache:
         cache.put(task, payload)
 
         assert cache.get(task) == payload
+
+    def test_put_creates_group_writable_entry(self, tmp_path: Path) -> None:
+        old_umask = os.umask(0o077)
+        try:
+            cache = TaskAnnotationCache(tmp_path / "cache")
+            cache.put(make_task(updated=_UPDATED), _payload())
+        finally:
+            os.umask(old_umask)
+
+        cache_dir = tmp_path / "cache"
+        entry = cache_dir / "task_1.json"
+        assert stat.S_IMODE(cache_dir.stat().st_mode) == 0o775
+        assert stat.S_IMODE(entry.stat().st_mode) == 0o664
 
     def test_get_miss_on_empty_dir(self, tmp_path: Path) -> None:
         cache = TaskAnnotationCache(tmp_path / "cache")

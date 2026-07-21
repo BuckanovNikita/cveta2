@@ -64,7 +64,7 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
         },
     ),
     (
-        ["fetch-task", "-p", "proj", "-t", "42", "-t", "43", "-o", "out"],
+        ["fetch-task", "-p", "proj", "-t", "42", "43", "-o", "out"],
         {
             "command": "fetch-task",
             "project": "proj",
@@ -79,7 +79,7 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
         {
             "command": "fetch-task",
             "project": "proj",
-            "task": [""],
+            "task": [],
             "output_dir": "out",
         },
     ),
@@ -151,6 +151,16 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "mark_all_deleted": False,
             "in_progress": None,
             "image_dir": None,
+            "labels": None,
+        },
+    ),
+    (
+        ["upload", "-p", "proj", "-d", "ds.csv", "--labels", "car", "person"],
+        {
+            "command": "upload",
+            "project": "proj",
+            "dataset": "ds.csv",
+            "labels": ["car", "person"],
         },
     ),
     (
@@ -183,7 +193,6 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "42",
             "--frame",
             "1",
-            "--frame",
             "2",
             "--image",
             "a.jpg",

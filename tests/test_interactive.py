@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from prompt_toolkit.history import FileHistory
 
 from cveta2.commands.interactive import primitives
+from cveta2.commands.interactive._history import history_for
 from cveta2.exceptions import InteractiveModeRequiredError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _HINT = "pass a flag instead"
 
@@ -71,6 +77,51 @@ class TestText:
             pytest.raises(SystemExit),
         ):
             primitives.text("Имя:", hint=_HINT, allow_empty=False)
+
+
+class TestPromptHistory:
+    def test_history_for_creates_dir_and_points_into_it(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        history = history_for("task-name")
+        expected_dir = tmp_path / "cveta2" / "prompt_history"
+        assert expected_dir.is_dir()
+        assert history.filename == str(expected_dir / "task-name")
+
+    def test_text_with_history_key_forwards_history(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        with patch(
+            "cveta2.commands.interactive._questionary.ask_text",
+            return_value="v",
+        ) as ask:
+            primitives.text("Имя:", hint=_HINT, history_key="task-name")
+        history = ask.call_args.kwargs["history"]
+        assert isinstance(history, FileHistory)
+        assert str(history.filename).endswith("task-name")
+
+    def test_text_without_history_key_passes_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+        with patch(
+            "cveta2.commands.interactive._questionary.ask_text",
+            return_value="v",
+        ) as ask:
+            primitives.text("Имя:", hint=_HINT)
+        assert ask.call_args.kwargs["history"] is None
+
+    def test_noninteractive_raises_before_history(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        with pytest.raises(InteractiveModeRequiredError):
+            primitives.text("Имя:", hint=_HINT, history_key="task-name")
+        assert not (tmp_path / "cveta2" / "prompt_history").exists()
 
 
 class TestConfirm:

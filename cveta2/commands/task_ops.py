@@ -12,7 +12,7 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import resolve_project
+from cveta2.commands._helpers import echo_cli_command, resolve_project
 from cveta2.exceptions import Cveta2Error
 from cveta2.task_cache import invalidate_local_entry
 
@@ -51,18 +51,18 @@ def _resolve_single_task(
 @contextmanager
 def _task_session(
     args: argparse.Namespace,
-) -> Iterator[tuple[CvatClient, TaskInfo]]:
+) -> Iterator[tuple[CvatClient, TaskInfo, str]]:
     """Open a client, resolve ``--project``/``--task``, invalidate cache on exit.
 
-    Mirrors ``api._resolved_task``: the local cache entry is invalidated
-    even when the mutation fails or the user declines a confirmation —
-    conservative but safe.
+    Yields ``(client, task, project_name)``.  Mirrors ``api._resolved_task``:
+    the local cache entry is invalidated even when the mutation fails or
+    the user declines a confirmation — conservative but safe.
     """
     with open_client() as client:
         project_id, project_name = resolve_project(client, args.project)
         task = _resolve_single_task(client, project_id, args.task)
         try:
-            yield client, task
+            yield client, task, project_name
         finally:
             invalidate_local_entry(project_id, task.id, project_name)
 
@@ -74,7 +74,17 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
     if not frames and not images:
         raise Cveta2Error("Ошибка: укажите хотя бы один --frame или --image.")
 
-    with _task_session(args) as (client, task):
+    with _task_session(args) as (client, task, project_name):
+        if not args.project:
+            echo_cli_command(
+                "task mark-deleted",
+                {
+                    "-p": project_name,
+                    "-t": args.task,
+                    "--frame": frames,
+                    "--image": images,
+                },
+            )
         marked = 0
         if images:
             marked += client.mark_frames_deleted(task.id, set(images))
@@ -87,7 +97,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
 
 def run_task_drop_label(args: argparse.Namespace) -> None:
     """Run ``cveta2 task drop-label``."""
-    with _task_session(args) as (client, task):
+    with _task_session(args) as (client, task, project_name):
         try:
             count = client.count_task_label_shapes(task.id, args.label)
         except ValueError as e:
@@ -104,6 +114,16 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
             yes=args.yes,
             hint=_CONFIRM_HINT,
         )
+        if not args.project or not args.yes:
+            echo_cli_command(
+                "task drop-label",
+                {
+                    "-p": project_name,
+                    "-t": args.task,
+                    "--label": args.label,
+                    "--yes": True,
+                },
+            )
         deleted = client.drop_label_annotations(task.id, args.label)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): удалено аннотаций: {deleted}"
@@ -112,12 +132,17 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
 
 def run_task_delete(args: argparse.Namespace) -> None:
     """Run ``cveta2 task delete``."""
-    with _task_session(args) as (client, task):
+    with _task_session(args) as (client, task, project_name):
         interactive.confirm_or_exit(
             f"Удалить задачу {task.name!r} (id={task.id}) безвозвратно?",
             yes=args.yes,
             hint=_CONFIRM_HINT,
         )
+        if not args.project or not args.yes:
+            echo_cli_command(
+                "task delete",
+                {"-p": project_name, "-t": args.task, "--yes": True},
+            )
         client.delete_task(task.id)
         logger.info(f"Задача {task.name!r} (id={task.id}) удалена.")
 
@@ -128,7 +153,17 @@ def run_task_status(args: argparse.Namespace) -> None:
         raise Cveta2Error("Ошибка: укажите хотя бы один --stage или --state.")
     state = STATE_CLI_TO_CVAT[args.state] if args.state else None
 
-    with _task_session(args) as (client, task):
+    with _task_session(args) as (client, task, project_name):
+        if not args.project:
+            echo_cli_command(
+                "task status",
+                {
+                    "-p": project_name,
+                    "-t": args.task,
+                    "--stage": args.stage,
+                    "--state": args.state,
+                },
+            )
         num_jobs = client.set_task_jobs_status(task.id, stage=args.stage, state=state)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): обновлено jobs: {num_jobs} "

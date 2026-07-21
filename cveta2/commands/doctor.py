@@ -137,8 +137,9 @@ _MAX_EXAMPLES = 10
 def check_cache_permissions() -> bool:
     """Check that images in cache dirs are group-accessible.
 
-    Files must have group-read; directories must have group-read +
-    group-execute so that all users in the same group can use the cache.
+    Files must have group read+write; directories must have group
+    read+write+execute so that all users in the same group can use and
+    update the cache.
 
     Returns ``True`` when everything is fine.
     """
@@ -190,7 +191,11 @@ def _check_one(path: Path, *, is_dir: bool, out: _BrokenList) -> None:
         logger.debug(f"Не удалось проверить {path}: {e}")
         return
 
-    need = (stat.S_IRGRP | stat.S_IXGRP) if is_dir else stat.S_IRGRP
+    need = (
+        (stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP)
+        if is_dir
+        else (stat.S_IRGRP | stat.S_IWGRP)
+    )
     if (st.st_mode & need) != need:
         try:
             owner = pwd.getpwuid(st.st_uid).pw_name

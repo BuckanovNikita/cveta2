@@ -9,7 +9,7 @@ from loguru import logger
 from cveta2.client import CvatClient
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import resolve_project_from_args
+from cveta2.commands._helpers import echo_cli_command, resolve_project_from_args
 from cveta2.config import (
     IgnoreConfig,
     IgnoredTask,
@@ -228,6 +228,7 @@ def _interactive_add(
             "Описание / причина (Enter — пропустить):",
             hint="Pass task ID(s) with --task to add non-interactively.",
             on_cancel="none",
+            history_key="ignore-reason",
         )
         or ""
     )
@@ -241,6 +242,15 @@ def _interactive_add(
             project_name, task.id, task.name, description, silent=silent
         )
         logger.info(f"Задача {task.name!r} (id={task.id}) добавлена")
+    echo_cli_command(
+        "ignore",
+        {
+            "-p": project_name,
+            "--add": [task.id for task in selected],
+            "--description": description or None,
+            "--silent": silent,
+        },
+    )
     return True
 
 

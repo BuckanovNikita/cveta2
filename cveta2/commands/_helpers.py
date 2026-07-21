@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import shlex
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from loguru import logger
 
 from cveta2.commands.interactive import select_project
 from cveta2.config import (
@@ -16,9 +20,34 @@ from cveta2.services.resolve import apply_sync_root_override
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Mapping
 
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
+
+
+def echo_cli_command(subcommand: str, arg_values: Mapping[str, object]) -> None:
+    """Print the fully-resolved CLI command to stdout for re-running.
+
+    *arg_values* maps flags to resolved values in CLI order: ``None``/
+    ``False`` entries are dropped, ``True`` renders a bare flag, lists
+    render as ``--flag v1 v2``.  The command goes to stdout (not the
+    loguru stderr sink) so it can be copy-pasted or piped.
+    """
+    parts = ["cveta2", subcommand]
+    for flag, value in arg_values.items():
+        if value is None or value is False:
+            continue
+        if value is True:
+            parts.append(flag)
+        elif isinstance(value, (list, tuple)):
+            if value:
+                parts.append(flag)
+                parts.extend(shlex.quote(str(v)) for v in value)
+        else:
+            parts.extend((flag, shlex.quote(str(value))))
+    logger.info("Команда для повторного запуска:")
+    sys.stdout.write(" ".join(parts) + "\n")
 
 
 def config_path_from_args(args: argparse.Namespace) -> Path:

@@ -37,7 +37,7 @@ def build_data_request(spec: UploadTaskSpec) -> cvat_models.DataRequest:
         server_files=spec.server_files,
         cloud_storage_id=spec.cloud_storage_id,
         use_cache=True,
-        sorting_method=cvat_models.SortingMethod("natural"),
+        sorting_method=cvat_models.SortingMethod("predefined"),
     )
 
 

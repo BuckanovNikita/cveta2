@@ -13,6 +13,7 @@ from cveta2.services.output import enrich_dataframe_paths, populate_record_paths
 from cveta2.services.upload import (
     _warn_missing_images,
     build_search_dirs,
+    build_upload_plan,
     filter_frames_by_labels,
     read_exclude_names,
     split_deleted_rows,
@@ -57,19 +58,19 @@ def test_read_exclude_names_csv_without_image_name(tmp_path: Path) -> None:
 def test_split_deleted_rows_no_column() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg", "b.jpg"]})
     df_normal, names = split_deleted_rows(df)
-    assert names == set()
+    assert names == []
     assert df_normal.equals(df)
 
 
-def test_split_deleted_rows_mixed_shapes() -> None:
+def test_split_deleted_rows_mixed_shapes_keeps_csv_order() -> None:
     df = pd.DataFrame(
         {
-            "image_name": ["a.jpg", "b.jpg", "c.jpg"],
-            "instance_shape": ["box", "deleted", "deleted"],
+            "image_name": ["a.jpg", "c.jpg", "b.jpg", "c.jpg"],
+            "instance_shape": ["box", "deleted", "deleted", "deleted"],
         }
     )
     df_normal, names = split_deleted_rows(df)
-    assert names == {"b.jpg", "c.jpg"}
+    assert names == ["c.jpg", "b.jpg"]
     assert df_normal["image_name"].tolist() == ["a.jpg"]
 
 
@@ -81,8 +82,30 @@ def test_split_deleted_rows_none_deleted() -> None:
         }
     )
     df_normal, names = split_deleted_rows(df)
-    assert names == set()
+    assert names == []
     assert len(df_normal) == 1
+
+
+# ---------------------------------------------------------------------------
+# build_upload_plan
+# ---------------------------------------------------------------------------
+
+
+def test_build_upload_plan_preserves_csv_order() -> None:
+    df = pd.DataFrame(
+        {
+            "image_name": ["b.jpg", "a.jpg", "b.jpg", "c.jpg"],
+            "instance_label": ["Edge", "Edge", "Edge", "Edge"],
+        }
+    )
+    plan = build_upload_plan(df, [], labels=["Edge"])
+    assert plan.image_names == ["b.jpg", "a.jpg", "c.jpg"]
+
+
+def test_build_upload_plan_raises_when_empty() -> None:
+    df = pd.DataFrame({"image_name": [], "instance_label": []})
+    with pytest.raises(Cveta2Error):
+        build_upload_plan(df, [], labels=["Edge"])
 
 
 # ---------------------------------------------------------------------------
@@ -233,14 +256,16 @@ def test_populate_paths_flat_frame_unchanged() -> None:
     assert ann.s3_image_path == "images/img.jpg"
 
 
-def test_populate_paths_local_flat_by_default(tmp_path: Path) -> None:
-    (tmp_path / "img.jpg").write_bytes(b"x")
+def test_populate_paths_local_mirrors_s3_by_default(tmp_path: Path) -> None:
+    nested = tmp_path / "sub" / "img.jpg"
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(b"x")
     ann = make_bbox(image_name="sub/img.jpg")
     result = ProjectAnnotations(annotations=[ann], deleted_images=[])
 
     populate_record_paths(result, make_cs_info(prefix="images"), tmp_path)
 
-    assert ann.image_path == str((tmp_path / "img.jpg").resolve())
+    assert ann.image_path == str(nested.resolve())
 
 
 def test_populate_paths_local_nested_with_ignored_prefix(tmp_path: Path) -> None:

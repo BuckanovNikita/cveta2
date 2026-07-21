@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import resolve_project
+from cveta2.commands._helpers import echo_cli_command, resolve_project
 from cveta2.services.output import read_dataset_csv
 from cveta2.services.whats_new import REQUIRED_COLUMNS, compute_cutoff
 
@@ -25,6 +25,8 @@ def run_whats_new(args: argparse.Namespace) -> None:
 
     with open_client() as client:
         project_id, project_name = resolve_project(client, args.project)
+        if not args.project:
+            echo_cli_command("whats-new", {"-p": project_name, "-d": args.dataset})
         tasks = client.list_tasks_completed_after(project_id, cutoff)
 
     logger.info(f"Дата отсечки (из {dataset_path}): {cutoff}")
