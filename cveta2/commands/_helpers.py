@@ -50,6 +50,22 @@ def echo_cli_command(subcommand: str, arg_values: Mapping[str, object]) -> None:
     sys.stdout.write(" ".join(parts) + "\n")
 
 
+def echo_if_prompted(
+    subcommand: str,
+    arg_values: Mapping[str, object],
+    *,
+    prompted: bool,
+) -> None:
+    """Echo the reproducible command when any input came from a prompt.
+
+    Every command computes its own ``prompted`` predicate (were any of
+    its inputs resolved interactively?) and routes the echo through here,
+    so the "echo only after prompting" rule lives in one place.
+    """
+    if prompted:
+        echo_cli_command(subcommand, arg_values)
+
+
 def config_path_from_args(args: argparse.Namespace) -> Path:
     """Resolve the ``--config`` argument into a concrete config path."""
     config_arg = getattr(args, "config", None)

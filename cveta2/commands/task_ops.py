@@ -12,7 +12,7 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import echo_cli_command, resolve_project
+from cveta2.commands._helpers import echo_if_prompted, resolve_project
 from cveta2.exceptions import Cveta2Error
 from cveta2.task_cache import invalidate_local_entry
 
@@ -72,16 +72,17 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
         raise Cveta2Error("Ошибка: укажите хотя бы один --frame или --image.")
 
     with _task_session(args) as (client, task, project_name):
-        if not args.project:
-            echo_cli_command(
-                "task mark-deleted",
-                {
-                    "-p": project_name,
-                    "-t": args.task,
-                    "--frame": frames,
-                    "--image": images,
-                },
-            )
+        prompted = not args.project
+        echo_if_prompted(
+            "task mark-deleted",
+            {
+                "-p": project_name,
+                "-t": args.task,
+                "--frame": frames,
+                "--image": images,
+            },
+            prompted=prompted,
+        )
         marked = 0
         if images:
             marked += client.mark_frames_deleted(task.id, set(images))
@@ -111,16 +112,17 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
             yes=args.yes,
             hint=_CONFIRM_HINT,
         )
-        if not args.project or not args.yes:
-            echo_cli_command(
-                "task drop-label",
-                {
-                    "-p": project_name,
-                    "-t": args.task,
-                    "--label": args.label,
-                    "--yes": True,
-                },
-            )
+        prompted = not args.project or not args.yes
+        echo_if_prompted(
+            "task drop-label",
+            {
+                "-p": project_name,
+                "-t": args.task,
+                "--label": args.label,
+                "--yes": True,
+            },
+            prompted=prompted,
+        )
         deleted = client.drop_label_annotations(task.id, args.label)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): удалено аннотаций: {deleted}"
@@ -135,11 +137,12 @@ def run_task_delete(args: argparse.Namespace) -> None:
             yes=args.yes,
             hint=_CONFIRM_HINT,
         )
-        if not args.project or not args.yes:
-            echo_cli_command(
-                "task delete",
-                {"-p": project_name, "-t": args.task, "--yes": True},
-            )
+        prompted = not args.project or not args.yes
+        echo_if_prompted(
+            "task delete",
+            {"-p": project_name, "-t": args.task, "--yes": True},
+            prompted=prompted,
+        )
         client.delete_task(task.id)
         logger.info(f"Задача {task.name!r} (id={task.id}) удалена.")
 
@@ -151,16 +154,17 @@ def run_task_status(args: argparse.Namespace) -> None:
     state = STATE_CLI_TO_CVAT[args.state] if args.state else None
 
     with _task_session(args) as (client, task, project_name):
-        if not args.project:
-            echo_cli_command(
-                "task status",
-                {
-                    "-p": project_name,
-                    "-t": args.task,
-                    "--stage": args.stage,
-                    "--state": args.state,
-                },
-            )
+        prompted = not args.project
+        echo_if_prompted(
+            "task status",
+            {
+                "-p": project_name,
+                "-t": args.task,
+                "--stage": args.stage,
+                "--state": args.state,
+            },
+            prompted=prompted,
+        )
         num_jobs = client.set_task_jobs_status(task.id, stage=args.stage, state=state)
         logger.info(
             f"Задача {task.name!r} (id={task.id}): обновлено jobs: {num_jobs} "

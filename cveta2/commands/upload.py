@@ -13,7 +13,7 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import echo_cli_command, resolve_project
+from cveta2.commands._helpers import echo_if_prompted, resolve_project
 from cveta2.config import UploadConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.output import read_dataset_csv
@@ -37,6 +37,13 @@ _NO_ANNOTATION_LABEL = "__no_annotation__"
 _UPLOAD_REQUIRED_COLUMNS: set[str] = {"image_name", "instance_label"}
 
 
+def _available_labels(df: pd.DataFrame) -> tuple[list[str], bool]:
+    """Sorted dataset labels + whether frames without annotations exist."""
+    labels = sorted(df["instance_label"].dropna().unique().tolist())
+    has_no_annotation = bool(df["instance_label"].isna().any())
+    return labels, has_no_annotation
+
+
 def _select_labels(df: pd.DataFrame) -> list[str]:
     """Interactively select instance labels from dataset.
 
@@ -45,10 +52,7 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
     The sentinel ``_NO_ANNOTATION_LABEL`` is returned in the list
     when that choice is selected.
     """
-    all_labels = sorted(
-        df["instance_label"].dropna().unique().tolist(),
-    )
-    has_no_annotation = df["instance_label"].isna().any()
+    all_labels, has_no_annotation = _available_labels(df)
     if not all_labels and not has_no_annotation:
         raise Cveta2Error("Ошибка: не найдено ни одного instance_label в dataset.csv.")
     choices: list[interactive.Choice] = [
@@ -64,7 +68,7 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
     raw = interactive.select_many(
         "Выберите классы для загрузки:",
         choices,
-        hint="The 'upload' command requires interactive class selection.",
+        hint="Pass --labels to select classes non-interactively.",
         empty_message="Не выбрано ни одного класса — отмена.",
     )
     selected = [str(v) for v in raw or []]
@@ -84,8 +88,9 @@ def _resolve_labels(labels_arg: list[str] | None, df: pd.DataFrame) -> list[str]
     """
     if labels_arg is None:
         return _select_labels(df)
-    available = set(df["instance_label"].dropna().unique().tolist())
-    if df["instance_label"].isna().any():
+    labels, has_no_annotation = _available_labels(df)
+    available = set(labels)
+    if has_no_annotation:
         available.add(_NO_ANNOTATION_LABEL)
     unknown = sorted(set(labels_arg) - available)
     if unknown:
@@ -125,20 +130,20 @@ def run_upload(args: argparse.Namespace) -> None:
         project_id, project_name = resolve_project(client, args.project)
         task_name = _resolve_task_name(args.name)
         selected = _resolve_labels(args.labels, df_normal)
-        if prompted:
-            echo_cli_command(
-                "upload",
-                {
-                    "-p": project_name,
-                    "-d": args.dataset,
-                    "--labels": selected,
-                    "--in-progress": args.in_progress,
-                    "--image-dir": args.image_dir,
-                    "--name": task_name,
-                    "--complete": args.complete,
-                    "--mark-all-deleted": args.mark_all_deleted,
-                },
-            )
+        echo_if_prompted(
+            "upload",
+            {
+                "-p": project_name,
+                "-d": args.dataset,
+                "--labels": selected,
+                "--in-progress": args.in_progress,
+                "--image-dir": args.image_dir,
+                "--name": task_name,
+                "--complete": args.complete,
+                "--mark-all-deleted": args.mark_all_deleted,
+            },
+            prompted=prompted,
+        )
         plan = build_upload_plan(
             df_normal,
             deleted_names,

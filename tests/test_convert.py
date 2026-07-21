@@ -32,7 +32,13 @@ from cveta2.services.convert.common import (
     _yolo_to_pixel,
 )
 from cveta2.services.convert.yolo import _parse_label_file
-from tests.helpers import csv_row, make_args, make_bbox, make_image, write_dataset_csv
+from tests.helpers import (
+    csv_row,
+    make_bbox,
+    make_image,
+    parse_cli_args,
+    write_dataset_csv,
+)
 
 
 def _make_dataset_csv(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
@@ -564,14 +570,15 @@ def test_run_convert_missing_split_exits(tmp_path: Path) -> None:
     rows[0]["split"] = None
     csv_path = _make_dataset_csv(tmp_path, rows)
 
-    args = make_args(
-        to_yolo=True,
-        from_yolo=False,
-        dataset=str(csv_path),
-        output=str(tmp_path / "yolo_out"),
-        link_mode="copy",
-        image_dir=[],
-        names_file=None,
+    args = parse_cli_args(
+        "convert",
+        "--to-yolo",
+        "-d",
+        str(csv_path),
+        "-o",
+        str(tmp_path / "yolo_out"),
+        "--link-mode",
+        "copy",
     )
 
     with pytest.raises(Cveta2Error):

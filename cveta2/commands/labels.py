@@ -10,7 +10,7 @@ from loguru import logger
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
-    echo_cli_command,
+    echo_if_prompted,
     resolve_project,
 )
 from cveta2.config import require_interactive
@@ -34,8 +34,12 @@ def run_labels(args: argparse.Namespace) -> None:
     """Run the ``labels`` command: list or interactively edit project labels."""
     with open_client() as client:
         project_id, project_name = resolve_project(client, args.project)
-        if not args.project:
-            echo_cli_command("labels", {"-p": project_name, "--list": args.list_only})
+        prompted = not args.project
+        echo_if_prompted(
+            "labels",
+            {"-p": project_name, "--list": args.list_only},
+            prompted=prompted,
+        )
 
         if args.list_only:
             labels = client.get_project_labels(project_id)

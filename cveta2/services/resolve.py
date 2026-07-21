@@ -15,8 +15,12 @@ if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
 
 
-def resolve_project(client: CvatClient, project: int | str) -> tuple[int, str]:
-    """Resolve a project spec (id or name) to ``(project_id, project_name)``."""
+def resolve_project_spec(client: CvatClient, project: int | str) -> tuple[int, str]:
+    """Resolve a project spec (id or name) to ``(project_id, project_name)``.
+
+    Never prompts — unlike the interactive
+    :func:`cveta2.commands._helpers.resolve_project`.
+    """
     project_id = client.resolve_project_id(project)
     name = str(project).strip()
     if isinstance(project, int) or name.isdigit():

@@ -381,6 +381,24 @@ def cache_dir_for_project(root: Path, project_name: str) -> Path:
     return root / safe
 
 
+def resolve_images_cache_dir(
+    project_name: str,
+    config_path: Path | None = None,
+) -> Path | None:
+    """Return the configured image-cache dir for a project, or None.
+
+    Checks the explicit ``image_cache`` project mapping first, then falls
+    back to the effective ``cache.images_root`` for the project.
+    """
+    cached_dir = ImageCacheConfig.load(config_path).get_cache_dir(project_name)
+    if cached_dir is not None:
+        return cached_dir
+    images_root = CacheConfig.load(config_path).for_project(project_name).images_root
+    if images_root is not None:
+        return cache_dir_for_project(images_root, project_name)
+    return None
+
+
 class SyncRootsConfig(_ProjectsSection):
     """Per-project mapping: project_name -> S3 root for image downloads.
 

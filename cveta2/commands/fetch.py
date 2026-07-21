@@ -14,13 +14,12 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import echo_cli_command, resolve_project_and_cloud_storage
+from cveta2.commands._helpers import echo_if_prompted, resolve_project_and_cloud_storage
 from cveta2.commands.interactive import select_tasks
 from cveta2.config import (
-    CacheConfig,
     ImageCacheConfig,
-    cache_dir_for_project,
     is_interactive_disabled,
+    resolve_images_cache_dir,
 )
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.fetch import (
@@ -45,17 +44,17 @@ def run_fetch(args: argparse.Namespace) -> None:
             client, args.project
         )
         options = _build_project_fetch_options(args, project_name)
-        if prompted:
-            echo_cli_command(
-                "fetch",
-                {
-                    "-p": project_name,
-                    "-o": str(output_dir),
-                    "--raw": options.raw,
-                    "--no-clearml": args.no_clearml,
-                }
-                | _common_fetch_echo_args(args),
-            )
+        echo_if_prompted(
+            "fetch",
+            {
+                "-p": project_name,
+                "-o": str(output_dir),
+                "--raw": options.raw,
+                "--no-clearml": args.no_clearml,
+            }
+            | _common_fetch_echo_args(args),
+            prompted=prompted,
+        )
         fetch_project(client, project_id, project_name, output_dir, cs_info, options)
 
 
@@ -69,16 +68,16 @@ def run_fetch_task(args: argparse.Namespace) -> None:
             client, args.project
         )
         options = _build_task_fetch_options(args, client, project_id, project_name)
-        if prompted:
-            echo_cli_command(
-                "fetch-task",
-                {
-                    "-p": project_name,
-                    "-t": options.task_selector,
-                    "-o": str(output_dir),
-                }
-                | _common_fetch_echo_args(args),
-            )
+        echo_if_prompted(
+            "fetch-task",
+            {
+                "-p": project_name,
+                "-t": options.task_selector,
+                "-o": str(output_dir),
+            }
+            | _common_fetch_echo_args(args),
+            prompted=prompted,
+        )
         fetch_selected_tasks(
             client, project_id, project_name, output_dir, cs_info, options
         )
@@ -198,22 +197,12 @@ def _resolve_images_dir(
     """
     if args.no_images:
         return None
-
-    # --images-dir takes top priority
     if args.images_dir:
         return Path(args.images_dir).resolve()
+    configured = resolve_images_cache_dir(project_name)
+    if configured is not None:
+        return configured
 
-    # Look up per-project mapping in config
-    ic_cfg = ImageCacheConfig.load()
-    cached_dir = ic_cfg.get_cache_dir(project_name)
-    if cached_dir is not None:
-        return cached_dir
-
-    images_root = CacheConfig.load().for_project(project_name).images_root
-    if images_root is not None:
-        return cache_dir_for_project(images_root, project_name)
-
-    # Not configured — interactive prompt or error
     if is_interactive_disabled():
         raise Cveta2Error(
             f"Ошибка: путь кэширования изображений для проекта "
@@ -234,6 +223,7 @@ def _resolve_images_dir(
         logger.warning("Путь не указан — загрузка изображений пропущена.")
         return None
 
+    ic_cfg = ImageCacheConfig.load()
     ic_cfg.set_cache_dir(project_name, new_path)
     ic_cfg.save()
     return new_path

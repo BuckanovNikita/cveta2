@@ -21,27 +21,27 @@ if TYPE_CHECKING:
 
 def run_convert(args: argparse.Namespace) -> None:
     """Map CLI arguments onto the conversion service functions."""
-    if getattr(args, "to_yolo", False):
+    if args.to_yolo:
         convert_to_yolo(
             args.dataset,
             args.output,
-            image_dirs=getattr(args, "image_dir", None),
-            link_mode=args.link_mode or "auto",
+            image_dirs=args.image_dir,
+            link_mode=args.link_mode,
         )
-    elif getattr(args, "from_yolo", False):
+    elif args.from_yolo:
         convert_from_yolo(
             args.input,
             args.output,
             names_file=args.names_file,
-            read_all_sizes=getattr(args, "read_all_sizes", False),
-            image_dirs=getattr(args, "image_dir", None),
+            read_all_sizes=args.read_all_sizes,
+            image_dirs=args.image_dir,
         )
-    elif getattr(args, "to_coco", False):
+    elif args.to_coco:
         convert_to_coco(
             args.dataset,
             args.output,
-            image_dirs=getattr(args, "image_dir", None),
-            link_mode=args.link_mode or "auto",
+            image_dirs=args.image_dir,
+            link_mode=args.link_mode,
         )
     else:
         raise Cveta2Error("Ошибка: укажите --to-yolo, --from-yolo или --to-coco")

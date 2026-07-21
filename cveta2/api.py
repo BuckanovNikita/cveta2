@@ -27,9 +27,8 @@ from cveta2.config import (
     CacheConfig,
     CvatConfig,
     IgnoreConfig,
-    ImageCacheConfig,
     UploadConfig,
-    cache_dir_for_project,
+    resolve_images_cache_dir,
 )
 from cveta2.exceptions import Cveta2Error, MissingHostError
 from cveta2.models import JOB_STAGES, JOB_STATES, TaskInfo
@@ -46,7 +45,7 @@ from cveta2.services.fetch import (
 )
 from cveta2.services.merge import merge_datasets
 from cveta2.services.output import read_dataset_csv
-from cveta2.services.resolve import apply_sync_root_override, resolve_project
+from cveta2.services.resolve import apply_sync_root_override, resolve_project_spec
 from cveta2.services.upload import (
     UploadOptions,
     UploadRequest,
@@ -196,12 +195,9 @@ def _resolve_images_dir(
         return None
     if images_dir:
         return Path(images_dir).resolve()
-    cached_dir = ImageCacheConfig.load(config_path).get_cache_dir(project_name)
-    if cached_dir is not None:
-        return cached_dir
-    images_root = CacheConfig.load(config_path).for_project(project_name).images_root
-    if images_root is not None:
-        return cache_dir_for_project(images_root, project_name)
+    configured = resolve_images_cache_dir(project_name, config_path)
+    if configured is not None:
+        return configured
     raise Cveta2Error(
         f"Путь кэширования изображений для проекта {project_name!r} не "
         f"настроен. Передайте images_dir=, download_images=False или "
@@ -240,7 +236,7 @@ def fetch(  # noqa: PLR0913
     use_cache, force = _cache_flags(cache)
     config_path = _config_path(connection)
     with _open(connection) as c:
-        project_id, project_name = resolve_project(c, project)
+        project_id, project_name = resolve_project_spec(c, project)
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id)
         )
@@ -286,7 +282,7 @@ def fetch_task(  # noqa: PLR0913
     use_cache, force = _cache_flags(cache)
     config_path = _config_path(connection)
     with _open(connection) as c:
-        project_id, project_name = resolve_project(c, project)
+        project_id, project_name = resolve_project_spec(c, project)
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id)
         )
@@ -351,7 +347,7 @@ def upload(  # noqa: PLR0913
     )
     upload_cfg = UploadConfig.load(_config_path(connection))
     with _open(connection) as c:
-        project_id, project_name = resolve_project(c, project)
+        project_id, project_name = resolve_project_spec(c, project)
         options = UploadOptions(
             search_dirs=build_search_dirs(image_dirs, project_name),
             segment_size=upload_cfg.images_per_job,
@@ -413,7 +409,7 @@ def whats_new(
     df = read_dataset_csv(dataset_path, REQUIRED_COLUMNS)
     baseline = compute_baseline(df, dataset_path)
     with _open(connection) as c:
-        project_id, _ = resolve_project(c, project)
+        project_id, _ = resolve_project_spec(c, project)
         tasks = c.list_tasks_completed_after(project_id, baseline.cutoff)
     return WhatsNewResult(
         tasks=tasks,
@@ -432,7 +428,7 @@ def s3_sync(
     """Sync all project images from S3 into *target_dir* like ``cveta2 s3-sync``."""
     config_path = _config_path(connection)
     with _open(connection) as c:
-        project_id, project_name = resolve_project(c, project)
+        project_id, project_name = resolve_project_spec(c, project)
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id), root
         )
@@ -451,7 +447,7 @@ def get_labels(
 ) -> list[LabelInfo]:
     """Return the project's label definitions."""
     with _open(connection) as c:
-        project_id, _ = resolve_project(c, project)
+        project_id, _ = resolve_project_spec(c, project)
         return c.get_project_labels(project_id)
 
 
@@ -472,7 +468,7 @@ def update_labels(  # noqa: PLR0913
     all annotations using them permanently.
     """
     with _open(connection) as c:
-        project_id, _ = resolve_project(c, project)
+        project_id, _ = resolve_project_spec(c, project)
         c.update_project_labels(
             project_id, add=add, rename=rename, delete=delete, recolor=recolor
         )
@@ -496,7 +492,7 @@ def ignore(  # noqa: PLR0913
     config_path = _config_path(connection)
     ignore_cfg = IgnoreConfig.load(config_path)
     with _open(connection) as c:
-        project_id, project_name = resolve_project(c, project)
+        project_id, project_name = resolve_project_spec(c, project)
         if add or remove:
             tasks = c.list_project_tasks(project_id)
             for task in c.resolve_task_selectors(tasks, list(add or [])):
@@ -527,7 +523,7 @@ def _resolved_task(
     mutation that forgets to call ``invalidate_local_entry``.
     """
     with _open(connection) as c:
-        project_id, project_name = resolve_project(c, project)
+        project_id, project_name = resolve_project_spec(c, project)
         task_info = _resolve_task(c, project_id, task)
         try:
             yield c, task_info
