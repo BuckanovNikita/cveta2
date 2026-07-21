@@ -17,6 +17,7 @@ CLI и Python API для работы с аннотациями CVAT-проек�
 - **Операции над задачами** (`task`) — пометка кадров удалёнными, удаление аннотаций по метке, удаление задачи, смена stage/state всех jobs
 - **Что нового** (`whats-new`) — список задач, завершённых после уже выгруженного `dataset.csv`
 - **Кэш аннотаций задач** — завершённые задачи кэшируются локально и в S3-бакете проекта, повторный `fetch` не перекачивает их с CVAT
+- **Публикация в ClearML** (`setup-clearml`) — опционально: после полного `fetch` CSV-файлы публикуются как новая версия ClearML Dataset
 - **Issues** — выгрузка issues CVAT в CSV (`issue_text` / `issue_state`) и создание новых issues при `upload`
 - **Удобный интерактив** — текстовые поля запоминают ответы прошлых запусков (стрелка вверх подставляет предыдущее значение), а после интерактивного заполнения команда печатает в stdout полный эквивалент с флагами для повторного запуска
 - Поддерживает фильтр по задачам со статусом `completed`
@@ -110,6 +111,20 @@ cveta2 setup-cache --config /path/to/config.yaml
 cveta2 setup-cache --list
 ```
 
+### Настроить публикацию в ClearML (`cveta2 setup-clearml`)
+
+Интерактивная настройка маппинга проектов CVAT на ClearML Dataset (см. раздел [«Публикация в ClearML»](#публикация-в-clearml)). Команда включает/выключает интеграцию и для каждого известного проекта запрашивает ClearML project и dataset name; Enter — пропустить проект или принять текущее значение. Список проектов берётся из локального кэша — если он пуст, сначала выполните `cveta2 setup-cache`.
+
+```bash
+cveta2 setup-clearml
+
+# Показать текущий маппинг и выйти
+cveta2 setup-clearml --list
+
+# Указать другой путь к конфигу
+cveta2 setup-clearml --config /path/to/config.yaml
+```
+
 ### Выгрузить все аннотации проекта (`cveta2 fetch`)
 
 Выгрузка **всех** bbox-аннотаций и удалённых изображений из проекта CVAT. Каждая задача выгружается последовательно и сохраняется как промежуточный CSV в `output/.tasks/task_{id}.csv`, после чего результаты объединяются и разбиваются на три CSV-файла + список удалённых. Если папка `--output-dir` уже существует, в интерактивном режиме будет предложено перезаписать, указать другой путь или отменить.
@@ -144,6 +159,9 @@ cveta2 fetch -p 123 -o output/ --no-cache
 
 # Перечитать все задачи с CVAT и обновить кэш
 cveta2 fetch -p 123 -o output/ --force
+
+# Не публиковать результат в ClearML (см. раздел «Публикация в ClearML»)
+cveta2 fetch -p 123 -o output/ --no-clearml
 ```
 
 Завершённые задачи по умолчанию берутся из кэша аннотаций — см. раздел [«Кэш аннотаций задач»](#кэш-аннотаций-задач).
@@ -211,6 +229,9 @@ cveta2 ignore -p "Мой проект" --add 456
 # Добавить несколько задач (по ID или имени) с описанием причины
 cveta2 ignore -p "Мой проект" --add 456 "Партия 3" -d "Дубликаты"
 
+# Добавить задачу без предупреждения при каждом fetch (--silent)
+cveta2 ignore -p "Мой проект" --add 456 --silent
+
 # Удалить задачу из ignore-списка
 cveta2 ignore -p "Мой проект" --remove 456
 
@@ -221,6 +242,8 @@ cveta2 ignore --list
 cveta2 ignore -p "Мой проект"
 ```
 
+Обычно при `fetch` каждая игнорируемая задача упоминается предупреждением в логе. Флаг `--silent` (в интерактивном режиме — отдельный вопрос) отключает это предупреждение: задача пропускается молча.
+
 Конфигурация хранится в `config.yaml`:
 
 ```yaml
@@ -229,6 +252,7 @@ ignore:
     - id: 456
       name: "Партия 3"
       description: "Дубликаты"
+      silent: true
     - id: 789
       name: "Партия 5"
 ```
@@ -302,7 +326,7 @@ cveta2 upload -d output/dataset.csv
 
 Флаг `--mark-all-deleted` после создания задачи помечает **все** загруженные кадры удалёнными. Без него удалёнными помечаются только изображения со строками `instance_shape="deleted"` из CSV.
 
-Количество изображений на job настраивается через `upload.images_per_job` в конфиге (по умолчанию 100).
+Количество изображений на job настраивается через `upload.images_per_job` в конфиге (по умолчанию 100), качество изображений в создаваемой задаче — через `upload.image_quality` (по умолчанию 100).
 
 ### Объединить два датасета (`cveta2 merge`)
 
@@ -371,6 +395,8 @@ cveta2 convert --from-yolo -i predictions/ -o preds.csv --names-file classes.yam
 В режиме предсказаний поддерживается 6-е поле confidence в YOLO `.txt` файлах (формат: `class_id xc yc w h confidence`). Значение записывается в столбец `confidence` выходного CSV.
 
 Изображения автоматически ищутся во всех директориях из `image_cache` конфига. Дополнительные пути можно указать через `--image-dir` (принимает список: `--image-dir d1 d2`).
+
+По умолчанию размеры читаются только у первого изображения — остальные считаются такого же размера. Если изображения в датасете разных размеров, укажите `--read-all-sizes`, чтобы читать размеры каждого файла отдельно.
 
 **CSV → COCO** (`--to-coco`):
 
@@ -449,7 +475,7 @@ cveta2 whats-new -d output/dataset.csv
 
 - Наличие и корректность файла конфигурации (хост, креды)
 - Доступность AWS/S3-учётных данных (boto3)
-- Права доступа кэша изображений: у файлов проверяется групповое чтение, у директорий — групповое чтение и выполнение (чтобы все пользователи группы имели доступ)
+- Права доступа кэша изображений: у файлов проверяется групповое чтение и запись, у директорий — групповое чтение, запись и выполнение (чтобы все пользователи группы могли пользоваться кэшем и обновлять его)
 
 ```bash
 cveta2 doctor
@@ -521,6 +547,27 @@ cveta2 fetch -p coco8-dev -o output/ --images-dir /tmp/my-images
 - Полный `fetch` удаляет локальные записи задач, которых больше нет в проекте.
 - Проблемы с кэшем никогда не ломают выгрузку: при ошибке S3 выводится одно предупреждение, и до конца запуска используется только локальный кэш.
 
+## Публикация в ClearML
+
+Опциональная интеграция: после полного `fetch` (не `fetch-task`) все CSV-файлы из выходной директории публикуются как **новая версия ClearML Dataset**. Публикация происходит, только если выполнены все условия:
+
+- установлен пакет `clearml` (в зависимости cveta2 он не входит);
+- в конфиге секция `clearml` включена (`enabled: true`) и для проекта задан маппинг (см. `cveta2 setup-clearml`);
+- не установлена переменная окружения `CVETA2_CLEARML=false` (разовое отключение).
+
+Ошибки публикации никогда не ломают выгрузку — выводится предупреждение, результаты `fetch` не затрагиваются. Разово отключить публикацию можно флагом `cveta2 fetch --no-clearml`; в Python API у `cveta2.fetch` есть параметр `publish_clearml` (по умолчанию `True`).
+
+Пример секции конфига:
+
+```yaml
+clearml:
+  enabled: true
+  projects:
+    coco8-dev:
+      clearml_project: "CV/coco8"
+      clearml_dataset: "coco8-dev"
+```
+
 ## Конфигурация
 
 ### Файл конфигурации
@@ -564,13 +611,22 @@ cache:
       task_cache_s3: s3://ml-cache/coco8-dev   # явное место S3-кэша задач (или голый префикс в бакете проекта)
 
 upload:
-  images_per_job: 100
+  images_per_job: 100                          # изображений на job в создаваемой задаче
+  image_quality: 100                           # качество изображений в CVAT
+
+clearml:
+  enabled: true                                # публикация CSV в ClearML после полного fetch
+  projects:
+    coco8-dev:
+      clearml_project: "CV/coco8"
+      clearml_dataset: "coco8-dev"
 
 ignore:
   coco8-dev:
     - id: 456
       name: "Партия 3"
       description: "Дубликаты"
+      silent: true                             # не предупреждать об этой задаче при fetch
 ```
 
 Поле `cvat.request_timeout` (или переменная `CVETA2_DATA_TIMEOUT`, у неё приоритет) включает таймауты для всех HTTP-запросов к CVAT (включая создание клиента) и операций с S3: таймаут соединения — 10 секунд, таймаут чтения — заданное значение. По умолчанию (не задано или `0`) таймаутов нет — запрос может ждать сколько угодно.
@@ -599,6 +655,7 @@ cveta2 содержит встроенный пресет (`cveta2/presets/defau
 | `CVETA2_DATA_TIMEOUT` | Таймаут чтения (в секундах) для всех HTTP-запросов к CVAT и операций с S3; таймаут соединения — 10 секунд. Не задан или `0` — без таймаутов (поведение по умолчанию). Переопределяет `cvat.request_timeout` из конфига |
 | `CVETA2_DISABLE_CACHE` | При `true` — полностью отключить кэш аннотаций задач: ни чтения, ни записи, ни синхронизации с S3. Эквивалент постоянного `--no-cache` (см. [Кэш аннотаций задач](#кэш-аннотаций-задач)) |
 | `CVETA2_RAISE_ON_FAILURE` | При `true` — при первой ошибке CVAT 5xx по задаче вызов `fetch`/`fetch-task` сразу падает (исключение пробрасывается). По умолчанию такие задачи пропускаются, ошибка и ссылка на задачу пишутся в лог |
+| `CVETA2_CLEARML` | При `false` — отключить публикацию в ClearML на этот запуск (см. [Публикация в ClearML](#публикация-в-clearml)) |
 
 ### Ошибки сервера CVAT (5xx)
 
@@ -615,13 +672,14 @@ cveta2 содержит встроенный пресет (`cveta2/presets/defau
 Для использования в CI/скриптах установите `CVETA2_NO_INTERACTIVE=true`. В этом режиме:
 
 - Все интерактивные промпты заменяются на ошибки с подсказкой, какой флаг или переменную окружения нужно использовать
-- Команды `setup` и `setup-cache` недоступны — настраивайте через env-переменные или редактируя файл конфигурации напрямую
+- Команды `setup`, `setup-cache` и `setup-clearml` недоступны (у `setup-cache` и `setup-clearml` работает только `--list`) — настраивайте через env-переменные или редактируя файл конфигурации напрямую
 - При `fetch` / `fetch-task` без `--project` — ошибка (укажите `-p`)
 - При `fetch-task` без `-t` или с `-t` без значения — ошибка (укажите `-t VALUE`)
 - Если не хватает учётных данных — ошибка (задайте `CVAT_USERNAME`/`CVAT_PASSWORD`)
 - Если путь к изображениям не настроен — ошибка (укажите `--images-dir`, `--no-images` или `image_cache` в конфиге)
 - Если выходная директория уже существует — перезаписывается без вопросов
-- Команда `upload` недоступна — выбор классов требует интерактивного режима
+- Команда `upload` требует явных `-p`, `--name` и `--labels` — без любого из них будет ошибка вместо интерактивного вопроса
+- Команда `labels` доступна только с `--list` (редактирование меток интерактивно)
 - Команда `ignore` без `--add`/`--remove`/`--list` недоступна (интерактивный TUI); `--add`/`--remove`/`--list` работают
 - Команды `task drop-label` и `task delete` требуют флаг `--yes` (подтверждение недоступно)
 
@@ -641,20 +699,25 @@ cveta2 fetch -p 123 -o output/ --images-dir /data/images
 
 ### Функции-команды (рекомендуемый способ)
 
-Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие команды CLI один в один. Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI; `fetch` / `fetch_task` дополнительно возвращают partition `dataset` как `pandas.DataFrame`.
+Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`setup-clearml`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. DATASET_FORMAT.md).
 
 ```python
 import cveta2
 
 # Выгрузка проекта: пишет dataset/obsolete/in_progress/deleted CSV в out/,
-# возвращает partition dataset как DataFrame
-df = cveta2.fetch("my-project", output_dir="out")
+# возвращает PartitionResult (dataset / obsolete / in_progress / deleted_images)
+result = cveta2.fetch("my-project", output_dir="out")
+print(result.dataset)         # DataFrame актуальных аннотаций
+print(len(result.obsolete))   # устаревшие строки тоже доступны
 
-# Выгрузка отдельных задач (по ID или имени)
+# Кэш аннотаций: cache="use" (по умолчанию) / "refresh" (= --force) / "off" (= --no-cache)
+result = cveta2.fetch("my-project", output_dir="out", cache="refresh")
+
+# Выгрузка отдельных задач (по ID или имени) — DataFrame без разбиения
 df = cveta2.fetch_task("my-project", tasks=[456, "Партия 3"], output_dir="out")
 
 # Загрузка датасета обратно в CVAT (labels=None → все кадры)
-result = cveta2.upload("out/dataset.csv", project="my-project", name="Партия 4")
+result = cveta2.upload("out/dataset.csv", "my-project", "Партия 4")
 print(result.task_id, result.url, result.annotations, result.issues)
 
 # Конвертация форматов
@@ -664,10 +727,17 @@ cveta2.convert_to_coco("out/dataset.csv", "coco_out/")
 
 # Прочие операции
 cveta2.merge("old/dataset.csv", "new/dataset.csv", "merged.csv")
-tasks = cveta2.whats_new("my-project", "out/dataset.csv")   # завершённые после выгрузки
+news = cveta2.whats_new("my-project", "out/dataset.csv")
+for task in news.tasks:  # news.updated_task_ids — задачи, уже имеющиеся в CSV
+    print(task.id, task.name, task.id in news.updated_task_ids)
 stats = cveta2.s3_sync("my-project", "/mnt/data/my-project") # синхронизация изображений из S3
 labels = cveta2.get_labels("my-project")
 cveta2.update_labels("my-project", add=["cat", "dog"])
+
+# Ignore-список задач (как `cveta2 ignore`)
+entries = cveta2.ignore("my-project", add=[456], description="Дубликаты", silent=True)
+entries = cveta2.ignore("my-project")            # только показать текущие записи
+cveta2.ignore("my-project", remove=[456])
 
 # Операции над задачами
 cveta2.task_mark_deleted("my-project", task=456, images=["img003.jpg"])
@@ -676,17 +746,19 @@ cveta2.task_set_status("my-project", task=456, state="completed")
 cveta2.task_delete("my-project", task=456)
 ```
 
-Все функции, обращающиеся к CVAT, принимают необязательные параметры подключения `host=`, `username=`, `password=`, `organization=`, `config_path=`. Если они не заданы, конфигурация берётся в порядке: переменные окружения → `~/.config/cveta2/config.yaml` → встроенный пресет. **API никогда не спрашивает интерактивно** — при отсутствии настроек поднимается `MissingHostError` / `MissingCredentialsError`. Чтобы переиспользовать одно соединение для нескольких вызовов, передайте готовый `client=` (уже открытый `CvatClient`).
+Все функции, обращающиеся к CVAT, принимают необязательный параметр `connection=` — объект `cveta2.Connection` с полями `host`, `username`, `password`, `organization`, `config_path`. Не заданные поля берутся в порядке: переменные окружения → `~/.config/cveta2/config.yaml` → встроенный пресет. **API никогда не спрашивает интерактивно** — при отсутствии настроек поднимается `MissingHostError` / `MissingCredentialsError`. Чтобы переиспользовать одно соединение для нескольких вызовов, передайте `Connection(client=...)` с уже открытым `CvatClient` (вне контекстного менеджера клиент отклоняется с понятной ошибкой).
 
 ```python
 import cveta2
 
-df = cveta2.fetch(
+result = cveta2.fetch(
     "my-project",
     output_dir="out",
-    host="https://app.cvat.ai",
-    username="bot",
-    password="secret",
+    connection=cveta2.Connection(
+        host="https://app.cvat.ai",
+        username="bot",
+        password="secret",
+    ),
 )
 ```
 
