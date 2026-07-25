@@ -12,11 +12,15 @@ from cveta2.exceptions import CvatApiError, ProjectNotFoundError
 
 if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
+    from cveta2.models import LabelInfo, OrganizationInfo, ProjectInfo, TaskInfo
 
 
 class _ReadMixin(_ClientBase):
     """List projects/tasks/labels and detect a project's cloud storage."""
+
+    def list_organizations(self) -> list[OrganizationInfo]:
+        """Fetch the list of organizations the user is a member of."""
+        return self._require_api("list_organizations").list_organizations()
 
     def list_projects(self) -> list[ProjectInfo]:
         """Fetch list of projects from CVAT (id and name)."""
@@ -25,6 +29,10 @@ class _ReadMixin(_ClientBase):
     def list_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Fetch the list of tasks for a project from CVAT."""
         return self._require_api("list_project_tasks").get_project_tasks(project_id)
+
+    def get_task(self, task_id: int) -> TaskInfo:
+        """Fetch one task by id (includes its ``project_id``)."""
+        return self._require_api("get_task").get_task(task_id)
 
     def list_tasks_completed_after(
         self,

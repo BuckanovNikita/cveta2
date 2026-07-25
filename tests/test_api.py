@@ -131,9 +131,9 @@ class TestFetchApi:
         out = tmp_path / "out"
 
         df = cveta2.fetch_task(
-            fake.project.id,
             [fake.tasks[0].name],
             out,
+            project=fake.project.id,
             download_images=False,
             connection=fake_connection(fake),
         )
@@ -142,6 +142,33 @@ class TestFetchApi:
         assert (out / "deleted.csv").exists()
         assert list(pd.read_csv(out / "dataset.csv").columns) == list(CSV_COLUMNS)
         assert len(df) == len(pd.read_csv(out / "dataset.csv"))
+
+    def test_fetch_task_infers_project_from_task_id(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        fake = normal_fake
+        out = tmp_path / "out"
+
+        df = cveta2.fetch_task(
+            [fake.tasks[0].id],
+            out,
+            download_images=False,
+            connection=fake_connection(fake),
+        )
+
+        assert (out / "dataset.csv").exists()
+        assert not df.empty
+
+    def test_fetch_task_without_project_and_numeric_ids_raises(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        with pytest.raises(Cveta2Error, match="проект"):
+            cveta2.fetch_task(
+                [normal_fake.tasks[0].name],
+                tmp_path / "out",
+                download_images=False,
+                connection=fake_connection(normal_fake),
+            )
 
     def test_fetch_by_project_name(
         self, normal_fake: LoadedFixtures, tmp_path: Path

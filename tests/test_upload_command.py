@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from cveta2.commands._helpers import echo_cli_command
-from cveta2.commands.upload import run_upload
+from cveta2.commands.upload import _NO_ANNOTATION_LABEL, _resolve_labels, run_upload
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.upload import (
     UploadOptions,
@@ -51,6 +51,27 @@ def _upload_args(csv: Path, **overrides: object) -> argparse.Namespace:
 @pytest.fixture
 def isolated_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "missing-config.yaml"))
+
+
+class TestResolveLabelsAll:
+    """``--labels all`` selects every dataset label."""
+
+    def test_all_selects_every_label(self) -> None:
+        df = pd.DataFrame({"instance_label": ["car", "person", "car"]})
+        assert _resolve_labels(["all"], df) == ["car", "person"]
+
+    def test_all_includes_unannotated_frames(self) -> None:
+        df = pd.DataFrame({"instance_label": ["car", None]})
+        assert _resolve_labels(["all"], df) == ["car", _NO_ANNOTATION_LABEL]
+
+    def test_literal_all_label_wins_over_shortcut(self) -> None:
+        df = pd.DataFrame({"instance_label": ["all", "car"]})
+        assert _resolve_labels(["all"], df) == ["all"]
+
+    def test_all_with_other_labels_is_validated_literally(self) -> None:
+        df = pd.DataFrame({"instance_label": ["car", "person"]})
+        with pytest.raises(Cveta2Error, match="all"):
+            _resolve_labels(["all", "car"], df)
 
 
 @pytest.mark.usefixtures("isolated_config")
@@ -106,7 +127,10 @@ def test_run_upload_echoes_full_command_after_prompts(
         patch("cveta2.commands.upload.build_search_dirs", return_value=[]),
         patch("cveta2.commands.upload.upload_dataset"),
     ):
-        open_client.return_value.__enter__.return_value = MagicMock()
+        client = MagicMock()
+        client.organization = None
+        client.default_organization = None
+        open_client.return_value.__enter__.return_value = client
         run_upload(_upload_args(csv))
 
     out = capsys.readouterr().out

@@ -46,6 +46,9 @@ class _ClientBase:
         self._cfg = cfg or CvatConfig.load()
         self._client_factory = client_factory
         self._api = api
+        # Session organization: starts at the configured default, changed
+        # by set_organization() (e.g. an ORG/PROJECT spec or the TUI).
+        self._organization: str | None = self._cfg.organization
         # Persistent API opened by __enter__, closed by __exit__.
         self._persistent_api: CvatApiPort | None = None
         self._exit_stack: ExitStack | None = None
@@ -88,6 +91,21 @@ class _ClientBase:
     def host(self) -> str:
         """The configured CVAT host."""
         return self._cfg.host or ""
+
+    @property
+    def organization(self) -> str | None:
+        """The current session organization (``None`` = personal workspace)."""
+        return self._organization
+
+    @property
+    def default_organization(self) -> str | None:
+        """The organization configured as default (config / env)."""
+        return self._cfg.organization
+
+    def set_organization(self, org: str | None) -> None:
+        """Scope subsequent CVAT requests to *org* (``None`` = personal)."""
+        self._organization = org
+        self._require_api("set_organization").set_organization(org)
 
     def open_task_session(self, task_id: int) -> TaskWriteSession:
         """Create a metadata session for consecutive writes to one task."""

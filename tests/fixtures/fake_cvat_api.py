@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
 from cveta2.exceptions import CvatApiError
-from cveta2.models import ProjectInfo, TaskInfo
+from cveta2.models import OrganizationInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
@@ -83,6 +83,9 @@ class FakeCvatApi:
         self._fail_methods = frozenset(fail_methods)
         self.annotation_calls: list[int] = []
         self.writes = RecordedWrites()
+        self.organizations: list[OrganizationInfo] = []
+        self.organization: str | None = None
+        self.organization_calls: list[str | None] = []
 
     @classmethod
     def from_tasks(
@@ -108,6 +111,15 @@ class FakeCvatApi:
     # Read port
     # ------------------------------------------------------------------
 
+    def list_organizations(self) -> list[OrganizationInfo]:
+        """Return organizations configured on the fake (empty by default)."""
+        return list(self.organizations)
+
+    def set_organization(self, org: str | None) -> None:
+        """Record the org switch and remember the current org."""
+        self.organization = org
+        self.organization_calls.append(org)
+
     def list_projects(self) -> list[ProjectInfo]:
         """Return the single fixture project."""
         return [self._project]
@@ -115,6 +127,15 @@ class FakeCvatApi:
     def get_project_tasks(self, _project_id: int) -> list[TaskInfo]:
         """Return tasks from fixture data."""
         return list(self._tasks)
+
+    def get_task(self, task_id: int) -> TaskInfo:
+        """Return one task by id, filling ``project_id`` from the fixture project."""
+        for task in self._tasks:
+            if task.id == task_id:
+                if task.project_id is not None:
+                    return task
+                return task.model_copy(update={"project_id": self._project.id})
+        raise CvatApiError(f"Task not found: {task_id}", status_code=404)
 
     def get_project_labels(self, _project_id: int) -> list[LabelInfo]:
         """Return labels from fixture data."""

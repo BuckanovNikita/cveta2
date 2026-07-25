@@ -32,7 +32,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _PROJECT_HELP = (
-    "Project ID or name. If omitted, interactive project selection is shown."
+    "Project ID or name, optionally prefixed with an organization: "
+    "ORG/PROJECT (default org comes from config; /PROJECT selects the "
+    "personal workspace). If omitted, interactive project selection is shown."
 )
 
 
@@ -148,7 +150,14 @@ def _configure_fetch(parser: argparse.ArgumentParser) -> None:
 
 
 def _configure_fetch_task(parser: argparse.ArgumentParser) -> None:
-    _add_project_arg(parser)
+    _add_project_arg(
+        parser,
+        help_text=(
+            "Project ID or name (see fetch --help for the ORG/PROJECT form). "
+            "If omitted, the project is inferred from the first numeric task "
+            "ID; otherwise interactive selection is shown."
+        ),
+    )
     parser.add_argument(
         "--task",
         "-t",
@@ -221,7 +230,8 @@ def _configure_upload(parser: argparse.ArgumentParser) -> None:
         metavar="LABEL",
         help=(
             "Instance labels selecting frames to upload "
-            "(use __no_annotation__ for frames without annotations). "
+            "(use __no_annotation__ for frames without annotations; "
+            "'--labels all' selects every label). "
             "If omitted, interactive selection is shown."
         ),
     )

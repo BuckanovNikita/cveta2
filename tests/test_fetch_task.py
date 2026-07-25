@@ -583,6 +583,44 @@ class TestFetchSelectedTasks:
 # ---------------------------------------------------------------------------
 
 
+class TestRunFetchTaskProjectInference:
+    """Without ``--project``, the project comes from the first numeric task id."""
+
+    def test_infers_project_from_numeric_task_id(
+        self,
+        normal_fake: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake = normal_fake
+        fake_api = FakeCvatApi(fake)
+        monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "missing-config.yaml"))
+
+        def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
+            return CvatClient(cfg, api=fake_api)
+
+        args = make_fetch_args(
+            project=None,
+            task=[str(fake.tasks[0].id)],
+            output_dir=str(tmp_path / "out"),
+        )
+
+        with (
+            patch_cli_client(factory=make_client, config=CFG),
+            patch(
+                "cveta2.config.IgnoreConfig.load",
+                return_value=IgnoreConfig(),
+            ),
+            patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=None,
+            ),
+        ):
+            run_fetch_task(args)
+
+        assert (tmp_path / "out" / "dataset.csv").exists()
+
+
 class TestRunFetchTaskCliExit:
     """``run_fetch_task`` raises ``Cveta2Error``; the CLI boundary exits."""
 

@@ -1,4 +1,16 @@
-"""Cache of CVAT projects (id, name) in a YAML file next to config."""
+"""Cache of CVAT projects grouped by organization, in a YAML file next to config.
+
+Format::
+
+    organizations:
+    - slug: ""            # "" = personal workspace
+      name: Личное пространство
+      projects:
+      - {id: 1, name: proj}
+
+The legacy flat ``projects:`` format is ignored (the cache refills on the
+next rescan).
+"""
 
 from __future__ import annotations
 
@@ -6,6 +18,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 from loguru import logger
+from pydantic import BaseModel, ValidationError
 
 from cveta2.config import get_projects_cache_path
 from cveta2.models import ProjectInfo
@@ -13,9 +26,22 @@ from cveta2.models import ProjectInfo
 if TYPE_CHECKING:
     from pathlib import Path
 
+PERSONAL_WORKSPACE_SLUG = ""
+"""Org key of the personal workspace in the cache and in ``/PROJECT`` specs."""
 
-def load_projects_cache(path: Path | None = None) -> list[ProjectInfo]:
-    """Load list of projects from cache file. Returns [] if file missing or invalid."""
+PERSONAL_WORKSPACE_TITLE = "Личное пространство"
+
+
+class OrgProjects(BaseModel):
+    """Cached projects of one organization (``""`` slug = personal workspace)."""
+
+    slug: str
+    name: str
+    projects: list[ProjectInfo]
+
+
+def load_orgs_cache(path: Path | None = None) -> list[OrgProjects]:
+    """Load per-organization project lists. Returns [] if missing or invalid."""
     cache_path = path if path is not None else get_projects_cache_path()
     if not cache_path.is_file():
         return []
@@ -25,35 +51,54 @@ def load_projects_cache(path: Path | None = None) -> list[ProjectInfo]:
     except (OSError, yaml.YAMLError) as e:
         logger.warning(f"Failed to load projects cache from {cache_path}: {e}")
         return []
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or not isinstance(data.get("organizations"), list):
         return []
-    raw = data.get("projects")
-    if not isinstance(raw, list):
-        return []
-    result: list[ProjectInfo] = []
-    for item in raw:
-        if isinstance(item, dict) and "id" in item and "name" in item:
-            try:
-                result.append(ProjectInfo(id=int(item["id"]), name=str(item["name"])))
-            except (TypeError, ValueError) as e:
-                logger.warning(
-                    f"Skipping invalid projects cache entry "
-                    f"(id={item.get('id')!r}, name={item.get('name')!r}): {e}"
-                )
-                continue
+    result: list[OrgProjects] = []
+    for item in data["organizations"]:
+        try:
+            result.append(OrgProjects.model_validate(item))
+        except ValidationError as e:
+            logger.warning(f"Skipping invalid projects cache entry {item!r}: {e}")
     return result
 
 
-def save_projects_cache(projects: list[ProjectInfo], path: Path | None = None) -> Path:
-    """Write projects list to cache YAML. Creates parent dir if needed."""
+def save_orgs_cache(orgs: list[OrgProjects], path: Path | None = None) -> Path:
+    """Write per-organization project lists. Creates parent dir if needed."""
     cache_path = path if path is not None else get_projects_cache_path()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    data = {
-        "projects": [{"id": p.id, "name": p.name} for p in projects],
-    }
-    content = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
+    data = {"organizations": [org.model_dump() for org in orgs]}
+    content = yaml.safe_dump(
+        data, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
     if not content.endswith("\n"):
         content += "\n"
     cache_path.write_text(content, encoding="utf-8")
-    logger.trace(f"Projects cache saved to {cache_path} ({len(projects)} projects)")
+    logger.trace(f"Projects cache saved to {cache_path} ({len(orgs)} organizations)")
     return cache_path
+
+
+def update_org_projects(
+    slug: str,
+    name: str,
+    projects: list[ProjectInfo],
+    path: Path | None = None,
+) -> Path:
+    """Replace one organization's project list in the cache, keeping the rest."""
+    orgs = [org for org in load_orgs_cache(path) if org.slug != slug]
+    orgs.append(OrgProjects(slug=slug, name=name, projects=projects))
+    return save_orgs_cache(orgs, path)
+
+
+def load_projects_cache(
+    path: Path | None = None,
+    org: str | None = None,
+) -> list[ProjectInfo]:
+    """Flat project list from the cache.
+
+    *org* of ``None`` merges all organizations; a slug (``""`` = personal
+    workspace) selects that organization only.
+    """
+    orgs = load_orgs_cache(path)
+    if org is not None:
+        orgs = [entry for entry in orgs if entry.slug == org]
+    return [project for entry in orgs for project in entry.projects]

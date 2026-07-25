@@ -16,13 +16,20 @@ from loguru import logger
 
 from cveta2.commands.interactive import primitives
 from cveta2.commands.interactive._questionary import Choice
-from cveta2.projects_cache import load_projects_cache, save_projects_cache
+from cveta2.projects_cache import (
+    PERSONAL_WORKSPACE_SLUG,
+    PERSONAL_WORKSPACE_TITLE,
+    OrgProjects,
+    load_orgs_cache,
+    save_orgs_cache,
+)
 
 if TYPE_CHECKING:
     from cveta2.client import CvatClient
     from cveta2.models import LabelInfo, TaskInfo
 
 _RESCAN_VALUE = "__rescan__"
+_NEXT_ORG_VALUE = "__next_org__"
 
 _PROJECT_HINT = "Pass --project / -p to specify the project ID or name."
 _PROJECT_NAME_HINT = "Pass --project / -p to specify the project name."
@@ -39,36 +46,101 @@ def build_task_choices(tasks: list[TaskInfo]) -> list[Choice]:
     return [Choice(title=t.format_display(), value=t.id) for t in tasks]
 
 
-def select_project(client: CvatClient) -> tuple[int, str]:
-    """Interactive project selection via a list with a rescan option.
+def _scan_organizations(client: CvatClient) -> list[OrgProjects]:
+    """Fetch projects of every organization (plus the personal workspace).
 
-    Returns ``(project_id, project_name)``.
+    Restores the client's session organization after scanning.
     """
-    projects = load_projects_cache()
-    while True:
-        if not projects:
-            logger.info("Кэш проектов пуст. Загружаю список с CVAT...")
-            projects = client.list_projects()
-            save_projects_cache(projects)
-            if not projects:
-                sys.exit("Нет доступных проектов.")
-        choices = [Choice(title=f"{p.name} (id={p.id})", value=p.id) for p in projects]
-        choices.append(
-            Choice(title="↻ Обновить список проектов с CVAT", value=_RESCAN_VALUE),
+    original_org = client.organization
+    pages = [
+        OrgProjects(
+            slug=PERSONAL_WORKSPACE_SLUG,
+            name=PERSONAL_WORKSPACE_TITLE,
+            projects=[],
         )
-        answer = primitives.select_one("Выберите проект:", choices, hint=_PROJECT_HINT)
+    ]
+    pages.extend(
+        OrgProjects(slug=org.slug, name=org.name, projects=[])
+        for org in client.list_organizations()
+    )
+    scanned: list[OrgProjects] = []
+    for page in pages:
+        client.set_organization(page.slug or None)
+        scanned.append(page.model_copy(update={"projects": client.list_projects()}))
+    client.set_organization(original_org)
+    total = sum(len(page.projects) for page in scanned)
+    logger.info(f"Загружено проектов: {total} (организаций: {len(scanned)})")
+    return scanned
+
+
+def _order_org_pages(pages: list[OrgProjects], first_slug: str) -> list[OrgProjects]:
+    """Put the *first_slug* page first, keeping the rest in listing order."""
+    first = [page for page in pages if page.slug == first_slug]
+    rest = [page for page in pages if page.slug != first_slug]
+    return first + rest
+
+
+def select_project(client: CvatClient) -> tuple[int, str]:
+    """Interactive project selection, one page per organization.
+
+    The first page is the configured default organization (or the
+    personal workspace).  Selecting a project switches the client's
+    session organization to that page's org.  Returns
+    ``(project_id, project_name)``.
+    """
+    default_slug = client.organization or PERSONAL_WORKSPACE_SLUG
+    pages = load_orgs_cache()
+    if not pages:
+        logger.info("Кэш проектов пуст. Загружаю список с CVAT...")
+        pages = _scan_organizations(client)
+        save_orgs_cache(pages)
+    index = 0
+    while True:
+        pages = _order_org_pages(pages, default_slug)
+        if not any(page.projects for page in pages):
+            sys.exit("Нет доступных проектов.")
+        page = pages[index % len(pages)]
+        answer = _ask_project_page(page, pages, index)
+        if answer == _NEXT_ORG_VALUE:
+            index += 1
+            continue
         if answer == _RESCAN_VALUE:
-            projects = client.list_projects()
-            save_projects_cache(projects)
-            logger.info(f"Загружено проектов: {len(projects)}")
+            pages = _scan_organizations(client)
+            save_orgs_cache(pages)
+            index = 0
             continue
         project_id = cast("int", answer)
-        project_name = str(project_id)
-        for p in projects:
-            if p.id == project_id:
-                project_name = p.name
-                break
+        client.set_organization(page.slug or None)
+        project_name = next(
+            (p.name for p in page.projects if p.id == project_id),
+            str(project_id),
+        )
         return (project_id, project_name)
+
+
+def _ask_project_page(
+    page: OrgProjects,
+    pages: list[OrgProjects],
+    index: int,
+) -> object:
+    """Prompt for a project on one org page; return id or a nav sentinel."""
+    choices = [Choice(title=f"{p.name} (id={p.id})", value=p.id) for p in page.projects]
+    if len(pages) > 1:
+        next_page = pages[(index + 1) % len(pages)]
+        choices.append(
+            Choice(
+                title=f"→ Следующая организация: {next_page.name}",
+                value=_NEXT_ORG_VALUE,
+            ),
+        )
+    choices.append(
+        Choice(title="↻ Обновить список проектов с CVAT", value=_RESCAN_VALUE),
+    )
+    return primitives.select_one(
+        f"Выберите проект — {page.name}:",
+        choices,
+        hint=_PROJECT_HINT,
+    )
 
 
 def select_project_name(names: list[str]) -> str:

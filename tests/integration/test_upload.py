@@ -446,6 +446,7 @@ class TestUploadDeletedFromCsvIntegration:
         monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "no-config.yaml"))
         upload_args = argparse.Namespace(
             dataset=str(dataset_csv),
+            labels=None,
             in_progress=None,
             name=task_name,
             project=str(project_id),

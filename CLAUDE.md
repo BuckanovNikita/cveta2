@@ -78,7 +78,7 @@ code is confined to `_client`.
   - `convert/{common,yolo,coco}.py` - CSV ↔ YOLO / COCO conversion
   - `merge.py` - `merge_datasets()`
   - `output.py` - CSV read/write, path enrichment
-  - `resolve.py` - project resolution and `sync_roots` override
+  - `resolve.py` - project resolution (`ORG/PROJECT` spec parsing, org switching, project-from-task inference) and `sync_roots` override
   - `whats_new.py` - cutoff computation
 - **`cveta2/client.py`** - High-level `CvatClient` domain orchestration over the port (SDK-free; requires a context manager for remote calls, never prompts)
 - **`cveta2/_client/`** - All CVAT SDK code (internal):
@@ -99,7 +99,7 @@ code is confined to `_client`.
 - **`cveta2/image_downloader.py`** - S3 → local sync
 - **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
 - **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
-- **`cveta2/projects_cache.py`** - Local project metadata cache
+- **`cveta2/projects_cache.py`** - Local project metadata cache, keyed by organization (`organizations: [{slug, name, projects}]`; `""` slug = personal workspace)
 
 ### Key Data Flow
 
@@ -111,7 +111,7 @@ code is confined to `_client`.
 
 2. **Upload**: `commands/upload.py` (or `api.upload`) → `services/upload.py:upload_dataset()` → `client.create_upload_task()` + `client.upload_task_annotations()`
    - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
-   - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels)
+   - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels); `--labels all` selects every dataset label plus unannotated frames (a literal dataset label named `all` wins over the shortcut)
    - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues **attached to the row's bbox**; rows with issue text but no complete bbox are skipped with a warning (no full-frame issues)
 
 3. **Convert**: `commands/convert.py` (or `api.convert_*`) → `services/convert/`: `convert_to_yolo` exports CSV to YOLO format (images + labels), `convert_from_yolo` imports YOLO predictions back to CSV, `convert_to_coco` exports COCO detection format. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
@@ -121,6 +121,12 @@ code is confined to `_client`.
    - If latest task is deletion → image goes to `obsolete`, added to `deleted_images`
    - Otherwise: completed tasks → `dataset` (latest) or `obsolete` (stale), non-completed → `in_progress`
    - **Important**: Deletion records are concatenated **before** annotation records to win ties (same date)
+
+### Project Specs and Organizations
+
+- Every project spec (CLI `-p`, API `project=`) accepts an id, a name, or `ORG/PROJECT` (`/PROJECT` = personal workspace). The org prefix calls `client.set_organization()`, switching the session org for all subsequent CVAT calls (`services/resolve.py:split_project_spec` / `apply_project_org`).
+- The interactive picker (`commands/interactive/entities.py:select_project`) pages projects by organization — first page is the config org — and switches the session org on selection. Echoed re-run commands qualify `-p` via `_helpers.project_cli_spec` when the session org differs from the config default.
+- `fetch-task` / `api.fetch_task` infer the project from the first numeric task id when no project is given (`services/resolve.py:infer_project_from_tasks` via the `get_task` port method); name-only task specs still need an explicit project.
 
 ### Critical Implementation Details
 

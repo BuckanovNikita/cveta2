@@ -13,7 +13,7 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import echo_if_prompted, resolve_project
+from cveta2.commands._helpers import echo_if_prompted, project_cli_spec, resolve_project
 from cveta2.config import UploadConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.output import read_dataset_csv
@@ -82,9 +82,11 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
 def _resolve_labels(labels_arg: list[str] | None, df: pd.DataFrame) -> list[str]:
     """Return selected labels from ``--labels`` or the interactive picker.
 
-    Labels passed on the command line are validated against the dataset
-    (including the ``__no_annotation__`` sentinel when the dataset has
-    frames without annotations).
+    ``--labels all`` selects every dataset label (plus frames without
+    annotations, unless the dataset really has a label named ``all``).
+    Other labels passed on the command line are validated against the
+    dataset (including the ``__no_annotation__`` sentinel when the
+    dataset has frames without annotations).
     """
     if labels_arg is None:
         return _select_labels(df)
@@ -92,6 +94,12 @@ def _resolve_labels(labels_arg: list[str] | None, df: pd.DataFrame) -> list[str]
     available = set(labels)
     if has_no_annotation:
         available.add(_NO_ANNOTATION_LABEL)
+    if list(labels_arg) == ["all"] and "all" not in available:
+        selected = list(labels)
+        if has_no_annotation:
+            selected.append(_NO_ANNOTATION_LABEL)
+        logger.info(f"--labels all: выбраны все классы ({len(selected)})")
+        return selected
     unknown = sorted(set(labels_arg) - available)
     if unknown:
         raise Cveta2Error(
@@ -133,7 +141,7 @@ def run_upload(args: argparse.Namespace) -> None:
         echo_if_prompted(
             "upload",
             {
-                "-p": project_name,
+                "-p": project_cli_spec(client, project_name),
                 "-d": args.dataset,
                 "--labels": selected,
                 "--in-progress": args.in_progress,

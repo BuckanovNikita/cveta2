@@ -37,7 +37,7 @@ from cveta2._client.sdk_requests import (
 from cveta2._retry import network_retry
 from cveta2.exceptions import CvatApiError
 from cveta2.image_downloader import parse_cloud_storage
-from cveta2.models import ProjectInfo
+from cveta2.models import OrganizationInfo, ProjectInfo
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -158,6 +158,22 @@ class SdkCvatApiAdapter:
 
     @_api_retry
     @_translate_api_errors
+    def list_organizations(self) -> list[OrganizationInfo]:
+        """Return all organizations the user is a member of."""
+        raw = get_paginated_collection(
+            self.client.api_client.organizations_api.list_endpoint
+        )
+        return [
+            OrganizationInfo(slug=str(o.slug), name=str(o.name or o.slug)) for o in raw
+        ]
+
+    def set_organization(self, org: str | None) -> None:
+        """Scope subsequent requests to *org* (``None`` = personal workspace)."""
+        self.client.organization_slug = org
+        logger.trace(f"Switched organization to: {org!r}")
+
+    @_api_retry
+    @_translate_api_errors
     def list_projects(self) -> list[ProjectInfo]:
         """Return all accessible projects."""
         raw = self.client.projects.list()
@@ -258,6 +274,12 @@ class SdkCvatApiAdapter:
             return None
         cs_raw, _ = self.client.api_client.cloudstorages_api.retrieve(cs_id)
         return parse_cloud_storage(cs_raw)
+
+    @_api_retry
+    @_translate_api_errors
+    def get_task(self, task_id: int) -> TaskInfo:
+        """Return one task by id (with its ``project_id``)."""
+        return convert_task(self.client.tasks.retrieve(task_id))
 
     @_api_retry
     @_translate_api_errors

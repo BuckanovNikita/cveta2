@@ -25,6 +25,15 @@ class ProjectInfo(BaseModel):
     name: str
 
 
+class OrganizationInfo(BaseModel):
+    """CVAT organization summary (slug + display name)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    slug: str
+    name: str
+
+
 class TaskInfo(BaseModel):
     """CVAT task metadata."""
 
@@ -35,6 +44,7 @@ class TaskInfo(BaseModel):
     status: str
     subset: str
     updated_date: str
+    project_id: int | None = None
 
     def format_display(self) -> str:
         """Human-readable one-line summary for TUI menus."""

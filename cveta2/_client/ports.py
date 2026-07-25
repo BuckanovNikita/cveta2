@@ -25,11 +25,19 @@ if TYPE_CHECKING:
         UploadTaskSpec,
     )
     from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
+    from cveta2.models import LabelInfo, OrganizationInfo, ProjectInfo, TaskInfo
 
 
 class CvatReadPort(Protocol):
     """Read-only CVAT API operations used by ``CvatClient``."""
+
+    def list_organizations(self) -> list[OrganizationInfo]:
+        """Return all organizations the user is a member of."""
+        ...
+
+    def set_organization(self, org: str | None) -> None:
+        """Scope subsequent requests to *org* (``None`` = personal workspace)."""
+        ...
 
     def list_projects(self) -> list[ProjectInfo]:
         """Return all accessible projects."""
@@ -37,6 +45,10 @@ class CvatReadPort(Protocol):
 
     def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Return tasks belonging to a project."""
+        ...
+
+    def get_task(self, task_id: int) -> TaskInfo:
+        """Return one task by id (with its ``project_id``)."""
         ...
 
     def get_project_labels(self, project_id: int) -> list[LabelInfo]:

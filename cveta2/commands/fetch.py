@@ -14,7 +14,11 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import echo_if_prompted, resolve_project_and_cloud_storage
+from cveta2.commands._helpers import (
+    echo_if_prompted,
+    project_cli_spec,
+    resolve_project_and_cloud_storage,
+)
 from cveta2.commands.interactive import select_tasks
 from cveta2.config import (
     ImageCacheConfig,
@@ -28,11 +32,17 @@ from cveta2.services.fetch import (
     fetch_selected_tasks,
     load_ignore_sets,
 )
+from cveta2.services.resolve import (
+    apply_sync_root_override,
+    infer_project_from_tasks,
+    resolve_project_spec,
+)
 
 if TYPE_CHECKING:
     import argparse
 
     from cveta2.client import CvatClient
+    from cveta2.image_downloader import CloudStorageInfo
 
 
 def run_fetch(args: argparse.Namespace) -> None:
@@ -47,7 +57,7 @@ def run_fetch(args: argparse.Namespace) -> None:
         echo_if_prompted(
             "fetch",
             {
-                "-p": project_name,
+                "-p": project_cli_spec(client, project_name),
                 "-o": str(output_dir),
                 "--raw": options.raw,
                 "--no-clearml": args.no_clearml,
@@ -59,19 +69,23 @@ def run_fetch(args: argparse.Namespace) -> None:
 
 
 def run_fetch_task(args: argparse.Namespace) -> None:
-    """Run the ``fetch-task`` command (selected task(s) only)."""
+    """Run the ``fetch-task`` command (selected task(s) only).
+
+    When ``--project`` is omitted but numeric task ids are given, the
+    project is inferred from the first such task instead of prompting.
+    """
     output_dir = Path(args.output_dir)
-    tasks_prompted = not args.task or not any(v.strip() for v in args.task)
-    prompted = not args.project or tasks_prompted
+    explicit_tasks = [v.strip() for v in (args.task or []) if v.strip()]
+    prompted = not args.project or not explicit_tasks
     with open_client() as client:
-        project_id, project_name, cs_info = resolve_project_and_cloud_storage(
-            client, args.project
+        project_id, project_name, cs_info = _resolve_fetch_task_project(
+            client, args.project, explicit_tasks
         )
         options = _build_task_fetch_options(args, client, project_id, project_name)
         echo_if_prompted(
             "fetch-task",
             {
-                "-p": project_name,
+                "-p": project_cli_spec(client, project_name),
                 "-t": options.task_selector,
                 "-o": str(output_dir),
             }
@@ -81,6 +95,24 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         fetch_selected_tasks(
             client, project_id, project_name, output_dir, cs_info, options
         )
+
+
+def _resolve_fetch_task_project(
+    client: CvatClient,
+    project_arg: str | None,
+    explicit_tasks: list[str],
+) -> tuple[int, str, CloudStorageInfo | None]:
+    """Resolve the fetch-task project: explicit arg, task inference, or TUI."""
+    project_spec: str | int | None = project_arg
+    if not project_spec:
+        project_spec = infer_project_from_tasks(client, explicit_tasks)
+    if isinstance(project_spec, int):
+        project_id, project_name = resolve_project_spec(client, project_spec)
+        cs_info = apply_sync_root_override(
+            project_name, client.detect_project_cloud_storage(project_id)
+        )
+        return project_id, project_name, cs_info
+    return resolve_project_and_cloud_storage(client, project_spec)
 
 
 def _common_fetch_echo_args(args: argparse.Namespace) -> dict[str, object]:

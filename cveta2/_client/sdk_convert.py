@@ -23,13 +23,21 @@ if TYPE_CHECKING:
 
 
 def convert_task(task: cvat_models.TaskRead) -> TaskInfo:
-    """Convert an SDK task to :class:`TaskInfo`."""
+    """Convert an SDK task to :class:`TaskInfo`.
+
+    ``project_id`` is read via ``getattr`` because CVAT SDK generated
+    models raise ``AttributeError`` for unset optional fields.  This is
+    an intentional exception to the project style rule "avoid getattr"
+    (see CLAUDE.md).
+    """
+    raw_project_id = getattr(task, "project_id", None)
     return TaskInfo(
         id=task.id,
         name=task.name or "",
         status=str(task.status or ""),
         subset=task.subset or "",
         updated_date=extract_updated_date(task),
+        project_id=int(raw_project_id) if raw_project_id is not None else None,
     )
 
 

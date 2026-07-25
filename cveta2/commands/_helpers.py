@@ -15,8 +15,8 @@ from cveta2.config import (
     get_config_path,
 )
 from cveta2.exceptions import MissingHostError
-from cveta2.projects_cache import load_projects_cache
-from cveta2.services.resolve import apply_sync_root_override
+from cveta2.projects_cache import PERSONAL_WORKSPACE_SLUG, load_projects_cache
+from cveta2.services.resolve import apply_project_org, apply_sync_root_override
 
 if TYPE_CHECKING:
     import argparse
@@ -79,8 +79,10 @@ def resolve_project_from_args(
     """Resolve project ID and name from CLI project argument.
 
     When *project_arg* is non-empty, resolves via cache and returns
-    ``(project_id, project_name)``. When *project_arg* is a digit string,
-    looks up human-readable name from cache. Returns ``None`` when
+    ``(project_id, project_name)``. An ``ORG/PROJECT`` spec switches the
+    client's session organization first (``/PROJECT`` selects the
+    personal workspace). When the project part is a digit string, looks
+    up the human-readable name from cache. Returns ``None`` when
     *project_arg* is None or empty (caller should run interactive TUI).
 
     Raises
@@ -91,9 +93,10 @@ def resolve_project_from_args(
     """
     if not project_arg or not project_arg.strip():
         return None
-    cached = load_projects_cache()
-    project_id = client.resolve_project_id(project_arg.strip(), cached=cached)
-    project_name = project_arg.strip()
+    spec = str(apply_project_org(client, project_arg.strip()))
+    cached = load_projects_cache(org=client.organization or PERSONAL_WORKSPACE_SLUG)
+    project_id = client.resolve_project_id(spec, cached=cached)
+    project_name = spec
     if project_name.isdigit():
         for p in cached:
             if p.id == project_id:
@@ -147,6 +150,19 @@ def resolve_project_and_cloud_storage(
     cs_info = client.detect_project_cloud_storage(project_id)
     cs_info = apply_sync_root_override(project_name, cs_info, sync_root)
     return (project_id, project_name, cs_info)
+
+
+def project_cli_spec(client: CvatClient, project_name: str) -> str:
+    """CLI value for ``-p``: prefixed with the org when it differs from config.
+
+    Keeps echoed commands re-runnable when a project was picked from a
+    non-default organization (``ORG/PROJECT``, or ``/PROJECT`` for the
+    personal workspace).
+    """
+    current = client.organization or ""
+    if current == (client.default_organization or ""):
+        return project_name
+    return f"{current}/{project_name}"
 
 
 def require_host(cfg: CvatConfig) -> None:

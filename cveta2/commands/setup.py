@@ -18,7 +18,11 @@ from cveta2.config import (
     require_interactive,
 )
 from cveta2.exceptions import Cveta2Error
-from cveta2.projects_cache import load_projects_cache, save_projects_cache
+from cveta2.projects_cache import (
+    PERSONAL_WORKSPACE_TITLE,
+    load_projects_cache,
+    update_org_projects,
+)
 
 if TYPE_CHECKING:
     import argparse
@@ -239,7 +243,7 @@ def _prompt_project_cache_dir(
 
 
 def _ensure_projects_list(config_path: Path) -> list[ProjectInfo]:
-    """Return cached projects; fetch from CVAT if cache is empty."""
+    """Return cached projects; fetch the default org's list if cache is empty."""
     projects = load_projects_cache()
     if projects:
         return projects
@@ -247,8 +251,9 @@ def _ensure_projects_list(config_path: Path) -> list[ProjectInfo]:
     logger.info("Кэш проектов пуст. Загружаю список с CVAT...")
     with open_client(config_path) as client:
         projects = client.list_projects()
+        org = client.organization or ""
 
     if projects:
-        save_projects_cache(projects)
+        update_org_projects(org, org or PERSONAL_WORKSPACE_TITLE, projects)
         logger.info(f"Загружено проектов: {len(projects)}")
     return projects

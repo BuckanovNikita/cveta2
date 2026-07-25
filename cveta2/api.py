@@ -45,7 +45,11 @@ from cveta2.services.fetch import (
 )
 from cveta2.services.merge import merge_datasets
 from cveta2.services.output import read_dataset_csv
-from cveta2.services.resolve import apply_sync_root_override, resolve_project_spec
+from cveta2.services.resolve import (
+    apply_sync_root_override,
+    infer_project_from_tasks,
+    resolve_project_spec,
+)
 from cveta2.services.upload import (
     UploadOptions,
     UploadRequest,
@@ -232,6 +236,11 @@ def fetch(  # noqa: PLR0913
     *cache* controls the task-annotation cache: ``"use"`` reads and
     updates it, ``"refresh"`` re-downloads every task and updates it,
     ``"off"`` disables it entirely.
+
+    *project* (here and in every function taking a project spec) accepts
+    an id, a name, or ``"ORG/PROJECT"`` — the org prefix overrides the
+    configured organization (``"/PROJECT"`` selects the personal
+    workspace).
     """
     use_cache, force = _cache_flags(cache)
     config_path = _config_path(connection)
@@ -261,10 +270,10 @@ def fetch(  # noqa: PLR0913
 
 
 def fetch_task(  # noqa: PLR0913
-    project: int | str,
     tasks: Sequence[int | str],
     output_dir: str | Path,
     *,
+    project: int | str | None = None,
     completed_only: bool = False,
     images_dir: str | Path | None = None,
     download_images: bool = True,
@@ -278,10 +287,21 @@ def fetch_task(  # noqa: PLR0913
     fetched rows as a DataFrame with :data:`cveta2.CSV_COLUMNS` columns
     (unpartitioned, unlike :func:`fetch`).  *cache* works as in
     :func:`fetch`.
+
+    *project* accepts an id, a name, or ``"ORG/PROJECT"``; when omitted,
+    it is inferred from the first numeric task id in *tasks* (task names
+    alone cannot be resolved without a project).
     """
     use_cache, force = _cache_flags(cache)
     config_path = _config_path(connection)
     with _open(connection) as c:
+        if project is None:
+            project = infer_project_from_tasks(c, tasks)
+            if project is None:
+                raise Cveta2Error(
+                    "Не удалось определить проект: передайте project= "
+                    "или укажите задачи числовыми ID."
+                )
         project_id, project_name = resolve_project_spec(c, project)
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id)
