@@ -15,6 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 STATS_FILE="$REPO_ROOT/mutants/mutmut-cicd-stats.json"
+RESULTS_FILE="$REPO_ROOT/mutants/mutmut-results.txt"
 
 cd "$REPO_ROOT"
 
@@ -33,15 +34,18 @@ if [[ ! -f "$STATS_FILE" ]]; then
     exit 1
 fi
 
-# Prints the human-readable summary and exits non-zero when any mutant
-# escaped, so the pre-commit hook fails.
-if uv run python "$SCRIPT_DIR/mutation_gate.py" "$STATS_FILE"; then
+uv run mutmut results > "$RESULTS_FILE"
+
+# Prints the summary and exits non-zero when a mutant escaped without a
+# justification, so the pre-commit hook fails.
+if uv run python "$SCRIPT_DIR/mutation_gate.py" \
+    "$STATS_FILE" "$RESULTS_FILE" "$REPO_ROOT/pyproject.toml"; then
     exit 0
 fi
 
 echo
-echo "==> Surviving mutants (see 'uv run mutmut show <name>' for the diff):"
-uv run mutmut results
-echo
+echo "==> Inspect a mutant with: uv run mutmut show <name>"
 echo "==> Triage interactively with: uv run mutmut browse"
+echo "==> A mutant no test can possibly kill belongs in"
+echo "    [tool.cveta2.mutation.equivalent] in pyproject.toml, with a reason."
 exit 1

@@ -28,6 +28,7 @@ uv run ruff check --fix .  # auto-fix
 uv run mypy .              # type check
 uv run lint-imports        # architecture contracts
 uv run vulture             # dead code detection
+./scripts/mutation_test.sh # mutation testing (mutmut) + pass/fail gate
 ```
 
 **Style**: Always use `loguru` for logging (never `print`), pydantic for configs, f-strings over structured logging.
@@ -227,9 +228,43 @@ Config loaded via `CvatConfig.load()` from:
 2. Update `DATASET_FORMAT.md` if CSV columns change
 3. Ensure tests in `tests/test_extractors.py` pass
 
+## Mutation Testing
+
+`./scripts/mutation_test.sh` runs mutmut over the modules listed in
+`[tool.mutmut].only_mutate` and fails if any mutant survives. It runs as a
+pre-commit hook on every commit (~10s at the current scope).
+
+**Scope is a ratchet.** `only_mutate` starts at `cveta2/dataset_partition.py`.
+A module joins the list in the *same commit* that drives it to zero unexplained
+survivors, so the hook is never red on `main`. Remaining target modules:
+`services/convert/`, `services/`, `models.py`, `task_cache.py`, `s3_utils.py`,
+`fs_utils.py`. Adapters (`cli.py`, `commands/`, `_client/`, `config.py`) are
+deliberately excluded — they yield mostly equivalent mutants.
+
+**When the hook fails**, inspect with `uv run mutmut show <name>` or
+`uv run mutmut browse`, then either strengthen a test (the default) or — only
+if the mutation genuinely cannot change behaviour — add the mutant to
+`[tool.cveta2.mutation.equivalent]` in `pyproject.toml` with a reason. The gate
+also fails on a *stale* allowlist entry: mutmut renumbers mutants whenever a
+function changes, so a justification cannot silently drift onto a different
+mutant.
+
+Config notes that are easy to get wrong (all verified against mutmut's source):
+
+- `pytest_add_cli_args` must keep `-n 0`; mutmut runs `pytest.main()` in each
+  forked child and the global `addopts = [..., "-n", "auto"]` would otherwise
+  spawn an xdist pool per mutant, which looks like a hang.
+- `cache_invalidation_files` + `on_dependency_change = "rerun"` are load-bearing:
+  mutmut keys a cached verdict on the *source* function's text, so without them
+  a weakened test leaves the gate green on stale results.
+- `mutate_only_covered_lines` must stay off — its coverage pre-pass leaves a
+  half-imported numpy in `sys.modules` and the stats run then dies.
+- `mutants/` is mutmut's working copy: gitignored, and excluded from mypy (two
+  `cveta2` packages otherwise collide) and ruff.
+
 ## Pre-commit Hooks
 
-The pre-commit pipeline runs: format → lint → import-linter → mypy → vulture → pytest → count-lines → build → lock.
+The pre-commit pipeline runs: format → lint → import-linter → mypy → vulture → pytest → mutmut → count-lines → build → lock.
 
 **Always run before committing**:
 ```bash

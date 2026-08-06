@@ -43,6 +43,13 @@ repos:
         pass_filenames: false
         always_run: true
 
+      - id: mutmut
+        name: mutmut (mutation testing)
+        entry: ./scripts/mutation_test.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: count-lines
         name: count lines of code
         entry: bash -c 'echo "Lines of code:"; find cveta2 -name "*.py" | xargs wc -l | tail -1'

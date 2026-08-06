@@ -121,6 +121,47 @@ only_mutate = [
 # args are appended last, so this `-n` wins.
 pytest_add_cli_args = ["-n", "0", "-p", "no:cacheprovider", "--no-cov"]
 pytest_add_cli_args_test_selection = ["tests/"]
+# Debug logs are diagnostics, not behaviour, and asserting on their text would
+# be brittle. logger.info/warning carry user-facing Russian messages and stay
+# mutated. Both mutmut suppression mechanisms key on the *first* line of the
+# mutated node, so they cannot single out one argument of a multi-line call -
+# individual equivalent mutants go in [tool.cveta2.mutation] instead.
+do_not_mutate_patterns = ["logger\\.debug\\("]
+# mutmut caches a mutant's verdict against the *source* function's text, so a
+# changed test does not invalidate it: weakening an assertion otherwise leaves
+# the gate green on stale results. Hashing the test tree and rerunning on any
+# change is what makes the cached run trustworthy.
+cache_invalidation_files = ["tests/**/*.py", "conftest.py"]
+on_dependency_change = "rerun"
+
+# Mutants that no test can kill because the mutation genuinely cannot change
+# behaviour. scripts/mutation_gate.py subtracts these from the survivor set and
+# fails if an entry stops matching a live survivor, so a stale justification
+# cannot silently widen the gate.
+[tool.cveta2.mutation.equivalent]
+# _latest_row_per_image: pandas' multi-key sort_values is stable on its own, so
+# _row_order only makes the intent explicit; keep="first" is the default.
+"cveta2.dataset_partition.x__latest_row_per_image__mutmut_6" = "_row_order=None; the two-key sort_values path is already stable"
+"cveta2.dataset_partition.x__latest_row_per_image__mutmut_20" = "drops keep=\"first\", which is the drop_duplicates default"
+
+# _latest_task_per_image: the pre-dedup only trims work, and the concatenated
+# frame is immediately re-indexed by image_name.
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_2" = "drop_duplicates over all columns; _latest_row_per_image dedups by image_name anyway"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_4" = "_is_deleted=None instead of 0; the column is only ever compared against 1"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_26" = "ignore_index=None; set_index(\"image_name\") replaces the index next"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_28" = "drops ignore_index; set_index(\"image_name\") replaces the index next"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_29" = "ignore_index=False; set_index(\"image_name\") replaces the index next"
+
+# _split_completed: latest_completed is derived from the left frame, so every
+# key matches and image_name is the only column the two share.
+"cveta2.dataset_partition.x__split_completed__mutmut_16" = "on=None falls back to the shared columns, which is exactly image_name"
+"cveta2.dataset_partition.x__split_completed__mutmut_19" = "drops on=; the shared columns are exactly image_name"
+"cveta2.dataset_partition.x__split_completed__mutmut_20" = "drops how=\"left\"; an inner join matches every row and keeps left order"
+
+# partition_annotations_df: obsolete is reset_index(drop=True)'d on the way out.
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_57" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_59" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_60" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
 # mutate_only_covered_lines is deliberately left off: its coverage pre-pass
 # leaves a half-imported numpy in sys.modules, so the following stats run dies
 # with "Unable to import required dependency numpy". Not needed here anyway -

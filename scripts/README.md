@@ -99,3 +99,32 @@ uv run python scripts/clone_project_to_s3.py --source coco8-dev --dest coco8-dev
 2. Загружает их в S3-бакет, указанный в cloud storage (`prefix/dest_name/filename`).
 3. Создаёт новый проект с теми же метками.
 4. Для каждой задачи создаёт новую задачу с cloud storage data source, копирует аннотации и удалённые кадры.
+
+---
+
+## mutation_test.sh + mutation_gate.py
+
+Запускает мутационное тестирование (mutmut) и превращает его результат в вердикт pass/fail.
+
+**Назначение:** `mutmut run` всегда завершается с кодом 0 и не имеет порогового флага, поэтому гейт собирается отдельно: `mutmut export-cicd-stats` пишет `mutants/mutmut-cicd-stats.json`, `mutmut results` — список неубитых мутантов, а `mutation_gate.py` сверяет их с allowlist из `[tool.cveta2.mutation.equivalent]` в `pyproject.toml`.
+
+**Зависимости:** mutmut (dev-группа). cveta2 не импортируется.
+
+**Примеры:**
+
+```bash
+# Весь текущий охват из [tool.mutmut].only_mutate
+./scripts/mutation_test.sh
+
+# Один модуль или конкретные мутанты
+./scripts/mutation_test.sh 'cveta2.dataset_partition.*'
+
+# Ограничить параллелизм
+./scripts/mutation_test.sh --max-children 4
+```
+
+**Код возврата:** 0 — все мутанты убиты либо перечислены в allowlist; 1 — выжил мутант без обоснования **или** запись allowlist больше не соответствует живому мутанту (mutmut перенумеровывает мутантов при изменении функции).
+
+**Вывод:** `mutants/mutmut-cicd-stats.json` (счётчики), `mutants/mutmut-results.txt` (имена и статусы). Каталог `mutants/` — рабочая копия mutmut, он в `.gitignore`.
+
+Скрипт срезает CR-спиннер mutmut, когда stdout не терминал: иначе pre-commit сохранил бы десятки тысяч кадров перерисовки.

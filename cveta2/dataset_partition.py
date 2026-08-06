@@ -47,12 +47,18 @@ def _deleted_registry_frame(
 def _latest_row_per_image(df: pd.DataFrame) -> pd.DataFrame:
     """Return one row per ``image_name``: the one with the max ``_parsed_date``.
 
-    The stable sort keeps the original row order among equal dates, so
-    callers break ties by ordering *df* (deletion records first).
+    Equal dates are broken by row position, so callers express precedence by
+    ordering *df* (deletion records first). That position is sorted on
+    explicitly instead of leaning on sort stability, which the single-key
+    ``sort_values`` path only delivers for frames small enough to stay in
+    insertion sort.
     """
-    latest: pd.DataFrame = df.sort_values(
-        "_parsed_date", ascending=False, kind="stable"
-    ).drop_duplicates(subset=["image_name"], keep="first")
+    ordered = df.assign(_row_order=list(range(len(df)))).sort_values(
+        ["_parsed_date", "_row_order"], ascending=[False, True]
+    )
+    latest: pd.DataFrame = ordered.drop_duplicates(
+        subset=["image_name"], keep="first"
+    ).drop(columns="_row_order")
     return latest
 
 
@@ -98,6 +104,9 @@ def _split_completed(
     latest_completed = _latest_row_per_image(cnd)[["image_name", "task_id"]].rename(
         columns={"task_id": "_latest_task_id"}
     )
+    # is_latest is applied positionally below, so the merge must preserve row
+    # order. image_name is the only column the two frames share and every key
+    # matches, which is also why on=/how= cannot change the outcome here.
     merged = completed_non_deleted.merge(latest_completed, on="image_name", how="left")
     is_latest = (merged["task_id"] == merged["_latest_task_id"]).to_numpy()
     return completed_non_deleted[is_latest], completed_non_deleted[~is_latest]

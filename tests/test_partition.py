@@ -386,3 +386,65 @@ def test_deleted_then_restored_several_tasks_later() -> None:
     assert "c.jpg" in set(result.dataset["image_name"])
 
     assert len(result.in_progress) == 0
+
+
+def test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort() -> None:
+    """Same-timestamp deletion still wins once the frame outgrows insertion sort.
+
+    ``test_deleted_image_with_annotations_in_same_task`` covers the same rule on
+    a two-row frame, where every sort algorithm happens to preserve input order
+    and so cannot detect a lost tie-break. Fourteen unrelated rows push the
+    combined frame past that threshold, where an implicitly-stable sort starts
+    reordering equal keys and the deletion silently loses.
+    """
+    tie = "2026-03-02T10:00:00"
+    rows = [
+        _row("contested.jpg", 1, tie),
+        _row("contested.jpg", 2, tie),
+    ]
+    rows += [
+        _row(f"filler{i % 5}.jpg", 10 + i, f"2026-03-{(i % 3) + 1:02d}T10:00:00")
+        for i in range(14)
+    ]
+    deleted = [make_deleted("contested.jpg", 2, tie)]
+
+    result = partition_annotations_df(_df(rows), deleted)
+
+    assert [d.image_name for d in result.deleted_images] == ["contested.jpg"]
+    assert "contested.jpg" not in set(result.dataset["image_name"])
+    contested_obsolete = result.obsolete[
+        result.obsolete["image_name"] == "contested.jpg"
+    ]
+    assert len(contested_obsolete) == 2
+
+
+def test_unparseable_task_date_becomes_nat_instead_of_raising() -> None:
+    """A malformed ``task_updated_date`` must not abort the whole partition."""
+    rows = [
+        _row("a.jpg", 1, "definitely-not-a-date"),
+        _row("b.jpg", 2, "2026-01-02T00:00:00"),
+    ]
+
+    result = partition_annotations_df(_df(rows), [])
+
+    assert "b.jpg" in set(result.dataset["image_name"])
+    assert len(result.dataset) + len(result.obsolete) + len(result.in_progress) == 2
+
+
+def test_result_frames_keep_the_input_columns_and_a_fresh_index() -> None:
+    """Partition outputs carry no leftover index column and restart numbering."""
+    rows = [
+        _row("a.jpg", 1, "2026-01-01T00:00:00"),
+        _row("a.jpg", 2, "2026-01-02T00:00:00"),
+        _row("b.jpg", 3, "2026-01-03T00:00:00", status="in progress"),
+    ]
+
+    result = partition_annotations_df(_df(rows), [])
+
+    for name, frame in (
+        ("dataset", result.dataset),
+        ("obsolete", result.obsolete),
+        ("in_progress", result.in_progress),
+    ):
+        assert list(frame.columns) == _COLS, f"{name} gained or lost a column"
+        assert list(frame.index) == list(range(len(frame))), f"{name} index not reset"
