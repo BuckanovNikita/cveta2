@@ -32,6 +32,7 @@ cveta2 = "cveta2.cli:main"
 [dependency-groups]
 dev = [
     "boto3-stubs>=1.42.49",
+    "mutmut>=3.7.0",
     "mypy>=2.3.0",
     "pandas-stubs>=2.3.3.260113",
     "pre-commit>=4.6.1",
@@ -50,7 +51,7 @@ dev = [
 [tool.ruff]
 target-version = "py310"
 line-length = 88
-exclude = ["vendor/**", "local/**"]
+exclude = ["vendor/**", "local/**", "mutants/**"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -88,7 +89,9 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-exclude = ["scripts/", "vendor/", "local/"]
+# mutants/ holds mutmut's copy of the tree; without it mypy sees two `cveta2`
+# packages and fails with a duplicate-module error.
+exclude = ["scripts/", "vendor/", "local/", "mutants/"]
 
 [[tool.mypy.overrides]]
 module = ["cvat_sdk.*"]
@@ -105,6 +108,23 @@ addopts = ["-v", "--tb=short", "-n", "auto"]
 markers = [
     "integration: requires running CVAT instance (only active when CVAT_INTEGRATION_HOST is set)",
 ]
+
+[tool.mutmut]
+source_paths = ["cveta2"]
+# Ratchet: a module joins this list in the same commit that takes it to zero
+# survivors, so the pre-commit hook is never red on main.
+only_mutate = [
+    "cveta2/dataset_partition.py",
+]
+# `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
+# the global addopts `-n auto` would spawn a full xdist pool per mutant. These
+# args are appended last, so this `-n` wins.
+pytest_add_cli_args = ["-n", "0", "-p", "no:cacheprovider", "--no-cov"]
+pytest_add_cli_args_test_selection = ["tests/"]
+# mutate_only_covered_lines is deliberately left off: its coverage pre-pass
+# leaves a half-imported numpy in sys.modules, so the following stats run dies
+# with "Unable to import required dependency numpy". Not needed here anyway -
+# the scoped modules report zero no-tests mutants without it.
 
 [tool.vulture]
 min_confidence = 80

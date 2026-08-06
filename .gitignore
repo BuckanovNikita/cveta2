@@ -24,6 +24,7 @@ wheels/
 dmypy.json
 
 # Testing
+mutants/
 .pytest_cache/
 .coverage
 coverage.xml
