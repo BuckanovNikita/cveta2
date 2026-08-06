@@ -234,12 +234,25 @@ Config loaded via `CvatConfig.load()` from:
 `[tool.mutmut].only_mutate` and fails if any mutant survives. It runs as a
 pre-commit hook on every commit (~10s at the current scope).
 
-**Scope is a ratchet.** `only_mutate` starts at `cveta2/dataset_partition.py`.
-A module joins the list in the *same commit* that drives it to zero unexplained
-survivors, so the hook is never red on `main`. Remaining target modules:
-`services/convert/`, `services/`, `models.py`, `task_cache.py`, `s3_utils.py`,
-`fs_utils.py`. Adapters (`cli.py`, `commands/`, `_client/`, `config.py`) are
+**Scope is a ratchet.** `only_mutate` starts at `cveta2/dataset_partition.py`
+(217 mutants, 204 killed, 13 allowlisted). A module joins the list in the *same
+commit* that drives it to zero unexplained survivors, so the hook is never red
+on `main`. Adapters (`cli.py`, `commands/`, `_client/`, `config.py`) are
 deliberately excluded — they yield mostly equivalent mutants.
+
+Measured baselines for the remaining target modules, so expanding scope starts
+from data (add the module to `only_mutate` and run the script to reproduce):
+
+| Module | Lines | Unexplained survivors |
+|---|---|---|
+| `services/convert/yolo.py` | 407 | 132 |
+| `services/convert/common.py` | 348 | 106 |
+| `services/convert/coco.py` | 135 | 54 |
+| `services/`, `models.py`, `task_cache.py`, `s3_utils.py`, `fs_utils.py` | ~880 | not yet measured |
+
+Triage, not runtime, is the cost — a full run over `dataset_partition.py` plus
+`services/convert/` takes ~24s, but each survivor needs a diff read and a
+judgement call.
 
 **When the hook fails**, inspect with `uv run mutmut show <name>` or
 `uv run mutmut browse`, then either strengthen a test (the default) or — only
