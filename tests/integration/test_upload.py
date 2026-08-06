@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path, PurePosixPath
-from typing import cast
 from unittest.mock import patch
 
 import pandas as pd
@@ -237,11 +236,11 @@ def _normalize_bbox_df(df: pd.DataFrame) -> pd.DataFrame:
     ]
     cols = [c for c in cols if c in bbox.columns]
     if not cols:
-        return cast("pd.DataFrame", bbox)
+        return bbox
     bbox = bbox.sort_values(by=cols).reset_index(drop=True)
     if set(cols).issubset(bbox.columns):
-        return cast("pd.DataFrame", bbox[cols])
-    return cast("pd.DataFrame", bbox)
+        return bbox[cols]
+    return bbox
 
 
 class TestMarkFramesDeletedIntegration:

@@ -240,10 +240,12 @@ def test_install_global_request_timeout_covers_new_rest_clients(
 
         instance = object.__new__(RESTClientObject)
         RESTClientObject.request(instance, "GET", "http://x")
-        assert recorded["_request_timeout"] == (10.0, 9.0)
+        installed_timeout = recorded["_request_timeout"]
+        assert installed_timeout == (10.0, 9.0)
 
         recorded.clear()
         RESTClientObject.request(instance, "GET", "http://x", _request_timeout=5)
-        assert recorded["_request_timeout"] == 5
+        caller_timeout = recorded["_request_timeout"]
+        assert caller_timeout == 5
     finally:
         delattr(RESTClientObject, sdk_adapter._GLOBAL_TIMEOUT_MARKER)

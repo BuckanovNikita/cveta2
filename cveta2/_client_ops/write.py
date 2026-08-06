@@ -101,7 +101,7 @@ class _WriteMixin(_ClientBase):
             return
         api.patch_project_labels(project_id, patches)
 
-    def create_upload_task(  # noqa: PLR0913
+    def create_upload_task(  # noqa: PLR0913, PLR0917
         self,
         project_id: int,
         name: str,

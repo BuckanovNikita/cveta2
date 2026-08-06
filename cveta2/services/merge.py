@@ -85,12 +85,13 @@ def _propagate_splits(
         logger.warning("В old-датасете нет данных split — пропагация split невозможна")
         return merged
 
-    old_splits: dict[str, str] = (
-        old[old["split"].notna()]
+    old_splits: dict[str, str] = {
+        str(image_name): str(split)
+        for image_name, split in old[old["split"].notna()]
         .drop_duplicates("image_name")
         .set_index("image_name")["split"]
-        .to_dict()
-    )
+        .items()
+    }
 
     if "split" in new.columns:
         new_split_images = set(
@@ -140,7 +141,7 @@ def _split_winners(
     return common_images, set()
 
 
-def _log_merge_summary(  # noqa: PLR0913
+def _log_merge_summary(  # noqa: PLR0913, PLR0917
     old_images: set[str],
     new_images: set[str],
     deleted: set[str],

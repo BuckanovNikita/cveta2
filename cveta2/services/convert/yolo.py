@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-def _write_box_labels(  # noqa: PLR0913
+def _write_box_labels(  # noqa: PLR0913, PLR0917
     box_df: pd.DataFrame,
     output_dir: Path,
     label_map: dict[str, int],
@@ -200,7 +200,7 @@ def _load_class_names_yaml(path: Path) -> dict[int, str]:
     return {}
 
 
-def _yolo_fields_to_row(  # noqa: PLR0913
+def _yolo_fields_to_row(  # noqa: PLR0913, PLR0917
     fields: list[float],
     class_names: dict[int, str],
     img_path: Path,

@@ -50,7 +50,7 @@ def issue_position_from_row(row: pd.Series[Any]) -> list[float] | None:
     return coords
 
 
-def task_to_records(  # noqa: PLR0913
+def task_to_records(  # noqa: PLR0913, PLR0917
     task: TaskInfo,
     data_meta: RawDataMeta,
     annotations: RawAnnotations,

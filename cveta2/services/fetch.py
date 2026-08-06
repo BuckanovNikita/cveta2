@@ -76,7 +76,7 @@ def load_ignore_sets(
     return set(ignored_ids), (silent_ids or None)
 
 
-def fetch_project(  # noqa: PLR0913
+def fetch_project(  # noqa: PLR0913, PLR0917
     client: CvatClient,
     project_id: int,
     project_name: str,
@@ -116,7 +116,7 @@ def fetch_project(  # noqa: PLR0913
     return partition
 
 
-def fetch_selected_tasks(  # noqa: PLR0913
+def fetch_selected_tasks(  # noqa: PLR0913, PLR0917
     client: CvatClient,
     project_id: int,
     project_name: str,
@@ -138,7 +138,7 @@ def fetch_selected_tasks(  # noqa: PLR0913
     return result
 
 
-def _fetch_core(  # noqa: PLR0913
+def _fetch_core(  # noqa: PLR0913, PLR0917
     client: CvatClient,
     project_id: int,
     project_name: str,

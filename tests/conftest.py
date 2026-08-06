@@ -88,8 +88,10 @@ def pytest_report_header() -> list[str]:
     except OSError:
         return []
     return [
-        "WARNING: CVAT detected at localhost:8080 but"
-        " CVAT_INTEGRATION_HOST is not set.",
+        (
+            "WARNING: CVAT detected at localhost:8080 but"
+            " CVAT_INTEGRATION_HOST is not set."
+        ),
         "  Integration tests will NOT run. To include them:",
         "  CVAT_INTEGRATION_HOST=http://localhost:8080 uv run pytest",
     ]

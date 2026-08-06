@@ -733,8 +733,8 @@ import cveta2
 # Выгрузка проекта: пишет dataset/obsolete/in_progress/deleted CSV в out/,
 # возвращает PartitionResult (dataset / obsolete / in_progress / deleted_images)
 result = cveta2.fetch("my-project", output_dir="out")
-print(result.dataset)         # DataFrame актуальных аннотаций
-print(len(result.obsolete))   # устаревшие строки тоже доступны
+print(result.dataset)  # DataFrame актуальных аннотаций
+print(len(result.obsolete))  # устаревшие строки тоже доступны
 
 # Кэш аннотаций: cache="use" (по умолчанию) / "refresh" (= --force) / "off" (= --no-cache)
 result = cveta2.fetch("my-project", output_dir="out", cache="refresh")
@@ -760,13 +760,15 @@ cveta2.merge("old/dataset.csv", "new/dataset.csv", "merged.csv")
 news = cveta2.whats_new("my-project", "out/dataset.csv")
 for task in news.tasks:  # news.updated_task_ids — задачи, уже имеющиеся в CSV
     print(task.id, task.name, task.id in news.updated_task_ids)
-stats = cveta2.s3_sync("my-project", "/mnt/data/my-project") # синхронизация изображений из S3
+stats = cveta2.s3_sync(
+    "my-project", "/mnt/data/my-project"
+)  # синхронизация изображений из S3
 labels = cveta2.get_labels("my-project")
 cveta2.update_labels("my-project", add=["cat", "dog"])
 
 # Ignore-список задач (как `cveta2 ignore`)
 entries = cveta2.ignore("my-project", add=[456], description="Дубликаты", silent=True)
-entries = cveta2.ignore("my-project")            # только показать текущие записи
+entries = cveta2.ignore("my-project")  # только показать текущие записи
 cveta2.ignore("my-project", remove=[456])
 
 # Операции над задачами
@@ -935,7 +937,9 @@ with CvatClient() as client:
     # Скачать изображения по результатам fetch
     result = client.fetch_annotations(project_id=project_id)
     stats = client.download_images(result, Path("/mnt/data/my-project"))
-    print(f"Загружено: {stats.downloaded}, из кэша: {stats.cached}, ошибок: {stats.failed}")
+    print(
+        f"Загружено: {stats.downloaded}, из кэша: {stats.cached}, ошибок: {stats.failed}"
+    )
 
     # Синхронизировать все изображения из S3 (без привязки к аннотациям)
     cs_info = client.detect_project_cloud_storage(project_id)
