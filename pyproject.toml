@@ -133,6 +133,10 @@ do_not_mutate_patterns = ["logger\\.debug\\("]
 # change is what makes the cached run trustworthy.
 cache_invalidation_files = ["tests/**/*.py", "conftest.py"]
 on_dependency_change = "rerun"
+# mutate_only_covered_lines is deliberately left off: its coverage pre-pass
+# leaves a half-imported numpy in sys.modules, so the following stats run dies
+# with "Unable to import required dependency numpy". Not needed here anyway -
+# the scoped modules report zero no-tests mutants without it.
 
 # Mutants that no test can kill because the mutation genuinely cannot change
 # behaviour. scripts/mutation_gate.py subtracts these from the survivor set and
@@ -162,10 +166,6 @@ on_dependency_change = "rerun"
 "cveta2.dataset_partition.x_partition_annotations_df__mutmut_57" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
 "cveta2.dataset_partition.x_partition_annotations_df__mutmut_59" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
 "cveta2.dataset_partition.x_partition_annotations_df__mutmut_60" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
-# mutate_only_covered_lines is deliberately left off: its coverage pre-pass
-# leaves a half-imported numpy in sys.modules, so the following stats run dies
-# with "Unable to import required dependency numpy". Not needed here anyway -
-# the scoped modules report zero no-tests mutants without it.
 
 [tool.vulture]
 min_confidence = 80
