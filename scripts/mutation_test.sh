@@ -24,6 +24,16 @@ RESULTS_FILE="$REPO_ROOT/mutants/mutmut-results.txt"
 
 cd "$REPO_ROOT"
 
+# Keep pytest's temp root inside this checkout. By default every run shares
+# /tmp/pytest-of-$USER, and a concurrent session's cleanup can delete the
+# `pytest-current` symlink out from under a mutant's forked child. The child
+# then dies for reasons unrelated to the mutation, which mutmut reads as
+# "killed" - the gate lying in the unsafe direction. pytest still numbers runs
+# inside this root, so mutmut's own parallel children stay isolated from each
+# other.
+# Created after sync-scope below, which may wipe mutants/ wholesale.
+export PYTEST_DEBUG_TEMPROOT="$REPO_ROOT/mutants/.pytest-temproot"
+
 PROFILE=""
 MUTMUT_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -47,6 +57,7 @@ done
 # mutmut's own fingerprint deliberately ignores those fields, so without this a
 # newly scoped module is never mutated and old verdicts survive renumbering.
 uv run python "$SCRIPT_DIR/mutation_config.py" sync-scope
+mkdir -p "$PYTEST_DEBUG_TEMPROOT"
 
 GATE_ARGS=()
 if [[ -n "$PROFILE" ]]; then

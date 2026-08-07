@@ -332,6 +332,12 @@ counter-intuitive and decide whether a module is worth gating at all.
   you ever bypass `mutation_test.sh`, wipe `mutants/` by hand.
 - `mutants/` is mutmut's working copy: gitignored, and excluded from mypy (two
   `cveta2` packages otherwise collide) and ruff.
+- `mutation_test.sh` exports `PYTEST_DEBUG_TEMPROOT` into `mutants/`. By
+  default every pytest run on the machine shares `/tmp/pytest-of-$USER`, and a
+  concurrent session's cleanup can delete the `pytest-current` symlink out from
+  under a mutant's forked child. The child then dies for reasons unrelated to
+  the mutation and mutmut records it as *killed* — the gate lying in the unsafe
+  direction. Observed while running several gates in parallel worktrees.
 
 ### Cost
 
