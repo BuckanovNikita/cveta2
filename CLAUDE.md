@@ -347,14 +347,23 @@ gated module would push it past that, leave it to `full`.
 Triage, not runtime, is the real cost: each survivor needs a diff read and a
 judgement call.
 
-Measured baseline for the still-ungated convert modules (reproduce by adding
-the module to `only_mutate` and running the script):
+Measured baselines for the still-ungated modules, so expanding scope starts
+from data (reproduce by adding the module to `only_mutate` and running the
+script):
 
-| Module | Lines | Unexplained survivors |
-|---|---|---|
-| `services/convert/yolo.py` | 407 | 132 |
-| `services/convert/common.py` | 348 | 106 |
-| `services/convert/coco.py` | 135 | 54 |
+| Module | Lines | Unexplained survivors | of which `no tests` |
+|---|---|---|---|
+| `api.py` | 620 | 274 | 107 |
+| `config.py` | 608 | 179 | 12 |
+| `services/convert/yolo.py` | 407 | 132 | not split |
+| `services/convert/common.py` | 348 | 106 | not split |
+| `services/convert/coco.py` | 135 | 54 | not split |
+
+The `no tests` column is the one that decides the shape of the work.
+`config.py` is well covered and only weakly asserted, so it is pure
+assertion-sharpening. `api.py` has 107 mutants on functions no test executes at
+all — that half is a coverage gap to close first, and it is worth doing as its
+own `test:` commit before any of it is gated.
 
 ### Permanently out of scope
 
