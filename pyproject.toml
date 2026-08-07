@@ -121,12 +121,23 @@ only_mutate = [
 # args are appended last, so this `-n` wins.
 pytest_add_cli_args = ["-n", "0", "-p", "no:cacheprovider", "--no-cov"]
 pytest_add_cli_args_test_selection = ["tests/"]
-# Debug logs are diagnostics, not behaviour, and asserting on their text would
-# be brittle. logger.info/warning carry user-facing Russian messages and stay
-# mutated. Both mutmut suppression mechanisms key on the *first* line of the
-# mutated node, so they cannot single out one argument of a multi-line call -
-# individual equivalent mutants go in [tool.cveta2.mutation] instead.
-do_not_mutate_patterns = ["logger\\.debug\\("]
+# Logging is diagnostics, not behaviour, at every level. Mutating it buys
+# nothing measurable here: mutmut's string operator fires only on
+# cst.SimpleString, and this project logs exclusively through f-strings
+# (cst.FormattedString), so the Russian message text was never mutated in the
+# first place. What is left per call site is the whole-argument-to-None mutant,
+# which no assertion can kill without pinning prose. Suppressing the call is
+# the honest way to say that.
+#
+# The pattern is line-anchored so it cannot silence an unrelated expression
+# that happens to share a line with a logger call. Matching only the first line
+# is enough for multi-line calls: mutmut skips any expression *starting* on a
+# matched line together with all of its children.
+#
+# Individual equivalent mutants still go in [tool.cveta2.mutation.equivalent] -
+# both of mutmut's suppression mechanisms key on the first line of the mutated
+# node, so neither can single out one argument of a multi-line call.
+do_not_mutate_patterns = ["^\\s*logger\\.[a-z_]+\\("]
 # mutmut caches a mutant's verdict against the *source* function's text, so a
 # changed test does not invalidate it: weakening an assertion otherwise leaves
 # the gate green on stale results. Hashing the test tree and rerunning on any
