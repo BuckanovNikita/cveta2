@@ -11,17 +11,26 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2._client.dtos import RawAttribute, RawDataMeta, RawFrame
+from cveta2._client.dtos import (
+    RawAnnotations,
+    RawAttribute,
+    RawDataMeta,
+    RawFrame,
+    RawShape,
+)
 from cveta2._client.sdk_convert import (
+    convert_annotations,
     convert_attributes,
     convert_data_meta,
     convert_label,
     convert_shape,
+    convert_task,
     data_meta_from_dict,
     extract_creator_username,
     extract_updated_date,
 )
 from cveta2._retry import _log_retry
+from cveta2.models import TaskInfo
 from tests.helpers import make_sdk_shape
 
 # ---------------------------------------------------------------------------
@@ -73,6 +82,17 @@ class TestConvertLabel:
         label = SimpleNamespace(id=3, name="dog", color=None, attributes=None)
         result = convert_label(label)
         assert result.color == ""
+
+    def test_attribute_name_none_falls_back_to_empty(self) -> None:
+        """Pin the ``a.name or ""`` fallback inside the attribute comprehension.
+
+        Every other label test gives its attributes a name, so the fallback
+        literal was never observed and could be mutated to any other string.
+        """
+        attr = SimpleNamespace(id=11, name=None)
+        label = SimpleNamespace(id=4, name="cat", color="#123456", attributes=[attr])
+        result = convert_label(label)
+        assert result.attributes[0].name == ""
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +174,158 @@ class TestConvertShape:
         result = convert_shape(shape)
         assert result.attributes == []
 
+    def test_every_field_carried_over_from_a_fully_populated_shape(self) -> None:
+        """Pin every field with a value that differs from the fixture default.
+
+        ``make_sdk_shape`` defaults ``id``/``z_order``/``rotation`` to zero,
+        ``occluded`` to ``False`` and ``created_by`` to ``None``, which makes
+        ``x or <zero>`` and ``x and <zero>`` produce the same result — those
+        mutants were unkillable *as fixtured*, not merely unasserted.  Asserting
+        the whole frozen dataclass also covers the fields no earlier test read.
+        """
+        shape = make_sdk_shape(
+            id=77,
+            type=SimpleNamespace(value="polygon"),
+            frame=4,
+            label_id=12,
+            points=[1.5, 2.5, 3.5, 4.5],
+            occluded=True,
+            z_order=3,
+            rotation=45.5,
+            source="auto",
+            attributes=[SimpleNamespace(spec_id=8, value="yes")],
+            created_by=SimpleNamespace(username="alice"),
+        )
+        assert convert_shape(shape) == RawShape(
+            id=77,
+            type="polygon",
+            frame=4,
+            label_id=12,
+            points=[1.5, 2.5, 3.5, 4.5],
+            occluded=True,
+            z_order=3,
+            rotation=45.5,
+            source="auto",
+            attributes=[RawAttribute(spec_id=8, value="yes")],
+            created_by="alice",
+        )
+
+    def test_falsy_sdk_fields_take_their_documented_defaults(self) -> None:
+        """Pin the other side of every ``or`` fallback in ``convert_shape``.
+
+        The truthy test above cannot see the fallback literals at all: with a
+        non-empty ``source`` the expression ``source or ""`` yields the same
+        value however the literal is mutated.  A shape whose optional fields
+        are all unset is the only input that observes them.
+        """
+        shape = make_sdk_shape(
+            id=None,
+            type="",
+            frame=6,
+            label_id=13,
+            points=None,
+            occluded=False,
+            z_order=None,
+            rotation=None,
+            source=None,
+            attributes=None,
+            created_by=None,
+            owner=None,
+        )
+        assert convert_shape(shape) == RawShape(
+            id=0,
+            type="",
+            frame=6,
+            label_id=13,
+            points=[],
+            occluded=False,
+            z_order=0,
+            rotation=0.0,
+            source="",
+            attributes=[],
+            created_by="",
+        )
+
+
+# ---------------------------------------------------------------------------
+# convert_annotations
+# ---------------------------------------------------------------------------
+
+
+class TestConvertAnnotations:
+    """No test called ``convert_annotations`` at all before these."""
+
+    def test_converts_every_shape(self) -> None:
+        labeled_data = SimpleNamespace(
+            shapes=[make_sdk_shape(id=3, frame=1), make_sdk_shape(id=4, frame=2)]
+        )
+        result = convert_annotations(labeled_data)
+        assert [(s.id, s.frame) for s in result.shapes] == [(3, 1), (4, 2)]
+
+    def test_none_shapes_becomes_empty_list(self) -> None:
+        """A task with no annotations must yield an empty list, never ``None``."""
+        assert convert_annotations(SimpleNamespace(shapes=None)) == RawAnnotations(
+            shapes=[]
+        )
+
+
+# ---------------------------------------------------------------------------
+# convert_task
+# ---------------------------------------------------------------------------
+
+
+class TestConvertTask:
+    """No test called ``convert_task`` at all before these."""
+
+    def test_populated_task_maps_every_field(self) -> None:
+        task = SimpleNamespace(
+            id=42,
+            name="task-a",
+            status="completed",
+            subset="train",
+            updated_date="2026-05-01T10:00:00",
+            project_id=7,
+        )
+        assert convert_task(task) == TaskInfo(
+            id=42,
+            name="task-a",
+            status="completed",
+            subset="train",
+            updated_date="2026-05-01T10:00:00",
+            project_id=7,
+        )
+
+    def test_project_id_read_as_int_from_a_string_value(self) -> None:
+        """The SDK may hand ``project_id`` back as a string, so ``int()`` matters."""
+        task = SimpleNamespace(
+            id=1,
+            name="t",
+            status="annotation",
+            subset="",
+            updated_date="",
+            project_id="9",
+        )
+        assert convert_task(task).project_id == 9
+
+    def test_unset_optional_fields_take_their_documented_defaults(self) -> None:
+        """Pin the falsy side of every ``or ""`` and the missing-``project_id`` path.
+
+        A ``TaskRead`` without ``project_id`` is what forces the three-argument
+        ``getattr``: dropping its default turns this case into an
+        ``AttributeError`` instead of ``project_id=None``.
+        """
+        task = SimpleNamespace(
+            id=1, name=None, status=None, subset=None, updated_date=None
+        )
+        assert convert_task(task) == TaskInfo(
+            id=1,
+            name="",
+            status="",
+            subset="",
+            updated_date="",
+            project_id=None,
+        )
+
 
 # ---------------------------------------------------------------------------
 # _convert_attributes
@@ -215,6 +387,21 @@ class TestExtractCreatorUsername:
 
     def test_no_user_returns_empty(self) -> None:
         shape = type("Shape", (), {})()
+        assert extract_creator_username(shape) == ""
+
+    def test_dict_user_without_name_keys_returns_empty(self) -> None:
+        """Pin the fallback of the dict branch, which no earlier test reached."""
+        shape = SimpleNamespace(created_by={"id": 3})
+        assert extract_creator_username(shape) == ""
+
+    def test_object_user_without_name_attributes_returns_empty(self) -> None:
+        """Pin the final ``return ""``.
+
+        Reached only by a *present* creator object that exposes neither
+        ``username`` nor ``name`` and is not a dict — every earlier test either
+        found a name or had no creator at all, so this line never ran.
+        """
+        shape = SimpleNamespace(created_by=SimpleNamespace(username=None, name=None))
         assert extract_creator_username(shape) == ""
 
 

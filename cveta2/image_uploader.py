@@ -40,6 +40,11 @@ class UploadStats(BaseModel):
     total: int = 0
 
 
+_S3_DUPLICATE_CONTEXT = "S3"
+_UPLOAD_DESC = "Uploading to S3"
+_UPLOAD_UNIT = "file"
+
+
 def _build_basename_index(search_dir: Path) -> dict[str, list[Path]]:
     """Walk *search_dir* recursively, mapping basename → sorted file paths."""
     index: dict[str, list[Path]] = {}
@@ -159,7 +164,7 @@ def _resolve_duplicate_basenames(names: Iterable[str]) -> dict[str, str]:
     for name in names:
         basename_to_names.setdefault(PurePosixPath(name).name, []).append(name)
     return {
-        base: pick_latest_duplicate("S3", base, candidates)
+        base: pick_latest_duplicate(_S3_DUPLICATE_CONTEXT, base, candidates)
         for base, candidates in basename_to_names.items()
     }
 
@@ -250,8 +255,8 @@ class S3Uploader:
             to_upload,
             lambda t: _upload_one_s3(s3, t.path, cs_info.bucket, t.key),
             lambda t: f"{t.name} (key={t.key})",
-            desc="Uploading to S3",
-            unit="file",
+            desc=_UPLOAD_DESC,
+            unit=_UPLOAD_UNIT,
         )
 
         logger.info(

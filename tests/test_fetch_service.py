@@ -21,6 +21,7 @@ from cveta2.models import (
     BBoxAnnotation,
     DeletedImage,
     ProjectAnnotations,
+    ProjectInfo,
     TaskInfo,
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
@@ -343,13 +344,46 @@ def test_resolve_project_id_casefold_name(normal_fake: LoadedFixtures) -> None:
 
 
 def test_resolve_project_id_not_found(normal_fake: LoadedFixtures) -> None:
-    """Non-existent project name raises ProjectNotFoundError."""
+    """Non-existent project name raises ProjectNotFoundError naming the spec.
+
+    The message is the only place the rejected spec appears; replacing it
+    wholesale left the raise indistinguishable from a bare one.
+    """
     from cveta2.exceptions import ProjectNotFoundError
 
     client = make_fake_client(normal_fake)
 
-    with pytest.raises(ProjectNotFoundError):
+    with pytest.raises(ProjectNotFoundError, match="does-not-exist"):
         client.resolve_project_id("does-not-exist")
+
+
+def test_resolve_project_id_cached_wins_over_the_api() -> None:
+    """Cached list and API deliberately disagree about the same name.
+
+    Every other cached test names a project that both sources resolve to
+    the same id, so deleting the cached lookup entirely -- or never
+    matching in it -- produced the same answer via the API round-trip.
+    """
+    api = FakeCvatApi.from_tasks([], project_name="shared")
+    client = CvatClient(CvatConfig(), api=api)
+
+    resolved = client.resolve_project_id(
+        "shared",
+        cached=[ProjectInfo(id=99, name="shared")],
+    )
+
+    assert resolved == 99
+
+
+def test_resolve_project_id_picks_the_named_project_from_the_api() -> None:
+    """A second, differently named project makes the name match load-bearing."""
+    api = FakeCvatApi.from_tasks(
+        [],
+        project_name="first",
+        other_projects=[ProjectInfo(id=42, name="second")],
+    )
+
+    assert CvatClient(CvatConfig(), api=api).resolve_project_id("second") == 42
 
 
 def test_count_images_unique_and_empty() -> None:

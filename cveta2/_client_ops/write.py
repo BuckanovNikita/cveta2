@@ -16,8 +16,15 @@ from cveta2._client.dtos import LabelPatch, UploadTaskSpec
 from cveta2._client_ops.base import _ClientBase
 
 if TYPE_CHECKING:
-    from cveta2._client.assembly import IssueBuildResult
     from cveta2._client_ops.session import TaskWriteSession
+
+# Both columns must exist for a row to become an issue, and both are
+# normalized the same way, so one constant drives the guard and the loop.
+_ISSUE_COLUMNS = frozenset({"issue_state", "issue_text"})
+
+_SKIP_UNKNOWN_IMAGES = "изображения не найдены"
+_SKIP_MISSING_BBOX = "у строк нет полного bbox"
+_SKIP_UNMAPPED_FRAMES = "не найден job для кадров изображений"
 
 
 def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
@@ -27,31 +34,17 @@ def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
     coordinates: distinct boxes on one image with the same text each keep
     their row; only fully identical duplicates collapse.
     """
-    if "issue_state" not in annotations_df.columns:
+    if not _ISSUE_COLUMNS.issubset(annotations_df.columns):
         return pd.DataFrame()
     df = annotations_df.copy()
-    if "issue_text" not in df.columns:
-        df["issue_text"] = ""
-    df["issue_state"] = df["issue_state"].fillna("").astype(str).str.strip()
-    df["issue_text"] = df["issue_text"].fillna("").astype(str).str.strip()
+    for column in _ISSUE_COLUMNS:
+        df[column] = df[column].fillna("").astype(str).str.strip()
     new_rows: pd.DataFrame = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
     dedup_key = ["image_name", "issue_text"] + [
         col for col in BBOX_COLUMNS if col in new_rows.columns
     ]
     deduped: pd.DataFrame = new_rows.drop_duplicates(subset=dedup_key)
     return deduped
-
-
-def _log_issue_skips(task_id: int, built: IssueBuildResult) -> None:
-    """Emit one warning per non-empty skip bucket in *built*."""
-    buckets = (
-        ("изображения не найдены", built.unknown_images),
-        ("у строк нет полного bbox", built.missing_bbox),
-        ("не найден job для кадров изображений", built.unmapped_frames),
-    )
-    for reason, names in buckets:
-        if names:
-            logger.warning(f"Issues пропущены: {reason} в задаче {task_id}: {names}")
 
 
 class _WriteMixin(_ClientBase):
@@ -208,10 +201,10 @@ class _WriteMixin(_ClientBase):
 
         if built.shapes:
             api.put_task_shapes(task_id, built.shapes)
-            unique_frames = len({shape.frame for shape in built.shapes})
             logger.info(
                 f"Загружено {len(built.shapes)} аннотаций "
-                f"({unique_frames} изображений) в задачу {task_id}"
+                f"({len({shape.frame for shape in built.shapes})} изображений) "
+                f"в задачу {task_id}"
             )
         else:
             logger.info(f"Нет аннотаций для загрузки в задачу {task_id}")
@@ -248,6 +241,15 @@ class _WriteMixin(_ClientBase):
         for issue in built.issues:
             api.create_issue(issue)
 
-        _log_issue_skips(task_id, built)
+        skipped = (
+            (_SKIP_UNKNOWN_IMAGES, built.unknown_images),
+            (_SKIP_MISSING_BBOX, built.missing_bbox),
+            (_SKIP_UNMAPPED_FRAMES, built.unmapped_frames),
+        )
+        for reason, names in skipped:
+            if names:
+                logger.warning(
+                    f"Issues пропущены: {reason} в задаче {task_id}: {names}"
+                )
         logger.info(f"Создано issues: {len(built.issues)} в задаче {task_id}")
         return len(built.issues)

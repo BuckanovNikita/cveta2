@@ -8,7 +8,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2._client.dtos import LabelPatch
+from cveta2._client.dtos import (
+    LabelPatch,
+    RawAnnotations,
+    RawDataMeta,
+    RawFrame,
+)
 from cveta2._client.ports import CvatApiPort
 from cveta2.cli import CliApp
 from cveta2.client import CvatClient
@@ -21,19 +26,21 @@ from cveta2.commands.labels import (
     _validate_hex_color,
 )
 from cveta2.config import CvatConfig
-from cveta2.models import LabelAttributeInfo, LabelInfo
+from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo
+from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.helpers import (
     build_fake,
     client_with_api,
     make_fake_client,
+    make_raw_shape,
+    make_task,
     mock_client_ctx,
     patch_cli_client,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-    from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +236,84 @@ def test_count_label_usage_deleted_frames_counted(
 
 
 # ---------------------------------------------------------------------------
+# count_label_usage: per-label totals and the skipped-task branch
+# ---------------------------------------------------------------------------
+
+_USAGE_LABELS = [
+    LabelInfo(id=1, name="cat", attributes=[]),
+    LabelInfo(id=2, name="dog", attributes=[]),
+]
+
+
+def _usage_fixtures() -> LoadedFixtures:
+    """Two tasks: task 10 has one cat and one dog, task 11 has two dogs."""
+    data_meta = RawDataMeta(frames=[RawFrame(name="a.jpg", width=64, height=64)])
+    return LoadedFixtures(
+        project=ProjectInfo(id=1, name="usage"),
+        tasks=[make_task(10), make_task(11)],
+        labels=_USAGE_LABELS,
+        task_data={
+            10: (
+                data_meta,
+                RawAnnotations(
+                    shapes=[
+                        make_raw_shape(id=1, label_id=1),
+                        make_raw_shape(id=2, label_id=2),
+                    ],
+                ),
+            ),
+            11: (
+                data_meta,
+                RawAnnotations(
+                    shapes=[
+                        make_raw_shape(id=3, label_id=2),
+                        make_raw_shape(id=4, label_id=2),
+                    ],
+                ),
+            ),
+        },
+    )
+
+
+def test_count_label_usage_counts_each_label_separately() -> None:
+    """The whole mapping is asserted, not ``sum(counts.values())``.
+
+    Every other usage test collapses the result to a total, so any
+    accounting error that preserves the total -- a per-label tally that
+    starts at one, or attributing a shape to the wrong label -- was
+    invisible.  The count drives a destructive label deletion.
+    """
+    client = CvatClient(CvatConfig(), api=FakeCvatApi(_usage_fixtures()))
+
+    assert client.count_label_usage(1) == {1: 1, 2: 3}
+
+
+def test_count_label_usage_continues_past_a_failing_task(
+    capture_logs: list[str],
+) -> None:
+    """The ``except CvatApiError`` branch was never executed by any test.
+
+    With the first of two tasks failing, the loop must skip it and keep
+    counting: aborting instead would silently under-report usage before a
+    label deletion, and the skipped-task summary is the only signal the
+    user gets that the count is partial.
+    """
+    api = FakeCvatApi(
+        _usage_fixtures(),
+        fail_task_ids={10},
+        fail_methods=("get_task_annotations",),
+    )
+
+    counts = CvatClient(CvatConfig(), api=api).count_label_usage(1)
+
+    assert counts == {2: 2}
+    assert any(
+        "Пропущено задач при подсчёте меток: [10]" in message
+        for message in capture_logs
+    )
+
+
+# ---------------------------------------------------------------------------
 # CvatClient.update_project_labels (mock SDK)
 # ---------------------------------------------------------------------------
 
@@ -274,6 +359,34 @@ def test_update_labels_calls_patch(
 
     client.update_project_labels(42, **kwargs)
     api.patch_project_labels.assert_called_once_with(42, expected_patches)
+
+
+def test_update_labels_combines_patches_in_declaration_order() -> None:
+    """Additions, renames, deletions and recolors go out as one ordered PATCH.
+
+    Every case above passes exactly one kind of change, so nothing pinned
+    either the order of the four blocks or the fact that they accumulate into
+    a single call.
+    """
+    client, api = _client_with_api_mock()
+
+    client.update_project_labels(
+        42,
+        add=["fish"],
+        rename={1: "kitty"},
+        delete=[2],
+        recolor={3: "#00ff00"},
+    )
+
+    api.patch_project_labels.assert_called_once_with(
+        42,
+        [
+            LabelPatch(name="fish"),
+            LabelPatch(id=1, name="kitty"),
+            LabelPatch(id=2, deleted=True),
+            LabelPatch(id=3, color="#00ff00"),
+        ],
+    )
 
 
 def test_update_labels_requires_context_manager() -> None:

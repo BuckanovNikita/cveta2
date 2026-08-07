@@ -42,6 +42,11 @@ CACHE_SCHEMA_VERSION = 2
 _COMPLETED_STATUS = "completed"
 _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})
 
+# Layer names for the rejection log, kept at module level so they carry no
+# behaviour: the value only ever reaches an f-string in _validate_envelope.
+_SOURCE_LOCAL = "локальный кэш"
+_SOURCE_S3 = "S3-кэш"
+
 
 class CachedTaskEnvelope(BaseModel):
     """Versioned wrapper around a cached :class:`TaskAnnotations` payload."""
@@ -61,14 +66,12 @@ def get_task_cache_dir(project_id: int, root: Path | None = None) -> Path:
     """
     if root is not None:
         return root / f"project_{project_id}"
-    xdg_cache = os.environ.get("XDG_CACHE_HOME", "")
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
     base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
     return base / "cveta2" / "task_annotations" / f"project_{project_id}"
 
 
-def invalidate_local_entry(
-    project_id: int, task_id: int, project_name: str = ""
-) -> None:
+def invalidate_local_entry(project_id: int, task_id: int, project_name: str) -> None:
     """Drop the local cache entry for *task_id* after a task mutation."""
     root = CacheConfig.load().for_project(project_name).tasks_root
     cache_dir = get_task_cache_dir(project_id, root=root)
@@ -82,8 +85,13 @@ def _s3_put_bytes(s3_client: S3Client, bucket: str, key: str, data: bytes) -> No
 
 
 def _client_error_code(error: ClientError) -> str:
-    """Extract the error code string from a botocore ClientError."""
-    return str(error.response.get("Error", {}).get("Code", ""))
+    """Extract the error code from a botocore ClientError as a string.
+
+    A response carrying no code stringifies to ``"None"``, which is not a
+    missing-key code: an error we cannot classify disables the cache
+    instead of reading as a miss.
+    """
+    return str(error.response.get("Error", {}).get("Code"))
 
 
 class S3CacheBackend:
@@ -127,11 +135,14 @@ class S3CacheBackend:
         """
         if task_cache_s3:
             bucket, prefix = parse_sync_root(task_cache_s3)
-            if bucket is None and cs_info is None:
-                return None
+            if bucket is None:
+                if cs_info is None:
+                    return None
+                bucket = cs_info.bucket
+            endpoint_url = cs_info.endpoint_url if cs_info else ""
             return cls(
-                make_s3_client((cs_info.endpoint_url if cs_info else "") or None),
-                bucket or (cs_info.bucket if cs_info else ""),
+                make_s3_client(endpoint_url or None),
+                bucket,
                 prefix,
                 explicit_location=True,
             )
@@ -216,7 +227,7 @@ class TaskAnnotationCache:
             cached_at=datetime.now(timezone.utc).isoformat(),
             payload=result,
         )
-        data = envelope.model_dump_json().encode("utf-8")
+        data = envelope.model_dump_json().encode()
         self._write_local(task.id, data)
         if self._s3 is not None:
             self._s3.put(task.id, data)
@@ -226,29 +237,38 @@ class TaskAnnotationCache:
         self._local_path(task_id).unlink(missing_ok=True)
 
     def prune(self, live_task_ids: set[int]) -> int:
-        """Remove local entries whose task no longer exists; return count."""
+        """Remove local entries whose task no longer exists; return count.
+
+        Deletion goes through :meth:`invalidate_local`, which rebuilds the
+        canonical ``task_{id}.json`` name — the only name this cache ever
+        writes, so it always names the file the glob just found.
+        """
         removed = 0
         for path in self._local_dir.glob("task_*.json"):
             task_id = _task_id_from_filename(path.name)
             if task_id is None or task_id in live_task_ids:
                 continue
-            path.unlink(missing_ok=True)
+            self.invalidate_local(task_id)
             removed += 1
         return removed
 
     def _get_local(self, task: TaskInfo) -> TaskAnnotations | None:
-        """Read and validate the local entry; delete it when invalid."""
-        path = self._local_path(task.id)
+        """Read and validate the local entry; delete it when invalid.
+
+        An entry that cannot be read at all (permissions, a truncated
+        mount) is a plain miss and is left on disk — only entries proven
+        invalid are dropped.
+        """
         try:
-            raw = path.read_bytes()
+            raw = self._local_path(task.id).read_bytes()
         except FileNotFoundError:
             return None
         except OSError as e:
             logger.info(f"Не удалось прочитать локальный кэш задачи {task.id}: {e}")
             return None
-        envelope = _validate_envelope(raw, task, source="локальный кэш")
+        envelope = _validate_envelope(raw, task, source=_SOURCE_LOCAL)
         if envelope is None:
-            path.unlink(missing_ok=True)
+            self.invalidate_local(task.id)
             return None
         return envelope.payload
 
@@ -259,7 +279,7 @@ class TaskAnnotationCache:
         raw = self._s3.get(task.id)
         if raw is None:
             return None
-        envelope = _validate_envelope(raw, task, source="S3-кэш")
+        envelope = _validate_envelope(raw, task, source=_SOURCE_S3)
         if envelope is None:
             return None
         self._write_local(task.id, raw)

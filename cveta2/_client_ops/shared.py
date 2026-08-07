@@ -49,21 +49,20 @@ class FetchContext:
 
 def _log_task_5xx_skip(
     task: TaskInfo,
-    host: str,
-    project_name: str,
+    ctx: FetchContext,
     e: CvatApiError,
 ) -> None:
     """Log 5xx error and ignore-command hint for a skipped task."""
     task_link = (
-        f"{host.rstrip('/')}/tasks/{task.id}"
-        if host
+        f"{ctx.host.rstrip('/')}/tasks/{task.id}"
+        if ctx.host
         else f"task_id={task.id} {task.name!r}"
     )
     logger.error(f"CVAT server error (HTTP {e.status_code}) for task {task_link}: {e}")
-    if project_name:
+    if ctx.project_name:
         logger.info(
             f"Чтобы пропустить задачу при следующем запуске: "
-            f"cveta2 ignore --project {project_name!r} --add {task.id}"
+            f"cveta2 ignore --project {ctx.project_name!r} --add {task.id}"
         )
     else:
         logger.info(

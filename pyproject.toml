@@ -125,6 +125,15 @@ only_mutate = [
     "cveta2/projects_cache.py",
     "cveta2/services/merge.py",
     "cveta2/services/output.py",
+    "cveta2/task_cache.py",
+    "cveta2/image_downloader.py",
+    "cveta2/image_uploader.py",
+    "cveta2/_client_ops/write.py",
+    "cveta2/_client_ops/task_ops.py",
+    "cveta2/_client_ops/fetch.py",
+    "cveta2/_client_ops/read.py",
+    "cveta2/_client/sdk_convert.py",
+    "cveta2/_client/sdk_requests.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -194,6 +203,36 @@ full = []
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]
+
+# task_cache: `_disable(e)` / `source=` only name the cause or the cache layer
+# inside a warning; the disabling and the miss themselves are pinned by tests.
+"cveta2.task_cache.xǁS3CacheBackendǁ__init____mutmut_6" = "_disabled=None is falsy; the only read is `if self._disabled`"
+"cveta2.task_cache.xǁS3CacheBackendǁget__mutmut_11" = "_disable(None) on the ClientError path; the error only names the cause in the warning"
+"cveta2.task_cache.xǁS3CacheBackendǁget__mutmut_12" = "_disable(None) on the BotoCoreError path; the error only names the cause in the warning"
+"cveta2.task_cache.xǁS3CacheBackendǁput__mutmut_10" = "_disable(None) on the upload path; the error only names the cause in the warning"
+"cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_local__mutmut_6" = "source=None; the layer label only reaches the rejection log"
+"cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_s3__mutmut_8" = "source=None; the layer label only reaches the rejection log"
+
+# Image IO: progress-bar captions, and counters assigned rather than
+# incremented where the counter is provably still zero at that point.
+"cveta2.image_downloader.x__download_pending__mutmut_5" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_43" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.image_downloader.x__download_pending__mutmut_22" = "stats.downloaded = ok; _download_pending is the only writer of `downloaded` and runs once per stats object"
+"cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_2" = "stats.failed = len(pending); the no-storage branch returns before any transfer, so failed is still 0"
+"cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_35" = "stats.failed = len(missing); the listing misses are counted before any transfer runs, so failed is still 0"
+"cveta2.image_downloader.x_parse_cloud_storage__mutmut_11" = "or \"XXXX\"; parse_qs of a string with no \"=\" yields {} exactly as for \"\""
+"cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_13" = "prefix=None widens the listing with out-of-prefix keys that no computed s3_key can equal"
+
+# count_label_usage: the label-scan bar's kwargs live in the module-level
+# _LABEL_SCAN_BAR precisely so their literals are not mutated; dropping the
+# whole mapping only leaves an uncaptioned bar. What the function returns is
+# pinned per-label by test_count_label_usage_counts_each_label_separately.
+"cveta2._client_ops.read.xǁ_ReadMixinǁcount_label_usage__mutmut_11" = "drops **_LABEL_SCAN_BAR; tqdm renders an uncaptioned bar over the same tasks"
+
+# fetch_one_task: the degrade path's [] and None are normalized identically by
+# _build_frame_issues(issues or []); the branch itself is tested.
+"cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_15" = "issues=None instead of []; _build_frame_issues normalizes it with `issues or []`"
+
 
 # run_s3_transfers: tqdm's `leave` only decides whether the finished progress
 # bar stays on screen. Same class as the logger suppression - presentation, not

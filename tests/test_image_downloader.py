@@ -42,6 +42,10 @@ class _FakeCloudStorage:
         self.specific_attributes = specific_attributes
 
 
+class _BareCloudStorage:
+    """A CVAT cloud-storage object exposing none of the expected attributes."""
+
+
 class _FakeTask:
     """Minimal SDK task with source_storage."""
 
@@ -78,12 +82,63 @@ class _FakeSdkClient:
         return self._cloud_storages[cs_id], None
 
 
+class _UnreadableKeysS3Client(FakeS3Client):
+    """Lists every seeded object but raises on ``get_object`` for some keys.
+
+    :class:`FakeS3Client` serves whatever it lists, so no test could ever
+    produce a non-zero ``stats.failed`` from a transfer.  ``KeyError`` is
+    in ``s3_utils.S3_TRANSFER_ERRORS`` but not in the ``s3_retry`` set, so
+    it is counted as a failure without burning the retry backoff.
+    """
+
+    def __init__(
+        self,
+        objects: dict[str, bytes],
+        *,
+        unreadable: set[str],
+        keyed_by_bucket: bool = True,
+    ) -> None:
+        """Seed the store and mark *unreadable* keys as un-gettable."""
+        super().__init__(objects, keyed_by_bucket=keyed_by_bucket)
+        self._unreadable = frozenset(unreadable)
+
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        """Serve the object unless its key was marked unreadable."""
+        if Key in self._unreadable:
+            raise KeyError(Key)
+        return super().get_object(Bucket=Bucket, Key=Key)
+
+
+class _RecordingS3Factory:
+    """``make_s3_client`` stand-in that records the endpoint it was given."""
+
+    def __init__(self, client: FakeS3Client) -> None:
+        """Store *client* to hand out, and an empty endpoint log."""
+        self._client = client
+        self.endpoints: list[str | None] = []
+
+    def __call__(self, endpoint_url: str | None = None) -> FakeS3Client:
+        """Record *endpoint_url* and return the fixed fake client."""
+        self.endpoints.append(endpoint_url)
+        return self._client
+
+
 def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: FakeS3Client) -> None:
     """Route make_s3_client to the fake S3 client."""
     monkeypatch.setattr(
         "cveta2.image_downloader.make_s3_client",
         lambda *_a, **_kw: fake_s3,
     )
+
+
+def _patch_recording_boto(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_s3: FakeS3Client,
+) -> _RecordingS3Factory:
+    """Route make_s3_client to a factory that records endpoint arguments."""
+    factory = _RecordingS3Factory(fake_s3)
+    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", factory)
+    return factory
 
 
 def _ann(task_id: int, frame_id: int, image_name: str) -> Any:
@@ -159,6 +214,35 @@ def test_parse_cloud_storage_no_prefix() -> None:
     assert info.prefix == ""
     assert info.bucket == "bucket"
     assert info.endpoint_url == "http://s3.example.com"
+
+
+def test_parse_cloud_storage_no_endpoint_url() -> None:
+    """A storage without endpoint_url falls back to the empty string.
+
+    The mirror case (no prefix) was covered, so only the ``prefix``
+    fallback list was pinned; the ``endpoint_url`` one could hold any
+    placeholder.
+    """
+    cs = _FakeCloudStorage(
+        cs_id=3, resource="bucket", specific_attributes="prefix=imgs"
+    )
+    info = parse_cloud_storage(cs)
+    assert info.endpoint_url == ""
+    assert info.prefix == "imgs"
+
+
+def test_parse_cloud_storage_missing_attributes_uses_defaults() -> None:
+    """Every ``getattr`` default is load-bearing on an older SDK object.
+
+    All fixtures supplied ``id``, ``resource`` and ``specific_attributes``,
+    so the three defaults were never read: dropping them, or changing 0/""
+    to anything else, went unnoticed.
+    """
+    info = parse_cloud_storage(_BareCloudStorage())
+    assert info.id == 0
+    assert info.bucket == ""
+    assert info.prefix == ""
+    assert info.endpoint_url == ""
 
 
 def test_s3_key_with_prefix() -> None:
@@ -580,31 +664,216 @@ def test_download_nested_frame_mirrors_s3_layout_by_default(
     assert rerun_stats.cached == 1
 
 
-def test_download_ignored_prefix_preserves_subfolders(
+def test_download_ignored_prefix_keeps_prefix_remainder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With ignored_prefix set, the local layout mirrors the key below it."""
+    """ignored_prefix must strip *less* of the key than the storage prefix.
+
+    The earlier version of this test used ``ignored_prefix`` equal to the
+    storage prefix, which makes the stripped layout byte-identical to the
+    default ``target_dir / frame_ref`` one.  It therefore could not tell
+    the two branches of ``_dest_path`` apart, nor notice ``__init__``
+    throwing ``ignored_prefix`` away, nor ``_filter_cached`` /
+    ``_download_all`` passing ``None`` for the storage.
+    """
     annotations = ProjectAnnotations(
         annotations=[_ann(10, 0, "2026-01/a.jpg"), _ann(10, 1, "b.jpg")],
         deleted_images=[],
     )
     s3_data = {
-        "test-bucket/images/2026-01/a.jpg": b"data-a",
-        "test-bucket/images/b.jpg": b"data-b",
+        "test-bucket/data/projA/2026-01/a.jpg": b"data-a",
+        "test-bucket/data/projA/b.jpg": b"data-b",
     }
+    _patch_boto(monkeypatch, FakeS3Client(s3_data))
+    cs_info = make_cs_info(bucket="test-bucket", prefix="data/projA")
+
+    target = tmp_path / "images"
+    downloader = ImageDownloader(target, ignored_prefix="data")
+    stats = downloader.download(annotations, project_cloud_storage=cs_info)
+
+    assert stats.downloaded == 2
+    assert (target / "projA" / "2026-01" / "a.jpg").read_bytes() == b"data-a"
+    assert (target / "projA" / "b.jpg").read_bytes() == b"data-b"
+
+    rerun = downloader.download(annotations, project_cloud_storage=cs_info)
+    assert rerun.cached == 2
+    assert rerun.downloaded == 0
+
+
+def test_download_uses_storage_endpoint_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The storage endpoint reaches make_s3_client verbatim.
+
+    Every fake replaced make_s3_client with a lambda that ignored its
+    arguments, so connecting to the wrong (or default) S3 endpoint was
+    invisible.
+    """
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "a.jpg")],
+        deleted_images=[],
+    )
+    s3_data = {"test-bucket/images/a.jpg": b"data-a"}
+    factory = _patch_recording_boto(monkeypatch, FakeS3Client(s3_data))
+    cs_info = make_cs_info(
+        bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000"
+    )
+
+    stats = ImageDownloader(tmp_path / "images").download(
+        annotations, project_cloud_storage=cs_info
+    )
+
+    assert stats.downloaded == 1
+    assert factory.endpoints == ["http://minio:9000"]
+
+
+def test_download_missing_from_s3_listing_counts_as_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An annotated image absent from the S3 listing is failed, not skipped.
+
+    Every fixture listed exactly the images it annotated, so the whole
+    ``missing`` block never ran: ``stats.failed += len(missing)`` and the
+    ``continue`` that keeps the remaining images downloading were free.
+    """
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "gone.jpg"), _ann(10, 1, "here.jpg")],
+        deleted_images=[],
+    )
+    s3_data = {"test-bucket/images/here.jpg": b"data-here"}
     _patch_boto(monkeypatch, FakeS3Client(s3_data))
 
     target = tmp_path / "images"
-    downloader = ImageDownloader(target, ignored_prefix="images")
-    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.total == 2
+    assert stats.failed == 1
+    assert stats.downloaded == 1
+    assert (target / "here.jpg").read_bytes() == b"data-here"
+    assert not (target / "gone.jpg").exists()
+
+
+def test_download_adds_listing_misses_and_transfer_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capture_logs: list[str],
+) -> None:
+    """stats.failed accumulates listing misses *and* failed transfers.
+
+    Two separate ``+=`` writers feed that counter, and with only one of
+    them ever non-zero a plain ``=`` was indistinguishable.  The failure
+    log is the only place the transfer's display name is used, so it also
+    pins ``Transfer(name=...)`` and the describe callable.
+    """
+    annotations = ProjectAnnotations(
+        annotations=[
+            _ann(10, 0, "gone.jpg"),
+            _ann(10, 1, "broken.jpg"),
+            _ann(10, 2, "ok.jpg"),
+        ],
+        deleted_images=[],
+    )
+    s3_data = {
+        "test-bucket/images/broken.jpg": b"unreadable",
+        "test-bucket/images/ok.jpg": b"data-ok",
+    }
+    _patch_boto(
+        monkeypatch,
+        _UnreadableKeysS3Client(s3_data, unreadable={"images/broken.jpg"}),
+    )
+
+    target = tmp_path / "images"
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.total == 3
+    assert stats.failed == 2
+    assert stats.downloaded == 1
+    assert (target / "ok.jpg").read_bytes() == b"data-ok"
+    assert "broken.jpg (key=images/broken.jpg)" in "\n".join(capture_logs)
+
+
+def test_download_key_lookup_prefers_frame_path_over_image_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """frame_path picks the key; image_name is only the basename fallback.
+
+    Every earlier fixture left ``frame_path`` equal to ``image_name``, so
+    the two lookups resolved to one and the same entry and their order was
+    unobservable.  ``one.jpg`` exists twice on S3 (nested and flat) so the
+    two tiers return *different* bytes; ``two.jpg`` has a stale
+    ``frame_path`` that only the second tier can rescue.  The bucket also
+    holds a same-basename object *outside* the storage prefix, listed
+    first, so that listing without the prefix poisons the basename entry
+    of the name map instead of going unnoticed.
+    """
+    s3_data = {
+        "test-bucket/archive/one.jpg": b"archived-one",
+        "test-bucket/images/2026-01/one.jpg": b"nested-one",
+        "test-bucket/images/one.jpg": b"flat-one",
+        "test-bucket/images/2026-02/two.jpg": b"wanted-two",
+    }
+    annotations = ProjectAnnotations(
+        annotations=[
+            make_bbox(image_name="one.jpg", frame_path="2026-01/one.jpg", task_id=10),
+            make_bbox(image_name="two.jpg", frame_path="stale/two.jpg", task_id=10),
+        ],
+        deleted_images=[],
+    )
+    _patch_boto(monkeypatch, FakeS3Client(s3_data))
+
+    target = tmp_path / "images"
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
 
     assert stats.downloaded == 2
-    assert (target / "2026-01" / "a.jpg").read_bytes() == b"data-a"
-    assert (target / "b.jpg").read_bytes() == b"data-b"
+    assert stats.failed == 0
+    assert (target / "2026-01" / "one.jpg").read_bytes() == b"nested-one"
+    assert (target / "stale" / "two.jpg").read_bytes() == b"wanted-two"
 
-    rerun = downloader.download(annotations, project_cloud_storage=_project_cs())
-    assert rerun.cached == 2
+
+def test_s3_syncer_scopes_to_bucket_and_reports_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capture_logs: list[str],
+) -> None:
+    """Sync reads one bucket over the configured endpoint and counts failures.
+
+    The parametrized syncer cases all used a bucket-blind fake, so passing
+    ``None`` for the bucket (to either the listing or the transfer) changed
+    nothing, the endpoint argument was never observed, and no case ever
+    produced a failed transfer — which is the only reader of a
+    ``Transfer``'s display name.
+    """
+    s3_data = {
+        "test-bucket/images/ok.jpg": b"data-ok",
+        "test-bucket/images/broken.jpg": b"unreadable",
+        "other-bucket/images/elsewhere.jpg": b"data-elsewhere",
+    }
+    client = _UnreadableKeysS3Client(s3_data, unreadable={"images/broken.jpg"})
+    factory = _patch_recording_boto(monkeypatch, client)
+    cs_info = make_cs_info(
+        bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000"
+    )
+
+    target = tmp_path / "sync-dir"
+    stats = S3Syncer(target).sync(cs_info)
+
+    assert factory.endpoints == ["http://minio:9000"]
+    assert stats.total == 2
+    assert stats.downloaded == 1
+    assert stats.failed == 1
+    assert (target / "ok.jpg").read_bytes() == b"data-ok"
+    assert not (target / "elsewhere.jpg").exists()
+    assert "broken.jpg (key=images/broken.jpg)" in "\n".join(capture_logs)
 
 
 def test_s3_syncer_ignored_prefix_keeps_remainder(

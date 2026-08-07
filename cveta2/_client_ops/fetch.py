@@ -27,6 +27,11 @@ if TYPE_CHECKING:
     from cveta2.models import TaskInfo
 
 
+def _format_task_choices(tasks: Sequence[TaskInfo]) -> str:
+    """Render ``'name' (id=N)`` per task, comma-separated, for humans."""
+    return ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
+
+
 def _filter_tasks_for_fetch(
     tasks: list[TaskInfo],
     options: _FetchAnnotationsOptions,
@@ -43,8 +48,9 @@ def _filter_tasks_for_fetch(
         tasks = [t for t in tasks if t.id not in options.ignore_task_ids]
     if options.task_selector is not None:
         tasks = _FetchMixin.resolve_task_selectors(tasks, options.task_selector)
-        names = ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
-        logger.info(f"Selected {len(tasks)} task(s): {names}")
+        logger.info(
+            f"Selected {len(tasks)} task(s): {_format_task_choices(tasks)}",
+        )
     if options.completed_only:
         tasks = [t for t in tasks if t.status == "completed"]
         logger.trace(f"Filtered to {len(tasks)} completed task(s)")
@@ -74,7 +80,7 @@ class _FetchMixin(_ClientBase):
             ignore_task_ids=ignore_task_ids,
             silent_task_ids=silent_task_ids,
             task_selector=task_selector,
-            host=(self._cfg.host or ""),
+            host=self._cfg.host,
             project_name=project_name,
         )
         source = self._require_api("prepare_fetch")
@@ -101,8 +107,9 @@ class _FetchMixin(_ClientBase):
         for t in tasks:
             if t.name.casefold() == search:
                 return t
-        available = ", ".join(f"{t.name!r} (id={t.id})" for t in tasks)
-        raise TaskNotFoundError(f"Task not found: {s!r}. Available tasks: {available}")
+        raise TaskNotFoundError(
+            f"Task not found: {s!r}. Available tasks: {_format_task_choices(tasks)}"
+        )
 
     @staticmethod
     def resolve_task_selectors(
@@ -162,7 +169,7 @@ class _FetchMixin(_ClientBase):
             if _HTTP_5XX_MIN <= e.status_code < _HTTP_5XX_MAX:
                 if ctx.raise_on_failure:
                     raise
-                _log_task_5xx_skip(task, ctx.host, ctx.project_name, e)
+                _log_task_5xx_skip(task, ctx, e)
                 return None
             raise
 

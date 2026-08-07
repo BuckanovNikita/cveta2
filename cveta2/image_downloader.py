@@ -8,8 +8,7 @@ pending images are counted as failed. Already-cached files are skipped.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import parse_qs
 
 from loguru import logger
@@ -28,6 +27,8 @@ from cveta2.s3_utils import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from cveta2.models import ProjectAnnotations
     from cveta2.s3_types import S3Client
 
@@ -71,34 +72,34 @@ class DownloadStats(BaseModel):
     total: int = 0
 
 
-def _download_pending(  # noqa: PLR0913
+class _ProgressLabels(NamedTuple):
+    """Caption and unit noun of one transfer batch's progress bar."""
+
+    desc: str
+    unit: str
+
+
+_PROJECT_STORAGE_PROGRESS = _ProgressLabels("Downloading from project storage", "img")
+_S3_SYNC_PROGRESS = _ProgressLabels("Syncing from S3", "file")
+
+
+def _download_pending(
     s3_client: S3Client,
     bucket: str,
     pending: list[Transfer],
     stats: DownloadStats,
-    *,
-    desc: str,
-    unit: str,
+    progress: _ProgressLabels,
 ) -> None:
     """Download *pending* transfers, adding the outcome counts to *stats*."""
     ok, failed = run_s3_transfers(
         pending,
         lambda t: _download_one_s3(s3_client, bucket, t.key, t.path),
         lambda t: f"{t.name} (key={t.key})",
-        desc=desc,
-        unit=unit,
+        desc=progress.desc,
+        unit=progress.unit,
     )
     stats.downloaded += ok
     stats.failed += failed
-
-
-def _log_download_summary(what: str, stats: DownloadStats) -> None:
-    """Log the downloaded / cached / failed / total counters."""
-    logger.info(
-        f"{what}: {stats.downloaded} загружено, "
-        f"{stats.cached} из кэша, {stats.failed} ошибок "
-        f"(всего {stats.total})"
-    )
 
 
 class ImageDownloader:
@@ -143,7 +144,11 @@ class ImageDownloader:
         ensure_shared_dir(self._target_dir)
         self._download_all(pending, stats, project_cloud_storage)
 
-        _log_download_summary("Загрузка изображений", stats)
+        logger.info(
+            f"Загрузка изображений: {stats.downloaded} загружено, "
+            f"{stats.cached} из кэша, {stats.failed} ошибок "
+            f"(всего {stats.total})"
+        )
         return stats
 
     @staticmethod
@@ -218,10 +223,8 @@ class ImageDownloader:
         to_download: list[Transfer] = []
         missing: list[str] = []
         for image_name, frame_ref in pending.items():
-            s3_key: str | None = (
-                name_to_key.get(frame_ref)
-                or name_to_key.get(image_name)
-                or name_to_key.get(Path(image_name).name)
+            s3_key: str | None = name_to_key.get(frame_ref) or name_to_key.get(
+                image_name
             )
             if s3_key is None:
                 missing.append(image_name)
@@ -240,8 +243,7 @@ class ImageDownloader:
             project_cloud_storage.bucket,
             to_download,
             stats,
-            desc="Downloading from project storage",
-            unit="img",
+            _PROJECT_STORAGE_PROGRESS,
         )
 
     @staticmethod
@@ -250,7 +252,13 @@ class ImageDownloader:
         bucket: str,
         prefix: str,
     ) -> dict[str, str]:
-        """List objects under prefix; return name -> S3 key (full name + basename)."""
+        """List objects under prefix; return name -> S3 key (full name + basename).
+
+        The basename entries are what makes the ``image_name`` fallback in
+        :meth:`_download_all` work: ``image_name`` is always a bare
+        filename (the model validator collapses nested CVAT frame names
+        into ``frame_path``).
+        """
         pairs = list_s3_objects(s3_client, bucket, prefix)
         return names_with_basename_fallback((name, key) for key, name in pairs)
 
@@ -315,9 +323,12 @@ class S3Syncer:
             cs_info.bucket,
             to_download,
             stats,
-            desc="Syncing from S3",
-            unit="file",
+            _S3_SYNC_PROGRESS,
         )
 
-        _log_download_summary("S3 sync", stats)
+        logger.info(
+            f"S3 sync: {stats.downloaded} загружено, "
+            f"{stats.cached} из кэша, {stats.failed} ошибок "
+            f"(всего {stats.total})"
+        )
         return stats

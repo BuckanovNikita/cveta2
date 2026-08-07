@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from cveta2._client.ports import CvatApiPort
     from cveta2._client_ops.session import TaskWriteSession
 
+_STAGE_OR_STATE_REQUIRED = "Укажите stage и/или state."
+
 
 class _TaskOpsMixin(_ClientBase):
     """Mark frames deleted, drop labels, delete tasks and set job status."""
@@ -88,10 +90,10 @@ class _TaskOpsMixin(_ClientBase):
         num_frames = len(raw_meta.frames)
         requested = sorted(set(frame_ids))
         valid = [fid for fid in requested if 0 <= fid < num_frames]
-        unknown = [fid for fid in requested if fid < 0 or fid >= num_frames]
-        if unknown:
+        if len(valid) != len(requested):
             logger.warning(
-                f"Задача {task_id}: кадры {unknown} не найдены "
+                f"Задача {task_id}: кадры "
+                f"{sorted(set(requested) - set(valid))} не найдены "
                 f"(в задаче {num_frames} кадров) — пропускаем"
             )
         return self._patch_deleted_frames(api, task_id, raw_meta, valid)
@@ -222,7 +224,7 @@ class _TaskOpsMixin(_ClientBase):
 
         """
         if stage is None and state is None:
-            raise ValueError("Укажите stage и/или state.")
+            raise ValueError(_STAGE_OR_STATE_REQUIRED)
         api = self._require_api("set_task_jobs_status")
 
         jobs = api.get_task_jobs(task_id)

@@ -273,6 +273,8 @@ class TestCreateTaskIssues:
         created = client.create_task_issues(7, df)
 
         assert created == 2
+        api.get_task_data_meta.assert_called_once_with(7)
+        api.get_task_jobs.assert_called_once_with(7)
         calls = api.create_issue.call_args_list
         first = calls[0].args[0]
         second = calls[1].args[0]
@@ -303,6 +305,24 @@ class TestCreateTaskIssues:
         client = _client_with_api(api)
         row = _issue_row("img_0.jpg", "same")
         df = pd.DataFrame([row, row])
+
+        assert client.create_task_issues(7, df) == 1
+        assert api.create_issue.call_count == 1
+
+    def test_dedupe_ignores_columns_outside_the_key(self) -> None:
+        """Rows identical in image, text and bbox collapse to one issue.
+
+        The old dedupe case duplicated a row wholesale, so ``subset=`` could
+        be dropped entirely (making ``drop_duplicates`` compare every column)
+        without changing the result.  A real dataset carries an
+        ``instance_label`` that differs between the co-located boxes.
+        """
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
+        row = _issue_row("img_0.jpg", "same")
+        df = pd.DataFrame(
+            [{**row, "instance_label": "person"}, {**row, "instance_label": "car"}]
+        )
 
         assert client.create_task_issues(7, df) == 1
         assert api.create_issue.call_count == 1
@@ -350,20 +370,80 @@ class TestCreateTaskIssues:
         api.create_issue.assert_not_called()
         assert any("img_1.jpg" in msg for msg in capture_logs)
 
-    def test_missing_issue_state_column_returns_zero(self) -> None:
-        api = MagicMock(spec=CvatApiPort)
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"image_name": "img_0.jpg"},
+            {"image_name": "img_0.jpg", "issue_state": "new"},
+            {"image_name": "img_0.jpg", "issue_text": "нет состояния"},
+        ],
+        ids=["neither-column", "state-without-text", "text-without-state"],
+    )
+    def test_missing_issue_column_returns_zero(self, row: dict[str, Any]) -> None:
+        """Both columns are required, not just ``issue_state``.
+
+        Only the "neither" case existed, so the branch that back-fills a
+        missing ``issue_text`` was never entered: it could have been filled
+        with a non-empty placeholder, turning every ``new`` row into an issue.
+        """
+        api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
-        df = pd.DataFrame([{"image_name": "img_0.jpg"}])
+
+        assert client.create_task_issues(7, pd.DataFrame([row])) == 0
+        api.create_issue.assert_not_called()
+
+    def test_new_state_with_empty_text_ignored(self) -> None:
+        """An empty ``issue_text`` disqualifies the row even when it has a bbox.
+
+        The row previously carried no bbox, so it was dropped downstream for
+        the wrong reason: the ``issue_text != ""`` half of the predicate could
+        be inverted or compared against a different literal and the count
+        stayed 0 regardless.
+        """
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
+        df = pd.DataFrame([_issue_row("img_0.jpg", "")])
 
         assert client.create_task_issues(7, df) == 0
         api.create_issue.assert_not_called()
 
-    def test_new_state_with_empty_text_ignored(self) -> None:
-        api = MagicMock(spec=CvatApiPort)
+    def test_whitespace_only_text_is_not_an_issue(self) -> None:
+        """Padding must be stripped before the emptiness check."""
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
+        df = pd.DataFrame([_issue_row("img_0.jpg", "   ")])
+
+        assert client.create_task_issues(7, df) == 0
+        api.create_issue.assert_not_called()
+
+    def test_padding_around_state_and_text_is_stripped(self) -> None:
+        """A hand-edited CSV keeps the padding the author typed.
+
+        Nothing previously fed a padded value, so both ``.str.strip()`` calls
+        were free to disappear: the state would stop matching ``"new"`` and
+        the posted comment would carry the author's stray spaces.
+        """
+        api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
         df = pd.DataFrame(
-            [{"image_name": "img_0.jpg", "issue_text": "", "issue_state": "new"}]
+            [_issue_row("img_0.jpg", "  плохой бокс  ", issue_state="  new  ")]
         )
+
+        assert client.create_task_issues(7, df) == 1
+        assert api.create_issue.call_args.args[0].message == "плохой бокс"
+
+    def test_missing_text_on_a_new_row_is_not_an_issue(self) -> None:
+        """``pd.read_csv`` turns a blank ``issue_text`` cell into NaN.
+
+        ``test_csv_roundtrip_empty_state_read_as_nan_is_handled`` had NaN in
+        *both* columns, so the row was rejected on the state alone and the
+        ``fillna("")`` on the text was never load-bearing — without it NaN
+        stringifies to something non-empty and the row gets posted.
+        """
+        api = _api_for_issue_creation(1, _TWO_JOBS)
+        client = _client_with_api(api)
+        df = pd.DataFrame([_issue_row("img_0.jpg", "text")])
+        df["issue_text"] = None
 
         assert client.create_task_issues(7, df) == 0
         api.create_issue.assert_not_called()
@@ -387,16 +467,19 @@ class TestCreateTaskIssues:
         api.create_issue.assert_not_called()
 
     def test_open_and_resolved_states_are_not_uploaded(self) -> None:
-        api = MagicMock(spec=CvatApiPort)
+        """Only ``new`` is uploaded; fetched states are already in CVAT.
+
+        These rows previously had no bbox, so they were discarded downstream
+        whatever the predicate said — the ``&`` joining state and text could
+        become ``|`` and the count stayed 0.  With a full bbox the row would
+        actually be posted.
+        """
+        api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
         df = pd.DataFrame(
             [
-                {"image_name": "img_0.jpg", "issue_text": "a", "issue_state": "open"},
-                {
-                    "image_name": "img_0.jpg",
-                    "issue_text": "b",
-                    "issue_state": "resolved",
-                },
+                _issue_row("img_0.jpg", "a", issue_state="open"),
+                _issue_row("img_0.jpg", "b", issue_state="resolved"),
             ]
         )
 
