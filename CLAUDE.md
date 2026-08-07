@@ -335,12 +335,17 @@ counter-intuitive and decide whether a module is worth gating at all.
 
 ### Cost
 
-Measured at ~120 mutants/second with ~4.5s of fixed overhead per run. A
-571-mutant scope took 11s cold and 4.7s once every verdict was cached (a repeat
-run reports `0.00 mutations/second`). Execution is cheap and the fixed overhead
-dominates, so keep modules in `fast` until it approaches ~20s rather than
-splitting pre-emptively. Triage, not runtime, is the real cost: each survivor
-needs a diff read and a judgement call.
+~4.5s of fixed overhead per run, plus a throughput between ~120 mutants/second
+over in-memory frames and ~50 for modules whose tests round-trip CSVs through
+`tmp_path`. A fully cached run is 4.7s and reports `0.00 mutations/second`.
+
+At 1197 gated mutants, `full` takes 23s and `fast` 12s. Profile membership is
+chosen to keep that gap worth having: putting *every* gated module in `fast`
+measured 22s, so the split bought nothing. Keep `fast` under ~15s; when a newly
+gated module would push it past that, leave it to `full`.
+
+Triage, not runtime, is the real cost: each survivor needs a diff read and a
+judgement call.
 
 Measured baseline for the still-ungated convert modules (reproduce by adding
 the module to `only_mutate` and running the script):

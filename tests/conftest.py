@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import threading
 import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from loguru import logger
+from tqdm import tqdm
 
 from cveta2._client.mapping import _build_label_maps
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
@@ -105,6 +107,25 @@ def pytest_report_header() -> list[str]:
         "  Integration tests will NOT run. To include them:",
         "  CVAT_INTEGRATION_HOST=http://localhost:8080 uv run pytest",
     ]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _fork_safe_tqdm() -> None:
+    """Give tqdm no cross-process state, so a forked test session cannot hang.
+
+    mutmut runs each mutant by forking the process that already ran the suite.
+    Two pieces of tqdm's default global state do not survive that intact: the
+    monitor ``Thread``, which the first bar a child closes tries to join even
+    though it will never run there, and the write lock, whose
+    ``multiprocessing.RLock`` half is one semaphore shared by every child, so a
+    child killed while holding it wedges all the later ones. Either way the
+    child hangs until mutmut's wall clock kills it and the gate reports a
+    perfectly killable mutant as escaped. The monitor only auto-tunes the
+    refresh rate and the lock only orders bars across processes, so no test
+    behaviour depends on them.
+    """
+    tqdm.monitor_interval = 0
+    tqdm.set_lock(threading.RLock())
 
 
 @pytest.fixture(autouse=True)

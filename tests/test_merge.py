@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -120,6 +121,38 @@ class TestPropagateSplits:
 
         assert any("split задан в обоих датасетах" in m for m in capture_logs)
 
+    def test_no_conflict_warning_when_only_old_has_split(
+        self, capture_logs: list[str]
+    ) -> None:
+        """No conflict is reported when new has no split of its own.
+
+        The user is told about disagreeing split data only when both sides
+        actually carry a value.  Nothing pinned the negative case before, so
+        widening either set operation behind the warning went unnoticed.
+        """
+        old = _df([_row("a.jpg", split="train")])
+        new = _df([_row("a.jpg")])
+        merged = new.copy()
+
+        _propagate_splits(merged, old, new, {"a.jpg"})
+
+        assert not any("split задан в обоих датасетах" in m for m in capture_logs)
+
+    def test_first_old_row_wins_for_duplicate_image(self) -> None:
+        """When old has two split values for one image, the first one is used.
+
+        Both rows are non-null and differ only in ``split``, so deduplicating
+        on all columns instead of on ``image_name`` keeps both and the later
+        value silently overwrites the earlier one.
+        """
+        old = _df([_row("a.jpg", split="train"), _row("a.jpg", split="val")])
+        new = _df([_row("a.jpg")])
+        merged = new.copy()
+
+        result = _propagate_splits(merged, old, new, {"a.jpg"})
+
+        assert result["split"].iloc[0] == "train"
+
     def test_conflict_keeps_winner_split(self) -> None:
         """Winner's split value is preserved, not overwritten."""
         old = _df([_row("a.jpg", split="train")])
@@ -236,6 +269,21 @@ class TestMergeDatasetsEdgeCases:
 
         assert len(merged) == 0
 
+    def test_merged_row_labels_are_unique(self) -> None:
+        """Both sides contribute rows, so the result gets fresh row labels.
+
+        Every other test reads the merged frame by column or by position, so
+        nothing noticed that concatenating without re-indexing leaves the two
+        sources' 0..n labels colliding — ``merged.loc[0]`` would then hand the
+        caller two rows instead of one.
+        """
+        old = _df([_row("a.jpg"), _row("b.jpg")])
+        new = _df([_row("c.jpg"), _row("d.jpg")])
+
+        merged = _merge_datasets(old, new, set())
+
+        assert merged.index.is_unique
+
     def test_disjoint_datasets_fully_preserved(self) -> None:
         """No common images -- both sides fully preserved."""
         old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
@@ -343,6 +391,22 @@ class TestResolveByTime:
         # old max = Jan 15, new max = Jan 12 → old wins
         assert result == set()
 
+    def test_dates_are_compared_as_instants(self) -> None:
+        """A naive date on one side is read as UTC, not compared as wall time.
+
+        Every other case here uses the same ``+00:00`` offset on both sides,
+        so parsing without ``utc=True`` happened to agree.  Here old is naive
+        and new carries an offset: without normalisation the two timestamps
+        cannot be compared at all.
+        """
+        old = _tdf([_trow("a.jpg", date="2026-01-01T12:00:00")])
+        new = _tdf([_trow("a.jpg", date="2026-01-01T10:00:00+03:00")])
+
+        result = _resolve_by_time(old, new, {"a.jpg"})
+
+        # new is 07:00 UTC, old is 12:00 UTC → old wins.
+        assert result == set()
+
     def test_mixed_images_resolved_independently(self) -> None:
         old = _tdf(
             [
@@ -388,6 +452,21 @@ class TestMergeDatasetsByTime:
 
         assert len(merged) == 1
         assert merged.iloc[0]["instance_label"] == "cat"
+
+    def test_default_mode_ignores_dates(self) -> None:
+        """Without --by-time new wins even when old carries a later date.
+
+        The other default-mode tests leave every row on the same date, where
+        date-based resolution would pick new anyway; only a strictly newer old
+        row separates "new always wins" from "the later date wins".
+        """
+        old = _tdf([_trow("a.jpg", date=_T_NEW, label="old_a")])
+        new = _tdf([_trow("a.jpg", date=_T_OLD, label="new_a")])
+
+        merged = _merge_datasets(old, new, set())
+
+        assert len(merged) == 1
+        assert merged.iloc[0]["instance_label"] == "new_a"
 
     def test_by_time_deleted_still_excluded(self) -> None:
         old = _tdf(
@@ -461,8 +540,17 @@ class TestReadDeletedNames:
         assert _read_deleted_names(None) == set()
 
     def test_csv_format_with_image_name_column(self, tmp_path: Path) -> None:
+        """A multi-column CSV is parsed as CSV, not as one name per line.
+
+        With a single-column file the legacy line-per-name reader returns the
+        same names apart from the header, so it could stand in for the CSV
+        reader unnoticed; the extra column makes the two disagree.
+        """
         csv_path = tmp_path / "deleted.csv"
-        csv_path.write_text("image_name\na.jpg\nb.jpg\na.jpg\n", encoding="utf-8")
+        csv_path.write_text(
+            "image_name,reason\na.jpg,dup\nb.jpg,blurred\na.jpg,dup\n",
+            encoding="utf-8",
+        )
 
         result = _read_deleted_names(csv_path)
 
@@ -476,19 +564,30 @@ class TestReadDeletedNames:
 
         assert result == {"a.jpg", "b.jpg", "c.jpg"}
 
-    def test_missing_file_exits(self, tmp_path: Path) -> None:
+    def test_empty_file_yields_no_names(self, tmp_path: Path) -> None:
+        """A file with only blank lines means "nothing deleted", not an error."""
+        txt_path = tmp_path / "deleted.txt"
+        txt_path.write_text("\n  \n", encoding="utf-8")
+
+        assert _read_deleted_names(txt_path) == set()
+
+    def test_missing_file_error_names_the_file(self, tmp_path: Path) -> None:
+        """The error says which file is missing, not just that one is.
+
+        The message was never asserted, so dropping its content left the user
+        with a bare exception and no path to check.
+        """
         missing = tmp_path / "does_not_exist.csv"
 
-        with pytest.raises(Cveta2Error):
+        with pytest.raises(Cveta2Error, match=re.escape(str(missing))):
             _read_deleted_names(missing)
 
-    def test_malformed_csv_raises_instead_of_silent_fallback(
-        self, tmp_path: Path
-    ) -> None:
+    def test_malformed_csv_error_names_the_file(self, tmp_path: Path) -> None:
+        """A parse failure is reported against the offending file."""
         csv_path = tmp_path / "deleted.csv"
         csv_path.write_text('image_name\n"unterminated,quote\n', encoding="utf-8")
 
-        with pytest.raises(Cveta2Error):
+        with pytest.raises(Cveta2Error, match=re.escape(str(csv_path))):
             _read_deleted_names(csv_path)
 
 
@@ -605,6 +704,74 @@ class TestMergeDatasetsIO:
 
         with pytest.raises(Cveta2Error):
             merge_datasets(old_path, new_path, out_path, by_time=True)
+
+    def test_by_time_missing_column_in_old_only_raises(self, tmp_path: Path) -> None:
+        """--by-time validates the old CSV too, before any date is compared.
+
+        With the column missing on one side only, skipping that side's check
+        defers the failure to a raw pandas KeyError deep inside the merge
+        instead of the guided Cveta2Error.
+        """
+        old_path = tmp_path / "old.csv"
+        new_path = tmp_path / "new.csv"
+        out_path = tmp_path / "merged.csv"
+
+        no_time = _row("a.jpg")
+        del no_time["task_updated_date"]
+        write_dataset_csv(old_path, [dict(no_time)])
+        write_dataset_csv(new_path, [_trow("a.jpg", date=_T_NEW)])
+
+        with pytest.raises(Cveta2Error, match=re.escape(str(old_path))):
+            merge_datasets(old_path, new_path, out_path, by_time=True)
+
+    def test_by_time_missing_column_in_new_only_raises(self, tmp_path: Path) -> None:
+        """--by-time validates the new CSV too, before any date is compared."""
+        old_path = tmp_path / "old.csv"
+        new_path = tmp_path / "new.csv"
+        out_path = tmp_path / "merged.csv"
+
+        no_time = _row("a.jpg")
+        del no_time["task_updated_date"]
+        write_dataset_csv(old_path, [_trow("a.jpg", date=_T_NEW)])
+        write_dataset_csv(new_path, [dict(no_time)])
+
+        with pytest.raises(Cveta2Error, match=re.escape(str(new_path))):
+            merge_datasets(old_path, new_path, out_path, by_time=True)
+
+    def test_default_mode_keeps_new_when_old_is_newer(self, tmp_path: Path) -> None:
+        """Through the public entry point, --by-time off means new always wins.
+
+        ``test_merge_by_time`` pins the opposite outcome for the same data, so
+        without this pair the default of the ``by_time`` flag is unpinned.
+        """
+        old_path = tmp_path / "old.csv"
+        new_path = tmp_path / "new.csv"
+        out_path = tmp_path / "merged.csv"
+
+        write_dataset_csv(old_path, [_trow("a.jpg", date=_T_NEW, label="old_label")])
+        write_dataset_csv(new_path, [_trow("a.jpg", date=_T_OLD, label="new_label")])
+
+        merge_datasets(old_path, new_path, out_path)
+
+        result = pd.read_csv(out_path)
+        assert result.iloc[0]["instance_label"] == "new_label"
+
+    def test_output_parent_directories_are_created(self, tmp_path: Path) -> None:
+        """A nested output path is created, parents included.
+
+        Every other I/O test writes straight into tmp_path, which already
+        exists, so nothing required the parents of the output file.
+        """
+        old_path = tmp_path / "old.csv"
+        new_path = tmp_path / "new.csv"
+        out_path = tmp_path / "runs" / "2026-01" / "merged.csv"
+
+        write_dataset_csv(old_path, [_row("a.jpg")])
+        write_dataset_csv(new_path, [_row("b.jpg")])
+
+        merge_datasets(old_path, new_path, out_path)
+
+        assert set(pd.read_csv(out_path)["image_name"]) == {"a.jpg", "b.jpg"}
 
 
 # ---------------------------------------------------------------------------

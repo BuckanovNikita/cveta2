@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
 from loguru import logger
 
 from cveta2.exceptions import Cveta2Error
-from cveta2.services.output import format_counts, read_dataset_csv
+from cveta2.services.output import read_dataset_csv, save_csv
 
 # Minimal columns that every dataset CSV must contain.
 _REQUIRED_COLUMNS: set[str] = {
@@ -25,7 +26,7 @@ _REQUIRED_COLUMNS: set[str] = {
 _TIME_COLUMN = "task_updated_date"
 
 
-def _read_dataset_csv(path: Path, *, by_time: bool = False) -> pd.DataFrame:
+def _read_dataset_csv(path: Path, *, by_time: bool) -> pd.DataFrame:
     """Read a dataset CSV and validate required columns.
 
     When *by_time* is ``True`` the ``task_updated_date`` column is also
@@ -49,15 +50,15 @@ def _read_deleted_names(path: Path | None) -> set[str]:
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
 
-    text = path.read_text(encoding="utf-8")
-    first_line = text.split("\n", 1)[0]
-    if "image_name" not in first_line:
-        names = {line.strip() for line in text.splitlines() if line.strip()}
-        logger.info(f"Загружен {path}: {len(names)} удалённых изображений")
-        return names
+    text = path.read_bytes().decode("utf-8")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines or "image_name" not in lines[0]:
+        legacy_names = set(lines)
+        logger.info(f"Загружен {path}: {len(legacy_names)} удалённых изображений")
+        return legacy_names
 
     try:
-        df = pd.read_csv(path, encoding="utf-8")
+        df = pd.read_csv(StringIO(text))
     except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
         raise Cveta2Error(f"Ошибка: не удалось прочитать CSV {path}: {e}") from e
     names = set(df["image_name"].dropna().unique())
@@ -114,10 +115,9 @@ def _propagate_splits(
     mask = merged["split"].isna() & merged["image_name"].isin(old_splits.keys())
     merged.loc[mask, "split"] = merged.loc[mask, "image_name"].map(old_splits)
 
-    propagated_count = int(mask.sum())
-    if propagated_count > 0:
+    if mask.any():
         logger.info(
-            f"Пропагация split: заполнено {propagated_count} строк из old-датасета"
+            f"Пропагация split: заполнено {int(mask.sum())} строк из old-датасета"
         )
 
     return merged
@@ -139,29 +139,6 @@ def _split_winners(
         keep_from_new = _resolve_by_time(old, new, common_images)
         return keep_from_new, common_images - keep_from_new
     return common_images, set()
-
-
-def _log_merge_summary(  # noqa: PLR0913, PLR0917
-    old_images: set[str],
-    new_images: set[str],
-    deleted: set[str],
-    keep_from_new: set[str],
-    keep_from_old: set[str],
-    total_rows: int,
-) -> None:
-    """Log per-category image counts for a completed merge."""
-    only_old = old_images - new_images - deleted
-    only_new = new_images - old_images - deleted
-    deleted_hit = (old_images | new_images) & deleted
-    logger.info(
-        f"Результат слияния: "
-        f"только в old={len(only_old)}, "
-        f"только в new={len(only_new)}, "
-        f"конфликт→new={len(keep_from_new - deleted)}, "
-        f"конфликт→old={len(keep_from_old - deleted)}, "
-        f"удалено={len(deleted_hit)}, "
-        f"итого строк={total_rows}"
-    )
 
 
 def _merge_datasets(
@@ -197,8 +174,14 @@ def _merge_datasets(
     )
     merged = _propagate_splits(merged, old, new, common_images)
 
-    _log_merge_summary(
-        old_images, new_images, deleted, keep_from_new, keep_from_old, len(merged)
+    logger.info(
+        f"Результат слияния: "
+        f"только в old={len(old_images - new_images - deleted)}, "
+        f"только в new={len(new_images - old_images - deleted)}, "
+        f"конфликт→new={len(keep_from_new - deleted)}, "
+        f"конфликт→old={len(keep_from_old - deleted)}, "
+        f"удалено={len((old_images | new_images) & deleted)}, "
+        f"итого строк={len(merged)}"
     )
     return merged
 
@@ -257,6 +240,5 @@ def merge_datasets(
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    merged.to_csv(output_path, index=False, encoding="utf-8")
-    logger.info(f"Merged CSV saved to {output_path} ({format_counts(merged)})")
+    save_csv(merged, output_path)
     return merged

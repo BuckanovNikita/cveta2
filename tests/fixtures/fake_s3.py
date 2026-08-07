@@ -80,3 +80,60 @@ class FakeS3Client:
 
     def upload_file(self, filename: str, bucket: str, key: str) -> None:
         self.objects[self._store_key(bucket, key)] = Path(filename).read_bytes()
+
+
+_LIST_PARAMETERS = frozenset({"Bucket", "Prefix", "ContinuationToken"})
+
+
+class PagedFakeS3Client(FakeS3Client):
+    """A listing that spans several pages and rejects a malformed request.
+
+    :class:`FakeS3Client` always answers with a single page and tolerates
+    whatever it is handed, which leaves the continuation-token branch of
+    :func:`cveta2.s3_utils.list_s3_objects` untested.  This one behaves
+    like a real bucket instead: it refuses parameters S3 does not know,
+    refuses a continuation token other than the one it handed out with
+    the previous page, and omits ``Contents`` entirely from an empty page.
+    """
+
+    def __init__(
+        self,
+        pages: list[list[str]],
+        *,
+        bucket: str = "test-bucket",
+    ) -> None:
+        """Serve *pages* of object keys, one ``list_objects_v2`` call each."""
+        super().__init__(keyed_by_bucket=False)
+        self._pages = pages
+        self._bucket = bucket
+        self._expected_token: str | None = None
+        self.list_calls: list[dict[str, str]] = []
+
+    def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
+        self.list_calls.append(dict(kwargs))
+        unknown = sorted(set(kwargs) - _LIST_PARAMETERS)
+        if unknown:
+            msg = f"S3 rejects unknown list_objects_v2 parameters: {unknown}"
+            raise TypeError(msg)
+        if kwargs.get("Bucket") != self._bucket:
+            msg = f"no such bucket: {kwargs.get('Bucket')!r}"
+            raise ValueError(msg)
+        token = kwargs.get("ContinuationToken")
+        if token != self._expected_token:
+            msg = f"invalid continuation token: {token!r}"
+            raise ValueError(msg)
+        return self._page(int(token or 0), kwargs.get("Prefix", ""))
+
+    def _page(self, index: int, prefix: str) -> dict[str, Any]:
+        contents = [
+            {"Key": key, "Size": len(key)}
+            for key in self._pages[index]
+            if key.startswith(prefix)
+        ]
+        response: dict[str, Any] = {"Contents": contents} if contents else {}
+        has_more = index + 1 < len(self._pages)
+        self._expected_token = str(index + 1) if has_more else None
+        if has_more:
+            response["IsTruncated"] = True
+            response["NextContinuationToken"] = self._expected_token
+        return response

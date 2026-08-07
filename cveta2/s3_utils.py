@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, TypeVar
 
 import boto3
 from botocore.config import Config
@@ -56,13 +56,13 @@ def pick_latest_duplicate(context: str, name: str, candidates: Sequence[_T]) -> 
     same way: the lexicographically last path wins (i.e. the most recent
     ``YYYY-MM`` month folder).
     """
-    ordered = sorted(str(c) for c in candidates)
-    if len(ordered) > 1:
+    winner = max(candidates, key=str)
+    if len(candidates) > 1:
         logger.warning(
-            f"Дубликаты в {context} для {name!r}: {ordered} — "
-            f"используем {ordered[-1]!r}"
+            f"Дубликаты в {context} для {name!r}: "
+            f"{sorted(str(c) for c in candidates)} — используем {winner!r}"
         )
-    return max(candidates, key=str)
+    return winner
 
 
 def names_with_basename_fallback(pairs: Iterable[tuple[str, _T]]) -> dict[str, _T]:
@@ -103,18 +103,20 @@ def set_default_data_timeout(timeout: float | None) -> None:
 
 def make_s3_client(endpoint_url: str | None = None) -> S3Client:
     """Create a boto3 S3 client honoring the default data timeout."""
-    session = boto3.Session()
-    if _DataTimeoutDefault.value:
-        timeout_config = Config(
+    read_timeout = _DataTimeoutDefault.value
+    timeout_config = (
+        Config(
             connect_timeout=_S3_CONNECT_TIMEOUT,
-            read_timeout=_DataTimeoutDefault.value,
+            read_timeout=read_timeout,
             retries={"max_attempts": RETRY_ATTEMPTS, "mode": "standard"},
         )
-        return cast(
-            "S3Client",
-            session.client("s3", endpoint_url=endpoint_url, config=timeout_config),
-        )
-    return cast("S3Client", session.client("s3", endpoint_url=endpoint_url))
+        if read_timeout
+        else None
+    )
+    client: S3Client = boto3.Session().client(
+        "s3", endpoint_url=endpoint_url, config=timeout_config
+    )
+    return client
 
 
 @s3_retry

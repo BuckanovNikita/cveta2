@@ -37,6 +37,22 @@ def test_invalid_yaml_returns_empty_list(
     assert any("Failed to load" in m for m in capture_logs)
 
 
+def test_undecodable_bytes_return_empty_list(
+    tmp_path: Path, capture_logs: list[str]
+) -> None:
+    """A cache file that is not valid UTF-8 must degrade, not raise.
+
+    PyYAML owns the decoding (the file is handed to ``safe_load`` as bytes), so
+    a truncated or locale-mangled cache surfaces as a ``YAMLError`` the loader
+    already catches. Reading through ``open(encoding=...)`` instead would raise
+    ``UnicodeDecodeError``, which is not in the ``except`` clause.
+    """
+    path = tmp_path / "undecodable.yaml"
+    path.write_bytes(b"organizations:\n- slug: \xff\xfa\n")
+    assert load_orgs_cache(path) == []
+    assert any("Failed to load" in m for m in capture_logs)
+
+
 def test_non_dict_top_level_returns_empty_list(tmp_path: Path) -> None:
     path = tmp_path / "list.yaml"
     path.write_text("- one\n- two\n", encoding="utf-8")
@@ -86,6 +102,21 @@ def test_save_and_load_roundtrip(tmp_path: Path) -> None:
     ]
     save_orgs_cache(orgs, path)
     assert load_orgs_cache(path) == orgs
+
+
+def test_saved_file_keeps_cyrillic_unescaped(tmp_path: Path) -> None:
+    """``allow_unicode=True`` is what makes the file readable to a human.
+
+    No roundtrip test can pin it: ``safe_load`` turns an escaped code point
+    back into the same string as raw Cyrillic, so dropping the flag is
+    invisible to every other assertion here — and the cache is a config-dir
+    file people open and edit.
+    """
+    path = tmp_path / "cyrillic.yaml"
+    save_orgs_cache([_org("", ProjectInfo(id=1, name="проект"))], path)
+    text = path.read_text(encoding="utf-8")
+    assert "Личное пространство" in text
+    assert "проект" in text
 
 
 def test_save_empty_list(tmp_path: Path) -> None:

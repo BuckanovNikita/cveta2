@@ -120,6 +120,11 @@ only_mutate = [
     "cveta2/services/resolve.py",
     "cveta2/_client/extractors.py",
     "cveta2/_client/assembly.py",
+    "cveta2/models.py",
+    "cveta2/s3_utils.py",
+    "cveta2/projects_cache.py",
+    "cveta2/services/merge.py",
+    "cveta2/services/output.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -159,10 +164,15 @@ on_dependency_change = "rerun"
 # verdict only when no mutant name is passed, so spelling it '*' would
 # re-execute the whole scope every time instead of reusing the cache.
 #
-# Measured on this machine (571 mutants over 6 modules): ~120 mutants/second,
-# ~4.5s of fixed overhead per run, 11s cold, 4.7s when every verdict is cached.
-# Execution is cheap and the overhead dominates, so keep modules in `fast`
-# until it approaches ~20s rather than splitting pre-emptively.
+# Measured on this machine: ~4.5s of fixed overhead per run, and a throughput
+# that ranges from ~120 mutants/second over in-memory frames down to ~50 for
+# modules whose tests round-trip CSVs through tmp_path. A fully cached run is
+# 4.7s (a repeat run reports 0.00 mutations/second).
+#
+# Current split: `fast` is 12s, `full` (1197 mutants) is 23s. Membership is
+# chosen so the difference stays worth having - putting every module in `fast`
+# measured 22s, i.e. the split bought nothing. Keep `fast` under ~15s; when a
+# newly gated module would push it past that, leave it to `full`.
 [tool.cveta2.mutation.profiles]
 fast = [
     "cveta2.dataset_partition.*",
@@ -170,6 +180,8 @@ fast = [
     "cveta2.services.whats_new.*",
     "cveta2.services.resolve.*",
     "cveta2._client.assembly.*",
+    "cveta2.models.*",
+    "cveta2.projects_cache.*",
 ]
 # _client.extractors is gated but deliberately absent from `fast`: most of its
 # mutants land on the 23 keyword arguments of one BBoxAnnotation constructor
@@ -182,6 +194,42 @@ full = []
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]
+
+# run_s3_transfers: tqdm's `leave` only decides whether the finished progress
+# bar stays on screen. Same class as the logger suppression - presentation, not
+# behaviour - but it is one argument of a multi-line call, so it needs an entry
+# rather than a pattern.
+"cveta2.s3_utils.x_run_s3_transfers__mutmut_6" = "leave=None; tqdm falls back to its default, which erases nothing extra"
+"cveta2.s3_utils.x_run_s3_transfers__mutmut_10" = "drops leave=; same tqdm default as passing None"
+"cveta2.s3_utils.x_run_s3_transfers__mutmut_11" = "leave=True; keeps the finished bar on screen instead of erasing it"
+
+# save_orgs_cache: the only reader is load_orgs_cache via yaml.safe_load, which
+# is blind to key order and codec spelling. allow_unicode is NOT here - it is
+# killed by test_saved_file_keeps_cyrillic_unescaped, because the cache is a
+# config-dir file people open and edit.
+"cveta2.projects_cache.x_save_orgs_cache__mutmut_15" = "sort_keys=None; PyYAML branches on `if self.sort_keys`, so None behaves as False"
+"cveta2.projects_cache.x_save_orgs_cache__mutmut_19" = "drops sort_keys, reordering keys in the file; safe_load reads mappings order-blind"
+"cveta2.projects_cache.x_save_orgs_cache__mutmut_22" = "encoding=\"UTF-8\"; codecs.lookup normalizes codec names, so the bytes are identical"
+"cveta2.projects_cache.x_save_orgs_cache__mutmut_23" = "sort_keys=True, reordering keys in the file; safe_load reads mappings order-blind"
+
+# Codec spellings and pandas' own encoding fallback: io.common.get_handle
+# resolves `encoding = encoding or "utf-8"`, so None and a dropped argument
+# reach the same codec, and "UTF-8" is an alias codecs.lookup normalizes.
+"cveta2.services.merge.x__read_deleted_names__mutmut_7" = "\"UTF-8\" is the same codec as \"utf-8\""
+"cveta2.services.output.x_read_dataset_csv__mutmut_6" = "encoding=None; pandas' get_handle falls back to utf-8"
+"cveta2.services.output.x_read_dataset_csv__mutmut_8" = "drops encoding=; pandas' get_handle falls back to utf-8"
+"cveta2.services.output.x_read_dataset_csv__mutmut_10" = "\"UTF-8\" is a codec alias of \"utf-8\""
+"cveta2.services.output.x_save_csv__mutmut_3" = "encoding=None; pandas' get_handle falls back to utf-8"
+"cveta2.services.output.x_save_csv__mutmut_6" = "drops encoding=; pandas' get_handle falls back to utf-8"
+"cveta2.services.output.x_save_csv__mutmut_9" = "\"UTF-8\" is a codec alias of \"utf-8\""
+"cveta2.services.output.x_save_csv__mutmut_2" = "index=None is falsy; the written CSV is byte-identical to index=False"
+
+# BBoxAnnotation.to_csv_row: json.dumps treats ensure_ascii=None as falsy, so it
+# takes the same non-ASCII-preserving branch as False. ensure_ascii=True and the
+# dropped-argument variant DO change the CSV and are killed by
+# test_bbox_to_csv_row_keeps_cyrillic_attributes_literal.
+"cveta2.models.xǁBBoxAnnotationǁto_csv_row__mutmut_8" = "ensure_ascii=None is falsy; json.dumps takes the same branch as False"
+
 # task_to_records: `ctx.frame_issues.get(fid, ("", ""))[N]` reads one fixed
 # element of the default tuple, so mutating the *other* element cannot be
 # observed. The element each expression does read is pinned by

@@ -186,9 +186,8 @@ class BBoxAnnotation(_ImageRecordBase):
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON)."""
         row = self.model_dump()
-        row.pop("frame_path", None)
-        attrs = row.pop("attributes")
-        row["attributes"] = json.dumps(attrs, ensure_ascii=False)
+        del row["frame_path"]
+        row["attributes"] = json.dumps(row["attributes"], ensure_ascii=False)
         return row
 
 
@@ -200,20 +199,21 @@ CSV_COLUMNS: tuple[str, ...] = tuple(
 )
 
 
+_EMPTY_ATTRIBUTES_JSON = json.dumps({})
+"""``attributes`` cell written for records that carry no attribute map."""
+
+
 def _sparse_csv_row(model: BaseModel) -> dict[str, str | int | float | bool | None]:
     """Build a CSV row matching ``CSV_COLUMNS`` from a sparse model.
 
     Fields present on the model are written; all others default to None.
     An empty ``attributes`` JSON object is added.
     """
-    row: dict[str, str | int | float | bool | None] = dict.fromkeys(
-        CSV_COLUMNS,
-        None,
-    )
+    row: dict[str, str | int | float | bool | None] = dict.fromkeys(CSV_COLUMNS)
     for key, value in model.model_dump().items():
         if key in row:
             row[key] = value
-    row["attributes"] = json.dumps({}, ensure_ascii=False)
+    row["attributes"] = _EMPTY_ATTRIBUTES_JSON
     return row
 
 

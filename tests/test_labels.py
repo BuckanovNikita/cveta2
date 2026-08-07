@@ -114,6 +114,22 @@ def test_format_label_with_attributes() -> None:
     assert "атрибуты: breed, size" in result
 
 
+def test_format_label_joins_sections_with_a_double_space() -> None:
+    """The rendered line is asserted whole, separators included.
+
+    Every other format_display test uses substring checks, which say nothing
+    about what glues the sections together — the string a user actually reads
+    in the label picker.
+    """
+    label = LabelInfo(
+        id=7,
+        name="cat",
+        color="#ff0000",
+        attributes=[LabelAttributeInfo(id=10, name="breed")],
+    )
+    assert label.format_display() == "'cat' (id=7)  цвет=#ff0000  атрибуты: breed"
+
+
 def test_format_label_no_color_no_attrs() -> None:
     label = LabelInfo(id=5, name="fish", attributes=[])
     result = label.format_display()

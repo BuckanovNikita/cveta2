@@ -27,6 +27,18 @@ def test_bbox_to_csv_row_attributes_serialized_as_json() -> None:
     assert parsed == {"color": "red", "make": "BMW"}
 
 
+def test_bbox_to_csv_row_keeps_cyrillic_attributes_literal() -> None:
+    """Cyrillic attributes reach the CSV cell as text, not as u-escapes.
+
+    Real CVAT attribute names and values are Russian. Round-tripping through
+    ``json.loads`` cannot tell ``ensure_ascii=False`` from the default, so the
+    raw cell is asserted here: with escaping on, a human reading dataset.csv
+    (or a tool grepping it) finds an ASCII escape sequence instead of a word.
+    """
+    row = make_bbox(attributes={"цвет": "красный"}).to_csv_row()
+    assert row["attributes"] == '{"цвет": "красный"}'
+
+
 # ---------------------------------------------------------------------------
 # ImageWithoutAnnotations.to_csv_row
 # ---------------------------------------------------------------------------
@@ -69,6 +81,30 @@ def test_deleted_image_to_csv_row() -> None:
     for key in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br", "instance_label"):
         assert row[key] is None
     assert set(row.keys()) == set(CSV_COLUMNS)
+
+
+def test_sparse_rows_carry_an_empty_attributes_object() -> None:
+    """Records without an attribute map still write parseable JSON.
+
+    The other sparse-row tests only checked the bbox columns and the key set,
+    so a row whose ``attributes`` cell was blank looked identical to them —
+    yet every reader of the CSV parses that cell back into a dict.
+    """
+    without_annotations = ImageWithoutAnnotations(
+        image_name="img.jpg",
+        image_width=640,
+        image_height=480,
+        task_id=1,
+        task_name="task-1",
+        frame_id=0,
+    ).to_csv_row()
+    deleted = DeletedImage(
+        image_name="img.jpg", task_id=1, task_name="task-1", frame_id=0
+    ).to_csv_row()
+
+    for row in (without_annotations, deleted):
+        assert isinstance(row["attributes"], str)
+        assert json.loads(row["attributes"]) == {}
 
 
 # ---------------------------------------------------------------------------

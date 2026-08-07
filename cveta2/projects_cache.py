@@ -6,10 +6,15 @@ Format::
     - slug: ""            # "" = personal workspace
       name: Личное пространство
       projects:
-      - {id: 1, name: proj}
+      - id: 1
+        name: proj
 
 The legacy flat ``projects:`` format is ignored (the cache refills on the
 next rescan).
+
+The file is read and written as bytes so its encoding never depends on the
+process locale: PyYAML decodes UTF-8 on load and encodes it on save. Organization
+names are Russian, so a locale-default codec would mangle them on Windows.
 """
 
 from __future__ import annotations
@@ -46,8 +51,7 @@ def load_orgs_cache(path: Path | None = None) -> list[OrgProjects]:
     if not cache_path.is_file():
         return []
     try:
-        with cache_path.open("r", encoding="utf-8") as fh:
-            data = yaml.safe_load(fh)
+        data = yaml.safe_load(cache_path.read_bytes())
     except (OSError, yaml.YAMLError) as e:
         logger.warning(f"Failed to load projects cache from {cache_path}: {e}")
         return []
@@ -67,12 +71,9 @@ def save_orgs_cache(orgs: list[OrgProjects], path: Path | None = None) -> Path:
     cache_path = path if path is not None else get_projects_cache_path()
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     data = {"organizations": [org.model_dump() for org in orgs]}
-    content = yaml.safe_dump(
-        data, default_flow_style=False, sort_keys=False, allow_unicode=True
+    cache_path.write_bytes(
+        yaml.safe_dump(data, encoding="utf-8", sort_keys=False, allow_unicode=True)
     )
-    if not content.endswith("\n"):
-        content += "\n"
-    cache_path.write_text(content, encoding="utf-8")
     logger.trace(f"Projects cache saved to {cache_path} ({len(orgs)} organizations)")
     return cache_path
 
