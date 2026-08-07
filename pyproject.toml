@@ -115,6 +115,7 @@ source_paths = ["cveta2"]
 # survivors, so the pre-commit hook is never red on main.
 only_mutate = [
     "cveta2/dataset_partition.py",
+    "cveta2/_client/connection.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -159,7 +160,10 @@ on_dependency_change = "rerun"
 # Execution is cheap and the overhead dominates, so keep modules in `fast`
 # until it approaches ~20s rather than splitting pre-emptively.
 [tool.cveta2.mutation.profiles]
-fast = ["cveta2.dataset_partition.*"]
+fast = [
+    "cveta2.dataset_partition.*",
+    "cveta2._client.connection.*",
+]
 full = []
 
 # Mutants that no test can kill because the mutation genuinely cannot change

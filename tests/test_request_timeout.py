@@ -198,19 +198,24 @@ def test_make_s3_client_without_timeout(timeout: float | None) -> None:
 # ---------------------------------------------------------------------------
 
 
+_BOTO3_DEFAULT_READ_TIMEOUT = 60.0
+
+
 @pytest.mark.parametrize(
-    ("timeout", "expected_calls"),
+    ("timeout", "expected_calls", "expected_read_timeout"),
     [
-        (45.0, [45.0]),
-        (None, []),
-        (0.0, []),
+        (45.0, [45.0], 45.0),
+        (None, [], _BOTO3_DEFAULT_READ_TIMEOUT),
+        (0.0, [], _BOTO3_DEFAULT_READ_TIMEOUT),
     ],
     ids=["value_installs_global", "none_skips", "zero_skips"],
 )
+@pytest.mark.usefixtures("s3_env")
 def test_configure_data_timeout_installs_global_backstop(
     monkeypatch: pytest.MonkeyPatch,
     timeout: float | None,
     expected_calls: list[float],
+    expected_read_timeout: float,
 ) -> None:
     from cveta2._client import connection
 
@@ -218,7 +223,48 @@ def test_configure_data_timeout_installs_global_backstop(
     monkeypatch.setattr(connection, "install_global_request_timeout", calls.append)
     connection.configure_data_timeout(timeout)
     assert calls == expected_calls
+
+    # The S3 half of the same call. Asserting only the SDK backstop above left
+    # `set_default_data_timeout(timeout)` free to become
+    # `set_default_data_timeout(None)`, silently dropping the timeout from every
+    # S3 transfer while CVAT requests kept theirs.
+    client: Any = make_s3_client()
+    assert client.meta.config.read_timeout == pytest.approx(expected_read_timeout)
     set_default_data_timeout(None)
+
+
+# ---------------------------------------------------------------------------
+# SDK client kwargs
+# ---------------------------------------------------------------------------
+
+
+def test_build_client_kwargs_sends_credentials_only_when_both_are_set() -> None:
+    """A half-filled credential pair must not turn into an anonymous session.
+
+    ``if cfg.username and cfg.password`` guards this. An ``and`` -> ``or``
+    mutant sends ``(username, None)`` to the SDK, and dropping the guard opens
+    an unauthenticated CVAT session that fails much later and confusingly.
+    """
+    from cveta2._client.connection import _build_client_kwargs
+
+    both = CvatConfig(host="https://cvat.example.com", username="u", password="p")
+    assert _build_client_kwargs(both) == {
+        "host": "https://cvat.example.com",
+        "credentials": ("u", "p"),
+    }
+
+    username_only = CvatConfig(host="https://cvat.example.com", username="u")
+    assert _build_client_kwargs(username_only) == {"host": "https://cvat.example.com"}
+
+    password_only = CvatConfig(host="https://cvat.example.com", password="p")
+    assert _build_client_kwargs(password_only) == {"host": "https://cvat.example.com"}
+
+
+def test_build_client_kwargs_maps_a_missing_host_to_empty_string() -> None:
+    """``cfg.host or ""`` — make_client rejects None but accepts an empty host."""
+    from cveta2._client.connection import _build_client_kwargs
+
+    assert _build_client_kwargs(CvatConfig()) == {"host": ""}
 
 
 def test_install_global_request_timeout_covers_new_rest_clients(
