@@ -116,6 +116,8 @@ source_paths = ["cveta2"]
 only_mutate = [
     "cveta2/dataset_partition.py",
     "cveta2/_client/connection.py",
+    "cveta2/services/whats_new.py",
+    "cveta2/services/resolve.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -163,6 +165,8 @@ on_dependency_change = "rerun"
 fast = [
     "cveta2.dataset_partition.*",
     "cveta2._client.connection.*",
+    "cveta2.services.whats_new.*",
+    "cveta2.services.resolve.*",
 ]
 full = []
 

@@ -11,7 +11,7 @@ from cveta2.client import CvatClient
 from cveta2.commands.whats_new import run_whats_new
 from cveta2.config import CvatConfig
 from cveta2.exceptions import Cveta2Error
-from cveta2.services.whats_new import compute_cutoff
+from cveta2.services.whats_new import compute_baseline, compute_cutoff
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
     CFG,
@@ -159,6 +159,90 @@ class TestComputeCutoff:
 
         with pytest.raises(Cveta2Error, match="пуст"):
             compute_cutoff(df, tmp_path / "dataset.csv")
+
+    def test_blank_dates_count_as_missing(self, tmp_path: Path) -> None:
+        """Empty strings are dropped as well as NaN.
+
+        ``dropna()`` alone does not remove ``""`` — a CSV round-trip turns a
+        missing date into an empty cell, not None — so the explicit
+        ``!= ""`` filters carry the behaviour. Without a blank row here they
+        are unexercised and free to compare against any other literal.
+        """
+        df = pd.DataFrame(
+            [
+                {"task_id": 1, "task_status": "completed", "task_updated_date": ""},
+                {"task_id": 2, "task_status": "annotation", "task_updated_date": ""},
+            ]
+        )
+
+        with pytest.raises(Cveta2Error, match="пуст"):
+            compute_cutoff(df, tmp_path / "dataset.csv")
+
+    def test_blank_completed_date_falls_back_to_all_rows(self, tmp_path: Path) -> None:
+        """A completed row with a blank date must not win the max().
+
+        Pins the second ``!= ""`` filter specifically: string comparison would
+        otherwise rank ``""`` below any date and quietly pick the annotation
+        row anyway, hiding the bug. Here the blank row is the only completed
+        one, so the fallback to all rows is what produces a usable cutoff.
+        """
+        df = pd.DataFrame(
+            [
+                {"task_id": 1, "task_status": "completed", "task_updated_date": ""},
+                {
+                    "task_id": 2,
+                    "task_status": "annotation",
+                    "task_updated_date": "2026-01-06T00:00:00+00:00",
+                },
+            ]
+        )
+
+        assert (
+            compute_cutoff(df, tmp_path / "dataset.csv") == "2026-01-06T00:00:00+00:00"
+        )
+
+    def test_baseline_reports_the_csv_path_when_dates_are_unusable(
+        self, tmp_path: Path
+    ) -> None:
+        """compute_baseline must forward its own path into the error message.
+
+        The path is used nowhere else, so passing None instead is invisible
+        until a user hits the error and is told the column is empty in
+        ``None``.
+        """
+        csv_path = tmp_path / "dataset.csv"
+        df = pd.DataFrame(
+            [{"task_id": 1, "task_status": "completed", "task_updated_date": None}]
+        )
+
+        with pytest.raises(Cveta2Error, match=str(csv_path)):
+            compute_baseline(df, csv_path)
+
+    def test_baseline_collects_known_task_ids(self, tmp_path: Path) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "task_id": 1,
+                    "task_status": "completed",
+                    "task_updated_date": "2026-01-02T00:00:00+00:00",
+                },
+                {
+                    "task_id": 1,
+                    "task_status": "completed",
+                    "task_updated_date": "2026-01-03T00:00:00+00:00",
+                },
+                {
+                    "task_id": None,
+                    "task_status": "annotation",
+                    "task_updated_date": "2026-01-04T00:00:00+00:00",
+                },
+            ]
+        )
+
+        baseline = compute_baseline(df, tmp_path / "dataset.csv")
+
+        assert baseline.known_task_ids == {1}
+        assert baseline.cutoff == "2026-01-03T00:00:00+00:00"
 
 
 # ---------------------------------------------------------------------------

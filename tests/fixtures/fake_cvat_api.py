@@ -16,7 +16,7 @@ from cveta2.models import OrganizationInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
 
     from cveta2._client.dtos import (
         LabelPatch,
@@ -86,6 +86,7 @@ class FakeCvatApi:
         self.organizations: list[OrganizationInfo] = []
         self.organization: str | None = None
         self.organization_calls: list[str | None] = []
+        self.other_projects: list[ProjectInfo] = []
 
     @classmethod
     def from_tasks(
@@ -93,15 +94,23 @@ class FakeCvatApi:
         tasks: list[TaskInfo],
         *,
         project_name: str = "fake",
+        other_projects: Sequence[ProjectInfo] = (),
     ) -> FakeCvatApi:
-        """Create a fake API serving only a project with the given tasks."""
+        """Create a fake API serving only a project with the given tasks.
+
+        ``other_projects`` are additional entries for ``list_projects`` that own
+        no tasks. A single-project fake cannot tell a lookup that selects the
+        right project from one that selects any project at all.
+        """
         fixtures = LoadedFixtures(
             project=ProjectInfo(id=1, name=project_name),
             tasks=tasks,
             labels=[],
             task_data={},
         )
-        return cls(fixtures)
+        fake = cls(fixtures)
+        fake.other_projects = list(other_projects)
+        return fake
 
     def _raise_if_failing(self, method: str, task_id: int) -> None:
         if task_id in self._fail_task_ids and method in self._fail_methods:
@@ -121,8 +130,8 @@ class FakeCvatApi:
         self.organization_calls.append(org)
 
     def list_projects(self) -> list[ProjectInfo]:
-        """Return the single fixture project."""
-        return [self._project]
+        """Return the fixture project plus any extra ones the test configured."""
+        return [self._project, *self.other_projects]
 
     def get_project_tasks(self, _project_id: int) -> list[TaskInfo]:
         """Return tasks from fixture data."""

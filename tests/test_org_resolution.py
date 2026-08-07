@@ -11,6 +11,7 @@ from cveta2.client import CvatClient
 from cveta2.commands._helpers import resolve_project_from_args
 from cveta2.config import CvatConfig
 from cveta2.exceptions import Cveta2Error
+from cveta2.models import ProjectInfo
 
 if TYPE_CHECKING:
     from cveta2.models import TaskInfo
@@ -80,6 +81,51 @@ class TestResolveProjectSpecWithOrg:
         client, api = _fake_client(project_name="alpha")
         assert resolve_project_spec(client, "acme/alpha") == (1, "alpha")
         assert api.organization == "acme"
+
+    @pytest.mark.parametrize("spec", [1, "1", " 1 "], ids=["int", "digits", "padded"])
+    def test_numeric_spec_looks_the_name_up(self, spec: int | str) -> None:
+        """A numeric spec resolves to the matching project's name.
+
+        Two projects are required: with only one in the fake, ``p.id ==
+        project_id`` and ``p.id != project_id`` both yield that project's name,
+        so the lookup cannot be distinguished from "take whatever is first".
+        """
+        api = FakeCvatApi.from_tasks(
+            [make_task(42)],
+            project_name="alpha",
+            other_projects=[ProjectInfo(id=2, name="beta")],
+        )
+        client = CvatClient(CvatConfig(), api=api)
+
+        assert resolve_project_spec(client, spec) == (1, "alpha")
+
+    def test_numeric_spec_falls_back_to_the_id_as_name(self) -> None:
+        """An id nobody owns still yields a usable name, not None.
+
+        ``next(..., str(project_id))`` supplies it; dropping the default makes
+        next() raise StopIteration, and passing None puts "None" in front of
+        the user wherever the project name is displayed.
+        """
+        api = FakeCvatApi.from_tasks([make_task(42)], project_name="alpha")
+        client = CvatClient(CvatConfig(), api=api)
+
+        assert resolve_project_spec(client, 999) == (999, "999")
+
+    def test_name_spec_is_not_treated_as_an_id_lookup(self) -> None:
+        """Non-numeric specs keep the caller's name verbatim.
+
+        Guards the `or` in ``isinstance(spec, int) or name.isdigit()``: an
+        `and` there would send every name through the id branch, replacing it
+        with the id-derived fallback.
+        """
+        api = FakeCvatApi.from_tasks(
+            [make_task(42)],
+            project_name="alpha",
+            other_projects=[ProjectInfo(id=2, name="beta")],
+        )
+        client = CvatClient(CvatConfig(), api=api)
+
+        assert resolve_project_spec(client, "beta") == (2, "beta")
 
     def test_default_organization_property_stays(self) -> None:
         client, _api = _fake_client(organization="default-org")
