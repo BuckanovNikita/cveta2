@@ -118,6 +118,8 @@ only_mutate = [
     "cveta2/_client/connection.py",
     "cveta2/services/whats_new.py",
     "cveta2/services/resolve.py",
+    "cveta2/_client/extractors.py",
+    "cveta2/_client/assembly.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -167,7 +169,12 @@ fast = [
     "cveta2._client.connection.*",
     "cveta2.services.whats_new.*",
     "cveta2.services.resolve.*",
+    "cveta2._client.assembly.*",
 ]
+# _client.extractors is gated but deliberately absent from `fast`: most of its
+# mutants land on the 23 keyword arguments of one BBoxAnnotation constructor
+# and die on pydantic validation rather than on any assertion, so they cost a
+# full suite run each and say nothing about test quality.
 full = []
 
 # Mutants that no test can kill because the mutation genuinely cannot change
@@ -175,6 +182,13 @@ full = []
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]
+# task_to_records: `ctx.frame_issues.get(fid, ("", ""))[N]` reads one fixed
+# element of the default tuple, so mutating the *other* element cannot be
+# observed. The element each expression does read is pinned by
+# TestTaskToRecords::test_unannotated_frames_default_to_blank_issue_fields.
+"cveta2._client.assembly.x_task_to_records__mutmut_75" = "issue_text takes [0]; the mutation changes the unread [1] of the default"
+"cveta2._client.assembly.x_task_to_records__mutmut_81" = "issue_state takes [1]; the mutation changes the unread [0] of the default"
+
 # _latest_row_per_image: pandas' multi-key sort_values is stable on its own, so
 # _row_order only makes the intent explicit; keep="first" is the default.
 "cveta2.dataset_partition.x__latest_row_per_image__mutmut_6" = "_row_order=None; the two-key sort_values path is already stable"

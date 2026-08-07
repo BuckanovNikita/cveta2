@@ -101,6 +101,13 @@ def test_field_mapping_correct(
     assert first.occluded == first_shape.occluded
     assert first.rotation == first_shape.rotation
     assert first.source == first_shape.source
+    assert first.created_by_username == first_shape.created_by
+    assert first.image_width == ctx.frames[first_shape.frame].width
+    assert first.image_height == ctx.frames[first_shape.frame].height
+    assert first.z_order == first_shape.z_order
+    assert first.subset == ctx.subset
+    assert first.task_status == ctx.task_status
+    assert first.task_updated_date == ctx.task_updated_date
 
 
 def test_all_except_first_empty(
@@ -167,6 +174,43 @@ def test_attributes_resolved() -> None:
 
     assert len(result) == 1
     assert result[0].attributes == {"color": "red", "make": "BMW"}
+
+
+def test_unknown_attribute_spec_falls_back_to_its_id() -> None:
+    """An attribute whose spec is missing keeps a usable key.
+
+    Real CVAT projects carry attributes whose spec is not in the label map
+    (added to one label, read from a task that predates it). The fallback keys
+    them by id; without it the key becomes None and every such attribute
+    collapses into a single ``"null"`` entry once the dict is JSON-encoded into
+    the CSV cell — silently losing all but the last value.
+    """
+    ctx = _make_ctx(attr_names={10: "color"})
+    attrs = [
+        RawAttribute(spec_id=10, value="red"),
+        RawAttribute(spec_id=77, value="matte"),
+        RawAttribute(spec_id=88, value="rusty"),
+    ]
+    shape = make_raw_shape(attributes=attrs)
+
+    result = _collect_shapes([shape], ctx)
+
+    assert result[0].attributes == {"color": "red", "77": "matte", "88": "rusty"}
+
+
+def test_author_is_carried_over_from_the_shape() -> None:
+    """``created_by_username=shape.created_by`` must survive the transfer.
+
+    The coco8 fixtures have ``created_by=None``, which equals the model
+    default, so asserting against them cannot tell a dropped keyword from a
+    forwarded one. This uses a synthetic shape with a real author.
+    """
+    ctx = _make_ctx()
+    shape = make_raw_shape(created_by="tester")
+
+    result = _collect_shapes([shape], ctx)
+
+    assert result[0].created_by_username == "tester"
 
 
 def test_multiple_shapes_on_same_frame() -> None:

@@ -8,8 +8,19 @@ from cveta2._client.assembly import (
     build_name_to_frame,
     build_task_issues,
     build_upload_shapes,
+    find_job_for_frame,
+    task_to_records,
 )
-from cveta2._client.dtos import RawDataMeta, RawFrame, RawJob
+from cveta2._client.dtos import (
+    RawAnnotations,
+    RawAttribute,
+    RawDataMeta,
+    RawFrame,
+    RawIssue,
+    RawJob,
+)
+from cveta2.models import BBoxAnnotation, DeletedImage, ImageWithoutAnnotations
+from tests.helpers import make_raw_shape, make_task
 
 
 def _meta(*names: str) -> RawDataMeta:
@@ -122,6 +133,91 @@ class TestBuildUploadShapes:
         assert result.shapes == []
         assert result.unknown_images == 0
 
+    def test_bbox_completeness_is_decided_per_row(self) -> None:
+        """``.all(axis=1)`` — one incomplete row must not disqualify the rest.
+
+        With ``axis=None`` the frame reduces to a single scalar, so one NaN
+        anywhere drops every shape. A test whose rows are uniformly complete
+        cannot see the difference.
+        """
+        df = self._df(
+            [
+                {
+                    "image_name": "a.jpg",
+                    "instance_label": "car",
+                    "bbox_x_tl": 1.0,
+                    "bbox_y_tl": 2.0,
+                    "bbox_x_br": 3.0,
+                    "bbox_y_br": 4.0,
+                },
+                {
+                    "image_name": "b.jpg",
+                    "instance_label": "car",
+                    "bbox_x_tl": 1.0,
+                    "bbox_y_tl": None,
+                    "bbox_x_br": 3.0,
+                    "bbox_y_br": 4.0,
+                },
+            ]
+        )
+        result = build_upload_shapes(df, {"a.jpg": 0, "b.jpg": 1}, {"car": 1})
+
+        assert [s.frame for s in result.shapes] == [0]
+
+    def test_skipped_rows_do_not_stop_the_scan(self) -> None:
+        """Both skip branches ``continue``; a ``break`` would drop later rows.
+
+        Also pins ``unknown_images += 1`` against a plain assignment by using
+        two unknown images rather than one.
+        """
+        rows: list[dict[str, object]] = [
+            {
+                "image_name": name,
+                "instance_label": label,
+                "bbox_x_tl": 1.0,
+                "bbox_y_tl": 2.0,
+                "bbox_x_br": 3.0,
+                "bbox_y_br": 4.0,
+            }
+            for name, label in [
+                ("missing1.jpg", "car"),
+                ("missing2.jpg", "car"),
+                ("a.jpg", "ghost"),
+                ("a.jpg", "car"),
+            ]
+        ]
+        result = build_upload_shapes(self._df(rows), {"a.jpg": 0}, {"car": 1})
+
+        assert len(result.shapes) == 1
+        assert result.unknown_images == 2
+        assert result.unknown_labels == ["ghost"]
+
+
+class TestFindJobForFrame:
+    """Tests for find_job_for_frame() range containment."""
+
+    def test_both_range_ends_are_inclusive(self) -> None:
+        """``start <= frame <= stop`` — both boundaries belong to the job.
+
+        Probing only the interior of a range leaves either comparison free to
+        become strict, which orphans the last frame of every job and sends its
+        issues nowhere.
+        """
+        jobs = [RawJob(id=1, start_frame=0, stop_frame=9)]
+
+        assert find_job_for_frame(jobs, 0) == 1
+        assert find_job_for_frame(jobs, 9) == 1
+        assert find_job_for_frame(jobs, 10) is None
+
+    def test_first_matching_job_wins(self) -> None:
+        jobs = [
+            RawJob(id=1, start_frame=0, stop_frame=9),
+            RawJob(id=2, start_frame=10, stop_frame=19),
+        ]
+
+        assert find_job_for_frame(jobs, 10) == 2
+        assert find_job_for_frame(jobs, 20) is None
+
 
 class TestBuildTaskIssues:
     """Tests for build_task_issues() row -> NewIssue translation."""
@@ -160,3 +256,148 @@ class TestBuildTaskIssues:
         assert result.issues == []
         assert result.missing_bbox == ["known.jpg"]
         assert result.unknown_images == ["unknown.jpg"]
+
+    def test_skipped_rows_do_not_stop_the_scan(self) -> None:
+        """Every skip branch must ``continue`` rather than abandon the scan.
+
+        A ``break`` in any of the three would silently drop the task's
+        remaining issues after the first bad row.
+        """
+        incomplete = self._row("a.jpg")
+        incomplete["bbox_y_br"] = None
+        rows = [
+            self._row("unknown.jpg"),
+            incomplete,
+            self._row("unmapped.jpg"),
+            self._row("a.jpg"),
+        ]
+        # The job covers frame 3 but not the frame "unmapped.jpg" sits on.
+        jobs = [RawJob(id=7, start_frame=3, stop_frame=3)]
+
+        result = build_task_issues(
+            pd.DataFrame(rows), {"a.jpg": 3, "unmapped.jpg": 50}, jobs
+        )
+
+        assert len(result.issues) == 1
+        assert result.unknown_images == ["unknown.jpg"]
+        assert result.missing_bbox == ["a.jpg"]
+        assert result.unmapped_frames == ["unmapped.jpg"]
+
+
+class TestTaskToRecords:
+    """Tests for task_to_records() DTO -> domain record assembly."""
+
+    @staticmethod
+    def _meta_with_deleted() -> RawDataMeta:
+        """Two known frames; deleted ids include one with no metadata at all."""
+        return RawDataMeta(
+            frames=[
+                RawFrame(name="kept.jpg", width=640, height=480),
+                RawFrame(name="gone.jpg", width=800, height=600),
+            ],
+            deleted_frames=[1, 99],
+        )
+
+    def test_deleted_frames_carry_task_provenance(self) -> None:
+        task = make_task(3, status="completed", subset="train", updated="2026-02-02")
+
+        _records, deleted = task_to_records(
+            task, self._meta_with_deleted(), RawAnnotations(), {}, {}
+        )
+
+        assert deleted == [
+            DeletedImage(
+                task_id=3,
+                task_name="task-3",
+                task_status="completed",
+                task_updated_date="2026-02-02",
+                frame_id=1,
+                image_name="gone.jpg",
+                image_width=800,
+                image_height=600,
+                subset="train",
+            ),
+            DeletedImage(
+                task_id=3,
+                task_name="task-3",
+                task_status="completed",
+                task_updated_date="2026-02-02",
+                frame_id=99,
+                image_name="<unknown>",
+                image_width=0,
+                image_height=0,
+                subset="train",
+            ),
+        ]
+
+    def test_unannotated_frames_default_to_blank_issue_fields(self) -> None:
+        """A frame with no issue must yield empty strings, not placeholders.
+
+        ``ctx.frame_issues.get(fid, ("", ""))`` supplies them, and the default
+        is only observable on a frame that has no issue at all.
+        """
+        task = make_task(1, subset="val")
+        meta = RawDataMeta(frames=[RawFrame(name="plain.jpg", width=10, height=20)])
+
+        records, _deleted = task_to_records(task, meta, RawAnnotations(), {}, {})
+
+        assert records == [
+            ImageWithoutAnnotations(
+                image_name="plain.jpg",
+                image_width=10,
+                image_height=20,
+                task_id=1,
+                task_name="task-1",
+                task_status="completed",
+                task_updated_date="2026-01-01T00:00:00+00:00",
+                frame_id=0,
+                subset="val",
+                issue_text="",
+                issue_state="",
+            )
+        ]
+
+    def test_unannotated_frame_keeps_its_issue(self) -> None:
+        task = make_task(1)
+        meta = RawDataMeta(frames=[RawFrame(name="plain.jpg", width=10, height=20)])
+        issues = [RawIssue(id=5, frame=0, resolved=False, comments=["look here"])]
+
+        records, _deleted = task_to_records(
+            task, meta, RawAnnotations(), {}, {}, issues
+        )
+
+        assert records[0].issue_text == "look here"
+        assert records[0].issue_state == "open"
+
+    def test_attribute_names_reach_the_annotations(self) -> None:
+        """attr_names must be forwarded, not dropped on the way to the shapes."""
+        task = make_task(1)
+        meta = RawDataMeta(frames=[RawFrame(name="a.jpg", width=10, height=20)])
+        shape = make_raw_shape(attributes=[RawAttribute(spec_id=10, value="red")])
+
+        records, _deleted = task_to_records(
+            task, meta, RawAnnotations(shapes=[shape]), {1: "car"}, {10: "color"}
+        )
+
+        annotation = records[0]
+        assert isinstance(annotation, BBoxAnnotation)
+        assert annotation.attributes == {"color": "red"}
+
+    def test_deleted_and_annotated_frames_are_not_reported_as_empty(self) -> None:
+        task = make_task(1)
+        meta = RawDataMeta(
+            frames=[
+                RawFrame(name="annotated.jpg", width=10, height=20),
+                RawFrame(name="deleted.jpg", width=10, height=20),
+                RawFrame(name="empty.jpg", width=10, height=20),
+            ],
+            deleted_frames=[1],
+        )
+        shape = make_raw_shape(frame=0, label_id=1)
+
+        records, _deleted = task_to_records(
+            task, meta, RawAnnotations(shapes=[shape]), {1: "car"}, {}
+        )
+
+        without = [r for r in records if isinstance(r, ImageWithoutAnnotations)]
+        assert [r.image_name for r in without] == ["empty.jpg"]
