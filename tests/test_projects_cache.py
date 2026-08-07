@@ -134,3 +134,16 @@ def test_update_org_projects_replaces_only_that_org(tmp_path: Path) -> None:
     assert [p.name for p in loaded[""].projects] == ["personal"]
     assert [p.name for p in loaded["acme"].projects] == ["new"]
     assert loaded["acme"].name == "Acme"
+
+
+def test_default_path_stays_inside_the_isolated_config_dir(tmp_path: Path) -> None:
+    """The no-path branch must never reach the developer's real ~/.config/cveta2.
+
+    Pins the ``_isolate_config`` autouse fixture against the whole family of
+    mutations that swap ``path is not None`` for ``path is None``: those
+    redirect the write to the default location, which without isolation is the
+    real ``projects.yaml``.
+    """
+    written = save_orgs_cache([_org("", ProjectInfo(id=1, name="personal"))])
+    assert written.is_relative_to(tmp_path)
+    assert [p.name for p in load_projects_cache(org="")] == ["personal"]

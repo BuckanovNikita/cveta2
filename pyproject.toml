@@ -104,7 +104,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-v", "--tb=short", "-n", "auto"]
+addopts = ["-v", "--tb=short", "-n", "auto", "-p", "tests.env_isolation"]
 markers = [
     "integration: requires running CVAT instance (only active when CVAT_INTEGRATION_HOST is set)",
 ]

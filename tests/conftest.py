@@ -25,6 +25,16 @@ if TYPE_CHECKING:
 
 COCO8_DIR = Path(__file__).resolve().parent / "fixtures" / "cvat" / "coco8-dev"
 
+# Cleared for every test so a developer's own CVAT credentials never leak in.
+_CVAT_ENV_VARS = (
+    "CVAT_HOST",
+    "CVAT_ORGANIZATION",
+    "CVAT_USERNAME",
+    "CVAT_PASSWORD",
+    "CVETA2_DATA_TIMEOUT",
+    "CVETA2_CLEARML",
+)
+
 # Gate tests/integration/ collection on CVAT_INTEGRATION_HOST env var.
 collect_ignore_glob: list[str] = (
     [] if os.environ.get("CVAT_INTEGRATION_HOST") else ["integration/*"]
@@ -109,15 +119,28 @@ def _disable_task_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CVETA2_DISABLE_CACHE", "true")
 
 
-@pytest.fixture
-def test_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Write a minimal test config and isolate env from real CVAT vars."""
+@pytest.fixture(autouse=True)
+def isolated_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point every config lookup at tmp_path so tests never read real config.
+
+    Without this, ``CvatConfig.load()`` and ``get_projects_cache_path()`` fall
+    back to the default location and test outcomes depend on the developer's own
+    config. ``tests/env_isolation.py`` makes that fallback harmless; this fixture
+    makes it unreachable, and gives each test its own config path. Named without
+    a leading underscore because ``test_config`` requests its value.
+    """
     cfg_path = tmp_path / "config.yaml"
-    write_test_config(cfg_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    for var in ("CVAT_HOST", "CVAT_ORGANIZATION", "CVAT_USERNAME", "CVAT_PASSWORD"):
+    for var in _CVAT_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     return cfg_path
+
+
+@pytest.fixture
+def test_config(isolated_config_path: Path) -> Path:
+    """Write a minimal test config into the already-isolated config path."""
+    write_test_config(isolated_config_path)
+    return isolated_config_path
 
 
 @pytest.fixture

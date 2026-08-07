@@ -173,6 +173,21 @@ def _clear_cvat_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
+def test_default_config_path_is_not_the_real_home() -> None:
+    """The import-time CONFIG_PATH must point inside the throwaway test home.
+
+    ``CvatConfig.save`` and ``CvatConfig.from_file`` take ``path=CONFIG_PATH`` as
+    a default argument, bound when the module is imported — no fixture can
+    redirect it afterwards. If ``tests/env_isolation.py`` stops being loaded
+    (``-p tests.env_isolation`` in addopts), those defaults silently point at the
+    developer's real ``~/.config/cveta2/`` and a stray no-path call overwrites it.
+    """
+    from cveta2.config import CONFIG_DIR, CONFIG_PATH
+
+    assert "cveta2-test-home-" in str(CONFIG_DIR)
+    assert CONFIG_PATH == CONFIG_DIR / "config.yaml"
+
+
 def test_preset_provides_defaults(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
