@@ -252,6 +252,7 @@ layers = [
     "cveta2.services",
     "cveta2._clearml",
     "cveta2.client",
+    "cveta2._client_ops",
     "cveta2._client",
 ]
 [[tool.importlinter.contracts]]

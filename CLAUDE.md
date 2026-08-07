@@ -28,7 +28,8 @@ uv run ruff check --fix .  # auto-fix
 uv run mypy .              # type check
 uv run lint-imports        # architecture contracts
 uv run vulture             # dead code detection
-./scripts/mutation_test.sh # mutation testing (mutmut) + pass/fail gate
+./scripts/mutation_test.sh --profile fast  # mutation testing gate (pre-commit subset)
+./scripts/mutation_test.sh --profile full  # mutation testing gate (whole scope, pre-push)
 ```
 
 **Style**: Always use `loguru` for logging (never `print`), pydantic for configs, f-strings over structured logging.
@@ -44,7 +45,7 @@ uv run vulture             # dead code detection
 **Layered architecture** enforced by import-linter (see `pyproject.toml`):
 
 ```
-cli → commands → api → services → _clearml → client → _client
+cli → commands → api → services → _clearml → client → _client_ops → _client
       ↓
    models, exceptions, config (foundation - no upward imports)
 ```
@@ -71,7 +72,7 @@ code is confined to `_client`.
   - `whats_new.py` - List tasks completed after a fetched dataset CSV
   - `doctor.py` - Diagnostic checks
   - `_bootstrap.py` - `open_client()`: single config load, host check, timeout setup, credential prompt (the ONLY place prompting happens)
-  - `_task_selector.py` / `_helpers.py` - Shared internals
+  - `_helpers.py` - Shared internals (task-selector resolution lives in `fetch.py:_resolve_task_selector`)
 - **`cveta2/api.py`** - Public workflow functions mirroring the CLI 1:1 (`fetch`, `upload`, `convert_*`, `merge`, `whats_new`, `s3_sync`, `get_labels`, `update_labels`, `task_*`), re-exported from `cveta2/__init__.py`. Never prompts — missing settings raise `MissingHostError` / `MissingCredentialsError`.
 - **`cveta2/services/`** - Orchestration (no prompts, no `sys.exit`; raise `Cveta2Error`):
   - `fetch.py` - `fetch_project()` / `fetch_selected_tasks()` pipelines
@@ -81,7 +82,15 @@ code is confined to `_client`.
   - `output.py` - CSV read/write, path enrichment
   - `resolve.py` - project resolution (`ORG/PROJECT` spec parsing, org switching, project-from-task inference) and `sync_roots` override
   - `whats_new.py` - cutoff computation
-- **`cveta2/client.py`** - High-level `CvatClient` domain orchestration over the port (SDK-free; requires a context manager for remote calls, never prompts)
+- **`cveta2/client.py`** - `CvatClient`, a thin composition of the `_client_ops` mixins (SDK-free; requires a context manager for remote calls, never prompts)
+- **`cveta2/_client_ops/`** - The domain orchestration behind `CvatClient`, split into cohesive mixins. Same architecture layer as `client.py`, and SDK-free — no file here imports `cvat_sdk`:
+  - `base.py` - `_ClientBase`: config, lazy API handle, context-manager lifecycle
+  - `read.py` / `fetch.py` - project & task lookups, per-task fetch pipeline
+  - `write.py` - task creation, annotation and issue upload, label patches
+  - `task_ops.py` - mark-deleted, drop-label, delete, status transitions
+  - `images.py` - S3 download orchestration
+  - `session.py` - `TaskWriteSession`, memoizing one `data_meta` fetch per task
+  - `shared.py` - `FetchContext` and the 5xx skip helper
 - **`cveta2/_client/`** - All CVAT SDK code (internal):
   - `ports.py` - `CvatReadPort` + `CvatWritePort` protocols (combined as `CvatApiPort`; enables test fakes)
   - `sdk_adapter.py` - Implements both ports over `cvat_sdk`; translates SDK errors to `CvatApiError`
@@ -230,54 +239,153 @@ Config loaded via `CvatConfig.load()` from:
 
 ## Mutation Testing
 
-`./scripts/mutation_test.sh` runs mutmut over the modules listed in
-`[tool.mutmut].only_mutate` and fails if any mutant survives. It runs as a
-pre-commit hook on every commit (~10s at the current scope).
+`./scripts/mutation_test.sh` runs mutmut over the modules in
+`[tool.mutmut].only_mutate` and fails if any mutant survives unexplained.
 
-**Scope is a ratchet.** `only_mutate` starts at `cveta2/dataset_partition.py`
-(217 mutants, 204 killed, 13 allowlisted). A module joins the list in the *same
-commit* that drives it to zero unexplained survivors, so the hook is never red
-on `main`. Adapters (`cli.py`, `commands/`, `_client/`, `config.py`) are
-deliberately excluded — they yield mostly equivalent mutants.
+**Two profiles**, defined in `[tool.cveta2.mutation.profiles]`:
 
-Measured baselines for the remaining target modules, so expanding scope starts
-from data (add the module to `only_mutate` and run the script to reproduce):
+```bash
+./scripts/mutation_test.sh --profile fast   # pre-commit subset
+./scripts/mutation_test.sh --profile full   # whole gated scope (pre-push)
+./scripts/mutation_test.sh                  # whole scope, no filter
+uv run pre-commit install --hook-type pre-push   # required once, for the full gate
+```
+
+`full` is an **empty glob list** on purpose. mutmut honours a cached verdict
+only when no positional mutant name is given, so writing it as `"*"` would
+re-execute every mutant on every push. `fast` accepts that cost for its subset
+in exchange for skipping the rest.
+
+**Scope is a ratchet.** A module joins `only_mutate` in the *same commit* that
+drives it to zero unexplained survivors, so the hook is never red on `main`.
+There is no "measured but ungated" tier: `mutmut results` walks every file in
+`only_mutate` regardless of what the run filtered on, so a parked module with
+survivors reddens the full profile immediately. Measure a candidate by
+temporarily adding it and reverting before committing.
+
+**Two-stage entry criterion.** `mutate_only_covered_lines` is off, so every
+mutant on an *uncovered* line is an automatic survivor that says nothing about
+assertion quality. Close line coverage first, then triage mutants. The real
+disqualifier is mutmut's own `no tests` status (exit code 33), not the
+`[tool.coverage.run] omit` list — that is a reporting setting mutmut never
+consults.
+
+**When the hook fails**, inspect with `uv run mutmut show <name>` or
+`uv run mutmut browse`, then in preference order: strengthen a test (the
+default), restructure the source so the mutant cannot exist, or — only when the
+mutation genuinely cannot change behaviour — add it to
+`[tool.cveta2.mutation.equivalent]` with a reason. The gate also fails on a
+*stale* allowlist entry: mutmut renumbers mutants whenever a function changes,
+so a justification cannot silently drift onto a different mutant. Keep the
+allowlist small; at scale every refactor of a mutated function forces
+re-triage.
+
+Two anti-patterns, both of which produce brittle change-detector tests:
+
+- Do not assert exact `yaml.safe_dump` / `json.dumps` output when the only
+  reader parses it back — `safe_load` is blind to escaping, key order and flow
+  style, so such a test breaks on any unrelated field addition.
+- Do not write a test whose only purpose is killing a mutant on an internal
+  expression that reaches a log message. Restructure the source instead.
+
+### What actually gets mutated
+
+Verified against the installed mutmut 3.7 source; several of these are
+counter-intuitive and decide whether a module is worth gating at all.
+
+- **Only code inside a top-level `FunctionDef`.** Module-level constants
+  (`CSV_COLUMNS`, `_DIR_MODE`, `_HTTP_5XX_MIN`) produce no mutants. Moving a
+  repeated literal to module level is therefore a legitimate way to remove a
+  cluster of unkillable mutants.
+- **Decorated functions and classes are skipped entirely, body included**
+  (`file_mutation.py:281-293`), except a single bare
+  `@staticmethod`/`@classmethod`. So `@property`, `@contextmanager`,
+  `@dataclass`, `@field_validator` and `@s3_retry` yield nothing. Pydantic
+  models declared by inheritance are *not* skipped, so plain validator
+  functions wired by class-body assignment still get mutated.
+- **f-strings are never mutated** — the string operator fires only on
+  `cst.SimpleString`. Since this project logs exclusively via f-strings, log
+  message text was never mutated; `do_not_mutate_patterns` now suppresses
+  logger calls at every level, which removes the one remaining
+  whole-argument-to-`None` mutant per call site.
+- **A glob matching no mutant crashes the run** (`assert filtered_mutants`), so
+  never name a zero-mutant module in a profile.
+
+### Config notes that are easy to get wrong
+
+- `pytest_add_cli_args` must keep `-n 0`; mutmut runs `pytest.main()` in each
+  forked child and the global `addopts = [..., "-n", "auto"]` would otherwise
+  spawn an xdist pool per mutant, which looks like a hang.
+- `cache_invalidation_files` + `on_dependency_change = "rerun"` are
+  load-bearing: mutmut keys a cached verdict on the *source* function's text,
+  so without them a weakened test leaves the gate green on stale results. The
+  corollary is that editing any file under `tests/` re-runs the entire scope.
+- `mutate_only_covered_lines` must stay off — its coverage pre-pass leaves a
+  half-imported numpy in `sys.modules` and the stats run then dies.
+- **`only_mutate` and `do_not_mutate_patterns` are excluded from mutmut's own
+  config fingerprint**, which hashes only pytest args, timeouts and the
+  type-check command. Changing either therefore leaves a stale mutant tree:
+  adding five modules to `only_mutate` once reported `0 files mutated, 6
+  unmodified` and re-gated the old mutants as if nothing had changed.
+  `scripts/mutation_config.py sync-scope` fingerprints those fields itself and
+  wipes `mutants/` when they move, so this is handled automatically — but if
+  you ever bypass `mutation_test.sh`, wipe `mutants/` by hand.
+- `mutants/` is mutmut's working copy: gitignored, and excluded from mypy (two
+  `cveta2` packages otherwise collide) and ruff.
+
+### Cost
+
+Measured at ~120 mutants/second with ~4.5s of fixed overhead per run. A
+571-mutant scope took 11s cold and 4.7s once every verdict was cached (a repeat
+run reports `0.00 mutations/second`). Execution is cheap and the fixed overhead
+dominates, so keep modules in `fast` until it approaches ~20s rather than
+splitting pre-emptively. Triage, not runtime, is the real cost: each survivor
+needs a diff read and a judgement call.
+
+Measured baseline for the still-ungated convert modules (reproduce by adding
+the module to `only_mutate` and running the script):
 
 | Module | Lines | Unexplained survivors |
 |---|---|---|
 | `services/convert/yolo.py` | 407 | 132 |
 | `services/convert/common.py` | 348 | 106 |
 | `services/convert/coco.py` | 135 | 54 |
-| `services/`, `models.py`, `task_cache.py`, `s3_utils.py`, `fs_utils.py` | ~880 | not yet measured |
 
-Triage, not runtime, is the cost — a full run over `dataset_partition.py` plus
-`services/convert/` takes ~24s, but each survivor needs a diff read and a
-judgement call.
+### Permanently out of scope
 
-**When the hook fails**, inspect with `uv run mutmut show <name>` or
-`uv run mutmut browse`, then either strengthen a test (the default) or — only
-if the mutation genuinely cannot change behaviour — add the mutant to
-`[tool.cveta2.mutation.equivalent]` in `pyproject.toml` with a reason. The gate
-also fails on a *stale* allowlist entry: mutmut renumbers mutants whenever a
-function changes, so a justification cannot silently drift onto a different
-mutant.
+Two distinct reasons, which imply different things about whether the exclusion
+could ever be lifted:
 
-Config notes that are easy to get wrong (all verified against mutmut's source):
+- **Zero mutable surface** — nothing to gate, ever: `_client/{ports,dtos,mapping}.py`,
+  `_client_ops/{shared,session}.py`, `exceptions.py`, `client.py`, `_retry.py`,
+  `_clearml/*`. `session.py` is a decorated dataclass whose four guards are all
+  `@property`, so it generates no mutants at all.
+- **Mutants exist but are low-signal plumbing already pinned by existing
+  tests** — admission costs runtime for no new signal: `fs_utils.py` (its whole
+  contract is the module-level `_DIR_MODE`/`_FILE_MODE`) and
+  `_client/context.py`.
+- **Adapters** — `cli.py` is ~640 `add_argument()` calls whose mutable content
+  is help text and arguments that restate argparse defaults; `commands/*` is
+  prompts, arg mapping and `sys.exit`. Note the reason is prompt/wiring
+  density, *not* log-message density: message text was never mutated.
 
-- `pytest_add_cli_args` must keep `-n 0`; mutmut runs `pytest.main()` in each
-  forked child and the global `addopts = [..., "-n", "auto"]` would otherwise
-  spawn an xdist pool per mutant, which looks like a hang.
-- `cache_invalidation_files` + `on_dependency_change = "rerun"` are load-bearing:
-  mutmut keys a cached verdict on the *source* function's text, so without them
-  a weakened test leaves the gate green on stale results.
-- `mutate_only_covered_lines` must stay off — its coverage pre-pass leaves a
-  half-imported numpy in `sys.modules` and the stats run then dies.
-- `mutants/` is mutmut's working copy: gitignored, and excluded from mypy (two
-  `cveta2` packages otherwise collide) and ruff.
+`config.py` and `api.py` are undecided rather than excluded — measure before
+deciding. Both are smaller than their line counts suggest (`@field_validator`
+and `@contextmanager` helpers produce nothing), and both contain real
+precedence logic. If either cannot reach zero in one commit, admit it with
+function-level mutant-name globs
+(`cveta2.config.CvatConfig.x_merge__mutmut_*`) rather than all-or-nothing.
 
 ## Pre-commit Hooks
 
-The pre-commit pipeline runs: format → lint → import-linter → mypy → vulture → pytest → mutmut → count-lines → build → lock.
+The pre-commit pipeline runs: format → lint → import-linter → mypy → vulture → pytest → mutmut (fast profile) → count-lines → build → lock.
+
+A second hook, `mutmut-full`, runs the whole gated mutation scope at **pre-push**.
+It needs a one-time install:
+
+```bash
+uv run pre-commit install --hook-type pre-push
+```
 
 **Always run before committing**:
 ```bash

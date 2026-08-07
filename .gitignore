@@ -47,3 +47,6 @@ Thumbs.db
 # Integration test artifacts
 tests/fixtures/data/coco8/images/
 tests/integration/.seeded
+
+# Claude Code agent worktrees
+.claude/worktrees/
