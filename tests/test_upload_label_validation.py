@@ -78,6 +78,32 @@ class TestUploadLabelValidation:
         validate_labels(client, 1, "test_project", [])
         client.get_project_labels.assert_not_called()
 
+    def test_labels_are_looked_up_for_the_requested_project(self) -> None:
+        """The project id must reach ``get_project_labels``.
+
+        ``_client_with_labels`` answers every id the same way, so a call
+        that passed ``None`` instead of the project id looked identical.
+        """
+        client = MagicMock()
+        client.get_project_labels.side_effect = lambda project_id: (
+            [LabelInfo(id=1, name="car", attributes=[])] if project_id == 1 else []
+        )
+
+        validate_labels(client, 1, "test_project", ["car"])
+
+        with pytest.raises(LabelsMismatchError):
+            validate_labels(client, 2, "test_project", ["car"])
+
+    def test_mismatch_error_names_the_project(self) -> None:
+        """The raised error must carry the project name it was given."""
+        with pytest.raises(LabelsMismatchError, match="test_project"):
+            validate_labels(
+                _client_with_labels({"car"}),
+                1,
+                "test_project",
+                ["unknown"],
+            )
+
     def test_mismatch_error_lists_available(self) -> None:
         with pytest.raises(LabelsMismatchError) as exc_info:
             validate_labels(

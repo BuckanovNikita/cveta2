@@ -40,7 +40,8 @@ def test_read_exclude_names_valid_csv(tmp_path: Path) -> None:
 
 
 def test_read_exclude_names_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(Cveta2Error):
+    """The error must name the file; ``Cveta2Error(None)`` stringifies to "None"."""
+    with pytest.raises(Cveta2Error, match=r"nope\.csv"):
         read_exclude_names(str(tmp_path / "nope.csv"))
 
 
@@ -104,8 +105,66 @@ def test_build_upload_plan_preserves_csv_order() -> None:
 
 def test_build_upload_plan_raises_when_empty() -> None:
     df = pd.DataFrame({"image_name": [], "instance_label": []})
-    with pytest.raises(Cveta2Error):
+    with pytest.raises(Cveta2Error, match="после фильтрации"):
         build_upload_plan(df, [], labels=["Edge"])
+
+
+def _plan_input_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "image_name": ["a.jpg", "b.jpg", "c.jpg"],
+            "instance_label": ["Edge", None, "Edge"],
+        }
+    )
+
+
+def test_build_upload_plan_skips_unannotated_frames_by_default() -> None:
+    """The default must exclude NaN-label frames.
+
+    Every earlier call either passed ``include_unannotated`` explicitly or
+    used a frame set without NaN labels, so flipping the default was
+    invisible.
+    """
+    plan = build_upload_plan(_plan_input_df(), [], labels=["Edge"])
+
+    assert plan.image_names == ["a.jpg", "c.jpg"]
+
+
+def test_build_upload_plan_forwards_include_unannotated() -> None:
+    """``include_unannotated=True`` must reach ``filter_frames_by_labels``.
+
+    Dropping the keyword, or passing ``None`` for it, both fall back to
+    the falsy default — indistinguishable unless a NaN-label frame is
+    present and the flag is on.
+    """
+    plan = build_upload_plan(
+        _plan_input_df(), [], labels=["Edge"], include_unannotated=True
+    )
+
+    assert plan.image_names == ["a.jpg", "b.jpg", "c.jpg"]
+
+
+def test_build_upload_plan_forwards_exclude_names() -> None:
+    """``exclude_names`` must reach the filter, not be dropped on the way."""
+    plan = build_upload_plan(
+        _plan_input_df(), [], labels=["Edge"], exclude_names={"a.jpg"}
+    )
+
+    assert plan.image_names == ["c.jpg"]
+
+
+def test_build_upload_plan_keeps_deleted_names_without_images() -> None:
+    """Deleted-only input is a valid plan and carries the names through.
+
+    Nothing asserted ``UploadPlan.deleted_names``, and no test reached the
+    branch where the image list is empty but deletions remain.
+    """
+    empty = pd.DataFrame({"image_name": [], "instance_label": []})
+
+    plan = build_upload_plan(empty, ["gone.jpg"], labels=["Edge"])
+
+    assert plan.image_names == []
+    assert plan.deleted_names == ["gone.jpg"]
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +266,21 @@ def test_build_search_dirs_with_arg(
     monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
     dirs = build_search_dirs([str(img_dir)], "proj")
     assert img_dir.resolve() in dirs
+
+
+def test_build_search_dirs_wraps_a_bare_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A single ``str``/``Path`` is wrapped, not discarded.
+
+    Every earlier call passed a list, so the ``isinstance`` branch that
+    wraps a scalar never ran and dropping its assignment changed nothing.
+    """
+    img_dir = tmp_path / "imgs"
+    img_dir.mkdir()
+    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
+
+    assert build_search_dirs(str(img_dir), "proj") == [img_dir.resolve()]
 
 
 def test_build_search_dirs_none_warns(

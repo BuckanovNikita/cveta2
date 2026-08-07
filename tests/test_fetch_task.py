@@ -368,6 +368,113 @@ class TestIgnoredTaskSilent:
         assert len(entries) == 1
         assert entries[0].silent is True
 
+    def test_get_silent_task_ids_unknown_project(self) -> None:
+        """An unconfigured project yields an empty set, not an error.
+
+        Every earlier call passed a project that was present, so the ``[]``
+        default of the lookup was never used.
+        """
+        assert IgnoreConfig().get_silent_task_ids("never-configured") == set()
+
+
+class TestParseIgnoreEntry:
+    """Tests for ``_parse_ignore_entry``'s three accepted input shapes.
+
+    The only earlier coverage was the ``silent`` flag on the dict form, which
+    left the legacy formats (bare int, digit string) and every default of the
+    dict form unexercised.
+    """
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (
+                {"id": 7, "name": "t7", "description": "why", "silent": True},
+                IgnoredTask(id=7, name="t7", description="why", silent=True),
+            ),
+            ({"id": "8"}, IgnoredTask(id=8, name="", description="", silent=False)),
+            (9, IgnoredTask(id=9, name="")),
+            ("10", IgnoredTask(id=10, name="")),
+            (" 11 ", IgnoredTask(id=11, name="")),
+        ],
+        ids=["full_dict", "id_only_dict", "legacy_int", "digit_str", "padded_digits"],
+    )
+    def test_accepted_shapes(self, raw: object, expected: IgnoredTask) -> None:
+        """Both legacy formats parse, and the dict form's defaults are blank."""
+        assert _parse_ignore_entry(raw) == expected
+
+    @pytest.mark.parametrize(
+        "raw",
+        [{"id": "abc"}, {"name": "no id"}, "abc", None, [1], 1.5],
+        ids=["bad_id", "dict_without_id", "non_digit_str", "none", "list", "float"],
+    )
+    def test_rejected_shapes(self, raw: object) -> None:
+        """Anything else is dropped rather than raising into the config load.
+
+        ``dict_without_id`` is what pins the ``and`` in the first guard: with
+        ``or`` the branch is entered for every dict and ``raw["id"]`` raises a
+        ``KeyError`` the surrounding ``except`` does not catch.
+        """
+        assert _parse_ignore_entry(raw) is None
+
+
+class TestIgnoreConfigEntries:
+    """Tests for adding and removing entries on ``IgnoreConfig``."""
+
+    def test_add_task_defaults_to_a_blank_loud_entry(self) -> None:
+        """Omitted ``description``/``silent`` must land as ``""`` / ``False``."""
+        cfg = IgnoreConfig()
+
+        cfg.add_task("proj", 1, "one")
+
+        entry = cfg.get_ignored_entries("proj")[0]
+        assert entry.description == ""
+        assert entry.silent is False
+
+    def test_add_task_stores_the_description(self) -> None:
+        """The description reaches the entry rather than being dropped."""
+        cfg = IgnoreConfig()
+
+        cfg.add_task("proj", 1, "one", "flaky annotations")
+
+        assert cfg.get_ignored_entries("proj")[0].description == "flaky annotations"
+
+    def test_add_task_appends_new_ids_and_ignores_duplicates(self) -> None:
+        """The duplicate guard must match on the id, not on "any other id".
+
+        A single-entry project cannot tell ``e.id == task_id`` from
+        ``e.id != task_id``; adding a second, different task can.
+        """
+        cfg = IgnoreConfig()
+
+        cfg.add_task("proj", 1, "one")
+        cfg.add_task("proj", 2, "two")
+        cfg.add_task("proj", 1, "one-again")
+
+        assert cfg.get_ignored_tasks("proj") == [1, 2]
+
+    def test_remove_task_keeps_the_project_while_entries_remain(self) -> None:
+        """The project key is deleted only once its last entry is gone."""
+        cfg = IgnoreConfig(
+            projects={
+                "proj": [IgnoredTask(id=1, name="a"), IgnoredTask(id=2, name="b")]
+            }
+        )
+
+        assert cfg.remove_task("proj", 1) is True
+        assert cfg.get_ignored_tasks("proj") == [2]
+
+        assert cfg.remove_task("proj", 2) is True
+        assert cfg.projects == {}
+
+    def test_remove_task_reports_false_for_unknown_project_or_id(self) -> None:
+        """A miss returns False and leaves the list untouched."""
+        cfg = IgnoreConfig(projects={"proj": [IgnoredTask(id=1, name="a")]})
+
+        assert cfg.remove_task("proj", 99) is False
+        assert cfg.remove_task("never-configured", 1) is False
+        assert cfg.get_ignored_tasks("proj") == [1]
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: _resolve_images_dir

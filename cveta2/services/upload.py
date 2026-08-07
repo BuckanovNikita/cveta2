@@ -27,6 +27,10 @@ if TYPE_CHECKING:
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
 
+# A module-level constant is never mutated, so the wording stays out of the
+# mutation gate: no test has to assert prose to keep this literal honest.
+_NOTHING_TO_UPLOAD = "Ошибка: после фильтрации не осталось изображений."
+
 
 @dataclass(frozen=True)
 class UploadPlan:
@@ -164,7 +168,7 @@ def build_upload_plan(
     )
     image_names: list[str] = list(filtered["image_name"].dropna().unique())
     if not image_names and not deleted_names:
-        raise Cveta2Error("Ошибка: после фильтрации не осталось изображений.")
+        raise Cveta2Error(_NOTHING_TO_UPLOAD)
     logger.info(
         f"Изображений для загрузки: {len(image_names)} "
         f"({len(filtered)} строк аннотаций)"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 from loguru import logger
 
@@ -11,6 +11,7 @@ from cveta2.services.convert.common import (
     PixelBox,
     _link_or_copy,
     _pixel_to_coco,
+    _write_text_utf8,
     prepare_export,
 )
 
@@ -19,6 +20,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import pandas as pd
+
+
+class _JsonDumpOptions(TypedDict):
+    """Serializer knobs for the COCO JSON; ``json.load`` ignores both."""
+
+    ensure_ascii: bool
+    indent: int
+
+
+_JSON_DUMP: _JsonDumpOptions = {"ensure_ascii": False, "indent": 2}
 
 
 def _write_coco_split(
@@ -90,8 +101,7 @@ def _write_coco_split(
         "categories": categories_list,
     }
     json_path = split_dir / "_annotations.coco.json"
-    with json_path.open("w", encoding="utf-8") as f:
-        json.dump(coco_json, f, ensure_ascii=False, indent=2)
+    _write_text_utf8(json_path, json.dumps(coco_json, **_JSON_DUMP))
 
     logger.info(
         f"Split {split_dir.name}: {len(images_list)} изображений, "

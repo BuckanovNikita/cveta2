@@ -134,6 +134,12 @@ only_mutate = [
     "cveta2/_client_ops/read.py",
     "cveta2/_client/sdk_convert.py",
     "cveta2/_client/sdk_requests.py",
+    "cveta2/services/upload.py",
+    "cveta2/services/convert/common.py",
+    "cveta2/services/convert/coco.py",
+    "cveta2/services/convert/yolo.py",
+    "cveta2/config.py",
+    "cveta2/api.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -203,6 +209,81 @@ full = []
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]
+"cveta2.services.upload.x_read_exclude_names__mutmut_8" = "encoding=None; pandas' get_handle falls back to utf-8"
+"cveta2.services.upload.x_read_exclude_names__mutmut_10" = "drops encoding=; pandas' get_handle falls back to utf-8"
+"cveta2.services.upload.x_read_exclude_names__mutmut_12" = "\"UTF-8\" is a codec alias of \"utf-8\""
+
+# services.upload._push_to_cvat always hands create_task_issues a session, so
+# `session or self.open_task_session(task_id)` short-circuits and the task id
+# reaches nothing but two log labels inside _client_ops.write.
+"cveta2.services.upload.x__push_to_cvat__mutmut_30" = "task_id=None with a session passed; the id only reaches the short-circuited session fallback and two log labels"
+
+# convert/common: the reflink warning names its cause, _warned is only ever
+# read for truthiness, and dict.fromkeys already defaults its value to None.
+"cveta2.services.convert.common.xǁ_OnceWarnerǁ__init____mutmut_1" = "_warned=None is falsy; the only read is `if not self._warned`"
+"cveta2.services.convert.common.x__reflink_or_fallback_copy__mutmut_10" = "error=None; the OSError only names the cause in the one-time warning, and the fallback copy itself is tested"
+"cveta2.services.convert.common.x__make_csv_row_base__mutmut_4" = "drops the fromkeys default, which is None already"
+
+# _read_text_utf8 / _write_text_utf8: only the codec *alias* survives - both
+# encode(None) and encode(\"XXutf-8XX\") die on the byte-level roundtrip test.
+"cveta2.services.convert.common.x__read_text_utf8__mutmut_3" = "\"UTF-8\" is a codec alias of \"utf-8\"; codecs.lookup normalizes the name"
+"cveta2.services.convert.common.x__write_text_utf8__mutmut_4" = "\"UTF-8\" is a codec alias of \"utf-8\"; codecs.lookup normalizes the name"
+
+# _write_csv: same pandas encoding fallback as services/output.save_csv -
+# io.common.get_handle resolves `encoding = encoding or \"utf-8\"`.
+"cveta2.services.convert.common.x__write_csv__mutmut_14" = "index=None is falsy; the written CSV is byte-identical to index=False"
+"cveta2.services.convert.common.x__write_csv__mutmut_15" = "encoding=None; pandas' get_handle falls back to utf-8"
+"cveta2.services.convert.common.x__write_csv__mutmut_18" = "drops encoding=; pandas' get_handle falls back to utf-8"
+"cveta2.services.convert.common.x__write_csv__mutmut_21" = "\"UTF-8\" is a codec alias of \"utf-8\""
+
+# _write_dataset_yaml / _write_coco_split: the serializer kwargs live in the
+# module-level _YAML_DUMP / _JSON_DUMP mappings precisely so their literals are
+# not mutated; only dropping the whole mapping is left, and yaml.safe_load /
+# json.load are blind to flow style, indentation and \\u escaping alike.
+"cveta2.services.convert.yolo.x__write_dataset_yaml__mutmut_26" = "drops **_YAML_DUMP; safe_load reads flow style and escaped non-ASCII identically"
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_152" = "drops **_JSON_DUMP; json.load reads unindented and escaped output identically"
+
+# _from_yolo_predictions: the stem only reaches the warning text; how many
+# files were skipped, and that the walk resumes, are both asserted.
+"cveta2.services.convert.yolo.x__from_yolo_predictions__mutmut_34" = "appends None instead of the stem; preview_names str()s it into the warning and nothing else reads the list"
+
+# _write_coco_split: COCO only requires ids to be unique and consistent within
+# a file, and the annotation -> image / category linkage is asserted by id
+# lookup rather than by absolute value. Duplicate ids (ann_id = 1) and negative
+# ones (ann_id -= 1) DO break the format and are killed.
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_10" = "drops enumerate start, numbering images from 0; every image_id reference follows"
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_14" = "start=2; every image_id reference follows"
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_50" = "ann_id starts at 1 so the first annotation is 2; ids stay unique and positive"
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_77" = "ann_id += 2; ids stay unique, positive and ascending"
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_56" = "continue -> break on an unmapped image name; image_id_map is built from split_df's unique names and split_boxes is a subset, so the guard never fires"
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_130" = "key=None sorts by (name, id); prepare_export assigns ids in name-sorted order, so both orders coincide"
+"cveta2.services.convert.coco.x__write_coco_split__mutmut_132" = "drops key=; same coincidence of name order and id order"
+
+# convert_to_coco: prepare_export already created output_dir with parents=True,
+# so split_dir's parent always exists. exist_ok IS load-bearing (a second run
+# into the same tree) and is killed by test_nested_output_dir_and_rerun.
+"cveta2.services.convert.coco.x_convert_to_coco__mutmut_27" = "parents=None; split_dir's parent is the output dir prepare_export just created"
+"cveta2.services.convert.coco.x_convert_to_coco__mutmut_29" = "drops parents=; split_dir's parent is the output dir prepare_export just created"
+"cveta2.services.convert.coco.x_convert_to_coco__mutmut_31" = "parents=False; split_dir's parent is the output dir prepare_export just created"
+
+# config._env_flag: the `""` default is read only when the variable is unset,
+# and no spelling of an absent value lowercases to a trigger token.
+"cveta2.config.x__env_flag__mutmut_6" = "default \"XXXX\"; like \"\" it lowercases to something no caller compares against"
+
+# config._write_raw_yaml: same two classes as save_orgs_cache above - a codec
+# alias and PyYAML's falsy-sort_keys branch. sort_keys=True and the dropped
+# argument DO reorder the file and are killed by the section-order tests,
+# because a config people hand-edit should stay in the order they left it.
+"cveta2.config.x__write_raw_yaml__mutmut_9" = "sort_keys=None; PyYAML branches on `if self.sort_keys`, so None behaves as False"
+"cveta2.config.x__write_raw_yaml__mutmut_16" = "encoding=\"UTF-8\"; codecs.lookup normalizes codec names, so the bytes are identical"
+
+# config.SectionConfig._dump: pydantic-core switches on `mode == "python"`, so
+# every other spelling - including a mangled one - takes the JSON branch.
+# mode=None and the dropped argument DO reach python mode and die on
+# yaml.safe_dump, which has no representer for the Path values in image_cache.
+"cveta2.config.xǁSectionConfigǁ_dump__mutmut_5" = "mode=\"XXjsonXX\"; any mode other than \"python\" serializes as JSON"
+"cveta2.config.xǁSectionConfigǁ_dump__mutmut_6" = "mode=\"JSON\"; any mode other than \"python\" serializes as JSON"
+
 
 # task_cache: `_disable(e)` / `source=` only name the cause or the cache layer
 # inside a warning; the disabling and the miss themselves are pinned by tests.

@@ -20,19 +20,27 @@ CONFIG_DIR = Path.home() / ".config" / "cveta2"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 
+def _env_flag(name: str, expected: str) -> bool:
+    """Return True when environment variable *name* equals *expected*.
+
+    Comparison is case-insensitive; an unset variable never matches.
+    """
+    return os.environ.get(name, "").lower() == expected
+
+
 def is_interactive_disabled() -> bool:
     """Return True when CVETA2_NO_INTERACTIVE is set to 'true' (case-insensitive)."""
-    return os.environ.get("CVETA2_NO_INTERACTIVE", "").lower() == "true"
+    return _env_flag("CVETA2_NO_INTERACTIVE", "true")
 
 
 def is_cache_disabled() -> bool:
     """Return True when CVETA2_DISABLE_CACHE is set to 'true' (case-insensitive)."""
-    return os.environ.get("CVETA2_DISABLE_CACHE", "").lower() == "true"
+    return _env_flag("CVETA2_DISABLE_CACHE", "true")
 
 
 def should_raise_on_fetch_failure() -> bool:
     """Return True when CVETA2_RAISE_ON_FAILURE requests aborting on first error."""
-    return os.environ.get("CVETA2_RAISE_ON_FAILURE", "").lower() == "true"
+    return _env_flag("CVETA2_RAISE_ON_FAILURE", "true")
 
 
 def require_interactive(hint: str) -> None:
@@ -71,8 +79,7 @@ def get_projects_cache_path(config_path: Path | None = None) -> Path:
 def _load_preset_data() -> dict[str, object]:
     """Load the bundled preset YAML and return raw dict."""
     ref = importlib.resources.files("cveta2.presets").joinpath("default.yaml")
-    text = ref.read_text(encoding="utf-8")
-    data = yaml.safe_load(text)
+    data = yaml.safe_load(ref.read_bytes())
     if isinstance(data, dict):
         return data
     return {}
@@ -82,12 +89,22 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
     """Load a YAML file and return its top-level mapping (or empty dict)."""
     if not path.is_file():
         return {}
-    with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
+    data = yaml.safe_load(path.read_bytes()) or {}
     if not isinstance(data, dict):
         logger.warning(f"Invalid config format in {path}; expected mapping.")
         return {}
     return data
+
+
+def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
+    """Write *data* as UTF-8 YAML, creating the config directory if needed.
+
+    Bytes in, bytes out: like :func:`cveta2.projects_cache.save_orgs_cache`,
+    the file's encoding must not depend on the writer's locale.  Key order is
+    the insertion order the callers built, which is why ``sort_keys`` is off.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(yaml.safe_dump(data, sort_keys=False, encoding="utf-8"))
 
 
 class SectionConfig(BaseModel):
@@ -106,10 +123,20 @@ class SectionConfig(BaseModel):
         """Map the raw YAML section mapping onto model fields."""
         return raw
 
+    def _dump(self) -> dict[str, object]:
+        """Model → YAML-safe mapping with defaulted fields dropped.
+
+        ``mode="json"`` is load-bearing: ``Path`` values (``image_cache``,
+        ``cache.images_root``) have no ``yaml.safe_dump`` representer, so the
+        python-mode dump cannot be written at all.  Every optional field in
+        this hierarchy defaults to ``None``, so ``exclude_defaults`` already
+        subsumes ``exclude_none``.
+        """
+        return self.model_dump(mode="json", exclude_defaults=True)
+
     def _to_raw(self) -> object | None:
         """Serialize to the YAML section value; ``None`` removes the section."""
-        data = self.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
-        return data or None
+        return self._dump() or None
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> Self:
@@ -122,17 +149,13 @@ class SectionConfig(BaseModel):
     def save(self, config_path: Path | None = None) -> Path:
         """Update only this section of the config YAML, keeping the rest."""
         path = get_config_path(config_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         existing = _load_raw_yaml(path)
         serialized = self._to_raw()
         if serialized is None:
             existing.pop(self.section_key, None)
         else:
             existing[self.section_key] = serialized
-        content = yaml.safe_dump(existing, default_flow_style=False, sort_keys=False)
-        if not content.endswith("\n"):
-            content += "\n"
-        path.write_text(content, encoding="utf-8")
+        _write_raw_yaml(path, existing)
         logger.info(self.save_log.format(path=path))
         return path
 
@@ -145,8 +168,7 @@ class _ProjectsSection(SectionConfig):
         return {"projects": raw}
 
     def _to_raw(self) -> object | None:
-        data = self.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
-        return data.get("projects") or None
+        return self._dump().get("projects") or None
 
 
 def _parse_timeout_env(raw: str | None) -> float | None:
@@ -181,7 +203,7 @@ class CvatConfig(BaseModel):
     @classmethod
     def _from_cvat_section(cls, data: dict[str, object]) -> CvatConfig:
         """Build from a raw YAML top-level dict (reads the ``cvat`` key)."""
-        cvat_section = data.get("cvat", {})
+        cvat_section = data.get("cvat")
         if not isinstance(cvat_section, dict):
             return cls()
         return cls(**{k: v for k, v in cvat_section.items() if k in cls.model_fields})
@@ -240,7 +262,6 @@ class CvatConfig(BaseModel):
         image_cache: ImageCacheConfig | None = None,
     ) -> Path:
         """Write config to a YAML file, preserving all non-``cvat`` sections."""
-        path.parent.mkdir(parents=True, exist_ok=True)
         existing_data = _load_raw_yaml(path)
 
         cvat_data: dict[str, str | float] = {"host": self.host}
@@ -260,10 +281,7 @@ class CvatConfig(BaseModel):
         if image_cache is not None and image_cache.projects:
             output["image_cache"] = {k: str(v) for k, v in image_cache.projects.items()}
 
-        content = yaml.safe_dump(output, default_flow_style=False, sort_keys=False)
-        if not content.endswith("\n"):
-            content += "\n"
-        path.write_text(content, encoding="utf-8")
+        _write_raw_yaml(path, output)
         logger.info(f"Config saved to {path}")
         return path
 
@@ -272,11 +290,16 @@ class CvatConfig(BaseModel):
 
         Never prompts.  The CLI layer prompts for missing credentials
         before opening a client (``cveta2.commands._bootstrap``).
+
+        Both halves of the message carry an ``f`` prefix on purpose, matching
+        every other raise in the mutation-gated modules: mutmut's string
+        operator fires on plain literals only, and prose is not behaviour
+        (see the ``do_not_mutate_patterns`` note in pyproject.toml).
         """
         if self.username and self.password:
             return self
         raise MissingCredentialsError(
-            "Учётные данные CVAT не настроены. Задайте CVAT_USERNAME и "
+            f"Учётные данные CVAT не настроены. Задайте CVAT_USERNAME и "
             f"CVAT_PASSWORD или заполните cvat.username/password в {CONFIG_PATH}."
         )
 
@@ -367,7 +390,7 @@ class CacheConfig(SectionConfig):
         }
 
     def _to_raw(self) -> object | None:
-        data = self.model_dump(mode="json", exclude_defaults=True, exclude_none=True)
+        data = self._dump()
         projects = data.get("projects")
         if isinstance(projects, dict):
             pruned = {name: entry for name, entry in projects.items() if entry}
@@ -526,7 +549,7 @@ def _parse_ignore_entry(raw: object) -> IgnoredTask | None:
                 id=int(raw["id"]),
                 name=str(raw.get("name", "")),
                 description=str(raw.get("description", "")),
-                silent=bool(raw.get("silent", False)),
+                silent=bool(raw.get("silent")),
             )
         except (TypeError, ValueError) as e:
             logger.warning(
@@ -551,7 +574,7 @@ class UploadConfig(SectionConfig):
 
 def is_clearml_disabled() -> bool:
     """Return True when ``CVETA2_CLEARML`` is ``'false'``."""
-    return os.environ.get("CVETA2_CLEARML", "").lower() == "false"
+    return _env_flag("CVETA2_CLEARML", "false")
 
 
 class ClearmlProjectMapping(BaseModel):
@@ -576,7 +599,7 @@ class ClearmlConfig(SectionConfig):
 
     @classmethod
     def _wrap_raw(cls, raw: dict[str, object]) -> dict[str, object]:
-        enabled = raw.get("enabled", True)
+        enabled = raw.get("enabled")
         return {**raw, "enabled": enabled if isinstance(enabled, bool) else True}
 
     @field_validator("projects", mode="before")
@@ -600,7 +623,7 @@ class ClearmlConfig(SectionConfig):
             return None
         result: dict[str, object] = {"enabled": self.enabled}
         if self.projects:
-            result["projects"] = self.model_dump(mode="json")["projects"]
+            result["projects"] = self._dump()["projects"]
         return result
 
     def get_mapping(self, project_name: str) -> ClearmlProjectMapping | None:

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytest
 import yaml
 
 from cveta2.config import (
@@ -15,9 +15,6 @@ from cveta2.config import (
     SyncRootsConfig,
 )
 from tests.helpers import write_config_yaml
-
-if TYPE_CHECKING:
-    import pytest
 
 
 def test_load_config_with_image_cache(tmp_path: Path) -> None:
@@ -334,3 +331,227 @@ def test_setup_save_preserves_cache_section(tmp_path: Path) -> None:
     assert reloaded.images_root == Path("/mnt/datasets")
     assert reloaded.for_project("projA").ignored_prefix == "data/projA"
     assert CvatConfig.from_file(cfg_path).host == "http://new-host:8080"
+
+
+def test_save_cache_config_drops_all_default_project_entries(tmp_path: Path) -> None:
+    """A project whose overrides are all defaults must not reach the file.
+
+    The existing round trip only reloaded what it had just saved, so it could
+    not see the pruning at all: an unpruned ``{"empty": {}}`` reloads into an
+    equal-looking ``CacheProjectSettings()``.
+    """
+    cfg_path = tmp_path / "custom.yaml"
+    CacheConfig(
+        images_root=Path("/root"),
+        projects={
+            "real": CacheProjectSettings(ignored_prefix="data/real"),
+            "empty": CacheProjectSettings(),
+        },
+    ).save(cfg_path)
+
+    assert set(CacheConfig.load(cfg_path).projects) == {"real"}
+
+
+def test_save_cache_config_omits_projects_when_every_entry_is_default(
+    tmp_path: Path,
+) -> None:
+    """Pruning everything removes the ``projects`` key rather than leaving ``{}``.
+
+    This is the branch that pops the key, and it also pins ``exclude_defaults``:
+    without it the unset ``tasks_root`` would be written back as ``null``.
+    """
+    cfg_path = tmp_path / "custom.yaml"
+    CacheConfig(
+        images_root=Path("/root"), projects={"empty": CacheProjectSettings()}
+    ).save(cfg_path)
+
+    raw = yaml.safe_load(cfg_path.read_bytes())
+    assert raw["cache"] == {"images_root": "/root"}
+
+
+# ---------------------------------------------------------------------------
+# env / merge precedence
+# ---------------------------------------------------------------------------
+
+
+def test_from_env_reads_every_cvat_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """All four CVAT variables are read, each from its own name.
+
+    Earlier tests either deleted these variables or asserted only ``host``, so
+    every other assignment could be dropped, misspelled or replaced by ``None``
+    without a single failure.
+    """
+    monkeypatch.setenv("CVAT_HOST", "https://env.example")
+    monkeypatch.setenv("CVAT_ORGANIZATION", "env-org")
+    monkeypatch.setenv("CVAT_USERNAME", "env-user")
+    monkeypatch.setenv("CVAT_PASSWORD", "env-pass")
+
+    cfg = CvatConfig.from_env()
+
+    assert cfg.host == "https://env.example"
+    assert cfg.organization == "env-org"
+    assert cfg.username == "env-user"
+    assert cfg.password == "env-pass"
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["host", "organization", "username", "password"],
+    ids=["host", "organization", "username", "password"],
+)
+def test_merge_prefers_a_set_override_and_keeps_the_base_otherwise(
+    field: str,
+) -> None:
+    """Each string field independently follows ``override or self``.
+
+    ``request_timeout`` had its own precedence table; the four ``or`` fallbacks
+    did not, so ``organization`` in particular could become ``and`` (yielding
+    the base value even when the override was set) unnoticed.
+    """
+    base = CvatConfig.model_validate({field: "from-base"})
+    override = CvatConfig.model_validate({field: "from-override"})
+
+    assert base.merge(CvatConfig()).model_dump()[field] == "from-base"
+    assert base.merge(override).model_dump()[field] == "from-override"
+
+
+def test_load_prefers_an_explicit_path_over_the_env_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``CvatConfig.load(config_path=...)`` must not read ``CVETA2_CONFIG``.
+
+    Every earlier test wrote its config to ``tmp_path/"config.yaml"``, which is
+    exactly where the autouse fixture points ``CVETA2_CONFIG`` — so dropping
+    the explicit argument made no observable difference.
+    """
+    _clear_cvat_env(monkeypatch)
+    monkeypatch.setenv(
+        "CVETA2_CONFIG",
+        str(
+            write_config_yaml(
+                tmp_path / "env.yaml", cvat={"host": "https://from-env-var.example"}
+            )
+        ),
+    )
+    explicit = write_config_yaml(
+        tmp_path / "explicit.yaml", cvat={"host": "https://from-argument.example"}
+    )
+
+    assert CvatConfig.load(config_path=explicit).host == "https://from-argument.example"
+
+
+def test_section_load_and_save_prefer_an_explicit_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same argument-over-env rule for the generic section load/save."""
+    env_path = write_config_yaml(tmp_path / "env.yaml", sync_roots={"p": "env/root"})
+    monkeypatch.setenv("CVETA2_CONFIG", str(env_path))
+    explicit = write_config_yaml(
+        tmp_path / "explicit.yaml", sync_roots={"p": "explicit/root"}
+    )
+
+    assert SyncRootsConfig.load(explicit).get_root("p") == "explicit/root"
+
+    SyncRootsConfig(projects={"p": "written/root"}).save(explicit)
+
+    assert SyncRootsConfig.load(explicit).get_root("p") == "written/root"
+    assert SyncRootsConfig.load(env_path).get_root("p") == "env/root"
+
+
+# ---------------------------------------------------------------------------
+# writing the config file
+# ---------------------------------------------------------------------------
+
+
+def test_section_save_creates_missing_directories(tmp_path: Path) -> None:
+    """``mkdir(parents=True)`` — a first-run config dir may not exist yet.
+
+    Every earlier save targeted ``tmp_path`` itself, whose parent always
+    exists, so ``parents=True`` was never load-bearing.
+    """
+    target = tmp_path / "nested" / "deeper" / "custom.yaml"
+
+    SyncRootsConfig(projects={"p": "root"}).save(target)
+
+    assert SyncRootsConfig.load(target).get_root("p") == "root"
+
+
+def test_section_save_keeps_the_existing_section_order(tmp_path: Path) -> None:
+    """``sort_keys=False`` keeps a hand-edited config in the order it was in.
+
+    The file is read back by ``safe_load``, which is order-blind, so nothing
+    else can see the difference — but a user re-opening their config can.
+    """
+    cfg_path = tmp_path / "custom.yaml"
+    cfg_path.write_bytes(b"cvat:\n  host: http://localhost:8080\ncache:\n  x: 1\n")
+
+    SyncRootsConfig(projects={"p": "root"}).save(cfg_path)
+
+    assert list(yaml.safe_load(cfg_path.read_bytes())) == [
+        "cvat",
+        "cache",
+        "sync_roots",
+    ]
+
+
+def test_save_to_file_keeps_the_cvat_section_first(tmp_path: Path) -> None:
+    """``save_to_file`` rebuilds the mapping with ``cvat`` first, on purpose."""
+    cfg_path = tmp_path / "custom.yaml"
+    cfg_path.write_bytes(b"cache:\n  images_root: /r\ncvat:\n  host: old\n")
+
+    CvatConfig(host="https://new.example").save_to_file(cfg_path)
+
+    assert list(yaml.safe_load(cfg_path.read_bytes())) == ["cvat", "cache"]
+
+
+def test_save_to_file_creates_missing_directories(tmp_path: Path) -> None:
+    """A ``setup`` run into a fresh ``~/.config/cveta2`` must create it."""
+    cfg_path = tmp_path / "nested" / "deeper" / "custom.yaml"
+
+    CvatConfig(host="https://new.example").save_to_file(cfg_path)
+
+    assert CvatConfig.from_file(cfg_path).host == "https://new.example"
+
+
+def test_save_to_file_persists_credentials_and_image_cache(tmp_path: Path) -> None:
+    """Every optional ``cvat`` key, plus the ``image_cache`` section, survives.
+
+    ``request_timeout`` already had a test; ``organization``/``username``/
+    ``password`` and the whole ``image_cache`` branch did not, so their keys
+    could be misspelled or their values replaced by ``None`` undetected.
+    """
+    cfg_path = tmp_path / "custom.yaml"
+
+    CvatConfig(
+        host="https://x.example",
+        organization="acme",
+        username="user1",
+        password="secret",
+    ).save_to_file(
+        cfg_path, image_cache=ImageCacheConfig(projects={"proj": Path("/data/proj")})
+    )
+
+    reloaded = CvatConfig.from_file(cfg_path)
+    assert reloaded.organization == "acme"
+    assert reloaded.username == "user1"
+    assert reloaded.password == "secret"
+    assert ImageCacheConfig.load(cfg_path).get_cache_dir("proj") == Path("/data/proj")
+
+
+def test_save_to_file_without_image_cache_leaves_the_section_alone(
+    tmp_path: Path,
+) -> None:
+    """An empty ``image_cache`` argument must not overwrite what is on disk."""
+    cfg_path = write_config_yaml(
+        tmp_path / "custom.yaml",
+        cvat={"host": "http://localhost:8080"},
+        image_cache={"proj": "/data/existing"},
+    )
+
+    CvatConfig(host="https://new.example").save_to_file(
+        cfg_path, image_cache=ImageCacheConfig()
+    )
+
+    assert ImageCacheConfig.load(cfg_path).get_cache_dir("proj") == Path(
+        "/data/existing"
+    )

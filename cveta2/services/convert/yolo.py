@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 import yaml
 from loguru import logger
@@ -19,9 +19,11 @@ from cveta2.services.convert.common import (
     _make_csv_row_base,
     _make_csv_row_box,
     _pixel_to_yolo,
+    _read_text_utf8,
     _require_positive_dimensions,
     _SizeCache,
     _write_csv,
+    _write_text_utf8,
     _yolo_to_pixel,
     prepare_export,
 )
@@ -31,6 +33,16 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import pandas as pd
+
+
+class _YamlDumpOptions(TypedDict):
+    """Serializer knobs for ``dataset.yaml``; ``yaml.safe_load`` ignores both."""
+
+    default_flow_style: bool
+    allow_unicode: bool
+
+
+_YAML_DUMP: _YamlDumpOptions = {"default_flow_style": False, "allow_unicode": False}
 
 
 def _write_box_labels(  # noqa: PLR0913, PLR0917
@@ -74,7 +86,7 @@ def _write_box_labels(  # noqa: PLR0913, PLR0917
             lines.append(
                 f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {yolo.w:.6f} {yolo.h:.6f}"
             )
-        label_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _write_text_utf8(label_path, "\n".join(lines) + "\n")
 
 
 def _write_none_labels(
@@ -98,7 +110,7 @@ def _write_none_labels(
 
         label_path = output_dir / "labels" / split / f"{Path(image_name).stem}.txt"
         if not label_path.exists():
-            label_path.write_text("", encoding="utf-8")
+            label_path.touch()
 
 
 def _write_dataset_yaml(
@@ -114,9 +126,7 @@ def _write_dataset_yaml(
             yaml_data[split_name] = f"images/{split_name}"
     yaml_data["names"] = names_dict
 
-    yaml_path = output_dir / "dataset.yaml"
-    with yaml_path.open("w", encoding="utf-8") as f:
-        yaml.dump(yaml_data, f, default_flow_style=False, allow_unicode=False)
+    _write_text_utf8(output_dir / "dataset.yaml", yaml.dump(yaml_data, **_YAML_DUMP))
 
 
 def convert_to_yolo(
@@ -179,7 +189,7 @@ def _parse_label_file(path: Path) -> list[list[float]]:
     if not path.is_file():
         return []
     rows: list[list[float]] = []
-    for line in path.read_text(encoding="utf-8").strip().splitlines():
+    for line in _read_text_utf8(path).strip().splitlines():
         parts = line.strip().split()
         if len(parts) < 5:
             continue
@@ -191,8 +201,7 @@ def _load_class_names_yaml(path: Path) -> dict[int, str]:
     """Load class names from a YAML file (supports {names: ...} or flat dict)."""
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл имён классов не найден: {path}")
-    with path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    data = yaml.safe_load(_read_text_utf8(path))
     if isinstance(data, dict) and "names" in data:
         return {int(k): str(v) for k, v in data["names"].items()}
     if isinstance(data, dict):
@@ -240,8 +249,7 @@ def _from_yolo_dataset(
     read_all_sizes: bool,
 ) -> None:
     """Convert YOLO dataset (with dataset.yaml) to CSV."""
-    with yaml_path.open("r", encoding="utf-8") as f:
-        ds_config = yaml.safe_load(f)
+    ds_config = yaml.safe_load(_read_text_utf8(yaml_path))
 
     class_names: dict[int, str] = {
         int(k): str(v) for k, v in ds_config.get("names", {}).items()

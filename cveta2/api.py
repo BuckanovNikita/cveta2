@@ -101,6 +101,21 @@ _CACHE_FLAGS: dict[str, tuple[bool, bool]] = {
     "off": (False, False),
 }
 
+# Fixed user-facing prose, kept at module level so it carries no behaviour a
+# test would have to pin. The alternative — an inline literal — is mutated
+# character by character, and the only test that could tell "Укажите ..." from
+# "УКАЖИТЕ ..." is one asserting the message verbatim.
+_ERR_IMAGES_DIR_CONFLICT = (
+    "Параметры несовместимы: передан images_dir= при download_images=False."
+)
+_ERR_PROJECT_UNRESOLVED = (
+    "Не удалось определить проект: передайте project= или укажите задачи числовыми ID."
+)
+_ERR_NO_FRAME_OR_IMAGE = "Укажите хотя бы один frame или image."
+_ERR_NO_STAGE_OR_STATE = "Укажите хотя бы один stage или state."
+_JOB_STAGES_HINT = ", ".join(JOB_STAGES)
+_JOB_STATES_HINT = ", ".join(JOB_STATES)
+
 
 class UploadResult(BaseModel):
     """Summary of a completed upload."""
@@ -192,9 +207,7 @@ def _resolve_images_dir(
 ) -> Path | None:
     """Resolve the image download directory without prompting."""
     if images_dir and not download_images:
-        raise Cveta2Error(
-            "Параметры несовместимы: передан images_dir= при download_images=False."
-        )
+        raise Cveta2Error(_ERR_IMAGES_DIR_CONFLICT)
     if not download_images:
         return None
     if images_dir:
@@ -298,10 +311,7 @@ def fetch_task(  # noqa: PLR0913
         if project is None:
             project = infer_project_from_tasks(c, tasks)
             if project is None:
-                raise Cveta2Error(
-                    "Не удалось определить проект: передайте project= "
-                    "или укажите задачи числовыми ID."
-                )
+                raise Cveta2Error(_ERR_PROJECT_UNRESOLVED)
         project_id, project_name = resolve_project_spec(c, project)
         cs_info = apply_sync_root_override(
             project_name, c.detect_project_cloud_storage(project_id)
@@ -561,14 +571,11 @@ def task_mark_deleted(
 ) -> int:
     """Mark frames of a task as deleted (by frame ids and/or image names)."""
     if not frames and not images:
-        raise Cveta2Error("Укажите хотя бы один frame или image.")
+        raise Cveta2Error(_ERR_NO_FRAME_OR_IMAGE)
     with _resolved_task(connection, project, task) as (c, task_info):
-        marked = 0
-        if images:
-            marked += c.mark_frames_deleted(task_info.id, set(images))
-        if frames:
-            marked += c.mark_frames_deleted_by_ids(task_info.id, frames)
-        return marked
+        by_name = c.mark_frames_deleted(task_info.id, set(images)) if images else 0
+        by_id = c.mark_frames_deleted_by_ids(task_info.id, frames) if frames else 0
+        return by_name + by_id
 
 
 def task_drop_label(
@@ -607,14 +614,14 @@ def task_set_status(
     Valid values: :data:`cveta2.JOB_STAGES` / :data:`cveta2.JOB_STATES`.
     """
     if stage is None and state is None:
-        raise Cveta2Error("Укажите хотя бы один stage или state.")
+        raise Cveta2Error(_ERR_NO_STAGE_OR_STATE)
     if stage is not None and stage not in JOB_STAGES:
         raise Cveta2Error(
-            f"Недопустимый stage {stage!r}; допустимые: {', '.join(JOB_STAGES)}."
+            f"Недопустимый stage {stage!r}; допустимые: {_JOB_STAGES_HINT}."
         )
     if state is not None and state not in JOB_STATES:
         raise Cveta2Error(
-            f"Недопустимый state {state!r}; допустимые: {', '.join(JOB_STATES)}."
+            f"Недопустимый state {state!r}; допустимые: {_JOB_STATES_HINT}."
         )
     with _resolved_task(connection, project, task) as (c, task_info):
         return c.set_task_jobs_status(task_info.id, stage=stage, state=state)

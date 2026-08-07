@@ -78,6 +78,29 @@ class TestParseClearmlSection:
         cfg = _parse_clearml_section({"enabled": "yes"})
         assert cfg.enabled is True
 
+    def test_missing_enabled_key_reads_as_enabled(self) -> None:
+        """A section written by hand without ``enabled:`` still turns ClearML on.
+
+        Only the explicit ``enabled: false`` case was pinned, so the absent-key
+        fallback could flip to ``False`` and silently disable publishing for
+        everyone who configured only ``projects:``.
+        """
+        cfg = _parse_clearml_section(
+            {"projects": {"P": {"clearml_project": "p", "clearml_dataset": "d"}}}
+        )
+        assert cfg.enabled is True
+        assert "P" in cfg.projects
+
+    def test_uncoercible_enabled_value_is_replaced_not_forwarded(self) -> None:
+        """The normalized ``enabled`` must overwrite the raw one, not sit beside it.
+
+        ``{"enabled": "yes"}`` could not show this: pydantic parses ``"yes"`` as
+        a bool on its own, so leaving the raw value in place looked identical.
+        A value pydantic cannot coerce does show it — forwarding it raises.
+        """
+        cfg = _parse_clearml_section({"enabled": "maybe"})
+        assert cfg.enabled is True
+
 
 class TestSerializeClearmlSection:
     """Tests for the clearml section serialization (save path)."""

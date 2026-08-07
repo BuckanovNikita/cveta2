@@ -22,6 +22,24 @@ if TYPE_CHECKING:
 
 _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 
+_EMPTY_ATTRIBUTES = json.dumps({}, ensure_ascii=False)
+"""``attributes`` value stamped on every row imported from YOLO."""
+
+
+def _read_text_utf8(path: Path) -> str:
+    """Read *path* as UTF-8, independent of the platform's locale encoding."""
+    return path.read_bytes().decode("utf-8")
+
+
+def _write_text_utf8(path: Path, text: str) -> None:
+    r"""Write *text* to *path* as UTF-8, independent of the locale encoding.
+
+    Going through bytes also pins the line endings: text mode would
+    translate ``\n`` to ``\r\n`` on Windows, which YOLO label files and
+    ``dataset.yaml`` must not depend on.
+    """
+    path.write_bytes(text.encode("utf-8"))
+
 
 class PixelBox(NamedTuple):
     """Pixel-coordinate bounding box (top-left, bottom-right)."""
@@ -239,7 +257,7 @@ def prepare_export(
     *,
     image_dirs: Sequence[str | Path] | None,
     link_mode: str,
-    label_start: int = 0,
+    label_start: int,
 ) -> ExportContext:
     """Load CSV, validate splits, build label map, and resolve images.
 
@@ -297,7 +315,7 @@ def _make_csv_row_base(
         split=split,
         subset="",
         source="yolo",
-        attributes=json.dumps({}, ensure_ascii=False),
+        attributes=_EMPTY_ATTRIBUTES,
     )
     return row
 

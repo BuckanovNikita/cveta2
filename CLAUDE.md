@@ -343,33 +343,23 @@ counter-intuitive and decide whether a module is worth gating at all.
 
 ~4.5s of fixed overhead per run, plus a throughput between ~120 mutants/second
 over in-memory frames and ~50 for modules whose tests round-trip CSVs through
-`tmp_path`. A fully cached run is 4.7s and reports `0.00 mutations/second`.
+`tmp_path`. A fully cached run reports `0.00 mutations/second`.
 
-At 1197 gated mutants, `full` takes 23s and `fast` 12s. Profile membership is
-chosen to keep that gap worth having: putting *every* gated module in `fast`
-measured 22s, so the split bought nothing. Keep `fast` under ~15s; when a newly
-gated module would push it past that, leave it to `full`.
+At the current 4700 gated mutants, `full` takes ~63s and `fast` ~17s. Profile
+membership is chosen to keep that gap worth having: putting *every* gated
+module in `fast` once measured the same as `full`, i.e. the split bought
+nothing. Keep `fast` under ~20s; when a newly gated module would push it past
+that, leave it to `full`.
 
 Triage, not runtime, is the real cost: each survivor needs a diff read and a
 judgement call.
 
-Measured baselines for the still-ungated modules, so expanding scope starts
-from data (reproduce by adding the module to `only_mutate` and running the
-script):
+### Current scope
 
-| Module | Lines | Unexplained survivors | of which `no tests` |
-|---|---|---|---|
-| `api.py` | 620 | 274 | 107 |
-| `config.py` | 608 | 179 | 12 |
-| `services/convert/yolo.py` | 407 | 132 | not split |
-| `services/convert/common.py` | 348 | 106 | not split |
-| `services/convert/coco.py` | 135 | 54 | not split |
-
-The `no tests` column is the one that decides the shape of the work.
-`config.py` is well covered and only weakly asserted, so it is pure
-assertion-sharpening. `api.py` has 107 mutants on functions no test executes at
-all — that half is a coverage gap to close first, and it is worth doing as its
-own `test:` commit before any of it is gated.
+Every module worth mutating is gated — 27 modules, 4700 mutants, 98.4% killed,
+77 allowlisted, zero unexplained. There is no ungated backlog left, so a new
+module joining `cveta2/` should come with its own entry in `only_mutate` rather
+than being added to a to-do list.
 
 ### Permanently out of scope
 
@@ -389,12 +379,10 @@ could ever be lifted:
   prompts, arg mapping and `sys.exit`. Note the reason is prompt/wiring
   density, *not* log-message density: message text was never mutated.
 
-`config.py` and `api.py` are undecided rather than excluded — measure before
-deciding. Both are smaller than their line counts suggest (`@field_validator`
-and `@contextmanager` helpers produce nothing), and both contain real
-precedence logic. If either cannot reach zero in one commit, admit it with
-function-level mutant-name globs
-(`cveta2.config.CvatConfig.x_merge__mutmut_*`) rather than all-or-nothing.
+`config.py` and `api.py` were the two undecided cases; both were measured
+(179 and 274 unexplained survivors) and are now gated. `api.py` needed no
+allowlist entries at all — every one of its 274 survivors was a real test gap,
+107 of them on functions no test executed.
 
 ## Pre-commit Hooks
 
