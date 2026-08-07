@@ -138,6 +138,19 @@ on_dependency_change = "rerun"
 # with "Unable to import required dependency numpy". Not needed here anyway -
 # the scoped modules report zero no-tests mutants without it.
 
+# Which mutants each hook runs. `fast` is the pre-commit subset; `full` is
+# empty on purpose, meaning "no positional filter" - mutmut honours a cached
+# verdict only when no mutant name is passed, so spelling it '*' would
+# re-execute the whole scope every time instead of reusing the cache.
+#
+# Measured on this machine (571 mutants over 6 modules): ~120 mutants/second,
+# ~4.5s of fixed overhead per run, 11s cold, 4.7s when every verdict is cached.
+# Execution is cheap and the overhead dominates, so keep modules in `fast`
+# until it approaches ~20s rather than splitting pre-emptively.
+[tool.cveta2.mutation.profiles]
+fast = ["cveta2.dataset_partition.*"]
+full = []
+
 # Mutants that no test can kill because the mutation genuinely cannot change
 # behaviour. scripts/mutation_gate.py subtracts these from the survivor set and
 # fails if an entry stops matching a live survivor, so a stale justification

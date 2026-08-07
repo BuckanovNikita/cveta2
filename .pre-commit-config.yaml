@@ -44,11 +44,24 @@ repos:
         always_run: true
 
       - id: mutmut
-        name: mutmut (mutation testing)
-        entry: ./scripts/mutation_test.sh
+        name: mutmut (mutation testing, fast profile)
+        entry: ./scripts/mutation_test.sh --profile fast
         language: system
         pass_filenames: false
         always_run: true
+
+      # The whole gated scope, kept off the commit path because any edit under
+      # tests/ invalidates every cached verdict (cache_invalidation_files +
+      # on_dependency_change = "rerun"), so a commit that touches a test pays
+      # for the full scope. Install with:
+      #     uv run pre-commit install --hook-type pre-push
+      - id: mutmut-full
+        name: mutmut (mutation testing, full scope)
+        entry: ./scripts/mutation_test.sh --profile full
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
 
       - id: count-lines
         name: count lines of code
