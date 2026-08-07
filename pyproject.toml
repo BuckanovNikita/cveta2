@@ -140,6 +140,11 @@ only_mutate = [
     "cveta2/services/convert/yolo.py",
     "cveta2/config.py",
     "cveta2/api.py",
+    "cveta2/_client_ops/base.py",
+    "cveta2/_client_ops/images.py",
+    "cveta2/commands/_helpers.py",
+    "cveta2/commands/interactive/primitives.py",
+    "cveta2/commands/upload.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -209,6 +214,24 @@ full = []
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]
+# _ClientBase.__exit__: the traceback is the one element of the exit triple no
+# downstream __exit__ can distinguish. ExitStack forwards the triple verbatim
+# to contextlib._GeneratorContextManager.__exit__, which re-raises inside the
+# open_sdk_api generator; the exception object carries its own __traceback__
+# either way, so the SDK client's __exit__ was measured to observe an identical
+# (type, value, tb). On 3.12+ the argument is not even read - that branch is
+# `self.gen.throw(value)`. Blanking exc_type or exc_val IS observable and both
+# are killed by test_exit_forwards_the_original_exception_to_the_sdk_client.
+"cveta2._client_ops.base.xǁ_ClientBaseǁ__exit____mutmut_6" = "exc_tb=None; the re-raised exception carries its own traceback, so the SDK client's __exit__ sees the same triple"
+
+# commands.upload._select_labels: questionary.Choice.__init__ assigns
+# `self.value = title` whenever value is None, and these label choices set
+# title == value, so both mutations build a byte-identical Choice. The
+# no-annotation choice below, where title and value genuinely differ, is
+# pinned by test_unannotated_frames_get_a_sentinel_choice.
+"cveta2.commands.upload.x__select_labels__mutmut_9" = "value=None; questionary.Choice falls back to title, which is the same label"
+"cveta2.commands.upload.x__select_labels__mutmut_11" = "drops value=; questionary.Choice falls back to title, which is the same label"
+
 "cveta2.services.upload.x_read_exclude_names__mutmut_8" = "encoding=None; pandas' get_handle falls back to utf-8"
 "cveta2.services.upload.x_read_exclude_names__mutmut_10" = "drops encoding=; pandas' get_handle falls back to utf-8"
 "cveta2.services.upload.x_read_exclude_names__mutmut_12" = "\"UTF-8\" is a codec alias of \"utf-8\""

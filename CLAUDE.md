@@ -345,7 +345,7 @@ counter-intuitive and decide whether a module is worth gating at all.
 over in-memory frames and ~50 for modules whose tests round-trip CSVs through
 `tmp_path`. A fully cached run reports `0.00 mutations/second`.
 
-At the current 4700 gated mutants, `full` takes ~63s and `fast` ~17s. Profile
+At the current 5120 gated mutants, `full` takes ~70s and `fast` ~17s. Profile
 membership is chosen to keep that gap worth having: putting *every* gated
 module in `fast` once measured the same as `full`, i.e. the split bought
 nothing. Keep `fast` under ~20s; when a newly gated module would push it past
@@ -356,10 +356,19 @@ judgement call.
 
 ### Current scope
 
-Every module worth mutating is gated — 27 modules, 4700 mutants, 98.4% killed,
-77 allowlisted, zero unexplained. There is no ungated backlog left, so a new
+Every module worth mutating is gated — 31 modules, 5120 mutants, 98.4% killed,
+80 allowlisted, zero unexplained. There is no ungated backlog left, so a new
 module joining `cveta2/` should come with its own entry in `only_mutate` rather
 than being added to a to-do list.
+
+The last group in was the one the rollout plan called conditional:
+`_client_ops/{base,images}.py` and the three command-layer exceptions
+(`commands/_helpers.py`, `commands/interactive/primitives.py`,
+`commands/upload.py`). None of them had a single `no tests` mutant in
+`_client_ops`; the survivors sat on code every scenario test already ran and
+none asserted — nothing constructed a client without `api=` and entered it, so
+the whole `client_factory` → `ExitStack` → SDK-client lifecycle was
+integration-only.
 
 ### Permanently out of scope
 
@@ -374,6 +383,13 @@ could ever be lifted:
   tests** — admission costs runtime for no new signal: `fs_utils.py` (its whole
   contract is the module-level `_DIR_MODE`/`_FILE_MODE`) and
   `_client/context.py`.
+- **The rest of `commands/`** — prompts, arg mapping and `sys.exit`. The three
+  that *are* gated (`_helpers.py`, `interactive/primitives.py`, `upload.py`)
+  were selected on message density: they carry 0, 1 and 2 logger calls
+  respectively, against 18–20 for `doctor.py`, `setup.py` and `labels.py`.
+  `commands/upload.py` additionally encodes a contract this file states as a
+  guarantee — `--labels all` loses to a literal dataset label named `all` —
+  which is worth pinning precisely.
 - **Adapters** — `cli.py` is ~640 `add_argument()` calls whose mutable content
   is help text and arguments that restate argparse defaults; `commands/*` is
   prompts, arg mapping and `sys.exit`. Note the reason is prompt/wiring

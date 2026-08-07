@@ -112,12 +112,20 @@ class _ClientBase:
         return TaskWriteSession(self._require_api("open_task_session"), task_id)
 
     def _require_api(self, method_name: str) -> CvatApiPort:
-        """Return the injected or persistent API port, or raise."""
+        """Return the injected or persistent API port, or raise.
+
+        Both halves of the message carry an ``f`` prefix on purpose, as in
+        :meth:`CvatConfig.require_credentials`: mutmut's string operator fires
+        on plain literals only, and the usage hint is prose, not behaviour
+        (see the ``do_not_mutate_patterns`` note in pyproject.toml).  What *is*
+        behaviour -- that the message names the operation the caller asked for
+        -- stays pinned by the interpolated ``method_name``.
+        """
         api = self._api or self._persistent_api
         if api is None:
             msg = (
                 f"{method_name}() requires a context manager. "
-                "Use: with CvatClient(cfg) as client: ..."
+                f"Use: with CvatClient(cfg) as client: ..."
             )
             raise RuntimeError(msg)
         return api

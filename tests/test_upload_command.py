@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import argparse
+import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
 
+from cveta2.commands import upload as upload_command
 from cveta2.commands._helpers import echo_cli_command
-from cveta2.commands.upload import _NO_ANNOTATION_LABEL, _resolve_labels, run_upload
+from cveta2.commands.upload import (
+    _NO_ANNOTATION_LABEL,
+    _resolve_labels,
+    _resolve_task_name,
+    _select_labels,
+    run_upload,
+)
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.upload import (
     UploadOptions,
@@ -18,10 +27,13 @@ from cveta2.services.upload import (
     UploadRequest,
     _stage_images,
 )
-from tests.helpers import make_cs_info
+from tests.helpers import make_cs_info, write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+_SELECT_MANY = "cveta2.commands.interactive.select_many"
+_ASK_TASK_NAME = "cveta2.commands.interactive.text"
 
 
 def _write_dataset(tmp_path: Path) -> Path:
@@ -72,6 +84,167 @@ class TestResolveLabelsAll:
         df = pd.DataFrame({"instance_label": ["car", "person"]})
         with pytest.raises(Cveta2Error, match="all"):
             _resolve_labels(["all", "car"], df)
+
+
+class TestAvailableLabels:
+    """``--labels`` validation is driven by ``_available_labels``."""
+
+    def test_labels_are_sorted_and_deduplicated(self) -> None:
+        df = pd.DataFrame({"instance_label": ["person", "car", "person"]})
+        assert _resolve_labels(["all"], df) == ["car", "person"]
+
+    def test_nan_is_not_offered_as_a_label(self) -> None:
+        """A dropped ``dropna()`` would put a float NaN in the label list.
+
+        ``--labels all`` returns that list verbatim, so the sentinel is the
+        only legitimate way an unannotated frame can be selected.
+        """
+        df = pd.DataFrame({"instance_label": ["car", None]})
+        assert _resolve_labels(["all"], df) == ["car", _NO_ANNOTATION_LABEL]
+
+
+class TestResolveLabelsValidation:
+    def test_picker_runs_on_the_dataset_when_no_flag_is_given(self) -> None:
+        """The dataframe must reach the picker.
+
+        ``_select_labels(None)`` raises inside pandas only because the
+        dataframe is indexed immediately — nothing else observes the
+        argument, so the offered choices are what pins it.
+        """
+        df = pd.DataFrame({"instance_label": ["car", "person"]})
+        with patch(_SELECT_MANY, return_value=["car"]) as picker:
+            assert _resolve_labels(None, df) == ["car"]
+        assert [choice.value for choice in picker.call_args.args[1]] == [
+            "car",
+            "person",
+        ]
+
+    def test_unannotated_sentinel_is_accepted_from_the_command_line(self) -> None:
+        """``--labels __no_annotation__`` must validate.
+
+        The sentinel is added to the available set only when the dataset
+        really has NaN labels; adding ``None`` instead rejects it.
+        """
+        df = pd.DataFrame({"instance_label": ["car", None]})
+        assert _resolve_labels([_NO_ANNOTATION_LABEL], df) == [_NO_ANNOTATION_LABEL]
+
+    def test_unannotated_sentinel_is_rejected_without_unannotated_frames(self) -> None:
+        df = pd.DataFrame({"instance_label": ["car"]})
+        with pytest.raises(Cveta2Error, match=_NO_ANNOTATION_LABEL):
+            _resolve_labels([_NO_ANNOTATION_LABEL], df)
+
+    def test_only_the_unknown_label_is_reported(self) -> None:
+        """Pins the direction of the set difference.
+
+        ``available - set(labels_arg)`` would name ``person`` — a label the
+        user never asked for — and stay silent about ``zebra``.
+        """
+        df = pd.DataFrame({"instance_label": ["car", "person"]})
+        with pytest.raises(Cveta2Error) as excinfo:
+            _resolve_labels(["car", "zebra"], df)
+        unknown_line = str(excinfo.value).splitlines()[0]
+        assert "zebra" in unknown_line
+        assert "person" not in unknown_line
+
+    def test_error_lists_unknown_and_available_labels_readably(self) -> None:
+        """Both lists are comma-separated so the message can be acted on."""
+        df = pd.DataFrame({"instance_label": ["car", "person"]})
+        with pytest.raises(Cveta2Error) as excinfo:
+            _resolve_labels(["zebra", "bicycle"], df)
+        message = str(excinfo.value)
+        assert "bicycle, zebra" in message
+        assert "car, person" in message
+
+
+class TestSelectLabels:
+    def test_every_dataset_label_becomes_a_choice(self) -> None:
+        """Pins the whole ``select_many`` call and the returned selection.
+
+        The picker is a ``MagicMock``: it accepts a ``None`` message, a
+        ``None`` choice list, or a call missing either positional argument
+        without complaining, so only the recorded call catches those.
+        """
+        df = pd.DataFrame({"instance_label": ["person", "car", "car"]})
+        with patch(_SELECT_MANY, return_value=["car"]) as picker:
+            assert _select_labels(df) == ["car"]
+
+        assert picker.call_args.args[0] == upload_command._LABELS_PROMPT
+        assert [
+            (choice.title, choice.value) for choice in picker.call_args.args[1]
+        ] == [("car", "car"), ("person", "person")]
+        assert picker.call_args.kwargs["hint"] == upload_command._LABELS_HINT
+        assert (
+            picker.call_args.kwargs["empty_message"]
+            == upload_command._LABELS_EMPTY_MESSAGE
+        )
+
+    def test_unannotated_frames_get_a_sentinel_choice(self) -> None:
+        """The extra choice must show a caption but return the sentinel.
+
+        ``questionary.Choice`` falls back to the title when no value is
+        given, so a dropped ``value=`` would hand ``"(без аннотаций)"``
+        back to :func:`run_upload`, which compares against the sentinel.
+        """
+        df = pd.DataFrame({"instance_label": ["car", None]})
+        with patch(_SELECT_MANY, return_value=[_NO_ANNOTATION_LABEL]) as picker:
+            assert _select_labels(df) == [_NO_ANNOTATION_LABEL]
+
+        assert [
+            (choice.title, choice.value) for choice in picker.call_args.args[1]
+        ] == [
+            ("car", "car"),
+            (upload_command._NO_ANNOTATION_TITLE, _NO_ANNOTATION_LABEL),
+        ]
+
+    def test_cancelled_picker_yields_no_labels(self) -> None:
+        df = pd.DataFrame({"instance_label": ["car"]})
+        with patch(_SELECT_MANY, return_value=None):
+            assert _select_labels(df) == []
+
+    def test_dataset_without_labels_or_unannotated_frames_is_rejected(self) -> None:
+        """Only a dataset that offers *nothing* is an error.
+
+        Pins both halves of ``not all_labels and not has_no_annotation``:
+        each mutation of that conjunction either raises on a perfectly
+        usable dataset or lets an empty one through to an empty picker.
+        """
+        df = pd.DataFrame({"instance_label": pd.Series([], dtype=object)})
+        with (
+            patch(_SELECT_MANY, return_value=[]),
+            pytest.raises(Cveta2Error, match="instance_label"),
+        ):
+            _select_labels(df)
+
+    def test_dataset_with_only_unannotated_frames_is_accepted(self) -> None:
+        df = pd.DataFrame({"instance_label": [None, None]})
+        with patch(_SELECT_MANY, return_value=[_NO_ANNOTATION_LABEL]):
+            assert _select_labels(df) == [_NO_ANNOTATION_LABEL]
+
+
+class TestResolveTaskName:
+    def test_explicit_name_skips_the_prompt(self) -> None:
+        with patch(_ASK_TASK_NAME) as prompt:
+            assert _resolve_task_name("given") == "given"
+        prompt.assert_not_called()
+
+    def test_prompt_is_configured_for_a_mandatory_name(self) -> None:
+        """Pins every argument of the ``text`` prompt.
+
+        The prompt is mocked, so a dropped ``allow_empty=False`` or
+        ``history_key`` changes nothing the return value can show — yet the
+        first would let an empty task name through and the second would
+        lose arrow-up recall.
+        """
+        with patch(_ASK_TASK_NAME, return_value="t1") as prompt:
+            assert _resolve_task_name(None) == "t1"
+
+        assert prompt.call_args.args == (upload_command._TASK_NAME_PROMPT,)
+        assert prompt.call_args.kwargs == {
+            "hint": upload_command._TASK_NAME_HINT,
+            "allow_empty": False,
+            "empty_message": upload_command._TASK_NAME_EMPTY_MESSAGE,
+            "history_key": upload_command._TASK_NAME_HISTORY_KEY,
+        }
 
 
 @pytest.mark.usefixtures("isolated_config")
@@ -172,6 +345,266 @@ def test_run_upload_rejects_unknown_cli_labels(tmp_path: Path) -> None:
         open_client.return_value.__enter__.return_value = MagicMock()
         with pytest.raises(Cveta2Error, match="bicycle"):
             run_upload(args)
+
+
+_RICH_DATASET = (
+    "image_name,instance_label,instance_shape\n"
+    "a.jpg,car,rectangle\n"
+    "b.jpg,person,rectangle\n"
+    "c.jpg,,\n"
+    "d.jpg,,deleted\n"
+    "e.jpg,car,rectangle\n"
+)
+
+
+@dataclass
+class _UploadRun:
+    """Everything :func:`run_upload` handed to its collaborators."""
+
+    client: object = None
+    resolve_client: object = None
+    request: UploadRequest | None = None
+
+
+def _run_upload_capturing(
+    args: argparse.Namespace,
+    *,
+    project: tuple[int, str] = (7, "proj"),
+    project_spec: str | None = None,
+) -> _UploadRun:
+    """Run ``upload`` with the client boundary faked, recording the request.
+
+    *project_spec* is the only spec ``resolve_project`` will resolve; any
+    other value (including the ``None`` a mutant would pass) yields a
+    recognisably wrong project.
+    """
+    run = _UploadRun()
+
+    def fake_resolve_project(client: object, spec: object) -> tuple[int, str]:
+        run.resolve_client = client
+        return project if spec == project_spec else (0, "unresolved")
+
+    def fake_upload_dataset(client: object, request: UploadRequest) -> None:
+        run.client = client
+        run.request = request
+
+    with (
+        patch("cveta2.commands.upload.open_client") as open_client,
+        patch(
+            "cveta2.commands.upload.resolve_project", side_effect=fake_resolve_project
+        ),
+        patch("cveta2.commands.upload.upload_dataset", side_effect=fake_upload_dataset),
+    ):
+        client = MagicMock()
+        client.organization = None
+        client.default_organization = None
+        open_client.return_value.__enter__.return_value = client
+        run_upload(args)
+
+    assert run.client is client
+    assert run.resolve_client is client
+    return run
+
+
+class TestRunUploadRequest:
+    """Everything ``run_upload`` assembles for :func:`upload_dataset`."""
+
+    @pytest.fixture
+    def paths(self, tmp_path: Path, isolated_config_path: Path) -> dict[str, Path]:
+        csv = tmp_path / "dataset.csv"
+        csv.write_text(_RICH_DATASET, encoding="utf-8")
+        in_progress = tmp_path / "in_progress.csv"
+        in_progress.write_text("image_name\ne.jpg\n", encoding="utf-8")
+        image_dir = tmp_path / "imgs"
+        image_dir.mkdir()
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        write_config_yaml(
+            isolated_config_path,
+            upload={"images_per_job": 7, "image_quality": 42},
+            image_cache={"proj": str(cache_dir)},
+        )
+        return {
+            "csv": csv,
+            "in_progress": in_progress,
+            "image_dir": image_dir,
+            "cache_dir": cache_dir,
+        }
+
+    @pytest.fixture
+    def request_built(self, paths: dict[str, Path]) -> UploadRequest:
+        args = _upload_args(
+            paths["csv"],
+            project="acme/proj",
+            name="t1",
+            labels=["car", _NO_ANNOTATION_LABEL],
+            in_progress=str(paths["in_progress"]),
+            image_dir=str(paths["image_dir"]),
+            complete=True,
+            mark_all_deleted=True,
+        )
+        run = _run_upload_capturing(args, project_spec="acme/proj")
+        assert run.request is not None
+        return run.request
+
+    def test_project_and_task_name_are_carried_through(
+        self, request_built: UploadRequest
+    ) -> None:
+        """The resolved project must be the one that reaches the pipeline.
+
+        ``resolve_project`` is faked on the spec, so passing ``None`` for
+        the spec (or nulling a ``UploadRequest`` field) shows up here.
+        """
+        assert request_built.project_id == 7
+        assert request_built.project_name == "proj"
+        assert request_built.task_name == "t1"
+
+    def test_selected_labels_choose_frames_and_the_sentinel_adds_the_rest(
+        self, request_built: UploadRequest
+    ) -> None:
+        """``--labels car __no_annotation__`` uploads car frames plus NaN ones.
+
+        ``b.jpg`` carries only ``person``; ``e.jpg`` is a car frame listed
+        in ``--in-progress``.  Dropping the exclude set, the sentinel flag
+        or inverting it changes exactly this list.
+        """
+        assert request_built.plan.image_names == ["a.jpg", "c.jpg"]
+
+    def test_deleted_rows_are_split_out_and_forwarded(
+        self, request_built: UploadRequest
+    ) -> None:
+        assert request_built.plan.deleted_names == ["d.jpg"]
+
+    def test_search_dirs_combine_the_flag_and_the_configured_cache(
+        self, request_built: UploadRequest, paths: dict[str, Path]
+    ) -> None:
+        """``--image-dir`` and the project's ``image_cache`` entry both count.
+
+        The cache entry is keyed by project *name*, so a call that forgets
+        to pass it silently loses that directory.
+        """
+        assert request_built.options.search_dirs == [
+            paths["image_dir"].resolve(),
+            paths["cache_dir"],
+        ]
+
+    def test_upload_config_supplies_segmentation_and_quality(
+        self, request_built: UploadRequest
+    ) -> None:
+        """Both come from the ``upload`` config section, not the dataclass.
+
+        ``UploadOptions`` defaults both to 100, so the config file has to
+        use other values for a dropped keyword to be visible.
+        """
+        assert request_built.options.segment_size == 7
+        assert request_built.options.image_quality == 42
+
+    def test_task_flags_reach_the_options(self, request_built: UploadRequest) -> None:
+        assert request_built.options.mark_all_deleted is True
+        assert request_built.options.complete is True
+
+
+@pytest.mark.usefixtures("isolated_config")
+def test_run_upload_echoes_every_flag_it_was_given(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The echoed command must be a faithful, re-runnable invocation.
+
+    Parsing it back with ``shlex.split`` is what a shell would do, and it
+    is the only place the flag spellings in the echo mapping are checked.
+    """
+    csv = tmp_path / "dataset.csv"
+    csv.write_text(_RICH_DATASET, encoding="utf-8")
+    in_progress = tmp_path / "in_progress.csv"
+    in_progress.write_text("image_name\ne.jpg\n", encoding="utf-8")
+    image_dir = tmp_path / "imgs"
+    image_dir.mkdir()
+
+    args = _upload_args(
+        csv,
+        name="t1",
+        labels=["car"],
+        in_progress=str(in_progress),
+        image_dir=str(image_dir),
+        complete=True,
+        mark_all_deleted=True,
+    )
+    _run_upload_capturing(args, project=(1, "proj"))
+
+    assert shlex.split(capsys.readouterr().out) == [
+        "cveta2",
+        "upload",
+        "-p",
+        "proj",
+        "-d",
+        str(csv),
+        "--labels",
+        "car",
+        "--in-progress",
+        str(in_progress),
+        "--image-dir",
+        str(image_dir),
+        "--name",
+        "t1",
+        "--complete",
+        "--mark-all-deleted",
+    ]
+
+
+class TestRunUploadPromptedPredicate:
+    """``prompted`` decides whether the re-run command is echoed."""
+
+    @pytest.fixture
+    def csv(self, tmp_path: Path) -> Path:
+        path = tmp_path / "dataset.csv"
+        path.write_text(_RICH_DATASET, encoding="utf-8")
+        return path
+
+    @pytest.mark.parametrize(
+        ("project", "name", "labels"),
+        [
+            pytest.param("proj", "t1", None, id="labels-prompted"),
+            pytest.param(None, "t1", ["car"], id="project-prompted"),
+            pytest.param("proj", None, ["car"], id="name-prompted"),
+        ],
+    )
+    @pytest.mark.usefixtures("isolated_config")
+    def test_any_single_prompted_input_triggers_the_echo(
+        self,
+        csv: Path,
+        capsys: pytest.CaptureFixture[str],
+        project: str | None,
+        name: str | None,
+        labels: list[str] | None,
+    ) -> None:
+        """Each disjunct of ``prompted`` must stand on its own.
+
+        Turning either ``or`` into an ``and`` still echoes when *several*
+        inputs were prompted, so only these one-at-a-time cases separate
+        them.
+        """
+        args = _upload_args(csv, project=project, name=name, labels=labels)
+        with (
+            patch("cveta2.commands.upload._select_labels", return_value=["car"]),
+            patch("cveta2.commands.upload._resolve_task_name", return_value="t1"),
+        ):
+            _run_upload_capturing(args, project_spec=project, project=(1, "proj"))
+
+        assert capsys.readouterr().out.startswith("cveta2 upload ")
+
+    @pytest.mark.usefixtures("isolated_config")
+    def test_empty_labels_list_does_not_count_as_prompted(
+        self, csv: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """``--labels`` with no values is still an explicit choice.
+
+        The predicate tests ``args.labels is None``, not falsiness; a
+        truthiness check would echo here as if the user had been prompted.
+        """
+        args = _upload_args(csv, project="proj", name="t1", labels=[])
+        _run_upload_capturing(args, project_spec="proj", project=(1, "proj"))
+
+        assert capsys.readouterr().out == ""
 
 
 def test_stage_images_keeps_plan_order() -> None:

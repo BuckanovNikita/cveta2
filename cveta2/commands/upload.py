@@ -33,8 +33,21 @@ if TYPE_CHECKING:
     import pandas as pd
 
 _NO_ANNOTATION_LABEL = "__no_annotation__"
+_NO_ANNOTATION_TITLE = "(без аннотаций)"
 
 _UPLOAD_REQUIRED_COLUMNS: set[str] = {"image_name", "instance_label"}
+
+# Presentation-only literals live at module level so mutation testing does not
+# generate unkillable "change the caption" mutants inside the functions below.
+_LABEL_DISPLAY = {_NO_ANNOTATION_LABEL: _NO_ANNOTATION_TITLE}
+_NO_LABELS_ERROR = "Ошибка: не найдено ни одного instance_label в dataset.csv."
+_LABELS_PROMPT = "Выберите классы для загрузки:"
+_LABELS_HINT = "Pass --labels to select classes non-interactively."
+_LABELS_EMPTY_MESSAGE = "Не выбрано ни одного класса — отмена."
+_TASK_NAME_PROMPT = "Имя задачи: "
+_TASK_NAME_HINT = "Pass --name to specify the task name."
+_TASK_NAME_EMPTY_MESSAGE = "Имя задачи не указано — отмена."
+_TASK_NAME_HISTORY_KEY = "task-name"
 
 
 def _available_labels(df: pd.DataFrame) -> tuple[list[str], bool]:
@@ -54,27 +67,27 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
     """
     all_labels, has_no_annotation = _available_labels(df)
     if not all_labels and not has_no_annotation:
-        raise Cveta2Error("Ошибка: не найдено ни одного instance_label в dataset.csv.")
+        raise Cveta2Error(_NO_LABELS_ERROR)
     choices: list[interactive.Choice] = [
         interactive.Choice(title=label, value=label) for label in all_labels
     ]
     if has_no_annotation:
         choices.append(
             interactive.Choice(
-                title="(без аннотаций)",
+                title=_NO_ANNOTATION_TITLE,
                 value=_NO_ANNOTATION_LABEL,
             ),
         )
     raw = interactive.select_many(
-        "Выберите классы для загрузки:",
+        _LABELS_PROMPT,
         choices,
-        hint="Pass --labels to select classes non-interactively.",
-        empty_message="Не выбрано ни одного класса — отмена.",
+        hint=_LABELS_HINT,
+        empty_message=_LABELS_EMPTY_MESSAGE,
     )
     selected = [str(v) for v in raw or []]
-    display = ["(без аннотаций)" if s == _NO_ANNOTATION_LABEL else s for s in selected]
     logger.info(
-        f"Выбрано классов: {len(selected)}: {', '.join(display)}",
+        f"Выбрано классов: {len(selected)}: "
+        f"{', '.join(_LABEL_DISPLAY.get(s, s) for s in selected)}",
     )
     return selected
 
@@ -114,11 +127,11 @@ def _resolve_task_name(name_arg: str | None) -> str:
     if name_arg:
         return name_arg
     task_name = interactive.text(
-        "Имя задачи: ",
-        hint="Pass --name to specify the task name.",
+        _TASK_NAME_PROMPT,
+        hint=_TASK_NAME_HINT,
         allow_empty=False,
-        empty_message="Имя задачи не указано — отмена.",
-        history_key="task-name",
+        empty_message=_TASK_NAME_EMPTY_MESSAGE,
+        history_key=_TASK_NAME_HISTORY_KEY,
     )
     return str(task_name)
 

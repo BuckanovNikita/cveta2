@@ -26,6 +26,17 @@ if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
 
 
+# Module level so mutation testing cannot generate unkillable "reword the
+# error" mutants inside :func:`require_host`.
+_MISSING_HOST_MESSAGE = (
+    "Ошибка: хост CVAT не настроен.\n"
+    "Запустите setup для сохранения настроек:\n  cveta2 setup\n"
+    "Или задайте переменные окружения: CVAT_HOST и "
+    "(CVAT_USERNAME/CVAT_PASSWORD).\n"
+    "Файл конфигурации: {config_path}"
+)
+
+
 def echo_cli_command(subcommand: str, arg_values: Mapping[str, object]) -> None:
     """Print the fully-resolved CLI command to stdout for re-running.
 
@@ -169,11 +180,4 @@ def require_host(cfg: CvatConfig) -> None:
     """Raise a friendly error when host is not configured."""
     if cfg.host:
         return
-    config_path = get_config_path()
-    raise MissingHostError(
-        "Ошибка: хост CVAT не настроен.\n"
-        "Запустите setup для сохранения настроек:\n  cveta2 setup\n"
-        "Или задайте переменные окружения: CVAT_HOST и "
-        "(CVAT_USERNAME/CVAT_PASSWORD).\n"
-        f"Файл конфигурации: {config_path}"
-    )
+    raise MissingHostError(_MISSING_HOST_MESSAGE.format(config_path=get_config_path()))

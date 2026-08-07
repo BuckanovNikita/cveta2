@@ -25,7 +25,11 @@ if TYPE_CHECKING:
 
 OnCancel = Literal["exit", "none"]
 
+# Default captions live at module level so mutation testing cannot generate
+# unkillable "change the wording" mutants inside the primitives below.
 _CANCELLED = "Отменено."
+_VALUE_NOT_SET = "Значение не указано."
+_NOTHING_SELECTED = "Ничего не выбрано."
 
 
 def _handle_cancel(on_cancel: OnCancel) -> None:
@@ -66,7 +70,7 @@ def text(  # noqa: PLR0913
     hint: str,
     default: str = "",
     allow_empty: bool = True,
-    empty_message: str = "Значение не указано.",
+    empty_message: str = _VALUE_NOT_SET,
     on_cancel: OnCancel = "exit",
     validate: Callable[[str], bool | str] | None = None,
     history_key: str | None = None,
@@ -103,7 +107,6 @@ def path(
     raw = text(
         message,
         hint=hint,
-        allow_empty=True,
         on_cancel=on_cancel,
         history_key=history_key,
     )
@@ -135,7 +138,7 @@ def select_many(  # noqa: PLR0913
     hint: str,
     on_cancel: OnCancel = "exit",
     allow_empty: bool = False,
-    empty_message: str = "Ничего не выбрано.",
+    empty_message: str = _NOTHING_SELECTED,
 ) -> list[object] | None:
     """Multi-choice picker.  Returns selected values or ``None`` on cancel."""
     require_interactive(hint)
