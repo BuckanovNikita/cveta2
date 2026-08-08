@@ -92,7 +92,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Check ports are free ───────────────────────────────────────────
+# ── Check ports are free (called in step 3b, after our own teardown) ──
 check_port_free() {
     local port=$1 label=$2
     if ss -tlnH "sport = :$port" 2>/dev/null | grep -q .; then
@@ -101,13 +101,6 @@ check_port_free() {
         exit 1
     fi
 }
-
-check_port_free "$CVAT_PORT" "CVAT API"
-check_port_free "$MINIO_PORT" "MinIO API"
-check_port_free "$MINIO_CONSOLE_PORT" "MinIO console"
-check_port_free "$CLEARML_API_PORT" "ClearML API"
-check_port_free "$CLEARML_FILES_PORT" "ClearML fileserver"
-check_port_free "$CLEARML_WEB_PORT" "ClearML webserver"
 
 export CVAT_PORT MINIO_PORT MINIO_CONSOLE_PORT CLEARML_API_PORT CLEARML_FILES_PORT CLEARML_WEB_PORT
 
@@ -144,6 +137,19 @@ fi
 # ── 3. Tear down existing stack (always reset) ─────────────────────
 log "Tearing down existing CVAT stack (docker compose down -v)"
 compose down -v --remove-orphans 2>/dev/null || true
+
+# ── 3b. Check ports are free ───────────────────────────────────────
+# After the teardown, never before it: the stack this script is about to
+# replace is holding these very ports, so checking first makes a plain
+# re-run fail on ports we were going to release anyway. What is worth
+# refusing is a port held by something else -- another user's stack, or a
+# second agent that picked the same --port.
+check_port_free "$CVAT_PORT" "CVAT API"
+check_port_free "$MINIO_PORT" "MinIO API"
+check_port_free "$MINIO_CONSOLE_PORT" "MinIO console"
+check_port_free "$CLEARML_API_PORT" "ClearML API"
+check_port_free "$CLEARML_FILES_PORT" "ClearML fileserver"
+check_port_free "$CLEARML_WEB_PORT" "ClearML webserver"
 
 # ── 4. Download coco8 images if missing ────────────────────────────
 if [ ! -d "$COCO8_IMAGES_DIR/train" ] || [ ! -d "$COCO8_IMAGES_DIR/val" ]; then
