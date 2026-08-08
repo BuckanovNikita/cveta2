@@ -25,8 +25,10 @@ if TYPE_CHECKING:
 
 OnCancel = Literal["exit", "none"]
 
-# Default captions live at module level so mutation testing cannot generate
-# unkillable "change the wording" mutants inside the primitives below.
+# Shared captions. These stay named rather than inline because they are
+# *parameter defaults*, the one presentation surface
+# `[tool.mutmut].do_not_mutate_patterns` cannot reach: a line pattern matches
+# call sites, not `def` signatures, and mutmut does mutate string defaults.
 _CANCELLED = "Отменено."
 _VALUE_NOT_SET = "Значение не указано."
 _NOTHING_SELECTED = "Ничего не выбрано."

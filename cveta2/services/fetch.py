@@ -307,13 +307,14 @@ def _fetch_and_save_tasks(
     output_dir: Path,
     policy: _CachePolicy,
     *,
-    save_tasks: bool = False,
+    save_tasks: bool,
 ) -> ProjectAnnotations:
     """Fetch tasks one by one, saving per-task CSVs into ``output_dir/.tasks/``.
 
-    Completed tasks are served from *policy*'s cache when possible.  When
-    *save_tasks* is False (default), the ``.tasks/`` directory is removed
-    after merging.
+    Completed tasks are served from *policy*'s cache when possible.  Unless
+    *save_tasks* is set, the ``.tasks/`` directory is removed after merging —
+    best effort, since a leftover tree from an earlier run may belong to
+    another user of a shared output directory.
 
     Returns the merged :class:`ProjectAnnotations` from all fetched tasks.
     """

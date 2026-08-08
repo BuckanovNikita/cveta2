@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from tqdm import tqdm
@@ -13,24 +13,6 @@ from cveta2.exceptions import CvatApiError, ProjectNotFoundError
 if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import LabelInfo, OrganizationInfo, ProjectInfo, TaskInfo
-
-
-class _BarStyle(TypedDict):
-    """Presentation-only ``tqdm`` keywords."""
-
-    desc: str
-    unit: str
-    leave: bool
-
-
-# Kept at module level because mutmut never mutates module-level code: written
-# inline, each literal yields a survivor that only a test asserting the bar's
-# caption could kill.
-_LABEL_SCAN_BAR: _BarStyle = {
-    "desc": "Checking annotations",
-    "unit": "task",
-    "leave": False,
-}
 
 
 class _ReadMixin(_ClientBase):
@@ -87,7 +69,7 @@ class _ReadMixin(_ClientBase):
         tasks = source.get_project_tasks(project_id)
         counts: dict[int, int] = {}
         skipped: list[int] = []
-        for task in tqdm(tasks, **_LABEL_SCAN_BAR):
+        for task in tqdm(tasks, desc="Checking annotations", unit="task", leave=False):
             try:
                 annotations = source.get_task_annotations(task.id)
             except CvatApiError:

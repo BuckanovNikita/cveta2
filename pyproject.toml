@@ -144,29 +144,39 @@ only_mutate = [
     "cveta2/commands/_helpers.py",
     "cveta2/commands/interactive/primitives.py",
     "cveta2/commands/upload.py",
+    "cveta2/services/fetch.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
 # args are appended last, so this `-n` wins.
 pytest_add_cli_args = ["-n", "0", "-p", "no:cacheprovider", "--no-cov"]
 pytest_add_cli_args_test_selection = ["tests/"]
-# Logging is diagnostics, not behaviour, at every level. Mutating it buys
-# nothing measurable here: mutmut's string operator fires only on
-# cst.SimpleString, and this project logs exclusively through f-strings
-# (cst.FormattedString), so the Russian message text was never mutated in the
-# first place. What is left per call site is the whole-argument-to-None mutant,
-# which no assertion can kill without pinning prose. Suppressing the call is
-# the honest way to say that.
+# Presentation is not behaviour. Log lines, progress bars and the text of a
+# `sys.exit` are things a person reads, and the only test that can kill a
+# mutation of them is one that pins their wording - a change-detector that
+# makes every copy edit a test edit.
 #
-# The pattern is line-anchored so it cannot silence an unrelated expression
-# that happens to share a line with a logger call. Matching only the first line
-# is enough for multi-line calls: mutmut skips any expression *starting* on a
-# matched line together with all of its children.
+# These patterns are the ONE place that exclusion is declared. Do not instead
+# restructure source to hide a literal from the mutation gate: hoisting a
+# progress-bar caption into a module-level constant works (mutmut only mutates
+# code inside a top-level function), but it buys a green gate by making the
+# code worse, and every later feature pays the cost of the indirection.
+# Presentation surface belongs here; if a new one appears, add it here.
+#
+# Matching is `re.search` per line, and a matched line skips every *expression*
+# starting on it together with its children - so `for x in tqdm(items, ...)`
+# suppresses the bar and its keywords without touching the loop body. The
+# logger pattern stays line-anchored because a bare `logger.` can appear
+# mid-expression; `tqdm(`/`sys.exit(` cannot.
 #
 # Individual equivalent mutants still go in [tool.cveta2.mutation.equivalent] -
-# both of mutmut's suppression mechanisms key on the first line of the mutated
-# node, so neither can single out one argument of a multi-line call.
-do_not_mutate_patterns = ["^\\s*logger\\.[a-z_]+\\("]
+# both suppression mechanisms key on the first line of the mutated node, so
+# neither can single out one argument of a multi-line call.
+do_not_mutate_patterns = [
+    "^\\s*logger\\.[a-z_]+\\(",
+    "\\btqdm\\(",
+    "\\bsys\\.exit\\(",
+]
 # mutmut caches a mutant's verdict against the *source* function's text, so a
 # changed test does not invalidate it: weakening an assertion otherwise leaves
 # the gate green on stale results. Hashing the test tree and rerunning on any
@@ -289,7 +299,11 @@ full = []
 "cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_local__mutmut_6" = "source=None; the layer label only reaches the rejection log"
 "cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_s3__mutmut_8" = "source=None; the layer label only reaches the rejection log"
 
-# Image IO: progress-bar captions, and counters assigned rather than
+# Image IO. The two bar captions are the residue the do_not_mutate_patterns
+# above cannot reach: they are one argument of a multi-line `run_s3_transfers`
+# call, and both of mutmut's suppression mechanisms key on the first line of a
+# node. Suppressing the whole call would also silence the transfer lambdas,
+# which carry real behaviour. The rest are counters assigned rather than
 # incremented where the counter is provably still zero at that point.
 "cveta2.image_downloader.x__download_pending__mutmut_5" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_43" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
@@ -299,24 +313,25 @@ full = []
 "cveta2.image_downloader.x_parse_cloud_storage__mutmut_11" = "or \"XXXX\"; parse_qs of a string with no \"=\" yields {} exactly as for \"\""
 "cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_13" = "prefix=None widens the listing with out-of-prefix keys that no computed s3_key can equal"
 
-# count_label_usage: the label-scan bar's kwargs live in the module-level
-# _LABEL_SCAN_BAR precisely so their literals are not mutated; dropping the
-# whole mapping only leaves an uncaptioned bar. What the function returns is
-# pinned per-label by test_count_label_usage_counts_each_label_separately.
-"cveta2._client_ops.read.xǁ_ReadMixinǁcount_label_usage__mutmut_11" = "drops **_LABEL_SCAN_BAR; tqdm renders an uncaptioned bar over the same tasks"
-
 # fetch_one_task: the degrade path's [] and None are normalized identically by
 # _build_frame_issues(issues or []); the branch itself is tested.
 "cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_15" = "issues=None instead of []; _build_frame_issues normalizes it with `issues or []`"
 
+# fetch_selected_tasks: prune_cache is read as `cache is not None and
+# prune_cache`, so None and False take the same branch.
+"cveta2.services.fetch.x_fetch_selected_tasks__mutmut_8" = "prune_cache=None is falsy, exactly like the False it replaces; prune_cache=True IS observable and is killed by test_a_selected_fetch_keeps_entries_for_the_tasks_it_skipped"
 
-# run_s3_transfers: tqdm's `leave` only decides whether the finished progress
-# bar stays on screen. Same class as the logger suppression - presentation, not
-# behaviour - but it is one argument of a multi-line call, so it needs an entry
-# rather than a pattern.
-"cveta2.s3_utils.x_run_s3_transfers__mutmut_6" = "leave=None; tqdm falls back to its default, which erases nothing extra"
-"cveta2.s3_utils.x_run_s3_transfers__mutmut_10" = "drops leave=; same tqdm default as passing None"
-"cveta2.s3_utils.x_run_s3_transfers__mutmut_11" = "leave=True; keeps the finished bar on screen instead of erasing it"
+# _fetch_and_save_tasks: the guard decides only whether the cache summary is
+# printed at all. Both branches return the same annotations, and the summary's
+# own numbers are pinned on _FetchStats by TestRetrieveTaskAccounting.
+"cveta2.services.fetch.x__fetch_and_save_tasks__mutmut_41" = "inverts the guard around stats.log_summary(); nothing but whether one info line is emitted"
+
+# _fetch_core -> prepare_fetch(project_name=): FetchContext.project_name has a
+# single reader, the 5xx skip hint in _client_ops.shared, which falls back to a
+# "<имя_проекта>" placeholder when it is empty. Killing this means asserting the
+# wording of that hint - the change-detector CLAUDE.md rules out.
+"cveta2.services.fetch.x__fetch_core__mutmut_7" = "project_name=None; the only reader is the 5xx hint's `if ctx.project_name` fallback"
+"cveta2.services.fetch.x__fetch_core__mutmut_13" = "drops project_name=; same single reader as above"
 
 # The CSV reader's only option is `encoding`, which pandas' io.common.get_handle
 # already resolves as `encoding or "utf-8"` - so dropping the whole mapping is

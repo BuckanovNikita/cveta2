@@ -34,7 +34,7 @@ from cveta2.task_cache import (
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import CFG, build_fake, make_bbox, make_task
+from tests.helpers import CFG, build_fake, make_bbox, make_task, write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -823,3 +823,135 @@ class TestCacheSettings:
         assert fake_s3.put_calls == [
             "bkt/pfx/.cveta2_cache/task_annotations/task_1.json"
         ]
+
+
+# ---------------------------------------------------------------------------
+# _build_task_cache: what the fetch pipeline wires the cache up to
+# ---------------------------------------------------------------------------
+
+
+class _FakeApiWithStorage(FakeCvatApi):
+    """``FakeCvatApi`` whose project reports a cloud storage.
+
+    The base fake answers ``None``, so no service-level test ever reached
+    the S3 half of the cache: every one of them ran local-only.
+    """
+
+    def __init__(self, fake: LoadedFixtures, storage: CloudStorageInfo) -> None:
+        super().__init__(fake)
+        self._storage = storage
+
+    def get_project_cloud_storage(self, _project_id: int) -> CloudStorageInfo | None:
+        return self._storage
+
+
+_PROJECT_STORAGE = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
+
+
+class TestFetchBuildsTheS3CacheBackend:
+    """The shared S3 cache only exists if the pipeline wires it up."""
+
+    def _fetch(
+        self,
+        api: FakeCvatApi,
+        fake: LoadedFixtures,
+        output_dir: Path,
+        fake_s3: FakeS3Client,
+        config_path: Path | None = None,
+    ) -> None:
+        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+            fetch_selected_tasks(
+                CvatClient(CFG, api=api),
+                fake.project.id,
+                fake.project.name,
+                output_dir,
+                None,
+                FetchOptions(
+                    task_selector=[fake.tasks[0].name],
+                    config_path=config_path,
+                ),
+            )
+
+    def test_an_s3_entry_is_served_without_asking_cvat(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """A teammate's cached entry must spare this machine the fetch.
+
+        Every earlier fetch test ran against the storage-less fake, so the
+        S3 backend was never built and the whole shared half of the cache
+        was reachable only through direct ``S3CacheBackend`` unit tests.
+        """
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        api = _FakeApiWithStorage(fake, _PROJECT_STORAGE)
+        task = fake.tasks[0]
+        fake_s3 = FakeS3Client(
+            {f"bkt/{_s3_key(task.id)}": _envelope_bytes(task, _payload(task.id))}
+        )
+
+        self._fetch(api, fake, tmp_path / "out", fake_s3)
+
+        assert api.annotation_calls == []
+        assert (get_task_cache_dir(fake.project.id) / f"task_{task.id}.json").exists()
+
+    def test_a_fresh_fetch_is_published_to_s3(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """A local-only write would leave every other machine re-fetching."""
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake_s3 = FakeS3Client()
+
+        self._fetch(
+            _FakeApiWithStorage(fake, _PROJECT_STORAGE), fake, tmp_path / "out", fake_s3
+        )
+
+        assert fake_s3.put_calls == [f"bkt/{_s3_key(fake.tasks[0].id)}"]
+
+    def test_the_configured_override_moves_the_s3_location(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """``task_cache_s3`` must survive the trip from config to backend.
+
+        Dropping it silently relocates a team's shared cache back to the
+        project bucket's ``.cveta2_cache/``, where nobody is looking.
+        """
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake_s3 = FakeS3Client()
+        config_path = write_config_yaml(
+            tmp_path / "cfg.yaml",
+            cache={
+                "projects": {fake.project.name: {"task_cache_s3": "s3://ml-cache/proj"}}
+            },
+        )
+
+        self._fetch(
+            _FakeApiWithStorage(fake, _PROJECT_STORAGE),
+            fake,
+            tmp_path / "out",
+            fake_s3,
+            config_path,
+        )
+
+        assert fake_s3.put_calls == [
+            f"ml-cache/proj/task_annotations/task_{fake.tasks[0].id}.json"
+        ]
+
+
+class TestSelectedFetchDoesNotPrune:
+    def test_a_selected_fetch_keeps_entries_for_the_tasks_it_skipped(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """Pruning on a partial fetch would delete every unselected task.
+
+        ``fetch_project`` prunes because it has just seen the whole project;
+        ``fetch_selected_tasks`` has seen one task and must not conclude the
+        rest are gone.
+        """
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        cache_dir = get_task_cache_dir(fake.project.id)
+        TaskAnnotationCache(cache_dir).put(
+            make_task(999, updated=_UPDATED), _payload(999)
+        )
+
+        _fetch_task_cached(FakeCvatApi(fake), fake, tmp_path / "out", FetchOptions())
+
+        assert (cache_dir / "task_999.json").exists()

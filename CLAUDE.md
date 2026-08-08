@@ -271,22 +271,30 @@ disqualifier is mutmut's own `no tests` status (exit code 33), not the
 consults.
 
 **When the hook fails**, inspect with `uv run mutmut show <name>` or
-`uv run mutmut browse`, then in preference order: strengthen a test (the
-default), restructure the source so the mutant cannot exist, or — only when the
-mutation genuinely cannot change behaviour — add it to
+`uv run mutmut browse`, then: strengthen a test (the default), or — only when
+the mutation genuinely cannot change behaviour — add it to
 `[tool.cveta2.mutation.equivalent]` with a reason. The gate also fails on a
 *stale* allowlist entry: mutmut renumbers mutants whenever a function changes,
 so a justification cannot silently drift onto a different mutant. Keep the
 allowlist small; at scale every refactor of a mutated function forces
 re-triage.
 
+**Never reshape working code to satisfy the gate.** A progress-bar caption
+hoisted into a module-level constant does remove the mutant — mutmut only
+mutates code inside a top-level function — but it buys a green gate by adding
+indirection that every later feature has to carry, and it hides the caption
+from the call site that owns it. Presentation surfaces are excluded once, by
+pattern, in `[tool.mutmut].do_not_mutate_patterns`; a new one goes there. This
+rule is the reason `_TASK_BAR` and `_LABEL_SCAN_BAR` no longer exist.
+
 Two anti-patterns, both of which produce brittle change-detector tests:
 
 - Do not assert exact `yaml.safe_dump` / `json.dumps` output when the only
   reader parses it back — `safe_load` is blind to escaping, key order and flow
   style, so such a test breaks on any unrelated field addition.
-- Do not write a test whose only purpose is killing a mutant on an internal
-  expression that reaches a log message. Restructure the source instead.
+- Do not write a test whose only purpose is pinning the wording of a message.
+  If the mutant only reaches text a person reads, it belongs behind a
+  `do_not_mutate_patterns` entry, not behind an assertion on prose.
 
 ### What actually gets mutated
 
@@ -294,9 +302,10 @@ Verified against the installed mutmut 3.7 source; several of these are
 counter-intuitive and decide whether a module is worth gating at all.
 
 - **Only code inside a top-level `FunctionDef`.** Module-level constants
-  (`CSV_COLUMNS`, `_DIR_MODE`, `_HTTP_5XX_MIN`) produce no mutants. Moving a
-  repeated literal to module level is therefore a legitimate way to remove a
-  cluster of unkillable mutants.
+  (`CSV_COLUMNS`, `_DIR_MODE`, `_HTTP_5XX_MIN`) produce no mutants. Note this
+  as a fact about the tool, not as a technique: hoist a literal when the
+  *code* wants it hoisted (it is shared, or it names something), never to
+  silence the gate — see the rule above.
 - **Decorated functions and classes are skipped entirely, body included**
   (`file_mutation.py:281-293`), except a single bare
   `@staticmethod`/`@classmethod`. So `@property`, `@contextmanager`,
@@ -304,10 +313,25 @@ counter-intuitive and decide whether a module is worth gating at all.
   models declared by inheritance are *not* skipped, so plain validator
   functions wired by class-body assignment still get mutated.
 - **f-strings are never mutated** — the string operator fires only on
-  `cst.SimpleString`. Since this project logs exclusively via f-strings, log
-  message text was never mutated; `do_not_mutate_patterns` now suppresses
-  logger calls at every level, which removes the one remaining
-  whole-argument-to-`None` mutant per call site.
+  `cst.SimpleString`, and triple-quoted strings are skipped as docs. Since this
+  project logs exclusively via f-strings, log message text was never mutated;
+  the patterns remove the remaining whole-argument-to-`None` mutant per call
+  site.
+- **`do_not_mutate_patterns` is `re.search` per line, not anchored**, and a
+  matched line skips every *expression* starting on it plus its children — so
+  `\btqdm\(` suppresses `for x in tqdm(items, desc=...)` without touching the
+  loop body. It cannot single out one argument of a *multi-line* call, because
+  the argument starts on a different line than the call; that residue is what
+  the two `run_s3_transfers` caption entries in the allowlist are.
+- **`# pragma: no mutate` only registers** on a standalone comment line or a
+  simple statement's trailing comment, and marks the statement's *start* line.
+  A trailing pragma on an argument line inside a multi-line call is silently
+  ignored.
+- **Parameter defaults are mutated** when they are a name, number or string
+  (other expressions are skipped, since they run at definition time). A line
+  pattern matches call sites, not `def` signatures, so a user-facing string
+  used as a default has no pattern-level escape — which is why
+  `interactive/primitives.py` keeps `_CANCELLED` and friends as names.
 - **A glob matching no mutant crashes the run** (`assert filtered_mutants`), so
   never name a zero-mutant module in a profile.
 
@@ -369,23 +393,32 @@ still escaping is justified in `[tool.cveta2.mutation.equivalent]`. A new
 module joining `cveta2/` should come with its own `only_mutate` entry rather
 than being added to a to-do list.
 
-Two modules are deliberately outside that ratchet and are **not** "nothing left
-to do":
+One module is deliberately outside that ratchet and is **not** "nothing left to
+do": **`_client/sdk_adapter.py`**, the SDK boundary, and the one module where
+line coverage itself is the blocker, so the two-stage entry criterion says
+close coverage first. Most of it is only reachable against a live CVAT, which
+is why the integration suite exists.
 
-- **`services/fetch.py`** — measured, not gated. Zero `no tests` mutants, so
-  this is an assertion-quality gap rather than a coverage one, and it is too
-  large to close in one sitting; the survivors concentrate in the cache loop
-  (`_fetch_and_save_tasks`, `_retrieve_task`, `_fetch_core`), where tests drive
-  the pipeline end to end and assert the CSVs rather than the per-task cache
-  hit/fetch accounting. Re-measure with the temporarily-add-and-revert
-  procedure above before starting.
-- **`_client/sdk_adapter.py`** — the SDK boundary, and the one module where
-  line coverage itself is the blocker, so the two-stage entry criterion says
-  close coverage first. Most of it is only reachable against a live CVAT, which
-  is why the integration suite exists.
+`services/fetch.py` was the other one and is now gated. Its survivors were an
+assertion-quality gap, not a coverage one — zero `no tests` mutants — and they
+clustered in three places worth knowing about, because they are the parts of
+the pipeline that end-to-end CSV assertions structurally cannot see:
 
-The last group into the ratchet was the one the rollout plan called
-conditional:
+- **the cache-hit vs live-fetch accounting** in `_retrieve_task`. Its counters
+  and elapsed-time fields feed one summary line, and every assertion available
+  on a real clock ("roughly zero") leaves `+=` and `=` indistinguishable.
+  `TestRetrieveTaskAccounting` scripts the `time` module instead, which makes
+  each field exactly predictable.
+- **the arguments `_fetch_core` forwards** to `download_images` and
+  `populate_record_paths`. Dropping one changes *where* images land or whether
+  they land at all — never how many rows the CSV has, so nothing that reads
+  `dataset.csv` reacts.
+- **the S3 half of the task cache.** `FakeCvatApi.get_project_cloud_storage`
+  returns `None`, so every service-level fetch test ran local-only and the
+  whole shared-cache path was reachable only from direct `S3CacheBackend` unit
+  tests. `_FakeApiWithStorage` in `tests/test_task_cache.py` closes that.
+
+The group before it was the one the rollout plan called conditional:
 `_client_ops/{base,images}.py` and the three command-layer exceptions
 (`commands/_helpers.py`, `commands/interactive/primitives.py`,
 `commands/upload.py`). None of them had a single `no tests` mutant in

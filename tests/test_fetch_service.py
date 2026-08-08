@@ -7,6 +7,7 @@ through the fetch service and :class:`CvatClient`.
 
 from __future__ import annotations
 
+import shutil
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -22,20 +23,35 @@ from cveta2.models import (
     DeletedImage,
     ProjectAnnotations,
     ProjectInfo,
+    TaskAnnotations,
     TaskInfo,
 )
+from cveta2.services import fetch as fetch_service
+from cveta2.services.fetch import (
+    FetchOptions,
+    _CachePolicy,
+    _FetchStats,
+    _retrieve_task,
+    fetch_project,
+)
+from cveta2.task_cache import TaskAnnotationCache
 from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import (
     build_fake,
     fetch_all_annotations,
+    make_cs_info,
     make_fake_client,
     split_records,
+    write_config_yaml,
 )
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
+    from cveta2.client import FetchContext
+    from cveta2.image_downloader import CloudStorageInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 # ---------------------------------------------------------------------------
@@ -451,3 +467,368 @@ def test_task_to_records_unknown_deleted_frame_id() -> None:
     assert len(deleted) == 1
     assert deleted[0].image_name == "<unknown>"
     assert deleted[0].frame_id == 999
+
+
+# ---------------------------------------------------------------------------
+# _retrieve_task: the per-task cache-hit vs live-fetch accounting
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedClock:
+    """``time`` stand-in handing out a fixed sequence of monotonic readings.
+
+    The accounting below is arithmetic on wall-clock deltas, so a real clock
+    can only support "roughly zero" assertions — under which ``+=`` and ``=``
+    are indistinguishable and a sign flip hides in the noise. Scripting the
+    readings makes every field exactly predictable.
+    """
+
+    def __init__(self, readings: list[float]) -> None:
+        self._readings = iter(readings)
+
+    def monotonic(self) -> float:
+        return next(self._readings)
+
+
+def _completed_fake(coco8_fixtures: LoadedFixtures) -> LoadedFixtures:
+    return build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+
+
+def _fetch_context(client: CvatClient, fake: LoadedFixtures) -> FetchContext:
+    return client.prepare_fetch(fake.project.id, project_name=fake.project.name)
+
+
+def _fetched(client: CvatClient, task: TaskInfo, ctx: FetchContext) -> TaskAnnotations:
+    """Fetch one task, failing the test rather than the type checker on a skip."""
+    result = client.fetch_one_task(client.api, task, ctx)
+    assert result is not None
+    return result
+
+
+class TestRetrieveTaskAccounting:
+    """``_FetchStats`` is what tells the user how much of a fetch was cached."""
+
+    def test_cache_hits_and_their_elapsed_time_accumulate(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Two hits report two hits and the *sum* of their durations."""
+        fake = _completed_fake(coco8_fixtures)
+        client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
+        ctx = _fetch_context(client, fake)
+        task = ctx.tasks[0]
+
+        cache = TaskAnnotationCache(tmp_path / "cache")
+        cache.put(task, _fetched(client, task, ctx))
+        policy = _CachePolicy(cache=cache)
+        stats = _FetchStats()
+
+        monkeypatch.setattr(
+            fetch_service, "time", _ScriptedClock([100.0, 101.5, 200.0, 203.0])
+        )
+        assert _retrieve_task(client, task, ctx, policy, stats) is not None
+        assert _retrieve_task(client, task, ctx, policy, stats) is not None
+
+        assert stats.cache_hits == 2
+        assert stats.hit_seconds == pytest.approx(4.5)
+        assert stats.fetched == 0
+        assert stats.fetch_seconds == 0.0
+
+    def test_live_fetches_and_their_elapsed_time_accumulate(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Without a cache every task is a live fetch, counted the same way."""
+        fake = _completed_fake(coco8_fixtures)
+        client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
+        ctx = _fetch_context(client, fake)
+        task = ctx.tasks[0]
+        policy = _CachePolicy()
+        stats = _FetchStats()
+
+        monkeypatch.setattr(
+            fetch_service, "time", _ScriptedClock([10.0, 12.0, 30.0, 34.0])
+        )
+        assert _retrieve_task(client, task, ctx, policy, stats) is not None
+        assert _retrieve_task(client, task, ctx, policy, stats) is not None
+
+        assert stats.fetched == 2
+        assert stats.fetch_seconds == pytest.approx(6.0)
+        assert stats.cache_hits == 0
+        assert stats.hit_seconds == 0.0
+
+    def test_a_skipped_task_is_counted_as_neither(
+        self, coco8_fixtures: LoadedFixtures
+    ) -> None:
+        """A 5xx skip must not inflate the fetched count or its timer."""
+        fake = _completed_fake(coco8_fixtures)
+        api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id})
+        client = CvatClient(CvatConfig(), api=api)
+        ctx = _fetch_context(client, fake)
+        stats = _FetchStats()
+
+        assert _retrieve_task(client, ctx.tasks[0], ctx, _CachePolicy(), stats) is None
+
+        assert (stats.fetched, stats.fetch_seconds) == (0, 0.0)
+        assert (stats.cache_hits, stats.hit_seconds) == (0, 0.0)
+
+    def test_force_bypasses_a_populated_cache(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """``--force`` must re-fetch even when the entry is valid."""
+        fake = _completed_fake(coco8_fixtures)
+        client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
+        ctx = _fetch_context(client, fake)
+        task = ctx.tasks[0]
+        cache = TaskAnnotationCache(tmp_path / "cache")
+        cache.put(task, _fetched(client, task, ctx))
+        stats = _FetchStats()
+
+        _retrieve_task(client, task, ctx, _CachePolicy(cache=cache, force=True), stats)
+
+        assert (stats.cache_hits, stats.fetched) == (0, 1)
+
+
+# ---------------------------------------------------------------------------
+# _fetch_and_save_tasks: the per-task CSV directory and the skip path
+# ---------------------------------------------------------------------------
+
+
+def _fetch_project(
+    api: FakeCvatApi,
+    fake: LoadedFixtures,
+    output_dir: Path,
+    options: FetchOptions,
+) -> PartitionResult:
+    return fetch_project(
+        CvatClient(CvatConfig(), api=api),
+        fake.project.id,
+        fake.project.name,
+        output_dir,
+        None,
+        options,
+    )
+
+
+class TestTaskCsvDirectory:
+    def test_a_leftover_tasks_directory_is_reused(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """Re-running into the same output directory must not fail.
+
+        A killed run leaves ``.tasks/`` behind, and ``--save-tasks`` leaves it
+        behind on purpose, so the second run always finds it there.
+        """
+        fake = _completed_fake(coco8_fixtures)
+        out = tmp_path / "out"
+        (out / ".tasks").mkdir(parents=True)
+
+        partition = _fetch_project(
+            FakeCvatApi(fake), fake, out, FetchOptions(publish_clearml=False)
+        )
+
+        assert len(partition.dataset) > 0
+
+    def test_a_cleanup_failure_does_not_fail_the_fetch(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Removing ``.tasks/`` is best effort — the annotations are the point.
+
+        The stand-in mirrors ``shutil.rmtree``'s own contract (``ignore_errors``
+        swallows the failure, its absence re-raises), so the assertion is that
+        the call site passes it — reached through the real call, not by
+        inspecting arguments. A shared output directory owned by another user
+        is the case that provokes this for real.
+        """
+        removals: list[Path] = []
+
+        def rmtree(path: Path, *, ignore_errors: bool = False) -> None:
+            removals.append(path)
+            if not ignore_errors:
+                raise PermissionError(path)
+
+        monkeypatch.setattr(shutil, "rmtree", rmtree)
+        fake = _completed_fake(coco8_fixtures)
+        out = tmp_path / "out"
+
+        partition = _fetch_project(
+            FakeCvatApi(fake), fake, out, FetchOptions(publish_clearml=False)
+        )
+
+        assert removals == [out / ".tasks"]
+        assert len(partition.dataset) > 0
+
+    def test_a_skipped_task_does_not_end_the_loop(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """A 5xx on the *first* task must not discard every task after it.
+
+        Every existing skip scenario failed the last task, where abandoning
+        the loop and continuing it produce the same output.
+        """
+        fake = build_fake(
+            coco8_fixtures,
+            ["all-empty", "normal"],
+            statuses=["completed", "completed"],
+        )
+        api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id})
+
+        partition = _fetch_project(
+            api, fake, tmp_path / "out", FetchOptions(publish_clearml=False)
+        )
+
+        assert set(partition.dataset["task_id"].unique()) == {fake.tasks[1].id}
+
+    def test_the_saved_per_task_csv_holds_that_task_s_rows(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """``--save-tasks`` writes real rows in the canonical column order.
+
+        Existing tests only asserted the file exists, which an empty frame or
+        an extra index column satisfies just as well.
+        """
+        fake = _completed_fake(coco8_fixtures)
+        out = tmp_path / "out"
+
+        _fetch_project(
+            FakeCvatApi(fake),
+            fake,
+            out,
+            FetchOptions(save_tasks=True, publish_clearml=False),
+        )
+
+        task_df = pd.read_csv(out / ".tasks" / f"task_{fake.tasks[0].id}.csv")
+        assert list(task_df.columns) == list(CSV_COLUMNS)
+        assert set(task_df["task_id"].unique()) == {fake.tasks[0].id}
+        assert len(task_df) == len(pd.read_csv(out / "dataset.csv"))
+
+
+# ---------------------------------------------------------------------------
+# _fetch_core: what it forwards to the downloader and to the path population
+# ---------------------------------------------------------------------------
+
+
+class _FakeApiWithStorage(FakeCvatApi):
+    """``FakeCvatApi`` whose project reports a cloud storage.
+
+    The base fake answers ``None``, which makes the ``project_id`` fallback
+    inside ``download_images`` unreachable from any service-level test.
+    """
+
+    def __init__(self, fake: LoadedFixtures, storage: CloudStorageInfo) -> None:
+        super().__init__(fake)
+        self._storage = storage
+
+    def get_project_cloud_storage(self, _project_id: int) -> CloudStorageInfo | None:
+        return self._storage
+
+
+class TestFetchCoreImageForwarding:
+    """Each argument decides *whether* or *where* images land on disk."""
+
+    _STORAGE = make_cs_info(bucket="bkt", prefix="data/proj", endpoint_url="")
+
+    def _bucket(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        objects = {f"data/proj/{name}": b"IMG" for name in _IMAGE_NAMES}
+        s3 = FakeS3Client(objects, keyed_by_bucket=False)
+        monkeypatch.setattr(
+            "cveta2.image_downloader.make_s3_client", lambda _endpoint=None: s3
+        )
+
+    def test_the_given_storage_is_what_gets_downloaded_from(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A caller-supplied storage must reach the downloader.
+
+        The fixture project reports no storage of its own, so dropping the
+        argument leaves the downloader with nothing and every image is
+        counted as failed — a silent zero-download fetch.
+        """
+        self._bucket(monkeypatch)
+        fake = _completed_fake(coco8_fixtures)
+        images = tmp_path / "images"
+
+        fetch_project(
+            CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
+            fake.project.id,
+            fake.project.name,
+            tmp_path / "out",
+            self._STORAGE,
+            FetchOptions(images_dir=images, publish_clearml=False),
+        )
+
+        assert (images / _IMAGE_NAMES[0]).read_bytes() == b"IMG"
+
+    def test_without_a_storage_the_project_id_finds_one(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """With no storage passed, the project id is the only way to get one."""
+        self._bucket(monkeypatch)
+        fake = _completed_fake(coco8_fixtures)
+        images = tmp_path / "images"
+
+        fetch_project(
+            CvatClient(CvatConfig(), api=_FakeApiWithStorage(fake, self._STORAGE)),
+            fake.project.id,
+            fake.project.name,
+            tmp_path / "out",
+            None,
+            FetchOptions(images_dir=images, publish_clearml=False),
+        )
+
+        assert (images / _IMAGE_NAMES[0]).read_bytes() == b"IMG"
+
+    def test_the_configured_ignored_prefix_shapes_both_paths(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``ignored_prefix`` reaches the download *and* the CSV path column.
+
+        It strips less of the S3 key than the storage prefix, so the S3
+        hierarchy below it survives locally.  Dropping it on either call
+        flattens the tree — same file count, different paths, which no
+        counter notices.  The two calls are asserted separately because
+        each keeps its own copy of the argument.
+        """
+        self._bucket(monkeypatch)
+        fake = _completed_fake(coco8_fixtures)
+        images = tmp_path / "images"
+        config_path = write_config_yaml(
+            tmp_path / "cfg.yaml",
+            cache={"projects": {fake.project.name: {"ignored_prefix": "data"}}},
+        )
+
+        fetch_project(
+            CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
+            fake.project.id,
+            fake.project.name,
+            tmp_path / "out",
+            self._STORAGE,
+            FetchOptions(
+                images_dir=images,
+                publish_clearml=False,
+                config_path=config_path,
+            ),
+        )
+
+        assert (images / "proj" / _IMAGE_NAMES[0]).read_bytes() == b"IMG"
+        assert not (images / _IMAGE_NAMES[0]).exists()
+
+        dataset = pd.read_csv(tmp_path / "out" / "dataset.csv")
+        local_paths = set(dataset["image_path"].dropna())
+        assert local_paths
+        assert all("/images/proj/" in path for path in local_paths)
