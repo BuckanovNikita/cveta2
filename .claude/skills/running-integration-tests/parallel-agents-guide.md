@@ -19,7 +19,7 @@ This means:
 Default ports are fixed:
 | Service        | Default Port |
 |----------------|-------------|
-| CVAT API (traefik) | 9988   |
+| CVAT API       | 9988        |
 | MinIO API      | 9989        |
 | MinIO console  | 9990        |
 | ClearML API    | 8880        |

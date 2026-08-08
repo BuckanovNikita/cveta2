@@ -161,6 +161,11 @@ Integration tests require a running CVAT instance and are gated by `CVAT_INTEGRA
 ./scripts/integration_stop.sh    # tear down
 ```
 
+The stack needs `tests/integration/.env`, which is gitignored and so absent
+from a fresh clone. The `running-integration-tests` skill lists the keys; the
+non-obvious one is `SMOKESCREEN_OPTS=--unsafe-allow-private-ranges`, without
+which CVAT's egress proxy blocks the MinIO container and seeding fails.
+
 `integration_test.sh` sets `CVAT_INTEGRATION_HOST`, `MINIO_ENDPOINT`, S3 credentials, and disables xdist automatically. Extra pytest args are forwarded: `./scripts/integration_test.sh -k upload`.
 
 **Fixed ports**: CVAT API `9988`, MinIO API `9989`, MinIO console `9990`. Override with `--port` / `--minio-port` flags on `integration_up.sh`.

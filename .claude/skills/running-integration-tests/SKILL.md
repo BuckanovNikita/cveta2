@@ -17,6 +17,25 @@ Integration tests run against a real CVAT + MinIO + ClearML Docker stack. The fu
 - `uv` (Python package manager)
 - CVAT git submodule initialized: `git submodule update --init`
 - Free ports (defaults: 9988, 9989, 9990, 8880-8882) — see parallel section for overrides
+- `tests/integration/.env` — gitignored, so a fresh clone does not have one and
+  every script fails on `couldn't find env file` until you write it:
+
+  ```dotenv
+  DJANGO_SUPERUSER_USERNAME=admin
+  DJANGO_SUPERUSER_PASSWORD=admin
+  DJANGO_SUPERUSER_EMAIL=admin@example.com
+
+  MINIO_BUCKET=cveta2-test
+
+  # CVAT proxies outbound S3 through smokescreen, which denies private ranges
+  # by default. Without this, seeding dies registering the cloud storage with
+  # "The resource cveta2-test not found" while MinIO is healthy and reachable.
+  SMOKESCREEN_OPTS=--unsafe-allow-private-ranges
+  ```
+
+  The username and password must match what `tests/integration/conftest.py`
+  logs in with (`admin`/`admin` unless `CVAT_INTEGRATION_USER` /
+  `CVAT_INTEGRATION_PASSWORD` say otherwise).
 
 ## Quick Start (Single Agent)
 
@@ -45,7 +64,7 @@ Forward extra pytest args to `integration_test.sh`:
 1. Checks that default ports (9988, 9989, 9990, 8880-8882) are free
 2. Tears down any existing stack (`docker compose down -v`)
 3. Downloads coco8 dataset images (if missing)
-4. Starts minimal CVAT services: `cvat_server`, `cvat_worker_import`, `cvat_worker_chunks`, `cveta2-minio`, `cvat_ui`, `traefik`, plus ClearML (`clearml-apiserver`, `clearml-webserver`, `clearml-fileserver`)
+4. Starts minimal CVAT services: `cvat_server`, `cvat_worker_import`, `cvat_worker_chunks`, `cveta2-minio`, plus ClearML (`clearml-apiserver`, `clearml-webserver`, `clearml-fileserver`). No `traefik` and no `cvat_ui`: `cvat_server` publishes its own nginx on the CVAT port, so the stack serves the API and has no web UI. See the header of `docker-compose.override.yml` for why traefik is kept out — in short, a traefik from any *other* CVAT stack on the machine discovers these containers through the Docker socket and breaks both stacks at once.
 5. Waits for CVAT and ClearML health endpoints (up to 180s)
 6. Creates CVAT superuser (`admin`/`admin`)
 7. Creates MinIO bucket (`cveta2-test`)
