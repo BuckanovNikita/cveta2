@@ -19,15 +19,13 @@ from cveta2.services.convert.common import (
     _make_csv_row_base,
     _make_csv_row_box,
     _pixel_to_yolo,
-    _read_text_utf8,
     _require_positive_dimensions,
     _SizeCache,
     _write_csv,
-    _write_text_utf8,
     _yolo_to_pixel,
     prepare_export,
 )
-from cveta2.services.output import preview_names
+from cveta2.services.output import preview_names, read_text_utf8, write_text_utf8
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -86,7 +84,7 @@ def _write_box_labels(  # noqa: PLR0913, PLR0917
             lines.append(
                 f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {yolo.w:.6f} {yolo.h:.6f}"
             )
-        _write_text_utf8(label_path, "\n".join(lines) + "\n")
+        write_text_utf8(label_path, "\n".join(lines) + "\n")
 
 
 def _write_none_labels(
@@ -126,7 +124,7 @@ def _write_dataset_yaml(
             yaml_data[split_name] = f"images/{split_name}"
     yaml_data["names"] = names_dict
 
-    _write_text_utf8(output_dir / "dataset.yaml", yaml.dump(yaml_data, **_YAML_DUMP))
+    write_text_utf8(output_dir / "dataset.yaml", yaml.dump(yaml_data, **_YAML_DUMP))
 
 
 def convert_to_yolo(
@@ -189,7 +187,7 @@ def _parse_label_file(path: Path) -> list[list[float]]:
     if not path.is_file():
         return []
     rows: list[list[float]] = []
-    for line in _read_text_utf8(path).strip().splitlines():
+    for line in read_text_utf8(path).strip().splitlines():
         parts = line.strip().split()
         if len(parts) < 5:
             continue
@@ -201,7 +199,7 @@ def _load_class_names_yaml(path: Path) -> dict[int, str]:
     """Load class names from a YAML file (supports {names: ...} or flat dict)."""
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл имён классов не найден: {path}")
-    data = yaml.safe_load(_read_text_utf8(path))
+    data = yaml.safe_load(read_text_utf8(path))
     if isinstance(data, dict) and "names" in data:
         return {int(k): str(v) for k, v in data["names"].items()}
     if isinstance(data, dict):
@@ -249,7 +247,7 @@ def _from_yolo_dataset(
     read_all_sizes: bool,
 ) -> None:
     """Convert YOLO dataset (with dataset.yaml) to CSV."""
-    ds_config = yaml.safe_load(_read_text_utf8(yaml_path))
+    ds_config = yaml.safe_load(read_text_utf8(yaml_path))
 
     class_names: dict[int, str] = {
         int(k): str(v) for k, v in ds_config.get("names", {}).items()

@@ -31,15 +31,14 @@ from cveta2.services.convert.common import (
     _make_csv_row_box,
     _pixel_to_coco,
     _pixel_to_yolo,
-    _read_text_utf8,
     _require_positive_dimensions,
     _SizeCache,
     _validate_splits,
     _write_csv,
-    _write_text_utf8,
     _yolo_to_pixel,
 )
 from cveta2.services.convert.yolo import _load_class_names_yaml, _parse_label_file
+from cveta2.services.output import read_text_utf8, write_text_utf8
 from tests.helpers import (
     csv_row,
     make_bbox,
@@ -1081,9 +1080,9 @@ class TestUtf8FileHelpers:
         """
         path = tmp_path / "t.txt"
         text = "кошка\nсобака\n"
-        _write_text_utf8(path, text)
+        write_text_utf8(path, text)
         assert path.read_bytes() == text.encode("utf-8")
-        assert _read_text_utf8(path) == text
+        assert read_text_utf8(path) == text
 
 
 # ---------------------------------------------------------------------------

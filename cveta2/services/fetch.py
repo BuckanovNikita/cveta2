@@ -20,6 +20,7 @@ from cveta2.config import CacheConfig, IgnoreConfig, is_cache_disabled
 from cveta2.dataset_partition import partition_annotations_df
 from cveta2.models import TaskAnnotations
 from cveta2.services.output import (
+    CSV_WRITE_OPTIONS,
     format_counts,
     populate_record_paths,
     write_dataset_and_deleted,
@@ -294,7 +295,7 @@ def _write_task_csv(task: TaskInfo, result: TaskAnnotations, tasks_dir: Path) ->
         return
     task_csv = tasks_dir / f"task_{task.id}.csv"
     task_df = pd.DataFrame(rows)
-    task_df.to_csv(task_csv, index=False, encoding="utf-8")
+    task_df.to_csv(task_csv, **CSV_WRITE_OPTIONS)
     logger.trace(
         f"Task {task.name!r} (id={task.id}): {format_counts(task_df)} → {task_csv}"
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import pandas as pd
 from loguru import logger
@@ -19,6 +19,41 @@ if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import DeletedImage, ProjectAnnotations
 
+_UTF8 = "utf-8"
+"""The one codec every file this project reads or writes is encoded in."""
+
+
+class _CsvReadOptions(TypedDict):
+    """Reader knobs shared by every CSV this project reads."""
+
+    encoding: str
+
+
+class _CsvWriteOptions(TypedDict):
+    """Writer knobs shared by every CSV this project writes."""
+
+    index: bool
+    encoding: str
+
+
+CSV_READ_OPTIONS: _CsvReadOptions = {"encoding": _UTF8}
+CSV_WRITE_OPTIONS: _CsvWriteOptions = {"index": False, "encoding": _UTF8}
+
+
+def read_text_utf8(path: Path) -> str:
+    """Read *path* as UTF-8, independent of the platform's locale encoding."""
+    return path.read_bytes().decode(_UTF8)
+
+
+def write_text_utf8(path: Path, text: str) -> None:
+    r"""Write *text* to *path* as UTF-8, independent of the locale encoding.
+
+    Going through bytes also pins the line endings: text mode would
+    translate ``\n`` to ``\r\n`` on Windows, which YOLO label files and
+    ``dataset.yaml`` must not depend on.
+    """
+    path.write_bytes(text.encode(_UTF8))
+
 
 def read_dataset_csv(
     path: Path,
@@ -33,7 +68,7 @@ def read_dataset_csv(
     """
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
-    df = pd.read_csv(path, encoding="utf-8")
+    df = pd.read_csv(path, **CSV_READ_OPTIONS)
     missing = required_columns - set(df.columns)
     if missing:
         raise Cveta2Error(
@@ -139,7 +174,7 @@ CSV_LABELS: dict[str, str] = {
 
 def save_csv(df: pd.DataFrame, path: Path) -> None:
     """Write *df* to *path* and log its ``CSV_LABELS`` name with row counts."""
-    df.to_csv(path, index=False, encoding="utf-8")
+    df.to_csv(path, **CSV_WRITE_OPTIONS)
     logger.info(
         f"{CSV_LABELS.get(path.name, path.name)} saved to {path} ({format_counts(df)})"
     )

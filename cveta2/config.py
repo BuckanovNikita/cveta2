@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import yaml
 from loguru import logger
@@ -96,15 +96,26 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
     return data
 
 
-def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
-    """Write *data* as UTF-8 YAML, creating the config directory if needed.
+class _YamlDumpOptions(TypedDict):
+    """Serializer knobs for the config file.
 
     Bytes in, bytes out: like :func:`cveta2.projects_cache.save_orgs_cache`,
     the file's encoding must not depend on the writer's locale.  Key order is
-    the insertion order the callers built, which is why ``sort_keys`` is off.
+    the insertion order the callers built, which is why ``sort_keys`` is off —
+    a config people hand-edit should stay in the order they left it.
     """
+
+    sort_keys: bool
+    encoding: str
+
+
+_YAML_DUMP: _YamlDumpOptions = {"sort_keys": False, "encoding": "utf-8"}
+
+
+def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
+    """Write *data* as UTF-8 YAML, creating the config directory if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(yaml.safe_dump(data, sort_keys=False, encoding="utf-8"))
+    path.write_bytes(yaml.safe_dump(data, **_YAML_DUMP))
 
 
 class SectionConfig(BaseModel):

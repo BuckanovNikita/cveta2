@@ -9,7 +9,7 @@ import pandas as pd
 from loguru import logger
 
 from cveta2.exceptions import Cveta2Error
-from cveta2.services.output import read_dataset_csv, save_csv
+from cveta2.services.output import read_dataset_csv, read_text_utf8, save_csv
 
 # Minimal columns that every dataset CSV must contain.
 _REQUIRED_COLUMNS: set[str] = {
@@ -50,7 +50,7 @@ def _read_deleted_names(path: Path | None) -> set[str]:
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
 
-    text = path.read_bytes().decode("utf-8")
+    text = read_text_utf8(path)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines or "image_name" not in lines[0]:
         legacy_names = set(lines)

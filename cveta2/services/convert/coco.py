@@ -11,9 +11,9 @@ from cveta2.services.convert.common import (
     PixelBox,
     _link_or_copy,
     _pixel_to_coco,
-    _write_text_utf8,
     prepare_export,
 )
+from cveta2.services.output import write_text_utf8
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -101,7 +101,7 @@ def _write_coco_split(
         "categories": categories_list,
     }
     json_path = split_dir / "_annotations.coco.json"
-    _write_text_utf8(json_path, json.dumps(coco_json, **_JSON_DUMP))
+    write_text_utf8(json_path, json.dumps(coco_json, **_JSON_DUMP))
 
     logger.info(
         f"Split {split_dir.name}: {len(images_list)} изображений, "

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypedDict
 
 from pydantic import (
     BaseModel,
@@ -14,6 +14,19 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+
+class _JsonDumpOptions(TypedDict):
+    """Serializer knobs for the ``attributes`` CSV cell.
+
+    Attribute names and values come from CVAT and are frequently Russian;
+    ``ensure_ascii`` off keeps them literal in a CSV people read directly.
+    """
+
+    ensure_ascii: bool
+
+
+_ATTRIBUTES_JSON_DUMP: _JsonDumpOptions = {"ensure_ascii": False}
 
 
 class ProjectInfo(BaseModel):
@@ -187,7 +200,7 @@ class BBoxAnnotation(_ImageRecordBase):
         """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON)."""
         row = self.model_dump()
         del row["frame_path"]
-        row["attributes"] = json.dumps(row["attributes"], ensure_ascii=False)
+        row["attributes"] = json.dumps(row["attributes"], **_ATTRIBUTES_JSON_DUMP)
         return row
 
 

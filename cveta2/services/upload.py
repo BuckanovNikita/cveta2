@@ -18,7 +18,11 @@ from cveta2.config import ImageCacheConfig
 from cveta2.exceptions import Cveta2Error, LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
 from cveta2.s3_utils import build_s3_key
-from cveta2.services.output import enrich_dataframe_paths, preview_names
+from cveta2.services.output import (
+    CSV_READ_OPTIONS,
+    enrich_dataframe_paths,
+    preview_names,
+)
 from cveta2.task_cache import invalidate_local_entry
 
 if TYPE_CHECKING:
@@ -96,7 +100,7 @@ def read_exclude_names(in_progress_path: str | None) -> set[str]:
     ip_path = Path(in_progress_path)
     if not ip_path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {ip_path}")
-    ip_df = pd.read_csv(ip_path, encoding="utf-8")
+    ip_df = pd.read_csv(ip_path, **CSV_READ_OPTIONS)
     if "image_name" not in ip_df.columns:
         return set()
     names: set[str] = set(ip_df["image_name"].dropna().unique())

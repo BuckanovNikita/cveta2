@@ -232,10 +232,6 @@ full = []
 "cveta2.commands.upload.x__select_labels__mutmut_9" = "value=None; questionary.Choice falls back to title, which is the same label"
 "cveta2.commands.upload.x__select_labels__mutmut_11" = "drops value=; questionary.Choice falls back to title, which is the same label"
 
-"cveta2.services.upload.x_read_exclude_names__mutmut_8" = "encoding=None; pandas' get_handle falls back to utf-8"
-"cveta2.services.upload.x_read_exclude_names__mutmut_10" = "drops encoding=; pandas' get_handle falls back to utf-8"
-"cveta2.services.upload.x_read_exclude_names__mutmut_12" = "\"UTF-8\" is a codec alias of \"utf-8\""
-
 # services.upload._push_to_cvat always hands create_task_issues a session, so
 # `session or self.open_task_session(task_id)` short-circuits and the task id
 # reaches nothing but two log labels inside _client_ops.write.
@@ -246,18 +242,6 @@ full = []
 "cveta2.services.convert.common.xǁ_OnceWarnerǁ__init____mutmut_1" = "_warned=None is falsy; the only read is `if not self._warned`"
 "cveta2.services.convert.common.x__reflink_or_fallback_copy__mutmut_10" = "error=None; the OSError only names the cause in the one-time warning, and the fallback copy itself is tested"
 "cveta2.services.convert.common.x__make_csv_row_base__mutmut_4" = "drops the fromkeys default, which is None already"
-
-# _read_text_utf8 / _write_text_utf8: only the codec *alias* survives - both
-# encode(None) and encode(\"XXutf-8XX\") die on the byte-level roundtrip test.
-"cveta2.services.convert.common.x__read_text_utf8__mutmut_3" = "\"UTF-8\" is a codec alias of \"utf-8\"; codecs.lookup normalizes the name"
-"cveta2.services.convert.common.x__write_text_utf8__mutmut_4" = "\"UTF-8\" is a codec alias of \"utf-8\"; codecs.lookup normalizes the name"
-
-# _write_csv: same pandas encoding fallback as services/output.save_csv -
-# io.common.get_handle resolves `encoding = encoding or \"utf-8\"`.
-"cveta2.services.convert.common.x__write_csv__mutmut_14" = "index=None is falsy; the written CSV is byte-identical to index=False"
-"cveta2.services.convert.common.x__write_csv__mutmut_15" = "encoding=None; pandas' get_handle falls back to utf-8"
-"cveta2.services.convert.common.x__write_csv__mutmut_18" = "drops encoding=; pandas' get_handle falls back to utf-8"
-"cveta2.services.convert.common.x__write_csv__mutmut_21" = "\"UTF-8\" is a codec alias of \"utf-8\""
 
 # _write_dataset_yaml / _write_coco_split: the serializer kwargs live in the
 # module-level _YAML_DUMP / _JSON_DUMP mappings precisely so their literals are
@@ -292,13 +276,6 @@ full = []
 # config._env_flag: the `""` default is read only when the variable is unset,
 # and no spelling of an absent value lowercases to a trigger token.
 "cveta2.config.x__env_flag__mutmut_6" = "default \"XXXX\"; like \"\" it lowercases to something no caller compares against"
-
-# config._write_raw_yaml: same two classes as save_orgs_cache above - a codec
-# alias and PyYAML's falsy-sort_keys branch. sort_keys=True and the dropped
-# argument DO reorder the file and are killed by the section-order tests,
-# because a config people hand-edit should stay in the order they left it.
-"cveta2.config.x__write_raw_yaml__mutmut_9" = "sort_keys=None; PyYAML branches on `if self.sort_keys`, so None behaves as False"
-"cveta2.config.x__write_raw_yaml__mutmut_16" = "encoding=\"UTF-8\"; codecs.lookup normalizes codec names, so the bytes are identical"
 
 # config.SectionConfig._dump: pydantic-core switches on `mode == "python"`, so
 # every other spelling - including a mangled one - takes the JSON branch.
@@ -346,32 +323,13 @@ full = []
 "cveta2.s3_utils.x_run_s3_transfers__mutmut_10" = "drops leave=; same tqdm default as passing None"
 "cveta2.s3_utils.x_run_s3_transfers__mutmut_11" = "leave=True; keeps the finished bar on screen instead of erasing it"
 
-# save_orgs_cache: the only reader is load_orgs_cache via yaml.safe_load, which
-# is blind to key order and codec spelling. allow_unicode is NOT here - it is
-# killed by test_saved_file_keeps_cyrillic_unescaped, because the cache is a
-# config-dir file people open and edit.
-"cveta2.projects_cache.x_save_orgs_cache__mutmut_15" = "sort_keys=None; PyYAML branches on `if self.sort_keys`, so None behaves as False"
-"cveta2.projects_cache.x_save_orgs_cache__mutmut_19" = "drops sort_keys, reordering keys in the file; safe_load reads mappings order-blind"
-"cveta2.projects_cache.x_save_orgs_cache__mutmut_22" = "encoding=\"UTF-8\"; codecs.lookup normalizes codec names, so the bytes are identical"
-"cveta2.projects_cache.x_save_orgs_cache__mutmut_23" = "sort_keys=True, reordering keys in the file; safe_load reads mappings order-blind"
-
-# Codec spellings and pandas' own encoding fallback: io.common.get_handle
-# resolves `encoding = encoding or "utf-8"`, so None and a dropped argument
-# reach the same codec, and "UTF-8" is an alias codecs.lookup normalizes.
-"cveta2.services.merge.x__read_deleted_names__mutmut_7" = "\"UTF-8\" is the same codec as \"utf-8\""
-"cveta2.services.output.x_read_dataset_csv__mutmut_6" = "encoding=None; pandas' get_handle falls back to utf-8"
-"cveta2.services.output.x_read_dataset_csv__mutmut_8" = "drops encoding=; pandas' get_handle falls back to utf-8"
-"cveta2.services.output.x_read_dataset_csv__mutmut_10" = "\"UTF-8\" is a codec alias of \"utf-8\""
-"cveta2.services.output.x_save_csv__mutmut_3" = "encoding=None; pandas' get_handle falls back to utf-8"
-"cveta2.services.output.x_save_csv__mutmut_6" = "drops encoding=; pandas' get_handle falls back to utf-8"
-"cveta2.services.output.x_save_csv__mutmut_9" = "\"UTF-8\" is a codec alias of \"utf-8\""
-"cveta2.services.output.x_save_csv__mutmut_2" = "index=None is falsy; the written CSV is byte-identical to index=False"
-
-# BBoxAnnotation.to_csv_row: json.dumps treats ensure_ascii=None as falsy, so it
-# takes the same non-ASCII-preserving branch as False. ensure_ascii=True and the
-# dropped-argument variant DO change the CSV and are killed by
-# test_bbox_to_csv_row_keeps_cyrillic_attributes_literal.
-"cveta2.models.xǁBBoxAnnotationǁto_csv_row__mutmut_8" = "ensure_ascii=None is falsy; json.dumps takes the same branch as False"
+# The CSV reader's only option is `encoding`, which pandas' io.common.get_handle
+# already resolves as `encoding or "utf-8"` - so dropping the whole mapping is
+# the one mutation the round-trip tests cannot see. Every *writer* mapping is
+# killable (to_csv defaults index=True; yaml.safe_dump without encoding= returns
+# str, which write_bytes rejects) and needs no entry here.
+"cveta2.services.output.x_read_dataset_csv__mutmut_7" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
+"cveta2.services.upload.x_read_exclude_names__mutmut_9" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
 
 # task_to_records: `ctx.frame_issues.get(fid, ("", ""))[N]` reads one fixed
 # element of the default tuple, so mutating the *other* element cannot be

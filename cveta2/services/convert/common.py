@@ -14,7 +14,12 @@ from cveta2.config import ImageCacheConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.image_uploader import resolve_images
 from cveta2.models import CSV_COLUMNS
-from cveta2.services.output import format_counts_ru, preview_names, read_dataset_csv
+from cveta2.services.output import (
+    CSV_WRITE_OPTIONS,
+    format_counts_ru,
+    preview_names,
+    read_dataset_csv,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -24,21 +29,6 @@ _IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
 
 _EMPTY_ATTRIBUTES = json.dumps({}, ensure_ascii=False)
 """``attributes`` value stamped on every row imported from YOLO."""
-
-
-def _read_text_utf8(path: Path) -> str:
-    """Read *path* as UTF-8, independent of the platform's locale encoding."""
-    return path.read_bytes().decode("utf-8")
-
-
-def _write_text_utf8(path: Path, text: str) -> None:
-    r"""Write *text* to *path* as UTF-8, independent of the locale encoding.
-
-    Going through bytes also pins the line endings: text mode would
-    translate ``\n`` to ``\r\n`` on Windows, which YOLO label files and
-    ``dataset.yaml`` must not depend on.
-    """
-    path.write_bytes(text.encode("utf-8"))
 
 
 class PixelBox(NamedTuple):
@@ -362,5 +352,5 @@ def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
     """Write rows to CSV with proper column order."""
     path.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(rows, columns=list(CSV_COLUMNS))
-    df.to_csv(path, index=False, encoding="utf-8")
+    df.to_csv(path, **CSV_WRITE_OPTIONS)
     logger.info(f"CSV сохранён: {path} ({format_counts_ru(df)})")
