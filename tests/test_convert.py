@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -168,6 +169,48 @@ class TestParseLabelFile:
         p = tmp_path / "label.txt"
         p.write_text("\n  0 0.5 0.5 0.3 0.4   \n\n")
         assert _parse_label_file(p) == [[0.0, 0.5, 0.5, 0.3, 0.4]]
+
+    def test_non_numeric_line_is_skipped_not_terminal(self, tmp_path: Path) -> None:
+        """A line of the right length but the wrong type skips only itself.
+
+        ``float(part)`` used to escape uncaught, so one header row or one
+        stray token anywhere in a label tree aborted the whole conversion
+        with a bare ``ValueError``.
+        """
+        p = tmp_path / "label.txt"
+        p.write_text("class xc yc w h\n1 0.1 0.2 0.3 0.4\n")
+        assert _parse_label_file(p) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
+
+    @pytest.mark.parametrize(
+        "bad_lines",
+        [
+            pytest.param(["0 0.5 0.5 0.3", "2 0.1 0.2"], id="too-short"),
+            pytest.param(["class xc yc w h", "x y z w h"], id="non-numeric"),
+        ],
+    )
+    def test_skipped_lines_are_counted_in_a_warning(
+        self, tmp_path: Path, capture_logs: list[str], bad_lines: list[str]
+    ) -> None:
+        """How many lines were dropped is reported, not just *that* some were.
+
+        The count is the whole point of the summary: a caller reading
+        "1 skipped" when 2 were dropped is told the result is more complete
+        than it is.  Asserted per skip reason so neither branch's counter can
+        stand in for the other's.
+        """
+        p = tmp_path / "label.txt"
+        p.write_text("\n".join([*bad_lines, "1 0.1 0.2 0.3 0.4"]) + "\n")
+
+        assert _parse_label_file(p) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
+        assert [re.search(r": (\d+)$", m).group(1) for m in capture_logs] == ["2"]  # type: ignore[union-attr]
+
+    def test_well_formed_file_warns_nothing(
+        self, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        p = tmp_path / "label.txt"
+        p.write_text("0 0.5 0.5 0.3 0.4\n")
+        _parse_label_file(p)
+        assert capture_logs == []
 
 
 # ---------------------------------------------------------------------------
@@ -1519,6 +1562,28 @@ class TestFromYoloDatasetSplits:
         _write_yolo_yaml(root, {}, ["train"], include_names=False)
 
         with pytest.raises(Cveta2Error, match="не найдены имена классов"):
+            convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
+
+    def test_empty_yaml_is_rejected(self, tmp_path: Path) -> None:
+        """An empty dataset.yaml aborts with an explanation, not AttributeError.
+
+        ``yaml.safe_load`` returns ``None`` for an empty document, and the
+        ``.get("names")`` that followed raised a bare ``AttributeError``.
+        """
+        root = tmp_path / "ds"
+        self._labelled(root, "train", "a")
+        (root / "dataset.yaml").write_text("", encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match="не содержит YAML-словарь"):
+            convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
+
+    def test_scalar_yaml_is_rejected(self, tmp_path: Path) -> None:
+        """A dataset.yaml holding a bare scalar is rejected the same way."""
+        root = tmp_path / "ds"
+        self._labelled(root, "train", "a")
+        (root / "dataset.yaml").write_text("just-a-string", encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match="не содержит YAML-словарь"):
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
 
 

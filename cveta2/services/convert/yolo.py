@@ -42,6 +42,12 @@ class _YamlDumpOptions(TypedDict):
 
 _YAML_DUMP: _YamlDumpOptions = {"default_flow_style": False, "allow_unicode": False}
 
+_YOLO_BOX_FIELDS = 5
+"""``class xc yc w h`` — the shortest label line YOLO defines."""
+
+_YOLO_CONF_FIELDS = _YOLO_BOX_FIELDS + 1
+"""A prediction line appends a confidence score to the box fields."""
+
 
 def _write_box_labels(  # noqa: PLR0913, PLR0917
     box_df: pd.DataFrame,
@@ -183,15 +189,27 @@ def _parse_label_file(path: Path) -> list[list[float]]:
 
     Returns list of float lists. Each has 5 fields (class xc yc w h) or 6
     fields (class xc yc w h conf).
+
+    Short and non-numeric lines are skipped rather than aborting the whole
+    conversion — a label set that went through other tooling may carry a
+    header or a stray token — but the count is reported so the caller knows
+    the result is incomplete.
     """
     if not path.is_file():
         return []
     rows: list[list[float]] = []
+    skipped = 0
     for line in read_text_utf8(path).strip().splitlines():
         parts = line.strip().split()
-        if len(parts) < 5:
+        if len(parts) < _YOLO_BOX_FIELDS:
+            skipped += 1
             continue
-        rows.append([float(p) for p in parts])
+        try:
+            rows.append([float(part) for part in parts])
+        except ValueError:
+            skipped += 1
+    if skipped:
+        logger.warning(f"Пропущено нечитаемых строк в {path}: {skipped}")
     return rows
 
 
@@ -220,7 +238,7 @@ def _yolo_fields_to_row(  # noqa: PLR0913, PLR0917
     """Convert a parsed YOLO label line to a CSV row dict."""
     class_id = int(fields[0])
     yolo = YoloBox(fields[1], fields[2], fields[3], fields[4])
-    conf = fields[5] if len(fields) >= 6 else None
+    conf = fields[5] if len(fields) >= _YOLO_CONF_FIELDS else None
     x_tl, y_tl, x_br, y_br = _yolo_to_pixel(yolo, img_w, img_h)
     label_name = class_names.get(class_id, f"class_{class_id}")
     return _make_csv_row_box(
@@ -248,6 +266,8 @@ def _from_yolo_dataset(
 ) -> None:
     """Convert YOLO dataset (with dataset.yaml) to CSV."""
     ds_config = yaml.safe_load(read_text_utf8(yaml_path))
+    if not isinstance(ds_config, dict):
+        raise Cveta2Error(f"Ошибка: {yaml_path} не содержит YAML-словарь")
 
     class_names: dict[int, str] = {
         int(k): str(v) for k, v in ds_config.get("names", {}).items()

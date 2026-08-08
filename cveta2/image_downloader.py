@@ -82,6 +82,9 @@ class _ProgressLabels(NamedTuple):
 _PROJECT_STORAGE_PROGRESS = _ProgressLabels("Downloading from project storage", "img")
 _S3_SYNC_PROGRESS = _ProgressLabels("Syncing from S3", "file")
 
+_MISSING_PREVIEW_LIMIT = 10
+"""How many not-found image names the warning lists before collapsing the rest."""
+
 
 def _download_pending(
     s3_client: S3Client,
@@ -235,8 +238,8 @@ class ImageDownloader:
             stats.failed += len(missing)
             logger.warning(
                 f"Не найдены на S3 ({len(missing)} шт.): "
-                f"{', '.join(missing[:10])}"
-                f"{'...' if len(missing) > 10 else ''}"
+                f"{', '.join(missing[:_MISSING_PREVIEW_LIMIT])}"
+                f"{'...' if len(missing) > _MISSING_PREVIEW_LIMIT else ''}"
             )
         _download_pending(
             s3_client,
