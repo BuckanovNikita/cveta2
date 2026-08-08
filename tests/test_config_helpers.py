@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from cveta2.config import (
     CvatConfig,
@@ -226,6 +227,33 @@ def test_upload_section_round_trips_non_default_values(tmp_path: Path) -> None:
     reloaded = UploadConfig.load(config_path)
     assert reloaded.images_per_job == 25
     assert reloaded.image_quality == 100
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        pytest.param({"images_per_job": 0}, id="zero-images-per-job"),
+        pytest.param({"images_per_job": -5}, id="negative-images-per-job"),
+        pytest.param({"image_quality": 101}, id="over-full-quality"),
+        pytest.param({"image_quality": -1}, id="negative-quality"),
+    ],
+)
+def test_unusable_upload_settings_are_rejected_at_load(
+    tmp_path: Path, section: dict[str, int]
+) -> None:
+    """A bad value fails naming the setting, not deep inside the upload.
+
+    ``images_per_job`` reaches CVAT as ``segment_size`` and divides the
+    job-count estimate, so a hand-written ``0`` used to surface either as a
+    CVAT rejection or as ``ZeroDivisionError`` — after the task had already
+    been created. ``image_quality`` is the CVAT chunk quality, documented as
+    0-100 by ``create_upload_task`` — so 0 stays legal and only the ends of
+    that range are enforced.
+    """
+    config_path = write_config_yaml(tmp_path / "custom.yaml", upload=section)
+
+    with pytest.raises(ValidationError):
+        UploadConfig.load(config_path)
 
 
 def test_saving_an_all_default_section_removes_it(tmp_path: Path) -> None:

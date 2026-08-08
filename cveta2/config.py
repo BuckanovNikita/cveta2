@@ -579,8 +579,14 @@ class UploadConfig(SectionConfig):
 
     section_key: ClassVar[str] = "upload"
 
-    images_per_job: int = 100
-    image_quality: int = 100
+    # images_per_job reaches CVAT as segment_size and divides the job-count
+    # estimate, so a hand-written 0 either fails inside CVAT or raises
+    # ZeroDivisionError after the task was already created. Rejecting it at
+    # load time names the setting instead.
+    images_per_job: int = Field(default=100, gt=0)
+    # 0-100 is the range create_upload_task documents for the CVAT chunk
+    # quality, so 0 is valid here and only the upper bound is added.
+    image_quality: int = Field(default=100, ge=0, le=100)
 
 
 def is_clearml_disabled() -> bool:
