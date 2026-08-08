@@ -154,28 +154,52 @@ def parse_sync_root(root: str) -> tuple[str | None, str]:
     return (None, prefix)
 
 
+def _key_prefix_dir(prefix: str) -> str:
+    """Return *prefix* in the directory form every key comparison uses.
+
+    A cloud-storage prefix names a folder, so it matches a key only at a
+    ``/`` boundary: with ``prefix="data/proj1"``, the sibling folder
+    ``data/proj10/`` is a different place, and a plain ``startswith`` would
+    claim its keys.  Normalizing here also collapses a configured trailing
+    slash, which otherwise produced doubled separators in built keys.
+    """
+    return f"{prefix.rstrip('/')}/"
+
+
 def build_s3_key(prefix: str, frame_name: str) -> str:
     """Construct the S3 object key for a frame.
 
-    If *frame_name* already starts with *prefix*, it is used as-is.
+    If *frame_name* already sits under *prefix*, it is used as-is.
     Otherwise *prefix/frame_name* is returned (or just *frame_name*
     when *prefix* is empty).
     """
     if not prefix:
         return frame_name
-    if frame_name.startswith(prefix):
+    prefix_dir = _key_prefix_dir(prefix)
+    if frame_name.startswith(prefix_dir):
         return frame_name
-    return f"{prefix}/{frame_name}"
+    return f"{prefix_dir}{frame_name}"
 
 
 def strip_key_prefix(key: str, prefix: str) -> str:
     """Return *key* with a leading *prefix* removed, keeping subfolders.
 
-    When *key* does not start with *prefix* (or *prefix* is empty), the
-    key is returned unchanged.
+    The folder marker — a key that *is* the prefix — strips to ``""``, which
+    is how :func:`list_s3_objects` recognizes and skips it.  When *key* does
+    not sit under *prefix* (or *prefix* is empty), it is returned unchanged.
+
+    The separator comes off with the prefix, so a remaining leading ``/`` is
+    a doubled separator in the key itself.  That is a distinct S3 object from
+    the single-slash spelling and is deliberately left alone: collapsing it
+    would map two keys onto one local file.
     """
-    if prefix and key.startswith(prefix):
-        return key[len(prefix) :].lstrip("/")
+    if not prefix:
+        return key
+    prefix_dir = _key_prefix_dir(prefix)
+    if key.startswith(prefix_dir):
+        return key[len(prefix_dir) :]
+    if key == prefix_dir.removesuffix("/"):
+        return ""
     return key
 
 
@@ -189,11 +213,19 @@ def list_s3_objects(
     The *local_name* is the object key with the prefix stripped, suitable
     for saving as a flat file name.  Empty names (the prefix directory
     marker itself) are skipped.
+
+    The server-side filter asks for ``prefix/`` rather than ``prefix``,
+    because S3 matches ``Prefix`` as a raw substring: listing ``data/proj1``
+    would otherwise hand back every key of the sibling ``data/proj10/``,
+    which :func:`strip_key_prefix` then declines to strip.  A storage whose
+    prefix names an object rather than a folder therefore lists nothing —
+    but :func:`build_s3_key` has always joined prefix and frame with a
+    ``/``, so that configuration could never round-trip anyway.
     """
     objects: list[tuple[str, str]] = []
     kwargs: dict[str, str] = {"Bucket": bucket}
     if prefix:
-        kwargs["Prefix"] = prefix
+        kwargs["Prefix"] = _key_prefix_dir(prefix)
     while True:
         resp = s3_client.list_objects_v2(**kwargs)
         for obj in resp.get("Contents", []):

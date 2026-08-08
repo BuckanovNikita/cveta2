@@ -40,6 +40,9 @@ class TestBuildS3Key:
                 "project/images/2026-03/img.jpg",
                 "project/images/2026-03/img.jpg",
             ),
+            ("data/proj1", "proj10/img.jpg", "data/proj1/proj10/img.jpg"),
+            ("data/proj1", "data/proj10/img.jpg", "data/proj1/data/proj10/img.jpg"),
+            ("proj/", "img.jpg", "proj/img.jpg"),
         ],
         ids=[
             "prefix_prepended",
@@ -49,10 +52,44 @@ class TestBuildS3Key:
             "flat_filename",
             "multi_segment_prefix",
             "multi_segment_prefix_no_double",
+            "sibling_named_like_the_prefix",
+            "sibling_key_is_not_already_prefixed",
+            "configured_trailing_slash_does_not_double",
         ],
     )
     def test_build_s3_key(self, prefix: str, path: str, expected: str) -> None:
         assert build_s3_key(prefix, path) == expected
+
+    def test_a_prefix_may_end_in_any_character(self) -> None:
+        """``rstrip`` takes a character *set*, so only the slash may come off.
+
+        Every other prefix here ends in a lowercase letter or a digit that no
+        plausible mutation of ``"/"`` also contains.
+        """
+        assert build_s3_key("dataX", "img.jpg") == "dataX/img.jpg"
+
+    @pytest.mark.parametrize(
+        ("prefix", "name"),
+        [
+            ("data/proj1", "img.jpg"),
+            ("data/proj1", "2026-03/img.jpg"),
+            ("data/proj1", "proj10/img.jpg"),
+            ("proj/", "img.jpg"),
+            ("", "img.jpg"),
+        ],
+    )
+    def test_key_round_trips_back_to_the_frame_name(
+        self, prefix: str, name: str
+    ) -> None:
+        """The two helpers are inverses — including across a sibling prefix.
+
+        ``build_s3_key`` used to skip the join whenever the frame name merely
+        *started with* the prefix string, and ``strip_key_prefix`` used to cut
+        that many characters off regardless of where the folder boundary was.
+        With ``prefix="data/proj1"``, a ``proj10/`` frame therefore came back
+        as ``0/img.jpg``.
+        """
+        assert strip_key_prefix(build_s3_key(prefix, name), prefix) == name
 
 
 class TestParseSyncRoot:
@@ -123,6 +160,9 @@ class TestStripKeyPrefix:
             ("data/projA/img.jpg", "", "data/projA/img.jpg"),
             ("other/img.jpg", "data/projA", "other/img.jpg"),
             ("data/projA/img.jpg", "data/projA/", "img.jpg"),
+            ("data/proj10/img.jpg", "data/proj1", "data/proj10/img.jpg"),
+            ("data/projA", "data/projA", ""),
+            ("data/projA/", "data/projA", ""),
         ],
         ids=[
             "keeps_subfolders",
@@ -131,18 +171,28 @@ class TestStripKeyPrefix:
             "empty_prefix",
             "unrelated_prefix_unchanged",
             "trailing_slash_prefix",
+            "sibling_prefix_is_not_a_match",
+            "folder_marker_strips_to_empty",
+            "folder_marker_with_slash_strips_to_empty",
         ],
     )
     def test_strip_key_prefix(self, key: str, prefix: str, expected: str) -> None:
         assert strip_key_prefix(key, prefix) == expected
 
     def test_only_the_separator_is_stripped_from_the_head(self) -> None:
-        """``lstrip`` takes a character *set*, so the first letter must survive.
+        """The slice cuts exactly the prefix, so the first letter must survive.
 
         Every other case has a remainder starting with a lowercase letter or a
-        digit, which cannot tell ``lstrip("/")`` apart from stripping more.
+        digit, which cannot tell an exact cut apart from stripping more.
         """
         assert strip_key_prefix("data/Xmas.jpg", "data") == "Xmas.jpg"
+
+    def test_a_doubled_separator_in_the_key_is_left_alone(self) -> None:
+        """``a//b`` and ``a/b`` are different S3 objects and stay different.
+
+        Collapsing the second slash would map both onto one local file.
+        """
+        assert strip_key_prefix("data//img.jpg", "data") == "/img.jpg"
 
 
 @pytest.fixture
@@ -314,7 +364,21 @@ class TestListS3Objects:
         result = list_s3_objects(s3, "test-bucket", "images")
 
         assert result == [("images/a.jpg", "a.jpg")]
-        assert s3.list_calls == [{"Bucket": "test-bucket", "Prefix": "images"}]
+        assert s3.list_calls == [{"Bucket": "test-bucket", "Prefix": "images/"}]
+
+    def test_the_server_side_filter_excludes_sibling_prefixes(self) -> None:
+        """``Prefix`` is a raw substring to S3, so the trailing slash matters.
+
+        Listing ``data/proj1`` without it also returns every ``data/proj10/``
+        key, which then reaches the name map, the local cache layout and
+        upload's existing-key set as a mangled ``0/...`` name.
+        """
+        s3 = PagedFakeS3Client([["data/proj1/a.jpg", "data/proj10/b.jpg"]])
+
+        assert list_s3_objects(s3, "test-bucket", "data/proj1") == [
+            ("data/proj1/a.jpg", "a.jpg")
+        ]
+        assert s3.list_calls == [{"Bucket": "test-bucket", "Prefix": "data/proj1/"}]
 
     def test_empty_listing_omits_the_contents_key(self) -> None:
         """S3 drops ``Contents`` from an empty page instead of sending ``[]``."""
