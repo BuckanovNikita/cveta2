@@ -61,8 +61,11 @@ Forward extra pytest args to `integration_test.sh`:
 
 ### `integration_up.sh`
 
-1. Checks that default ports (9988, 9989, 9990, 8880-8882) are free
-2. Tears down any existing stack (`docker compose down -v`)
+1. Tears down any existing stack (`docker compose down -v`)
+2. Checks that default ports (9988, 9989, 9990, 8880-8882) are free — in that
+   order, so a plain re-run is not refused by the ports its own teardown just
+   released. A port still taken here belongs to something else: another user's
+   stack, or a second agent that picked the same `--port`.
 3. Downloads coco8 dataset images (if missing)
 4. Starts minimal CVAT services: `cvat_server`, `cvat_worker_import`, `cvat_worker_chunks`, `cveta2-minio`, plus ClearML (`clearml-apiserver`, `clearml-webserver`, `clearml-fileserver`). No `traefik` and no `cvat_ui`: `cvat_server` publishes its own nginx on the CVAT port, so the stack serves the API and has no web UI. See the header of `docker-compose.override.yml` for why traefik is kept out — in short, a traefik from any *other* CVAT stack on the machine discovers these containers through the Docker socket and breaks both stacks at once.
 5. Waits for CVAT and ClearML health endpoints (up to 180s)
