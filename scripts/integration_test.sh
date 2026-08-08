@@ -35,4 +35,7 @@ echo "==> ClearML: $CLEARML_STATUS"
 echo "==> Running pytest (xdist disabled for CVAT rate limits)"
 
 cd "$REPO_ROOT"
-uv run pytest -o 'addopts=-v --tb=short' "$@"
+# Repeats every addopts entry from pyproject.toml except "-n auto". Dropping
+# xdist is the point of the override; dropping "-p tests.env_isolation" with it
+# would let the suite read and write the developer's real ~/.config/cveta2/.
+uv run pytest -o 'addopts=-v --tb=short -p tests.env_isolation' "$@"
