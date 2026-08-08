@@ -1,17 +1,22 @@
 # Override for CVAT integration tests.
 #
-# Adds MinIO, cvat_ui and traefik. Disables the analytics pipeline.
+# Adds MinIO and ClearML. Disables the analytics pipeline.
 # All image versions come from the checked-out CVAT submodule tag.
 #
 # INTEGRATION_USER is set by integration_up.sh (defaults to "default")
 # and used as a container-name prefix to avoid clashes between users.
 #
-# Traefik routes both API and UI on a single dynamic port (CVAT_PORT):
-#   /api/, /static/, /admin, /django-rq  ->  cvat_server
-#   everything else                      ->  cvat_ui
+# cvat_server publishes its own nginx on CVAT_PORT; traefik and cvat_ui are
+# not started, so this stack serves the API only and has no web UI.
 #
-# !override on traefik ports replaces the base 8080/8090 bindings
-# so only the dynamic CVAT_PORT is exposed (requires Compose v2.24.6+).
+# traefik.enable is forced to "false" on every service the base compose
+# labels. A traefik discovers containers through the Docker socket, not
+# through a network, so an unrelated CVAT stack on this machine would
+# otherwise adopt these containers into its own `cvat` service (they carry
+# identical router/service labels) and load-balance real traffic into them.
+# TRAEFIK_PROVIDERS_DOCKER_NETWORK does not prevent this: it only picks
+# which IP to use, so the foreign, unreachable endpoint stays in rotation
+# and every other request dies on a 30 s dial timeout. Both stacks break.
 
 services:
   cvat_db:
@@ -30,6 +35,10 @@ services:
     container_name: ${INTEGRATION_USER:-default}-cvat_server
     environment:
       CVAT_ANALYTICS: 0
+    labels:
+      traefik.enable: "false"
+    ports:
+      - "${CVAT_PORT:-8080}:8080"
 
   cvat_worker_import:
     container_name: ${INTEGRATION_USER:-default}-cvat_worker_import
@@ -39,14 +48,14 @@ services:
 
   traefik:
     container_name: ${INTEGRATION_USER:-default}-traefik
-    image: traefik:v3.6
-    ports: !override
-      - "${CVAT_PORT:-8080}:8080"
-    environment:
-      TRAEFIK_PROVIDERS_DOCKER_NETWORK: ${INTEGRATION_USER:-default}-cvat_cvat
+    ports: !override []
+    labels:
+      traefik.enable: "false"
 
   cvat_ui:
     container_name: ${INTEGRATION_USER:-default}-cvat_ui
+    labels:
+      traefik.enable: "false"
 
   cveta2-minio:
     container_name: ${INTEGRATION_USER:-default}-cveta2-minio

@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # Start (or recreate) a minimal CVAT + MinIO stack for integration tests.
 #
-# Starts the services needed for API testing and web UI:
+# Starts the services needed for API testing:
 #   cvat_server  (+deps: db, redis x2, opa)
 #   cvat_worker_import   (task creation)
 #   cvat_worker_chunks   (image processing, if present in the version)
 #   cveta2-minio         (S3 storage)
-#   cvat_ui, traefik     (web UI)
 #
-# Analytics (clickhouse, vector, grafana) and non-essential workers are NOT started.
-# Single port: traefik routes both API and UI on CVAT_PORT (see docker-compose.override.yml).
+# Analytics (clickhouse, vector, grafana), the web UI (cvat_ui) and traefik are
+# NOT started; cvat_server publishes its own nginx on CVAT_PORT. See the header
+# of docker-compose.override.yml for why traefik is kept out of this stack.
 # Container names are prefixed with username (INTEGRATION_USER) to avoid clashes.
 #
 # Usage:
 #   ./scripts/integration_up.sh [--cvat-version v2.26.0] [--port 9080]
 #
 # If --port is omitted, fixed well-known ports are used:
-#   CVAT API (traefik): 9988
+#   CVAT API: 9988
 #   MinIO API:          9989
 #   MinIO console:      9990
 #
@@ -163,7 +163,7 @@ else
 fi
 
 # ── 5. Start minimal CVAT stack ───────────────────────────────────
-SERVICES="cvat_server cvat_worker_import cveta2-minio cvat_ui traefik clearml-apiserver clearml-webserver clearml-fileserver"
+SERVICES="cvat_server cvat_worker_import cveta2-minio clearml-apiserver clearml-webserver clearml-fileserver"
 if compose config --services 2>/dev/null | grep -q '^cvat_worker_chunks$'; then
     SERVICES="$SERVICES cvat_worker_chunks"
 fi
