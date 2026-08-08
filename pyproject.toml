@@ -183,15 +183,11 @@ on_dependency_change = "rerun"
 # verdict only when no mutant name is passed, so spelling it '*' would
 # re-execute the whole scope every time instead of reusing the cache.
 #
-# Measured on this machine: ~4.5s of fixed overhead per run, and a throughput
-# that ranges from ~120 mutants/second over in-memory frames down to ~50 for
-# modules whose tests round-trip CSVs through tmp_path. A fully cached run is
-# 4.7s (a repeat run reports 0.00 mutations/second).
-#
-# Current split: `fast` is 12s, `full` (1197 mutants) is 23s. Membership is
-# chosen so the difference stays worth having - putting every module in `fast`
-# measured 22s, i.e. the split bought nothing. Keep `fast` under ~15s; when a
-# newly gated module would push it past that, leave it to `full`.
+# Membership is chosen so `fast` stays meaningfully quicker than `full` -
+# putting every gated module in `fast` once measured the same as `full`, i.e.
+# the split bought nothing. mutation_test.sh prints the count and elapsed time
+# of each run; when a newly gated module erases the gap again, leave it to
+# `full`.
 [tool.cveta2.mutation.profiles]
 fast = [
     "cveta2.dataset_partition.*",

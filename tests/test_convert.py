@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import errno
 import json
-import re
 import shutil
 from pathlib import Path
 
@@ -202,7 +201,7 @@ class TestParseLabelFile:
         p.write_text("\n".join([*bad_lines, "1 0.1 0.2 0.3 0.4"]) + "\n")
 
         assert _parse_label_file(p) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
-        assert [re.search(r": (\d+)$", m).group(1) for m in capture_logs] == ["2"]  # type: ignore[union-attr]
+        assert [message.rsplit(": ", 1)[-1] for message in capture_logs] == ["2"]
 
     def test_well_formed_file_warns_nothing(
         self, tmp_path: Path, capture_logs: list[str]

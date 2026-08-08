@@ -330,6 +330,13 @@ counter-intuitive and decide whether a module is worth gating at all.
   `scripts/mutation_config.py sync-scope` fingerprints those fields itself and
   wipes `mutants/` when they move, so this is handled automatically — but if
   you ever bypass `mutation_test.sh`, wipe `mutants/` by hand.
+- **`cache_invalidation_files` re-runs mutants but does not re-derive which
+  tests cover which mutant.** Add a *new* test aimed at a specific survivor and
+  the gate can still report it as surviving, because the stats pass that
+  associates tests with mutants is itself cached. The fix is `rm -rf mutants`
+  and re-run. This one fails in the safe direction — a false red, not a false
+  green — but it will make you doubt a correct test. Suspect it whenever a
+  mutant survives whose diff you can show, by hand, that the new test rejects.
 - `mutants/` is mutmut's working copy: gitignored, and excluded from mypy (two
   `cveta2` packages otherwise collide) and ruff.
 - `mutation_test.sh` exports `PYTEST_DEBUG_TEMPROOT` into `mutants/`. By
@@ -341,27 +348,44 @@ counter-intuitive and decide whether a module is worth gating at all.
 
 ### Cost
 
-~4.5s of fixed overhead per run, plus a throughput between ~120 mutants/second
-over in-memory frames and ~50 for modules whose tests round-trip CSVs through
-`tmp_path`. A fully cached run reports `0.00 mutations/second`.
+Each run pays a fixed setup cost, then a throughput that is several times
+higher over modules whose tests stay in memory than over ones that round-trip
+CSVs through `tmp_path`. A fully cached run reports `0.00 mutations/second`.
 
-At the current 5120 gated mutants, `full` takes ~70s and `fast` ~17s. Profile
-membership is chosen to keep that gap worth having: putting *every* gated
-module in `fast` once measured the same as `full`, i.e. the split bought
-nothing. Keep `fast` under ~20s; when a newly gated module would push it past
-that, leave it to `full`.
+`mutation_test.sh` prints the mutant count, the score and the elapsed time on
+every run — read them from there rather than from this file. Profile
+membership exists to keep `fast` meaningfully quicker than `full`: putting
+*every* gated module in `fast` once measured the same as `full`, i.e. the
+split bought nothing. When a newly gated module erases that gap again, leave
+it to `full`.
 
 Triage, not runtime, is the real cost: each survivor needs a diff read and a
 judgement call.
 
 ### Current scope
 
-Every module worth mutating is gated — 31 modules, 5120 mutants, 98.4% killed,
-80 allowlisted, zero unexplained. There is no ungated backlog left, so a new
-module joining `cveta2/` should come with its own entry in `only_mutate` rather
+Every module in `only_mutate` sits at zero *unexplained* survivors; everything
+still escaping is justified in `[tool.cveta2.mutation.equivalent]`. A new
+module joining `cveta2/` should come with its own `only_mutate` entry rather
 than being added to a to-do list.
 
-The last group in was the one the rollout plan called conditional:
+Two modules are deliberately outside that ratchet and are **not** "nothing left
+to do":
+
+- **`services/fetch.py`** — measured, not gated. Zero `no tests` mutants, so
+  this is an assertion-quality gap rather than a coverage one, and it is too
+  large to close in one sitting; the survivors concentrate in the cache loop
+  (`_fetch_and_save_tasks`, `_retrieve_task`, `_fetch_core`), where tests drive
+  the pipeline end to end and assert the CSVs rather than the per-task cache
+  hit/fetch accounting. Re-measure with the temporarily-add-and-revert
+  procedure above before starting.
+- **`_client/sdk_adapter.py`** — the SDK boundary, and the one module where
+  line coverage itself is the blocker, so the two-stage entry criterion says
+  close coverage first. Most of it is only reachable against a live CVAT, which
+  is why the integration suite exists.
+
+The last group into the ratchet was the one the rollout plan called
+conditional:
 `_client_ops/{base,images}.py` and the three command-layer exceptions
 (`commands/_helpers.py`, `commands/interactive/primitives.py`,
 `commands/upload.py`). None of them had a single `no tests` mutant in
