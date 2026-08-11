@@ -1,0 +1,111 @@
+# cveta2 architecture
+
+The layer diagram and the rule that governs it live in `CLAUDE.md`; this file
+is the map underneath it — which module owns what, how a command flows through
+the layers, and the two behaviours that are easy to get wrong when touching
+them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
+
+## Module organization
+
+- **`cveta2/cli.py`** - Argparse CLI entry point, dispatches to commands
+- **`cveta2/commands/`** - Thin CLI adapters (prompts, arg mapping, `sys.exit`; delegate to `services`):
+  - `fetch.py` - Fetch annotations from CVAT project
+  - `upload.py` - Upload annotated dataset back to CVAT
+  - `convert.py` - Bidirectional CSV ↔ YOLO conversion, plus CSV → COCO export
+  - `merge.py` - Merge multiple fetch outputs
+  - `labels.py` - Manage project labels
+  - `s3_sync.py` - Download images from S3
+  - `setup.py` / `setup_clearml.py` - Initial config and project cache setup
+  - `ignore.py` - Mark tasks to skip during fetch
+  - `task_ops.py` - `task` subcommands: mark-deleted, drop-label, delete, status
+  - `whats_new.py` - List tasks completed after a fetched dataset CSV
+  - `doctor.py` - Diagnostic checks
+  - `_bootstrap.py` - `open_client()`: single config load, host check, timeout setup, credential prompt (the ONLY place prompting happens)
+  - `_helpers.py` - Shared internals (task-selector resolution lives in `fetch.py:_resolve_task_selector`)
+- **`cveta2/api.py`** - Public workflow functions mirroring the CLI 1:1 (`fetch`, `upload`, `convert_*`, `merge`, `whats_new`, `s3_sync`, `get_labels`, `update_labels`, `task_*`), re-exported from `cveta2/__init__.py`. Never prompts — missing settings raise `MissingHostError` / `MissingCredentialsError`.
+- **`cveta2/services/`** - Orchestration (no prompts, no `sys.exit`; raise `Cveta2Error`):
+  - `fetch.py` - `fetch_project()` / `fetch_selected_tasks()` pipelines
+  - `upload.py` - `upload_dataset()` + plan building / filtering helpers
+  - `convert/{common,yolo,coco}.py` - CSV ↔ YOLO / COCO conversion
+  - `merge.py` - `merge_datasets()`
+  - `output.py` - CSV read/write, path enrichment
+  - `resolve.py` - project resolution (`ORG/PROJECT` spec parsing, org switching, project-from-task inference) and `sync_roots` override
+  - `whats_new.py` - cutoff computation
+- **`cveta2/client.py`** - `CvatClient`, a thin composition of the `_client_ops` mixins (SDK-free; requires a context manager for remote calls, never prompts)
+- **`cveta2/_client_ops/`** - The domain orchestration behind `CvatClient`, split into cohesive mixins. Same architecture layer as `client.py`, and SDK-free — no file here imports `cvat_sdk`:
+  - `base.py` - `_ClientBase`: config, lazy API handle, context-manager lifecycle
+  - `read.py` / `fetch.py` - project & task lookups, per-task fetch pipeline
+  - `write.py` - task creation, annotation and issue upload, label patches
+  - `task_ops.py` - mark-deleted, drop-label, delete, status transitions
+  - `images.py` - S3 download orchestration
+  - `session.py` - `TaskWriteSession`, memoizing one `data_meta` fetch per task
+  - `shared.py` - `FetchContext` and the 5xx skip helper
+- **`cveta2/_client/`** - All CVAT SDK code (internal):
+  - `ports.py` - `CvatReadPort` + `CvatWritePort` protocols (combined as `CvatApiPort`; enables test fakes)
+  - `sdk_adapter.py` - Implements both ports over `cvat_sdk`; translates SDK errors to `CvatApiError`
+  - `sdk_requests.py` - Builds SDK request models
+  - `connection.py` - Opens SDK clients, configures data timeout
+  - `assembly.py` - Pure DTO → domain transforms
+  - `extractors.py` - Converts CVAT shapes to `BBoxAnnotation`
+  - `dtos.py` - Raw CVAT data transfer objects
+  - `context.py` - API context management
+  - `mapping.py` - Data mapping utilities
+- **`cveta2/_clearml/`** - Optional ClearML dataset publishing (isolated layer)
+- **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation with optional `confidence`, DeletedImage, etc.)
+- **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
+- **`cveta2/dataset_partition.py`** - Core logic: splits annotations into dataset/obsolete/in_progress
+- **`cveta2/task_cache.py`** - Cache of completed-task annotations: local dir + shared S3 mirror, invalidated by task `updated_date`
+- **`cveta2/image_downloader.py`** - S3 → local sync
+- **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
+- **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
+- **`cveta2/projects_cache.py`** - Local project metadata cache, keyed by organization (`organizations: [{slug, name, projects}]`; `""` slug = personal workspace)
+
+## Key data flow
+
+1. **Fetch**: `cli`/`api.fetch` → `commands/fetch.py` (or `api.py`) → `services/fetch.py:fetch_project()` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
+   - Completed tasks are served from `task_cache.py` when the cached `task_updated_date` matches (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
+   - Returns `ProjectAnnotations(annotations, deleted_images)`
+   - Annotations converted to `BBoxAnnotation` by `extractors.py`
+   - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
+
+2. **Upload**: `commands/upload.py` (or `api.upload`) → `services/upload.py:upload_dataset()` → `client.create_upload_task()` + `client.upload_task_annotations()`
+   - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
+   - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels); `--labels all` selects every dataset label plus unannotated frames (a literal dataset label named `all` wins over the shortcut)
+   - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues **attached to the row's bbox**; rows with issue text but no complete bbox are skipped with a warning (no full-frame issues)
+   - A CSV whose rows are all `instance_shape="deleted"` is a valid upload: the label step is skipped and only deleted frames are pushed
+
+3. **Convert**: `commands/convert.py` (or `api.convert_*`) → `services/convert/`: `convert_to_yolo` exports CSV to YOLO format (images + labels), `convert_from_yolo` imports YOLO predictions back to CSV, `convert_to_coco` exports COCO detection format. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
+
+4. **Partition Logic** (`dataset_partition.py`):
+   - For each image, finds **latest task** by `task_updated_date` (comparing annotations + deletions)
+   - If latest task is deletion → image goes to `obsolete`, added to `deleted_images`
+   - Otherwise: completed tasks → `dataset` (latest) or `obsolete` (stale), non-completed → `in_progress`
+   - **Important**: Deletion records are concatenated **before** annotation records to win ties (same date)
+
+## Project specs and organizations
+
+- Every project spec (CLI `-p`, API `project=`) accepts an id, a name, or `ORG/PROJECT` (`/PROJECT` = personal workspace). The org prefix calls `client.set_organization()`, switching the session org for all subsequent CVAT calls (`services/resolve.py:split_project_spec` / `apply_project_org`).
+- The interactive picker (`commands/interactive/entities.py:select_project`) pages projects by organization — first page is the config org — and switches the session org on selection. Echoed re-run commands qualify `-p` via `_helpers.project_cli_spec` when the session org differs from the config default.
+- `fetch-task` / `api.fetch_task` infer the project from the first numeric task id when no project is given (`services/resolve.py:infer_project_from_tasks` via the `get_task` port method); name-only task specs still need an explicit project.
+
+## Deleted images handling
+
+CVAT allows frames to be marked as deleted (`data_meta.deleted_frames`), but annotation shapes for those frames **still exist** in the task data. This is handled in two places:
+
+1. **Collection** (`_client/extractors.py`): Shapes are collected for ALL frames including deleted ones (needed for label counting, etc.)
+2. **Partition** (`dataset_partition.py`): Deletion records are placed FIRST in the concat so `idxmax()` picks them in case of ties
+
+**Bug fix history**: Previously, when an image had both annotations and deletion record with same `task_updated_date`, annotations won the tie. Fixed by reordering concat (see `test_deleted_image_with_annotations_in_same_task`).
+
+## Nested frame names
+
+Nested CVAT frame names (`sub/img.jpg`) keep `image_name` as a basename; the
+full key is carried in the internal `frame_path` model field — kept in the task
+cache JSON, excluded from the CSV — and used to build `s3_image_path`. The
+local image cache mirrors the S3 key layout below the effective storage prefix
+(`sync_roots` overrides the prefix, `cache.projects.<name>.ignored_prefix`
+skips less of the hierarchy); see README.md for the user-facing description.
+
+## Task-by-task processing
+
+`fetch` processes tasks individually (`fetch_one_task()`) and saves intermediate CSVs in `output/.tasks/task_{id}.csv` before merging. This allows resuming on failures and provides visibility into per-task data.

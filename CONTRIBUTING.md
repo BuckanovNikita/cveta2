@@ -186,7 +186,7 @@ uv run pre-commit install --hook-type pre-push
   выживших. Новый модуль в `cveta2/` добавляйте в `only_mutate` тем же
   коммитом, который доводит его до нуля выживших, чтобы гейт на `main` никогда
   не был красным. Вне гейта осознанно оставлен только `_client/sdk_adapter.py`
-  (граница SDK, сначала нужно покрытие) — см. CLAUDE.md.
+  (граница SDK, сначала нужно покрытие) — см. `.claude/skills/mutation-testing/SKILL.md`.
 - Если хук упал — по умолчанию усильте тест. Если мутация в принципе не может
   изменить поведение, добавьте её в `[tool.cveta2.mutation.equivalent]` в
   `pyproject.toml` с обоснованием.
@@ -207,7 +207,8 @@ uv run pre-commit install --hook-type pre-push
   `mutants/`.
 
 Подробности механики (что именно мутируется, почему декорированные функции и
-константы уровня модуля не дают мутантов) — в `CLAUDE.md`.
+константы уровня модуля не дают мутантов) —
+в `.claude/skills/mutation-testing/mutation-internals.md`.
 
 ## Тесты
 
@@ -285,6 +286,9 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 - **Слои** — `cli → commands → client → _client` (защищено import-linter, см. выше).
 - **Фундамент** — `models` и `exceptions` не зависят от верхних слоёв; `config` зависит только от `exceptions`.
 
+Подробная карта модулей и потоки данных (fetch / upload / convert, разрешение
+`ORG/PROJECT`, обработка удалённых кадров) — в `ARCHITECTURE.md`.
+
 ## Документация
 
 | Файл | Для кого | Язык |
@@ -292,6 +296,7 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 | `README.md` | Пользователей | Русский |
 | `CONTRIBUTING.md` | Разработчиков | Русский |
 | `DATASET_FORMAT.md` | Пользователей — формат выходных CSV | Английский |
+| `ARCHITECTURE.md` | Разработчиков — карта модулей и потоки данных | Английский |
 
 Обновляйте `README.md` при изменении API.
 
