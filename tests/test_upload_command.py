@@ -221,6 +221,48 @@ class TestSelectLabels:
             assert _select_labels(df) == [_NO_ANNOTATION_LABEL]
 
 
+class TestDeletedOnlyDataset:
+    """A CSV whose rows are all deleted frames is still uploadable.
+
+    ``split_deleted_rows`` hands the picker the *remaining* rows, so a
+    ``deleted.csv`` reaches label resolution as an empty frame.  Rejecting
+    it there made the whole file unuploadable even though the pipeline
+    below accepts a plan of nothing but deleted names.
+    """
+
+    @staticmethod
+    def _empty() -> pd.DataFrame:
+        return pd.DataFrame({"instance_label": pd.Series([], dtype=object)})
+
+    def test_picker_is_skipped_when_the_dataset_has_deleted_rows(self) -> None:
+        with patch(_SELECT_MANY, side_effect=AssertionError("picker must not run")):
+            assert _resolve_labels(None, self._empty(), has_deleted=True) == []
+
+    def test_an_empty_dataset_without_deleted_rows_is_still_rejected(self) -> None:
+        """The rescue must not leak into datasets that offer nothing at all.
+
+        Called without the flag, so the default also has to mean "no
+        deleted rows" — defaulting it to ``True`` would swallow this error
+        for every caller that omits it.
+        """
+        with pytest.raises(Cveta2Error, match="instance_label"):
+            _resolve_labels(None, self._empty())
+
+    def test_labels_all_selects_nothing_on_a_deleted_only_dataset(self) -> None:
+        assert _resolve_labels(["all"], self._empty(), has_deleted=True) == []
+
+    def test_deleted_rows_do_not_suppress_a_picker_that_has_choices(self) -> None:
+        """``has_deleted`` only rescues the *empty* case.
+
+        A dataset with both labels and deleted rows must still prompt;
+        returning early on ``has_deleted`` alone would silently drop every
+        annotated frame from the upload.
+        """
+        df = pd.DataFrame({"instance_label": ["car"]})
+        with patch(_SELECT_MANY, return_value=["car"]):
+            assert _resolve_labels(None, df, has_deleted=True) == ["car"]
+
+
 class TestResolveTaskName:
     def test_explicit_name_skips_the_prompt(self) -> None:
         with patch(_ASK_TASK_NAME) as prompt:
@@ -260,8 +302,9 @@ def test_run_upload_prompts_project_then_name_then_labels(tmp_path: Path) -> Non
         calls.append("name")
         return "t1"
 
-    def fake_labels(_df: pd.DataFrame) -> list[str]:
+    def fake_labels(_df: pd.DataFrame, *, has_deleted: bool) -> list[str]:
         calls.append("labels")
+        assert has_deleted is False
         return ["car"]
 
     with (
@@ -404,6 +447,28 @@ def _run_upload_capturing(
     assert run.client is client
     assert run.resolve_client is client
     return run
+
+
+@pytest.mark.usefixtures("isolated_config")
+def test_run_upload_uploads_a_dataset_of_only_deleted_rows(tmp_path: Path) -> None:
+    """End-to-end: ``upload -d deleted.csv`` without ``--labels``.
+
+    The plan carries the deleted frame and no images, and nothing prompts
+    for a class the file cannot offer.
+    """
+    csv = tmp_path / "deleted.csv"
+    csv.write_text(
+        "image_name,instance_label,instance_shape\nd.jpg,,deleted\n",
+        encoding="utf-8",
+    )
+    args = _upload_args(csv, project="proj", name="t1")
+
+    with patch(_SELECT_MANY, side_effect=AssertionError("picker must not run")):
+        run = _run_upload_capturing(args, project_spec="proj", project=(1, "proj"))
+
+    assert run.request is not None
+    assert run.request.plan.deleted_names == ["d.jpg"]
+    assert run.request.plan.image_names == []
 
 
 class TestRunUploadRequest:

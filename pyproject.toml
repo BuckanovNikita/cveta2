@@ -234,8 +234,8 @@ full = []
 # title == value, so both mutations build a byte-identical Choice. The
 # no-annotation choice below, where title and value genuinely differ, is
 # pinned by test_unannotated_frames_get_a_sentinel_choice.
-"cveta2.commands.upload.x__select_labels__mutmut_9" = "value=None; questionary.Choice falls back to title, which is the same label"
-"cveta2.commands.upload.x__select_labels__mutmut_11" = "drops value=; questionary.Choice falls back to title, which is the same label"
+"cveta2.commands.upload.x__select_labels__mutmut_11" = "value=None; questionary.Choice falls back to title, which is the same label"
+"cveta2.commands.upload.x__select_labels__mutmut_13" = "drops value=; questionary.Choice falls back to title, which is the same label"
 
 # services.upload._push_to_cvat always hands create_task_issues a session, so
 # `session or self.open_task_session(task_id)` short-circuits and the task id

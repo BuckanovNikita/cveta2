@@ -57,17 +57,24 @@ def _available_labels(df: pd.DataFrame) -> tuple[list[str], bool]:
     return labels, has_no_annotation
 
 
-def _select_labels(df: pd.DataFrame) -> list[str]:
+def _select_labels(df: pd.DataFrame, *, has_deleted: bool = False) -> list[str]:
     """Interactively select instance labels from dataset.
 
     Includes a special "(без аннотаций)" choice when the dataset
     contains images without annotations (NaN ``instance_label``).
     The sentinel ``_NO_ANNOTATION_LABEL`` is returned in the list
     when that choice is selected.
+
+    A dataset that offers no class at all is an error only when it has
+    nothing else to upload: with *has_deleted* set, the CSV consists of
+    deleted frames, which the pipeline uploads without any label.
     """
     all_labels, has_no_annotation = _available_labels(df)
     if not all_labels and not has_no_annotation:
-        raise Cveta2Error(_NO_LABELS_ERROR)
+        if not has_deleted:
+            raise Cveta2Error(_NO_LABELS_ERROR)
+        logger.info("В CSV только удалённые кадры — выбор классов пропущен")
+        return []
     choices: list[interactive.Choice] = [
         interactive.Choice(title=label, value=label) for label in all_labels
     ]
@@ -92,7 +99,12 @@ def _select_labels(df: pd.DataFrame) -> list[str]:
     return selected
 
 
-def _resolve_labels(labels_arg: list[str] | None, df: pd.DataFrame) -> list[str]:
+def _resolve_labels(
+    labels_arg: list[str] | None,
+    df: pd.DataFrame,
+    *,
+    has_deleted: bool = False,
+) -> list[str]:
     """Return selected labels from ``--labels`` or the interactive picker.
 
     ``--labels all`` selects every dataset label (plus frames without
@@ -102,7 +114,7 @@ def _resolve_labels(labels_arg: list[str] | None, df: pd.DataFrame) -> list[str]
     dataset has frames without annotations).
     """
     if labels_arg is None:
-        return _select_labels(df)
+        return _select_labels(df, has_deleted=has_deleted)
     labels, has_no_annotation = _available_labels(df)
     available = set(labels)
     if has_no_annotation:
@@ -150,7 +162,9 @@ def run_upload(args: argparse.Namespace) -> None:
     with open_client() as client:
         project_id, project_name = resolve_project(client, args.project)
         task_name = _resolve_task_name(args.name)
-        selected = _resolve_labels(args.labels, df_normal)
+        selected = _resolve_labels(
+            args.labels, df_normal, has_deleted=bool(deleted_names)
+        )
         echo_if_prompted(
             "upload",
             {

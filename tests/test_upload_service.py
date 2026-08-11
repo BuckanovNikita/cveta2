@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 
 from cveta2.exceptions import Cveta2Error, LabelsMismatchError
-from cveta2.models import LabelInfo, ProjectInfo
+from cveta2.models import CSV_COLUMNS, LabelInfo, ProjectInfo
 from cveta2.services.upload import (
     UploadOptions,
     UploadPlan,
@@ -381,6 +381,43 @@ class TestUploadDataset:
         assert api.writes.issues == []
         assert outcome.issues == 0
         assert api.writes.job_updates == []
+
+    def test_a_dataset_of_only_deleted_rows_still_creates_the_task(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``deleted.csv`` on its own is a valid upload.
+
+        The annotation frame is empty but keeps every ``CSV_COLUMNS``
+        column, exactly as :func:`read_dataset_csv` yields it, so the whole
+        write chain — shapes, issues, deleted frames — has to survive
+        having nothing to annotate.
+        """
+        make_s3(monkeypatch, _ListCountingS3())
+        image_dir = make_local_images(tmp_path, ["d.jpg"])
+        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        request = UploadRequest(
+            project_id=PROJECT_ID,
+            project_name=PROJECT_NAME,
+            task_name="deleted-only",
+            plan=UploadPlan(
+                annotations=pd.DataFrame(columns=list(CSV_COLUMNS)),
+                image_names=[],
+                deleted_names=["d.jpg"],
+            ),
+            options=UploadOptions(search_dirs=[image_dir]),
+        )
+
+        outcome = upload_dataset(client, request)
+
+        api = client.api
+        assert isinstance(api, _ProjectScopedFake)
+        assert api.writes.created_tasks[0].server_files == [current_month_key("d.jpg")]
+        assert api.writes.shapes.get(NEW_TASK_ID) is None
+        assert api.writes.deleted_frames[NEW_TASK_ID] == [0]
+        assert outcome.images == 1
+        assert outcome.deleted == 1
+        assert outcome.annotations == 0
+        assert outcome.issues == 0
 
     @pytest.mark.parametrize(
         ("mark_all_deleted", "deleted_names", "expected_frames"),
