@@ -275,7 +275,28 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 | `CVAT_INTEGRATION_USER` | `admin` | Пользователь CVAT |
 | `CVAT_INTEGRATION_PASSWORD` | `admin` | Пароль CVAT |
 
-## Релизы
+## Ветки и релизы
+
+Работа идёт в ветках, `main` меняется только вливанием. Прямых коммитов в `main` нет —
+и версия появляется не «когда накопится», а сразу: **каждое изменение `main` заканчивается
+релизом**. Тег отстаёт от `main` ровно на время между вливанием и командой релиза.
+
+```
+feature-branch → правки, коммиты → влить в main → выпустить релиз с main
+```
+
+Ветку от `main` отводят под одно изменение и вливают целиком. Название произвольное,
+но тип коммитов важен: именно из них считается версия (таблица ниже).
+
+`semantic-release` сам откажется работать где-либо кроме `main`:
+
+```
+branch 'my-feature' isn't in any release groups; no release will be made
+```
+
+Это не ошибка конфигурации, а защита: релиз возможен только с `main`.
+
+### Что попадает в версию
 
 Версию, тег и `CHANGELOG.md` считает
 [python-semantic-release](https://python-semantic-release.readthedocs.io/) по истории
@@ -298,6 +319,8 @@ conventional-коммитов. Поле `version` в `pyproject.toml` рукам
 
 ### Как выпустить
 
+Сразу после вливания ветки, находясь на `main`:
+
 ```bash
 uv run semantic-release version --print                       # какая версия получится
 uv run semantic-release version --no-push --no-vcs-release    # локальный релиз
@@ -311,6 +334,11 @@ git push origin main --follow-tags                            # коммит и 
 
 Пакет релиз не собирает: артефакт всё равно некуда публиковать, а собираемость проверяет
 `uv build` в pre-commit.
+
+Если во влитой ветке были одни `chore` / `docs` / `test`, первая команда ответит
+`No release will be made, X.Y.Z has already been released!` и завершится успешно —
+выпускать нечего, тег остаётся прежним. Проверять всё равно нужно каждый раз: только так
+видно, какой это случай.
 
 Пуш вынесен в отдельную команду не для красоты: он поднимает pre-push-хук с полным
 профилем мутационного тестирования, а semantic-release пушит ветку и тег двумя разными

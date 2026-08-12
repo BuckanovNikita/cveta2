@@ -107,6 +107,32 @@ module is worth gating. It carries the rules that fail silently otherwise —
 never reshape working code to satisfy the gate, allowlist entries go stale on
 renumbering — plus a reference file on what mutmut actually mutates.
 
+## Branching and releases
+
+Work happens on a branch; `main` only ever changes by merging one in. **Every
+change to `main` ends with a release** — python-semantic-release derives the
+version, the annotated `vX.Y.Z` tag and `CHANGELOG.md` from the conventional
+commits that were merged. Never hand-edit `version` in `pyproject.toml`.
+
+From `main`, right after the merge:
+
+```bash
+uv run semantic-release version --print                     # what the next version would be
+uv run semantic-release version --no-push --no-vcs-release
+git push origin main --follow-tags
+```
+
+- A merge of only `chore`/`docs`/`test` commits warrants no release; `--print`
+  says so and exits 0. Still run it — that is how you learn which case you are in.
+- The push is separate on purpose: it fires the pre-push full mutation gate, and
+  semantic-release would push branch and tag separately, paying for it twice.
+- Releases never run from a feature branch — semantic-release refuses, since only
+  `main` is a release branch.
+- No CI, no GitHub Release, no PyPI. A release is a tag, a changelog and a version.
+
+The bump rules, the `BREAKING CHANGE:` footer convention and what is excluded
+from the changelog are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Configuration
 
 Config loaded via `CvatConfig.load()` from:
