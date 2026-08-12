@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -8,6 +8,21 @@ version = "0.1.0"
 description = "CVAT project annotation utilities"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Buckanov Nikita", email = "buckanov32@gmail.com" }]
+keywords = ["cvat", "annotations", "dataset", "yolo", "coco", "computer-vision"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
 dependencies = [
     "boto3>=1.42.49",
     "cvat-sdk>=2.41.0",
@@ -26,8 +41,30 @@ dependencies = [
 [project.optional-dependencies]
 clearml = ["clearml>=1.16.0"]
 
+[project.urls]
+Homepage = "https://github.com/BuckanovNikita/cveta2"
+Repository = "https://github.com/BuckanovNikita/cveta2"
+Changelog = "https://github.com/BuckanovNikita/cveta2/blob/main/CHANGELOG.md"
+Issues = "https://github.com/BuckanovNikita/cveta2/issues"
+
 [project.scripts]
 cveta2 = "cveta2.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cveta2"]
+
+# Without an explicit list hatchling sweeps every file that git does not ignore,
+# and vendor/cvat is a submodule - a whole CVAT checkout - so it would ship
+# inside every sdist.
+[tool.hatch.build.targets.sdist]
+include = [
+    "cveta2",
+    "README.md",
+    "CHANGELOG.md",
+    "DATASET_FORMAT.md",
+    "LICENSE",
+    "pyproject.toml",
+]
 
 [dependency-groups]
 dev = [
@@ -46,6 +83,39 @@ dev = [
     "ipywidgets>=8.1.8",
     "matplotlib>=3.10.8",
     "pytest-cov>=7.1.0",
+    "python-semantic-release>=10.6.1",
+]
+
+[tool.semantic_release]
+tag_format = "v{version}"
+version_toml = ["pyproject.toml:project.version"]
+commit_parser = "conventional"
+# 0.x stays 0.x: a breaking change bumps the minor, never to 1.0.0 on its own.
+# Both are spelled out rather than left to the defaults, which have moved
+# between python-semantic-release majors.
+allow_zero_version = true
+major_on_zero = false
+# The default release commit message is not a conventional commit, so it would
+# fail any later check over the range.
+commit_message = "chore(release): {version}"
+# A release only moves the version and the tag; it builds no artifact, because
+# nothing publishes one. This hook exists solely to keep uv.lock honest:
+# uv.lock carries its own cveta2 version entry, which version_toml does not
+# touch, so without the re-lock the tagged commit ships a lockfile that
+# disagrees with pyproject.toml and the next `uv run` silently re-locks.
+# `git add` is what puts the lockfile inside the release commit instead of
+# leaving it dirty after.
+build_command = """
+uv lock --upgrade-package "$PACKAGE_NAME"
+git add uv.lock
+"""
+
+[tool.semantic_release.changelog]
+# The release commit itself, and the two types that describe no change a reader
+# of the changelog can act on.
+exclude_commit_patterns = [
+    '''chore(?:\([^)]*?\))?: .+''',
+    '''style(?:\([^)]*?\))?: .+''',
 ]
 
 [tool.ruff]

@@ -275,6 +275,50 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 | `CVAT_INTEGRATION_USER` | `admin` | Пользователь CVAT |
 | `CVAT_INTEGRATION_PASSWORD` | `admin` | Пароль CVAT |
 
+## Релизы
+
+Версию, тег и `CHANGELOG.md` считает
+[python-semantic-release](https://python-semantic-release.readthedocs.io/) по истории
+conventional-коммитов. Поле `version` в `pyproject.toml` руками не правят — его
+проставляет релиз.
+
+| Коммит | Бамп версии |
+|---|---|
+| `fix:`, `perf:` | patch (`0.1.0` → `0.1.1`) |
+| `feat:` | minor (`0.1.0` → `0.2.0`) |
+| `feat!:` или футер `BREAKING CHANGE:` | тоже minor, пока проект на `0.x` |
+
+`major_on_zero = false`: сам по себе `0.x` в `1.0.0` не превратится, это отдельное
+решение (`uv run semantic-release version --major`).
+
+В раздел «BREAKING CHANGES» changelog-а ломающее изменение попадёт только при футере
+`BREAKING CHANGE: <описание>` в теле коммита. Одного `!` в заголовке хватает для расчёта
+версии, но текста для changelog он не даёт. Коммиты типов `chore` и `style` в changelog
+не попадают вовсе (`exclude_commit_patterns`).
+
+### Как выпустить
+
+```bash
+uv run semantic-release version --print                       # какая версия получится
+uv run semantic-release version --no-push --no-vcs-release    # локальный релиз
+git push origin main --follow-tags                            # коммит и тег одним пушем
+```
+
+Первая команда ничего не меняет. Вторая правит `version` в `pyproject.toml`,
+перегенерирует `CHANGELOG.md`, обновляет запись версии в `uv.lock` (это `build_command`,
+единственная его задача), затем делает коммит `chore(release): X.Y.Z` и аннотированный
+тег `vX.Y.Z`.
+
+Пакет релиз не собирает: артефакт всё равно некуда публиковать, а собираемость проверяет
+`uv build` в pre-commit.
+
+Пуш вынесен в отдельную команду не для красоты: он поднимает pre-push-хук с полным
+профилем мутационного тестирования, а semantic-release пушит ветку и тег двумя разными
+пушами — гейт отработал бы дважды.
+
+`--no-vcs-release` отключает создание GitHub Release, поэтому токен не нужен. На PyPI
+пакет не публикуется.
+
 ## Архитектура
 
 - **API-абстракция** — весь доступ к CVAT через протокол `CvatApiPort`.
