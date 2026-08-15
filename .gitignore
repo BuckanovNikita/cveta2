@@ -41,8 +41,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Project cache
+# Project cache (holds the fetched CVAT docker-compose.yml, see scripts/integration_up.sh)
 .cache/
+
+# Leftover CVAT checkout in clones made back when vendor/cvat was a submodule
+vendor/
 
 # Integration test artifacts
 tests/fixtures/data/coco8/images/

@@ -3,7 +3,7 @@
 ## Быстрый старт
 
 ```bash
-git clone --recurse-submodules <repo-url>
+git clone <repo-url>
 cd cveta2
 uv sync
 uv run pre-commit install   # автоматические проверки перед коммитом
@@ -12,7 +12,8 @@ uv run pre-commit install   # автоматические проверки пе
 Требования: Python 3.12+, [uv](https://docs.astral.sh/uv/),
 Docker + Compose v2 (только для интеграционных тестов).
 
-Забыли `--recurse-submodules`? — `git submodule update --init`.
+Сабмодулей у репозитория нет: `docker-compose.yml` для стека CVAT
+`integration_up.sh` скачивает сам (см. «Интеграционные тесты»).
 
 ## Стиль кода
 
@@ -61,7 +62,7 @@ uv run ruff format --check .  # проверка без изменений (exit
 - `target-version = "py310"`
 - `docstring-code-format = true` — форматирует примеры кода в docstrings
 - Директория `scripts/` форматируется, но **не линтуется**
-- Директория `vendor/` исключена полностью
+- Директория `vendor/` исключена полностью (остаётся от старых клонов с сабмодулем CVAT)
 
 ### ruff check (линтинг)
 
@@ -109,7 +110,7 @@ uv run mypy .
 - `python_version = "3.10"`
 - `warn_return_any = true`
 - `warn_unused_configs = true`
-- Исключены: `scripts/`, `vendor/`
+- Исключены: `scripts/`, `vendor/` (второе — ради старых клонов с сабмодулем CVAT)
 - Для `cvat_sdk.*` установлено `ignore_missing_imports = true` (SDK не поставляет полные стабы)
 - Type stubs для сторонних библиотек в dev-зависимостях: `boto3-stubs`, `pandas-stubs`, `types-tqdm`, `types-pyyaml`
 
@@ -256,7 +257,7 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 # 1. Поднять стек (порт по умолчанию 9988, всегда с нуля)
 ./scripts/integration_up.sh
 ./scripts/integration_up.sh --port 9080        # конкретный порт
-./scripts/integration_up.sh --cvat-version v2.26.0  # конкретная версия
+./scripts/integration_up.sh --cvat-version v2.26.0  # конкретная версия CVAT
 
 # 2. Запустить тесты (скрипт сам выставляет env-переменные и отключает xdist)
 ./scripts/integration_test.sh
@@ -267,6 +268,15 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 ./scripts/integration_stop.sh
 ```
 
+Базовый compose-файл — это `docker-compose.yml` самого CVAT. `integration_up.sh`
+скачивает его один раз на версию в `.cache/cvat/<версия>/` (каталог в `.gitignore`),
+дальше стек поднимается без сети. `--cvat-version` задаёт и compose-файл, и теги
+образов `cvat/*`. Если машина не имеет доступа к `raw.githubusercontent.com`,
+укажите свою копию файла: `CVAT_COMPOSE_FILE=/path/to/docker-compose.yml`.
+
+Останавливающий скрипт compose-файл не читает — он сносит стек по метке проекта,
+поэтому работает при любой версии и без сети.
+
 Без `CVAT_INTEGRATION_HOST` интеграционные тесты не запускаются. Скрипт `integration_test.sh` выставляет эту переменную автоматически.
 
 | Переменная | По умолчанию | Описание |
@@ -274,6 +284,7 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 | `CVAT_INTEGRATION_HOST` | — | URL CVAT; включает интеграционные тесты |
 | `CVAT_INTEGRATION_USER` | `admin` | Пользователь CVAT |
 | `CVAT_INTEGRATION_PASSWORD` | `admin` | Пароль CVAT |
+| `CVAT_COMPOSE_FILE` | — | Локальный `docker-compose.yml` CVAT вместо скачивания |
 
 ## Ветки и релизы
 
@@ -382,6 +393,6 @@ git push origin main --follow-tags                            # коммит и 
 docker logs "$(whoami)-cvat_server"
 ```
 
-**Ошибка про сабмодуль** — `git submodule update --init`
+**Не скачивается compose-файл CVAT** — задайте `CVAT_COMPOSE_FILE` с путём к локальной копии `docker-compose.yml` CVAT
 
 **Тесты падают после изменения фикстур** — перезапустите `./scripts/integration_up.sh`

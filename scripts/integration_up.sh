@@ -20,6 +20,10 @@
 #   MinIO API:          9989
 #   MinIO console:      9990
 #
+# The base compose file is CVAT's own docker-compose.yml, downloaded once per
+# version into .cache/cvat/ (gitignored). Set CVAT_COMPOSE_FILE to a local copy
+# to skip the download on a machine that cannot reach raw.githubusercontent.com.
+#
 # Requirements: docker, docker compose v2, uv, curl, unzip
 
 set -euo pipefail
@@ -27,12 +31,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-CVAT_SUBMODULE="$REPO_ROOT/vendor/cvat"
 ENV_FILE="$REPO_ROOT/tests/integration/.env"
 OVERRIDE_FILE="$REPO_ROOT/tests/integration/docker-compose.override.yml"
 COCO8_IMAGES_DIR="$REPO_ROOT/tests/fixtures/data/coco8/images"
+COMPOSE_CACHE_DIR="$REPO_ROOT/.cache/cvat"
 
-CVAT_VERSION=""
+CVAT_VERSION="v2.41.0"
 CVAT_PORT="9988"
 MINIO_PORT="9989"
 MINIO_CONSOLE_PORT="9990"
@@ -80,7 +84,7 @@ while [[ $# -gt 0 ]]; do
             echo "Always resets (docker compose down -v) before starting."
             echo ""
             echo "Options:"
-            echo "  --cvat-version TAG   CVAT version tag to check out (default: submodule HEAD)"
+            echo "  --cvat-version TAG   CVAT release tag: compose file and images (default: $CVAT_VERSION)"
             echo "  --port PORT          Host port for CVAT API and UI (default: 9988)"
             echo "  --minio-port PORT    Host port for MinIO API (default: 9989)"
             exit 0
@@ -102,14 +106,20 @@ check_port_free() {
     fi
 }
 
-export CVAT_PORT MINIO_PORT MINIO_CONSOLE_PORT CLEARML_API_PORT CLEARML_FILES_PORT CLEARML_WEB_PORT
+# CVAT_VERSION picks both the compose file and, through its own ${CVAT_VERSION:-...}
+# defaults inside that file, every cvat/* image tag.
+export CVAT_PORT MINIO_PORT MINIO_CONSOLE_PORT CLEARML_API_PORT CLEARML_FILES_PORT CLEARML_WEB_PORT CVAT_VERSION
+
+COMPOSE_URL="https://raw.githubusercontent.com/cvat-ai/cvat/${CVAT_VERSION}/docker-compose.yml"
+COMPOSE_DIR="$COMPOSE_CACHE_DIR/$CVAT_VERSION"
+COMPOSE_FILE="${CVAT_COMPOSE_FILE:-$COMPOSE_DIR/docker-compose.yml}"
 
 # ── Helpers ─────────────────────────────────────────────────────────
 compose() {
     docker compose \
-        --project-directory "$CVAT_SUBMODULE" \
+        --project-directory "${COMPOSE_FILE%/*}" \
         -p "${INTEGRATION_USER}-cvat" \
-        -f "$CVAT_SUBMODULE/docker-compose.yml" \
+        -f "$COMPOSE_FILE" \
         -f "$OVERRIDE_FILE" \
         --env-file "$ENV_FILE" \
         "$@"
@@ -117,26 +127,34 @@ compose() {
 
 log() { echo "==> $*"; }
 
-# ── 1. Verify submodule ────────────────────────────────────────────
-if [ ! -f "$CVAT_SUBMODULE/docker-compose.yml" ]; then
-    echo "ERROR: CVAT submodule not initialized at vendor/cvat/" >&2
-    echo "Run:  git submodule update --init" >&2
-    exit 1
-fi
-
-# ── 2. Checkout CVAT version ───────────────────────────────────────
-if [ -n "$CVAT_VERSION" ]; then
-    log "Checking out CVAT $CVAT_VERSION"
-    git -C "$CVAT_SUBMODULE" fetch --tags --quiet
-    git -C "$CVAT_SUBMODULE" checkout "$CVAT_VERSION" --quiet
+# ── 1-2. Resolve the CVAT compose file ─────────────────────────────
+# Downloaded once per version, so every later run is offline. Only `up` needs the
+# file at all: the teardowns here and in integration_stop.sh go by project label.
+if [ -n "${CVAT_COMPOSE_FILE:-}" ]; then
+    if [ ! -f "$CVAT_COMPOSE_FILE" ]; then
+        echo "ERROR: CVAT_COMPOSE_FILE=$CVAT_COMPOSE_FILE does not exist" >&2
+        exit 1
+    fi
+    log "Using CVAT compose file $CVAT_COMPOSE_FILE (images: $CVAT_VERSION)"
+elif [ -f "$COMPOSE_FILE" ]; then
+    log "Using cached CVAT $CVAT_VERSION compose file"
 else
-    CVAT_VERSION=$(git -C "$CVAT_SUBMODULE" describe --tags --always 2>/dev/null || echo "dev")
-    log "Using CVAT at current submodule HEAD ($CVAT_VERSION)"
+    log "Downloading CVAT $CVAT_VERSION compose file"
+    mkdir -p "$COMPOSE_DIR"
+    if ! curl -fsSL "$COMPOSE_URL" -o "$COMPOSE_FILE.part"; then
+        rm -f "$COMPOSE_FILE.part"
+        echo "ERROR: could not download $COMPOSE_URL" >&2
+        echo "Set CVAT_COMPOSE_FILE to a local copy of CVAT's docker-compose.yml." >&2
+        exit 1
+    fi
+    mv "$COMPOSE_FILE.part" "$COMPOSE_FILE"
 fi
 
 # ── 3. Tear down existing stack (always reset) ─────────────────────
+# By project label rather than through compose(): the stack being replaced may
+# have been started from a different CVAT version's compose file.
 log "Tearing down existing CVAT stack (docker compose down -v)"
-compose down -v --remove-orphans 2>/dev/null || true
+docker compose -p "${INTEGRATION_USER}-cvat" down -v --remove-orphans 2>/dev/null || true
 
 # ── 3b. Check ports are free ───────────────────────────────────────
 # After the teardown, never before it: the stack this script is about to

@@ -15,7 +15,10 @@ Integration tests run against a real CVAT + MinIO + ClearML Docker stack. The fu
 
 - Docker and Docker Compose v2.24.6+
 - `uv` (Python package manager)
-- CVAT git submodule initialized: `git submodule update --init`
+- Network access to `raw.githubusercontent.com` on the first run of a given CVAT
+  version — `integration_up.sh` downloads CVAT's own `docker-compose.yml` into
+  `.cache/cvat/<version>/` and reuses it offline afterwards. Without that access,
+  point `CVAT_COMPOSE_FILE` at a local copy of that file.
 - Free ports (defaults: 9988, 9989, 9990, 8880-8882) — see parallel section for overrides
 - `tests/integration/.env` — gitignored, so a fresh clone does not have one and
   every script fails on `couldn't find env file` until you write it:
@@ -61,17 +64,22 @@ Forward extra pytest args to `integration_test.sh`:
 
 ### `integration_up.sh`
 
-1. Tears down any existing stack (`docker compose down -v`)
-2. Checks that default ports (9988, 9989, 9990, 8880-8882) are free — in that
+1. Resolves the base compose file: `CVAT_COMPOSE_FILE` if set, else
+   `.cache/cvat/<version>/docker-compose.yml`, downloading it from the CVAT repo
+   when that cache entry is missing. `--cvat-version` selects both this file and
+   the `cvat/*` image tags (default `v2.41.0`).
+2. Tears down any existing stack (`docker compose -p <project> down -v`, by project
+   label, so it does not matter which CVAT version started it)
+3. Checks that default ports (9988, 9989, 9990, 8880-8882) are free — in that
    order, so a plain re-run is not refused by the ports its own teardown just
    released. A port still taken here belongs to something else: another user's
    stack, or a second agent that picked the same `--port`.
-3. Downloads coco8 dataset images (if missing)
-4. Starts minimal CVAT services: `cvat_server`, `cvat_worker_import`, `cvat_worker_chunks`, `cveta2-minio`, plus ClearML (`clearml-apiserver`, `clearml-webserver`, `clearml-fileserver`). No `traefik` and no `cvat_ui`: `cvat_server` publishes its own nginx on the CVAT port, so the stack serves the API and has no web UI. See the header of `docker-compose.override.yml` for why traefik is kept out — in short, a traefik from any *other* CVAT stack on the machine discovers these containers through the Docker socket and breaks both stacks at once.
-5. Waits for CVAT and ClearML health endpoints (up to 180s)
-6. Creates CVAT superuser (`admin`/`admin`)
-7. Creates MinIO bucket (`cveta2-test`)
-8. Seeds CVAT with `coco8-dev` test project via `tests/integration/seed_cvat.py`
+4. Downloads coco8 dataset images (if missing)
+5. Starts minimal CVAT services: `cvat_server`, `cvat_worker_import`, `cvat_worker_chunks`, `cveta2-minio`, plus ClearML (`clearml-apiserver`, `clearml-webserver`, `clearml-fileserver`). No `traefik` and no `cvat_ui`: `cvat_server` publishes its own nginx on the CVAT port, so the stack serves the API and has no web UI. See the header of `docker-compose.override.yml` for why traefik is kept out — in short, a traefik from any *other* CVAT stack on the machine discovers these containers through the Docker socket and breaks both stacks at once.
+6. Waits for CVAT and ClearML health endpoints (up to 180s)
+7. Creates CVAT superuser (`admin`/`admin`)
+8. Creates MinIO bucket (`cveta2-test`)
+9. Seeds CVAT with `coco8-dev` test project via `tests/integration/seed_cvat.py`
 
 ### `integration_test.sh`
 
@@ -81,27 +89,29 @@ Forward extra pytest args to `integration_test.sh`:
 
 ### `integration_stop.sh`
 
-1. Runs `docker compose down -v --remove-orphans` to remove all containers and volumes
-2. Uses the same `INTEGRATION_USER` prefix so it targets the correct compose project
+1. Runs `docker compose -p "${INTEGRATION_USER}-cvat" down -v --remove-orphans` to
+   remove all containers, networks and volumes
+2. Passes no compose file at all — docker compose finds everything by project
+   label, so teardown needs no download and works whichever CVAT version started it
 
 ## Shutdown
 
 Always tear down with `./scripts/integration_stop.sh` (not manual `docker compose down`), because:
 
 - It uses the correct compose project name (`${INTEGRATION_USER}-cvat`)
-- It passes the right `-f` flags (both base + override compose files)
 - It removes volumes (`-v`) to ensure clean state for next run
 - It removes orphan containers (`--remove-orphans`)
 
 If a test run is interrupted (Ctrl-C, crash), the stack keeps running. Run `integration_stop.sh` to clean up. The stack is designed to be disposable — `integration_up.sh` always tears down first before starting.
 
-If `integration_stop.sh` itself fails (e.g., missing CVAT submodule), fall back to:
+To tear down another user's or another agent's stack, run the same command with
+their project name:
 
 ```bash
-# Find your project name
+# Find the project name
 docker compose ls | grep cvat
 
-# Manual teardown (replace USERNAME with your $USER)
+# Manual teardown (replace USERNAME with the prefix that stack used)
 docker compose -p "USERNAME-cvat" down -v --remove-orphans
 ```
 

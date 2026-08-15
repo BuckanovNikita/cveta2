@@ -54,8 +54,7 @@ cveta2 = "cveta2.cli:main"
 packages = ["cveta2"]
 
 # Without an explicit list hatchling sweeps every file that git does not ignore,
-# and vendor/cvat is a submodule - a whole CVAT checkout - so it would ship
-# inside every sdist.
+# so tests, scripts and fixtures would ship inside every sdist.
 [tool.hatch.build.targets.sdist]
 include = [
     "cveta2",
@@ -121,6 +120,8 @@ exclude_commit_patterns = [
 [tool.ruff]
 target-version = "py310"
 line-length = 88
+# vendor/ is no longer part of the repo; the entry stays for clones made while
+# vendor/cvat was still a submodule, which keep the checkout on disk.
 exclude = ["vendor/**", "local/**", "mutants/**"]
 
 [tool.ruff.lint]
@@ -159,7 +160,8 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 # mutants/ holds mutmut's copy of the tree; without it mypy sees two `cveta2`
-# packages and fails with a duplicate-module error.
+# packages and fails with a duplicate-module error. vendor/ is only a leftover
+# CVAT checkout in older clones - mypy, unlike ruff, ignores .gitignore.
 exclude = ["scripts/", "vendor/", "local/", "mutants/"]
 
 [[tool.mypy.overrides]]

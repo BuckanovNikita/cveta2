@@ -1,7 +1,8 @@
 # Override for CVAT integration tests.
 #
 # Adds MinIO and ClearML. Disables the analytics pipeline.
-# All image versions come from the checked-out CVAT submodule tag.
+# Layered on top of CVAT's own docker-compose.yml, which integration_up.sh
+# downloads into .cache/cvat/; CVAT_VERSION picks that file and the image tags.
 #
 # INTEGRATION_USER is set by integration_up.sh (defaults to "default")
 # and used as a container-name prefix to avoid clashes between users.

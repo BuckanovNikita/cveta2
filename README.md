@@ -26,8 +26,21 @@ CLI и Python API для работы с аннотациями CVAT-проек�
 
 ## Установка
 
+Из git-репозитория по тегу версии:
+
 ```bash
-pip install cveta2-0.1.0-py3-none-any.whl
+uv add git+ssh://git@<host>/<org>/cveta2@vX.Y.Z
+pip install git+ssh://git@<host>/<org>/cveta2@vX.Y.Z
+```
+
+Сабмодулей у репозитория нет, доступ к github.com при установке не нужен:
+подходит любое зеркало или внутренний git-хост, а зависимости ставятся с PyPI
+(или с внутреннего индекса).
+
+Собранный пакет ставится как обычно:
+
+```bash
+pip install cveta2-<версия>-py3-none-any.whl
 ```
 
 ## Быстрый старт

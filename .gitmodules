@@ -1,3 +1,0 @@
-[submodule "vendor/cvat"]
-	path = vendor/cvat
-	url = https://github.com/cvat-ai/cvat.git
