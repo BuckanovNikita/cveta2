@@ -87,8 +87,12 @@ class CvatReadPort(Protocol):
 class CvatWritePort(Protocol):
     """Mutating CVAT API operations used by ``CvatClient``."""
 
-    def create_task_with_data(self, spec: UploadTaskSpec) -> int:
-        """Create a task, attach cloud-storage data, wait; return task id."""
+    def create_task(self, spec: UploadTaskSpec) -> int:
+        """Create an empty task and return its id."""
+        ...
+
+    def attach_task_data(self, task_id: int, spec: UploadTaskSpec) -> None:
+        """Attach cloud-storage files to a task and wait for processing."""
         ...
 
     def put_task_shapes(self, task_id: int, shapes: list[NewShape]) -> None:

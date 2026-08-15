@@ -14,10 +14,11 @@ from cveta2._client_ops.shared import (
     _HTTP_5XX_MIN,
     FetchContext,
     _FetchAnnotationsOptions,
+    _is_rate_limited,
     _log_task_5xx_skip,
 )
 from cveta2.config import should_raise_on_fetch_failure
-from cveta2.exceptions import CvatApiError, TaskNotFoundError
+from cveta2.exceptions import CvatApiError, Cveta2Error, TaskNotFoundError
 from cveta2.models import TaskAnnotations
 
 if TYPE_CHECKING:
@@ -166,6 +167,14 @@ class _FetchMixin(_ClientBase):
             data_meta = api.get_task_data_meta(task.id)
             annotations = api.get_task_annotations(task.id)
         except CvatApiError as e:
+            if _is_rate_limited(e):
+                msg = (
+                    f"CVAT ограничивает частоту запросов (HTTP {e.status_code}) "
+                    f"на задаче {task.id}, повторы исчерпаны. Задача НЕ пропущена, "
+                    f"чтобы датасет не потерял её молча — уменьшите "
+                    f"network.cvat_workers и повторите запуск."
+                )
+                raise Cveta2Error(msg) from e
             if _HTTP_5XX_MIN <= e.status_code < _HTTP_5XX_MAX:
                 if ctx.raise_on_failure:
                     raise

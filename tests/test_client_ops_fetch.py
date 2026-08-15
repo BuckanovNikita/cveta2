@@ -20,7 +20,7 @@ from cveta2._client.dtos import (
 from cveta2._client_ops.shared import FetchContext
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
-from cveta2.exceptions import CvatApiError, TaskNotFoundError
+from cveta2.exceptions import CvatApiError, Cveta2Error, TaskNotFoundError
 from cveta2.models import (
     BBoxAnnotation,
     LabelAttributeInfo,
@@ -278,3 +278,28 @@ class TestFetchOneTask:
         ctx = FetchContext(tasks=[task], label_names={}, attr_names={})
 
         assert CvatClient.fetch_one_task(api, task, ctx) is None
+
+    def test_rate_limiting_aborts_instead_of_skipping_the_task(self) -> None:
+        """A 429 here means the retry budget is already spent.
+
+        Skipping would drop the task from the merged dataset for a reason
+        that has nothing to do with its contents, and the only trace would
+        be a log line — so the run stops instead.
+        """
+        task, fixtures = _annotated_task_fixtures()
+        api = FakeCvatApi(fixtures, fail_task_ids={task.id}, fail_status=429)
+        ctx = FetchContext(tasks=[task], label_names={}, attr_names={})
+
+        with pytest.raises(Cveta2Error, match="cvat_workers"):
+            CvatClient.fetch_one_task(api, task, ctx)
+
+    def test_rate_limiting_aborts_even_when_failures_are_tolerated(self) -> None:
+        """``raise_on_failure`` is off by default and must not soften a 429."""
+        task, fixtures = _annotated_task_fixtures()
+        api = FakeCvatApi(fixtures, fail_task_ids={task.id}, fail_status=429)
+        ctx = FetchContext(
+            tasks=[task], label_names={}, attr_names={}, raise_on_failure=False
+        )
+
+        with pytest.raises(Cveta2Error):
+            CvatClient.fetch_one_task(api, task, ctx)

@@ -7,6 +7,8 @@ pipeline without the real CVAT SDK.
 from __future__ import annotations
 
 import dataclasses
+import threading
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -16,7 +18,7 @@ from cveta2.models import OrganizationInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
+    from collections.abc import Collection, Mapping, Sequence
 
     from cveta2._client.dtos import (
         LabelPatch,
@@ -56,21 +58,29 @@ class FakeCvatApi:
     ``get_task_annotations`` is recorded in ``annotation_calls``.
 
     Write methods record their traffic on ``self.writes`` and keep the
-    in-memory task store consistent (``create_task_with_data`` allocates
-    an id and synthesizes frame metadata, ``set_deleted_frames`` updates
-    the stored ``data_meta``), so full upload flows run against the fake.
-    A ``MagicMock(spec=CvatApiPort)`` remains acceptable only for narrow
-    single-method interaction tests (error injection, exact call-arg
+    in-memory task store consistent (``create_task`` allocates an id,
+    ``attach_task_data`` synthesizes frame metadata, ``set_deleted_frames``
+    updates the stored ``data_meta``), so full upload flows run against the
+    fake.  A ``MagicMock(spec=CvatApiPort)`` remains acceptable only for
+    narrow single-method interaction tests (error injection, exact call-arg
     assertions where a one-line ``return_value`` beats fixture setup).
+
+    *flaky* makes any method fail its first N calls and then succeed, which
+    is what a retry policy has to be tested against: ``call_counts`` then
+    says how many attempts it actually took.  Mutations are guarded by a
+    lock so concurrent callers cannot interleave a read-modify-write.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         fixtures: LoadedFixtures,
         *,
         fail_task_ids: Collection[int] = frozenset(),
         fail_status: int = 500,
         fail_methods: Collection[str] = _DEFAULT_FAIL_METHODS,
+        flaky: Mapping[str, int] | None = None,
+        flaky_status: int = 429,
+        flaky_retry_after: float | None = None,
     ) -> None:
         """Unpack fixture data into internal stores (copies: writes stay local)."""
         self._project = fixtures.project
@@ -81,6 +91,11 @@ class FakeCvatApi:
         self._fail_task_ids = frozenset(fail_task_ids)
         self._fail_status = fail_status
         self._fail_methods = frozenset(fail_methods)
+        self._flaky = dict(flaky or {})
+        self._flaky_status = flaky_status
+        self._flaky_retry_after = flaky_retry_after
+        self._lock = threading.Lock()
+        self.call_counts: Counter[str] = Counter()
         self.annotation_calls: list[int] = []
         self.writes = RecordedWrites()
         self.organizations: list[OrganizationInfo] = []
@@ -115,6 +130,20 @@ class FakeCvatApi:
     def _raise_if_failing(self, method: str, task_id: int) -> None:
         if task_id in self._fail_task_ids and method in self._fail_methods:
             raise CvatApiError("fake failure", status_code=self._fail_status)
+
+    def _enter(self, method: str) -> None:
+        """Count the call and fail it while *method* still owes failures."""
+        with self._lock:
+            self.call_counts[method] += 1
+            remaining = self._flaky.get(method, 0)
+            if remaining <= 0:
+                return
+            self._flaky[method] = remaining - 1
+        raise CvatApiError(
+            f"fake {method} failure",
+            status_code=self._flaky_status,
+            retry_after=self._flaky_retry_after,
+        )
 
     # ------------------------------------------------------------------
     # Read port
@@ -192,45 +221,62 @@ class FakeCvatApi:
     # Write port (records traffic; keeps the task store consistent)
     # ------------------------------------------------------------------
 
-    def create_task_with_data(self, spec: UploadTaskSpec) -> int:
-        """Allocate a task id and synthesize frame metadata from the spec."""
-        self.writes.created_tasks.append(spec)
-        task_id = max((t.id for t in self._tasks), default=0) + 1
+    def create_task(self, spec: UploadTaskSpec) -> int:
+        """Allocate a task id and register an empty task."""
+        self._enter("create_task")
+        with self._lock:
+            self.writes.created_tasks.append(spec)
+            task_id = max((t.id for t in self._tasks), default=0) + 1
+            self._task_data[task_id] = (RawDataMeta(frames=[]), RawAnnotations())
+            self._tasks.append(
+                TaskInfo(
+                    id=task_id,
+                    name=spec.name,
+                    status="annotation",
+                    subset="",
+                    updated_date="",
+                )
+            )
+        return task_id
+
+    def attach_task_data(self, task_id: int, spec: UploadTaskSpec) -> None:
+        """Synthesize frame metadata for *task_id* from the spec."""
+        self._enter("attach_task_data")
         data_meta = RawDataMeta(
             frames=[RawFrame(name=f, width=640, height=480) for f in spec.server_files]
         )
-        self._task_data[task_id] = (data_meta, RawAnnotations())
-        self._tasks.append(
-            TaskInfo(
-                id=task_id,
-                name=spec.name,
-                status="annotation",
-                subset="",
-                updated_date="",
-            )
-        )
-        return task_id
+        with self._lock:
+            _, annotations = self._task_data[task_id]
+            self._task_data[task_id] = (data_meta, annotations)
 
     def put_task_shapes(self, task_id: int, shapes: list[NewShape]) -> None:
         """Record uploaded shapes per task."""
-        self.writes.shapes.setdefault(task_id, []).extend(shapes)
+        self._enter("put_task_shapes")
+        with self._lock:
+            self.writes.shapes.setdefault(task_id, []).extend(shapes)
 
     def create_issue(self, issue: NewIssue) -> None:
         """Record a created issue."""
-        self.writes.issues.append(issue)
+        self._enter("create_issue")
+        with self._lock:
+            self.writes.issues.append(issue)
 
     def set_deleted_frames(self, task_id: int, frame_ids: list[int]) -> None:
         """Record deleted frames and update the stored ``data_meta``."""
-        self.writes.deleted_frames[task_id] = list(frame_ids)
-        data_meta, annotations = self._task_data[task_id]
-        self._task_data[task_id] = (
-            dataclasses.replace(data_meta, deleted_frames=list(frame_ids)),
-            annotations,
-        )
+        self._enter("set_deleted_frames")
+        with self._lock:
+            self.writes.deleted_frames[task_id] = list(frame_ids)
+            data_meta, annotations = self._task_data[task_id]
+            self._task_data[task_id] = (
+                dataclasses.replace(data_meta, deleted_frames=list(frame_ids)),
+                annotations,
+            )
 
     def delete_shapes(self, task_id: int, shapes: list[RawShape]) -> None:
         """Record deleted shapes per task."""
-        self.writes.deleted_shapes.setdefault(task_id, []).extend(shapes)
+        self._enter("delete_shapes")
+        with self._lock:
+            self.writes.deleted_shapes.setdefault(task_id, []).extend(shapes)
 
     def delete_task(self, task_id: int) -> None:
         """Record the deletion and drop the task from the store."""

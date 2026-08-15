@@ -319,7 +319,7 @@ class TestCreateUploadTask:
         and the task would still be "created".
         """
         api = MagicMock(spec=CvatApiPort)
-        api.create_task_with_data.return_value = 55
+        api.create_task.return_value = 55
         client = _client_with_api(api)
 
         task_id = client.create_upload_task(
@@ -331,17 +331,17 @@ class TestCreateUploadTask:
             image_quality=70,
         )
 
-        assert task_id == 55
-        api.create_task_with_data.assert_called_once_with(
-            UploadTaskSpec(
-                project_id=3,
-                name="up",
-                server_files=["2026-01/a.jpg"],
-                cloud_storage_id=9,
-                segment_size=25,
-                image_quality=70,
-            )
+        expected_spec = UploadTaskSpec(
+            project_id=3,
+            name="up",
+            server_files=["2026-01/a.jpg"],
+            cloud_storage_id=9,
+            segment_size=25,
+            image_quality=70,
         )
+        assert task_id == 55
+        api.create_task.assert_called_once_with(expected_spec)
+        api.attach_task_data.assert_called_once_with(55, expected_spec)
 
     def test_segment_size_and_quality_default_to_one_hundred(self) -> None:
         """The two defaults are the client's own, not the DTO's, to callers."""
@@ -350,7 +350,7 @@ class TestCreateUploadTask:
 
         client.create_upload_task(3, "up", ["a.jpg"], 9)
 
-        spec = api.create_task_with_data.call_args.args[0]
+        spec = api.create_task.call_args.args[0]
         assert (spec.segment_size, spec.image_quality) == (100, 100)
 
 

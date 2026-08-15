@@ -21,12 +21,13 @@ from typing import TYPE_CHECKING, Literal
 import pandas as pd
 from pydantic import BaseModel
 
-from cveta2._client.connection import configure_data_timeout
+from cveta2._client.connection import configure_data_timeout, configure_network
 from cveta2.client import CvatClient
 from cveta2.config import (
     CacheConfig,
     CvatConfig,
     IgnoreConfig,
+    NetworkConfig,
     UploadConfig,
     resolve_images_cache_dir,
 )
@@ -180,6 +181,7 @@ def _open(connection: Connection | None) -> Iterator[CvatClient]:
             "(либо cvat.host в конфигурации)."
         )
     configure_data_timeout(cfg.request_timeout)
+    configure_network(NetworkConfig.resolve(conn.config_path))
     with CvatClient(cfg) as opened:
         yield opened
 

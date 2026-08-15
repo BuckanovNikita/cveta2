@@ -7,9 +7,16 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import yaml
 
+from cveta2._client.connection import configure_network
 from cveta2._client.sdk_adapter import apply_request_timeout
-from cveta2.config import CvatConfig
-from cveta2.s3_utils import make_s3_client, set_default_data_timeout
+from cveta2._retry import RetryPolicy, configure_retries
+from cveta2.config import CvatConfig, NetworkConfig
+from cveta2.s3_utils import (
+    _PoolSizeDefault,
+    make_s3_client,
+    set_default_data_timeout,
+    set_default_pool_size,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -295,3 +302,72 @@ def test_install_global_request_timeout_covers_new_rest_clients(
         assert caller_timeout == 5
     finally:
         delattr(RESTClientObject, sdk_adapter._GLOBAL_TIMEOUT_MARKER)
+
+
+# ---------------------------------------------------------------------------
+# Connection pool sizing and the retry budget
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("s3_env")
+def test_make_s3_client_configures_retries_without_a_timeout() -> None:
+    """Botocore retries used to be reachable only by setting a timeout.
+
+    The config object was built only in the timeout branch, so the default
+    install silently had neither retries nor a raised pool ceiling.
+    """
+    set_default_data_timeout(None)
+    client: Any = make_s3_client()
+
+    assert client.meta.config.retries["mode"] == "standard"
+    assert client.meta.config.max_pool_connections >= 10
+
+
+@pytest.mark.usefixtures("s3_env")
+def test_pool_size_follows_the_worker_count() -> None:
+    """Workers beyond the pool size queue for a connection instead of running."""
+    try:
+        set_default_pool_size(48)
+        client: Any = make_s3_client()
+        assert client.meta.config.max_pool_connections == 48
+    finally:
+        set_default_pool_size(0)
+
+
+@pytest.mark.usefixtures("s3_env")
+def test_pool_size_never_drops_below_the_boto_default() -> None:
+    """A small worker count must not make unrelated S3 calls contend."""
+    try:
+        set_default_pool_size(2)
+        client: Any = make_s3_client()
+        assert client.meta.config.max_pool_connections == 10
+    finally:
+        set_default_pool_size(0)
+
+
+def test_configure_network_installs_the_whole_retry_budget() -> None:
+    """The decorators bind at import time and read this budget per attempt.
+
+    Both halves matter: the attempt count decides whether a throttled call
+    is repeated at all, and the cap decides how long a server that asks for
+    an hour is allowed to stall the run.
+    """
+    attempts, max_wait = RetryPolicy.attempts, RetryPolicy.max_wait
+    try:
+        configure_network(
+            NetworkConfig(s3_workers=7, retry_attempts=9, retry_max_wait=12.5)
+        )
+        assert (RetryPolicy.attempts, RetryPolicy.max_wait) == (9, 12.5)
+    finally:
+        configure_retries(attempts, max_wait)
+        set_default_pool_size(0)
+
+
+def test_configure_network_sizes_the_pool_from_s3_workers() -> None:
+    attempts, max_wait = RetryPolicy.attempts, RetryPolicy.max_wait
+    try:
+        configure_network(NetworkConfig(s3_workers=64))
+        assert _PoolSizeDefault.value == 64
+    finally:
+        configure_retries(attempts, max_wait)
+        set_default_pool_size(0)

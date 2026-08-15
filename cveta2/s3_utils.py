@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Final, TypeVar
+from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ConnectTimeoutError, ReadTimeoutError
+from botocore.exceptions import ClientError, ConnectTimeoutError, ReadTimeoutError
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2._retry import RETRY_ATTEMPTS, network_retry
+from cveta2._retry import network_retry
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
@@ -21,8 +21,17 @@ if TYPE_CHECKING:
 _T = TypeVar("_T")
 
 # KeyError covers malformed S3 responses (missing "Body"/"Contents" keys),
-# which surface exactly like transport failures for a transfer.
-S3_TRANSFER_ERRORS: Final = (OSError, ConnectionError, KeyError)
+# which surface exactly like transport failures for a transfer.  ClientError
+# is here so one object's 403/404 fails that object rather than the whole
+# run; the retryable subset below never reaches this far.
+S3_TRANSFER_ERRORS: Final = (OSError, ConnectionError, KeyError, ClientError)
+
+# S3's throttle and transient-fault codes.  SlowDown is S3's 429, and
+# without it a large parallel transfer dies with a raw traceback the moment
+# the bucket pushes back.
+_RETRYABLE_S3_CODES: Final = frozenset(
+    {"SlowDown", "RequestTimeout", "RequestTimeTooSkewed", "InternalError", "503"}
+)
 
 
 def run_s3_transfers(
@@ -80,9 +89,22 @@ def names_with_basename_fallback(pairs: Iterable[tuple[str, _T]]) -> dict[str, _
     return result
 
 
-s3_retry = network_retry(
-    (OSError, ConnectionError, ConnectTimeoutError, ReadTimeoutError), label="S3"
+_S3_TRANSPORT_ERRORS: Final = (
+    OSError,
+    ConnectionError,
+    ConnectTimeoutError,
+    ReadTimeoutError,
 )
+
+
+def _should_retry_s3(exc: BaseException) -> bool:
+    """Retry transport faults and the codes S3 uses to say "slow down"."""
+    if isinstance(exc, ClientError):
+        return exc.response.get("Error", {}).get("Code") in _RETRYABLE_S3_CODES
+    return isinstance(exc, _S3_TRANSPORT_ERRORS)
+
+
+s3_retry = network_retry(_should_retry_s3, label="S3")
 
 _S3_CONNECT_TIMEOUT = 10.0
 
@@ -93,6 +115,16 @@ class _DataTimeoutDefault:
     value: float | None = None
 
 
+_MIN_POOL_SIZE: Final = 10
+"""boto3's own default; never go below it just because workers are few."""
+
+
+class _PoolSizeDefault:
+    """Process-wide connection-pool size for S3 clients."""
+
+    value: int = _MIN_POOL_SIZE
+
+
 def set_default_data_timeout(timeout: float | None) -> None:
     """Set the default S3 read timeout used by :func:`make_s3_client`.
 
@@ -101,20 +133,39 @@ def set_default_data_timeout(timeout: float | None) -> None:
     _DataTimeoutDefault.value = timeout
 
 
+def set_default_pool_size(size: int) -> None:
+    """Set the S3 connection-pool size used by :func:`make_s3_client`.
+
+    Concurrent transfers block on this pool, so it has to be at least the
+    number of workers or the extra ones only queue for a connection.
+    """
+    _PoolSizeDefault.value = max(size, _MIN_POOL_SIZE)
+
+
+# botocore retries sit *under* the tenacity ``s3_retry``, so the two
+# multiply.  Keep this small and let tenacity own the overall budget.
+_BOTO_MAX_ATTEMPTS: Final = 3
+
+
 def make_s3_client(endpoint_url: str | None = None) -> S3Client:
-    """Create a boto3 S3 client honoring the default data timeout."""
-    read_timeout = _DataTimeoutDefault.value
-    timeout_config = (
-        Config(
-            connect_timeout=_S3_CONNECT_TIMEOUT,
-            read_timeout=read_timeout,
-            retries={"max_attempts": RETRY_ATTEMPTS, "mode": "standard"},
-        )
-        if read_timeout
-        else None
-    )
+    """Create a boto3 S3 client honoring the configured timeout and pool size.
+
+    The config is built unconditionally.  It used to be built only when a
+    read timeout was set, which quietly meant that the default install had
+    no botocore retries at all and a connection pool of 10 — a ceiling that
+    caps every parallel transfer regardless of the configured worker count.
+    """
+    options: dict[str, Any] = {
+        "connect_timeout": _S3_CONNECT_TIMEOUT,
+        "max_pool_connections": _PoolSizeDefault.value,
+        "retries": {"max_attempts": _BOTO_MAX_ATTEMPTS, "mode": "standard"},
+    }
+    # An unset or zero timeout means "no opinion", so the key is omitted
+    # rather than passed: urllib3 rejects a read timeout of 0 outright.
+    if _DataTimeoutDefault.value:
+        options["read_timeout"] = _DataTimeoutDefault.value
     client: S3Client = boto3.Session().client(
-        "s3", endpoint_url=endpoint_url, config=timeout_config
+        "s3", endpoint_url=endpoint_url, config=Config(**options)
     )
     return client
 

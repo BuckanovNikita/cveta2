@@ -144,7 +144,9 @@ class _WriteMixin(_ClientBase):
             segment_size=segment_size,
             image_quality=image_quality,
         )
-        return api.create_task_with_data(spec)
+        task_id = api.create_task(spec)
+        api.attach_task_data(task_id, spec)
+        return task_id
 
     def upload_task_annotations(
         self,

@@ -6,13 +6,16 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from cveta2.config import (
     CacheConfig,
     CacheProjectSettings,
     CvatConfig,
     ImageCacheConfig,
+    NetworkConfig,
     SyncRootsConfig,
+    _parse_int_env,
 )
 from tests.helpers import write_config_yaml
 
@@ -555,3 +558,115 @@ def test_save_to_file_without_image_cache_leaves_the_section_alone(
     assert ImageCacheConfig.load(cfg_path).get_cache_dir("proj") == Path(
         "/data/existing"
     )
+
+
+# ---------------------------------------------------------------------------
+# network section
+# ---------------------------------------------------------------------------
+
+
+def test_network_defaults_keep_cvat_below_s3() -> None:
+    """CVAT rate-limits long before object storage does.
+
+    Equal worker counts would spend the extra CVAT parallelism on 429
+    backoff sleeps, which is slower than not fanning out at all.
+    """
+    network = NetworkConfig()
+
+    assert network.cvat_workers < network.s3_workers
+    assert network.retry_attempts > 1
+
+
+def test_network_section_is_read_from_the_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every field comes from the file, and the explicit path wins over env."""
+    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "env.yaml"))
+    explicit = write_config_yaml(
+        tmp_path / "explicit.yaml",
+        cvat={"host": "http://localhost:8080"},
+        network={
+            "s3_workers": 32,
+            "cvat_workers": 2,
+            "retry_attempts": 9,
+            "retry_max_wait": 90.0,
+        },
+    )
+
+    network = NetworkConfig.resolve(explicit)
+
+    assert (network.s3_workers, network.cvat_workers) == (32, 2)
+    assert (network.retry_attempts, network.retry_max_wait) == (9, 90.0)
+
+
+def test_environment_overrides_the_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """These are the knobs to turn for one run on a rate-limited link."""
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        network={"s3_workers": 32, "cvat_workers": 8, "retry_attempts": 3},
+    )
+    monkeypatch.setenv("CVETA2_S3_WORKERS", "4")
+    monkeypatch.setenv("CVETA2_CVAT_WORKERS", "1")
+    monkeypatch.setenv("CVETA2_RETRY_ATTEMPTS", "11")
+
+    network = NetworkConfig.resolve(cfg_path)
+
+    assert (network.s3_workers, network.cvat_workers) == (4, 1)
+    assert network.retry_attempts == 11
+
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-3", ""], ids=list("abcd"))
+def test_unusable_environment_values_fall_back_to_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    """A typo must not silently serialize every transfer or crash the run."""
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        network={"s3_workers": 12},
+    )
+    monkeypatch.setenv("CVETA2_S3_WORKERS", raw)
+
+    assert NetworkConfig.resolve(cfg_path).s3_workers == 12
+
+
+@pytest.mark.parametrize("raw", ["0", "-3"], ids=["zero", "negative"])
+def test_a_worker_count_below_one_is_reported_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch, capture_logs: list[str], raw: str
+) -> None:
+    """Falling back silently would look like the setting had been applied.
+
+    Zero is the case worth naming: the fallback also happens to be reached
+    because ``0`` is falsy, so nothing downstream can tell an ignored value
+    from an honoured one.
+    """
+    monkeypatch.setenv("CVETA2_S3_WORKERS", raw)
+
+    assert _parse_int_env("CVETA2_S3_WORKERS") is None
+    assert any("CVETA2_S3_WORKERS" in message for message in capture_logs)
+
+
+@pytest.mark.parametrize(
+    "section",
+    [{"s3_workers": 0}, {"cvat_workers": -1}, {"retry_attempts": 1}],
+    ids=["no_s3_workers", "negative_cvat_workers", "retry_attempts_too_low"],
+)
+def test_worker_counts_that_cannot_work_are_rejected_at_load(
+    tmp_path: Path, section: dict[str, int]
+) -> None:
+    """Zero workers is a hang and one attempt is no retry at all.
+
+    Rejecting at load names the setting; accepting it produces a run that
+    quietly does nothing the setting promised.
+    """
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        network=section,
+    )
+
+    with pytest.raises(ValidationError):
+        NetworkConfig.resolve(cfg_path)

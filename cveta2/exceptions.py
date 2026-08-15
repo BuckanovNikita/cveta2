@@ -34,13 +34,22 @@ class CvatApiError(Cveta2Error):
 
     Wraps SDK-level API exceptions so no ``cvat_sdk`` types leak above
     the ``_client`` layer.  ``status_code`` is the HTTP status (0 when
-    unknown).
+    unknown).  ``retry_after`` carries the ``Retry-After`` header in
+    seconds when the server sent one: its presence is what distinguishes a
+    deliberate throttle from a crash, which is the difference between a
+    write that is safe to repeat and one that is not.
     """
 
-    def __init__(self, message: str, status_code: int = 0) -> None:
-        """Store the HTTP status code alongside the message."""
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 0,
+        retry_after: float | None = None,
+    ) -> None:
+        """Store the HTTP status code and throttle hint alongside the message."""
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
 
 
 class LabelsMismatchError(Cveta2Error):

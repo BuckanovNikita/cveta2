@@ -589,6 +589,62 @@ class UploadConfig(SectionConfig):
     image_quality: int = Field(default=100, ge=0, le=100)
 
 
+class NetworkConfig(SectionConfig):
+    """Transfer concurrency and retry budget.
+
+    ``cvat_workers`` stays deliberately smaller than ``s3_workers``: CVAT
+    rate-limits well before object storage does, and every 429 it returns
+    costs a backoff sleep that eats the parallelism it was meant to buy.
+    """
+
+    section_key: ClassVar[str] = "network"
+
+    s3_workers: int = Field(default=16, gt=0)
+    cvat_workers: int = Field(default=4, gt=0)
+    # Below 2 there is no retry at all, which is the behaviour this setting
+    # exists to replace.
+    retry_attempts: int = Field(default=5, ge=2)
+    retry_max_wait: float = Field(default=30.0, gt=0)
+
+    @classmethod
+    def resolve(cls, config_path: Path | None = None) -> NetworkConfig:
+        """Load the section, then let environment variables override it.
+
+        ``SectionConfig.load`` reads the config file only; these knobs are
+        the ones an operator wants to change for a single run on a slow or
+        rate-limited link, so they get an env override too.
+        """
+        base = cls.load(config_path)
+        return cls(
+            s3_workers=_parse_int_env("CVETA2_S3_WORKERS") or base.s3_workers,
+            cvat_workers=_parse_int_env("CVETA2_CVAT_WORKERS") or base.cvat_workers,
+            retry_attempts=_parse_int_env("CVETA2_RETRY_ATTEMPTS")
+            or base.retry_attempts,
+            retry_max_wait=base.retry_max_wait,
+        )
+
+
+def _parse_int_env(name: str) -> int | None:
+    """Read a positive int from the environment; warn and ignore garbage."""
+    raw = os.environ.get(name)
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            f"Некорректное значение {name}={raw!r} — ожидается целое число; "
+            f"значение игнорируется."
+        )
+        return None
+    if value <= 0:
+        logger.warning(
+            f"Значение {name}={value} должно быть больше нуля; игнорируется."
+        )
+        return None
+    return value
+
+
 def is_clearml_disabled() -> bool:
     """Return True when ``CVETA2_CLEARML`` is ``'false'``."""
     return _env_flag("CVETA2_CLEARML", "false")

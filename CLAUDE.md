@@ -149,6 +149,7 @@ Env vars that change behaviour under test or in CI:
 - `CVETA2_NO_INTERACTIVE=true` — disables all prompts
 - `CVETA2_RAISE_ON_FAILURE=true` — abort on the first CVAT 5xx during fetch instead of skipping that task with a warning
 - `CVETA2_DATA_TIMEOUT` — opt-in read timeout in seconds for CVAT and S3 requests, overriding the `cvat.request_timeout` config field (connect timeout fixed at 10s); unset or `0` = no timeout
+- `CVETA2_S3_WORKERS` / `CVETA2_CVAT_WORKERS` / `CVETA2_RETRY_ATTEMPTS` — one-run overrides for the `network` config section (parallel S3 transfers, parallel CVAT requests, total attempts per request)
 
 The `sync_roots`, `cache` and `image_cache` config sections (image-cache roots,
 `ignored_prefix`, `task_cache_s3`, per-project download sources) are documented

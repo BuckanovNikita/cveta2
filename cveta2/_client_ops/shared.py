@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 _HTTP_5XX_MIN = 500
 _HTTP_5XX_MAX = 600
+_HTTP_TOO_MANY_REQUESTS = 429
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,17 @@ class FetchContext:
     host: str = ""
     project_name: str = ""
     raise_on_failure: bool = False
+
+
+def _is_rate_limited(e: CvatApiError) -> bool:
+    """Report whether *e* is CVAT refusing the call for rate-limiting.
+
+    Rate limiting must never be handled by skipping the task: the retry
+    budget is already spent by the time this is asked, and dropping the
+    task would silently shrink the dataset for a reason that has nothing to
+    do with the task's contents.
+    """
+    return e.status_code == _HTTP_TOO_MANY_REQUESTS
 
 
 def _log_task_5xx_skip(

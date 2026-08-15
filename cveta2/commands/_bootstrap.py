@@ -10,11 +10,11 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-from cveta2._client.connection import configure_data_timeout
+from cveta2._client.connection import configure_data_timeout, configure_network
 from cveta2.client import CvatClient
 from cveta2.commands._helpers import require_host
 from cveta2.commands.interactive import prompt_credentials
-from cveta2.config import CvatConfig
+from cveta2.config import CvatConfig, NetworkConfig
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -27,6 +27,7 @@ def open_client(config_path: Path | None = None) -> Iterator[CvatClient]:
     cfg = CvatConfig.load(config_path=config_path)
     require_host(cfg)
     configure_data_timeout(cfg.request_timeout)
+    configure_network(NetworkConfig.resolve(config_path))
     cfg = prompt_credentials(cfg)
     with CvatClient(cfg) as client:
         yield client

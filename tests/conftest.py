@@ -35,6 +35,9 @@ _CVAT_ENV_VARS = (
     "CVAT_PASSWORD",
     "CVETA2_DATA_TIMEOUT",
     "CVETA2_CLEARML",
+    "CVETA2_S3_WORKERS",
+    "CVETA2_CVAT_WORKERS",
+    "CVETA2_RETRY_ATTEMPTS",
 )
 
 # Gate tests/integration/ collection on CVAT_INTEGRATION_HOST env var.

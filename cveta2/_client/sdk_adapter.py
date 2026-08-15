@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import functools
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import urllib3.exceptions
 from loguru import logger
@@ -70,6 +70,27 @@ _DATA_CHECK_PERIOD = 5
 """Seconds between status checks during data processing."""
 
 
+def _parse_retry_after(exc: ApiException) -> float | None:
+    """Read the ``Retry-After`` header off an SDK exception, in seconds.
+
+    ``ApiException`` is an opaque generated type whose ``headers`` is
+    ``None`` unless the failure carried an HTTP response, so the attributes
+    are read defensively.  Only the delta-seconds form is understood; the
+    HTTP-date spelling falls back to the normal backoff.
+    """
+    headers = getattr(exc, "headers", None)
+    if headers is None:
+        return None
+    raw = headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        logger.debug(f"Retry-After не распознан: {raw!r}")
+        return None
+
+
 def _translate_api_errors(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Convert SDK ``ApiException`` into :class:`CvatApiError`."""
 
@@ -79,15 +100,48 @@ def _translate_api_errors(func: Callable[_P, _R]) -> Callable[_P, _R]:
             return func(*args, **kwargs)
         except ApiException as e:
             status = int(getattr(e, "status", 0) or 0)
-            raise CvatApiError(str(e), status_code=status) from e
+            raise CvatApiError(
+                str(e), status_code=status, retry_after=_parse_retry_after(e)
+            ) from e
 
     return wrapper
 
 
+TOO_MANY_REQUESTS: Final = 429
+SERVICE_UNAVAILABLE: Final = 503
+_READ_RETRY_STATUS: Final = frozenset({TOO_MANY_REQUESTS, 500, 502, 503, 504})
+
 # urllib3 timeout errors are not OSError, hence urllib3.exceptions.HTTPError.
-_api_retry = network_retry(
-    (OSError, ConnectionError, urllib3.exceptions.HTTPError), label="CVAT API"
-)
+_TRANSPORT_ERRORS: Final = (OSError, ConnectionError, urllib3.exceptions.HTTPError)
+
+
+def _should_retry_read(exc: BaseException) -> bool:
+    """Retry anything transient: a read is always safe to repeat."""
+    if isinstance(exc, _TRANSPORT_ERRORS):
+        return True
+    return isinstance(exc, CvatApiError) and exc.status_code in _READ_RETRY_STATUS
+
+
+def _should_retry_write(exc: BaseException) -> bool:
+    """Retry a write only when the server provably never applied it.
+
+    A 429 is a refusal: the request was rejected before it did anything, so
+    repeating it is safe.  A 503 that carries ``Retry-After`` is the same
+    signal spelled differently — a deliberate throttle rather than a crash.
+    Everything else is ambiguous, and repeating it would append a second
+    copy of every shape or issue (``put_task_shapes`` uses the CREATE
+    action).  Those failures abort and are recovered by ``upload --resume``,
+    which reads back what CVAT actually stored.
+    """
+    if not isinstance(exc, CvatApiError):
+        return False
+    if exc.status_code == TOO_MANY_REQUESTS:
+        return True
+    return exc.status_code == SERVICE_UNAVAILABLE and exc.retry_after is not None
+
+
+_api_retry = network_retry(_should_retry_read, label="CVAT API")
+_write_retry = network_retry(_should_retry_write, label="CVAT write")
 
 _CONNECT_TIMEOUT = 10.0
 
@@ -312,21 +366,33 @@ class SdkCvatApiAdapter:
         task_obj = self.client.tasks.retrieve(task_id)
         return int(task_obj.size or 0)
 
+    @_write_retry
     @_translate_api_errors
-    def create_task_with_data(self, spec: UploadTaskSpec) -> int:
-        """Create a task, attach cloud-storage data, wait; return task id.
+    def create_task(self, spec: UploadTaskSpec) -> int:
+        """Create an empty task and return its id.
+
+        Kept separate from :meth:`attach_task_data` so each is retried on
+        its own: retrying the pair as one unit after the *data* call was
+        throttled would create a second task.  The split is also what lets
+        the caller record the task id before the long data step runs.
+        """
+        tasks_api = self.client.api_client.tasks_api
+        task, _ = tasks_api.create(build_task_write_request(spec))
+        logger.info(f"Создана задача: {task.name} (id={task.id})")
+        return int(task.id)
+
+    @_write_retry
+    @_translate_api_errors
+    def attach_task_data(self, task_id: int, spec: UploadTaskSpec) -> None:
+        """Attach cloud-storage files to *task_id* and wait for processing.
 
         Waits for CVAT to finish processing the cloud-storage files so
         that subsequent annotation uploads land on the correct frames.
         Raises ``RuntimeError`` when processing fails (e.g. images not
         found in cloud storage).
         """
-        tasks_api = self.client.api_client.tasks_api
-        task, _ = tasks_api.create(build_task_write_request(spec))
-        logger.info(f"Создана задача: {task.name} (id={task.id})")
-
-        result, _ = tasks_api.create_data(
-            task.id,
+        result, _ = self.client.api_client.tasks_api.create_data(
+            task_id,
             data_request=build_data_request(spec),
         )
         try:
@@ -335,17 +401,17 @@ class SdkCvatApiAdapter:
                 status_check_period=_DATA_CHECK_PERIOD,
             )
         except BackgroundRequestException as exc:
-            msg = f"Задача {task.id}: обработка данных не удалась — {exc}"
+            msg = f"Задача {task_id}: обработка данных не удалась — {exc}"
             raise RuntimeError(msg) from exc
 
-        size = self.get_task_size(int(task.id))
+        size = self.get_task_size(task_id)
         logger.info(
-            f"Привязано {len(spec.server_files)} изображений к задаче {task.id} "
+            f"Привязано {len(spec.server_files)} изображений к задаче {task_id} "
             f"(cloud_storage_id={spec.cloud_storage_id}, "
             f"segment_size={spec.segment_size}, size={size})"
         )
-        return int(task.id)
 
+    @_write_retry
     @_translate_api_errors
     def put_task_shapes(self, task_id: int, shapes: list[NewShape]) -> None:
         """Add annotation shapes to a task."""
@@ -355,11 +421,13 @@ class SdkCvatApiAdapter:
             action=AnnotationUpdateAction.CREATE,
         )
 
+    @_write_retry
     @_translate_api_errors
     def create_issue(self, issue: NewIssue) -> None:
         """Open a review issue on a job frame."""
         self.client.api_client.issues_api.create(build_issue_request(issue))
 
+    @_write_retry
     @_translate_api_errors
     def set_deleted_frames(self, task_id: int, frame_ids: list[int]) -> None:
         """Replace the task's deleted-frames list."""
@@ -368,6 +436,7 @@ class SdkCvatApiAdapter:
             patched_data_meta_write_request=build_deleted_frames_request(frame_ids),
         )
 
+    @_write_retry
     @_translate_api_errors
     def delete_shapes(self, task_id: int, shapes: list[RawShape]) -> None:
         """Delete the given existing shapes from a task."""
@@ -377,11 +446,13 @@ class SdkCvatApiAdapter:
             patched_labeled_data_request=build_delete_shapes_payload(shapes),
         )
 
+    @_write_retry
     @_translate_api_errors
     def delete_task(self, task_id: int) -> None:
         """Delete a task permanently."""
         self.client.api_client.tasks_api.destroy(task_id)
 
+    @_write_retry
     @_translate_api_errors
     def update_job(
         self,
@@ -396,6 +467,7 @@ class SdkCvatApiAdapter:
             patched_job_write_request=build_job_patch_request(stage=stage, state=state),
         )
 
+    @_write_retry
     @_translate_api_errors
     def patch_project_labels(
         self,
