@@ -161,6 +161,7 @@ class TestUploadIssuesFromCsvIntegration:
             image_dir=None,
             complete=False,
             mark_all_deleted=False,
+            resume=False,
         )
         with (
             patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
@@ -232,6 +233,7 @@ class TestUploadIssuesFromCsvIntegration:
             image_dir=None,
             complete=False,
             mark_all_deleted=False,
+            resume=False,
         )
         with (
             patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),

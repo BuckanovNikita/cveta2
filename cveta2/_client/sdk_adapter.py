@@ -58,7 +58,11 @@ if TYPE_CHECKING:
 
 from typing import ParamSpec, TypeVar
 
-from cvat_sdk.api_client.exceptions import ApiException, ApiTypeError
+from cvat_sdk.api_client.exceptions import (
+    ApiAttributeError,
+    ApiException,
+    ApiTypeError,
+)
 from cvat_sdk.core.exceptions import BackgroundRequestException
 from cvat_sdk.core.helpers import get_paginated_collection
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
@@ -362,9 +366,19 @@ class SdkCvatApiAdapter:
     @_api_retry
     @_translate_api_errors
     def get_task_size(self, task_id: int) -> int:
-        """Return the number of frames in a task."""
+        """Return the number of frames in a task.
+
+        A task whose data was never attached carries no ``size`` field at
+        all, and the SDK raises on the missing attribute rather than
+        reporting zero.  That state is not exceptional here — it is exactly
+        what ``upload --resume`` looks for to tell a task worth continuing
+        from one worth replacing.
+        """
         task_obj = self.client.tasks.retrieve(task_id)
-        return int(task_obj.size or 0)
+        try:
+            return int(task_obj.size or 0)
+        except ApiAttributeError:
+            return 0
 
     @_write_retry
     @_translate_api_errors

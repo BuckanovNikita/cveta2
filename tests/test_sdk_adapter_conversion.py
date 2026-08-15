@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from cvat_sdk.api_client.exceptions import ApiAttributeError
 
 from cveta2._client.dtos import (
     RawAnnotations,
@@ -18,6 +19,7 @@ from cveta2._client.dtos import (
     RawFrame,
     RawShape,
 )
+from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2._client.sdk_convert import (
     convert_annotations,
     convert_attributes,
@@ -415,3 +417,40 @@ def test_log_retry_does_not_crash() -> None:
     state.outcome.exception.return_value = RuntimeError("connection lost")
     state.attempt_number = 2
     _log_retry("CVAT API", state)
+
+
+class _TaskWithoutSize:
+    """A ``TaskRead`` the server sent with no ``size`` field at all.
+
+    The generated SDK raises on the access rather than returning None.
+    """
+
+    @property
+    def size(self) -> int:
+        raise ApiAttributeError("TaskRead has no attribute 'size'")
+
+
+class TestGetTaskSize:
+    """The read-back `upload --resume` decides task reuse from."""
+
+    @staticmethod
+    def _adapter_for(task: object) -> SdkCvatApiAdapter:
+        client = MagicMock()
+        client.tasks.retrieve.return_value = task
+        return SdkCvatApiAdapter(client)
+
+    def test_a_task_with_frames_reports_them(self) -> None:
+        assert self._adapter_for(SimpleNamespace(size=8)).get_task_size(1) == 8
+
+    def test_a_task_whose_data_never_attached_reports_zero(self) -> None:
+        """CVAT omits ``size`` entirely, and the SDK raises on the access.
+
+        That is the state a killed upload leaves behind, so treating it as
+        an error would make the recovery path unreachable — found against a
+        live server, where the attribute is simply absent.
+        """
+        assert self._adapter_for(_TaskWithoutSize()).get_task_size(1) == 0
+
+    def test_a_null_size_reports_zero(self) -> None:
+        """The other spelling of "no data yet" some versions return."""
+        assert self._adapter_for(SimpleNamespace(size=None)).get_task_size(1) == 0

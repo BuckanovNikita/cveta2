@@ -10,6 +10,7 @@ actually exist somewhere the client cannot see.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -28,7 +29,7 @@ from cveta2.upload_manifest import compute_fingerprint, list_manifests, load_man
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import (
     IMAGE_NAMES,
-    _coco8_search_dirs,
+    _cs_info_for_host,
     _get_project_and_storage,
 )
 
@@ -102,7 +103,10 @@ def _upload_request(
         plan=UploadPlan(
             annotations=pd.DataFrame(rows), image_names=names, deleted_names=[]
         ),
-        options=UploadOptions(search_dirs=_coco8_search_dirs(), segment_size=10),
+        # No search dirs: the seeded images are already on S3, so staging
+        # has nothing to transfer and the test needs no host-side MinIO
+        # route. The point here is the CVAT half of the upload.
+        options=UploadOptions(search_dirs=[], segment_size=10),
         dataset_path="integration-resume.csv",
         labels=("person",),
         resume=resume,
@@ -121,10 +125,18 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
     annotation write is CREATE. Only reading the task back afterwards
     shows it.
     """
-    project_id, project_name, _cs_info, cfg = _get_project_and_storage()
+    project_id, project_name, cs_info, cfg = _get_project_and_storage()
     names = IMAGE_NAMES[:2]
 
-    with CvatClient(cfg) as client:
+    # CVAT reports the storage under its in-docker hostname; staging lists
+    # the bucket from the host, which cannot resolve it.
+    with (
+        patch(
+            "cveta2.client.CvatClient.detect_project_cloud_storage",
+            return_value=_cs_info_for_host(cs_info),
+        ),
+        CvatClient(cfg) as client,
+    ):
         original = client.api.attach_task_data
 
         def die(_task_id: int, _spec: object) -> None:
