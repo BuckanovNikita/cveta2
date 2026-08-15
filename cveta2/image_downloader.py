@@ -14,6 +14,7 @@ from urllib.parse import parse_qs
 from loguru import logger
 from pydantic import BaseModel
 
+from cveta2._concurrency import Workers, run_concurrent
 from cveta2.fs_utils import ensure_shared_dir, write_shared_bytes
 from cveta2.s3_types import Transfer
 from cveta2.s3_utils import (
@@ -193,10 +194,25 @@ class ImageDownloader:
         stats: DownloadStats,
         project_cloud_storage: CloudStorageInfo | None,
     ) -> dict[str, str]:
-        """Remove already-cached images, updating *stats*. Return pending."""
+        """Remove already-cached images, updating *stats*. Return pending.
+
+        The existence checks run concurrently: on a shared network cache
+        each one is a round-trip, and there is one per image in the fetch.
+        """
+        entries = list(image_tasks.items())
+        cached_flags = run_concurrent(
+            entries,
+            lambda entry: self._dest_path(entry[1], project_cloud_storage).exists(),
+            max_workers=Workers.s3,
+            catch=(),
+            desc="Checking local cache",
+            unit="img",
+        )
         pending: dict[str, str] = {}
-        for image_name, frame_ref in image_tasks.items():
-            if self._dest_path(frame_ref, project_cloud_storage).exists():
+        for (image_name, frame_ref), is_cached in zip(
+            entries, cached_flags, strict=True
+        ):
+            if is_cached is True:
                 stats.cached += 1
             else:
                 pending[image_name] = frame_ref

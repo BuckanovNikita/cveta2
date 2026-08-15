@@ -14,6 +14,7 @@ from cveta2._client.assembly import (
 )
 from cveta2._client.dtos import LabelPatch, UploadTaskSpec
 from cveta2._client_ops.base import _ClientBase
+from cveta2._concurrency import Workers, run_concurrent
 
 if TYPE_CHECKING:
     from cveta2._client_ops.session import TaskWriteSession
@@ -239,9 +240,18 @@ class _WriteMixin(_ClientBase):
         if new_rows.empty:
             return 0
 
+        # session.name_to_frame and session.jobs are read here so both lazy
+        # fields are populated before the fan-out: their first touch is an
+        # unguarded fetch that concurrent workers would each repeat.
         built = build_task_issues(new_rows, session.name_to_frame, session.jobs)
-        for issue in built.issues:
-            api.create_issue(issue)
+        run_concurrent(
+            built.issues,
+            api.create_issue,
+            max_workers=Workers.cvat,
+            catch=(),
+            desc="Creating issues",
+            unit="issue",
+        )
 
         skipped = (
             (_SKIP_UNKNOWN_IMAGES, built.unknown_images),

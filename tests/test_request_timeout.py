@@ -9,14 +9,10 @@ import yaml
 
 from cveta2._client.connection import configure_network
 from cveta2._client.sdk_adapter import apply_request_timeout
+from cveta2._concurrency import Workers, configure_workers
 from cveta2._retry import RetryPolicy, configure_retries
 from cveta2.config import CvatConfig, NetworkConfig
-from cveta2.s3_utils import (
-    _PoolSizeDefault,
-    make_s3_client,
-    set_default_data_timeout,
-    set_default_pool_size,
-)
+from cveta2.s3_utils import make_s3_client, set_default_data_timeout
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -327,22 +323,22 @@ def test_make_s3_client_configures_retries_without_a_timeout() -> None:
 def test_pool_size_follows_the_worker_count() -> None:
     """Workers beyond the pool size queue for a connection instead of running."""
     try:
-        set_default_pool_size(48)
+        configure_workers(s3=48, cvat=4)
         client: Any = make_s3_client()
         assert client.meta.config.max_pool_connections == 48
     finally:
-        set_default_pool_size(0)
+        configure_workers(s3=1, cvat=1)
 
 
 @pytest.mark.usefixtures("s3_env")
 def test_pool_size_never_drops_below_the_boto_default() -> None:
     """A small worker count must not make unrelated S3 calls contend."""
     try:
-        set_default_pool_size(2)
+        configure_workers(s3=2, cvat=1)
         client: Any = make_s3_client()
         assert client.meta.config.max_pool_connections == 10
     finally:
-        set_default_pool_size(0)
+        configure_workers(s3=1, cvat=1)
 
 
 def test_configure_network_installs_the_whole_retry_budget() -> None:
@@ -360,14 +356,15 @@ def test_configure_network_installs_the_whole_retry_budget() -> None:
         assert (RetryPolicy.attempts, RetryPolicy.max_wait) == (9, 12.5)
     finally:
         configure_retries(attempts, max_wait)
-        set_default_pool_size(0)
+        configure_workers(s3=1, cvat=1)
 
 
-def test_configure_network_sizes_the_pool_from_s3_workers() -> None:
+def test_configure_network_installs_both_worker_counts() -> None:
+    """S3 and CVAT fan out at different widths and must not be conflated."""
     attempts, max_wait = RetryPolicy.attempts, RetryPolicy.max_wait
     try:
-        configure_network(NetworkConfig(s3_workers=64))
-        assert _PoolSizeDefault.value == 64
+        configure_network(NetworkConfig(s3_workers=64, cvat_workers=3))
+        assert (Workers.s3, Workers.cvat) == (64, 3)
     finally:
         configure_retries(attempts, max_wait)
-        set_default_pool_size(0)
+        configure_workers(s3=1, cvat=1)

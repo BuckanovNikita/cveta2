@@ -43,6 +43,7 @@ class FakeS3Client:
         self.objects: dict[str, bytes] = dict(objects or {})
         self.get_calls: list[str] = []
         self.put_calls: list[str] = []
+        self.list_requests: list[dict[str, str]] = []
         self._keyed_by_bucket = keyed_by_bucket
 
     def _store_key(self, bucket: str, key: str) -> str:
@@ -64,9 +65,12 @@ class FakeS3Client:
         self.objects[full_key] = Body
 
     def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
+        self.list_requests.append(dict(kwargs))
         bucket = kwargs.get("Bucket", "")
         prefix = kwargs.get("Prefix", "")
+        delimiter = kwargs.get("Delimiter", "")
         contents = []
+        folders: set[str] = set()
         for full_key, value in self.objects.items():
             key_part = full_key
             if self._keyed_by_bucket:
@@ -75,14 +79,26 @@ class FakeS3Client:
                     continue
             if prefix and not key_part.startswith(prefix):
                 continue
+            # With a delimiter, S3 reports anything nested below one level
+            # as a folder rather than as an object.
+            remainder = key_part[len(prefix) :]
+            if delimiter and delimiter in remainder:
+                head = remainder.split(delimiter, 1)[0]
+                folders.add(f"{prefix}{head}{delimiter}")
+                continue
             contents.append({"Key": key_part, "Size": len(value)})
-        return {"Contents": contents, "IsTruncated": False}
+        response: dict[str, Any] = {"Contents": contents, "IsTruncated": False}
+        if folders:
+            response["CommonPrefixes"] = [
+                {"Prefix": folder} for folder in sorted(folders)
+            ]
+        return response
 
     def upload_file(self, filename: str, bucket: str, key: str) -> None:
         self.objects[self._store_key(bucket, key)] = Path(filename).read_bytes()
 
 
-_LIST_PARAMETERS = frozenset({"Bucket", "Prefix", "ContinuationToken"})
+_LIST_PARAMETERS = frozenset({"Bucket", "Prefix", "ContinuationToken", "Delimiter"})
 
 
 class PagedFakeS3Client(FakeS3Client):

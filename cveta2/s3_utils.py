@@ -9,12 +9,12 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError, ConnectTimeoutError, ReadTimeoutError
 from loguru import logger
-from tqdm import tqdm
 
+from cveta2._concurrency import Workers, run_concurrent
 from cveta2._retry import network_retry
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from cveta2.s3_types import S3Client
 
@@ -42,20 +42,29 @@ def run_s3_transfers(
     desc: str,
     unit: str,
 ) -> tuple[int, int]:
-    """Run *transfer* per item under a tqdm bar; return ``(ok, failed)``.
+    """Transfer every item, up to ``Workers.s3`` at a time; ``(ok, failed)``.
 
-    Each failure is logged with ``logger.exception``; callers log the
-    summary line after the loop.
+    This is the one fan-out both directions go through — uploads and
+    downloads alike — so the worker count is read from the process-wide
+    setting rather than threaded through every caller. One object's failure
+    is logged and counted; the rest of the batch still runs.
     """
-    ok = failed = 0
-    for item in tqdm(items, desc=desc, unit=unit, leave=False):
-        try:
-            transfer(item)
-            ok += 1
-        except S3_TRANSFER_ERRORS:
-            logger.exception(f"Не удалось загрузить {describe(item)}")
-            failed += 1
-    return ok, failed
+    outcomes = run_concurrent(
+        items,
+        transfer,
+        max_workers=Workers.s3,
+        catch=S3_TRANSFER_ERRORS,
+        desc=desc,
+        unit=unit,
+    )
+    failures = [
+        (item, outcome)
+        for item, outcome in zip(items, outcomes, strict=True)
+        if isinstance(outcome, Exception)
+    ]
+    for item, error in failures:
+        logger.opt(exception=error).error(f"Не удалось загрузить {describe(item)}")
+    return len(items) - len(failures), len(failures)
 
 
 def pick_latest_duplicate(context: str, name: str, candidates: Sequence[_T]) -> _T:
@@ -119,27 +128,12 @@ _MIN_POOL_SIZE: Final = 10
 """boto3's own default; never go below it just because workers are few."""
 
 
-class _PoolSizeDefault:
-    """Process-wide connection-pool size for S3 clients."""
-
-    value: int = _MIN_POOL_SIZE
-
-
 def set_default_data_timeout(timeout: float | None) -> None:
     """Set the default S3 read timeout used by :func:`make_s3_client`.
 
     ``None`` or ``0`` disables the timeout (boto3 defaults apply).
     """
     _DataTimeoutDefault.value = timeout
-
-
-def set_default_pool_size(size: int) -> None:
-    """Set the S3 connection-pool size used by :func:`make_s3_client`.
-
-    Concurrent transfers block on this pool, so it has to be at least the
-    number of workers or the extra ones only queue for a connection.
-    """
-    _PoolSizeDefault.value = max(size, _MIN_POOL_SIZE)
 
 
 # botocore retries sit *under* the tenacity ``s3_retry``, so the two
@@ -154,10 +148,13 @@ def make_s3_client(endpoint_url: str | None = None) -> S3Client:
     read timeout was set, which quietly meant that the default install had
     no botocore retries at all and a connection pool of 10 — a ceiling that
     caps every parallel transfer regardless of the configured worker count.
+    The pool is therefore sized from the worker count itself: workers past
+    that ceiling only queue for a connection, which looks from the outside
+    like the fan-out simply not working.
     """
     options: dict[str, Any] = {
         "connect_timeout": _S3_CONNECT_TIMEOUT,
-        "max_pool_connections": _PoolSizeDefault.value,
+        "max_pool_connections": max(Workers.s3, _MIN_POOL_SIZE),
         "retries": {"max_attempts": _BOTO_MAX_ATTEMPTS, "mode": "standard"},
     }
     # An unset or zero timeout means "no opinion", so the key is omitted
@@ -254,6 +251,78 @@ def strip_key_prefix(key: str, prefix: str) -> str:
     return key
 
 
+def _iter_list_pages(
+    s3_client: S3Client,
+    bucket: str,
+    query: dict[str, str],
+) -> Iterator[dict[str, Any]]:
+    """Yield each page of a ``list_objects_v2`` call, following the token.
+
+    The one place that speaks S3's pagination protocol, so the whole-prefix
+    scan and the one-level scan below cannot drift apart on it.
+    """
+    kwargs: dict[str, str] = {"Bucket": bucket, **query}
+    while True:
+        resp = s3_client.list_objects_v2(**kwargs)
+        yield resp
+        if not resp.get("IsTruncated"):
+            return
+        kwargs["ContinuationToken"] = resp["NextContinuationToken"]
+
+
+def _page_pairs(page: dict[str, Any], prefix: str) -> list[tuple[str, str]]:
+    """Return one page's ``(key, name)`` pairs, dropping the folder marker."""
+    pairs: list[tuple[str, str]] = []
+    for obj in page.get("Contents", []):
+        key: str = obj["Key"]
+        name = strip_key_prefix(key, prefix)
+        if name:
+            pairs.append((key, name))
+    return pairs
+
+
+def _search_query(search: str) -> dict[str, str]:
+    """Build the ``Prefix`` filter, omitted entirely when listing a whole bucket."""
+    return {"Prefix": search} if search else {}
+
+
+def _list_keys_under(
+    s3_client: S3Client,
+    bucket: str,
+    prefix: str,
+    search: str,
+) -> list[tuple[str, str]]:
+    """Page through every key under *search*, stripping *prefix* from names."""
+    return [
+        pair
+        for page in _iter_list_pages(s3_client, bucket, _search_query(search))
+        for pair in _page_pairs(page, prefix)
+    ]
+
+
+def _list_one_level(
+    s3_client: S3Client,
+    bucket: str,
+    prefix: str,
+    search: str,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Split *search* into ``(subfolder prefixes, keys directly under it)``.
+
+    ``Delimiter`` makes S3 collapse everything below one level into a
+    ``CommonPrefixes`` entry, which is how the listing gets divided into
+    independently pageable chunks.  An S3 stand-in that ignores the
+    parameter reports no subfolders, and the caller falls back to a single
+    sequential pass.
+    """
+    folders: list[str] = []
+    objects: list[tuple[str, str]] = []
+    query = {"Delimiter": "/", **_search_query(search)}
+    for page in _iter_list_pages(s3_client, bucket, query):
+        folders.extend(entry["Prefix"] for entry in page.get("CommonPrefixes", []))
+        objects.extend(_page_pairs(page, prefix))
+    return folders, objects
+
+
 def list_s3_objects(
     s3_client: S3Client,
     bucket: str,
@@ -272,19 +341,32 @@ def list_s3_objects(
     prefix names an object rather than a folder therefore lists nothing —
     but :func:`build_s3_key` has always joined prefix and frame with a
     ``/``, so that configuration could never round-trip anyway.
+
+    A whole-prefix listing is a serial chain of round-trips — one per
+    thousand keys — and it runs before every fetch and every upload.  When
+    the storage has subfolders (the uploader's own ``YYYY-MM/`` layout does)
+    they are paged concurrently instead.  The result is sorted by key so it
+    is byte-for-byte what the serial listing returned: callers depend on
+    that order, because :func:`names_with_basename_fallback` resolves a
+    duplicate basename by keeping the first entry it sees.
     """
-    objects: list[tuple[str, str]] = []
-    kwargs: dict[str, str] = {"Bucket": bucket}
-    if prefix:
-        kwargs["Prefix"] = _key_prefix_dir(prefix)
-    while True:
-        resp = s3_client.list_objects_v2(**kwargs)
-        for obj in resp.get("Contents", []):
-            key: str = obj["Key"]
-            name = strip_key_prefix(key, prefix)
-            if name:
-                objects.append((key, name))
-        if not resp.get("IsTruncated"):
-            break
-        kwargs["ContinuationToken"] = resp["NextContinuationToken"]
-    return objects
+    search = _key_prefix_dir(prefix) if prefix else ""
+    if Workers.s3 <= 1:
+        return _list_keys_under(s3_client, bucket, prefix, search)
+
+    folders, root_objects = _list_one_level(s3_client, bucket, prefix, search)
+    if not folders:
+        return root_objects
+
+    listings = run_concurrent(
+        folders,
+        lambda folder: _list_keys_under(s3_client, bucket, prefix, folder),
+        max_workers=Workers.s3,
+        catch=(),
+        desc="Listing S3 prefixes",
+        unit="prefix",
+    )
+    objects = [
+        pair for listing in listings if isinstance(listing, list) for pair in listing
+    ]
+    return sorted([*objects, *root_objects])

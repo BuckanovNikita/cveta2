@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cveta2._client_ops.base import _ClientBase
+from cveta2._concurrency import Workers, run_concurrent
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -228,8 +229,14 @@ class _TaskOpsMixin(_ClientBase):
         api = self._require_api("set_task_jobs_status")
 
         jobs = api.get_task_jobs(task_id)
-        for job in jobs:
-            api.update_job(job.id, stage=stage, state=state)
+        run_concurrent(
+            jobs,
+            lambda job: api.update_job(job.id, stage=stage, state=state),
+            max_workers=Workers.cvat,
+            catch=(),
+            desc="Updating jobs",
+            unit="job",
+        )
         logger.info(
             f"Задача {task_id}: обновлено {len(jobs)} job(s) "
             f"(stage={stage or '-'}, state={state or '-'})"

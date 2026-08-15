@@ -96,7 +96,13 @@ def populate_record_paths(
     the CVAT frame name was nested).  The local path mirrors the S3 layout
     below the storage prefix; with *ignored_prefix* set, only that leading
     key part is stripped instead (keeping more of the S3 hierarchy).
+
+    Records are per annotation, not per image, so an image carrying ten
+    boxes used to cost ten identical ``exists``/``resolve`` pairs.  They are
+    memoized per path instead: on a shared network cache each of those is a
+    round-trip.
     """
+    resolved: dict[Path, str | None] = {}
     for record in (*result.annotations, *result.deleted_images):
         frame_ref = record.frame_path or record.image_name
         if cs_info is not None:
@@ -108,8 +114,11 @@ def populate_record_paths(
                     build_s3_key(cs_info.prefix, frame_ref), ignored_prefix
                 )
             local = images_dir / local_rel
-            if local.exists():
-                record.image_path = str(local.resolve())
+            if local not in resolved:
+                resolved[local] = str(local.resolve()) if local.exists() else None
+            found = resolved[local]
+            if found is not None:
+                record.image_path = found
 
 
 def enrich_dataframe_paths(

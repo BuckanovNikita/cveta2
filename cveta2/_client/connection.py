@@ -13,8 +13,9 @@ from cveta2._client.sdk_adapter import (
     apply_request_timeout,
     install_global_request_timeout,
 )
+from cveta2._concurrency import configure_workers
 from cveta2._retry import configure_retries
-from cveta2.s3_utils import set_default_data_timeout, set_default_pool_size
+from cveta2.s3_utils import set_default_data_timeout
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -38,14 +39,14 @@ def configure_data_timeout(timeout: float | None) -> None:
 
 
 def configure_network(network: NetworkConfig) -> None:
-    """Install the retry budget and size the S3 connection pool.
+    """Install the retry budget and the transfer fan-out width.
 
-    Called once per client bootstrap, before any transfer starts: both
-    settings are process-wide, and the retry decorators were already bound
-    at import time with nothing but their defaults.
+    Called once per client bootstrap, before any transfer starts: both are
+    process-wide, and the retry decorators were already bound at import
+    time with nothing but their defaults.
     """
     configure_retries(network.retry_attempts, network.retry_max_wait)
-    set_default_pool_size(network.s3_workers)
+    configure_workers(s3=network.s3_workers, cvat=network.cvat_workers)
 
 
 class SdkClientFactory(Protocol):

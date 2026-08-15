@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -24,7 +25,7 @@ from cveta2.commands.task_ops import (
     run_task_mark_deleted,
     run_task_status,
 )
-from cveta2.exceptions import Cveta2Error
+from cveta2.exceptions import CvatApiError, Cveta2Error
 from cveta2.models import LabelInfo, TaskInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
@@ -400,3 +401,22 @@ class TestSetTaskJobsStatus:
         assert num_jobs == 2
         assert api.update_job.call_count == 2
         api.update_job.assert_called_with(101, stage="acceptance", state="completed")
+
+
+class TestJobStatusFailure:
+    def test_a_rejected_job_patch_fails_the_call(self) -> None:
+        """Jobs are patched one request each, now concurrently.
+
+        Swallowing one would report the task complete while a job stayed
+        open, which is exactly the state `--complete` exists to prevent.
+        """
+        api = MagicMock(spec=CvatApiPort)
+        api.get_task_jobs.return_value = [
+            SimpleNamespace(id=1, start_frame=0, stop_frame=1),
+            SimpleNamespace(id=2, start_frame=2, stop_frame=3),
+        ]
+        api.update_job.side_effect = CvatApiError("nope", status_code=500)
+        client = _client_with_api(api)
+
+        with pytest.raises(CvatApiError):
+            client.set_task_jobs_status(7, stage="acceptance")

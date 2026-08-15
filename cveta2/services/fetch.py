@@ -8,14 +8,15 @@ directory) before calling in; the public API calls in directly.
 from __future__ import annotations
 
 import shutil
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pandas as pd
 from loguru import logger
-from tqdm import tqdm
 
+from cveta2._concurrency import Workers, run_concurrent
 from cveta2.config import CacheConfig, IgnoreConfig, is_cache_disabled
 from cveta2.dataset_partition import partition_annotations_df
 from cveta2.models import TaskAnnotations
@@ -245,12 +246,28 @@ class _CachePolicy:
 
 @dataclass
 class _FetchStats:
-    """Cache-hit vs live-fetch counts and elapsed seconds for the fetch loop."""
+    """Cache-hit vs live-fetch counts and elapsed seconds for the fetch loop.
+
+    Several tasks are fetched at once, so the counters are shared across
+    threads and every update goes through the lock: a bare ``+=`` is a
+    read-modify-write and would lose totals under contention.
+    """
 
     cache_hits: int = 0
     fetched: int = 0
     hit_seconds: float = 0.0
     fetch_seconds: float = 0.0
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def record_hit(self, seconds: float) -> None:
+        with self.lock:
+            self.cache_hits += 1
+            self.hit_seconds += seconds
+
+    def record_fetch(self, seconds: float) -> None:
+        with self.lock:
+            self.fetched += 1
+            self.fetch_seconds += seconds
 
     def log_summary(self) -> None:
         logger.info(
@@ -275,16 +292,14 @@ def _retrieve_task(
     started = time.monotonic()
     cached = policy.read(task)
     if cached is not None:
-        stats.cache_hits += 1
-        stats.hit_seconds += time.monotonic() - started
+        stats.record_hit(time.monotonic() - started)
         return cached
 
     fetched = client.fetch_one_task(client.api, task, ctx)
     if fetched is None:
         return None
-    stats.fetched += 1
     policy.write(task, fetched)
-    stats.fetch_seconds += time.monotonic() - started
+    stats.record_fetch(time.monotonic() - started)
     return fetched
 
 
@@ -309,7 +324,12 @@ def _fetch_and_save_tasks(
     *,
     save_tasks: bool,
 ) -> ProjectAnnotations:
-    """Fetch tasks one by one, saving per-task CSVs into ``output_dir/.tasks/``.
+    """Fetch tasks in parallel, saving per-task CSVs into ``output_dir/.tasks/``.
+
+    Up to ``Workers.cvat`` tasks are in flight at once; each is three CVAT
+    round-trips that spend nearly all their time waiting.  Results are
+    returned in task order regardless of completion order, so the merged
+    output does not depend on which task happened to finish first.
 
     Completed tasks are served from *policy*'s cache when possible.  Unless
     *save_tasks* is set, the ``.tasks/`` directory is removed after merging —
@@ -326,13 +346,24 @@ def _fetch_and_save_tasks(
     tasks_dir.mkdir(parents=True, exist_ok=True)
 
     stats = _FetchStats()
-    task_results: list[TaskAnnotations] = []
-    for task in tqdm(ctx.tasks, desc="Processing tasks", unit="task", leave=False):
+
+    def process(task: TaskInfo) -> TaskAnnotations | None:
         result = _retrieve_task(client, task, ctx, policy, stats)
-        if result is None:
-            continue
-        _write_task_csv(task, result, tasks_dir)
-        task_results.append(result)
+        if result is not None:
+            _write_task_csv(task, result, tasks_dir)
+        return result
+
+    # catch=(): a failure that got this far is already past the retry budget
+    # and the 5xx skip, so it aborts the fetch exactly as it did serially.
+    outcomes = run_concurrent(
+        ctx.tasks,
+        process,
+        max_workers=Workers.cvat,
+        catch=(),
+        desc="Processing tasks",
+        unit="task",
+    )
+    task_results = [r for r in outcomes if isinstance(r, TaskAnnotations)]
 
     if not save_tasks:
         shutil.rmtree(tasks_dir, ignore_errors=True)

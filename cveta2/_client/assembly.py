@@ -18,6 +18,8 @@ from cveta2.models import DeletedImage, ImageWithoutAnnotations
 from cveta2.s3_utils import names_with_basename_fallback
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable, Mapping
+
     from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue, RawJob
     from cveta2.models import AnnotationRecord, TaskInfo
 
@@ -39,7 +41,7 @@ def find_job_for_frame(jobs: list[RawJob], frame: int) -> int | None:
     return None
 
 
-def issue_position_from_row(row: pd.Series[Any]) -> list[float] | None:
+def issue_position_from_row(row: Mapping[Hashable, Any]) -> list[float] | None:
     """Return the row's bbox as an issue rectangle, or None without full bbox."""
     coords: list[float] = []
     for col in BBOX_COLUMNS:
@@ -125,7 +127,7 @@ def build_upload_shapes(
         list(BBOX_COLUMNS)
     ].notna().all(axis=1)
     result = ShapeBuildResult()
-    for _, row in annotations_df[has_annotation].iterrows():
+    for row in annotations_df[has_annotation].to_dict("records"):
         img_name = str(row["image_name"])
         label_name = str(row["instance_label"])
         if img_name not in name_to_frame:
@@ -165,7 +167,7 @@ def build_task_issues(
     bbox are recorded in the returned result rather than opened.
     """
     result = IssueBuildResult()
-    for _, row in new_rows.iterrows():
+    for row in new_rows.to_dict("records"):
         image_name = str(row["image_name"])
         frame = name_to_frame.get(image_name)
         if frame is None:

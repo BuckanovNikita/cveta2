@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
+from cveta2._concurrency import Workers, configure_workers
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
@@ -47,6 +48,7 @@ from tests.helpers import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
@@ -832,3 +834,77 @@ class TestFetchCoreImageForwarding:
         local_paths = set(dataset["image_path"].dropna())
         assert local_paths
         assert all("/images/proj/" in path for path in local_paths)
+
+
+# ---------------------------------------------------------------------------
+# concurrent task fetching
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _restore_workers() -> Generator[None, None, None]:
+    s3, cvat = Workers.s3, Workers.cvat
+    yield
+    configure_workers(s3=s3, cvat=cvat)
+
+
+@pytest.mark.usefixtures("_restore_workers")
+def test_concurrent_fetch_produces_the_same_dataset_as_a_serial_one(
+    coco8_fixtures: LoadedFixtures, tmp_path: Path
+) -> None:
+    """Worker count is a throughput knob and must not touch the output.
+
+    Per-task results are merged positionally, so a loop that appended in
+    completion order would reorder rows for the same input — invisible
+    until two tasks annotate the same image.
+    """
+    fake = build_fake(
+        coco8_fixtures,
+        ["normal", "all-empty", "all-bboxes-moved", "frames-1-2-removed"],
+        statuses=["completed"] * 4,
+    )
+    options = FetchOptions(publish_clearml=False)
+
+    configure_workers(s3=1, cvat=1)
+    serial = _fetch_project(FakeCvatApi(fake), fake, tmp_path / "serial", options)
+
+    configure_workers(s3=1, cvat=8)
+    parallel = _fetch_project(FakeCvatApi(fake), fake, tmp_path / "parallel", options)
+
+    assert parallel.dataset.equals(serial.dataset)
+    assert len(serial.dataset) > 0
+
+
+@pytest.mark.usefixtures("_restore_workers")
+def test_every_task_is_fetched_exactly_once_under_concurrency(
+    coco8_fixtures: LoadedFixtures, tmp_path: Path
+) -> None:
+    """Re-fetching a task would double its rows and its CVAT load."""
+    fake = build_fake(
+        coco8_fixtures,
+        ["normal", "all-empty", "all-bboxes-moved", "frames-1-2-removed"],
+        statuses=["completed"] * 4,
+    )
+    api = FakeCvatApi(fake)
+    configure_workers(s3=1, cvat=8)
+
+    _fetch_project(api, fake, tmp_path / "out", FetchOptions(publish_clearml=False))
+
+    assert sorted(api.annotation_calls) == sorted(task.id for task in fake.tasks)
+
+
+@pytest.mark.usefixtures("_restore_workers")
+def test_a_failing_task_still_aborts_the_whole_fetch(
+    coco8_fixtures: LoadedFixtures, tmp_path: Path
+) -> None:
+    """Concurrency must not turn a fatal error into a partial dataset."""
+    fake = build_fake(
+        coco8_fixtures,
+        ["normal", "all-empty", "all-bboxes-moved", "frames-1-2-removed"],
+        statuses=["completed"] * 4,
+    )
+    api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id}, fail_status=403)
+    configure_workers(s3=1, cvat=8)
+
+    with pytest.raises(CvatApiError):
+        _fetch_project(api, fake, tmp_path / "out", FetchOptions(publish_clearml=False))

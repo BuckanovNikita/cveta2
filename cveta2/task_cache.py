@@ -10,6 +10,7 @@ every S3 error self-disables the backend for the rest of the run.
 from __future__ import annotations
 
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -289,7 +290,8 @@ class TaskAnnotationCache:
         """Atomically write the local entry (best effort)."""
         try:
             ensure_shared_dir(self._local_dir)
-            tmp_path = self._local_dir / f"task_{task_id}.json.tmp{os.getpid()}"
+            writer = f"{os.getpid()}-{threading.get_ident()}"
+            tmp_path = self._local_dir / f"task_{task_id}.json.tmp{writer}"
             write_shared_bytes(tmp_path, data)
             tmp_path.replace(self._local_path(task_id))
         except OSError as e:

@@ -248,6 +248,15 @@ do_not_mutate_patterns = [
     "^\\s*logger\\.[a-z_]+\\(",
     "\\btqdm\\(",
     "\\bsys\\.exit\\(",
+    # Progress-bar captions. `\btqdm(` covers the single-line bars, but the
+    # shared fan-out takes its caption as one argument of a multi-line
+    # `run_concurrent` / `run_s3_transfers` call, which starts on a line of
+    # its own. Patterns are re.search per line and skip every expression
+    # starting on the matched line, so naming the argument reaches exactly
+    # the caption and nothing else. Every `desc=`/`unit=` in the package is
+    # a bar caption; grep before adding a third meaning.
+    "^\\s*desc=",
+    "^\\s*unit=",
 ]
 # mutmut caches a mutant's verdict against the *source* function's text, so a
 # changed test does not invalidate it: weakening an assertion otherwise leaves
@@ -371,19 +380,56 @@ full = []
 "cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_local__mutmut_6" = "source=None; the layer label only reaches the rejection log"
 "cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_s3__mutmut_8" = "source=None; the layer label only reaches the rejection log"
 
-# Image IO. The two bar captions are the residue the do_not_mutate_patterns
-# above cannot reach: they are one argument of a multi-line `run_s3_transfers`
-# call, and both of mutmut's suppression mechanisms key on the first line of a
-# node. Suppressing the whole call would also silence the transfer lambdas,
-# which carry real behaviour. The rest are counters assigned rather than
-# incremented where the counter is provably still zero at that point.
-"cveta2.image_downloader.x__download_pending__mutmut_5" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
-"cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_43" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+# Image IO. Bar captions are now excluded by the `desc=`/`unit=` line
+# patterns above. The rest are counters assigned rather than incremented
+# where the counter is provably still zero at that point.
 "cveta2.image_downloader.x__download_pending__mutmut_22" = "stats.downloaded = ok; _download_pending is the only writer of `downloaded` and runs once per stats object"
 "cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_2" = "stats.failed = len(pending); the no-storage branch returns before any transfer, so failed is still 0"
 "cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_35" = "stats.failed = len(missing); the listing misses are counted before any transfer runs, so failed is still 0"
 "cveta2.image_downloader.x_parse_cloud_storage__mutmut_11" = "or \"XXXX\"; parse_qs of a string with no \"=\" yields {} exactly as for \"\""
 "cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_13" = "prefix=None widens the listing with out-of-prefix keys that no computed s3_key can equal"
+
+# Bar captions, second half. The `desc=`/`unit=` line patterns kill the
+# mutants that rewrite the caption *text*, but not the one that drops the
+# whole keyword argument: `desc=None` replaces the argument node itself,
+# which mutmut attributes to the enclosing call rather than to the line the
+# pattern matched. tqdm then renders the bar with no caption and nothing
+# else changes.
+"cveta2.image_downloader.x__download_pending__mutmut_5" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_8" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_43" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.s3_utils.x_list_s3_objects__mutmut_29" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.services.fetch.x__fetch_and_save_tasks__mutmut_37" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2._client_ops.task_ops.xǁ_TaskOpsMixinǁset_task_jobs_status__mutmut_15" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_22" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+
+# run_concurrent returns exactly one outcome per item — that is its documented
+# contract and TestOrdering pins it — so the zip that pairs them back up can
+# never see a length mismatch and `strict=` can never fire. Killing these
+# would mean faking a run_concurrent that violates its own contract.
+"cveta2.s3_utils.x_run_s3_transfers__mutmut_17" = "zip strict=None; lengths are equal by construction, so no spelling of strict changes anything"
+"cveta2.s3_utils.x_run_s3_transfers__mutmut_20" = "zip strict dropped; lengths are equal by construction"
+"cveta2.s3_utils.x_run_s3_transfers__mutmut_21" = "zip strict=False; lengths are equal by construction"
+"cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_25" = "zip strict=None; lengths are equal by construction"
+"cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_28" = "zip strict dropped; lengths are equal by construction"
+"cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_29" = "zip strict=False; lengths are equal by construction"
+
+# pandas lowercases the `orient` argument before dispatching on it, so every
+# spelling of "records" that differs only in case is the same call.
+"cveta2._client.assembly.x_build_task_issues__mutmut_4" = "to_dict(\"RECORDS\"); pandas lower-cases orient, so this is the same call as \"records\""
+"cveta2._client.assembly.x_build_upload_shapes__mutmut_11" = "to_dict(\"RECORDS\"); pandas lower-cases orient, so this is the same call as \"records\""
+
+# _filter_cached: catch=() means a stat failure aborts the fetch rather than
+# being silently read as "not cached". Reaching the mutated `isinstance(err,
+# None)` needs Path.exists itself to raise, which only a monkeypatched Path
+# can produce — a test that asserts nothing about cveta2.
+"cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_7" = "catch=None; only reachable if Path.exists raises, which no real filesystem does here"
+
+# _write_local: the temp name only has to be unique per writer before the
+# atomic replace. Dropping the thread id still yields a name unique per
+# process, and one task id is written by exactly one thread, so no test can
+# observe the collision this guards against.
+"cveta2.task_cache.xǁTaskAnnotationCacheǁ_write_local__mutmut_2" = "writer=None; the temp name stays unique for every writer a test can create"
 
 # fetch_one_task: the degrade path's [] and None are normalized identically by
 # _build_frame_issues(issues or []); the branch itself is tested.
@@ -396,7 +442,7 @@ full = []
 # _fetch_and_save_tasks: the guard decides only whether the cache summary is
 # printed at all. Both branches return the same annotations, and the summary's
 # own numbers are pinned on _FetchStats by TestRetrieveTaskAccounting.
-"cveta2.services.fetch.x__fetch_and_save_tasks__mutmut_41" = "inverts the guard around stats.log_summary(); nothing but whether one info line is emitted"
+"cveta2.services.fetch.x__fetch_and_save_tasks__mutmut_52" = "inverts the guard around stats.log_summary(); nothing but whether one info line is emitted"
 
 # _fetch_core -> prepare_fetch(project_name=): FetchContext.project_name has a
 # single reader, the 5xx skip hint in _client_ops.shared, which falls back to a

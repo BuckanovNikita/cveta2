@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from cveta2._concurrency import Workers, configure_workers
 from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
@@ -17,7 +18,7 @@ from cveta2.s3_utils import (
     set_default_data_timeout,
     strip_key_prefix,
 )
-from tests.fixtures.fake_s3 import PagedFakeS3Client
+from tests.fixtures.fake_s3 import FakeS3Client, PagedFakeS3Client
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -384,3 +385,146 @@ class TestListS3Objects:
         """S3 drops ``Contents`` from an empty page instead of sending ``[]``."""
         s3 = PagedFakeS3Client([[]])
         assert list_s3_objects(s3, "test-bucket", "images") == []
+
+
+# ---------------------------------------------------------------------------
+# parallel prefix listing
+# ---------------------------------------------------------------------------
+
+
+_LISTING_OBJECTS = {
+    "bucket/data/proj/2026-01/a.jpg": b"a",
+    "bucket/data/proj/2026-01/b.jpg": b"b",
+    "bucket/data/proj/2026-02/c.jpg": b"c",
+    "bucket/data/proj/2026-03/d.jpg": b"d",
+    "bucket/data/proj/loose.jpg": b"e",
+    "bucket/data/proj/nested/deep/f.jpg": b"f",
+}
+
+
+@pytest.fixture
+def _listing_workers() -> Generator[None, None, None]:
+    s3, cvat = Workers.s3, Workers.cvat
+    yield
+    configure_workers(s3=s3, cvat=cvat)
+
+
+@pytest.mark.usefixtures("_listing_workers")
+def test_parallel_listing_matches_the_sequential_one_exactly() -> None:
+    """Fanning out by subfolder must not change the result in any way.
+
+    Callers depend on the order — ``names_with_basename_fallback`` keeps
+    the *first* entry for a duplicate basename — so completion order
+    leaking through would silently repoint images at different keys.
+    """
+    client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
+
+    configure_workers(s3=1, cvat=1)
+    sequential = list_s3_objects(client, "bucket", "data/proj")
+
+    configure_workers(s3=8, cvat=1)
+    parallel = list_s3_objects(client, "bucket", "data/proj")
+
+    assert parallel == sequential
+    assert sequential == sorted(sequential, key=lambda pair: pair[0])
+    assert len(sequential) == len(_LISTING_OBJECTS)
+
+
+@pytest.mark.usefixtures("_listing_workers")
+def test_the_fan_out_really_pages_each_subfolder_separately() -> None:
+    """Without the delimiter pass this silently stays one serial chain.
+
+    The result is identical either way, so only the call pattern shows
+    whether the work was actually split.
+    """
+    client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
+
+    configure_workers(s3=1, cvat=1)
+    list_s3_objects(client, "bucket", "data/proj")
+    serial_calls = len(client.list_requests)
+
+    client.list_requests.clear()
+    configure_workers(s3=8, cvat=1)
+    list_s3_objects(client, "bucket", "data/proj")
+
+    subfolders = {"2026-01/", "2026-02/", "2026-03/", "nested/"}
+    assert serial_calls == 1
+    assert len(client.list_requests) == 1 + len(subfolders)
+    assert {call.get("Prefix", "") for call in client.list_requests} == {
+        "data/proj/",
+        *(f"data/proj/{folder}" for folder in subfolders),
+    }
+
+
+@pytest.mark.usefixtures("_listing_workers")
+def test_two_workers_already_take_the_parallel_path() -> None:
+    """The threshold is "more than one", not some larger round number."""
+    client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
+    configure_workers(s3=2, cvat=1)
+
+    list_s3_objects(client, "bucket", "data/proj")
+
+    assert len(client.list_requests) > 1
+
+
+@pytest.mark.usefixtures("_listing_workers")
+def test_the_listing_targets_the_requested_bucket() -> None:
+    """Every page — delimiter pass and subfolder pass alike — needs the bucket."""
+    client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
+    configure_workers(s3=8, cvat=1)
+
+    assert list_s3_objects(client, "other-bucket", "data/proj") == []
+    assert all(call.get("Bucket") == "other-bucket" for call in client.list_requests)
+
+
+@pytest.mark.usefixtures("_listing_workers")
+def test_parallel_listing_keeps_keys_outside_any_subfolder() -> None:
+    """A key sitting directly under the prefix belongs to no subfolder.
+
+    The fan-out pages subfolders; anything at the top level is only
+    reachable from the delimiter pass and would otherwise vanish.
+    """
+    client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
+    configure_workers(s3=8, cvat=1)
+
+    names = {name for _, name in list_s3_objects(client, "bucket", "data/proj")}
+
+    assert "loose.jpg" in names
+    assert "nested/deep/f.jpg" in names
+
+
+@pytest.mark.usefixtures("_listing_workers")
+def test_a_storage_with_no_subfolders_still_lists() -> None:
+    """The fan-out has nothing to split, so it falls back to one pass."""
+    client = FakeS3Client(
+        {"bucket/data/proj/a.jpg": b"a", "bucket/data/proj/b.jpg": b"b"},
+        keyed_by_bucket=True,
+    )
+    configure_workers(s3=8, cvat=1)
+
+    assert [name for _, name in list_s3_objects(client, "bucket", "data/proj")] == [
+        "a.jpg",
+        "b.jpg",
+    ]
+
+
+@pytest.mark.usefixtures("_listing_workers")
+def test_a_failed_subfolder_listing_aborts_the_whole_listing() -> None:
+    """A partial listing is worse than no listing.
+
+    Every caller treats "not in the listing" as "not on S3": the uploader
+    would re-upload the objects it could not see, and the downloader would
+    report them missing. Both are silent, so the failure has to surface.
+    """
+
+    class _FlakyListing(FakeS3Client):
+        def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
+            if kwargs.get("Prefix", "").endswith("2026-02/"):
+                raise OSError("listing failed")
+            return super().list_objects_v2(**kwargs)
+
+    client = _FlakyListing(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
+    configure_workers(s3=8, cvat=1)
+
+    with pytest.raises(OSError, match="listing failed"):
+        list_s3_objects(client, "bucket", "data/proj")

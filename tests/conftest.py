@@ -13,6 +13,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from cveta2._client.mapping import _build_label_maps
+from cveta2._concurrency import configure_workers
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
 from tests.helpers import build_fake, write_test_config
 
@@ -141,6 +142,22 @@ def _isolate_task_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 def _disable_task_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     """Disable the task-annotation cache for all tests; cache tests opt back in."""
     monkeypatch.setenv("CVETA2_DISABLE_CACHE", "true")
+
+
+@pytest.fixture(autouse=True)
+def _sequential_transfers() -> Generator[None, None, None]:
+    """Run every test sequentially unless it asks for fan-out.
+
+    Worker counts are process-wide and ``open_client`` installs the
+    configured ones, so a single CLI test would otherwise leave every later
+    test in that worker running its transfers concurrently — and a fan-out
+    reorders S3 calls and adds a listing round-trip, which several tests
+    legitimately assert on. Concurrency tests call ``configure_workers``
+    themselves.
+    """
+    configure_workers(s3=1, cvat=1)
+    yield
+    configure_workers(s3=1, cvat=1)
 
 
 @pytest.fixture(autouse=True)

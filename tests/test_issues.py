@@ -23,6 +23,7 @@ from cveta2._client.extractors import _collect_shapes
 from cveta2._client.ports import CvatApiPort
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.client import CvatClient, FetchContext
+from cveta2.exceptions import CvatApiError
 from cveta2.models import (
     BBoxAnnotation,
     ImageWithoutAnnotations,
@@ -538,3 +539,21 @@ def test_reserved_new_state_not_produced_by_fetch() -> None:
     issues = [RawIssue(id=1, frame=0, resolved=False, comments=["x"])]
     _text, state = _build_frame_issues(issues)[0]
     assert state != "new"
+
+
+class TestIssueCreationFailure:
+    def test_a_rejected_issue_fails_the_call(self) -> None:
+        """Issues are created one request each, now concurrently.
+
+        A swallowed failure would report every issue as opened while some
+        silently never existed, and the annotator would never be told.
+        """
+        api = _api_for_issue_creation(200, _TWO_JOBS)
+        api.create_issue.side_effect = CvatApiError("nope", status_code=500)
+        client = _client_with_api(api)
+        df = pd.DataFrame(
+            [_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")]
+        )
+
+        with pytest.raises(CvatApiError):
+            client.create_task_issues(7, df)
