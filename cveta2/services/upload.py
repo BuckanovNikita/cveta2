@@ -15,7 +15,7 @@ import pandas as pd
 from loguru import logger
 
 from cveta2.config import ImageCacheConfig
-from cveta2.exceptions import Cveta2Error, LabelsMismatchError
+from cveta2.exceptions import CvatApiError, Cveta2Error, LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
 from cveta2.s3_utils import build_s3_key
 from cveta2.services.output import (
@@ -44,6 +44,8 @@ if TYPE_CHECKING:
 # A module-level constant is never mutated, so the wording stays out of the
 # mutation gate: no test has to assert prose to keep this literal honest.
 _NOTHING_TO_UPLOAD = "Ошибка: после фильтрации не осталось изображений."
+
+_HTTP_NOT_FOUND = 404
 
 
 @dataclass(frozen=True)
@@ -382,7 +384,18 @@ def _ensure_task(
     if manifest.task_id is None:
         return create()
 
-    size = client.get_task_size(manifest.task_id)
+    try:
+        size = client.get_task_size(manifest.task_id)
+    except CvatApiError as e:
+        if e.status_code != _HTTP_NOT_FOUND:
+            raise
+        # The likeliest manual intervention: the stranded task was deleted
+        # in the CVAT UI. That is the state a fresh task is for, so there is
+        # nothing to warn about beyond saying what happened.
+        logger.info(
+            f"Задача {manifest.task_id} больше не существует в CVAT — создаём новую."
+        )
+        return create()
     if size == expected:
         logger.info(
             f"Продолжаем задачу {manifest.task_id}: {size} изображений уже привязаны."

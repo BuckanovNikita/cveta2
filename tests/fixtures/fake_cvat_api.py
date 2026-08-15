@@ -236,7 +236,14 @@ class FakeCvatApi:
         return [RawJob(id=task_id, start_frame=0, stop_frame=len(data_meta.frames))]
 
     def get_task_size(self, task_id: int) -> int:
-        """Return the number of frames in a task."""
+        """Return the number of frames in a task.
+
+        A task that is not here answers 404, as CVAT does: ``upload
+        --resume`` reads a task id out of its manifest and has to survive
+        that task having been deleted in the UI meanwhile.
+        """
+        if task_id not in self._task_data:
+            raise CvatApiError(f"Task not found: {task_id}", status_code=404)
         data_meta, _annotations = self._task_data[task_id]
         return len(data_meta.frames)
 

@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 from botocore.exceptions import ClientError
 
-from cveta2.exceptions import Cveta2Error, LabelsMismatchError
+from cveta2.exceptions import CvatApiError, Cveta2Error, LabelsMismatchError
 from cveta2.models import CSV_COLUMNS, LabelInfo, ProjectInfo
 from cveta2.s3_utils import build_s3_key
 from cveta2.services.upload import (
@@ -941,3 +941,48 @@ class TestResumeWithIssues:
 
         assert created == 1
         assert len(_writes_of(client).issues) == created
+
+
+class TestResumeAfterManualDeletion:
+    def test_a_task_deleted_in_the_ui_is_recreated(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Deleting the stranded task by hand is the likeliest intervention.
+
+        Without this the read-back raises a bare 404 — correctly not
+        retried, and unhelpful: the run has everything it needs to start
+        over.
+        """
+        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        make_s3(monkeypatch, _ListCountingS3())
+        names = ["a.jpg"]
+
+        with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
+            upload_dataset(client, make_request(image_names=names))
+        stranded = list_manifests(PROJECT_ID)[0].task_id
+        assert stranded is not None
+        client.delete_task(stranded)
+
+        outcome = upload_dataset(client, _resume_request(names))
+
+        assert outcome.images == len(names)
+        assert list_manifests(PROJECT_ID) == []
+
+    def test_another_error_reading_the_task_still_surfaces(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only 404 means "gone"; a 500 must not be read as one."""
+        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        make_s3(monkeypatch, _ListCountingS3())
+        names = ["a.jpg"]
+
+        with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
+            upload_dataset(client, make_request(image_names=names))
+
+        def boom(_task_id: int) -> int:
+            raise CvatApiError("server error", status_code=500)
+
+        monkeypatch.setattr(client.api, "get_task_size", boom)
+
+        with pytest.raises(CvatApiError):
+            upload_dataset(client, _resume_request(names))
