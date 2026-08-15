@@ -349,6 +349,7 @@ def upload(  # noqa: PLR0913
     image_dirs: Sequence[str | Path] | None = None,
     complete: bool = False,
     mark_all_deleted: bool = False,
+    resume: bool = False,
     connection: Connection | None = None,
 ) -> UploadResult:
     """Upload a dataset back to CVAT like ``cveta2 upload``.
@@ -357,6 +358,10 @@ def upload(  # noqa: PLR0913
     the chosen frames are included); ``labels=None`` uploads all frames.
     Rows with ``issue_state="new"`` become CVAT issues; rows with
     ``instance_shape="deleted"`` are marked as deleted frames.
+
+    *resume* continues the last unfinished upload of the same frames and
+    labels instead of creating a second task, reading back from CVAT what
+    the interrupted run had already managed to store.
     """
     df = (
         dataset
@@ -393,6 +398,9 @@ def upload(  # noqa: PLR0913
             task_name=name,
             plan=plan,
             options=options,
+            dataset_path="" if isinstance(dataset, pd.DataFrame) else str(dataset),
+            labels=tuple(labels),
+            resume=resume,
         )
         outcome = upload_dataset(c, request)
         return UploadResult(

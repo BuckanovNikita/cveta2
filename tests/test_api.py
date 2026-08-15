@@ -30,6 +30,7 @@ from cveta2.exceptions import (
 )
 from cveta2.image_uploader import UploadStats
 from cveta2.models import CSV_COLUMNS
+from cveta2.services.upload import UploadOutcome, UploadRequest
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import (
@@ -1041,7 +1042,10 @@ class TestUploadApi:
         _RecordingUploader.calls = []
         monkeypatch.setattr(
             "cveta2.services.upload.build_server_file_mapping",
-            lambda _cs_info, names: ({name: name for name in names}, set()),
+            lambda _cs_info, names, pinned=None: (
+                dict(pinned) if pinned is not None else {name: name for name in names},
+                set(),
+            ),
         )
         monkeypatch.setattr("cveta2.services.upload.S3Uploader", _RecordingUploader)
 
@@ -1800,3 +1804,94 @@ def _shapes_with_label(
 ) -> list[RawShape]:
     _meta, annotations = fixtures.task_data[task_id]
     return [s for s in annotations.shapes if s.label_id == label_id]
+
+
+class TestUploadResumeWiring:
+    """What `cveta2.upload` puts in the request that decides a resume."""
+
+    @staticmethod
+    def _capture(
+        monkeypatch: pytest.MonkeyPatch, fake: LoadedFixtures, **kwargs: object
+    ) -> UploadRequest:
+        """Run ``upload`` far enough to see the request it builds."""
+        seen: list[UploadRequest] = []
+
+        def record(_client: object, request: UploadRequest) -> UploadOutcome:
+            seen.append(request)
+            return UploadOutcome(
+                task_id=1,
+                task_name=request.task_name,
+                images=0,
+                deleted=0,
+                annotations=0,
+                issues=0,
+                jobs=0,
+            )
+
+        monkeypatch.setattr("cveta2.api.upload_dataset", record)
+        cveta2.upload(
+            pd.DataFrame([csv_row("a.jpg", label="cat")]),
+            project=fake.project.id,
+            name="t",
+            connection=fake_connection(fake),
+            **kwargs,  # type: ignore[arg-type]
+        )
+        return seen[0]
+
+    def test_resume_reaches_the_request(
+        self, normal_fake: LoadedFixtures, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._capture(monkeypatch, normal_fake, resume=True).resume is True
+
+    def test_resume_is_off_unless_asked_for(
+        self, normal_fake: LoadedFixtures, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A library caller must not silently adopt a stranded task."""
+        assert self._capture(monkeypatch, normal_fake).resume is False
+
+    def test_the_selected_labels_reach_the_request(
+        self, normal_fake: LoadedFixtures, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """They are half the fingerprint that identifies the upload."""
+        request = self._capture(monkeypatch, normal_fake, labels=["cat"])
+
+        assert request.labels == ("cat",)
+
+    def test_a_dataframe_input_has_no_dataset_path(
+        self, normal_fake: LoadedFixtures, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """There is no file to name, and ``str(df)`` would dump the frame."""
+        assert self._capture(monkeypatch, normal_fake).dataset_path == ""
+
+    def test_a_csv_input_records_its_path(
+        self,
+        normal_fake: LoadedFixtures,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """It is what a mismatch report shows to identify the stranded run."""
+        csv = tmp_path / "dataset.csv"
+        csv.write_text("image_name,instance_label\na.jpg,cat\n", encoding="utf-8")
+        seen: list[UploadRequest] = []
+
+        def record(_client: object, request: UploadRequest) -> UploadOutcome:
+            seen.append(request)
+            return UploadOutcome(
+                task_id=1,
+                task_name=request.task_name,
+                images=0,
+                deleted=0,
+                annotations=0,
+                issues=0,
+                jobs=0,
+            )
+
+        monkeypatch.setattr("cveta2.api.upload_dataset", record)
+        cveta2.upload(
+            csv,
+            project=normal_fake.project.id,
+            name="t",
+            connection=fake_connection(normal_fake),
+        )
+
+        assert seen[0].dataset_path == str(csv)

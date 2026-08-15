@@ -135,19 +135,38 @@ class TestParallelism:
 
         assert results == [True] * width
 
-    def test_one_worker_does_not_overlap(self) -> None:
-        """The inline path is what keeps `max_workers=1` a true no-op."""
-        barrier = threading.Barrier(2, timeout=0.2)
+    def test_one_worker_runs_inline_in_the_calling_thread(self) -> None:
+        """`max_workers=1` must be a true no-op, not a pool of one.
 
-        with pytest.raises(threading.BrokenBarrierError):
-            run_concurrent(
-                [0, 1],
-                lambda _n: barrier.wait(),
-                max_workers=1,
-                catch=(),
-                desc="t",
-                unit="item",
-            )
+        A pool would still serialize the work, so only the thread identity
+        shows whether the sequential path was actually taken — and it is
+        that path the untouched tracebacks and the default install rely on.
+        """
+        threads = run_concurrent(
+            list(range(4)),
+            lambda _n: threading.get_ident(),
+            max_workers=1,
+            catch=(),
+            desc="t",
+            unit="item",
+        )
+
+        assert set(threads) == {threading.get_ident()}
+
+    def test_two_workers_already_overlap(self) -> None:
+        """The threshold is "more than one", not some larger round number."""
+        barrier = threading.Barrier(2, timeout=_BARRIER_TIMEOUT)
+
+        results = run_concurrent(
+            [0, 1],
+            lambda _n: barrier.wait() >= 0,
+            max_workers=2,
+            catch=(),
+            desc="t",
+            unit="item",
+        )
+
+        assert results == [True, True]
 
     def test_workers_never_exceed_the_limit(self) -> None:
         """Exceeding it would blow past the S3 pool and the CVAT rate limit."""

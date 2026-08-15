@@ -34,6 +34,15 @@ class _ReadMixin(_ClientBase):
         """Fetch one task by id (includes its ``project_id``)."""
         return self._require_api("get_task").get_task(task_id)
 
+    def get_task_size(self, task_id: int) -> int:
+        """Return how many frames a task holds.
+
+        ``upload --resume`` compares this against the frame list it meant
+        to upload: it is how a task whose data attach never finished is
+        told apart from one where only the reply was lost.
+        """
+        return self._require_api("get_task_size").get_task_size(task_id)
+
     def list_tasks_completed_after(
         self,
         project_id: int,

@@ -55,6 +55,7 @@ def _upload_args(csv: Path, **overrides: object) -> argparse.Namespace:
         "name": None,
         "complete": False,
         "mark_all_deleted": False,
+        "resume": False,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -724,3 +725,36 @@ def test_echo_cli_command_formats_flags_lists_and_quoting(
     )
     out = capsys.readouterr().out
     assert out == "cveta2 upload -p 'my proj' --labels car 'no annotation' --complete\n"
+
+
+class TestResumeWiring:
+    """The three fields that decide which upload ``--resume`` continues."""
+
+    @pytest.mark.usefixtures("isolated_config")
+    def test_the_dataset_labels_and_resume_flag_reach_the_request(
+        self, tmp_path: Path
+    ) -> None:
+        """Resuming is keyed on the frames and labels, not on the flag alone.
+
+        A dropped label selection would fingerprint a different upload and
+        either find nothing or continue the wrong task.
+        """
+        csv = _write_dataset(tmp_path)
+        args = _upload_args(csv, labels=["car"], resume=True, name="t")
+
+        run = _run_upload_capturing(args)
+
+        assert run.request is not None
+        assert run.request.dataset_path == str(csv)
+        assert run.request.labels == ("car",)
+        assert run.request.resume is True
+
+    @pytest.mark.usefixtures("isolated_config")
+    def test_resume_defaults_to_off(self, tmp_path: Path) -> None:
+        """A plain upload must never adopt a stranded task by accident."""
+        args = _upload_args(_write_dataset(tmp_path), labels=["car"], name="t")
+
+        run = _run_upload_capturing(args)
+
+        assert run.request is not None
+        assert run.request.resume is False

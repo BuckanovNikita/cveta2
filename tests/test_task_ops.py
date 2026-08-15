@@ -116,6 +116,8 @@ _CONTEXT_REQUIRED_CALLS: list[tuple[str, Callable[[CvatClient], object]]] = [
     ("count_task_label_shapes", lambda c: c.count_task_label_shapes(1, "cat")),
     ("drop_label_annotations", lambda c: c.drop_label_annotations(1, "cat")),
     ("delete_task", lambda c: c.delete_task(1)),
+    ("count_task_shapes", lambda c: c.count_task_shapes(1)),
+    ("get_task_size", lambda c: c.get_task_size(1)),
     ("set_task_jobs_status", lambda c: c.set_task_jobs_status(1, state="completed")),
     ("update_project_labels", lambda c: c.update_project_labels(1, add=["cat"])),
     ("create_upload_task", lambda c: c.create_upload_task(1, "t", ["a.jpg"], 2)),

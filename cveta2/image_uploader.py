@@ -123,6 +123,7 @@ def build_server_file_mapping(
     cs_info: CloudStorageInfo,
     image_names: Iterable[str],
     s3_client: S3Client | None = None,
+    pinned: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], set[str]]:
     """Map image names to their S3 ``server_file`` paths relative to prefix.
 
@@ -137,6 +138,12 @@ def build_server_file_mapping(
     (lexicographic max — i.e. most recent month folder) wins and a warning
     is logged.
 
+    *pinned* replaces the computed mapping with one an earlier run already
+    decided, while still listing the bucket for *existing_keys*.  A resumed
+    upload must reuse the earlier assignment: :func:`_assign_month_folder`
+    reads the clock, so a run resumed in a new month would otherwise place
+    its remaining images somewhere the frame order does not expect.
+
     Returns
     -------
     name_to_server_file : dict[str, str]
@@ -149,8 +156,10 @@ def build_server_file_mapping(
     client = s3_client or make_s3_client(cs_info.endpoint_url or None)
     objects = list_s3_objects(client, cs_info.bucket, cs_info.prefix)
     existing_keys: set[str] = {key for key, _name in objects}
-    resolved = _resolve_duplicate_basenames(name for _key, name in objects)
+    if pinned is not None:
+        return dict(pinned), existing_keys
 
+    resolved = _resolve_duplicate_basenames(name for _key, name in objects)
     name_to_server_file = {
         image_name: resolved.get(image_name) or _assign_month_folder(image_name)
         for image_name in image_names

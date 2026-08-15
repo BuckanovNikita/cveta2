@@ -24,10 +24,20 @@ from cveta2.services.output import (
     preview_names,
 )
 from cveta2.task_cache import invalidate_local_entry
+from cveta2.upload_manifest import (
+    UploadManifest,
+    compute_fingerprint,
+    delete_manifest,
+    list_manifests,
+    load_manifest,
+    new_manifest,
+    save_manifest,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from cveta2._client_ops.session import TaskWriteSession
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
 
@@ -69,6 +79,9 @@ class UploadRequest:
     task_name: str
     plan: UploadPlan
     options: UploadOptions
+    dataset_path: str = ""
+    labels: tuple[str, ...] = ()
+    resume: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,6 +91,7 @@ class _StagedUpload:
     cs_info: CloudStorageInfo
     annotations: pd.DataFrame
     task_image_names: list[str]
+    name_to_server_file: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -235,8 +249,17 @@ def _warn_missing_images(missing: list[str]) -> None:
     )
 
 
-def _stage_images(client: CvatClient, request: UploadRequest) -> _StagedUpload:
-    """Validate labels, upload local images to S3, enrich annotation rows."""
+def _stage_images(
+    client: CvatClient,
+    request: UploadRequest,
+    pinned_server_files: dict[str, str] | None = None,
+) -> _StagedUpload:
+    """Validate labels, upload local images to S3, enrich annotation rows.
+
+    *pinned_server_files* replaces the freshly computed name → server-file
+    mapping when resuming, so images the first run had not uploaded yet
+    keep the folder that run assigned them rather than today's month.
+    """
     plan = request.plan
     upload_labels = sorted(plan.annotations["instance_label"].dropna().unique())
     validate_labels(client, request.project_id, request.project_name, upload_labels)
@@ -261,6 +284,7 @@ def _stage_images(client: CvatClient, request: UploadRequest) -> _StagedUpload:
     name_to_server_file, existing_keys = build_server_file_mapping(
         cs_info,
         all_image_names,
+        pinned=pinned_server_files,
     )
 
     annotations = enrich_dataframe_paths(
@@ -279,6 +303,15 @@ def _stage_images(client: CvatClient, request: UploadRequest) -> _StagedUpload:
             f"{stats.skipped_existing} уже на S3, "
             f"{stats.failed} ошибок",
         )
+        if stats.failed:
+            # Every name goes into server_files regardless, so a file that
+            # never reached S3 would still be bound into the task and only
+            # surface as a processing failure — after the task exists.
+            raise Cveta2Error(
+                f"Ошибка: {stats.failed} изображений не загрузились на S3. "
+                f"Задача не создана; повторите команду, уже загруженные "
+                f"изображения будут пропущены."
+            )
 
     _warn_missing_images(missing)
 
@@ -289,39 +322,116 @@ def _stage_images(client: CvatClient, request: UploadRequest) -> _StagedUpload:
         cs_info=cs_info,
         annotations=annotations,
         task_image_names=task_image_names,
+        name_to_server_file=name_to_server_file,
     )
+
+
+def _ensure_annotations(
+    client: CvatClient,
+    task_id: int,
+    staged: _StagedUpload,
+    session: TaskWriteSession,
+    resuming: bool,  # noqa: FBT001
+) -> int:
+    """Upload the shapes unless a previous run already put them there.
+
+    Shapes go up in one bulk request, so the task holds either none of them
+    or all of them; there is no half-applied state to reconcile.  Anything
+    already present therefore came from the run being resumed, and adding
+    to it would duplicate every box — ``put_task_shapes`` appends.
+    """
+    if resuming:
+        existing = client.count_task_shapes(task_id)
+        if existing:
+            logger.info(
+                f"Задача {task_id}: {existing} аннотаций уже загружены, пропускаем"
+            )
+            return existing
+    return client.upload_task_annotations(task_id, staged.annotations, session=session)
+
+
+def _ensure_task(
+    client: CvatClient,
+    request: UploadRequest,
+    staged: _StagedUpload,
+    manifest: UploadManifest,
+) -> int:
+    """Return the task holding this upload's frames, creating it if needed.
+
+    The manifest says which task a previous run created; CVAT says what
+    actually happened to it.  A task whose frame count already matches is
+    reused — that is the common recovery, where the connection died during
+    the processing poll but the server finished anyway.  An empty task
+    means processing never completed, so it is replaced.  Any other count
+    is a task built from different inputs, and guessing which frames it
+    holds would corrupt the annotations, so it stops.
+    """
+    expected = len(staged.task_image_names)
+
+    def create() -> int:
+        return client.create_upload_task(
+            project_id=request.project_id,
+            name=request.task_name,
+            image_names=staged.task_image_names,
+            cloud_storage_id=staged.cs_info.id,
+            segment_size=request.options.segment_size,
+            image_quality=request.options.image_quality,
+            on_created=lambda new_id: _record_task_id(manifest, new_id),
+        )
+
+    if manifest.task_id is None:
+        return create()
+
+    size = client.get_task_size(manifest.task_id)
+    if size == expected:
+        logger.info(
+            f"Продолжаем задачу {manifest.task_id}: {size} изображений уже привязаны."
+        )
+        return manifest.task_id
+    if size == 0:
+        logger.warning(
+            f"Задача {manifest.task_id} осталась без изображений — "
+            f"удаляем её и создаём заново."
+        )
+        client.delete_task(manifest.task_id)
+        return create()
+    raise Cveta2Error(
+        f"Ошибка: задача {manifest.task_id} содержит {size} изображений, "
+        f"а загрузка рассчитана на {expected}. Продолжить нельзя. "
+        f"Удалите задачу (cveta2 task delete -t {manifest.task_id}) "
+        f"и запустите загрузку заново без --resume."
+    )
+
+
+def _record_task_id(manifest: UploadManifest, task_id: int) -> None:
+    """Persist the new task id before the long frame-attach step runs."""
+    manifest.task_id = task_id
+    save_manifest(manifest)
 
 
 def _push_to_cvat(
     client: CvatClient,
     request: UploadRequest,
     staged: _StagedUpload,
+    manifest: UploadManifest,
 ) -> tuple[int, int, int]:
     """Create the task and push annotations, issues and deleted frames.
 
     Returns ``(task_id, num_shapes, num_issues)``.
     """
     plan, options = request.plan, request.options
-    task_id = client.create_upload_task(
-        project_id=request.project_id,
-        name=request.task_name,
-        image_names=staged.task_image_names,
-        cloud_storage_id=staged.cs_info.id,
-        segment_size=options.segment_size,
-        image_quality=options.image_quality,
-    )
+    task_id = _ensure_task(client, request, staged, manifest)
     session = client.open_task_session(task_id)
 
-    num_shapes = client.upload_task_annotations(
-        task_id,
-        staged.annotations,
-        session=session,
-    )
+    num_shapes = _ensure_annotations(client, task_id, staged, session, request.resume)
 
     num_issues = 0
     if "issue_state" in staged.annotations.columns:
         num_issues = client.create_task_issues(
-            task_id, staged.annotations, session=session
+            task_id,
+            staged.annotations,
+            session=session,
+            skip_existing=request.resume,
         )
 
     if options.mark_all_deleted:
@@ -337,6 +447,59 @@ def _push_to_cvat(
     return task_id, num_shapes, num_issues
 
 
+def _resume_manifest(request: UploadRequest, fingerprint: str) -> UploadManifest:
+    """Load the manifest ``--resume`` was asked to continue, or explain why not.
+
+    A missing manifest is reported against whatever unfinished uploads the
+    project does have, because the likely mistake is resuming with a
+    different CSV or label selection — and "nothing to resume" alone would
+    leave the user guessing which one.
+    """
+    manifest = load_manifest(request.project_id, fingerprint)
+    if manifest is not None:
+        return manifest
+    others = list_manifests(request.project_id)
+    if not others:
+        raise Cveta2Error(
+            f"Ошибка: незавершённых загрузок для проекта "
+            f"{request.project_name!r} не найдено — нечего продолжать."
+        )
+    listed = "\n".join(f"  - {other.describe()}" for other in others)
+    raise Cveta2Error(
+        f"Ошибка: для этого набора изображений и меток незавершённой "
+        f"загрузки нет. Незавершённые загрузки проекта "
+        f"{request.project_name!r}:\n{listed}\n"
+        f"Запустите --resume с тем же CSV и теми же --labels, что и в тот раз."
+    )
+
+
+def _fresh_manifest(
+    client: CvatClient,
+    request: UploadRequest,
+    fingerprint: str,
+) -> tuple[_StagedUpload, UploadManifest]:
+    """Stage images for a new upload and record what it decided."""
+    existing = load_manifest(request.project_id, fingerprint)
+    if existing is not None and existing.task_id is not None:
+        logger.warning(
+            f"Найдена незавершённая загрузка этого набора "
+            f"(задача {existing.task_id}); она будет забыта. "
+            f"Чтобы продолжить её, повторите команду с --resume."
+        )
+    staged = _stage_images(client, request)
+    manifest = new_manifest(
+        dataset_path=request.dataset_path,
+        fingerprint=fingerprint,
+        project_id=request.project_id,
+        task_name=request.task_name,
+        cs_info=staged.cs_info,
+        name_to_server_file=staged.name_to_server_file,
+        task_image_names=staged.task_image_names,
+    )
+    save_manifest(manifest)
+    return staged, manifest
+
+
 def upload_dataset(client: CvatClient, request: UploadRequest) -> UploadOutcome:
     """Run the full upload chain: S3 → task → annotations → issues → deleted.
 
@@ -344,9 +507,22 @@ def upload_dataset(client: CvatClient, request: UploadRequest) -> UploadOutcome:
     creates the CVAT task, uploads annotations, opens issues, marks
     deleted frames, optionally completes the task, and invalidates the
     local annotation cache entry.
+
+    A manifest of the run is written before CVAT is touched and updated the
+    moment a task id exists, so ``resume=True`` can continue an upload that
+    died partway.  It is removed once the upload finishes.
     """
-    staged = _stage_images(client, request)
-    task_id, num_shapes, num_issues = _push_to_cvat(client, request, staged)
+    fingerprint = compute_fingerprint(
+        request.plan.image_names, request.plan.deleted_names, request.labels
+    )
+    if request.resume:
+        manifest = _resume_manifest(request, fingerprint)
+        staged = _stage_images(client, request, manifest.name_to_server_file)
+    else:
+        staged, manifest = _fresh_manifest(client, request, fingerprint)
+
+    task_id, num_shapes, num_issues = _push_to_cvat(client, request, staged, manifest)
+    delete_manifest(request.project_id, fingerprint)
 
     invalidate_local_entry(request.project_id, task_id, request.project_name)
 

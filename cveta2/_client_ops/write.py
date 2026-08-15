@@ -17,6 +17,9 @@ from cveta2._client_ops.base import _ClientBase
 from cveta2._concurrency import Workers, run_concurrent
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from cveta2._client.dtos import NewIssue, RawIssue
     from cveta2._client_ops.session import TaskWriteSession
 
 # Both columns must exist for a row to become an issue, and both are
@@ -46,6 +49,20 @@ def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
     ]
     deduped: pd.DataFrame = new_rows.drop_duplicates(subset=dedup_key)
     return deduped
+
+
+def _issues_not_yet_on_task(
+    existing: list[RawIssue],
+    built: list[NewIssue],
+) -> list[NewIssue]:
+    """Drop the built issues a previous run already opened on the task.
+
+    Matched on ``(frame, message)``: the position is a float bbox that has
+    round-tripped through CVAT, so comparing it would report every issue as
+    missing and duplicate the lot.
+    """
+    seen = {(issue.frame, comment) for issue in existing for comment in issue.comments}
+    return [issue for issue in built if (issue.frame, issue.message) not in seen]
 
 
 class _WriteMixin(_ClientBase):
@@ -103,6 +120,8 @@ class _WriteMixin(_ClientBase):
         cloud_storage_id: int,
         segment_size: int = 100,
         image_quality: int = 100,
+        *,
+        on_created: Callable[[int], None] | None = None,
     ) -> int:
         """Create a CVAT task backed by cloud storage images.
 
@@ -127,6 +146,10 @@ class _WriteMixin(_ClientBase):
             Maximum frames per job (CVAT auto-creates multiple jobs).
         image_quality:
             JPEG compression quality for CVAT image chunks (0-100).
+        on_created:
+            Called with the new task id after the task exists but before
+            its frames are attached, so a caller tracking recovery state
+            can record it.
 
         Returns
         -------
@@ -146,6 +169,11 @@ class _WriteMixin(_ClientBase):
             image_quality=image_quality,
         )
         task_id = api.create_task(spec)
+        # The task exists now but holds no frames, and attaching them is the
+        # long step this whole call can die in. Callers that track recovery
+        # state record the id here, while it is still the only trace of it.
+        if on_created is not None:
+            on_created(task_id)
         api.attach_task_data(task_id, spec)
         return task_id
 
@@ -220,6 +248,7 @@ class _WriteMixin(_ClientBase):
         annotations_df: pd.DataFrame,
         *,
         session: TaskWriteSession | None = None,
+        skip_existing: bool = False,
     ) -> int:
         """Create open CVAT issues from rows with ``issue_state == "new"``.
 
@@ -229,6 +258,11 @@ class _WriteMixin(_ClientBase):
         ``(image_name, issue_text, bbox)`` rows are created once.  Issues
         are attached to the row's bbox; rows without a complete bbox are
         skipped with a warning.
+
+        Issues are one request each, so this is the one upload stage that
+        can genuinely end up half-applied.  *skip_existing* reads the task's
+        issues back first and creates only the missing ones, which is what
+        ``upload --resume`` needs to avoid a second copy of every comment.
 
         Returns the number of issues created.  Requires an active context
         manager (``with CvatClient(...) as c:``).
@@ -244,8 +278,16 @@ class _WriteMixin(_ClientBase):
         # fields are populated before the fan-out: their first touch is an
         # unguarded fetch that concurrent workers would each repeat.
         built = build_task_issues(new_rows, session.name_to_frame, session.jobs)
+        pending = built.issues
+        if skip_existing:
+            pending = _issues_not_yet_on_task(api.get_task_issues(task_id), pending)
+            already = len(built.issues) - len(pending)
+            if already:
+                logger.info(
+                    f"Задача {task_id}: {already} issues уже созданы, пропускаем"
+                )
         run_concurrent(
-            built.issues,
+            pending,
             api.create_issue,
             max_workers=Workers.cvat,
             catch=(),
@@ -263,5 +305,5 @@ class _WriteMixin(_ClientBase):
                 logger.warning(
                     f"Issues пропущены: {reason} в задаче {task_id}: {names}"
                 )
-        logger.info(f"Создано issues: {len(built.issues)} в задаче {task_id}")
-        return len(built.issues)
+        logger.info(f"Создано issues: {len(pending)} в задаче {task_id}")
+        return len(pending)

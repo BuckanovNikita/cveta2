@@ -266,6 +266,14 @@ def _configure_upload(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Mark every uploaded image as deleted after task creation.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Continue the last unfinished upload of this dataset instead of "
+            "creating a second task. Pass the same --dataset and --labels."
+        ),
+    )
 
 
 def _configure_merge(parser: argparse.ArgumentParser) -> None:

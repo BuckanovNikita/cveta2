@@ -185,6 +185,16 @@ class _TaskOpsMixin(_ClientBase):
         annotations = api.get_task_annotations(task_id)
         return [s for s in annotations.shapes if s.label_id in label_ids]
 
+    def count_task_shapes(self, task_id: int) -> int:
+        """Return how many annotation shapes a task currently holds.
+
+        ``upload --resume`` reads this back rather than trusting its own
+        record of what it uploaded, because the record is exactly what a
+        crash loses.
+        """
+        api = self._require_api("count_task_shapes")
+        return len(api.get_task_annotations(task_id).shapes)
+
     def delete_task(self, task_id: int) -> None:
         """Delete a CVAT task permanently (including its data and jobs).
 

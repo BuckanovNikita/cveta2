@@ -201,5 +201,8 @@ def run_upload(args: argparse.Namespace) -> None:
             task_name=task_name,
             plan=plan,
             options=options,
+            dataset_path=str(args.dataset),
+            labels=tuple(selected),
+            resume=args.resume,
         )
         upload_dataset(client, request)

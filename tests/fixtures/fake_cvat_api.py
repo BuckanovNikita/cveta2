@@ -12,7 +12,13 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
+from cveta2._client.dtos import (
+    RawAnnotations,
+    RawDataMeta,
+    RawFrame,
+    RawIssue,
+    RawShape,
+)
 from cveta2.exceptions import CvatApiError
 from cveta2.models import OrganizationInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -24,9 +30,7 @@ if TYPE_CHECKING:
         LabelPatch,
         NewIssue,
         NewShape,
-        RawIssue,
         RawJob,
-        RawShape,
         UploadTaskSpec,
     )
     from cveta2.image_downloader import CloudStorageInfo
@@ -47,6 +51,23 @@ class RecordedWrites:
     deleted_tasks: list[int] = field(default_factory=list)
     job_updates: list[tuple[int, str | None, str | None]] = field(default_factory=list)
     label_patches: dict[int, list[LabelPatch]] = field(default_factory=dict)
+
+
+def _as_raw_shape(shape_id: int, shape: NewShape) -> RawShape:
+    """Turn an uploaded shape into the form a read-back would return."""
+    return RawShape(
+        id=shape_id,
+        type=shape.type,
+        frame=shape.frame,
+        label_id=shape.label_id,
+        points=list(shape.points),
+        occluded=False,
+        z_order=0,
+        rotation=0.0,
+        source="manual",
+        attributes=[],
+        created_by="",
+    )
 
 
 class FakeCvatApi:
@@ -87,7 +108,7 @@ class FakeCvatApi:
         self._tasks = list(fixtures.tasks)
         self._labels = fixtures.labels
         self._task_data = dict(fixtures.task_data)
-        self._issues = fixtures.issues or {}
+        self._issues = dict(fixtures.issues or {})
         self._fail_task_ids = frozenset(fail_task_ids)
         self._fail_status = fail_status
         self._fail_methods = frozenset(fail_methods)
@@ -128,6 +149,8 @@ class FakeCvatApi:
         return fake
 
     def _raise_if_failing(self, method: str, task_id: int) -> None:
+        with self._lock:
+            self.call_counts[method] += 1
         if task_id in self._fail_task_ids and method in self._fail_methods:
             raise CvatApiError("fake failure", status_code=self._fail_status)
 
@@ -250,16 +273,53 @@ class FakeCvatApi:
             self._task_data[task_id] = (data_meta, annotations)
 
     def put_task_shapes(self, task_id: int, shapes: list[NewShape]) -> None:
-        """Record uploaded shapes per task."""
+        """Record uploaded shapes and make them readable back off the task.
+
+        CVAT's action here is CREATE, so the shapes join whatever the task
+        already had. Reflecting that in the store is what lets a test tell
+        an upload that ran once from one that ran twice — the distinction
+        ``upload --resume`` exists to preserve.
+        """
         self._enter("put_task_shapes")
         with self._lock:
             self.writes.shapes.setdefault(task_id, []).extend(shapes)
+            data_meta, annotations = self._task_data[task_id]
+            next_id = len(annotations.shapes)
+            self._task_data[task_id] = (
+                data_meta,
+                dataclasses.replace(
+                    annotations,
+                    shapes=[
+                        *annotations.shapes,
+                        *(
+                            _as_raw_shape(next_id + offset, shape)
+                            for offset, shape in enumerate(shapes)
+                        ),
+                    ],
+                ),
+            )
 
     def create_issue(self, issue: NewIssue) -> None:
-        """Record a created issue."""
+        """Record a created issue and make it readable back off the task.
+
+        ``get_task_jobs`` hands out one job per task keyed by the task id,
+        so the issue's ``job_id`` is the task it belongs to. Reflecting the
+        write is what lets a test tell one upload from two — the very thing
+        ``upload --resume`` reads the issues back to check.
+        """
         self._enter("create_issue")
         with self._lock:
             self.writes.issues.append(issue)
+            stored = self._issues.setdefault(issue.job_id, [])
+            self._issues[issue.job_id] = [
+                *stored,
+                RawIssue(
+                    id=len(stored),
+                    frame=issue.frame,
+                    resolved=False,
+                    comments=[issue.message],
+                ),
+            ]
 
     def set_deleted_frames(self, task_id: int, frame_ids: list[int]) -> None:
         """Record deleted frames and update the stored ``data_meta``."""

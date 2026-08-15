@@ -59,6 +59,9 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
 - **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
 - **`cveta2/projects_cache.py`** - Local project metadata cache, keyed by organization (`organizations: [{slug, name, projects}]`; `""` slug = personal workspace)
+- **`cveta2/_concurrency.py`** - `run_concurrent`, the one bounded fan-out every parallel site goes through, plus the process-wide `Workers` counts
+- **`cveta2/_retry.py`** - retry mechanism (attempts, backoff, logging); the *predicates* deciding what is worth retrying live next to the calls they protect, in `_client/sdk_adapter.py` and `s3_utils.py`
+- **`cveta2/upload_manifest.py`** - crash record of an in-flight upload, read by `upload --resume`
 
 ## Key data flow
 
@@ -69,6 +72,8 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
 
 2. **Upload**: `commands/upload.py` (or `api.upload`) → `services/upload.py:upload_dataset()` → `client.create_upload_task()` + `client.upload_task_annotations()`
+   - A manifest is written to `~/.cache/cveta2/uploads/project_<id>/<fingerprint>.json` before CVAT is touched, and the task id recorded the instant it exists — `create_upload_task` splits the CVAT call in two (`create_task`, then `attach_task_data`) so there is a checkpoint between them. Removed on success.
+   - `--resume` reads the manifest for *which* task, then asks CVAT what that task actually holds: frame count decides reuse / recreate / abort, a non-zero shape count means the annotations already landed (`put_task_shapes` appends, so a second pass would duplicate them), and issues are diffed by `(frame, message)`. `set_deleted_frames` and `update_job` are idempotent and simply redone.
    - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
    - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels); `--labels all` selects every dataset label plus unannotated frames (a literal dataset label named `all` wins over the shortcut)
    - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues **attached to the row's bbox**; rows with issue text but no complete bbox are skipped with a warning (no full-frame issues)

@@ -12,6 +12,7 @@ import pytest
 from cveta2._client.assembly import task_to_records
 from cveta2._client.context import _build_frame_issues, _TaskContext
 from cveta2._client.dtos import (
+    NewIssue,
     RawAnnotations,
     RawDataMeta,
     RawFrame,
@@ -22,6 +23,7 @@ from cveta2._client.dtos import (
 from cveta2._client.extractors import _collect_shapes
 from cveta2._client.ports import CvatApiPort
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
+from cveta2._client_ops.write import _issues_not_yet_on_task
 from cveta2.client import CvatClient, FetchContext
 from cveta2.exceptions import CvatApiError
 from cveta2.models import (
@@ -557,3 +559,78 @@ class TestIssueCreationFailure:
 
         with pytest.raises(CvatApiError):
             client.create_task_issues(7, df)
+
+
+def _new_issue(*, frame: int, message: str) -> NewIssue:
+    """Build an issue carrying only the fields the resume diff compares."""
+    return NewIssue(
+        frame=frame, job_id=201, position=[1.0, 2.0, 3.0, 4.0], message=message
+    )
+
+
+class TestIssuesNotYetOnTask:
+    """The diff `upload --resume` uses to avoid a second copy of every comment.
+
+    Issues go up one request each, so this is the only upload stage that can
+    genuinely end up half-applied — and `create_issue` always creates.
+    """
+
+    def test_an_issue_already_on_the_task_is_dropped(self) -> None:
+        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["первая"])]
+        built = [_new_issue(frame=5, message="первая")]
+
+        assert _issues_not_yet_on_task(existing, built) == []
+
+    def test_a_missing_issue_survives(self) -> None:
+        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["первая"])]
+        built = [_new_issue(frame=5, message="вторая")]
+
+        assert _issues_not_yet_on_task(existing, built) == built
+
+    def test_the_same_text_on_another_frame_is_not_a_match(self) -> None:
+        """One comment per frame; matching on text alone would lose the rest."""
+        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["текст"])]
+        built = [_new_issue(frame=6, message="текст")]
+
+        assert _issues_not_yet_on_task(existing, built) == built
+
+    def test_nothing_on_the_task_keeps_everything(self) -> None:
+        built = [_new_issue(frame=1, message="a"), _new_issue(frame=2, message="b")]
+
+        assert _issues_not_yet_on_task([], built) == built
+
+    def test_every_comment_of_an_issue_counts_as_seen(self) -> None:
+        """CVAT joins follow-up comments onto one issue; all of them match."""
+        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["a", "b"])]
+        built = [_new_issue(frame=5, message="b")]
+
+        assert _issues_not_yet_on_task(existing, built) == []
+
+
+class TestSkipExistingIssues:
+    def test_resuming_does_not_reopen_issues_already_created(self) -> None:
+        """Without the read-back every resumed upload doubles its comments."""
+        api = _api_for_issue_creation(200, _TWO_JOBS)
+        api.get_task_issues.return_value = [
+            RawIssue(id=1, frame=5, resolved=False, comments=["первая"])
+        ]
+        client = _client_with_api(api)
+        df = pd.DataFrame(
+            [_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")]
+        )
+
+        created = client.create_task_issues(7, df, skip_existing=True)
+
+        assert created == 1
+        assert [c.args[0].message for c in api.create_issue.call_args_list] == [
+            "вторая"
+        ]
+
+    def test_a_normal_upload_does_not_read_the_issues_back(self) -> None:
+        """A fresh task has none, so the extra request would buy nothing."""
+        api = _api_for_issue_creation(200, _TWO_JOBS)
+        client = _client_with_api(api)
+        df = pd.DataFrame([_issue_row("img_5.jpg", "первая")])
+
+        assert client.create_task_issues(7, df) == 1
+        api.get_task_issues.assert_not_called()
