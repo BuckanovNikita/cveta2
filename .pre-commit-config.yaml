@@ -1,3 +1,8 @@
+# A single `uv run pre-commit install` wires all three stages. Without this the
+# commit-stage hooks below are documentation: they run only when someone types
+# `uv run pre-commit run --all-files`.
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+
 repos:
   - repo: local
     hooks:
@@ -53,8 +58,7 @@ repos:
       # The whole gated scope, kept off the commit path because any edit under
       # tests/ invalidates every cached verdict (cache_invalidation_files +
       # on_dependency_change = "rerun"), so a commit that touches a test pays
-      # for the full scope. Install with:
-      #     uv run pre-commit install --hook-type pre-push
+      # for the full scope.
       - id: mutmut-full
         name: mutmut (mutation testing, full scope)
         entry: ./scripts/mutation_test.sh --profile full
@@ -62,6 +66,44 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-push]
+
+      # Cheap, so it goes before the integration gate: a version nobody released
+      # should stop the push in a second, not after a stack bring-up.
+      - id: version-drift
+        name: version matches the nearest tag
+        entry: uv run python scripts/check_version_drift.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # Integration tests need a live CVAT + MinIO + ClearML stack, and the stack
+      # must be fresh (a reused one fails with "Duplicate base task name"), so the
+      # script owns up -> test -> stop and a run costs minutes. Hence pre-push,
+      # after the mutation gate.
+      #
+      # It disables itself when tests/integration/.env is missing, which is the
+      # case on a fresh clone and on any machine never set up for integration
+      # testing. verbose: true so that notice is visible - pre-commit swallows the
+      # output of hooks that pass.
+      #
+      # Skip it for one push with: SKIP=integration-tests git push
+      - id: integration-tests
+        name: integration tests (live CVAT stack)
+        entry: ./scripts/integration_gate.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+        verbose: true
+
+      # No pass_filenames here: at this stage pre-commit passes the path of the
+      # commit message file, which is the whole input.
+      - id: conventional-commit
+        name: conventional commit message
+        entry: uv run python scripts/check_commit_msg.py
+        language: system
+        stages: [commit-msg]
 
       - id: count-lines
         name: count lines of code

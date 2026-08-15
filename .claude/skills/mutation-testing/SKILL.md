@@ -19,7 +19,7 @@ description: |
 ./scripts/mutation_test.sh --profile fast   # pre-commit subset
 ./scripts/mutation_test.sh --profile full   # whole gated scope (pre-push)
 ./scripts/mutation_test.sh                  # whole scope, no filter
-uv run pre-commit install --hook-type pre-push   # required once, for the full gate
+uv run pre-commit install                   # required once; installs the pre-push gate too
 ```
 
 `full` is an **empty glob list** on purpose. mutmut honours a cached verdict

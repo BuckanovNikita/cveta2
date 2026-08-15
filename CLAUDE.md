@@ -18,7 +18,7 @@ uv run pytest              # full suite with parallel execution
 uv run pytest -x           # stop on first failure
 uv run pytest -k "test_name"  # run specific tests
 
-# Pre-commit checks (runs all tools in order)
+# The commit gate, without making a commit (git commit runs it too)
 uv run pre-commit run --all-files
 
 # Individual tools
@@ -30,6 +30,7 @@ uv run lint-imports        # architecture contracts
 uv run vulture             # dead code detection
 ./scripts/mutation_test.sh --profile fast  # mutation testing gate (pre-commit subset)
 ./scripts/mutation_test.sh --profile full  # mutation testing gate (whole scope, pre-push)
+./scripts/integration_gate.sh              # integration gate: stack up, tests, stack down (pre-push)
 ```
 
 **Style**: Always use `loguru` for logging (never `print`), pydantic for configs, f-strings over structured logging.
@@ -90,10 +91,11 @@ uv run pytest -x                 # stop on first failure
 - **`tests/test_api.py`** covers the public `cveta2.*` workflow functions; **`tests/test_cli_parsing.py`** covers argparse wiring
 
 Integration tests (`tests/integration/`) run only when `CVAT_INTEGRATION_HOST`
-is set, against a live CVAT + MinIO stack. The lifecycle scripts, the
-`tests/integration/.env` keys, the fixed ports and the no-xdist / fresh-state
-caveats live in the **`running-integration-tests` skill** — use it rather than
-starting the stack by hand.
+is set, against a live CVAT + MinIO stack, and at pre-push through
+`scripts/integration_gate.sh` on machines that have `tests/integration/.env`.
+The lifecycle scripts, the `.env` keys, the fixed ports and the no-xdist /
+fresh-state caveats live in the **`running-integration-tests` skill** — use it
+rather than starting the stack by hand.
 
 ## Mutation Testing
 
@@ -124,8 +126,9 @@ git push origin main --follow-tags
 
 - A merge of only `chore`/`docs`/`test` commits warrants no release; `--print`
   says so and exits 0. Still run it — that is how you learn which case you are in.
-- The push is separate on purpose: it fires the pre-push full mutation gate, and
-  semantic-release would push branch and tag separately, paying for it twice.
+- The push is separate on purpose: it fires the pre-push gates (full mutation
+  scope, version drift, integration tests), and semantic-release would push
+  branch and tag separately, paying for them twice.
 - Releases never run from a feature branch — semantic-release refuses, since only
   `main` is a release branch.
 - No CI, no GitHub Release, no PyPI. A release is a tag, a changelog and a version.
@@ -179,20 +182,36 @@ interactively.
 2. Update `DATASET_FORMAT.md` if CSV columns change
 3. Ensure tests in `tests/test_extractors.py` pass
 
-## Pre-commit Hooks
+## Hooks
 
-The pre-commit pipeline runs: format → lint → import-linter → mypy → vulture → pytest → mutmut (fast profile) → count-lines → build → lock.
-
-A second hook, `mutmut-full`, runs the whole gated mutation scope at **pre-push**.
-It needs a one-time install:
+One command installs every stage — `default_install_hook_types` in
+`.pre-commit-config.yaml` covers `pre-commit`, `commit-msg` and `pre-push`:
 
 ```bash
-uv run pre-commit install --hook-type pre-push
+uv run pre-commit install
 ```
 
-**Always run before committing**:
-```bash
-uv run pre-commit run --all-files
-```
+**commit** — format → lint → import-linter → mypy → vulture → pytest → mutmut
+(fast profile) → count-lines → build → lock. `git commit` runs it; there is no
+separate manual step, and unstaged changes are stashed for the run, so what is
+checked is what is being committed. A hook that rewrites files (ruff format,
+`uv lock`) aborts the commit — re-`git add` and commit again.
 
-If hooks modify files (ruff format), review changes and re-add them.
+**commit-msg** — `conventional-commit` rejects a subject python-semantic-release
+cannot parse, and a `!` marker with no `BREAKING CHANGE:` footer. Merge, revert
+and autosquash subjects are exempt.
+
+**pre-push** — `mutmut-full` over the whole gated mutation scope, then
+`version-drift` (the `version` field must match the nearest tag, so a hand edit
+cannot reach `main`), then `integration-tests`.
+
+`integration-tests` runs `scripts/integration_gate.sh`, which builds the CVAT +
+MinIO + ClearML stack from scratch, runs `tests/integration`, and tears it down
+again. It arms itself on `tests/integration/.env`: no such file, no integration
+tests, which is what a fresh clone and every other machine gets. **A push
+therefore destroys a stack you left running** — `integration_up.sh` starts with
+`down -v`, volumes included. Skip it for one push with
+`SKIP=integration-tests git push`.
+
+To run one hook by hand: `uv run pre-commit run --all-files`, or
+`uv run pre-commit run <id> --hook-stage pre-push`.

@@ -21,24 +21,19 @@ Integration tests run against a real CVAT + MinIO + ClearML Docker stack. The fu
   point `CVAT_COMPOSE_FILE` at a local copy of that file.
 - Free ports (defaults: 9988, 9989, 9990, 8880-8882) — see parallel section for overrides
 - `tests/integration/.env` — gitignored, so a fresh clone does not have one and
-  every script fails on `couldn't find env file` until you write it:
+  every script fails on `couldn't find env file` until you create it:
 
-  ```dotenv
-  DJANGO_SUPERUSER_USERNAME=admin
-  DJANGO_SUPERUSER_PASSWORD=admin
-  DJANGO_SUPERUSER_EMAIL=admin@example.com
-
-  MINIO_BUCKET=cveta2-test
-
-  # CVAT proxies outbound S3 through smokescreen, which denies private ranges
-  # by default. Without this, seeding dies registering the cloud storage with
-  # "The resource cveta2-test not found" while MinIO is healthy and reachable.
-  SMOKESCREEN_OPTS=--unsafe-allow-private-ranges
+  ```bash
+  cp tests/integration/.env.example tests/integration/.env
   ```
 
-  The username and password must match what `tests/integration/conftest.py`
-  logs in with (`admin`/`admin` unless `CVAT_INTEGRATION_USER` /
-  `CVAT_INTEGRATION_PASSWORD` say otherwise).
+  The same file is the switch for the pre-push gate below. The username and
+  password in it must match what `tests/integration/conftest.py` logs in with
+  (`admin`/`admin` unless `CVAT_INTEGRATION_USER` / `CVAT_INTEGRATION_PASSWORD`
+  say otherwise). `SMOKESCREEN_OPTS` is not optional: CVAT proxies outbound S3
+  through smokescreen, which denies private ranges, so without it seeding dies
+  registering the cloud storage with "The resource cveta2-test not found" while
+  MinIO is healthy and reachable.
 
 ## Quick Start (Single Agent)
 
@@ -59,6 +54,30 @@ Forward extra pytest args to `integration_test.sh`:
 ./scripts/integration_test.sh -k upload        # only upload tests
 ./scripts/integration_test.sh -x --tb=long     # stop on first failure, long tracebacks
 ```
+
+## The pre-push gate
+
+`scripts/integration_gate.sh` runs the same lifecycle from the `integration-tests`
+pre-push hook: start the stack, run `tests/integration`, tear it down. It owns the
+whole cycle rather than reusing whatever is running because of caveat 2 below —
+a stack that already ran the upload tests is not safe to run them against again.
+
+It arms itself on `tests/integration/.env`, so a machine that was never set up
+for integration testing skips it silently. That is the *only* silent skip: with
+docker down or a port taken, an armed gate fails the push instead of waving it
+through.
+
+```bash
+./scripts/integration_gate.sh                # the same thing by hand
+./scripts/integration_gate.sh --keep-stack   # leave the stack up on failure
+SKIP=integration-tests git push              # skip it for one push
+```
+
+Two consequences worth knowing before your first push: it **destroys a stack you
+left running** (the cycle starts with `down -v`), and it runs only
+`tests/integration` — the `live-cvat` re-run of the unit suite that
+`CVAT_INTEGRATION_HOST` also switches on stays a manual
+`./scripts/integration_test.sh`.
 
 ## What Each Script Does
 
@@ -139,6 +158,6 @@ INTEGRATION_USER=agent-b ./scripts/integration_up.sh --port 9188 --minio-port 91
 ## Important Caveats
 
 1. **No xdist**: Do NOT add `-n auto` to integration tests. CVAT returns 429 errors under parallel load.
-2. **Fresh state required**: Upload tests create tasks in the seeded project. Re-running against the same instance without re-seeding fails with `ValueError: Duplicate base task name`. Always tear down and restart between full runs.
+2. **Fresh state required**: Upload tests create tasks in the seeded project. Re-running against the same instance without re-seeding fails with `ValueError: Duplicate base task name`. Always tear down and restart between full runs — this is why the pre-push gate builds its own stack instead of reusing one.
 3. **First run is slow**: Docker image pulls + coco8 download + CVAT startup takes 2-3 minutes. Subsequent runs are faster (images cached).
 4. **Health timeout**: If CVAT doesn't become healthy within 180s, the script fails. Check `docker logs USERNAME-cvat_server`.

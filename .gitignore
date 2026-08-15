@@ -16,6 +16,7 @@ wheels/
 # Environment variables
 .env
 .env.*
+!tests/integration/.env.example
 
 # Linters / type checkers / formatters cache
 .mypy_cache/

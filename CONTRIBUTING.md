@@ -6,8 +6,11 @@
 git clone <repo-url>
 cd cveta2
 uv sync
-uv run pre-commit install   # автоматические проверки перед коммитом
+uv run pre-commit install   # хуки commit, commit-msg и pre-push разом
 ```
+
+Одной команды достаточно: список стадий задан в `.pre-commit-config.yaml`
+(`default_install_hook_types`).
 
 Требования: Python 3.12+, [uv](https://docs.astral.sh/uv/),
 Docker + Compose v2 (только для интеграционных тестов).
@@ -30,6 +33,14 @@ Docker + Compose v2 (только для интеграционных тесто
 
 ### Запуск всего сразу
 
+Хуки установлены, поэтому `git commit` сам прогоняет весь набор — отдельно
+запускать ничего не нужно. Незакоммиченные изменения на время прогона убираются
+в stash, так что проверяется ровно то, что коммитится. Если хук переписал файлы
+(`ruff format`, `uv lock`), коммит прерывается: добавьте изменения в индекс и
+повторите.
+
+Прогнать всё вручную, не коммитя:
+
 ```bash
 uv run pre-commit run --all-files
 ```
@@ -48,6 +59,15 @@ Pre-commit запускает хуки в следующем порядке:
 1. `uv lock` — синхронизация lock-файла
 
 Всегда запускайте `ruff format` перед `ruff check` — форматтер может создать/исправить lint-ошибки.
+
+На стадии `commit-msg` работает `conventional-commit`: он не пропускает
+заголовок, который не разберёт semantic-release, и `!` без футера
+`BREAKING CHANGE:`. Заголовки `Merge …`, `Revert …` и autosquash он не трогает.
+
+На стадии `pre-push` — три хука подряд: `mutmut-full` (весь охват мутационного
+тестирования), `version-drift` (поле `version` должно совпадать с ближайшим
+тегом, чтобы правка руками не доехала до `main`) и `integration-tests`
+(см. «Интеграционные тесты»).
 
 ### ruff format (форматирование)
 
@@ -176,11 +196,7 @@ uv run mutmut browse                             # интерактивный р
 Проверяет, что тесты действительно *проверяют* поведение, а не просто
 исполняют код, и падает, если выжил хоть один мутант без объяснения.
 
-Полный гейт живёт в хуке pre-push, его нужно установить отдельно:
-
-```bash
-uv run pre-commit install --hook-type pre-push
-```
+Полный гейт живёт в хуке pre-push — его ставит общий `uv run pre-commit install`.
 
 - Охват задаётся в `[tool.mutmut].only_mutate`; счёт мутантов и score печатает
   сам `mutation_test.sh`. Каждый модуль оттуда стоит на нуле *необъяснённых*
@@ -279,6 +295,33 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 
 Без `CVAT_INTEGRATION_HOST` интеграционные тесты не запускаются. Скрипт `integration_test.sh` выставляет эту переменную автоматически.
 
+### Гейт на pre-push
+
+`scripts/integration_gate.sh` (хук `integration-tests`) делает на пуше весь цикл
+сам: поднимает стек, гоняет `tests/integration`, гасит стек. Прогоняется только
+`tests/integration` — переменная `CVAT_INTEGRATION_HOST` заодно добавляет
+параметр `live-cvat` в фикстуру `coco8_fixtures`, и юнит-тесты пошли бы по
+живому CVAT ещё раз, последовательно. Такой прогон запускают руками:
+`./scripts/integration_test.sh`.
+
+Гейт включается сам по наличию `tests/integration/.env` — файл в `.gitignore`,
+поэтому на свежем клоне и на любой другой машине интеграционных тестов на пуше
+просто нет. Включить: `cp tests/integration/.env.example tests/integration/.env`.
+
+Два следствия, о которых лучше знать заранее:
+
+- **Пуш сносит поднятый стек.** `integration_up.sh` всегда начинает с
+  `docker compose down -v`, вместе с volumes — свежее состояние здесь требование
+  корректности, иначе upload-тесты падают на `Duplicate base task name`.
+- **Отсутствие `.env` — единственный тихий пропуск.** Если машина включена, а
+  docker не поднят или порт занят, гейт валит пуш, а не пропускает его.
+
+Пропустить гейт на один пуш (`mutmut-full` при этом отработает):
+
+```bash
+SKIP=integration-tests git push
+```
+
 | Переменная | По умолчанию | Описание |
 |---|---|---|
 | `CVAT_INTEGRATION_HOST` | — | URL CVAT; включает интеграционные тесты |
@@ -312,7 +355,8 @@ branch 'my-feature' isn't in any release groups; no release will be made
 Версию, тег и `CHANGELOG.md` считает
 [python-semantic-release](https://python-semantic-release.readthedocs.io/) по истории
 conventional-коммитов. Поле `version` в `pyproject.toml` руками не правят — его
-проставляет релиз.
+проставляет релиз, а хук `version-drift` на pre-push сверяет его с ближайшим тегом.
+Формат заголовка проверяет хук `conventional-commit` на `commit-msg`.
 
 | Коммит | Бамп версии |
 |---|---|
@@ -351,9 +395,9 @@ git push origin main --follow-tags                            # коммит и 
 выпускать нечего, тег остаётся прежним. Проверять всё равно нужно каждый раз: только так
 видно, какой это случай.
 
-Пуш вынесен в отдельную команду не для красоты: он поднимает pre-push-хук с полным
-профилем мутационного тестирования, а semantic-release пушит ветку и тег двумя разными
-пушами — гейт отработал бы дважды.
+Пуш вынесен в отдельную команду не для красоты: он поднимает pre-push-хуки (полный
+профиль мутационного тестирования, `version-drift`, интеграционный гейт), а
+semantic-release пушит ветку и тег двумя разными пушами — гейты отработали бы дважды.
 
 `--no-vcs-release` отключает создание GitHub Release, поэтому токен не нужен. На PyPI
 пакет не публикуется.
@@ -396,3 +440,11 @@ docker logs "$(whoami)-cvat_server"
 **Не скачивается compose-файл CVAT** — задайте `CVAT_COMPOSE_FILE` с путём к локальной копии `docker-compose.yml` CVAT
 
 **Тесты падают после изменения фикстур** — перезапустите `./scripts/integration_up.sh`
+
+**Пуш падает на `integration-tests`** — не поднят docker или занят один из портов
+стека. Поднимите docker / освободите порт либо пропустите гейт на этот пуш:
+`SKIP=integration-tests git push`
+
+**Пуш падает на `version-drift`** — `version` в `pyproject.toml` разошёлся с
+ближайшим тегом. Верните значение, которое проставил релиз; если ветка старше
+последнего релиза `main`, перебазируйте её на `main`.
