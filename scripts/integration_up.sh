@@ -117,7 +117,7 @@ COMPOSE_FILE="${CVAT_COMPOSE_FILE:-$COMPOSE_DIR/docker-compose.yml}"
 # ── Helpers ─────────────────────────────────────────────────────────
 compose() {
     docker compose \
-        --project-directory "${COMPOSE_FILE%/*}" \
+        --project-directory "$(dirname "$COMPOSE_FILE")" \
         -p "${INTEGRATION_USER}-cvat" \
         -f "$COMPOSE_FILE" \
         -f "$OVERRIDE_FILE" \
