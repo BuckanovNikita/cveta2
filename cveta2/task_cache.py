@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from botocore.exceptions import BotoCoreError, ClientError
@@ -20,7 +19,7 @@ from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 from cveta2.config import CacheConfig
-from cveta2.fs_utils import ensure_shared_dir, write_shared_bytes
+from cveta2.fs_utils import default_cache_base, ensure_shared_dir, write_shared_bytes
 from cveta2.models import TaskAnnotations
 from cveta2.s3_utils import (
     build_s3_key,
@@ -31,6 +30,8 @@ from cveta2.s3_utils import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from cveta2.image_downloader import CloudStorageInfo
     from cveta2.models import TaskInfo
     from cveta2.s3_types import S3Client
@@ -67,9 +68,7 @@ def get_task_cache_dir(project_id: int, root: Path | None = None) -> Path:
     """
     if root is not None:
         return root / f"project_{project_id}"
-    xdg_cache = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
-    return base / "cveta2" / "task_annotations" / f"project_{project_id}"
+    return default_cache_base() / "task_annotations" / f"project_{project_id}"
 
 
 def invalidate_local_entry(project_id: int, task_id: int, project_name: str) -> None:

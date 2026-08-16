@@ -509,6 +509,18 @@ def _configure_setup_clearml(parser: argparse.ArgumentParser) -> None:
     _add_list_arg(parser, "List current ClearML project mappings and exit.")
 
 
+def _configure_doctor(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        help=(
+            "Fix cache permissions: grant the group rwx on every cache path "
+            "owned by the current user, and list the users who must run this "
+            "themselves for the rest."
+        ),
+    )
+
+
 def _configure_whats_new(parser: argparse.ArgumentParser) -> None:
     _add_project_arg(parser)
     parser.add_argument(
@@ -622,8 +634,9 @@ def _command_specs() -> tuple[CommandSpec, ...]:
         ),
         CommandSpec(
             "doctor",
-            "Check configuration and image cache health.",
+            "Check configuration and cache health.",
             run_doctor,
+            _configure_doctor,
         ),
         CommandSpec(
             "setup-clearml",

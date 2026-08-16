@@ -248,6 +248,8 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
         ["task", "status", "-p", "proj", "-t", "7"],
         {"command": "task", "action": "status", "stage": None, "state": None},
     ),
+    (["doctor"], {"command": "doctor", "cache": False}),
+    (["doctor", "--cache"], {"command": "doctor", "cache": True}),
 ]
 
 

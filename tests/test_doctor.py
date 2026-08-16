@@ -24,8 +24,24 @@ def test_run_doctor_no_crash() -> None:
         patch("cveta2.commands.doctor.CvatConfig.load", return_value=cfg),
         patch("cveta2.config.ImageCacheConfig.load", return_value=ic_cfg),
         patch("cveta2.commands.doctor.check_aws_credentials", return_value=True),
+        patch("cveta2.commands.doctor.collect_cache_roots", return_value={}),
     ):
         run_doctor()
+
+
+def test_run_doctor_cache_flag_requests_a_fix() -> None:
+    """``doctor --cache`` reaches the permission check in fixing mode."""
+    import argparse
+
+    with (
+        patch("cveta2.commands.doctor.check_config", return_value=True),
+        patch("cveta2.commands.doctor.check_aws_credentials", return_value=True),
+        patch(
+            "cveta2.commands.doctor.check_cache_permissions", return_value=True
+        ) as check,
+    ):
+        run_doctor(argparse.Namespace(cache=True))
+    check.assert_called_once_with(fix=True)
 
 
 def test_run_setup_requires_interactive(tmp_path: Path) -> None:

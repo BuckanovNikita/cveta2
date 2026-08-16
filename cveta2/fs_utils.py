@@ -9,15 +9,25 @@ paths (possibly owned by other users) are never touched.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import os
+from pathlib import Path
 
 from loguru import logger
 
-if TYPE_CHECKING:
-    from pathlib import Path
+DIR_MODE = 0o775
+FILE_MODE = 0o664
 
-_DIR_MODE = 0o775
-_FILE_MODE = 0o664
+
+def default_cache_base() -> Path:
+    """Return cveta2's own cache base: ``$XDG_CACHE_HOME`` or ``~/.cache``.
+
+    Every cache cveta2 writes without an explicit configured root lives
+    below this directory, and ``doctor`` walks it from here — so the
+    convention is spelled out once instead of in each writer.
+    """
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
+    return base / "cveta2"
 
 
 def _chmod_quiet(path: Path, mode: int) -> None:
@@ -38,11 +48,11 @@ def ensure_shared_dir(path: Path) -> Path:
         current = current.parent
     path.mkdir(parents=True, exist_ok=True)
     for level in missing:
-        _chmod_quiet(level, _DIR_MODE)
+        _chmod_quiet(level, DIR_MODE)
     return path
 
 
 def write_shared_bytes(path: Path, data: bytes) -> None:
     """Write *data* to *path* and chmod the file to 664."""
     path.write_bytes(data)
-    _chmod_quiet(path, _FILE_MODE)
+    _chmod_quiet(path, FILE_MODE)

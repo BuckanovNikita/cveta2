@@ -16,17 +16,17 @@ import hashlib
 import os
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
-from cveta2.fs_utils import ensure_shared_dir, write_shared_bytes
+from cveta2.fs_utils import default_cache_base, ensure_shared_dir, write_shared_bytes
 from cveta2.image_downloader import CloudStorageInfo
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+    from pathlib import Path
 
 MANIFEST_SCHEMA_VERSION = 1
 
@@ -79,9 +79,7 @@ def compute_fingerprint(
 
 def get_upload_manifest_dir(project_id: int) -> Path:
     """Return the directory holding a project's unfinished upload manifests."""
-    xdg_cache = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
-    return base / "cveta2" / "uploads" / f"project_{project_id}"
+    return default_cache_base() / "uploads" / f"project_{project_id}"
 
 
 def save_manifest(manifest: UploadManifest) -> None:
