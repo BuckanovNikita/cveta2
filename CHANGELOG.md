@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v0.2.0 (2026-08-16)
+
+### Bug Fixes
+
+- **upload**: Report a task with no attached data as empty, not as an error
+  ([`1652ce2`](https://github.com/BuckanovNikita/cveta2/commit/1652ce25a114153f7afe6db8677ef85c01bf35ab))
+
+### Features
+
+- **doctor**: Repair shared-cache permissions with `doctor --cache`
+  ([`df85689`](https://github.com/BuckanovNikita/cveta2/commit/df85689f81d07e13dee05f3427a83e91d8069611))
+
+- **retry**: Retry 429 and 5xx, and never repeat an ambiguous write
+  ([`bcc8932`](https://github.com/BuckanovNikita/cveta2/commit/bcc8932dd200ffe0c8eaf456a1e1373399edc592))
+
+- **transfer**: Run S3 and CVAT work concurrently
+  ([`5eee206`](https://github.com/BuckanovNikita/cveta2/commit/5eee2069c0cea6526ee3390bce71c6221acc9032))
+
+- **upload**: Continue an interrupted upload with --resume
+  ([`f58d818`](https://github.com/BuckanovNikita/cveta2/commit/f58d8184345522322aac1927054479b9a1842086))
+
+### Testing
+
+- **integration**: Prove concurrency and resume against a live CVAT
+  ([`873822a`](https://github.com/BuckanovNikita/cveta2/commit/873822a09e73457b132ec7095e2036bb1a1cf5b2))
+
+
 ## v0.1.1 (2026-08-15)
 
 ### Bug Fixes
