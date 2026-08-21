@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-08-21)
+
+### Bug Fixes
+
+- **convert**: Emit job_stage/job_state instead of the removed task_status
+  ([`f25b0f3`](https://github.com/BuckanovNikita/cveta2/commit/f25b0f3cc6bd40ea344c50cf42a41026be4cd780))
+
+- **integration**: Make the stack work against CVAT v2.59.1
+  ([`26471ad`](https://github.com/BuckanovNikita/cveta2/commit/26471adf23e6a5704c9a09cf7f5214e5fdc93fdd))
+
+### Features
+
+- Replace task_status with per-job job_stage and job_state
+  ([`f50c5b1`](https://github.com/BuckanovNikita/cveta2/commit/f50c5b1bb388d10b1ba1ce26b90b69bb732f4552))
+
+### Testing
+
+- **integration**: Pin CVAT's finished-task rule against a live server
+  ([`e865648`](https://github.com/BuckanovNikita/cveta2/commit/e865648efbc9e55f600eee76f1013ab88ba91665))
+
+### Breaking Changes
+
+- The `task_status` column is gone from dataset.csv, obsolete.csv, in_progress.csv and deleted.csv,
+  replaced by `job_stage` and `job_state`. `whats_new` requires the new columns, so a CSV fetched
+  before this change must be refetched.
+
+
 ## v0.2.1 (2026-08-21)
 
 ### Performance Improvements
