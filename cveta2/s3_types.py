@@ -23,6 +23,10 @@ class S3Client(Protocol):
         """Retrieve an object from S3."""
         ...
 
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        """Retrieve an object's metadata without its body."""
+        ...
+
     def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
         """List objects in a bucket."""
         ...

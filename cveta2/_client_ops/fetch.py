@@ -12,11 +12,13 @@ from cveta2._client_ops.base import _ClientBase
 from cveta2._client_ops.shared import (
     _HTTP_5XX_MAX,
     _HTTP_5XX_MIN,
+    _HTTP_NOT_FOUND,
     FetchContext,
     _FetchAnnotationsOptions,
     _is_rate_limited,
     _log_task_5xx_skip,
 )
+from cveta2._concurrency import Workers, run_concurrent
 from cveta2.config import should_raise_on_fetch_failure
 from cveta2.exceptions import CvatApiError, Cveta2Error, TaskNotFoundError
 from cveta2.models import TaskAnnotations
@@ -36,19 +38,32 @@ def _format_task_choices(tasks: Sequence[TaskInfo]) -> str:
 def _filter_tasks_for_fetch(
     tasks: list[TaskInfo],
     options: _FetchAnnotationsOptions,
+    *,
+    already_selected: bool = False,
 ) -> list[TaskInfo]:
-    """Apply ignore list, task selector, completed_only; return filtered list."""
-    if options.ignore_task_ids:
-        skipped = [t for t in tasks if t.id in options.ignore_task_ids]
-        silent_ids = options.silent_task_ids or set()
-        logged = [t for t in skipped if t.id not in silent_ids]
-        if logged:
-            logger.warning(f"Пропускаем {len(logged)} задач(а) из ignore-списка:")
-            for t in logged:
-                logger.warning(f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})")
-        tasks = [t for t in tasks if t.id not in options.ignore_task_ids]
+    """Apply ignore list, task selector, completed_only; return filtered list.
+
+    *already_selected* says *tasks* is the caller's selection resolved by
+    id rather than the project's whole list: the ignore list and the
+    selector are settled, and only the logging and ``completed_only``
+    still apply.  Both paths share the logging so the two look alike in
+    a run log.
+    """
+    if not already_selected:
+        if options.ignore_task_ids:
+            skipped = [t for t in tasks if t.id in options.ignore_task_ids]
+            silent_ids = options.silent_task_ids or set()
+            logged = [t for t in skipped if t.id not in silent_ids]
+            if logged:
+                logger.warning(f"Пропускаем {len(logged)} задач(а) из ignore-списка:")
+                for t in logged:
+                    logger.warning(
+                        f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})"
+                    )
+            tasks = [t for t in tasks if t.id not in options.ignore_task_ids]
+        if options.task_selector is not None:
+            tasks = _FetchMixin.resolve_task_selectors(tasks, options.task_selector)
     if options.task_selector is not None:
-        tasks = _FetchMixin.resolve_task_selectors(tasks, options.task_selector)
         logger.info(
             f"Selected {len(tasks)} task(s): {_format_task_choices(tasks)}",
         )
@@ -56,6 +71,80 @@ def _filter_tasks_for_fetch(
         tasks = [t for t in tasks if t.status == "completed"]
         logger.trace(f"Filtered to {len(tasks)} completed task(s)")
     return tasks
+
+
+def _numeric_selector_ids(
+    selectors: Sequence[int | str] | None,
+) -> list[int] | None:
+    """Return *selectors* as unique task ids, or None if any names a task."""
+    if not selectors:
+        return None
+    ids: list[int] = []
+    for selector in selectors:
+        text = str(selector).strip()
+        if not (isinstance(selector, int) or text.isdigit()):
+            return None
+        ids.append(int(text))
+    return list(dict.fromkeys(ids))
+
+
+def _resolve_selected_tasks_by_id(
+    api: CvatApiPort,
+    project_id: int,
+    options: _FetchAnnotationsOptions,
+) -> list[TaskInfo] | None:
+    """Retrieve the selected tasks one by one, or None to list the project.
+
+    Listing every task of a project to pick one out of it is the largest
+    fixed cost of a task fetch, and it grows with the project rather than
+    with the request: the CVAT SDK pages that listing serially.  When the
+    caller named tasks by id there is nothing to search — ``get_task``
+    answers each selector in a single request.
+
+    ``None`` means the full list is needed after all, which restores the
+    listing path together with its error messages.  Each such case is an
+    error or a skip — an unknown id may still match a task *name*, a task
+    from another project or an ignored one must raise rather than fetch —
+    so no run that goes on to download anything pays for the listing.
+    """
+    task_ids = _numeric_selector_ids(options.task_selector)
+    if task_ids is None:
+        return None
+    if options.ignore_task_ids and not options.ignore_task_ids.isdisjoint(task_ids):
+        return None
+    outcomes = run_concurrent(
+        task_ids,
+        api.get_task,
+        max_workers=Workers.cvat,
+        catch=(CvatApiError,),
+        desc="Resolving tasks",
+        unit="task",
+    )
+    tasks: list[TaskInfo] = []
+    for outcome in outcomes:
+        if isinstance(outcome, Exception):
+            if (
+                isinstance(outcome, CvatApiError)
+                and outcome.status_code == _HTTP_NOT_FOUND
+            ):
+                return None
+            raise outcome
+        if outcome.project_id != project_id:
+            return None
+        tasks.append(outcome)
+    return tasks
+
+
+def _select_tasks_for_fetch(
+    api: CvatApiPort,
+    project_id: int,
+    options: _FetchAnnotationsOptions,
+) -> list[TaskInfo]:
+    """Return the tasks to fetch, listing the project only when needed."""
+    selected = _resolve_selected_tasks_by_id(api, project_id, options)
+    if selected is not None:
+        return _filter_tasks_for_fetch(selected, options, already_selected=True)
+    return _filter_tasks_for_fetch(api.get_project_tasks(project_id), options)
 
 
 class _FetchMixin(_ClientBase):
@@ -139,10 +228,9 @@ class _FetchMixin(_ClientBase):
         options: _FetchAnnotationsOptions,
     ) -> FetchContext:
         """Get task list and labels, apply filters, return context."""
-        tasks = api.get_project_tasks(project_id)
+        tasks = _select_tasks_for_fetch(api, project_id, options)
         labels = api.get_project_labels(project_id)
         label_names, attr_names = _build_label_maps(labels)
-        tasks = _filter_tasks_for_fetch(tasks, options)
         return FetchContext(
             tasks=tasks,
             label_names=label_names,

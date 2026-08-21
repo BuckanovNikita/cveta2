@@ -10,7 +10,10 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2._client_ops.fetch import _filter_tasks_for_fetch
+from cveta2._client_ops.fetch import (
+    _filter_tasks_for_fetch,
+    _select_tasks_for_fetch,
+)
 from cveta2._client_ops.shared import _FetchAnnotationsOptions
 from cveta2.client import CvatClient
 from cveta2.commands.fetch import (
@@ -42,6 +45,7 @@ from tests.helpers import (
     build_fake,
     make_fake_client,
     make_fetch_args,
+    make_task,
     patch_cli_client,
 )
 
@@ -217,6 +221,126 @@ class TestWarnIgnoredTasks:
 
         assert ignore_set == {10, 20, 30}
         assert silent_set == {10, 30}
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: _select_tasks_for_fetch (numeric selectors skip the task listing)
+# ---------------------------------------------------------------------------
+
+_PROJECT_ID = 1
+
+
+class TestSelectTasksForFetch:
+    """Numeric selectors are retrieved by id; everything else lists the project.
+
+    Listing a project to find one task in it costs a serial page walk that
+    grows with the project, so the id path must stay off it.  Each fallback
+    below is a case the listing still owns, and every one of them ends in an
+    error or a skip — which is what keeps the listing off the happy path.
+    """
+
+    def test_numeric_ids_are_retrieved_one_by_one(self) -> None:
+        """Ids reach ``get_task`` directly, and the project is never listed."""
+        api = FakeCvatApi.from_tasks([make_task(1), make_task(2), make_task(3)])
+        options = _FetchAnnotationsOptions(task_selector=["2", 3])
+
+        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert [t.id for t in result] == [2, 3]
+        assert api.call_counts["get_project_tasks"] == 0
+        assert api.call_counts["get_task"] == 2
+
+    def test_the_same_id_twice_is_requested_once(self) -> None:
+        """Duplicate selectors collapse before any request is made."""
+        api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
+        options = _FetchAnnotationsOptions(task_selector=[2, "2"])
+
+        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert [t.id for t in result] == [2]
+        assert api.call_counts["get_task"] == 1
+
+    def test_completed_only_still_applies(self) -> None:
+        """The status filter runs on the id path as it does on the listing."""
+        api = FakeCvatApi.from_tasks(
+            [make_task(1, status="completed"), make_task(2, status="annotation")]
+        )
+        options = _FetchAnnotationsOptions(task_selector=[1, 2], completed_only=True)
+
+        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert [t.id for t in result] == [1]
+
+    def test_no_selector_lists_the_project(self) -> None:
+        """A whole-project fetch still asks for every task."""
+        api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
+
+        result = _select_tasks_for_fetch(api, _PROJECT_ID, _FetchAnnotationsOptions())
+
+        assert [t.id for t in result] == [1, 2]
+        assert api.call_counts["get_project_tasks"] == 1
+
+    def test_name_selector_lists_the_project(self) -> None:
+        """A name can only be matched against the full list."""
+        api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
+        options = _FetchAnnotationsOptions(task_selector=["alpha"])
+
+        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert [t.id for t in result] == [1]
+        assert api.call_counts["get_project_tasks"] == 1
+        assert api.call_counts["get_task"] == 0
+
+    def test_one_name_among_ids_lists_the_project(self) -> None:
+        """A single non-numeric selector sends the whole batch to the listing."""
+        api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
+        options = _FetchAnnotationsOptions(task_selector=[2, "alpha"])
+
+        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert {t.id for t in result} == {1, 2}
+        assert api.call_counts["get_project_tasks"] == 1
+        assert api.call_counts["get_task"] == 0
+
+    def test_unknown_id_falls_back_to_a_name_match(self) -> None:
+        """A digit string names a task when no task carries it as an id.
+
+        The listing path matches by id first and by name second, so a task
+        literally called ``"12345"`` is reachable by that selector.  Taking
+        the id shortcut must not turn that into "task not found".
+        """
+        api = FakeCvatApi.from_tasks([make_task(7, name="12345")])
+        options = _FetchAnnotationsOptions(task_selector=["12345"])
+
+        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert [t.id for t in result] == [7]
+        assert api.call_counts["get_project_tasks"] == 1
+
+    def test_task_of_another_project_lists_the_project(self) -> None:
+        """An id owned by a different project is the listing's to reject."""
+        api = FakeCvatApi.from_tasks([make_task(1)])
+        options = _FetchAnnotationsOptions(task_selector=[1])
+
+        with pytest.raises(TaskNotFoundError):
+            _select_tasks_for_fetch(api, _PROJECT_ID + 1, options)
+
+        assert api.call_counts["get_project_tasks"] == 1
+
+    def test_ignored_id_still_raises_task_not_found(self) -> None:
+        """Asking for an ignored task fails; it must not fetch nothing quietly.
+
+        The listing drops ignored tasks *before* resolving the selector, so
+        the id never matches.  Filtering after an id lookup would instead
+        write an empty dataset and exit successfully.
+        """
+        api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
+        options = _FetchAnnotationsOptions(task_selector=[2], ignore_task_ids={2})
+
+        with pytest.raises(TaskNotFoundError):
+            _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert api.call_counts["get_project_tasks"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -662,6 +786,45 @@ class TestFetchSelectedTasks:
         task_ids_in_csv = set(df["task_id"].unique())
         assert fake.tasks[0].id in task_ids_in_csv
         assert ignored_task_id not in task_ids_in_csv
+
+    def test_numeric_selector_matches_the_name_selector_without_listing(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        tmp_path: Path,
+    ) -> None:
+        """Fetching by id writes what fetching by name writes, minus the listing.
+
+        The name selector still walks the project task list, so it is the
+        reference the id shortcut has to reproduce byte for byte.
+        """
+        fake = build_fake(
+            coco8_fixtures,
+            ["normal", "all-empty"],
+            statuses=["completed", "completed"],
+        )
+        by_name_api = FakeCvatApi(fake)
+        by_id_api = FakeCvatApi(fake)
+        by_name = tmp_path / "by-name"
+        by_id = tmp_path / "by-id"
+
+        for api, out_dir, selector in (
+            (by_name_api, by_name, [t.name for t in fake.tasks]),
+            (by_id_api, by_id, [t.id for t in fake.tasks]),
+        ):
+            fetch_selected_tasks(
+                CvatClient(CFG, api=api),
+                fake.project.id,
+                fake.project.name,
+                out_dir,
+                None,
+                FetchOptions(task_selector=list(selector), use_cache=False),
+            )
+
+        for name in ("dataset.csv", "deleted.csv"):
+            assert (by_id / name).read_bytes() == (by_name / name).read_bytes()
+        assert by_name_api.call_counts["get_project_tasks"] == 1
+        assert by_id_api.call_counts["get_project_tasks"] == 0
+        assert by_id_api.call_counts["get_task"] == len(fake.tasks)
 
     def test_task_not_found_raises(
         self,

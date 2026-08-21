@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from cveta2._client.connection import SdkClientFactory
     from cveta2._client.ports import CvatApiPort
+    from cveta2.image_downloader import CloudStorageInfo
 
 
 class _ClientBase:
@@ -52,6 +53,11 @@ class _ClientBase:
         # Persistent API opened by __enter__, closed by __exit__.
         self._persistent_api: CvatApiPort | None = None
         self._exit_stack: ExitStack | None = None
+        # Cloud storage per project id: two requests each, asked for twice
+        # per fetch (once for the images, once for the shared task cache)
+        # and never changing inside a run.  Project ids are scoped to the
+        # session organization, so set_organization() drops it.
+        self._cloud_storage_memo: dict[int, CloudStorageInfo | None] = {}
 
     def __enter__(self) -> Self:
         """Open a persistent SDK connection for the lifetime of this block."""
@@ -105,6 +111,7 @@ class _ClientBase:
     def set_organization(self, org: str | None) -> None:
         """Scope subsequent CVAT requests to *org* (``None`` = personal)."""
         self._organization = org
+        self._cloud_storage_memo.clear()
         self._require_api("set_organization").set_organization(org)
 
     def open_task_session(self, task_id: int) -> TaskWriteSession:

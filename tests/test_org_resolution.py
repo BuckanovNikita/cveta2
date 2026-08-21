@@ -102,14 +102,21 @@ class TestResolveProjectSpecWithOrg:
     def test_numeric_spec_falls_back_to_the_id_as_name(self) -> None:
         """An id nobody owns still yields a usable name, not None.
 
-        ``next(..., str(project_id))`` supplies it; dropping the default makes
-        next() raise StopIteration, and passing None puts "None" in front of
-        the user wherever the project name is displayed.
+        Reading the project raises rather than answering, and the id has to
+        stand in: the name reaches log lines, the task-cache directory and
+        the ignore-list key, so "None" there would be shown to the user.
         """
         api = FakeCvatApi.from_tasks([make_task(42)], project_name="alpha")
         client = CvatClient(CvatConfig(), api=api)
 
         assert resolve_project_spec(client, 999) == (999, "999")
+
+    def test_a_project_with_no_name_falls_back_to_the_id(self) -> None:
+        """An unnamed project is the same problem as an unreadable one."""
+        api = FakeCvatApi.from_tasks([make_task(42)], project_name="")
+        client = CvatClient(CvatConfig(), api=api)
+
+        assert resolve_project_spec(client, 1) == (1, "1")
 
     def test_name_spec_is_not_treated_as_an_id_lookup(self) -> None:
         """Non-numeric specs keep the caller's name verbatim.

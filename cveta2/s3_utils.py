@@ -175,6 +175,29 @@ def s3_get_bytes(s3_client: S3Client, bucket: str, key: str) -> bytes:
     return data
 
 
+_NOT_FOUND_CODES: Final = frozenset({"NoSuchKey", "NotFound", "404"})
+"""What S3 answers a HEAD for a key that is not there; the set varies by server."""
+
+
+@s3_retry
+def s3_object_exists(s3_client: S3Client, bucket: str, key: str) -> bool:
+    """Report whether *key* exists in *bucket*, without downloading it.
+
+    An absent object is an answer, not a failure — the caller asks in
+    order to learn whether a key it constructed was a good guess.  Every
+    other ``ClientError`` still raises: a denied bucket or a wrong
+    endpoint reported as "absent" would quietly turn a broken
+    configuration into a list of images said to be missing from S3.
+    """
+    try:
+        s3_client.head_object(Bucket=bucket, Key=key)
+    except ClientError as e:
+        if str(e.response.get("Error", {}).get("Code")) in _NOT_FOUND_CODES:
+            return False
+        raise
+    return True
+
+
 def parse_sync_root(root: str) -> tuple[str | None, str]:
     """Parse a sync root string into ``(bucket, prefix)``.
 

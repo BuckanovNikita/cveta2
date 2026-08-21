@@ -26,6 +26,10 @@ class _ReadMixin(_ClientBase):
         """Fetch list of projects from CVAT (id and name)."""
         return self._require_api("list_projects").list_projects()
 
+    def get_project(self, project_id: int) -> ProjectInfo:
+        """Fetch one project by id (id and name)."""
+        return self._require_api("get_project").get_project(project_id)
+
     def list_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Fetch the list of tasks for a project from CVAT."""
         return self._require_api("list_project_tasks").get_project_tasks(project_id)
@@ -131,7 +135,16 @@ class _ReadMixin(_ClientBase):
         ``source_storage.cloud_storage_id`` (ProjectRead API), or ``None``
         if the project has no source_storage.
 
+        The answer is remembered for the client's lifetime: it costs two
+        requests, a fetch asks for it twice (the image download applies
+        the sync-root override to it, the shared task cache deliberately
+        does not), and a project's storage does not change mid-run.
+
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
+        if project_id in self._cloud_storage_memo:
+            return self._cloud_storage_memo[project_id]
         api = self._require_api("detect_project_cloud_storage")
-        return api.get_project_cloud_storage(project_id)
+        cloud_storage = api.get_project_cloud_storage(project_id)
+        self._cloud_storage_memo[project_id] = cloud_storage
+        return cloud_storage

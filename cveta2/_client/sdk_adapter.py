@@ -239,6 +239,13 @@ class SdkCvatApiAdapter:
 
     @_api_retry
     @_translate_api_errors
+    def get_project(self, project_id: int) -> ProjectInfo:
+        """Return one project by id."""
+        project = self.client.projects.retrieve(project_id)
+        return ProjectInfo(id=project.id, name=project.name or "")
+
+    @_api_retry
+    @_translate_api_errors
     def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Return tasks belonging to a project."""
         project = self.client.projects.retrieve(project_id)

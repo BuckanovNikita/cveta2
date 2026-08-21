@@ -43,6 +43,10 @@ class CvatReadPort(Protocol):
         """Return all accessible projects."""
         ...
 
+    def get_project(self, project_id: int) -> ProjectInfo:
+        """Return one project by id."""
+        ...
+
     def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         """Return tasks belonging to a project."""
         ...

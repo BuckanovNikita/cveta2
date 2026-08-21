@@ -896,3 +896,108 @@ def test_s3_syncer_ignored_prefix_keeps_remainder(
     assert stats.downloaded == 2
     assert (target / "projA" / "2026-01" / "a.jpg").read_bytes() == b"data-a"
     assert (target / "projA" / "b.jpg").read_bytes() == b"data-b"
+
+
+# ---------------------------------------------------------------------------
+# S3 key resolution: probe the expected key before walking the whole prefix
+# ---------------------------------------------------------------------------
+
+
+def test_expected_keys_skip_the_whole_prefix_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Images sitting at their expected key are found without a listing.
+
+    The prefix holds every task's images, so listing it to place a couple
+    of them is what made a one-task fetch cost as much as a whole-project
+    one.  The key CVAT's frame name implies is checked first instead.
+    """
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "a.jpg"), _ann(10, 1, "b.jpg")],
+        deleted_images=[],
+    )
+    fake_s3 = FakeS3Client(
+        {
+            "test-bucket/images/a.jpg": b"data-a",
+            "test-bucket/images/b.jpg": b"data-b",
+            "test-bucket/images/someone-elses.jpg": b"data-other",
+        }
+    )
+    _patch_boto(monkeypatch, fake_s3)
+
+    target = tmp_path / "images"
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.downloaded == 2
+    assert fake_s3.list_requests == []
+    assert fake_s3.head_calls == [
+        "test-bucket/images/a.jpg",
+        "test-bucket/images/b.jpg",
+    ]
+    assert (target / "a.jpg").read_bytes() == b"data-a"
+    assert (target / "b.jpg").read_bytes() == b"data-b"
+
+
+def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bare name stored under a subfolder still resolves, via the listing.
+
+    Only the listing carries the basename fallback, so a probe that comes
+    back empty must hand the name over to it rather than report the image
+    as missing from S3.
+    """
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "flat.jpg"), _ann(10, 1, "nested.jpg")],
+        deleted_images=[],
+    )
+    fake_s3 = FakeS3Client(
+        {
+            "test-bucket/images/flat.jpg": b"data-flat",
+            "test-bucket/images/2026-02/nested.jpg": b"data-nested",
+        }
+    )
+    _patch_boto(monkeypatch, fake_s3)
+
+    target = tmp_path / "images"
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.downloaded == 2
+    assert stats.failed == 0
+    assert fake_s3.list_requests != []
+    assert (target / "flat.jpg").read_bytes() == b"data-flat"
+    assert (target / "nested.jpg").read_bytes() == b"data-nested"
+
+
+def test_a_batch_past_the_probe_limit_lists_instead(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wanting most of the bucket is what the single listing is still for."""
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "a.jpg"), _ann(10, 1, "b.jpg")],
+        deleted_images=[],
+    )
+    fake_s3 = FakeS3Client(
+        {
+            "test-bucket/images/a.jpg": b"data-a",
+            "test-bucket/images/b.jpg": b"data-b",
+        }
+    )
+    _patch_boto(monkeypatch, fake_s3)
+    monkeypatch.setattr("cveta2.image_downloader._DIRECT_KEY_PROBE_LIMIT", 1)
+
+    target = tmp_path / "images"
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.downloaded == 2
+    assert fake_s3.head_calls == []
+    assert fake_s3.list_requests != []

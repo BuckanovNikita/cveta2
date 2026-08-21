@@ -43,6 +43,7 @@ class FakeS3Client:
         self.objects: dict[str, bytes] = dict(objects or {})
         self.get_calls: list[str] = []
         self.put_calls: list[str] = []
+        self.head_calls: list[str] = []
         self.list_requests: list[dict[str, str]] = []
         self._keyed_by_bucket = keyed_by_bucket
 
@@ -58,6 +59,16 @@ class FakeS3Client:
                 "GetObject",
             )
         return {"Body": _FakeBody(self.objects[full_key])}
+
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        full_key = self._store_key(Bucket, Key)
+        self.head_calls.append(full_key)
+        if full_key not in self.objects:
+            raise ClientError(
+                {"Error": {"Code": "404", "Message": full_key}},
+                "HeadObject",
+            )
+        return {"ContentLength": len(self.objects[full_key])}
 
     def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> None:  # noqa: N803
         full_key = self._store_key(Bucket, Key)

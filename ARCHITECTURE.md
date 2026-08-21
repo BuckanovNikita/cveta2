@@ -55,7 +55,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
 - **`cveta2/dataset_partition.py`** - Core logic: splits annotations into dataset/obsolete/in_progress
 - **`cveta2/task_cache.py`** - Cache of completed-task annotations: local dir + shared S3 mirror, invalidated by task `updated_date`
-- **`cveta2/image_downloader.py`** - S3 → local sync
+- **`cveta2/image_downloader.py`** - S3 → local sync; resolves a small batch of images by probing the key each CVAT frame name implies (`s3_utils.s3_object_exists`) and falls back to the whole-prefix listing only for what that misses
 - **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
 - **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
 - **`cveta2/projects_cache.py`** - Local project metadata cache, keyed by organization (`organizations: [{slug, name, projects}]`; `""` slug = personal workspace)
@@ -66,6 +66,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 ## Key data flow
 
 1. **Fetch**: `cli`/`api.fetch` → `commands/fetch.py` (or `api.py`) → `services/fetch.py:fetch_project()` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
+   - Task selection scales with the request, not the project: `_client_ops/fetch.py:_select_tasks_for_fetch` retrieves each selector through `get_task` when all of them are numeric ids, and only walks the project task list otherwise — for a name selector, an id that turns out to name a task, a task belonging to another project, or an ignored id (all of which the listing path still owns, and all of which end in an error or a skip)
    - Completed tasks are served from `task_cache.py` when the cached `task_updated_date` matches (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
    - Annotations converted to `BBoxAnnotation` by `extractors.py`
@@ -92,6 +93,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - Every project spec (CLI `-p`, API `project=`) accepts an id, a name, or `ORG/PROJECT` (`/PROJECT` = personal workspace). The org prefix calls `client.set_organization()`, switching the session org for all subsequent CVAT calls (`services/resolve.py:split_project_spec` / `apply_project_org`).
 - The interactive picker (`commands/interactive/entities.py:select_project`) pages projects by organization — first page is the config org — and switches the session org on selection. Echoed re-run commands qualify `-p` via `_helpers.project_cli_spec` when the session org differs from the config default.
 - `fetch-task` / `api.fetch_task` infer the project from the first numeric task id when no project is given (`services/resolve.py:infer_project_from_tasks` via the `get_task` port method); name-only task specs still need an explicit project.
+- A numeric project spec is named through the `get_project` port method, not by listing the organization; an id nobody owns falls back to the id as the display name (`services/resolve.py:_project_display_name`). `client.detect_project_cloud_storage` is memoized per project for the client's lifetime and dropped on `set_organization`.
 
 ## Deleted images handling
 

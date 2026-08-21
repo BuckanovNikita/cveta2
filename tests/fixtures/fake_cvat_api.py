@@ -183,14 +183,32 @@ class FakeCvatApi:
 
     def list_projects(self) -> list[ProjectInfo]:
         """Return the fixture project plus any extra ones the test configured."""
+        self._enter("list_projects")
         return [self._project, *self.other_projects]
 
-    def get_project_tasks(self, _project_id: int) -> list[TaskInfo]:
-        """Return tasks from fixture data."""
+    def get_project(self, project_id: int) -> ProjectInfo:
+        """Return one project by id from the fixture project and the extras."""
+        self._enter("get_project")
+        for project in (self._project, *self.other_projects):
+            if project.id == project_id:
+                return project
+        raise CvatApiError(f"Project not found: {project_id}", status_code=404)
+
+    def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
+        """Return the fixture project's tasks, or nothing for another project.
+
+        CVAT scopes this endpoint to the project, so a fake that answered
+        with its tasks whatever it was asked could not tell a caller that
+        passes the right project id from one that passes any id at all.
+        """
+        self._enter("get_project_tasks")
+        if project_id != self._project.id:
+            return []
         return list(self._tasks)
 
     def get_task(self, task_id: int) -> TaskInfo:
         """Return one task by id, filling ``project_id`` from the fixture project."""
+        self._enter("get_task")
         for task in self._tasks:
             if task.id == task_id:
                 if task.project_id is not None:

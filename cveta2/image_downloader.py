@@ -24,6 +24,7 @@ from cveta2.s3_utils import (
     names_with_basename_fallback,
     run_s3_transfers,
     s3_get_bytes,
+    s3_object_exists,
     strip_key_prefix,
 )
 
@@ -85,6 +86,16 @@ _S3_SYNC_PROGRESS = _ProgressLabels("Syncing from S3", "file")
 
 _MISSING_PREVIEW_LIMIT = 10
 """How many not-found image names the warning lists before collapsing the rest."""
+
+_DIRECT_KEY_PROBE_LIMIT = 2000
+"""Above this many pending images, list the prefix instead of probing keys.
+
+Probing costs one HEAD per image; listing costs one round-trip per thousand
+keys under the whole project prefix — every task's images, not just the
+fetched one's.  Probing therefore wins by orders of magnitude when a fetch
+wants a few images out of a large project, and loses when it wants nearly
+all of them, which is what a whole-project fetch does.
+"""
 
 
 def _download_pending(
@@ -234,17 +245,11 @@ class ImageDownloader:
                 )
             return
         s3_client = make_s3_client(project_cloud_storage.endpoint_url or None)
-        name_to_key = self._build_project_storage_name_map(
-            s3_client,
-            project_cloud_storage.bucket,
-            project_cloud_storage.prefix,
-        )
+        name_to_key = self._resolve_s3_keys(s3_client, project_cloud_storage, pending)
         to_download: list[Transfer] = []
         missing: list[str] = []
         for image_name, frame_ref in pending.items():
-            s3_key: str | None = name_to_key.get(frame_ref) or name_to_key.get(
-                image_name
-            )
+            s3_key = name_to_key.get(image_name)
             if s3_key is None:
                 missing.append(image_name)
                 continue
@@ -264,6 +269,76 @@ class ImageDownloader:
             stats,
             _PROJECT_STORAGE_PROGRESS,
         )
+
+    def _resolve_s3_keys(
+        self,
+        s3_client: S3Client,
+        project_cloud_storage: CloudStorageInfo,
+        pending: dict[str, str],
+    ) -> dict[str, str]:
+        """Return ``{image_name: s3_key}`` for the pending images found on S3.
+
+        The frame name CVAT reports is normally the object key below the
+        storage prefix, so a small batch can confirm each key with one
+        HEAD.  The alternative — and the fallback — is walking the whole
+        project prefix, which holds every task's images and is a serial
+        chain of round-trips per thousand keys; a fetch of one task used
+        to pay for all of it.  Names no direct probe confirms go through
+        that listing, which is also what resolves a bare file name
+        against a nested key.
+        """
+        resolved: dict[str, str] = {}
+        unresolved = pending
+        if len(pending) <= _DIRECT_KEY_PROBE_LIMIT:
+            resolved, unresolved = self._probe_expected_keys(
+                s3_client, project_cloud_storage, pending
+            )
+            if not unresolved:
+                return resolved
+        name_to_key = self._build_project_storage_name_map(
+            s3_client,
+            project_cloud_storage.bucket,
+            project_cloud_storage.prefix,
+        )
+        for image_name, frame_ref in unresolved.items():
+            s3_key = name_to_key.get(frame_ref) or name_to_key.get(image_name)
+            if s3_key is not None:
+                resolved[image_name] = s3_key
+        return resolved
+
+    @staticmethod
+    def _probe_expected_keys(
+        s3_client: S3Client,
+        project_cloud_storage: CloudStorageInfo,
+        pending: dict[str, str],
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Split *pending* into images found at their expected key, and the rest.
+
+        Returns ``({image_name: s3_key}, {image_name: frame_ref})``.
+        """
+        entries = list(pending.items())
+        keys = [
+            build_s3_key(project_cloud_storage.prefix, frame_ref)
+            for _, frame_ref in entries
+        ]
+        found = run_concurrent(
+            keys,
+            lambda key: s3_object_exists(s3_client, project_cloud_storage.bucket, key),
+            max_workers=Workers.s3,
+            catch=(),
+            desc="Locating images on S3",
+            unit="img",
+        )
+        resolved: dict[str, str] = {}
+        unresolved: dict[str, str] = {}
+        for (image_name, frame_ref), key, exists in zip(
+            entries, keys, found, strict=True
+        ):
+            if exists is True:
+                resolved[image_name] = key
+            else:
+                unresolved[image_name] = frame_ref
+        return resolved, unresolved
 
     @staticmethod
     def _build_project_storage_name_map(

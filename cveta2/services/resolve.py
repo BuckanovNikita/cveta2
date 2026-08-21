@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cveta2.config import SyncRootsConfig
-from cveta2.exceptions import Cveta2Error
+from cveta2.exceptions import CvatApiError, Cveta2Error
 from cveta2.s3_utils import parse_sync_root
 
 if TYPE_CHECKING:
@@ -52,6 +52,25 @@ def apply_project_org(client: CvatClient, project: int | str) -> int | str:
     return spec
 
 
+def _project_display_name(client: CvatClient, project_id: int) -> str:
+    """Return the project's name, falling back to the id when unreadable.
+
+    An id nobody owns must still produce a usable name: it ends up in log
+    lines, in the task-cache directory and as the ignore-list key, and an
+    empty one would be shown to the user verbatim.  Reading the single
+    project costs one request, where listing the whole organization to
+    find its name costs one per page.
+    """
+    try:
+        return client.get_project(project_id).name or str(project_id)
+    except CvatApiError as e:
+        logger.info(
+            f"Не удалось прочитать проект {project_id} ({e}) — "
+            f"используем id как имя проекта"
+        )
+        return str(project_id)
+
+
 def resolve_project_spec(client: CvatClient, project: int | str) -> tuple[int, str]:
     """Resolve a project spec to ``(project_id, project_name)``.
 
@@ -64,10 +83,7 @@ def resolve_project_spec(client: CvatClient, project: int | str) -> tuple[int, s
     project_id = client.resolve_project_id(spec)
     name = str(spec).strip()
     if isinstance(spec, int) or name.isdigit():
-        name = next(
-            (p.name for p in client.list_projects() if p.id == project_id),
-            str(project_id),
-        )
+        name = _project_display_name(client, project_id)
     return project_id, name
 
 

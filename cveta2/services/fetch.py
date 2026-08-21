@@ -151,6 +151,7 @@ def _fetch_core(  # noqa: PLR0913, PLR0917
     prune_cache: bool,
 ) -> ProjectAnnotations:
     """Shared fetch flow: prepare, cache loop, prune, download, path population."""
+    started = time.monotonic()
     ctx = client.prepare_fetch(
         project_id,
         completed_only=options.completed_only,
@@ -158,6 +159,9 @@ def _fetch_core(  # noqa: PLR0913, PLR0917
         silent_task_ids=options.silent_task_ids,
         task_selector=options.task_selector,
         project_name=project_name,
+    )
+    logger.debug(
+        f"Отбор задач: {len(ctx.tasks)} к загрузке ({time.monotonic() - started:.1f} с)"
     )
 
     cache_settings = CacheConfig.load(options.config_path).for_project(project_name)

@@ -336,6 +336,11 @@ class _FailingS3Client:
         self.calls += 1
         raise EndpointConnectionError(endpoint_url="http://s3.invalid")
 
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        del Bucket, Key
+        self.calls += 1
+        raise EndpointConnectionError(endpoint_url="http://s3.invalid")
+
     def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> None:  # noqa: N803
         del Bucket, Key, Body
         self.calls += 1
