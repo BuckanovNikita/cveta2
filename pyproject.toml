@@ -476,7 +476,7 @@ full = []
 
 # fetch_one_task: the degrade path's [] and None are normalized identically by
 # _build_frame_issues(issues or []); the branch itself is tested.
-"cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_18" = "issues=None instead of []; _build_frame_issues normalizes it with `issues or []`"
+"cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_20" = "issues=None instead of []; _build_frame_issues normalizes it with `issues or []`"
 
 # fetch_selected_tasks: prune_cache is read as `cache is not None and
 # prune_cache`, so None and False take the same branch.

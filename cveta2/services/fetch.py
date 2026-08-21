@@ -330,8 +330,8 @@ def _fetch_and_save_tasks(
 ) -> ProjectAnnotations:
     """Fetch tasks in parallel, saving per-task CSVs into ``output_dir/.tasks/``.
 
-    Up to ``Workers.cvat`` tasks are in flight at once; each is three CVAT
-    round-trips that spend nearly all their time waiting.  Results are
+    Up to ``Workers.cvat`` tasks are in flight at once; each is a handful
+    of CVAT round-trips that spend nearly all their time waiting.  Results are
     returned in task order regardless of completion order, so the merged
     output does not depend on which task happened to finish first.
 

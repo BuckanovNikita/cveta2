@@ -86,6 +86,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
    - For each image, finds **latest task** by `task_updated_date` (comparing annotations + deletions)
    - If latest task is deletion → image goes to `obsolete`, added to `deleted_images`
    - Otherwise: completed tasks → `dataset` (latest) or `obsolete` (stale), non-completed → `in_progress`
+   - **Completed** is read from `job_stage`/`job_state`, not from a task-level field: `completed_task_ids()` requires *every* row of the task — deletion records included — to sit on `acceptance`/`completed`, which is how CVAT itself derives a task's status from its jobs
    - **Important**: Deletion records are concatenated **before** annotation records to win ties (same date)
 
 ## Project specs and organizations

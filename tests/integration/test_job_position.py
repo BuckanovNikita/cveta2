@@ -66,7 +66,9 @@ class TestJobPositionDecidesCompletion:
                 segment_size=_IMAGES_PER_JOB,
             )
             try:
-                jobs = client.api.get_task_jobs(task_id)
+                jobs = sorted(
+                    client.api.get_task_jobs(task_id), key=lambda j: j.start_frame
+                )
                 assert len(jobs) == 2, (
                     f"expected the task to split into two jobs, got {len(jobs)} — "
                     f"segment_size={_IMAGES_PER_JOB} over {_TASK_IMAGES} images"
@@ -104,7 +106,9 @@ class TestJobPositionDecidesCompletion:
                 segment_size=_IMAGES_PER_JOB,
             )
             try:
-                jobs = client.api.get_task_jobs(task_id)
+                jobs = sorted(
+                    client.api.get_task_jobs(task_id), key=lambda j: j.start_frame
+                )
                 client.api.update_job(jobs[0].id, stage="acceptance", state="completed")
                 client.api.update_job(jobs[1].id, stage="annotation", state="new")
 
