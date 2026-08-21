@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.2.1 (2026-08-21)
+
+### Performance Improvements
+
+- **fetch**: Make a single-task fetch cost the task, not the project
+  ([`2c76e08`](https://github.com/BuckanovNikita/cveta2/commit/2c76e0883442b865b9884e0136614188176feb5c))
+
+### Testing
+
+- **fetch**: Close the mutation gaps the single-task fast path opened
+  ([`2cf7582`](https://github.com/BuckanovNikita/cveta2/commit/2cf7582e193889cfeb241505efa2025ea7fe504e))
+
+
 ## v0.2.0 (2026-08-16)
 
 ### Bug Fixes
