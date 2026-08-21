@@ -21,13 +21,12 @@ from cveta2._client_ops.shared import (
 from cveta2._concurrency import Workers, run_concurrent
 from cveta2.config import should_raise_on_fetch_failure
 from cveta2.exceptions import CvatApiError, Cveta2Error, TaskNotFoundError
-from cveta2.models import TaskAnnotations
+from cveta2.models import TaskAnnotations, TaskInfo
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from cveta2._client.ports import CvatApiPort
-    from cveta2.models import TaskInfo
 
 
 def _format_task_choices(tasks: Sequence[TaskInfo]) -> str:
@@ -38,32 +37,19 @@ def _format_task_choices(tasks: Sequence[TaskInfo]) -> str:
 def _filter_tasks_for_fetch(
     tasks: list[TaskInfo],
     options: _FetchAnnotationsOptions,
-    *,
-    already_selected: bool = False,
 ) -> list[TaskInfo]:
-    """Apply ignore list, task selector, completed_only; return filtered list.
-
-    *already_selected* says *tasks* is the caller's selection resolved by
-    id rather than the project's whole list: the ignore list and the
-    selector are settled, and only the logging and ``completed_only``
-    still apply.  Both paths share the logging so the two look alike in
-    a run log.
-    """
-    if not already_selected:
-        if options.ignore_task_ids:
-            skipped = [t for t in tasks if t.id in options.ignore_task_ids]
-            silent_ids = options.silent_task_ids or set()
-            logged = [t for t in skipped if t.id not in silent_ids]
-            if logged:
-                logger.warning(f"Пропускаем {len(logged)} задач(а) из ignore-списка:")
-                for t in logged:
-                    logger.warning(
-                        f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})"
-                    )
-            tasks = [t for t in tasks if t.id not in options.ignore_task_ids]
-        if options.task_selector is not None:
-            tasks = _FetchMixin.resolve_task_selectors(tasks, options.task_selector)
+    """Apply ignore list, task selector, completed_only; return filtered list."""
+    if options.ignore_task_ids:
+        skipped = [t for t in tasks if t.id in options.ignore_task_ids]
+        silent_ids = options.silent_task_ids or set()
+        logged = [t for t in skipped if t.id not in silent_ids]
+        if logged:
+            logger.warning(f"Пропускаем {len(logged)} задач(а) из ignore-списка:")
+            for t in logged:
+                logger.warning(f"  - #{t.id} {t.name!r} (обновлена: {t.updated_date})")
+        tasks = [t for t in tasks if t.id not in options.ignore_task_ids]
     if options.task_selector is not None:
+        tasks = _FetchMixin.resolve_task_selectors(tasks, options.task_selector)
         logger.info(
             f"Selected {len(tasks)} task(s): {_format_task_choices(tasks)}",
         )
@@ -86,6 +72,16 @@ def _numeric_selector_ids(
             return None
         ids.append(int(text))
     return list(dict.fromkeys(ids))
+
+
+def _get_task_if_present(api: CvatApiPort, task_id: int) -> TaskInfo | None:
+    """Return the task, or None when CVAT has no task with that id."""
+    try:
+        return api.get_task(task_id)
+    except CvatApiError as e:
+        if e.status_code == _HTTP_NOT_FOUND:
+            return None
+        raise
 
 
 def _resolve_selected_tasks_by_id(
@@ -114,24 +110,17 @@ def _resolve_selected_tasks_by_id(
         return None
     outcomes = run_concurrent(
         task_ids,
-        api.get_task,
+        lambda task_id: _get_task_if_present(api, task_id),
         max_workers=Workers.cvat,
-        catch=(CvatApiError,),
+        catch=(),
         desc="Resolving tasks",
         unit="task",
     )
-    tasks: list[TaskInfo] = []
-    for outcome in outcomes:
-        if isinstance(outcome, Exception):
-            if (
-                isinstance(outcome, CvatApiError)
-                and outcome.status_code == _HTTP_NOT_FOUND
-            ):
-                return None
-            raise outcome
-        if outcome.project_id != project_id:
-            return None
-        tasks.append(outcome)
+    tasks = [outcome for outcome in outcomes if isinstance(outcome, TaskInfo)]
+    if len(tasks) != len(task_ids):
+        return None
+    if any(task.project_id != project_id for task in tasks):
+        return None
     return tasks
 
 
@@ -140,11 +129,17 @@ def _select_tasks_for_fetch(
     project_id: int,
     options: _FetchAnnotationsOptions,
 ) -> list[TaskInfo]:
-    """Return the tasks to fetch, listing the project only when needed."""
+    """Return the tasks to fetch, listing the project only when needed.
+
+    The filters run over the shortlist exactly as they run over the full
+    list: resolving the selectors against tasks that *are* the selection
+    is a no-op, and an ignored id never reaches here (it is one of the
+    cases that falls back).
+    """
     selected = _resolve_selected_tasks_by_id(api, project_id, options)
-    if selected is not None:
-        return _filter_tasks_for_fetch(selected, options, already_selected=True)
-    return _filter_tasks_for_fetch(api.get_project_tasks(project_id), options)
+    if selected is None:
+        selected = api.get_project_tasks(project_id)
+    return _filter_tasks_for_fetch(selected, options)
 
 
 class _FetchMixin(_ClientBase):

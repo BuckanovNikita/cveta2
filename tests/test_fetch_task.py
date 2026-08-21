@@ -29,6 +29,7 @@ from cveta2.config import (
     _parse_ignore_entry,
 )
 from cveta2.exceptions import (
+    CvatApiError,
     Cveta2Error,
     InteractiveModeRequiredError,
     TaskNotFoundError,
@@ -230,6 +231,11 @@ class TestWarnIgnoredTasks:
 _PROJECT_ID = 1
 
 
+def _raise_server_error(task_id: int) -> TaskInfo:
+    """Stand in for a CVAT that is down rather than missing the task."""
+    raise CvatApiError(f"boom on {task_id}", status_code=500)
+
+
 class TestSelectTasksForFetch:
     """Numeric selectors are retrieved by id; everything else lists the project.
 
@@ -316,6 +322,22 @@ class TestSelectTasksForFetch:
 
         assert [t.id for t in result] == [7]
         assert api.call_counts["get_project_tasks"] == 1
+
+    def test_a_server_error_on_the_id_lookup_is_not_a_fallback(self) -> None:
+        """Only a 404 means "ask the listing"; a 5xx is CVAT being broken.
+
+        Falling back on any failure would hide an outage behind a slow
+        path that is about to fail the same way.
+        """
+        api = FakeCvatApi.from_tasks([make_task(1)])
+        api.get_task = _raise_server_error  # type: ignore[method-assign]
+        options = _FetchAnnotationsOptions(task_selector=[1])
+
+        with pytest.raises(CvatApiError) as excinfo:
+            _select_tasks_for_fetch(api, _PROJECT_ID, options)
+
+        assert excinfo.value.status_code == 500
+        assert api.call_counts["get_project_tasks"] == 0
 
     def test_task_of_another_project_lists_the_project(self) -> None:
         """An id owned by a different project is the listing's to reject."""

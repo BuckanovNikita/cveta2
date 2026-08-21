@@ -33,6 +33,7 @@ _CONTEXT_REQUIRED_OPS: list[tuple[str, Callable[[CvatClient], object]]] = [
     ("list_projects", lambda c: c.list_projects()),
     ("list_project_tasks", lambda c: c.list_project_tasks(1)),
     ("get_task", lambda c: c.get_task(1)),
+    ("get_project", lambda c: c.get_project(1)),
     ("get_project_labels", lambda c: c.get_project_labels(1)),
     ("count_label_usage", lambda c: c.count_label_usage(1)),
     ("detect_project_cloud_storage", lambda c: c.detect_project_cloud_storage(1)),
@@ -119,6 +120,36 @@ def test_detect_project_cloud_storage_forwards_project_id() -> None:
     client_with_api(api).detect_project_cloud_storage(53)
 
     api.get_project_cloud_storage.assert_called_once_with(53)
+
+
+def test_detect_project_cloud_storage_is_asked_once_per_project() -> None:
+    """The answer is remembered: it costs two requests and cannot change mid-run.
+
+    A fetch asks twice — the image download applies the sync-root override
+    to it, the shared task cache deliberately does not — and both go
+    through this one method.
+    """
+    api = _mock_port()
+    client = client_with_api(api)
+
+    first = client.detect_project_cloud_storage(53)
+    again = client.detect_project_cloud_storage(53)
+    client.detect_project_cloud_storage(54)
+
+    assert again is first
+    assert api.get_project_cloud_storage.call_count == 2
+
+
+def test_switching_organization_drops_the_cloud_storage_memo() -> None:
+    """Project ids are scoped to the session org, so the remembered answers are."""
+    api = _mock_port()
+    client = client_with_api(api)
+
+    client.detect_project_cloud_storage(53)
+    client.set_organization("acme")
+    client.detect_project_cloud_storage(53)
+
+    assert api.get_project_cloud_storage.call_count == 2
 
 
 def test_prepare_fetch_forwards_project_id_to_both_reads() -> None:

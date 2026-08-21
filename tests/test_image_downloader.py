@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import ClientError
 
 from cveta2.image_downloader import (
     CloudStorageInfo,
@@ -44,6 +45,20 @@ class _FakeCloudStorage:
 
 class _BareCloudStorage:
     """A CVAT cloud-storage object exposing none of the expected attributes."""
+
+
+class _DenyingHeadS3Client(FakeS3Client):
+    """Fake S3 that refuses every HEAD, the way a denied bucket does.
+
+    S3 answers 403 rather than 404 for a caller without ListBucket, so
+    "denied" and "absent" are only told apart by the error code.
+    """
+
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        raise ClientError(
+            {"Error": {"Code": "AccessDenied", "Message": f"{Bucket}/{Key}"}},
+            "HeadObject",
+        )
 
 
 class _FakeTask:
@@ -949,7 +964,9 @@ def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
 
     Only the listing carries the basename fallback, so a probe that comes
     back empty must hand the name over to it rather than report the image
-    as missing from S3.
+    as missing from S3.  The listing stays scoped to the project prefix:
+    the decoy sorts before the real key, so a listing widened to the whole
+    bucket would claim the basename first and hand back the wrong bytes.
     """
     annotations = ProjectAnnotations(
         annotations=[_ann(10, 0, "flat.jpg"), _ann(10, 1, "nested.jpg")],
@@ -959,6 +976,7 @@ def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
         {
             "test-bucket/images/flat.jpg": b"data-flat",
             "test-bucket/images/2026-02/nested.jpg": b"data-nested",
+            "test-bucket/another-project/nested.jpg": b"data-decoy",
         }
     )
     _patch_boto(monkeypatch, fake_s3)
@@ -973,6 +991,89 @@ def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
     assert fake_s3.list_requests != []
     assert (target / "flat.jpg").read_bytes() == b"data-flat"
     assert (target / "nested.jpg").read_bytes() == b"data-nested"
+
+
+def test_a_denied_head_is_raised_rather_than_read_as_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bucket that refuses the probe is a broken setup, not a missing image.
+
+    Reading 403 as "not there" would turn a wrong endpoint or a denied
+    bucket into a quiet list of images reported as missing from S3.
+    """
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "a.jpg")], deleted_images=[]
+    )
+    _patch_boto(monkeypatch, _DenyingHeadS3Client())
+
+    with pytest.raises(ClientError):
+        ImageDownloader(tmp_path / "images").download(
+            annotations, project_cloud_storage=_project_cs()
+        )
+
+
+def test_the_probe_limit_is_inclusive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch exactly at the limit still probes; one past it lists."""
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "a.jpg"), _ann(10, 1, "b.jpg")],
+        deleted_images=[],
+    )
+    fake_s3 = FakeS3Client(
+        {
+            "test-bucket/images/a.jpg": b"data-a",
+            "test-bucket/images/b.jpg": b"data-b",
+        }
+    )
+    _patch_boto(monkeypatch, fake_s3)
+    monkeypatch.setattr("cveta2.image_downloader._DIRECT_KEY_PROBE_LIMIT", 2)
+
+    stats = ImageDownloader(tmp_path / "images").download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.downloaded == 2
+    assert fake_s3.head_calls != []
+    assert fake_s3.list_requests == []
+
+
+def test_the_listing_prefers_the_frame_path_over_a_same_named_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the listing path the full frame path outranks the bare basename.
+
+    Two months hold a file of the same name; the basename fallback keeps
+    the first it sees, so only the full path picks the right one.
+    """
+    annotation = make_bbox(
+        image_name="x.jpg",
+        task_id=10,
+        task_name="task",
+        frame_id=0,
+        frame_path="2026-02/x.jpg",
+    )
+    fake_s3 = FakeS3Client(
+        {
+            "test-bucket/images/2026-01/x.jpg": b"data-january",
+            "test-bucket/images/2026-02/x.jpg": b"data-february",
+        }
+    )
+    _patch_boto(monkeypatch, fake_s3)
+    monkeypatch.setattr("cveta2.image_downloader._DIRECT_KEY_PROBE_LIMIT", 0)
+
+    target = tmp_path / "images"
+    stats = ImageDownloader(target).download(
+        ProjectAnnotations(annotations=[annotation], deleted_images=[]),
+        project_cloud_storage=_project_cs(),
+    )
+
+    assert stats.downloaded == 1
+    assert fake_s3.head_calls == []
+    assert (target / "2026-02" / "x.jpg").read_bytes() == b"data-february"
 
 
 def test_a_batch_past_the_probe_limit_lists_instead(

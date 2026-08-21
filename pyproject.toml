@@ -385,7 +385,7 @@ full = []
 # where the counter is provably still zero at that point.
 "cveta2.image_downloader.x__download_pending__mutmut_22" = "stats.downloaded = ok; _download_pending is the only writer of `downloaded` and runs once per stats object"
 "cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_2" = "stats.failed = len(pending); the no-storage branch returns before any transfer, so failed is still 0"
-"cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_35" = "stats.failed = len(missing); the listing misses are counted before any transfer runs, so failed is still 0"
+"cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_33" = "stats.failed = len(missing); the misses are counted before any transfer runs, so failed is still 0"
 "cveta2.image_downloader.x_parse_cloud_storage__mutmut_11" = "or \"XXXX\"; parse_qs of a string with no \"=\" yields {} exactly as for \"\""
 "cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_13" = "prefix=None widens the listing with out-of-prefix keys that no computed s3_key can equal"
 
@@ -402,6 +402,8 @@ full = []
 "cveta2.services.fetch.x__fetch_and_save_tasks__mutmut_37" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2._client_ops.task_ops.xǁ_TaskOpsMixinǁset_task_jobs_status__mutmut_15" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_32" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2._client_ops.fetch.x__resolve_selected_tasks_by_id__mutmut_12" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.image_downloader.xǁImageDownloaderǁ_probe_expected_keys__mutmut_13" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 
 # run_concurrent returns exactly one outcome per item — that is its documented
 # contract and TestOrdering pins it — so the zip that pairs them back up can
@@ -413,6 +415,19 @@ full = []
 "cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_25" = "zip strict=None; lengths are equal by construction"
 "cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_28" = "zip strict dropped; lengths are equal by construction"
 "cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_29" = "zip strict=False; lengths are equal by construction"
+"cveta2.image_downloader.xǁImageDownloaderǁ_probe_expected_keys__mutmut_33" = "zip strict=None; lengths are equal by construction"
+"cveta2.image_downloader.xǁImageDownloaderǁ_probe_expected_keys__mutmut_37" = "zip strict dropped; lengths are equal by construction"
+"cveta2.image_downloader.xǁImageDownloaderǁ_probe_expected_keys__mutmut_38" = "zip strict=False; lengths are equal by construction"
+
+# _probe_expected_keys: the value it records for an unresolved image is the
+# frame name the fallback listing looks up first. A listing name IS its key
+# with the storage prefix stripped, and the probe checked exactly
+# build_s3_key(prefix, frame_ref) - so a frame name the listing could resolve
+# by full path is one the probe already found, and this lookup is dead on the
+# probe path. The lookup itself is load-bearing on the over-limit path, where
+# unresolved is `pending` itself, and is killed there by
+# test_the_listing_prefers_the_frame_path_over_a_same_named_file.
+"cveta2.image_downloader.xǁImageDownloaderǁ_probe_expected_keys__mutmut_42" = "records None instead of the frame name; every name the listing resolves by full path was already found by the probe"
 
 # pandas lowercases the `orient` argument before dispatching on it, so every
 # spelling of "records" that differs only in case is the same call.
@@ -476,8 +491,8 @@ full = []
 # single reader, the 5xx skip hint in _client_ops.shared, which falls back to a
 # "<имя_проекта>" placeholder when it is empty. Killing this means asserting the
 # wording of that hint - the change-detector CLAUDE.md rules out.
-"cveta2.services.fetch.x__fetch_core__mutmut_7" = "project_name=None; the only reader is the 5xx hint's `if ctx.project_name` fallback"
-"cveta2.services.fetch.x__fetch_core__mutmut_13" = "drops project_name=; same single reader as above"
+"cveta2.services.fetch.x__fetch_core__mutmut_8" = "project_name=None; the only reader is the 5xx hint's `if ctx.project_name` fallback"
+"cveta2.services.fetch.x__fetch_core__mutmut_14" = "drops project_name=; same single reader as above"
 
 # The CSV reader's only option is `encoding`, which pandas' io.common.get_handle
 # already resolves as `encoding or "utf-8"` - so dropping the whole mapping is
