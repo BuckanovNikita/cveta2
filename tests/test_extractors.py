@@ -34,9 +34,9 @@ def _make_ctx(
         attr_names=attr_names if attr_names is not None else {},
         task_id=100,
         task_name="test-task",
-        task_status="completed",
         task_updated_date="2026-01-01T00:00:00+00:00",
         subset="train",
+        frame_jobs=dict.fromkeys(_FRAMES, ("acceptance", "completed")),
     )
 
 
@@ -106,7 +106,7 @@ def test_field_mapping_correct(
     assert first.image_height == ctx.frames[first_shape.frame].height
     assert first.z_order == first_shape.z_order
     assert first.subset == ctx.subset
-    assert first.task_status == ctx.task_status
+    assert (first.job_stage, first.job_state) == ctx.job_position(first_shape.frame)
     assert first.task_updated_date == ctx.task_updated_date
 
 

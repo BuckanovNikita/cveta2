@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawDataMeta, RawFrame, RawIssue
+    from cveta2._client.dtos import RawDataMeta, RawFrame, RawIssue, RawJob
     from cveta2.models import TaskInfo
 
 _RECTANGLE = "rectangle"
@@ -36,6 +36,20 @@ def _build_frame_issues(issues: list[RawIssue]) -> dict[int, tuple[str, str]]:
     return result
 
 
+def _build_frame_jobs(jobs: list[RawJob]) -> dict[int, tuple[str, str]]:
+    """Map every frame covered by a job to that job's ``(stage, state)``.
+
+    A frame belongs to exactly one job, so the review position CVAT
+    records per job is the one every record of that frame carries.
+    Frames no job covers are absent and read as empty.
+    """
+    return {
+        frame: (job.stage, job.state)
+        for job in jobs
+        for frame in range(job.start_frame, job.stop_frame + 1)
+    }
+
+
 @dataclass
 class _TaskContext:
     """Shared context for extracting annotations from a single task."""
@@ -45,19 +59,24 @@ class _TaskContext:
     attr_names: dict[int, str]
     task_id: int
     task_name: str
-    task_status: str
     task_updated_date: str
     subset: str
     frame_issues: dict[int, tuple[str, str]] = field(default_factory=dict)
+    frame_jobs: dict[int, tuple[str, str]] = field(default_factory=dict)
+
+    def job_position(self, frame: int) -> tuple[str, str]:
+        """Return ``(job_stage, job_state)`` for *frame*, empty when unknown."""
+        return self.frame_jobs.get(frame, ("", ""))
 
     @classmethod
-    def from_raw(
+    def from_raw(  # noqa: PLR0913, PLR0917
         cls,
         task: TaskInfo,
         data_meta: RawDataMeta,
         label_names: dict[int, str],
         attr_names: dict[int, str],
         issues: list[RawIssue] | None = None,
+        jobs: list[RawJob] | None = None,
     ) -> _TaskContext:
         """Build context from DTO objects."""
         return cls(
@@ -66,8 +85,8 @@ class _TaskContext:
             attr_names=attr_names,
             task_id=task.id,
             task_name=task.name,
-            task_status=task.status,
             task_updated_date=task.updated_date,
             subset=task.subset,
             frame_issues=_build_frame_issues(issues or []),
+            frame_jobs=_build_frame_jobs(jobs or []),
         )

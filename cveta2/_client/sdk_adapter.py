@@ -366,6 +366,8 @@ class SdkCvatApiAdapter:
                 id=int(job.id),
                 start_frame=int(job.start_frame),
                 stop_frame=int(job.stop_frame),
+                stage=str(job.stage or ""),
+                state=str(job.state or ""),
             )
             for job in jobs
         ]

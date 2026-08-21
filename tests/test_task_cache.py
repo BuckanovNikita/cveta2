@@ -70,7 +70,6 @@ def _payload(task_id: int = 1) -> TaskAnnotations:
         image_height=480,
         task_id=task_id,
         task_name=f"task-{task_id}",
-        task_status="completed",
         task_updated_date=_UPDATED,
         frame_id=1,
     )

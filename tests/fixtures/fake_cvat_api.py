@@ -38,6 +38,21 @@ if TYPE_CHECKING:
 
 _DEFAULT_FAIL_METHODS = ("get_task_data_meta", "get_task_annotations")
 
+# The inverse of CVAT's status derivation, so a task seeded with a status
+# hands out the jobs that would have produced it: CVAT reads a job at
+# ``acceptance``/``completed`` as completed, one at ``annotation`` as
+# annotation, and everything else as validation.
+JOB_POSITION_BY_STATUS = {
+    "completed": ("acceptance", "completed"),
+    "validation": ("validation", "in progress"),
+    "annotation": ("annotation", "new"),
+}
+
+
+def job_position_for_status(status: str) -> tuple[str, str]:
+    """Return the ``(stage, state)`` a task of *status* would have."""
+    return JOB_POSITION_BY_STATUS.get(status, ("annotation", "new"))
+
 
 @dataclass
 class RecordedWrites:
@@ -247,11 +262,27 @@ class FakeCvatApi:
         return list(self._labels)
 
     def get_task_jobs(self, task_id: int) -> list[RawJob]:
-        """Return a single job spanning all frames of the task."""
+        """Return a single job spanning all frames of the task.
+
+        Its ``(stage, state)`` is whichever pair CVAT would have turned
+        into the task's seeded status, so a fixture that asks for a
+        completed task gets jobs that read as completed.
+        """
         from cveta2._client.dtos import RawJob
 
+        self._raise_if_failing("get_task_jobs", task_id)
         data_meta, _annotations = self._task_data[task_id]
-        return [RawJob(id=task_id, start_frame=0, stop_frame=len(data_meta.frames))]
+        status = next((t.status for t in self._tasks if t.id == task_id), "")
+        stage, state = job_position_for_status(status)
+        return [
+            RawJob(
+                id=task_id,
+                start_frame=0,
+                stop_frame=len(data_meta.frames),
+                stage=stage,
+                state=state,
+            )
+        ]
 
     def get_task_size(self, task_id: int) -> int:
         """Return the number of frames in a task.

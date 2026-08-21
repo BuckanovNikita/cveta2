@@ -110,12 +110,14 @@ class TestComputeCutoff:
             [
                 {
                     "task_id": 1,
-                    "task_status": "completed",
+                    "job_stage": "acceptance",
+                    "job_state": "completed",
                     "task_updated_date": "2026-01-02T00:00:00+00:00",
                 },
                 {
                     "task_id": 2,
-                    "task_status": "annotation",
+                    "job_stage": "annotation",
+                    "job_state": "new",
                     "task_updated_date": "2026-01-09T00:00:00+00:00",
                 },
             ]
@@ -131,12 +133,14 @@ class TestComputeCutoff:
             [
                 {
                     "task_id": 1,
-                    "task_status": "annotation",
+                    "job_stage": "annotation",
+                    "job_state": "new",
                     "task_updated_date": "2026-01-04T00:00:00+00:00",
                 },
                 {
                     "task_id": 2,
-                    "task_status": "validation",
+                    "job_stage": "validation",
+                    "job_state": "in progress",
                     "task_updated_date": "2026-01-06T00:00:00+00:00",
                 },
             ]
@@ -151,7 +155,8 @@ class TestComputeCutoff:
             [
                 {
                     "task_id": 1,
-                    "task_status": "completed",
+                    "job_stage": "acceptance",
+                    "job_state": "completed",
                     "task_updated_date": None,
                 },
             ]
@@ -170,8 +175,18 @@ class TestComputeCutoff:
         """
         df = pd.DataFrame(
             [
-                {"task_id": 1, "task_status": "completed", "task_updated_date": ""},
-                {"task_id": 2, "task_status": "annotation", "task_updated_date": ""},
+                {
+                    "task_id": 1,
+                    "job_stage": "acceptance",
+                    "job_state": "completed",
+                    "task_updated_date": "",
+                },
+                {
+                    "task_id": 2,
+                    "job_stage": "annotation",
+                    "job_state": "new",
+                    "task_updated_date": "",
+                },
             ]
         )
 
@@ -188,10 +203,16 @@ class TestComputeCutoff:
         """
         df = pd.DataFrame(
             [
-                {"task_id": 1, "task_status": "completed", "task_updated_date": ""},
+                {
+                    "task_id": 1,
+                    "job_stage": "acceptance",
+                    "job_state": "completed",
+                    "task_updated_date": "",
+                },
                 {
                     "task_id": 2,
-                    "task_status": "annotation",
+                    "job_stage": "annotation",
+                    "job_state": "new",
                     "task_updated_date": "2026-01-06T00:00:00+00:00",
                 },
             ]
@@ -212,7 +233,14 @@ class TestComputeCutoff:
         """
         csv_path = tmp_path / "dataset.csv"
         df = pd.DataFrame(
-            [{"task_id": 1, "task_status": "completed", "task_updated_date": None}]
+            [
+                {
+                    "task_id": 1,
+                    "job_stage": "acceptance",
+                    "job_state": "completed",
+                    "task_updated_date": None,
+                }
+            ]
         )
 
         with pytest.raises(Cveta2Error, match=str(csv_path)):
@@ -223,17 +251,20 @@ class TestComputeCutoff:
             [
                 {
                     "task_id": 1,
-                    "task_status": "completed",
+                    "job_stage": "acceptance",
+                    "job_state": "completed",
                     "task_updated_date": "2026-01-02T00:00:00+00:00",
                 },
                 {
                     "task_id": 1,
-                    "task_status": "completed",
+                    "job_stage": "acceptance",
+                    "job_state": "completed",
                     "task_updated_date": "2026-01-03T00:00:00+00:00",
                 },
                 {
                     "task_id": None,
-                    "task_status": "annotation",
+                    "job_stage": "annotation",
+                    "job_state": "new",
                     "task_updated_date": "2026-01-04T00:00:00+00:00",
                 },
             ]
@@ -257,7 +288,8 @@ def test_run_whats_new_empty_date_column_exits(tmp_path: Path) -> None:
         [
             {
                 "task_id": 1,
-                "task_status": "completed",
+                "job_stage": "acceptance",
+                "job_state": "completed",
                 "task_updated_date": None,
             },
         ],

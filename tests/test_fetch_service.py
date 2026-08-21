@@ -261,7 +261,6 @@ def test_fetch_to_partition_restore_and_three_way(
     external_delete = DeletedImage(
         task_id=999,
         task_name="external-delete",
-        task_status="completed",
         task_updated_date="2026-03-01T00:00:00+00:00",
         frame_id=0,
         image_name=_IMAGE_NAMES[0],
@@ -306,6 +305,54 @@ def test_5xx_task_skipped(coco8_fixtures: LoadedFixtures) -> None:
     assert len(bbox_records) == 30
     assert task_ids == {fake.tasks[0].id}
     assert failing_task_id not in task_ids
+
+
+def test_a_task_whose_jobs_cannot_be_read_is_skipped(
+    coco8_fixtures: LoadedFixtures,
+) -> None:
+    """The jobs request is load-bearing, so its 5xx skips the task.
+
+    Unlike issues, ``job_stage``/``job_state`` decide which side of the
+    partition every row lands on.  Emitting the task without them would
+    quietly move a finished task into ``in_progress``, so the task is
+    dropped with the same warning a 5xx on the frame metadata produces.
+    """
+    fake = build_fake(
+        coco8_fixtures,
+        ["normal", "all-empty"],
+        statuses=["completed", "completed"],
+    )
+    failing_task_id = fake.tasks[1].id
+    api = FakeCvatApi(
+        fake,
+        fail_task_ids={failing_task_id},
+        fail_methods=("get_task_jobs",),
+    )
+    client = CvatClient(CvatConfig(), api=api)
+
+    result = fetch_all_annotations(
+        client,
+        fake.project.id,
+        project_name="test-project",
+    )
+
+    assert {a.task_id for a in result.annotations} == {fake.tasks[0].id}
+
+
+def test_job_position_reaches_every_record(normal_fake: LoadedFixtures) -> None:
+    """Each record carries the stage/state of the job that owns its frame."""
+    client = CvatClient(CvatConfig(), api=FakeCvatApi(normal_fake))
+
+    result = fetch_all_annotations(
+        client,
+        normal_fake.project.id,
+        project_name="test-project",
+    )
+
+    assert result.annotations
+    assert {(a.job_stage, a.job_state) for a in result.annotations} == {
+        ("acceptance", "completed")
+    }
 
 
 def test_4xx_error_propagated(normal_fake: LoadedFixtures) -> None:

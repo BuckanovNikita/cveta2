@@ -59,9 +59,10 @@ def task_to_records(  # noqa: PLR0913, PLR0917
     label_names: dict[int, str],
     attr_names: dict[int, str],
     issues: list[RawIssue] | None = None,
+    jobs: list[RawJob] | None = None,
 ) -> tuple[list[AnnotationRecord], list[DeletedImage]]:
     """Build annotation records and deleted list for one task."""
-    ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names, issues)
+    ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names, issues, jobs)
     task_annotations = _collect_shapes(annotations.shapes, ctx)
     deleted_ids = set(data_meta.deleted_frames)
     frames = ctx.frames
@@ -69,7 +70,8 @@ def task_to_records(  # noqa: PLR0913, PLR0917
         DeletedImage(
             task_id=task.id,
             task_name=task.name,
-            task_status=task.status,
+            job_stage=ctx.job_position(fid)[0],
+            job_state=ctx.job_position(fid)[1],
             task_updated_date=task.updated_date,
             frame_id=fid,
             image_name=(frames[fid].name if fid in frames else "<unknown>"),
@@ -87,7 +89,8 @@ def task_to_records(  # noqa: PLR0913, PLR0917
             image_height=frame.height,
             task_id=task.id,
             task_name=task.name,
-            task_status=task.status,
+            job_stage=ctx.job_position(fid)[0],
+            job_state=ctx.job_position(fid)[1],
             task_updated_date=task.updated_date,
             frame_id=fid,
             subset=task.subset,

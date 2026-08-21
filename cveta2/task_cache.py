@@ -36,10 +36,13 @@ if TYPE_CHECKING:
     from cveta2.models import TaskInfo
     from cveta2.s3_types import S3Client
 
+# v3: payload records carry ``job_stage``/``job_state`` in place of
+# ``task_status``; a v2 entry has no per-job review position, and the
+# partition would read every one of its rows as still unreviewed.
 # v2: payload records carry ``frame_path`` (nested CVAT frame names); v1
 # entries were saved after basename collapse and would rebuild a wrong
 # ``s3_image_path`` for multilevel S3 hierarchies.
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
 
 _COMPLETED_STATUS = "completed"
 _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})

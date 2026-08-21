@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from loguru import logger
 
+from cveta2.models import COMPLETED_JOB_STAGE, COMPLETED_JOB_STATE
+
 if TYPE_CHECKING:
     from cveta2.models import DeletedImage
 
@@ -20,6 +22,57 @@ class PartitionResult:
     obsolete: pd.DataFrame
     in_progress: pd.DataFrame
     deleted_images: list[DeletedImage] = field(default_factory=list)
+
+
+def _rows_are_finished(frame: pd.DataFrame) -> pd.Series[bool]:
+    """Per-row mask: this row's job sits on the finished ``(stage, state)``."""
+    return (frame["job_stage"] == COMPLETED_JOB_STAGE) & (
+        frame["job_state"] == COMPLETED_JOB_STATE
+    )
+
+
+def completed_task_ids(
+    df: pd.DataFrame,
+    deleted_images: list[DeletedImage] | None = None,
+) -> set[int]:
+    """Return the ids of tasks whose every job has finished review.
+
+    ``job_stage``/``job_state`` are per-job, so a task counts as finished
+    only when all of its rows do — the same "no job left at annotation or
+    validation" rule CVAT applies to derive a task's status.
+
+    *deleted_images* are folded in because their rows live in a separate
+    file: a job whose every frame was deleted contributes nothing to *df*
+    and would otherwise let an unfinished task pass as complete.
+
+    The two frames are scanned separately rather than concatenated: a task
+    qualifies when it owns at least one row and no unfinished one, which
+    the set difference expresses without either frame's row labels having
+    to mean anything.  A row without a ``task_id`` belongs to no task and
+    neither qualifies nor disqualifies one.
+    """
+    frames = [df.loc[:, ["task_id", "job_stage", "job_state"]]]
+    if deleted_images:
+        frames.append(
+            pd.DataFrame(
+                [
+                    {
+                        "task_id": d.task_id,
+                        "job_stage": d.job_stage,
+                        "job_state": d.job_state,
+                    }
+                    for d in deleted_images
+                ]
+            )
+        )
+    finished: set[int] = set()
+    unfinished: set[int] = set()
+    for frame in frames:
+        is_finished = _rows_are_finished(frame)
+        task_ids = frame["task_id"]
+        finished |= {int(t) for t in task_ids[is_finished].dropna()}
+        unfinished |= {int(t) for t in task_ids[~is_finished].dropna()}
+    return finished - unfinished
 
 
 def _parse_task_dates(dates: pd.Series[str]) -> pd.Series[pd.Timestamp]:
@@ -149,7 +202,7 @@ def partition_annotations_df(
     """Partition an annotation DataFrame into dataset, obsolete and in-progress parts.
 
     Required columns in *df*: ``image_name``, ``task_id``, ``task_updated_date``,
-    ``task_status``.
+    ``job_stage``, ``job_state``.
 
     Algorithm
     ---------
@@ -158,7 +211,8 @@ def partition_annotations_df(
     2. If that latest task is a deletion → the image is "deleted": all its rows
        go to **obsolete** and it is collected via :func:`_filter_deleted_images`.
     3. For non-deleted images:
-       - rows where ``task_status != "completed"`` → **in_progress**
+       - rows of tasks with an unfinished job (see
+         :func:`completed_task_ids`) → **in_progress**
        - :func:`_split_completed` sends the *latest completed task* per image to
          **dataset** and the rest to **obsolete**.
     """
@@ -184,7 +238,7 @@ def partition_annotations_df(
         logger.debug(f"Images deleted in their latest task: {len(unique_deleted)}")
 
     is_deleted = df["image_name"].isin(deleted_image_names)
-    is_completed = df["task_status"] == "completed"
+    is_completed = df["task_id"].isin(completed_task_ids(df, deleted_images))
 
     obsolete_deleted = df[is_deleted]
     in_progress = df[~is_deleted & ~is_completed]

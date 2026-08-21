@@ -27,6 +27,7 @@ def _collect_shapes(
         if frame_info is None:
             continue
         issue_text, issue_state = ctx.frame_issues.get(shape.frame, ("", ""))
+        job_stage, job_state = ctx.job_position(shape.frame)
         result.append(
             BBoxAnnotation(
                 image_name=frame_info.name,
@@ -39,7 +40,8 @@ def _collect_shapes(
                 bbox_y_br=shape.points[3],
                 task_id=ctx.task_id,
                 task_name=ctx.task_name,
-                task_status=ctx.task_status,
+                job_stage=job_stage,
+                job_state=job_state,
                 task_updated_date=ctx.task_updated_date,
                 created_by_username=shape.created_by,
                 frame_id=shape.frame,

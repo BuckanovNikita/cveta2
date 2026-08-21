@@ -73,11 +73,17 @@ class RawIssue:
 
 @dataclass(frozen=True, slots=True)
 class RawJob:
-    """A CVAT job with its frame range."""
+    """A CVAT job with its frame range and review position.
+
+    ``stage`` and ``state`` default to empty so the write paths, which
+    build jobs only to address them, need not invent a review position.
+    """
 
     id: int
     start_frame: int
     stop_frame: int
+    stage: str = ""
+    state: str = ""
 
 
 @dataclass(frozen=True, slots=True)

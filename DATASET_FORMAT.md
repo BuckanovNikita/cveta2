@@ -45,7 +45,8 @@ cveta2 stores bbox annotations in CSV files. The record type is determined by th
 | `bbox_y_br` | `float` | Y of the bottom-right corner |
 | `task_id` | `int` | CVAT task ID |
 | `task_name` | `str` | Task name |
-| `task_status` | `str` | Task status (completed, annotation, ...) |
+| `job_stage` | `str` | Review stage of the job owning the frame (`annotation`, `validation`, `acceptance`) |
+| `job_state` | `str` | Review state of that job (`new`, `in progress`, `completed`, `rejected`) |
 | `task_updated_date` | `str` | Date/time of the task's last update |
 | `created_by_username` | `str` | Username of the annotation's author |
 | `frame_id` | `int` | Frame index within the task |
@@ -64,6 +65,28 @@ cveta2 stores bbox annotations in CSV files. The record type is determined by th
 | `attributes` | `dict[str, str]` | Custom attributes (serialized as JSON in CSV) |
 
 > **The `split` field** is a cveta2 convention, not a CVAT one. On export from CVAT (`fetch`) it is always `None`. It is filled manually or during conversion. On upload back to CVAT (`upload`) it is ignored.
+
+### Job stage and state (`job_stage` / `job_state`)
+
+CVAT tracks review progress per **job**, not per task: `stage` moves
+`annotation` → `validation` → `acceptance`, and `state` moves
+`new` → `in progress` → `completed` (or `rejected`). A task is split into jobs
+by frame range, so both columns describe the job that owns *that row's frame* —
+two rows of the same task can differ when its jobs are at different points.
+Both are `""` for a frame no job covers.
+
+**What counts as completed.** CVAT reads a job as finished when its stage is
+`acceptance` *and* its state is `completed`, and a task as finished when none of
+its jobs is left at annotation or validation. `fetch` applies the same rule: a
+task reaches `dataset.csv` only when every one of its rows — including the rows
+of frames deleted from it, which live in `deleted.csv` — carries that pair.
+Anything else lands in `in_progress.csv`. `cveta2 task status --stage acceptance
+--state completed` sets the pair on every job of a task.
+
+> **Caveat:** the annotation cache is keyed on `task_updated_date`. Moving a job's
+> stage or state through the CVAT UI does not necessarily bump that date, so a
+> cached task can serve a stale pair; `cveta2 task status` invalidates the local
+> entry, and `--no-cache` or `--force` bypasses the cache entirely.
 
 ### Issues (`issue_text` / `issue_state`)
 
@@ -95,7 +118,8 @@ Images without bbox annotations. They are still included in the CSV with empty b
 | `instance_shape` | `"none"` | Shape type (discriminator) |
 | `task_id` | `int` | CVAT task ID |
 | `task_name` | `str` | Task name |
-| `task_status` | `str` | Task status |
+| `job_stage` | `str` | Review stage of the job owning the frame |
+| `job_state` | `str` | Review state of that job |
 | `task_updated_date` | `str` | Date/time of the task's last update |
 | `frame_id` | `int` | Frame index within the task |
 | `split` | `"train" \| "val" \| "test" \| None` | Dataset split |
@@ -117,7 +141,8 @@ Record of a deleted image. Written to `deleted.csv` with `instance_shape="delete
 | `instance_shape` | `"deleted"` | Shape type (discriminator) |
 | `task_id` | `int` | Task ID |
 | `task_name` | `str` | Task name |
-| `task_status` | `str` | Task status |
+| `job_stage` | `str` | Review stage of the job owning the frame |
+| `job_state` | `str` | Review state of that job |
 | `task_updated_date` | `str` | Task update date |
 | `frame_id` | `int` | Frame index |
 | `subset` | `str` | Subset from CVAT |

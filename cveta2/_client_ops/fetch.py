@@ -243,12 +243,18 @@ class _FetchMixin(_ClientBase):
     ) -> TaskAnnotations | None:
         """Fetch annotations for a single task via the API port.
 
+        The jobs request is not optional the way issues are: ``job_stage``
+        and ``job_state`` are what the partition reads to tell a finished
+        task from one still being annotated, so a task whose jobs cannot be
+        read is skipped rather than emitted as unreviewed.
+
         Returns ``None`` when the task was skipped (5xx with
         ``ctx.raise_on_failure`` not set).
         """
         try:
             data_meta = api.get_task_data_meta(task.id)
             annotations = api.get_task_annotations(task.id)
+            jobs = api.get_task_jobs(task.id)
         except CvatApiError as e:
             if _is_rate_limited(e):
                 msg = (
@@ -275,7 +281,7 @@ class _FetchMixin(_ClientBase):
             issues = []
 
         records, deleted = task_to_records(
-            task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues
+            task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues, jobs
         )
         return TaskAnnotations(
             task_id=task.id,

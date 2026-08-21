@@ -32,7 +32,7 @@ from cveta2.models import (
     TaskAnnotations,
     TaskInfo,
 )
-from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.fixtures.fake_cvat_api import FakeCvatApi, job_position_for_status
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
     build_fake_project,
@@ -201,7 +201,8 @@ def make_bbox(**overrides: Any) -> BBoxAnnotation:
         "bbox_y_br": 200.0,
         "task_id": 1,
         "task_name": "task-1",
-        "task_status": "completed",
+        "job_stage": "acceptance",
+        "job_state": "completed",
         "task_updated_date": "2026-01-01T00:00:00",
         "created_by_username": "tester",
         "frame_id": 0,
@@ -242,10 +243,12 @@ def make_deleted(
     status: str = "completed",
 ) -> DeletedImage:
     """Create a DeletedImage record with test defaults."""
+    stage, state = job_position_for_status(status)
     return DeletedImage(
         task_id=task_id,
         task_name=f"task-{task_id}",
-        task_status=status,
+        job_stage=stage,
+        job_state=state,
         task_updated_date=updated,
         frame_id=0,
         image_name=image,
@@ -333,7 +336,7 @@ def csv_row(  # noqa: PLR0913
     row["instance_label"] = label if shape != "none" else None
     row["task_id"] = task_id
     row["task_name"] = f"task-{task_id}"
-    row["task_status"] = status
+    row["job_stage"], row["job_state"] = job_position_for_status(status)
     row["task_updated_date"] = updated
     row["frame_id"] = 0
     row["split"] = split

@@ -110,6 +110,18 @@ JobState = Literal["new", "in progress", "completed", "rejected"]
 JOB_STATES: tuple[JobState, ...] = ("new", "in progress", "completed", "rejected")
 """All valid CVAT job states (runtime counterpart of :data:`JobState`)."""
 
+COMPLETED_JOB_STAGE: JobStage = "acceptance"
+COMPLETED_JOB_STATE: JobState = "completed"
+"""The one ``(stage, state)`` pair CVAT counts as a finished job.
+
+CVAT derives a job's status from the pair — ``acceptance`` plus
+``completed`` is ``completed``, anything else is ``annotation`` or
+``validation`` — and a task's status from its jobs: completed only when
+no job is still at annotation or validation.  A task is therefore
+finished exactly when *every* one of its jobs sits on this pair, which
+is what :func:`cveta2.dataset_partition.completed_task_ids` computes.
+"""
+
 
 def _validate_image_name(v: str) -> str:
     """Ensure *image_name* is a bare filename (no directory components)."""
@@ -178,7 +190,8 @@ class BBoxAnnotation(_ImageRecordBase):
     # Extra fields
     task_id: int
     task_name: str
-    task_status: str = ""
+    job_stage: str = ""
+    job_state: str = ""
     task_updated_date: str = ""
     created_by_username: str = ""
     frame_id: int
@@ -244,7 +257,8 @@ class ImageWithoutAnnotations(_ImageRecordBase):
     instance_shape: Literal["none"] = "none"
     task_id: int
     task_name: str
-    task_status: str = ""
+    job_stage: str = ""
+    job_state: str = ""
     task_updated_date: str = ""
     frame_id: int
     split: Split | None = None
@@ -269,7 +283,8 @@ class DeletedImage(_ImageRecordBase):
     instance_shape: Literal["deleted"] = "deleted"
     task_id: int
     task_name: str
-    task_status: str = ""
+    job_stage: str = ""
+    job_state: str = ""
     task_updated_date: str = ""
     frame_id: int
     subset: str = ""

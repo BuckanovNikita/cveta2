@@ -298,6 +298,69 @@ class TestTaskToRecords:
             deleted_frames=[1, 99],
         )
 
+    def test_each_frame_carries_its_own_jobs_position(self) -> None:
+        """Frames split across two jobs must not share one review position.
+
+        A task partway through review has one job accepted and another
+        still being annotated; the records of each frame report the job
+        that actually owns it.
+        """
+        task = make_task(5, subset="train", updated="2026-02-02")
+        meta = RawDataMeta(
+            frames=[
+                RawFrame(name="done.jpg", width=10, height=20),
+                RawFrame(name="doing.jpg", width=10, height=20),
+            ],
+        )
+        jobs = [
+            RawJob(
+                id=1, start_frame=0, stop_frame=0, stage="acceptance", state="completed"
+            ),
+            RawJob(id=2, start_frame=1, stop_frame=1, stage="annotation", state="new"),
+        ]
+
+        records, _deleted = task_to_records(
+            task, meta, RawAnnotations(), {}, {}, None, jobs
+        )
+
+        positions = {r.image_name: (r.job_stage, r.job_state) for r in records}
+        assert positions == {
+            "done.jpg": ("acceptance", "completed"),
+            "doing.jpg": ("annotation", "new"),
+        }
+
+    def test_a_frame_no_job_covers_reports_an_empty_position(self) -> None:
+        """An uncovered frame reads as empty, never as a finished job."""
+        task = make_task(5, subset="train", updated="2026-02-02")
+        meta = RawDataMeta(frames=[RawFrame(name="orphan.jpg", width=10, height=20)])
+
+        records, _deleted = task_to_records(
+            task, meta, RawAnnotations(), {}, {}, None, []
+        )
+
+        assert [(r.job_stage, r.job_state) for r in records] == [("", "")]
+
+    def test_deleted_frames_carry_their_jobs_position(self) -> None:
+        """A deleted frame keeps the review position of the job it belonged to.
+
+        The partition folds deletion records back in to decide whether a
+        task is finished, so a deleted frame that loses its job position
+        would let an unfinished task pass as complete.
+        """
+        task = make_task(3, subset="train", updated="2026-02-02")
+        jobs = [
+            RawJob(id=1, start_frame=0, stop_frame=99, stage="annotation", state="new")
+        ]
+
+        _records, deleted = task_to_records(
+            task, self._meta_with_deleted(), RawAnnotations(), {}, {}, None, jobs
+        )
+
+        assert [(d.job_stage, d.job_state) for d in deleted] == [
+            ("annotation", "new"),
+            ("annotation", "new"),
+        ]
+
     def test_deleted_frames_carry_task_provenance(self) -> None:
         task = make_task(3, status="completed", subset="train", updated="2026-02-02")
 
@@ -309,7 +372,6 @@ class TestTaskToRecords:
             DeletedImage(
                 task_id=3,
                 task_name="task-3",
-                task_status="completed",
                 task_updated_date="2026-02-02",
                 frame_id=1,
                 image_name="gone.jpg",
@@ -320,7 +382,6 @@ class TestTaskToRecords:
             DeletedImage(
                 task_id=3,
                 task_name="task-3",
-                task_status="completed",
                 task_updated_date="2026-02-02",
                 frame_id=99,
                 image_name="<unknown>",
@@ -348,7 +409,6 @@ class TestTaskToRecords:
                 image_height=20,
                 task_id=1,
                 task_name="task-1",
-                task_status="completed",
                 task_updated_date="2026-01-01T00:00:00+00:00",
                 frame_id=0,
                 subset="val",

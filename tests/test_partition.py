@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 # Minimal columns required by partition_annotations_df
-_COLS = ["image_name", "task_id", "task_updated_date", "task_status"]
+_COLS = ["image_name", "task_id", "task_updated_date", "job_stage", "job_state"]
 
 
 def _row(
@@ -448,3 +448,104 @@ def test_result_frames_keep_the_input_columns_and_a_fresh_index() -> None:
     ):
         assert list(frame.columns) == _COLS, f"{name} gained or lost a column"
         assert list(frame.index) == list(range(len(frame))), f"{name} index not reset"
+
+
+# ---------------------------------------------------------------------------
+# Job stage/state aggregation
+# ---------------------------------------------------------------------------
+
+
+def _job_row(
+    image: str,
+    task_id: int,
+    updated: str,
+    stage: str,
+    state: str,
+) -> dict[str, object]:
+    return csv_row(
+        image, task_id=task_id, updated=updated, job_stage=stage, job_state=state
+    )
+
+
+def test_one_unfinished_job_holds_back_the_whole_task() -> None:
+    """A task is finished only when every one of its jobs is.
+
+    Two jobs of task 1 cover different frames; the second is still being
+    annotated, so CVAT would report the task as ``annotation`` and none of
+    its images may reach the dataset.
+    """
+    rows = [
+        _job_row("a.jpg", 1, "2026-01-02T00:00:00", "acceptance", "completed"),
+        _job_row("b.jpg", 1, "2026-01-02T00:00:00", "annotation", "new"),
+    ]
+
+    result = partition_annotations_df(_df(rows), [])
+
+    assert len(result.in_progress) == 2
+    assert len(result.dataset) == 0
+
+
+@pytest.mark.parametrize(
+    ("stage", "state"),
+    [
+        ("acceptance", "in progress"),
+        ("validation", "completed"),
+        ("annotation", "completed"),
+        ("acceptance", "rejected"),
+    ],
+)
+def test_only_acceptance_plus_completed_counts_as_finished(
+    stage: str,
+    state: str,
+) -> None:
+    """Either half of the pair alone leaves the task unfinished."""
+    rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", stage, state)]
+
+    result = partition_annotations_df(_df(rows), [])
+
+    assert len(result.dataset) == 0
+    assert len(result.in_progress) == 1
+
+
+def test_a_job_whose_frames_were_all_deleted_still_holds_the_task_back() -> None:
+    """Deletion records carry the job position of frames that left the CSV.
+
+    Every surviving row of task 1 belongs to a finished job, so grouping
+    the annotation rows alone would call the task done.  The deleted frame
+    belongs to a second job still at annotation, which is only visible in
+    the deletion records.
+    """
+    rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", "acceptance", "completed")]
+    deleted = [make_deleted("gone.jpg", 1, "2026-01-02T00:00:00", status="annotation")]
+
+    result = partition_annotations_df(_df(rows), deleted)
+
+    assert len(result.dataset) == 0
+    assert len(result.in_progress) == 1
+
+
+def test_finished_task_reaches_the_dataset_despite_a_deleted_frame() -> None:
+    """The deletion fold must not hold back a task whose jobs are all done."""
+    rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", "acceptance", "completed")]
+    deleted = [make_deleted("gone.jpg", 1, "2026-01-02T00:00:00", status="completed")]
+
+    result = partition_annotations_df(_df(rows), deleted)
+
+    assert len(result.dataset) == 1
+    assert len(result.in_progress) == 0
+
+
+def test_an_unfinished_row_still_counts_when_the_deleted_frames_are_finished() -> None:
+    """Unfinished jobs accumulate across both sources, not just the last one.
+
+    The mirror of the case above: here the CSV row is the unfinished one and
+    the deletion record is finished.  A task disqualified by either source
+    stays disqualified.
+    """
+    rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", "annotation", "new")]
+    deleted = [make_deleted("gone.jpg", 1, "2026-01-02T00:00:00", status="completed")]
+
+    result = partition_annotations_df(_df(rows), deleted)
+
+    assert len(result.dataset) == 0
+    assert len(result.in_progress) == 1

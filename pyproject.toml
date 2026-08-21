@@ -506,8 +506,8 @@ full = []
 # element of the default tuple, so mutating the *other* element cannot be
 # observed. The element each expression does read is pinned by
 # TestTaskToRecords::test_unannotated_frames_default_to_blank_issue_fields.
-"cveta2._client.assembly.x_task_to_records__mutmut_75" = "issue_text takes [0]; the mutation changes the unread [1] of the default"
-"cveta2._client.assembly.x_task_to_records__mutmut_81" = "issue_state takes [1]; the mutation changes the unread [0] of the default"
+"cveta2._client.assembly.x_task_to_records__mutmut_89" = "issue_text takes [0]; the mutation changes the unread [1] of the default"
+"cveta2._client.assembly.x_task_to_records__mutmut_95" = "issue_state takes [1]; the mutation changes the unread [0] of the default"
 
 # _latest_row_per_image: pandas' multi-key sort_values is stable on its own, so
 # _row_order only makes the intent explicit; keep="first" is the default.
@@ -529,9 +529,9 @@ full = []
 "cveta2.dataset_partition.x__split_completed__mutmut_20" = "drops how=\"left\"; an inner join matches every row and keeps left order"
 
 # partition_annotations_df: obsolete is reset_index(drop=True)'d on the way out.
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_57" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_59" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_60" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_59" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_61" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_62" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
 
 [tool.vulture]
 min_confidence = 80

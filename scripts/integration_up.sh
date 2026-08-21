@@ -36,7 +36,7 @@ OVERRIDE_FILE="$REPO_ROOT/tests/integration/docker-compose.override.yml"
 COCO8_IMAGES_DIR="$REPO_ROOT/tests/fixtures/data/coco8/images"
 COMPOSE_CACHE_DIR="$REPO_ROOT/.cache/cvat"
 
-CVAT_VERSION="v2.41.0"
+CVAT_VERSION="v2.59.1"
 CVAT_PORT="9988"
 MINIO_PORT="9989"
 MINIO_CONSOLE_PORT="9990"
