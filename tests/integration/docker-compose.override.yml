@@ -32,6 +32,13 @@ services:
   cvat_opa:
     container_name: ${INTEGRATION_USER:-default}-cvat_opa
 
+  # Renamed for the same reason as the rest, but it only started colliding
+  # at CVAT v2.59.1, which added cvat_clickhouse to x-backend-deps: before
+  # that cvat_server did not depend on it, so the analytics pipeline this
+  # stack disables was never brought up at all.
+  cvat_clickhouse:
+    container_name: ${INTEGRATION_USER:-default}-cvat_clickhouse
+
   cvat_server:
     container_name: ${INTEGRATION_USER:-default}-cvat_server
     environment:
