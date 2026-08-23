@@ -22,6 +22,7 @@ import pandas as pd
 from pydantic import BaseModel
 
 from cveta2._client.connection import configure_data_timeout, configure_network
+from cveta2._client_ops.task_ops import STAGE_OR_STATE_REQUIRED
 from cveta2.client import CvatClient
 from cveta2.config import (
     CacheConfig,
@@ -113,7 +114,6 @@ _ERR_PROJECT_UNRESOLVED = (
     "Не удалось определить проект: передайте project= или укажите задачи числовыми ID."
 )
 _ERR_NO_FRAME_OR_IMAGE = "Укажите хотя бы один frame или image."
-_ERR_NO_STAGE_OR_STATE = "Укажите хотя бы один stage или state."
 _JOB_STAGES_HINT = ", ".join(JOB_STAGES)
 _JOB_STATES_HINT = ", ".join(JOB_STATES)
 
@@ -624,7 +624,7 @@ def task_set_status(
     Valid values: :data:`cveta2.JOB_STAGES` / :data:`cveta2.JOB_STATES`.
     """
     if stage is None and state is None:
-        raise Cveta2Error(_ERR_NO_STAGE_OR_STATE)
+        raise Cveta2Error(STAGE_OR_STATE_REQUIRED)
     if stage is not None and stage not in JOB_STAGES:
         raise Cveta2Error(
             f"Недопустимый stage {stage!r}; допустимые: {_JOB_STAGES_HINT}."

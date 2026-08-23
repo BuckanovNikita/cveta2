@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 from cveta2.config import ClearmlConfig, ClearmlProjectMapping
+from cveta2.exceptions import ClearmlPublishError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -126,7 +127,7 @@ class TestMaybePublishClearml:
             patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
             patch(
                 "cveta2._clearml._dataset.publish_to_clearml",
-                side_effect=RuntimeError("ClearML server unreachable"),
+                side_effect=ClearmlPublishError("ClearML server unreachable"),
             ),
         ):
             from cveta2._clearml import maybe_publish_clearml

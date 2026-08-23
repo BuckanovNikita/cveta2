@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cveta2.config import ClearmlConfig, is_clearml_disabled
+from cveta2.exceptions import ClearmlPublishError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,9 +53,8 @@ def maybe_publish_clearml(project_name: str, output_dir: Path) -> None:
         from cveta2._clearml._dataset import publish_to_clearml  # noqa: PLC0415
 
         publish_to_clearml(mapping, output_dir)
-    except Exception:  # noqa: BLE001
-        logger.warning(
+    except (ClearmlPublishError, ImportError):
+        logger.opt(exception=True).warning(
             f"ClearML publish failed for project {project_name!r} — "
-            "fetch results are unaffected",
-            exc_info=True,
+            "fetch results are unaffected"
         )

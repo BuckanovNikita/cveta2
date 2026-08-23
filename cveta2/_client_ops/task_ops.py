@@ -8,6 +8,7 @@ from loguru import logger
 
 from cveta2._client_ops.base import _ClientBase
 from cveta2._concurrency import Workers, run_concurrent
+from cveta2.exceptions import Cveta2Error
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -16,7 +17,7 @@ if TYPE_CHECKING:
     from cveta2._client.ports import CvatApiPort
     from cveta2._client_ops.session import TaskWriteSession
 
-_STAGE_OR_STATE_REQUIRED = "Укажите stage и/или state."
+STAGE_OR_STATE_REQUIRED = "Укажите хотя бы один stage или state."
 
 
 class _TaskOpsMixin(_ClientBase):
@@ -117,8 +118,8 @@ class _TaskOpsMixin(_ClientBase):
     def count_task_label_shapes(self, task_id: int, label: str) -> int:
         """Count annotation shapes with the given label name in a task.
 
-        Raises ``ValueError`` (listing available labels) when the label
-        does not exist in the task.
+        Raises :class:`Cveta2Error` (listing available labels) when the
+        label does not exist in the task.
 
         Requires an active context manager (``with CvatClient(...) as c:``).
         """
@@ -145,7 +146,7 @@ class _TaskOpsMixin(_ClientBase):
 
         Raises
         ------
-        ValueError
+        Cveta2Error
             When the label does not exist in the task (message lists
             available labels).
 
@@ -171,14 +172,14 @@ class _TaskOpsMixin(_ClientBase):
     ) -> list[RawShape]:
         """Return task shapes whose label name equals *label*.
 
-        Raises ``ValueError`` listing available labels when no task label
-        matches *label*.
+        Raises :class:`Cveta2Error` listing available labels when no task
+        label matches *label*.
         """
         task_labels = api.get_task_labels(task_id)
         label_ids = {lbl.id for lbl in task_labels if lbl.name == label}
         if not label_ids:
             available = ", ".join(sorted(str(lbl.name) for lbl in task_labels))
-            raise ValueError(
+            raise Cveta2Error(
                 f"Метка {label!r} не найдена в задаче {task_id}. "
                 f"Доступные метки: {available}"
             )
@@ -235,7 +236,7 @@ class _TaskOpsMixin(_ClientBase):
 
         """
         if stage is None and state is None:
-            raise ValueError(_STAGE_OR_STATE_REQUIRED)
+            raise Cveta2Error(STAGE_OR_STATE_REQUIRED)
         api = self._require_api("set_task_jobs_status")
 
         jobs = api.get_task_jobs(task_id)

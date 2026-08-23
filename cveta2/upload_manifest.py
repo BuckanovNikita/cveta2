@@ -151,7 +151,10 @@ def _read_manifest(path: Path) -> UploadManifest | None:
     """Parse one manifest file, treating anything unreadable as absent."""
     try:
         raw = path.read_bytes()
-    except (FileNotFoundError, OSError):
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        logger.info(f"Не удалось прочитать состояние загрузки {path}: {e}")
         return None
     try:
         manifest = UploadManifest.model_validate_json(raw)

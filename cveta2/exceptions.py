@@ -52,6 +52,15 @@ class CvatApiError(Cveta2Error):
         self.retry_after = retry_after
 
 
+class ClearmlPublishError(Cveta2Error):
+    """Raised when publishing a dataset to ClearML fails.
+
+    The ClearML SDK raises a wide and undocumented range of types, so the
+    publish call converts whatever it gets into this one.  That is what
+    lets the caller stay narrow instead of catching bare ``Exception``.
+    """
+
+
 class LabelsMismatchError(Cveta2Error):
     """Raised when CSV labels don't match project labels."""
 

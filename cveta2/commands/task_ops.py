@@ -96,10 +96,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
 def run_task_drop_label(args: argparse.Namespace) -> None:
     """Run ``cveta2 task drop-label``."""
     with _task_session(args) as (client, task, project_name):
-        try:
-            count = client.count_task_label_shapes(task.id, args.label)
-        except ValueError as e:
-            raise Cveta2Error(str(e)) from e
+        count = client.count_task_label_shapes(task.id, args.label)
         if count == 0:
             logger.info(
                 f"В задаче {task.name!r} (id={task.id}) "
@@ -140,7 +137,11 @@ def run_task_delete(args: argparse.Namespace) -> None:
         prompted = not args.project or not args.yes
         echo_if_prompted(
             "task delete",
-            {"-p": project_name, "-t": args.task, "--yes": True},
+            {
+                "-p": project_name,
+                "-t": args.task,
+                "--yes": True,
+            },
             prompted=prompted,
         )
         client.delete_task(task.id)

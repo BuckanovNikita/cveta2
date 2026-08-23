@@ -178,7 +178,7 @@ class TestFakeWriteChain:
 
 
 class TestDropLabelAnnotations:
-    def test_unknown_label_raises_value_error_with_available(self) -> None:
+    def test_unknown_label_raises_domain_error_with_available(self) -> None:
         api = MagicMock(spec=CvatApiPort)
         api.get_task_labels.return_value = [
             LabelInfo(id=1, name="person"),
@@ -186,7 +186,7 @@ class TestDropLabelAnnotations:
         ]
         client = _client_with_api(api)
 
-        with pytest.raises(ValueError, match="person") as exc_info:
+        with pytest.raises(Cveta2Error, match="person") as exc_info:
             client.count_task_label_shapes(5, "ghost")
         # The joined, sorted list — not just its members — is the contract:
         # asserting membership alone left the ", " separator unpinned.
@@ -377,7 +377,7 @@ class TestUploadTaskAnnotations:
 class TestSetTaskJobsStatus:
     def test_requires_stage_or_state(self) -> None:
         client = _client_with_api(MagicMock(spec=CvatApiPort))
-        with pytest.raises(ValueError, match="stage"):
+        with pytest.raises(Cveta2Error, match="stage"):
             client.set_task_jobs_status(1)
 
     def test_patches_only_provided_fields(self) -> None:
