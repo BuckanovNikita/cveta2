@@ -120,9 +120,11 @@ exclude_commit_patterns = [
 [tool.ruff]
 target-version = "py310"
 line-length = 88
-# vendor/ needs no entry here: it is gitignored, and ruff respects .gitignore.
-# local/ is not gitignored; mutants/ is mutmut's copy of the tree.
-exclude = ["local/**", "mutants/**"]
+# vendor/ and local/ need no entry here: both are gitignored, and ruff
+# respects .gitignore. mutants/ is gitignored too but must stay listed --
+# ruff would otherwise see mutmut's copy of the tree when it is passed
+# explicitly. mypy needs all three, since it ignores .gitignore.
+exclude = ["mutants/**"]
 
 [tool.ruff.lint]
 select = ["ALL"]
