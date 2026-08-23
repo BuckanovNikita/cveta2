@@ -411,8 +411,14 @@ class SdkCvatApiAdapter:
 
         Waits for CVAT to finish processing the cloud-storage files so
         that subsequent annotation uploads land on the correct frames.
-        Raises ``RuntimeError`` when processing fails (e.g. images not
-        found in cloud storage).
+        Raises :class:`CvatApiError` when processing fails (e.g. images
+        not found in cloud storage).
+
+        The trailing size read is deliberately shielded: it feeds a log
+        line, but it runs *after* ``create_data`` has already succeeded,
+        and ``create_data`` is not idempotent.  Letting a throttled read
+        escape would hand ``_write_retry`` a 429 and re-attach every image
+        to a task CVAT has already finished processing.
         """
         result, _ = self.client.api_client.tasks_api.create_data(
             task_id,
@@ -425,9 +431,13 @@ class SdkCvatApiAdapter:
             )
         except BackgroundRequestException as exc:
             msg = f"Задача {task_id}: обработка данных не удалась — {exc}"
-            raise RuntimeError(msg) from exc
+            raise CvatApiError(msg) from exc
 
-        size = self.get_task_size(task_id)
+        try:
+            size: int | str = self.get_task_size(task_id)
+        except (CvatApiError, *_TRANSPORT_ERRORS) as exc:
+            logger.warning(f"Задача {task_id}: не удалось прочитать size — {exc!r}")
+            size = "?"
         logger.info(
             f"Привязано {len(spec.server_files)} изображений к задаче {task_id} "
             f"(cloud_storage_id={spec.cloud_storage_id}, "

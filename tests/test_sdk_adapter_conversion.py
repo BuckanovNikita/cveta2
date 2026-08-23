@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
 from cvat_sdk.api_client.exceptions import ApiAttributeError
+from cvat_sdk.core.exceptions import BackgroundRequestException
 
 from cveta2._client.dtos import (
     RawAnnotations,
@@ -18,6 +20,7 @@ from cveta2._client.dtos import (
     RawDataMeta,
     RawFrame,
     RawShape,
+    UploadTaskSpec,
 )
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2._client.sdk_convert import (
@@ -31,9 +34,13 @@ from cveta2._client.sdk_convert import (
     extract_creator_username,
     extract_updated_date,
 )
-from cveta2._retry import _log_retry
+from cveta2._retry import RetryPolicy, _log_retry, configure_retries
+from cveta2.exceptions import CvatApiError, Cveta2Error
 from cveta2.models import TaskInfo
 from tests.helpers import make_sdk_shape
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 # ---------------------------------------------------------------------------
 # _extract_updated_date
@@ -454,3 +461,59 @@ class TestGetTaskSize:
     def test_a_null_size_reports_zero(self) -> None:
         """The other spelling of "no data yet" some versions return."""
         assert self._adapter_for(SimpleNamespace(size=None)).get_task_size(1) == 0
+
+
+# ---------------------------------------------------------------------------
+# attach_task_data
+# ---------------------------------------------------------------------------
+
+
+class TestAttachTaskData:
+    """The retry unit around the data call, and what escapes it."""
+
+    @pytest.fixture(autouse=True)
+    def _cheap_retries(self) -> Generator[None, None, None]:
+        attempts, max_wait = RetryPolicy.attempts, RetryPolicy.max_wait
+        configure_retries(attempts=3, max_wait=0.01)
+        yield
+        configure_retries(attempts, max_wait)
+
+    @staticmethod
+    def _adapter(client: MagicMock) -> SdkCvatApiAdapter:
+        client.api_client.tasks_api.create_data.return_value = (
+            SimpleNamespace(rq_id="rq-1"),
+            None,
+        )
+        return SdkCvatApiAdapter(client)
+
+    @staticmethod
+    def _spec() -> UploadTaskSpec:
+        return UploadTaskSpec(
+            project_id=1,
+            name="task",
+            server_files=["a.jpg"],
+            cloud_storage_id=7,
+        )
+
+    def test_a_throttled_size_read_does_not_re_upload_the_data(self) -> None:
+        """The size read is for a log line; retrying it must not redo the write.
+
+        ``create_data`` is not idempotent, so a second pass attaches the
+        images again to a task CVAT has already finished processing.
+        """
+        client = MagicMock()
+        client.tasks.retrieve.side_effect = CvatApiError("429", status_code=429)
+        adapter = self._adapter(client)
+
+        adapter.attach_task_data(1, self._spec())
+
+        assert client.api_client.tasks_api.create_data.call_count == 1
+
+    def test_a_processing_failure_raises_a_domain_error(self) -> None:
+        """``CliApp`` catches only ``Cveta2Error``; anything else is a traceback."""
+        client = MagicMock()
+        client.wait_for_completion.side_effect = BackgroundRequestException("boom")
+        adapter = self._adapter(client)
+
+        with pytest.raises(Cveta2Error):
+            adapter.attach_task_data(1, self._spec())

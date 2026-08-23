@@ -129,8 +129,8 @@ class _WriteMixin(_ClientBase):
         go into each job (CVAT splits automatically).  After attaching data
         the method **waits** for CVAT to finish processing the cloud storage
         files so that subsequent annotation uploads land on the correct
-        frames.  Raises ``RuntimeError`` immediately if processing fails
-        (e.g. images not found in cloud storage).
+        frames.  Raises :class:`CvatApiError` immediately if processing
+        fails (e.g. images not found in cloud storage).
 
         Parameters
         ----------
