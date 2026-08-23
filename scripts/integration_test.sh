@@ -12,8 +12,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-export CVAT_INTEGRATION_HOST="http://localhost:9988"
-export MINIO_ENDPOINT="http://localhost:9989"
+export CVAT_INTEGRATION_HOST="${CVAT_INTEGRATION_HOST:-http://localhost:${CVAT_PORT:-9988}}"
+export MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://localhost:${MINIO_PORT:-9989}}"
 export AWS_ACCESS_KEY_ID=minioadmin
 export AWS_SECRET_ACCESS_KEY=minioadmin
 

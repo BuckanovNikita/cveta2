@@ -1,34 +1,37 @@
 #!/usr/bin/env python3
-"""Dev tool: create a CVAT project and fill it with multiple tasks from a dataset YAML (e.g. coco8).
+r"""Dev tool: create a CVAT project and fill it with tasks from a dataset YAML.
 
 Uses dataset YAML format: path, train/val/test dirs, names (class id -> name).
-Creates one project with labels from names, then N tasks each with the same set of images
-(train + val). Imports bounding boxes from YOLO-style label files (labels/<split>/<stem>.txt:
-one line per object: "class_id x_center y_center width height" normalized 0–1).
+Creates one project with labels from names, then N tasks each with the same
+set of images (train + val). Imports bounding boxes from YOLO-style label
+files (labels/<split>/<stem>.txt: one line per object,
+"class_id x_center y_center width height", normalized 0-1).
 
 Example:
   uv run python scripts/upload_dataset_to_cvat.py
-  uv run python scripts/upload_dataset_to_cvat.py --yaml tests/fixtures/data/coco8.yaml --tasks 3 --project "coco8-dev"
+  uv run python scripts/upload_dataset_to_cvat.py \\
+      --yaml tests/fixtures/data/coco8.yaml --tasks 3 --project "coco8-dev"
+
 """
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import yaml
-from loguru import logger
-from PIL import Image
-from pydantic import BaseModel
 
 # CVAT SDK only in this script (dev tool)
 from cvat_sdk import make_client
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from cvat_sdk.core.proxies.tasks import ResourceType
+from loguru import logger
+from PIL import Image
+from pydantic import BaseModel
 
 from cveta2.config import CvatConfig
-
 
 # ---------------------------------------------------------------------------
 # Dataset YAML schema (coco/ultralytics-style)
@@ -64,7 +67,7 @@ def load_dataset_yaml(path: Path) -> tuple[DatasetYaml, Path]:
     with path.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     if not isinstance(data, dict):
-        raise ValueError(f"Invalid YAML: expected mapping, got {type(data)}")
+        raise TypeError(f"Invalid YAML: expected mapping, got {type(data)}")
     # Normalize names: YAML may have int or str keys
     names_raw = data.get("names") or {}
     names = {}
@@ -90,9 +93,7 @@ def collect_image_paths(
         if not dir_path.is_dir():
             logger.warning(f"Dataset dir missing: {dir_path}")
             continue
-        for p in sorted(dir_path.iterdir()):
-            if p.suffix.lower() in exts:
-                paths.append(p)
+        paths.extend(p for p in sorted(dir_path.iterdir()) if p.suffix.lower() in exts)
     return paths
 
 
@@ -110,14 +111,16 @@ def label_path_for_image(dataset_root: Path, image_path: Path) -> Path:
 
 
 def parse_yolo_label_file(path: Path) -> list[tuple[int, float, float, float, float]]:
-    """Parse YOLO .txt: one line per object = 'class_id x_center y_center width height' (normalized 0-1).
-    Returns list of (class_id, x_center, y_center, width, height).
+    """Parse one YOLO label file into normalized rows.
+
+    Each line is ``class_id x_center y_center width height``, normalized to
+    0-1. Returns a list of ``(class_id, x_center, y_center, width, height)``.
     """
     if not path.is_file():
         return []
     rows: list[tuple[int, float, float, float, float]] = []
-    for line in path.read_text(encoding="utf-8").strip().splitlines():
-        line = line.strip()
+    for raw_line in path.read_text(encoding="utf-8").strip().splitlines():
+        line = raw_line.strip()
         if not line:
             continue
         parts = line.split()
@@ -148,7 +151,10 @@ def yolo_norm_to_pixel_bbox(
     img_width: int,
     img_height: int,
 ) -> list[float]:
-    """Convert YOLO normalized (xc, yc, w, h) to CVAT rectangle points [x1, y1, x2, y2] in pixels."""
+    """Convert YOLO normalized (xc, yc, w, h) to CVAT pixel points.
+
+    Returns the rectangle as ``[x1, y1, x2, y2]``.
+    """
     x1 = (x_center - width / 2.0) * img_width
     y1 = (y_center - height / 2.0) * img_height
     x2 = (x_center + width / 2.0) * img_width
@@ -160,8 +166,9 @@ def load_bbox_annotations(
     dataset_root: Path,
     image_paths: list[Path],
 ) -> list[list[tuple[int, list[float]]]]:
-    """For each image, load YOLO labels and return list of (class_id, [x1,y1,x2,y2]) per frame.
-    Uses PIL to get image size for conversion to pixels.
+    """Load YOLO labels for each image as ``(class_id, [x1, y1, x2, y2])``.
+
+    Uses PIL to read image size, which the pixel conversion needs.
     """
     result: list[list[tuple[int, list[float]]]] = []
     for img_path in image_paths:
@@ -183,7 +190,9 @@ def load_bbox_annotations(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Create CVAT project and multiple tasks from dataset YAML (e.g. coco8)."
+        description=(
+            "Create CVAT project and multiple tasks from dataset YAML (e.g. coco8)."
+        )
     )
     parser.add_argument(
         "--yaml",
@@ -224,16 +233,17 @@ def main() -> None:
     bbox_annotations = load_bbox_annotations(dataset_root, image_paths)
     total_boxes = sum(len(f) for f in bbox_annotations)
     logger.info(
-        f"Dataset: {dataset_root}, labels={len(label_names)}, images={len(image_paths)}, bboxes={total_boxes}"
+        f"Dataset: {dataset_root}, labels={len(label_names)}, "
+        f"images={len(image_paths)}, bboxes={total_boxes}"
     )
 
     cfg = CvatConfig.load()
-    resolved = cfg.ensure_credentials()
+    resolved = cfg.require_credentials()
     if not resolved.host:
         logger.error("CVAT host not set. Run cveta2 setup or set CVAT_HOST.")
         raise SystemExit(1)
 
-    kwargs: dict = {"host": resolved.host}
+    kwargs: dict[str, Any] = {"host": resolved.host}
     kwargs["credentials"] = (resolved.username or "", resolved.password or "")
 
     with make_client(**kwargs) as client:

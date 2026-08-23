@@ -748,7 +748,6 @@ dependencies = [
     { name = "reflink-copy" },
     { name = "tenacity" },
     { name = "tqdm" },
-    { name = "types-pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -773,6 +772,7 @@ dev = [
     { name = "pytest-xdist" },
     { name = "python-semantic-release" },
     { name = "ruff" },
+    { name = "types-pyyaml" },
     { name = "types-tqdm" },
     { name = "vulture" },
 ]
@@ -791,7 +791,6 @@ requires-dist = [
     { name = "reflink-copy", specifier = ">=0.1.0" },
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "tqdm", specifier = ">=4.66.0" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
 ]
 provides-extras = ["clearml"]
 
@@ -811,6 +810,7 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "python-semantic-release", specifier = ">=10.6.1" },
     { name = "ruff", specifier = ">=0.16.1" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
     { name = "types-tqdm", specifier = ">=4.66.0.20240417" },
     { name = "vulture", specifier = ">=2.16" },
 ]

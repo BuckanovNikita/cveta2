@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export CVAT project/task data to JSON fixtures for tests.
+r"""Export CVAT project/task data to JSON fixtures for tests.
 
 Uses only cvat_sdk (no cveta2 client). Credentials via env: CVAT_HOST,
 CVAT_USERNAME, CVAT_PASSWORD. Output mirrors cveta2._client.dtos shape.
@@ -7,6 +7,7 @@ CVAT_USERNAME, CVAT_PASSWORD. Output mirrors cveta2._client.dtos shape.
 Example:
   CVAT_HOST=http://localhost:8080 CVAT_USERNAME=admin CVAT_PASSWORD=... \\
   uv run python scripts/export_cvat_fixtures.py --project coco8-dev
+
 """
 
 from __future__ import annotations
@@ -16,10 +17,13 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from cvat_sdk import make_client
-from cvat_sdk.api_client import models as cvat_models
 from loguru import logger
+
+if TYPE_CHECKING:
+    from cvat_sdk.api_client import models as cvat_models
 
 
 def _slug(name: str) -> str:
@@ -51,7 +55,7 @@ def _extract_creator_username(item: object) -> str:
     return ""
 
 
-def task_to_dict(task: cvat_models.TaskRead) -> dict:
+def task_to_dict(task: cvat_models.TaskRead) -> dict[str, Any]:
     return {
         "id": task.id,
         "name": task.name or "",
@@ -61,13 +65,13 @@ def task_to_dict(task: cvat_models.TaskRead) -> dict:
     }
 
 
-def label_to_dict(label: cvat_models.Label) -> dict:
+def label_to_dict(label: cvat_models.Label) -> dict[str, Any]:
     raw_attrs = label.attributes or []
     attrs = [{"id": a.id, "name": a.name or ""} for a in raw_attrs]
     return {"id": label.id, "name": label.name, "attributes": attrs}
 
 
-def data_meta_to_dict(data_meta: cvat_models.DataMetaRead) -> dict:
+def data_meta_to_dict(data_meta: cvat_models.DataMetaRead) -> dict[str, Any]:
     frames_raw = data_meta.frames or []
     frames = [
         {"name": f.name or "", "width": int(f.width or 0), "height": int(f.height or 0)}
@@ -79,13 +83,13 @@ def data_meta_to_dict(data_meta: cvat_models.DataMetaRead) -> dict:
 
 def _attributes_to_list(
     raw_attrs: list[cvat_models.AttributeVal] | None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     if not raw_attrs:
         return []
     return [{"spec_id": a.spec_id, "value": str(a.value or "")} for a in raw_attrs]
 
 
-def shape_to_dict(shape: cvat_models.LabeledShape) -> dict:
+def shape_to_dict(shape: cvat_models.LabeledShape) -> dict[str, Any]:
     type_val = shape.type.value if shape.type else str(shape.type)
     return {
         "id": shape.id or 0,
@@ -102,7 +106,7 @@ def shape_to_dict(shape: cvat_models.LabeledShape) -> dict:
     }
 
 
-def tracked_shape_to_dict(ts: cvat_models.TrackedShape) -> dict:
+def tracked_shape_to_dict(ts: cvat_models.TrackedShape) -> dict[str, Any]:
     type_str = ts.type.value if ts.type else str(ts.type)
     return {
         "type": type_str,
@@ -117,7 +121,7 @@ def tracked_shape_to_dict(ts: cvat_models.TrackedShape) -> dict:
     }
 
 
-def track_to_dict(track: cvat_models.LabeledTrack) -> dict:
+def track_to_dict(track: cvat_models.LabeledTrack) -> dict[str, Any]:
     raw_shapes = track.shapes or []
     return {
         "id": track.id or 0,
@@ -128,7 +132,7 @@ def track_to_dict(track: cvat_models.LabeledTrack) -> dict:
     }
 
 
-def annotations_to_dict(labeled_data: cvat_models.LabeledData) -> dict:
+def annotations_to_dict(labeled_data: cvat_models.LabeledData) -> dict[str, Any]:
     raw_shapes = labeled_data.shapes or []
     raw_tracks = labeled_data.tracks or []
     return {
@@ -148,7 +152,10 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=Path("tests/fixtures/cvat/coco8-dev"),
-        help="Output directory for project.json and tasks/ (default: tests/fixtures/cvat/coco8-dev)",
+        help=(
+            "Output directory for project.json and tasks/ "
+            "(default: tests/fixtures/cvat/coco8-dev)"
+        ),
     )
     args = parser.parse_args()
 

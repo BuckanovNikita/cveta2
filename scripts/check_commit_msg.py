@@ -76,7 +76,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if match.group(3) and not BREAKING_FOOTER_RE.search(body):
         print(
-            f"FAILED: `!` marks a breaking change but the body has no footer:\n    {subject}"
+            "FAILED: `!` marks a breaking change but the body has no footer:\n"
+            f"    {subject}"
         )
         print("Add a footer line, otherwise the changelog gets no text for it:")
         print("    BREAKING CHANGE: <what broke and what to do about it>")

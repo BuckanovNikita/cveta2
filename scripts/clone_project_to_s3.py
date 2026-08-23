@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clone a CVAT project, moving all task images to an existing S3 cloud storage.
+r"""Clone a CVAT project, moving all task images to an existing S3 cloud storage.
 
 Downloads frames from the source project, uploads them to the S3 bucket
 referenced by the CVAT cloud storage, then creates a new project with
@@ -12,12 +12,14 @@ Credentials:
 Example:
   uv run python scripts/clone_project_to_s3.py \\
       --source coco8-dev --dest coco8-dev-s3 --cloud-storage-id 1
+
 """
 
 from __future__ import annotations
 
 import argparse
 import time
+from typing import Any
 from urllib.parse import parse_qs
 
 import boto3
@@ -28,7 +30,6 @@ from loguru import logger
 from pydantic import BaseModel
 
 from cveta2.config import CvatConfig
-
 
 # ---------------------------------------------------------------------------
 # Config
@@ -44,7 +45,7 @@ class CloudStorageInfo(BaseModel):
     endpoint_url: str
 
 
-def parse_cloud_storage(cs: object) -> CloudStorageInfo:
+def parse_cloud_storage(cs: Any) -> CloudStorageInfo:
     """Extract bucket, prefix, endpoint from CVAT cloud storage object."""
     specific = str(cs.specific_attributes or "")
     parsed = parse_qs(specific)
@@ -64,13 +65,13 @@ def parse_cloud_storage(cs: object) -> CloudStorageInfo:
 
 
 def upload_bytes_to_s3(
-    s3_client: object,
+    s3_client: Any,
     bucket: str,
     key: str,
     data: bytes,
 ) -> None:
     """Upload raw bytes to S3."""
-    s3_client.put_object(Bucket=bucket, Key=key, Body=data)  # type: ignore[union-attr]
+    s3_client.put_object(Bucket=bucket, Key=key, Body=data)
 
 
 # ---------------------------------------------------------------------------
@@ -79,12 +80,15 @@ def upload_bytes_to_s3(
 
 
 def download_task_frames(
-    cvat_client: object,
+    cvat_client: Any,
     task_id: int,
     frame_ids: list[int],
 ) -> dict[int, bytes]:
-    """Download original-quality frames from a CVAT task. Returns {frame_id: raw_bytes}."""
-    task = cvat_client.tasks.retrieve(task_id)  # type: ignore[union-attr]
+    """Download original-quality frames from a CVAT task.
+
+    Returns ``{frame_id: raw_bytes}``.
+    """
+    task = cvat_client.tasks.retrieve(task_id)
     result: dict[int, bytes] = {}
     for fid in frame_ids:
         stream = task.get_frame(fid, quality="original")
@@ -251,7 +255,10 @@ def main() -> None:
     parser.add_argument(
         "--s3-subdir",
         default=None,
-        help="Subdirectory within cloud storage prefix for images (default: dest project name).",
+        help=(
+            "Subdirectory within cloud storage prefix for images "
+            "(default: dest project name)."
+        ),
     )
     args = parser.parse_args()
 
@@ -265,7 +272,7 @@ def main() -> None:
         logger.error("CVAT host not set. Run cveta2 setup or set CVAT_HOST.")
         raise SystemExit(1)
 
-    kwargs: dict = {"host": resolved.host}
+    kwargs: dict[str, Any] = {"host": resolved.host}
     kwargs["credentials"] = (resolved.username or "", resolved.password or "")
 
     with make_client(**kwargs) as cvat:
@@ -287,7 +294,8 @@ def main() -> None:
         src_labels = src_project.get_labels()
         src_tasks = src_project.get_tasks()
         logger.info(
-            f"Source project: {src_project.name} (id={src_project.id}), {len(src_tasks)} tasks"
+            f"Source project: {src_project.name} (id={src_project.id}), "
+            f"{len(src_tasks)} tasks"
         )
 
         # ── Read cloud storage info ───────────────────────────────────
@@ -337,9 +345,7 @@ def main() -> None:
         # ── Create destination project ────────────────────────────────
         label_specs = []
         for lbl in src_labels:
-            attr_specs = []
-            for attr in lbl.attributes or []:
-                attr_specs.append({"name": attr.name})
+            attr_specs = [{"name": attr.name} for attr in lbl.attributes or []]
             label_specs.append({"name": lbl.name, "attributes": attr_specs})
 
         dst_project = cvat.projects.create({"name": dest_name, "labels": label_specs})

@@ -30,7 +30,6 @@ dependencies = [
     "pandas>=2.0.0",
     "pydantic>=2.12.5",
     "pyyaml>=6.0.0",
-    "types-pyyaml>=6.0.12.20250915",
     "questionary>=2.0.0",
     "tqdm>=4.66.0",
     "tenacity>=9.1.4",
@@ -75,6 +74,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.1",
+    "types-pyyaml>=6.0.12.20250915",
     "types-tqdm>=4.66.0.20240417",
     "vulture>=2.16",
     "import-linter>=2.13",
@@ -138,14 +138,21 @@ ignore = [
     "CPY001",  # missing-copyright-notice - this project ships no per-file headers
 ]
 fixable = ["ALL"]
-exclude = ["scripts/**"]  # lint only; format still runs on scripts
+
+[tool.ruff.lint.isort]
+# tomllib is stdlib from 3.11 on. Ruff classifies against `target-version`,
+# which is py310 for the package; only the dev scripts import it, and they
+# run on the pinned interpreter in .python-version.
+extra-standard-library = ["tomllib"]
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D101", "D102", "D103", "S311", "SLF001"]
-"main.py" = ["F401"]  # re-export wrapper
+# Standalone operator scripts: `print` is their output, an argparse `main()`
+# is linear top-to-bottom by nature, and their helpers are not an API surface.
+"scripts/*.py" = ["T201", "D103", "ANN401", "PLR2004", "S607", "C901", "PLR0912", "PLR0915", "PLR0913", "PLR0917"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -162,7 +169,7 @@ warn_unused_configs = true
 # mutants/ holds mutmut's copy of the tree; without it mypy sees two `cveta2`
 # packages and fails with a duplicate-module error. vendor/ is only a leftover
 # CVAT checkout in older clones - mypy, unlike ruff, ignores .gitignore.
-exclude = ["scripts/", "vendor/", "local/", "mutants/"]
+exclude = ["vendor/", "local/", "mutants/"]
 
 [[tool.mypy.overrides]]
 module = ["cvat_sdk.*"]
@@ -294,7 +301,7 @@ fast = [
     "cveta2.projects_cache.*",
 ]
 # _client.extractors is gated but deliberately absent from `fast`: most of its
-# mutants land on the 23 keyword arguments of one BBoxAnnotation constructor
+# mutants land on the keyword arguments of one BBoxAnnotation constructor
 # and die on pydantic validation rather than on any assertion, so they cost a
 # full suite run each and say nothing about test quality.
 full = []

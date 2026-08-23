@@ -2,7 +2,7 @@
 # Stop the CVAT + MinIO integration stack started by integration_up.sh.
 #
 # Usage:
-#   ./scripts/stop_integration.sh
+#   ./scripts/integration_stop.sh
 
 set -euo pipefail
 

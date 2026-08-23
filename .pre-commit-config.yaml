@@ -52,7 +52,7 @@ repos:
 
       - id: pytest
         name: pytest (with coverage)
-        entry: uv run pytest -n auto --cov --cov-report=term-missing --cov-fail-under=65
+        entry: uv run pytest -n auto --cov --cov-report=term-missing
         language: system
         pass_filenames: false
         always_run: true

@@ -90,7 +90,8 @@ def sync_scope() -> None:
             print("==> mutants/ has no scope fingerprint; regenerating from scratch.")
         else:
             print(
-                f"==> Mutation scope changed ({previous} -> {current}); wiping mutants/."
+                f"==> Mutation scope changed ({previous} -> {current}); "
+                "wiping mutants/."
             )
         shutil.rmtree(MUTANTS_DIR, ignore_errors=True)
     MUTANTS_DIR.mkdir(parents=True, exist_ok=True)
