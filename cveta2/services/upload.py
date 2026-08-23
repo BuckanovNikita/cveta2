@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 from loguru import logger
 
-from cveta2.config import ImageCacheConfig
+from cveta2.config import resolve_images_cache_dir
 from cveta2.exceptions import CvatApiError, Cveta2Error, LabelsMismatchError
 from cveta2.image_uploader import S3Uploader, build_server_file_mapping, resolve_images
 from cveta2.s3_utils import build_s3_key
@@ -228,18 +228,24 @@ def build_search_dirs(
     image_dirs: Sequence[str | Path] | str | Path | None,
     project_name: str,
 ) -> list[Path]:
-    """Build list of directories to search for image files."""
+    """Build list of directories to search for image files.
+
+    Resolves the project's image cache the same way ``fetch`` and
+    ``s3-sync`` do: an explicit ``image_cache`` entry first, then
+    ``cache.images_root``.  Reading only the explicit entry, as this used
+    to, meant a project configured solely through the global root
+    uploaded nothing but what was already on S3.
+    """
     if isinstance(image_dirs, (str, Path)):
         image_dirs = [image_dirs]
     dirs: list[Path] = [Path(d).resolve() for d in (image_dirs or [])]
-    ic_cfg = ImageCacheConfig.load()
-    cache_dir = ic_cfg.get_cache_dir(project_name)
+    cache_dir = resolve_images_cache_dir(project_name)
     if cache_dir is not None:
         dirs.append(cache_dir)
     if not dirs:
         logger.warning(
-            "Не указан --image-dir и не настроен image_cache "
-            f"для проекта {project_name!r}. "
+            "Не указан --image-dir и не настроены ни image_cache, "
+            f"ни cache.images_root для проекта {project_name!r}. "
             "Будут загружены только изображения, "
             "уже находящиеся на S3.",
         )

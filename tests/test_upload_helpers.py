@@ -7,6 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from cveta2.config import cache_dir_for_project
 from cveta2.exceptions import Cveta2Error
 from cveta2.models import ProjectAnnotations
 from cveta2.services.output import enrich_dataframe_paths, populate_record_paths
@@ -292,6 +293,45 @@ def test_build_search_dirs_none_warns(
     dirs = build_search_dirs(None, "proj")
     assert dirs == []
     assert any("Не указан --image-dir" in m for m in capture_logs)
+
+
+def test_build_search_dirs_falls_back_to_the_global_images_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A project configured only through ``cache.images_root`` still resolves.
+
+    ``upload`` used to read the explicit ``image_cache`` entry alone, so such
+    a project uploaded nothing but what was already on S3 — while ``fetch``
+    and ``s3-sync`` found the images fine.
+    """
+    images_root = tmp_path / "datasets"
+    images_root.mkdir()
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(f"cache:\n  images_root: {images_root}\n", encoding="utf-8")
+    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
+
+    dirs = build_search_dirs(None, "my-project")
+
+    assert dirs == [cache_dir_for_project(images_root, "my-project")]
+
+
+def test_build_search_dirs_prefers_an_explicit_entry_over_the_global_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``image_cache`` wins; the root is only a fallback."""
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+    images_root = tmp_path / "datasets"
+    images_root.mkdir()
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        f"image_cache:\n  my-project: {explicit}\n"
+        f"cache:\n  images_root: {images_root}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
+
+    assert build_search_dirs(None, "my-project") == [explicit]
 
 
 def test_build_search_dirs_includes_cache(

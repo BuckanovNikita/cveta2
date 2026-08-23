@@ -20,12 +20,6 @@ if TYPE_CHECKING:
     from cveta2.models import TaskInfo
 
 
-def resolve_task(client: CvatClient, project_id: int, task: int | str) -> TaskInfo:
-    """Resolve one task selector (id or name) within *project_id*."""
-    tasks = client.list_project_tasks(project_id)
-    return client.resolve_task_selectors(tasks, [task])[0]
-
-
 @contextmanager
 def resolved_task(
     client: CvatClient,
@@ -39,7 +33,8 @@ def resolved_task(
     through a prompt, the api layer without one, and services may not
     import the interactive layer.
     """
-    task_info = resolve_task(client, project_id, task)
+    tasks = client.list_project_tasks(project_id)
+    task_info = client.resolve_task_selectors(tasks, [task])[0]
     try:
         yield task_info
     finally:
