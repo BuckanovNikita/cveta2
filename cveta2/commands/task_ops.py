@@ -12,7 +12,11 @@ from loguru import logger
 
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import echo_if_prompted, resolve_project
+from cveta2.commands._helpers import (
+    echo_if_prompted,
+    project_cli_spec,
+    resolve_project,
+)
 from cveta2.exceptions import Cveta2Error
 from cveta2.task_cache import invalidate_local_entry
 
@@ -76,7 +80,7 @@ def run_task_mark_deleted(args: argparse.Namespace) -> None:
         echo_if_prompted(
             "task mark-deleted",
             {
-                "-p": project_name,
+                "-p": project_cli_spec(client, project_name),
                 "-t": args.task,
                 "--frame": frames,
                 "--image": images,
@@ -113,7 +117,7 @@ def run_task_drop_label(args: argparse.Namespace) -> None:
         echo_if_prompted(
             "task drop-label",
             {
-                "-p": project_name,
+                "-p": project_cli_spec(client, project_name),
                 "-t": args.task,
                 "--label": args.label,
                 "--yes": True,
@@ -138,7 +142,7 @@ def run_task_delete(args: argparse.Namespace) -> None:
         echo_if_prompted(
             "task delete",
             {
-                "-p": project_name,
+                "-p": project_cli_spec(client, project_name),
                 "-t": args.task,
                 "--yes": True,
             },
@@ -159,7 +163,7 @@ def run_task_status(args: argparse.Namespace) -> None:
         echo_if_prompted(
             "task status",
             {
-                "-p": project_name,
+                "-p": project_cli_spec(client, project_name),
                 "-t": args.task,
                 "--stage": args.stage,
                 "--state": args.state,

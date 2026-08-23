@@ -9,7 +9,11 @@ from loguru import logger
 from cveta2.client import CvatClient
 from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
-from cveta2.commands._helpers import echo_cli_command, resolve_project_from_args
+from cveta2.commands._helpers import (
+    echo_cli_command,
+    project_cli_spec,
+    resolve_project_from_args,
+)
 from cveta2.config import (
     IgnoreConfig,
     IgnoredTask,
@@ -245,7 +249,7 @@ def _interactive_add(
     echo_cli_command(
         "ignore",
         {
-            "-p": project_name,
+            "-p": project_cli_spec(client, project_name),
             "--add": [task.id for task in selected],
             "--description": description or None,
             "--silent": silent,

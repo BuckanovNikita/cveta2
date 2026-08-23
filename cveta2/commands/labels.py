@@ -11,6 +11,7 @@ from cveta2.commands import interactive
 from cveta2.commands._bootstrap import open_client
 from cveta2.commands._helpers import (
     echo_if_prompted,
+    project_cli_spec,
     resolve_project,
 )
 from cveta2.config import require_interactive
@@ -37,7 +38,7 @@ def run_labels(args: argparse.Namespace) -> None:
         prompted = not args.project
         echo_if_prompted(
             "labels",
-            {"-p": project_name, "--list": args.list_only},
+            {"-p": project_cli_spec(client, project_name), "--list": args.list_only},
             prompted=prompted,
         )
 

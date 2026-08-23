@@ -260,7 +260,7 @@ def main() -> None:
 
     # ── Load CVAT config ──────────────────────────────────────────────
     cfg = CvatConfig.load()
-    resolved = cfg.ensure_credentials()
+    resolved = cfg.require_credentials()
     if not resolved.host:
         logger.error("CVAT host not set. Run cveta2 setup or set CVAT_HOST.")
         raise SystemExit(1)
