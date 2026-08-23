@@ -12,8 +12,13 @@ uv run pre-commit install   # хуки commit, commit-msg и pre-push разом
 Одной команды достаточно: список стадий задан в `.pre-commit-config.yaml`
 (`default_install_hook_types`).
 
-Требования: Python 3.12+, [uv](https://docs.astral.sh/uv/),
+Требования: Python 3.10+ (пакет), [uv](https://docs.astral.sh/uv/),
 Docker + Compose v2 (только для интеграционных тестов).
+
+Версии Python в проекте различаются намеренно: `requires-python = ">=3.10"` —
+это floor **пакета**; `.python-version` пинит **разработку** на 3.12; mypy
+анализирует как 3.11 (floor установленных зависимостей, см. ниже). Ставить
+везде одно число не нужно и вредно.
 
 Сабмодулей у репозитория нет: `docker-compose.yml` для стека CVAT
 `integration_up.sh` скачивает сам (см. «Интеграционные тесты»).
@@ -114,9 +119,14 @@ uv run ruff check --fix .  # автоматически исправить бе�
 что вынос литерала убирает и группу неубиваемых мутантов.
 
 - Per-file overrides:
-  - `tests/**` — отключены `S101` (assert), `S105` (hardcoded password), `PLR2004`, `PLC0415` (import not at top), `D102`/`D103` (missing docstrings), `S311` (random)
-  - `main.py` — отключён `F401` (unused import, т.к. re-export)
-- `scripts/**` полностью исключена из линтинга (но форматируется)
+  - `tests/**` — отключены `S101` (assert), `S105`/`S106` (hardcoded password),
+    `ANN401` (`Any` в аннотациях), `PLR2004`, `PLC0415` (import not at top),
+    `D101`/`D102`/`D103` (missing docstrings), `S311` (random),
+    `SLF001` (доступ к приватным атрибутам)
+  - `scripts/*.py` — отключены `T201` (`print` — это их вывод), `D103`,
+    `ANN401`, `PLR2004`, `S607`, и правила «слишком длинная функция»
+    (`C901`, `PLR0912`, `PLR0915`, `PLR0913`, `PLR0917`): argparse-`main()`
+    в утилите линеен сверху вниз
 
 ### mypy (статическая типизация)
 
@@ -127,10 +137,14 @@ uv run mypy .
 Конфигурация:
 
 - `strict = true` — строжайший режим
-- `python_version = "3.10"`
+- `python_version = "3.11"` — это floor *установленных зависимостей*, а не
+  `requires-python`. На 3.10 pandas-stubs 3.0 деградирует `DataFrame` до
+  `Any` и проверка типов pandas молча выключается целиком
 - `warn_return_any = true`
 - `warn_unused_configs = true`
-- Исключены: `scripts/`, `vendor/` (второе — ради старых клонов с сабмодулем CVAT)
+- Исключены: `vendor/` (ради старых клонов с сабмодулем CVAT), `local/` и
+  `mutants/` (копия дерева от mutmut — иначе mypy видит два пакета `cveta2`
+  и падает с duplicate-module). `scripts/` **не** исключена
 - Для `cvat_sdk.*` установлено `ignore_missing_imports = true` (SDK не поставляет полные стабы)
 - Type stubs для сторонних библиотек в dev-зависимостях: `boto3-stubs`, `pandas-stubs`, `types-tqdm`, `types-pyyaml`
 
@@ -140,23 +154,27 @@ uv run mypy .
 uv run lint-imports
 ```
 
-Три контракта, определённых в `pyproject.toml`:
+Четыре контракта, определённых в `pyproject.toml`:
 
 **1. Слои архитектуры** (тип `layers`):
 
 ```
-cli → commands → client → _client
+cli → commands → api → services → _clearml → client → _client_ops → _client
 ```
 
 Импорты допускаются только сверху вниз. Нижние слои не могут импортировать верхние. Доменные типы (`TaskInfo`, `LabelInfo`, `ProjectInfo`) живут в `models.py` (фундаментный слой) и импортируются всеми слоями без нарушений.
 
 **2. Изоляция фундаментных модулей** (тип `forbidden`):
 
-Модули `models` и `exceptions` **не могут** импортировать из: `client`, `commands`, `cli`, `_client`.
+Модули `models` и `exceptions` **не могут** импортировать из: `client`, `api`, `services`, `commands`, `cli`, `_client`.
 
 **3. Изоляция конфигурации** (тип `forbidden`):
 
-Модуль `config` **не может** импортировать из: `client`, `commands`, `cli`, `_client`, `models`. Может зависеть только от `exceptions`.
+Модуль `config` **не может** импортировать из: `client`, `api`, `services`, `commands`, `cli`, `_client`, `models`. Может зависеть только от `exceptions`.
+
+**4. Изоляция слоя ClearML** (тип `forbidden`):
+
+Пакет `_clearml` **не может** импортировать из: `client`, `commands`, `cli`, `_client`, `models`.
 
 При добавлении новых модулей или кросс-модульных импортов запускайте `uv run lint-imports` для проверки.
 
@@ -179,15 +197,16 @@ uv run pytest -n0          # в один поток (для отладки)
 uv run pytest -k "test_labels"  # запустить по имени
 ```
 
-- `-v --tb=short -n auto` — настройки по умолчанию из `pyproject.toml`
+- `-v --tb=short -n auto -p tests.env_isolation` — настройки по умолчанию из
+  `pyproject.toml`; последний плагин изолирует переменные окружения
 - `-n auto` включает параллельное выполнение через `pytest-xdist`
 - Интеграционные тесты запускаются только при наличии `CVAT_INTEGRATION_HOST`
 
 ### mutmut (мутационное тестирование)
 
 ```bash
-./scripts/mutation_test.sh --profile fast        # подмножество для pre-commit (~17 c)
-./scripts/mutation_test.sh --profile full        # весь охват, запускается на pre-push (~70 c)
+./scripts/mutation_test.sh --profile fast        # подмножество для pre-commit
+./scripts/mutation_test.sh --profile full        # весь охват, запускается на pre-push
 ./scripts/mutation_test.sh 'cveta2.dataset_partition.*'  # один модуль
 uv run mutmut show <имя-мутанта>                 # diff конкретного мутанта
 uv run mutmut browse                             # интерактивный разбор
@@ -202,8 +221,11 @@ uv run mutmut browse                             # интерактивный р
   сам `mutation_test.sh`. Каждый модуль оттуда стоит на нуле *необъяснённых*
   выживших. Новый модуль в `cveta2/` добавляйте в `only_mutate` тем же
   коммитом, который доводит его до нуля выживших, чтобы гейт на `main` никогда
-  не был красным. Вне гейта осознанно оставлен только `_client/sdk_adapter.py`
-  (граница SDK, сначала нужно покрытие) — см. `.claude/skills/mutation-testing/SKILL.md`.
+  не был красным. Критерий
+  простой: бизнес-логика идёт в ратчет, а адаптеры, модули без изменяемой
+  поверхности и обвязка остаются вне гейта навсегда. Полный список и
+  обоснования — в разделе «Permanently out of scope»
+  файла `.claude/skills/mutation-testing/SKILL.md`.
 - Если хук упал — по умолчанию усильте тест. Если мутация в принципе не может
   изменить поведение, добавьте её в `[tool.cveta2.mutation.equivalent]` в
   `pyproject.toml` с обоснованием.
@@ -243,10 +265,8 @@ uv run pytest -n0       # в один поток (для отладки)
 - **merge** (`tests/test_merge.py`) — split propagation, default merge (new wins), by-time merge, I/O (CSV и legacy), CLI end-to-end
 - **partition** (`tests/test_partition.py`) — разбиение на dataset/obsolete/in_progress
 - **extractors** (`tests/test_extractors.py`) — конвертация shapes в BBoxAnnotation
-- **mapping** (`tests/test_mapping.py`) — маппинг label/attribute
-- **pipeline** (`tests/test_pipeline_integration.py`) — полный цикл через FakeCvatApi + CvatClient
 - **image download** (`tests/test_image_downloader.py`) — S3 download, caching, S3Syncer
-- **labels** (`tests/test_labels.py` и в `test_pipeline_integration.py`) — add/rename/recolor/delete
+- **labels** (`tests/test_labels.py`) — add/rename/recolor/delete
 
 ### Фикстуры CVAT
 
@@ -410,7 +430,7 @@ semantic-release пушит ветку и тег двумя разными пу�
 - **DTO** (`_client/dtos.py`) — frozen dataclasses для CVAT API. Модели
   (`models.py`) — Pydantic. Конфиги (`config.py`) — тоже Pydantic.
 - **CLI** (`cli.py`) — тонкий argparse; логика в `commands/` (по модулю на команду).
-- **Слои** — `cli → commands → client → _client` (защищено import-linter, см. выше).
+- **Слои** — `cli → commands → api → services → _clearml → client → _client_ops → _client` (защищено import-linter, см. выше).
 - **Фундамент** — `models` и `exceptions` не зависят от верхних слоёв; `config` зависит только от `exceptions`.
 
 Подробная карта модулей и потоки данных (fetch / upload / convert, разрешение
@@ -420,12 +440,25 @@ semantic-release пушит ветку и тег двумя разными пу�
 
 | Файл | Для кого | Язык |
 |---|---|---|
-| `README.md` | Пользователей | Русский |
+| `README.md` | Пользователей — точка входа | Русский |
+| `docs/cli.md` | Пользователей — команды CLI | Русский |
+| `docs/configuration.md` | Пользователей — конфиг и окружение | Русский |
+| `docs/images-and-cache.md` | Пользователей — S3, кэш, ClearML | Русский |
+| `docs/python-api.md` | Пользователей — Python API | Русский |
 | `CONTRIBUTING.md` | Разработчиков | Русский |
 | `DATASET_FORMAT.md` | Пользователей — формат выходных CSV | Английский |
 | `ARCHITECTURE.md` | Разработчиков — карта модулей и потоки данных | Английский |
+| `CLAUDE.md` | Агентов и разработчиков | Английский |
 
-Обновляйте `README.md` при изменении API.
+Правило: пользовательская и контрибьюторская документация (`README.md`,
+`CONTRIBUTING.md`, `docs/`) — на русском; документация для разработчиков и
+агентов (`CLAUDE.md`, `ARCHITECTURE.md`, `DATASET_FORMAT.md`) — на английском.
+`tests/test_docs.py` это проверяет.
+
+Обновляйте `docs/` при изменении CLI или API — `tests/test_docs.py` падает,
+если появилась недокументированная команда, флаг, переменная окружения или
+поле конфига, если документированный Python-пример разошёлся с сигнатурой,
+или если ссылка перестала резолвиться.
 
 ## Решение проблем
 

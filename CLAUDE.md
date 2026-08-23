@@ -91,7 +91,7 @@ uv run pytest -x                 # stop on first failure
 - **`tests/test_api.py`** covers the public `cveta2.*` workflow functions; **`tests/test_cli_parsing.py`** covers argparse wiring
 
 Integration tests (`tests/integration/`) run only when `CVAT_INTEGRATION_HOST`
-is set, against a live CVAT + MinIO stack, and at pre-push through
+is set, against a live CVAT + MinIO + ClearML stack, and at pre-push through
 `scripts/integration_gate.sh` on machines that have `tests/integration/.env`.
 The lifecycle scripts, the `.env` keys, the fixed ports and the no-xdist /
 fresh-state caveats live in the **`running-integration-tests` skill** — use it
@@ -149,20 +149,35 @@ Env vars that change behaviour under test or in CI:
 - `CVETA2_NO_INTERACTIVE=true` — disables all prompts
 - `CVETA2_RAISE_ON_FAILURE=true` — abort on the first CVAT 5xx during fetch instead of skipping that task with a warning
 - `CVETA2_DATA_TIMEOUT` — opt-in read timeout in seconds for CVAT and S3 requests, overriding the `cvat.request_timeout` config field (connect timeout fixed at 10s); unset or `0` = no timeout
+- `CVETA2_CLEARML=false` — disable ClearML dataset publishing for this run,
+  equivalent to `fetch --no-clearml`
 - `CVETA2_S3_WORKERS` / `CVETA2_CVAT_WORKERS` / `CVETA2_RETRY_ATTEMPTS` — one-run overrides for the `network` config section (parallel S3 transfers, parallel CVAT requests, total attempts per request)
 
 The `sync_roots`, `cache` and `image_cache` config sections (image-cache roots,
 `ignored_prefix`, `task_cache_s3`, per-project download sources) are documented
-for users in [README.md](README.md); `cveta2 setup-cache` writes them
-interactively.
+for users in [docs/configuration.md](docs/configuration.md); `cveta2 setup-cache`
+writes them interactively.
 
 ## Important Files
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Module map, data flows, layer details
 - **CONTRIBUTING.md** - Style guide, linter setup, documentation rules (Russian)
 - **DATASET_FORMAT.md** - Output CSV format, data model reference
-- **README.md** - User documentation (Russian)
+- **README.md** - User entry point (Russian); the reference lives in `docs/`
+- **docs/** - User reference, Russian: `cli.md` (every command and flag),
+  `configuration.md` (config file, env vars, parallelism, retries,
+  non-interactive mode), `images-and-cache.md` (S3 images, task cache, ClearML),
+  `python-api.md`
 - **pyproject.toml** - Dependencies, tool configs, import-linter contracts
+
+**Documentation language.** User- and contributor-facing docs are Russian
+(`README.md`, `CONTRIBUTING.md`, `docs/`); developer- and agent-facing docs are
+English (`CLAUDE.md`, `ARCHITECTURE.md`, `DATASET_FORMAT.md`).
+`tests/test_docs.py` enforces this, along with three other checks that keep the
+docs from drifting: every documented Python example must match a real signature,
+every command / flag / env var / config field must be documented, and every
+relative link and anchor must resolve. Update `docs/` in the same commit that
+changes the CLI or the API.
 
 ## Common Tasks
 
@@ -171,7 +186,7 @@ interactively.
 2. Create `cveta2/commands/mycommand.py` with `run_mycommand(args: argparse.Namespace)` — a thin adapter that resolves prompts, opens a client via `open_client()`, and calls the service
 3. Expose it as a `cveta2.mycommand(...)` function in `cveta2/api.py` (no prompts; raise on missing settings)
 4. Add subparser in `cveta2/cli.py`
-5. Update README.md (Russian)
+5. Document it in `docs/cli.md`, and add a row to the command index in README.md (Russian)
 
 **Modify partition logic**:
 1. Edit `cveta2/dataset_partition.py`

@@ -20,9 +20,10 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
   - `task_ops.py` - `task` subcommands: mark-deleted, drop-label, delete, status
   - `whats_new.py` - List tasks completed after a fetched dataset CSV
   - `doctor.py` - Diagnostic checks
-  - `_bootstrap.py` - `open_client()`: single config load, host check, timeout setup, credential prompt (the ONLY place prompting happens)
+  - `_bootstrap.py` - `open_client()`: single config load, host check, timeout setup — the only place *credentials* are prompted for
+  - `interactive/` - every other prompt: project/task pickers, wizards, confirmations, questionary primitives
   - `_helpers.py` - Shared internals (task-selector resolution lives in `fetch.py:_resolve_task_selector`)
-- **`cveta2/api.py`** - Public workflow functions mirroring the CLI 1:1 (`fetch`, `upload`, `convert_*`, `merge`, `whats_new`, `s3_sync`, `get_labels`, `update_labels`, `task_*`), re-exported from `cveta2/__init__.py`. Never prompts — missing settings raise `MissingHostError` / `MissingCredentialsError`.
+- **`cveta2/api.py`** - Public workflow functions, one per *data* command (`fetch`, `fetch_task`, `upload`, `convert_*`, `merge`, `whats_new`, `s3_sync`, `get_labels`, `update_labels`, `ignore`, `task_*`), re-exported from `cveta2/__init__.py`. The interactive-only commands (`setup`, `setup-cache`, `setup-clearml`, `doctor`) have no counterpart. Never prompts — missing settings raise `MissingHostError` / `MissingCredentialsError`.
 - **`cveta2/services/`** - Orchestration (no prompts, no `sys.exit`; raise `Cveta2Error`):
   - `fetch.py` - `fetch_project()` / `fetch_selected_tasks()` pipelines
   - `upload.py` - `upload_dataset()` + plan building / filtering helpers
@@ -50,7 +51,9 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
   - `dtos.py` - Raw CVAT data transfer objects
   - `context.py` - API context management
   - `mapping.py` - Data mapping utilities
+  - `sdk_convert.py` - Opaque SDK objects → typed DTOs
 - **`cveta2/_clearml/`** - Optional ClearML dataset publishing (isolated layer)
+- **`cveta2/exceptions.py`** - `Cveta2Error` and its subclasses; every layer above raises these and the CLI turns them into a clean exit
 - **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation with optional `confidence`, DeletedImage, etc.)
 - **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
 - **`cveta2/dataset_partition.py`** - Core logic: splits annotations into dataset/obsolete/in_progress
@@ -58,6 +61,8 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - **`cveta2/image_downloader.py`** - S3 → local sync; resolves a small batch of images by probing the key each CVAT frame name implies (`s3_utils.s3_object_exists`) and falls back to the whole-prefix listing only for what that misses
 - **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
 - **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
+- **`cveta2/s3_utils.py`** - S3 client construction, key helpers, the parallel transfer runner and the S3 retry predicate
+- **`cveta2/fs_utils.py`** - Local filesystem writes under the shared-cache permission modes (`_DIR_MODE`/`_FILE_MODE`)
 - **`cveta2/projects_cache.py`** - Local project metadata cache, keyed by organization (`organizations: [{slug, name, projects}]`; `""` slug = personal workspace)
 - **`cveta2/_concurrency.py`** - `run_concurrent`, the one bounded fan-out every parallel site goes through, plus the process-wide `Workers` counts
 - **`cveta2/_retry.py`** - retry mechanism (attempts, backoff, logging); the *predicates* deciding what is worth retrying live next to the calls they protect, in `_client/sdk_adapter.py` and `s3_utils.py`
@@ -116,4 +121,12 @@ skips less of the hierarchy); see README.md for the user-facing description.
 
 ## Task-by-task processing
 
-`fetch` processes tasks individually (`fetch_one_task()`) and saves intermediate CSVs in `output/.tasks/task_{id}.csv` before merging. This allows resuming on failures and provides visibility into per-task data.
+`fetch` reads one task at a time (`fetch_one_task()`), but the tasks themselves
+run concurrently through `run_concurrent(..., max_workers=Workers.cvat)`; results
+are merged positionally so the output does not depend on completion order.
+
+Each task's rows are written to `output/.tasks/task_{id}.csv` as they arrive.
+That directory is **removed after the merge** unless `--save-tasks` is given, and
+nothing ever reads it back — it is a debugging artefact, not a resume point. The
+only `--resume` in the project belongs to `upload`, and it reads its manifest
+from `~/.cache/cveta2/uploads/`, not from here.

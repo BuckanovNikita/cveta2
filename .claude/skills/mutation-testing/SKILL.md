@@ -135,7 +135,7 @@ could ever be lifted:
   `commands/upload.py` additionally encodes a contract `ARCHITECTURE.md` states
   as a guarantee — `--labels all` loses to a literal dataset label named `all` —
   which is worth pinning precisely.
-- **Adapters** — `cli.py` is ~640 `add_argument()` calls whose mutable content
+- **Adapters** — `cli.py` is a wall of `add_argument()` calls whose mutable content
   is help text and arguments that restate argparse defaults; `commands/*` is
   prompts, arg mapping and `sys.exit`. Note the reason is prompt/wiring
   density, *not* log-message density: message text was never mutated.

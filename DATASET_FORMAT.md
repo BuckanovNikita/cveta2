@@ -2,6 +2,10 @@
 
 cveta2 stores bbox annotations in CSV files. The record type is determined by the `instance_shape` field: `"box"` (annotation), `"none"` (image without annotations) or `"deleted"` (deleted image).
 
+Only CVAT shapes of type `rectangle` become `"box"` records. Every other CVAT
+shape type (`polygon`, `polyline`, `points`, …) is skipped with a warning, so a
+segmentation project produces no annotation rows at all.
+
 ## Output files
 
 ### `cveta2 fetch`
@@ -23,7 +27,7 @@ cveta2 stores bbox annotations in CSV files. The record type is determined by th
 
 ## Data format
 
-`CvatClient.fetch_annotations()` returns `ProjectAnnotations`, `CvatClient.fetch_one_task()` returns `TaskAnnotations`:
+`CvatClient.fetch_one_task()` returns `TaskAnnotations | None`; `TaskAnnotations.merge()` combines several into a `ProjectAnnotations`:
 
 - `ProjectAnnotations` — result across all tasks: `annotations: list[AnnotationRecord]`, `deleted_images: list[DeletedImage]`
 - `TaskAnnotations` — result for a single task: `task_id`, `task_name`, `annotations`, `deleted_images`. `TaskAnnotations.merge(list)` combines several tasks into a `ProjectAnnotations`

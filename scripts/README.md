@@ -1,6 +1,8 @@
 # Скрипты (scripts/)
 
-Вспомогательные скрипты для разработки и тестов. Запускать из корня репозитория: `uv run python scripts/<script>.py ...`.
+Вспомогательные скрипты для разработки и тестов. Запускать из корня
+репозитория: Python-скрипты через `uv run python scripts/<script>.py ...`,
+shell-скрипты — напрямую (`./scripts/<script>.sh`).
 
 ## upload_dataset_to_cvat.py
 
@@ -119,12 +121,34 @@ uv run python scripts/clone_project_to_s3.py --source coco8-dev --dest coco8-dev
 # Один модуль или конкретные мутанты
 ./scripts/mutation_test.sh 'cveta2.dataset_partition.*'
 
+# Профиль pre-commit (подмножество охвата) и профиль pre-push (весь охват)
+./scripts/mutation_test.sh --profile fast
+./scripts/mutation_test.sh --profile full
+
 # Ограничить параллелизм
 ./scripts/mutation_test.sh --max-children 4
 ```
+
+`--profile` — единственный флаг, который передают сами хуки: `fast` на
+pre-commit, `full` на pre-push. Профили заданы в
+`[tool.cveta2.mutation.profiles]`; `full` — намеренно пустой список глобов,
+потому что mutmut использует кэш вердиктов только когда позиционные имена
+мутантов не заданы. Остальные аргументы (включая `--max-children`)
+пробрасываются в mutmut как есть.
 
 **Код возврата:** 0 — все мутанты убиты либо перечислены в allowlist; 1 — выжил мутант без обоснования **или** запись allowlist больше не соответствует живому мутанту (mutmut перенумеровывает мутантов при изменении функции).
 
 **Вывод:** `mutants/mutmut-cicd-stats.json` (счётчики), `mutants/mutmut-results.txt` (имена и статусы). Каталог `mutants/` — рабочая копия mutmut, он в `.gitignore`.
 
 Скрипт срезает CR-спиннер mutmut, когда stdout не терминал: иначе pre-commit сохранил бы десятки тысяч кадров перерисовки.
+
+## Остальные скрипты
+
+Отдельных разделов у них нет — они описаны там, где используются:
+
+| Скрипт | Где описан |
+|---|---|
+| `integration_up.sh`, `integration_test.sh`, `integration_stop.sh`, `integration_gate.sh` | Скилл `running-integration-tests` и раздел «Интеграционные тесты» в [CONTRIBUTING.md](../CONTRIBUTING.md) |
+| `mutation_config.py` | Вспомогательный модуль `mutation_test.sh` (профили и сброс `mutants/` при смене охвата) |
+| `check_commit_msg.py` | Хук `commit-msg`, см. «Ветки и релизы» в [CONTRIBUTING.md](../CONTRIBUTING.md) |
+| `check_version_drift.py` | Хук `pre-push`, там же |
