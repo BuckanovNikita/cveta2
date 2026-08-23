@@ -26,7 +26,7 @@ def main() -> int:
     version = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
 
     described = subprocess.run(
-        ["git", "describe", "--tags", "--abbrev=0"],
+        ["git", "describe", "--tags", "--abbrev=0"],  # noqa: S607
         capture_output=True,
         text=True,
         check=False,

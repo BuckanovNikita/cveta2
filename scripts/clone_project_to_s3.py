@@ -232,7 +232,7 @@ def remap_tracks(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def main() -> None:  # noqa: C901, PLR0912, PLR0915
     parser = argparse.ArgumentParser(
         description="Clone a CVAT project, moving images to S3 cloud storage."
     )

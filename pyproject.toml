@@ -120,21 +120,19 @@ exclude_commit_patterns = [
 [tool.ruff]
 target-version = "py310"
 line-length = 88
-# vendor/ is no longer part of the repo; the entry stays for clones made while
-# vendor/cvat was still a submodule, which keep the checkout on disk.
-exclude = ["vendor/**", "local/**", "mutants/**"]
+# vendor/ needs no entry here: it is gitignored, and ruff respects .gitignore.
+# local/ is not gitignored; mutants/ is mutmut's copy of the tree.
+exclude = ["local/**", "mutants/**"]
 
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
     "COM812",  # missing-trailing-comma - conflicts with ruff formatter
-    "ISC001",  # single-line-implicit-string-concatenation - conflicts with formatter
     "EM",      # flake8-errmsg - overly pedantic for small projects
     "TRY003",  # raise-vanilla-args - same as EM
     "D213",
     "D203",
     "RUF001",  # ambiguous-unicode-character - project uses Russian (Cyrillic) strings
-    "PERF203", # try-except-in-loop - false positive in modern Python (3.11+)
     "CPY001",  # missing-copyright-notice - this project ships no per-file headers
 ]
 fixable = ["ALL"]
@@ -150,9 +148,10 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D101", "D102", "D103", "S311", "SLF001"]
-# Standalone operator scripts: `print` is their output, an argparse `main()`
-# is linear top-to-bottom by nature, and their helpers are not an API surface.
-"scripts/*.py" = ["T201", "D103", "ANN401", "PLR2004", "S607", "C901", "PLR0912", "PLR0915", "PLR0913", "PLR0917"]
+# Standalone operator scripts: `print` is their output and their helpers are
+# not an API surface. What only one script trips is suppressed at that site,
+# where RUF100 retires the suppression once the site is fixed.
+"scripts/*.py" = ["T201", "D103", "ANN401", "PLR2004"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -551,7 +550,6 @@ source = ["cveta2"]
 branch = true
 omit = [
     "cveta2/__main__.py",
-    "cveta2/s3_types.py",
     "cveta2/commands/setup_clearml.py",
 ]
 

@@ -143,7 +143,7 @@ def parse_yolo_label_file(path: Path) -> list[tuple[int, float, float, float, fl
     return rows
 
 
-def yolo_norm_to_pixel_bbox(
+def yolo_norm_to_pixel_bbox(  # noqa: PLR0913, PLR0917
     x_center: float,
     y_center: float,
     width: float,

@@ -82,7 +82,7 @@ def load_orgs_cache(path: Path | None = None) -> list[OrgProjects]:
     for item in data["organizations"]:
         try:
             result.append(OrgProjects.model_validate(item))
-        except ValidationError as e:
+        except ValidationError as e:  # noqa: PERF203
             logger.warning(f"Skipping invalid projects cache entry {item!r}: {e}")
     return result
 
