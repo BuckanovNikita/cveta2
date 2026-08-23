@@ -564,8 +564,8 @@ def _command_specs() -> tuple[CommandSpec, ...]:
         ),
         CommandSpec(
             "s3-sync",
-            "Sync images from S3 cloud storage to local cache "
-            "for all configured projects.",
+            "Sync images from S3 cloud storage to local cache for every "
+            "project configured under image_cache or cache.projects.",
             run_s3_sync,
             _configure_s3_sync,
         ),

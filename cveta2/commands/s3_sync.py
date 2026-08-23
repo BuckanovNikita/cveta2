@@ -74,8 +74,10 @@ def run_s3_sync(args: argparse.Namespace) -> None:
                 f"в конфигурацию (cveta2 setup-cache)."
             )
         raise Cveta2Error(
-            "Ошибка: image_cache не настроен — нет проектов для синхронизации.\n"
-            "Добавьте секцию image_cache в конфигурацию или запустите: cveta2 setup"
+            "Ошибка: нет проектов для синхронизации — не настроены ни "
+            "image_cache, ни cache.projects.\n"
+            "Добавьте секцию image_cache в конфигурацию или запустите: "
+            "cveta2 setup-cache"
         )
 
     with open_client() as client:
