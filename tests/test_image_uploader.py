@@ -16,7 +16,7 @@ from cveta2.image_uploader import (
 )
 from cveta2.s3_utils import build_s3_key
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import make_cs_info
+from tests.helpers import make_cs_info, patch_recording_s3
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,30 +69,6 @@ class _UnwritableKeysS3Client(FakeS3Client):
         if key in self._unwritable:
             raise KeyError(key)
         super().upload_file(filename, bucket, key)
-
-
-class _RecordingS3Factory:
-    """``make_s3_client`` stand-in that records the endpoint it was given."""
-
-    def __init__(self, client: FakeS3Client) -> None:
-        """Store *client* to hand out, and an empty endpoint log."""
-        self._client = client
-        self.endpoints: list[str | None] = []
-
-    def __call__(self, endpoint_url: str | None = None) -> FakeS3Client:
-        """Record *endpoint_url* and return the fixed fake client."""
-        self.endpoints.append(endpoint_url)
-        return self._client
-
-
-def _patch_recording_boto(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_s3: FakeS3Client,
-) -> _RecordingS3Factory:
-    """Route make_s3_client to a factory that records endpoint arguments."""
-    factory = _RecordingS3Factory(fake_s3)
-    monkeypatch.setattr("cveta2.image_uploader.make_s3_client", factory)
-    return factory
 
 
 def _make_cs_info() -> CloudStorageInfo:
@@ -284,7 +260,7 @@ class TestBuildServerFileMapping:
                 "other-bucket/project/images/theirs.jpg": b"theirs",
             }
         )
-        factory = _patch_recording_boto(monkeypatch, client)
+        factory = patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
 
         mapping, existing_keys = build_server_file_mapping(
             cs_info, {"mine.jpg", "theirs.jpg"}
@@ -440,7 +416,9 @@ class TestS3Uploader:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An empty batch short-circuits before any S3 client is built."""
-        factory = _patch_recording_boto(monkeypatch, FakeS3Client())
+        factory = patch_recording_s3(
+            monkeypatch, "cveta2.image_uploader", FakeS3Client()
+        )
 
         stats = S3Uploader().upload(_upload_cs_info(), {})
 
@@ -464,7 +442,7 @@ class TestS3Uploader:
                 "other-bucket/project/images/new.jpg": b"not-mine",
             }
         )
-        factory = _patch_recording_boto(monkeypatch, client)
+        factory = patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
         images = {
             "new.jpg": _touch(tmp_path / "new.jpg"),
             "old.jpg": _touch(tmp_path / "old.jpg"),
@@ -496,7 +474,7 @@ class TestS3Uploader:
         of the mapping itself.
         """
         client = FakeS3Client()
-        _patch_recording_boto(monkeypatch, client)
+        patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
         images = {
             "mapped.jpg": _touch(tmp_path / "mapped.jpg"),
             "unmapped.jpg": _touch(tmp_path / "unmapped.jpg"),
@@ -529,7 +507,7 @@ class TestS3Uploader:
         opposite answer.
         """
         client = FakeS3Client(case.seeded)
-        _patch_recording_boto(monkeypatch, client)
+        patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
 
         stats = S3Uploader().upload(
             _upload_cs_info(),
@@ -552,7 +530,7 @@ class TestS3Uploader:
         failing transfer the name and the describe callable were free.
         """
         client = _UnwritableKeysS3Client(unwritable={"project/images/bad.jpg"})
-        _patch_recording_boto(monkeypatch, client)
+        patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
         images = {
             "good.jpg": _touch(tmp_path / "good.jpg"),
             "bad.jpg": _touch(tmp_path / "bad.jpg"),

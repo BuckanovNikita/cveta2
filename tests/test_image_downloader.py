@@ -23,7 +23,7 @@ from cveta2.models import (
 )
 from cveta2.s3_utils import build_s3_key, list_s3_objects, parse_sync_root
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import make_bbox, make_cs_info
+from tests.helpers import make_bbox, make_cs_info, patch_recording_s3
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -124,36 +124,12 @@ class _UnreadableKeysS3Client(FakeS3Client):
         return super().get_object(Bucket=Bucket, Key=Key)
 
 
-class _RecordingS3Factory:
-    """``make_s3_client`` stand-in that records the endpoint it was given."""
-
-    def __init__(self, client: FakeS3Client) -> None:
-        """Store *client* to hand out, and an empty endpoint log."""
-        self._client = client
-        self.endpoints: list[str | None] = []
-
-    def __call__(self, endpoint_url: str | None = None) -> FakeS3Client:
-        """Record *endpoint_url* and return the fixed fake client."""
-        self.endpoints.append(endpoint_url)
-        return self._client
-
-
 def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: FakeS3Client) -> None:
     """Route make_s3_client to the fake S3 client."""
     monkeypatch.setattr(
         "cveta2.image_downloader.make_s3_client",
         lambda *_a, **_kw: fake_s3,
     )
-
-
-def _patch_recording_boto(
-    monkeypatch: pytest.MonkeyPatch,
-    fake_s3: FakeS3Client,
-) -> _RecordingS3Factory:
-    """Route make_s3_client to a factory that records endpoint arguments."""
-    factory = _RecordingS3Factory(fake_s3)
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", factory)
-    return factory
 
 
 def _ann(task_id: int, frame_id: int, image_name: str) -> Any:
@@ -731,7 +707,9 @@ def test_download_uses_storage_endpoint_url(
         deleted_images=[],
     )
     s3_data = {"test-bucket/images/a.jpg": b"data-a"}
-    factory = _patch_recording_boto(monkeypatch, FakeS3Client(s3_data))
+    factory = patch_recording_s3(
+        monkeypatch, "cveta2.image_downloader", FakeS3Client(s3_data)
+    )
     cs_info = make_cs_info(
         bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000"
     )
@@ -874,7 +852,7 @@ def test_s3_syncer_scopes_to_bucket_and_reports_failures(
         "other-bucket/images/elsewhere.jpg": b"data-elsewhere",
     }
     client = _UnreadableKeysS3Client(s3_data, unreadable={"images/broken.jpg"})
-    factory = _patch_recording_boto(monkeypatch, client)
+    factory = patch_recording_s3(monkeypatch, "cveta2.image_downloader", client)
     cs_info = make_cs_info(
         bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000"
     )

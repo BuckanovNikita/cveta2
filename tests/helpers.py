@@ -43,7 +43,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
     from pathlib import Path
 
+    import pytest
+
     from tests.fixtures.fake_cvat_project import LoadedFixtures
+    from tests.fixtures.fake_s3 import FakeS3Client
 
 CFG: Final = CvatConfig(
     host="http://fake-cvat", username="test-user", password="test-password"
@@ -410,3 +413,32 @@ def mock_client_ctx(*, project_id: int = 1) -> MagicMock:
     client.__exit__ = MagicMock(return_value=False)
     client.resolve_project_id.return_value = project_id
     return client
+
+
+class RecordingS3Factory:
+    """``make_s3_client`` stand-in that records the endpoint it was given."""
+
+    def __init__(self, client: FakeS3Client) -> None:
+        """Store *client* to hand out, and an empty endpoint log."""
+        self._client = client
+        self.endpoints: list[str | None] = []
+
+    def __call__(self, endpoint_url: str | None = None) -> FakeS3Client:
+        """Record *endpoint_url* and return the fixed fake client."""
+        self.endpoints.append(endpoint_url)
+        return self._client
+
+
+def patch_recording_s3(
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    fake_s3: FakeS3Client,
+) -> RecordingS3Factory:
+    """Route *target*'s ``make_s3_client`` to an endpoint-recording factory.
+
+    *target* is the module whose ``make_s3_client`` name is replaced —
+    the downloader and the uploader each bind their own.
+    """
+    factory = RecordingS3Factory(fake_s3)
+    monkeypatch.setattr(f"{target}.make_s3_client", factory)
+    return factory

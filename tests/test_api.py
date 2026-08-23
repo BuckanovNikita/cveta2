@@ -54,13 +54,6 @@ if TYPE_CHECKING:
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
-@pytest.fixture(autouse=True)
-def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "missing.yaml"))
-    for var in ("CVAT_HOST", "CVAT_ORGANIZATION", "CVAT_USERNAME", "CVAT_PASSWORD"):
-        monkeypatch.delenv(var, raising=False)
-
-
 # ---------------------------------------------------------------------------
 # Test doubles
 # ---------------------------------------------------------------------------
@@ -297,7 +290,7 @@ class TestFetchApi:
         assert len(pd.read_csv(out / "obsolete.csv")) == len(result.obsolete)
 
     def test_default_flags_skip_raw_task_csvs_and_publish_clearml(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """Pins the three keyword defaults that no other test exercises.
 
@@ -305,7 +298,7 @@ class TestFetchApi:
         to True; flipping any default is invisible unless a call that
         passes none of them asserts the resulting side effects.
         """
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         out = tmp_path / "out"
 
         with patch("cveta2._clearml.maybe_publish_clearml") as publish:
@@ -321,14 +314,14 @@ class TestFetchApi:
         publish.assert_called_once_with(fake.project.name, out)
 
     def test_raw_and_save_tasks_reach_the_pipeline(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """``raw=`` and ``save_tasks=`` must survive as far as FetchOptions.
 
         ``FetchOptions`` defaults both to False, so a dropped keyword is
         only visible when the caller asks for True.
         """
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         out = tmp_path / "out"
 
         cveta2.fetch(
@@ -345,14 +338,14 @@ class TestFetchApi:
         assert (out / ".tasks" / f"task_{fake.tasks[0].id}.csv").exists()
 
     def test_publish_clearml_false_suppresses_the_publish(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """``publish_clearml`` defaults to True in FetchOptions too.
 
         Only an explicit False can show that the keyword is forwarded
         rather than dropped.
         """
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
 
         with patch("cveta2._clearml.maybe_publish_clearml") as publish:
             cveta2.fetch(
@@ -397,7 +390,7 @@ class TestFetchApi:
 
     def test_sync_root_override_reaches_the_output_rows(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -408,7 +401,7 @@ class TestFetchApi:
         row's ``s3_image_path`` — so the detection call, the override and
         the value handed to ``fetch_project`` all become observable.
         """
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         config = write_config_yaml(
             tmp_path / "sync.yaml",
             sync_roots={fake.project.name: "s3://other-bucket/synced"},
@@ -514,7 +507,7 @@ class TestFetchApi:
         assert [m for m in capture_logs if "ignore-списка" in m]
 
     def test_configured_image_cache_is_used_as_the_download_target(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """Exercises the *success* path of ``_resolve_images_dir`` inside fetch.
 
@@ -523,7 +516,7 @@ class TestFetchApi:
         it forwards were never load-bearing. Pre-seeding the cache
         directory keeps the run offline.
         """
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         images_dir = tmp_path / "images"
         images_dir.mkdir()
         for frame in fake.task_data[fake.tasks[0].id][0].frames:
@@ -673,12 +666,12 @@ class TestFetchApi:
 
     def test_fetch_task_honours_the_sync_root_override(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The ``fetch_task`` twin of the ``fetch`` cs_info wiring test."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         env_config = write_config_yaml(
             tmp_path / "sync.yaml",
             sync_roots={fake.project.name: "s3://other-bucket/synced"},
@@ -699,7 +692,7 @@ class TestFetchApi:
         assert _s3_prefixes(df) == {"synced"}
 
     def test_fetch_task_rejects_a_task_on_the_ignore_list(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path, capture_logs: list[str]
+        self, normal_fake: LoadedFixtures, tmp_path: Path, capture_logs: list[str]
     ) -> None:
         """Ignored tasks are dropped *before* the selector is resolved.
 
@@ -707,7 +700,7 @@ class TestFetchApi:
         ``fetch-task``: without it the task resolves and the fetch
         succeeds.
         """
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         ignored = fake.tasks[0]
         config = write_config_yaml(
             tmp_path / "ignore.yaml",
@@ -727,9 +720,9 @@ class TestFetchApi:
         assert [m for m in capture_logs if "ignore-списка" in m]
 
     def test_fetch_task_silent_ignored_task_is_not_warned_about(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path, capture_logs: list[str]
+        self, normal_fake: LoadedFixtures, tmp_path: Path, capture_logs: list[str]
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         ignored = fake.tasks[0]
         config = write_config_yaml(
             tmp_path / "ignore.yaml",
@@ -753,9 +746,9 @@ class TestFetchApi:
         assert not [m for m in capture_logs if "ignore-списка" in m]
 
     def test_fetch_task_uses_the_configured_image_cache(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         images_dir = tmp_path / "images"
         images_dir.mkdir()
         for frame in fake.task_data[fake.tasks[0].id][0].frames:
@@ -874,11 +867,11 @@ class TestFetchCacheModes:
 
     def test_use_writes_the_cache_under_the_configured_root(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         _api, connection, tasks_root = self._setup(fake, tmp_path, monkeypatch)
 
         cveta2.fetch(
@@ -893,11 +886,11 @@ class TestFetchCacheModes:
 
     def test_off_writes_nothing(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         _api, connection, tasks_root = self._setup(fake, tmp_path, monkeypatch)
 
         cveta2.fetch(
@@ -913,11 +906,11 @@ class TestFetchCacheModes:
 
     def test_use_serves_the_second_run_from_the_cache(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         api, connection, _root = self._setup(fake, tmp_path, monkeypatch)
 
         cveta2.fetch(
@@ -940,12 +933,12 @@ class TestFetchCacheModes:
 
     def test_refresh_re_downloads_a_cached_task(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """``force`` is the only difference between ``use`` and ``refresh``."""
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         api, connection, _root = self._setup(fake, tmp_path, monkeypatch)
 
         cveta2.fetch(
@@ -969,11 +962,11 @@ class TestFetchCacheModes:
 
     def test_fetch_task_cache_modes_share_the_mapping(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         api, connection, tasks_root = self._setup(fake, tmp_path, monkeypatch)
         task = fake.tasks[0]
 
@@ -1003,11 +996,11 @@ class TestFetchCacheModes:
 
     def test_fetch_task_off_writes_nothing(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+        fake = normal_fake
         _api, connection, tasks_root = self._setup(fake, tmp_path, monkeypatch)
 
         cveta2.fetch_task(

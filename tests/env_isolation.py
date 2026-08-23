@@ -11,7 +11,7 @@ a fixture that sets ``HOME`` later cannot reach them — ``CvatConfig.save()``
 with no path would still write to the real ``~/.config/cveta2/config.yaml``.
 Setting HOME here freezes those constants inside a throwaway directory instead.
 
-Per-test isolation of ``CVETA2_CONFIG`` still happens in the ``_isolate_config``
+Per-test isolation of ``CVETA2_CONFIG`` still happens in the ``isolated_config_path``
 fixture; this module only guarantees the fallback is harmless.
 """
 

@@ -18,14 +18,6 @@ from cveta2._concurrency import Workers, configure_workers, run_concurrent
 _BARRIER_TIMEOUT = 5.0
 
 
-@pytest.fixture(autouse=True)
-def _restore_workers() -> object:
-    """Worker counts are process-wide; keep a test from leaking into others."""
-    s3, cvat = Workers.s3, Workers.cvat
-    yield
-    configure_workers(s3=s3, cvat=cvat)
-
-
 class TestOrdering:
     @pytest.mark.parametrize("max_workers", [1, 2, 8], ids=["inline", "two", "eight"])
     def test_results_follow_input_order(self, max_workers: int) -> None:

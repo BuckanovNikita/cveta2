@@ -163,9 +163,9 @@ def test_print_labels_with_data() -> None:
 
 
 def test_get_project_labels_returns_fixture_labels(
-    coco8_fixtures: LoadedFixtures,
+    normal_fake: LoadedFixtures,
 ) -> None:
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = normal_fake
     client = make_fake_client(fake)
     labels = client.get_project_labels(fake.project.id)
     assert len(labels) == len(fake.labels)
@@ -180,10 +180,10 @@ def test_get_project_labels_returns_fixture_labels(
 
 
 def test_count_label_usage_shapes_per_label(
-    coco8_fixtures: LoadedFixtures,
+    normal_fake: LoadedFixtures,
 ) -> None:
     """Normal task has shapes; count_label_usage aggregates them."""
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = normal_fake
     client = make_fake_client(fake)
     counts = client.count_label_usage(fake.project.id)
     total = sum(counts.values())
@@ -214,10 +214,10 @@ def test_count_label_usage_multiple_tasks(
 
 
 def test_count_label_usage_ids_match_labels(
-    coco8_fixtures: LoadedFixtures,
+    normal_fake: LoadedFixtures,
 ) -> None:
     """All label_ids in usage come from the project's labels."""
-    fake = build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+    fake = normal_fake
     client = make_fake_client(fake)
     counts = client.count_label_usage(fake.project.id)
     label_ids = {lbl.id for lbl in fake.labels}

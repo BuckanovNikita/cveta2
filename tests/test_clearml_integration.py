@@ -59,6 +59,13 @@ class TestPublishToClearml:
         mock_dataset_cls.create.assert_not_called()
 
 
+_MAPPED_CONFIG = ClearmlConfig(
+    enabled=True,
+    projects={"proj": ClearmlProjectMapping(clearml_project="p", clearml_dataset="d")},
+)
+"""A config that passes every guard, so a test can disable exactly one."""
+
+
 class TestMaybePublishClearml:
     """Tests for maybe_publish_clearml skip paths."""
 
@@ -78,53 +85,66 @@ class TestMaybePublishClearml:
     def test_not_installed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Every later guard is permissive, so only this one can do the skipping."""
         monkeypatch.delenv("CVETA2_CLEARML", raising=False)
-
-        with patch("cveta2._clearml.is_clearml_available", return_value=False):
-            from cveta2._clearml import maybe_publish_clearml
-
-            maybe_publish_clearml("proj", tmp_path)
-
-    def test_config_disabled(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("CVETA2_CLEARML", raising=False)
-        cfg = ClearmlConfig(enabled=False)
+        mock_publish = MagicMock()
 
         with (
-            patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
+            patch("cveta2._clearml.is_clearml_available", return_value=False),
+            patch("cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG),
+            patch("cveta2._clearml._dataset.publish_to_clearml", mock_publish),
         ):
             from cveta2._clearml import maybe_publish_clearml
 
             maybe_publish_clearml("proj", tmp_path)
 
-    def test_no_mapping(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_publish.assert_not_called()
+
+    def test_config_disabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`enabled=False` must win even though a mapping for the project exists."""
         monkeypatch.delenv("CVETA2_CLEARML", raising=False)
-        cfg = ClearmlConfig(enabled=True, projects={})
+        cfg = ClearmlConfig(enabled=False, projects=_MAPPED_CONFIG.projects)
+        mock_publish = MagicMock()
 
         with (
             patch("cveta2._clearml.is_clearml_available", return_value=True),
             patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
+            patch("cveta2._clearml._dataset.publish_to_clearml", mock_publish),
+        ):
+            from cveta2._clearml import maybe_publish_clearml
+
+            maybe_publish_clearml("proj", tmp_path)
+
+        mock_publish.assert_not_called()
+
+    def test_no_mapping(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CVETA2_CLEARML", raising=False)
+        mock_publish = MagicMock()
+
+        with (
+            patch("cveta2._clearml.is_clearml_available", return_value=True),
+            patch("cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG),
+            patch("cveta2._clearml._dataset.publish_to_clearml", mock_publish),
         ):
             from cveta2._clearml import maybe_publish_clearml
 
             maybe_publish_clearml("unmapped-project", tmp_path)
 
+        mock_publish.assert_not_called()
+
     def test_exception_caught_and_logged(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_logs: list[str],
     ) -> None:
         monkeypatch.delenv("CVETA2_CLEARML", raising=False)
-        cfg = ClearmlConfig(
-            enabled=True,
-            projects={
-                "proj": ClearmlProjectMapping(clearml_project="p", clearml_dataset="d")
-            },
-        )
 
         with (
             patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
+            patch("cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG),
             patch(
                 "cveta2._clearml._dataset.publish_to_clearml",
                 side_effect=ClearmlPublishError("ClearML server unreachable"),
@@ -134,3 +154,5 @@ class TestMaybePublishClearml:
 
             # Should not raise — exception is caught
             maybe_publish_clearml("proj", tmp_path)
+
+        assert capture_logs, "a swallowed publish failure must still be reported"

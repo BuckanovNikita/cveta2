@@ -31,7 +31,9 @@ def _s3_sync_client() -> MagicMock:
 @pytest.mark.usefixtures("test_config")
 def test_s3_sync_no_image_cache_exits() -> None:
     app = CliApp()
-    with pytest.raises(SystemExit):
+    # Match on the identifier, not the surrounding Russian prose: this is what
+    # tells the two guards apart, and a copy edit must not break it.
+    with pytest.raises(SystemExit, match="image_cache"):
         app.run(["s3-sync"])
 
 
@@ -70,5 +72,5 @@ def test_s3_sync_root_without_project_exits(
     )
 
     app = CliApp()
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="--root"):
         app.run(["s3-sync", "--root", "s3://bucket/prefix"])

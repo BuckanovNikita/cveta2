@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from cveta2._concurrency import Workers, configure_workers
+from cveta2._concurrency import configure_workers
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
 from cveta2.dataset_partition import PartitionResult, partition_annotations_df
@@ -48,7 +48,6 @@ from tests.helpers import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from pathlib import Path
 
     from cveta2._client.dtos import RawAnnotations, RawDataMeta
@@ -539,10 +538,6 @@ class _ScriptedClock:
         return next(self._readings)
 
 
-def _completed_fake(coco8_fixtures: LoadedFixtures) -> LoadedFixtures:
-    return build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
-
-
 def _fetch_context(client: CvatClient, fake: LoadedFixtures) -> FetchContext:
     return client.prepare_fetch(fake.project.id, project_name=fake.project.name)
 
@@ -559,12 +554,12 @@ class TestRetrieveTaskAccounting:
 
     def test_cache_hits_and_their_elapsed_time_accumulate(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Two hits report two hits and the *sum* of their durations."""
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
@@ -587,11 +582,11 @@ class TestRetrieveTaskAccounting:
 
     def test_live_fetches_and_their_elapsed_time_accumulate(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Without a cache every task is a live fetch, counted the same way."""
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
@@ -610,10 +605,10 @@ class TestRetrieveTaskAccounting:
         assert stats.hit_seconds == 0.0
 
     def test_a_skipped_task_is_counted_as_neither(
-        self, coco8_fixtures: LoadedFixtures
+        self, normal_fake: LoadedFixtures
     ) -> None:
         """A 5xx skip must not inflate the fetched count or its timer."""
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id})
         client = CvatClient(CvatConfig(), api=api)
         ctx = _fetch_context(client, fake)
@@ -625,10 +620,10 @@ class TestRetrieveTaskAccounting:
         assert (stats.cache_hits, stats.hit_seconds) == (0, 0.0)
 
     def test_force_bypasses_a_populated_cache(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """``--force`` must re-fetch even when the entry is valid."""
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
@@ -664,14 +659,14 @@ def _fetch_project(
 
 class TestTaskCsvDirectory:
     def test_a_leftover_tasks_directory_is_reused(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """Re-running into the same output directory must not fail.
 
         A killed run leaves ``.tasks/`` behind, and ``--save-tasks`` leaves it
         behind on purpose, so the second run always finds it there.
         """
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         out = tmp_path / "out"
         (out / ".tasks").mkdir(parents=True)
 
@@ -683,7 +678,7 @@ class TestTaskCsvDirectory:
 
     def test_a_cleanup_failure_does_not_fail_the_fetch(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -703,7 +698,7 @@ class TestTaskCsvDirectory:
                 raise PermissionError(path)
 
         monkeypatch.setattr(shutil, "rmtree", rmtree)
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         out = tmp_path / "out"
 
         partition = _fetch_project(
@@ -735,14 +730,14 @@ class TestTaskCsvDirectory:
         assert set(partition.dataset["task_id"].unique()) == {fake.tasks[1].id}
 
     def test_the_saved_per_task_csv_holds_that_task_s_rows(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """``--save-tasks`` writes real rows in the canonical column order.
 
         Existing tests only asserted the file exists, which an empty frame or
         an extra index column satisfies just as well.
         """
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         out = tmp_path / "out"
 
         _fetch_project(
@@ -792,7 +787,7 @@ class TestFetchCoreImageForwarding:
 
     def test_the_given_storage_is_what_gets_downloaded_from(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -803,7 +798,7 @@ class TestFetchCoreImageForwarding:
         counted as failed — a silent zero-download fetch.
         """
         self._bucket(monkeypatch)
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         images = tmp_path / "images"
 
         fetch_project(
@@ -819,13 +814,13 @@ class TestFetchCoreImageForwarding:
 
     def test_without_a_storage_the_project_id_finds_one(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """With no storage passed, the project id is the only way to get one."""
         self._bucket(monkeypatch)
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         images = tmp_path / "images"
 
         fetch_project(
@@ -841,7 +836,7 @@ class TestFetchCoreImageForwarding:
 
     def test_the_configured_ignored_prefix_shapes_both_paths(
         self,
-        coco8_fixtures: LoadedFixtures,
+        normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -854,7 +849,7 @@ class TestFetchCoreImageForwarding:
         each keeps its own copy of the argument.
         """
         self._bucket(monkeypatch)
-        fake = _completed_fake(coco8_fixtures)
+        fake = normal_fake
         images = tmp_path / "images"
         config_path = write_config_yaml(
             tmp_path / "cfg.yaml",
@@ -888,14 +883,6 @@ class TestFetchCoreImageForwarding:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def _restore_workers() -> Generator[None, None, None]:
-    s3, cvat = Workers.s3, Workers.cvat
-    yield
-    configure_workers(s3=s3, cvat=cvat)
-
-
-@pytest.mark.usefixtures("_restore_workers")
 def test_concurrent_fetch_produces_the_same_dataset_as_a_serial_one(
     coco8_fixtures: LoadedFixtures, tmp_path: Path
 ) -> None:
@@ -922,7 +909,6 @@ def test_concurrent_fetch_produces_the_same_dataset_as_a_serial_one(
     assert len(serial.dataset) > 0
 
 
-@pytest.mark.usefixtures("_restore_workers")
 def test_every_task_is_fetched_exactly_once_under_concurrency(
     coco8_fixtures: LoadedFixtures, tmp_path: Path
 ) -> None:
@@ -940,7 +926,6 @@ def test_every_task_is_fetched_exactly_once_under_concurrency(
     assert sorted(api.annotation_calls) == sorted(task.id for task in fake.tasks)
 
 
-@pytest.mark.usefixtures("_restore_workers")
 def test_a_failing_task_still_aborts_the_whole_fetch(
     coco8_fixtures: LoadedFixtures, tmp_path: Path
 ) -> None:

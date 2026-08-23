@@ -195,3 +195,21 @@ def capture_logs() -> Generator[list[str], None, None]:
         yield messages
     finally:
         logger.remove(handler_id)
+
+
+@pytest.fixture
+def capture_info_logs() -> Generator[list[str], None, None]:
+    """Capture loguru messages at INFO+ level into a list of strings.
+
+    Separate from :func:`capture_logs` because a command whose entire
+    output is INFO — `ignore --list`, `doctor` — has nothing to assert on
+    at WARNING.
+    """
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda msg: messages.append(msg.record["message"]), level="INFO"
+    )
+    try:
+        yield messages
+    finally:
+        logger.remove(handler_id)
