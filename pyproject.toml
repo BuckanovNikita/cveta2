@@ -542,7 +542,7 @@ full = []
 
 [tool.vulture]
 min_confidence = 80
-paths = ["cveta2", "main.py"]
+paths = ["cveta2", "main.py", "tests", "scripts"]
 exclude = ["cveta2/s3_types.py"]
 
 [tool.coverage.run]
@@ -550,11 +550,10 @@ source = ["cveta2"]
 branch = true
 omit = [
     "cveta2/__main__.py",
-    "cveta2/commands/setup_clearml.py",
 ]
 
 [tool.coverage.report]
-fail_under = 65
+fail_under = 90
 show_missing = true
 skip_empty = true
 exclude_lines = [

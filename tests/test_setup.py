@@ -44,12 +44,7 @@ def feed_inputs(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str
     prompts: list[str] = []
     answers_iter = iter(answers)
 
-    def fake_text(
-        message: str,
-        *,
-        validate: object = None,  # noqa: ARG001
-        history: object = None,  # noqa: ARG001
-    ) -> str:
+    def fake_text(message: str, **_kwargs: object) -> str:
         prompts.append(message)
         return next(answers_iter)
 
