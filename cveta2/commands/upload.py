@@ -18,6 +18,7 @@ from cveta2.config import UploadConfig
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.output import read_dataset_csv
 from cveta2.services.upload import (
+    UPLOAD_REQUIRED_COLUMNS,
     UploadOptions,
     UploadRequest,
     build_search_dirs,
@@ -34,8 +35,6 @@ if TYPE_CHECKING:
 
 _NO_ANNOTATION_LABEL = "__no_annotation__"
 _NO_ANNOTATION_TITLE = "(без аннотаций)"
-
-_UPLOAD_REQUIRED_COLUMNS: set[str] = {"image_name", "instance_label"}
 
 # Presentation-only literals live at module level so mutation testing does not
 # generate unkillable "change the caption" mutants inside the functions below.
@@ -152,7 +151,7 @@ def run_upload(args: argparse.Namespace) -> None:
     """Run the ``upload`` command."""
     upload_cfg = UploadConfig.load()
 
-    df = read_dataset_csv(Path(args.dataset), _UPLOAD_REQUIRED_COLUMNS)
+    df = read_dataset_csv(Path(args.dataset), UPLOAD_REQUIRED_COLUMNS)
     df_normal, deleted_names = split_deleted_rows(df)
 
     exclude_names = read_exclude_names(args.in_progress)

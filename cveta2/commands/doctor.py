@@ -246,8 +246,8 @@ def _scan_permissions(root_dir: Path, *, fix: bool = False) -> _ScanResult:
 
     def record_unreadable(error: OSError) -> None:
         logger.warning(
-            f"doctor: не удалось прочитать {error.filename} ({error}) — "
-            f"содержимое каталога не проверено"
+            f"doctor: cannot read {error.filename} ({error}) — "
+            f"directory contents not checked"
         )
         if error.filename is not None:
             _check_one(
@@ -278,7 +278,7 @@ def _check_one(
     try:
         st = path.stat()
     except OSError as e:
-        logger.debug(f"Не удалось проверить {path}: {e}")
+        logger.debug(f"doctor: cannot stat {path}: {e}")
         return False
 
     need = (
@@ -305,9 +305,9 @@ def _grant_group_access(path: Path, mode: int) -> bool:
     try:
         path.chmod(stat.S_IMODE(mode))
     except OSError as e:
-        logger.warning(f"doctor: не удалось выставить права на {path}: {e}")
+        logger.warning(f"doctor: cannot set permissions on {path}: {e}")
         return False
-    logger.debug(f"doctor: права {oct(stat.S_IMODE(mode))} выставлены на {path}")
+    logger.debug(f"doctor: set permissions {oct(stat.S_IMODE(mode))} on {path}")
     return True
 
 

@@ -48,6 +48,10 @@ _NOTHING_TO_UPLOAD = "Ошибка: после фильтрации не ост�
 _HTTP_NOT_FOUND = 404
 
 
+UPLOAD_REQUIRED_COLUMNS: set[str] = {"image_name", "instance_label"}
+"""Columns an upload CSV must carry, shared by the CLI and the api layer."""
+
+
 @dataclass(frozen=True)
 class UploadPlan:
     """Resolved upload inputs: filtered rows and ordered image-name lists.

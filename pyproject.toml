@@ -226,6 +226,7 @@ only_mutate = [
     "cveta2/services/fetch.py",
     "cveta2/_concurrency.py",
     "cveta2/upload_manifest.py",
+    "cveta2/services/task_ops.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -487,7 +488,7 @@ full = []
 
 # fetch_selected_tasks: prune_cache is read as `cache is not None and
 # prune_cache`, so None and False take the same branch.
-"cveta2.services.fetch.x_fetch_selected_tasks__mutmut_8" = "prune_cache=None is falsy, exactly like the False it replaces; prune_cache=True IS observable and is killed by test_a_selected_fetch_keeps_entries_for_the_tasks_it_skipped"
+"cveta2.services.fetch.x_fetch_selected_tasks__mutmut_5" = "prune_cache=None is falsy, exactly like the False it replaces; prune_cache=True IS observable and is killed by test_a_selected_fetch_keeps_entries_for_the_tasks_it_skipped"
 
 # _fetch_and_save_tasks: the guard decides only whether the cache summary is
 # printed at all. Both branches return the same annotations, and the summary's
@@ -498,8 +499,8 @@ full = []
 # single reader, the 5xx skip hint in _client_ops.shared, which falls back to a
 # "<имя_проекта>" placeholder when it is empty. Killing this means asserting the
 # wording of that hint - the change-detector CLAUDE.md rules out.
-"cveta2.services.fetch.x__fetch_core__mutmut_8" = "project_name=None; the only reader is the 5xx hint's `if ctx.project_name` fallback"
-"cveta2.services.fetch.x__fetch_core__mutmut_14" = "drops project_name=; same single reader as above"
+"cveta2.services.fetch.x__fetch_core__mutmut_9" = "project_name=None; the only reader is the 5xx hint's `if ctx.project_name` fallback"
+"cveta2.services.fetch.x__fetch_core__mutmut_15" = "drops project_name=; same single reader as above"
 
 # The CSV reader's only option is `encoding`, which pandas' io.common.get_handle
 # already resolves as `encoding or "utf-8"` - so dropping the whole mapping is

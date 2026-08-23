@@ -25,7 +25,7 @@ from cveta2.models import (
     BBoxAnnotation,
     ImageWithoutAnnotations,
 )
-from cveta2.services.fetch import FetchOptions, fetch_selected_tasks
+from cveta2.services.fetch import FetchOptions, FetchTarget, fetch_selected_tasks
 from cveta2.task_cache import get_task_cache_dir
 from tests.helpers import fetch_all_annotations
 from tests.integration.conftest import _env, _make_sdk_client
@@ -212,14 +212,18 @@ class TestFetchTaskCacheLive:
                 return_value=_cs_info_for_host(cs_info),
             ):
                 fetch_selected_tasks(
-                    client, project_id, project_name, tmp_path / "out1", None, options
+                    client,
+                    FetchTarget(project_id, project_name, tmp_path / "out1", None),
+                    options,
                 )
                 assert spy.call_count == 1
                 entry = get_task_cache_dir(project_id) / f"task_{task_id}.json"
                 assert entry.exists(), "first fetch must persist a local cache entry"
 
                 fetch_selected_tasks(
-                    client, project_id, project_name, tmp_path / "out2", None, options
+                    client,
+                    FetchTarget(project_id, project_name, tmp_path / "out2", None),
+                    options,
                 )
                 assert spy.call_count == 1, "second fetch must be served from cache"
         finally:

@@ -18,7 +18,7 @@ from cveta2.commands._helpers import (
     resolve_project,
 )
 from cveta2.exceptions import Cveta2Error
-from cveta2.task_cache import invalidate_local_entry
+from cveta2.services.task_ops import resolved_task
 
 if TYPE_CHECKING:
     import argparse
@@ -39,33 +39,20 @@ STATE_CLI_TO_CVAT: dict[str, JobState] = {
 _CONFIRM_HINT = "Запустите команду с флагом --yes."
 
 
-def _resolve_single_task(
-    client: CvatClient,
-    project_id: int,
-    selector: str,
-) -> TaskInfo:
-    """Resolve a single ``--task`` selector (ID or name) to a task."""
-    tasks = client.list_project_tasks(project_id)
-    return client.resolve_task_selectors(tasks, [selector])[0]
-
-
 @contextmanager
 def _task_session(
     args: argparse.Namespace,
 ) -> Iterator[tuple[CvatClient, TaskInfo, str]]:
     """Open a client, resolve ``--project``/``--task``, invalidate cache on exit.
 
-    Yields ``(client, task, project_name)``.  Mirrors ``api._resolved_task``:
-    the local cache entry is invalidated even when the mutation fails or
-    the user declines a confirmation — conservative but safe.
+    Yields ``(client, task, project_name)``.  Only the prompting project
+    resolution is local; the resolve-and-invalidate scaffold is the one
+    ``api`` uses, so the two cannot drift on it.
     """
     with open_client() as client:
         project_id, project_name = resolve_project(client, args.project)
-        task = _resolve_single_task(client, project_id, args.task)
-        try:
+        with resolved_task(client, project_id, project_name, args.task) as task:
             yield client, task, project_name
-        finally:
-            invalidate_local_entry(project_id, task.id, project_name)
 
 
 def run_task_mark_deleted(args: argparse.Namespace) -> None:

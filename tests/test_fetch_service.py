@@ -30,6 +30,7 @@ from cveta2.models import (
 from cveta2.services import fetch as fetch_service
 from cveta2.services.fetch import (
     FetchOptions,
+    FetchTarget,
     _CachePolicy,
     _FetchStats,
     _retrieve_task,
@@ -649,10 +650,7 @@ def _fetch_project(
 ) -> PartitionResult:
     return fetch_project(
         CvatClient(CvatConfig(), api=api),
-        fake.project.id,
-        fake.project.name,
-        output_dir,
-        None,
+        FetchTarget(fake.project.id, fake.project.name, output_dir, None),
         options,
     )
 
@@ -803,10 +801,9 @@ class TestFetchCoreImageForwarding:
 
         fetch_project(
             CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
-            fake.project.id,
-            fake.project.name,
-            tmp_path / "out",
-            self._STORAGE,
+            FetchTarget(
+                fake.project.id, fake.project.name, tmp_path / "out", self._STORAGE
+            ),
             FetchOptions(images_dir=images, publish_clearml=False),
         )
 
@@ -825,10 +822,7 @@ class TestFetchCoreImageForwarding:
 
         fetch_project(
             CvatClient(CvatConfig(), api=_FakeApiWithStorage(fake, self._STORAGE)),
-            fake.project.id,
-            fake.project.name,
-            tmp_path / "out",
-            None,
+            FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
             FetchOptions(images_dir=images, publish_clearml=False),
         )
 
@@ -858,10 +852,9 @@ class TestFetchCoreImageForwarding:
 
         fetch_project(
             CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
-            fake.project.id,
-            fake.project.name,
-            tmp_path / "out",
-            self._STORAGE,
+            FetchTarget(
+                fake.project.id, fake.project.name, tmp_path / "out", self._STORAGE
+            ),
             FetchOptions(
                 images_dir=images,
                 publish_clearml=False,

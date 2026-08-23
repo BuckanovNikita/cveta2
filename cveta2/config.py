@@ -266,12 +266,7 @@ class CvatConfig(BaseModel):
         env_cfg = cls.from_env()
         return preset_cfg.merge(file_cfg).merge(env_cfg)
 
-    def save_to_file(
-        self,
-        path: Path = CONFIG_PATH,
-        *,
-        image_cache: ImageCacheConfig | None = None,
-    ) -> Path:
+    def save_to_file(self, path: Path = CONFIG_PATH) -> Path:
         """Write config to a YAML file, preserving all non-``cvat`` sections."""
         existing_data = _load_raw_yaml(path)
 
@@ -289,9 +284,6 @@ class CvatConfig(BaseModel):
         output.update(
             (key, value) for key, value in existing_data.items() if key != "cvat"
         )
-        if image_cache is not None and image_cache.projects:
-            output["image_cache"] = {k: str(v) for k, v in image_cache.projects.items()}
-
         _write_raw_yaml(path, output)
         logger.info(f"Config saved to {path}")
         return path

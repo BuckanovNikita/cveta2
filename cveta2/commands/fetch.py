@@ -28,13 +28,14 @@ from cveta2.config import (
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.fetch import (
     FetchOptions,
+    FetchTarget,
     fetch_project,
     fetch_selected_tasks,
     load_ignore_sets,
 )
 from cveta2.services.resolve import (
-    apply_sync_root_override,
     infer_project_from_tasks,
+    project_cloud_storage,
     resolve_project_spec,
 )
 
@@ -65,7 +66,8 @@ def run_fetch(args: argparse.Namespace) -> None:
             | _common_fetch_echo_args(args),
             prompted=prompted,
         )
-        fetch_project(client, project_id, project_name, output_dir, cs_info, options)
+        target = FetchTarget(project_id, project_name, output_dir, cs_info)
+        fetch_project(client, target, options)
 
 
 def run_fetch_task(args: argparse.Namespace) -> None:
@@ -92,9 +94,8 @@ def run_fetch_task(args: argparse.Namespace) -> None:
             | _common_fetch_echo_args(args),
             prompted=prompted,
         )
-        fetch_selected_tasks(
-            client, project_id, project_name, output_dir, cs_info, options
-        )
+        target = FetchTarget(project_id, project_name, output_dir, cs_info)
+        fetch_selected_tasks(client, target, options)
 
 
 def _resolve_fetch_task_project(
@@ -108,9 +109,7 @@ def _resolve_fetch_task_project(
         project_spec = infer_project_from_tasks(client, explicit_tasks)
     if isinstance(project_spec, int):
         project_id, project_name = resolve_project_spec(client, project_spec)
-        cs_info = apply_sync_root_override(
-            project_name, client.detect_project_cloud_storage(project_id)
-        )
+        cs_info = project_cloud_storage(client, project_id, project_name)
         return project_id, project_name, cs_info
     return resolve_project_and_cloud_storage(client, project_spec)
 

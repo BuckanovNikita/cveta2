@@ -45,6 +45,22 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class FetchTarget:
+    """What a fetch runs against: the project, and where its output goes.
+
+    Separate from :class:`FetchOptions`, which carries how the fetch
+    behaves. The four fields travel together through every function in
+    this module, so passing them individually was what made the
+    signatures wide.
+    """
+
+    project_id: int
+    project_name: str
+    output_dir: Path
+    cs_info: CloudStorageInfo | None = None
+
+
+@dataclass(frozen=True)
 class FetchOptions:
     """Options for the fetch pipeline (all inputs already resolved)."""
 
@@ -78,28 +94,18 @@ def load_ignore_sets(
     return set(ignored_ids), (silent_ids or None)
 
 
-def fetch_project(  # noqa: PLR0913, PLR0917
+def fetch_project(
     client: CvatClient,
-    project_id: int,
-    project_name: str,
-    output_dir: Path,
-    cs_info: CloudStorageInfo | None,
+    target: FetchTarget,
     options: FetchOptions,
 ) -> PartitionResult:
     """Full-project fetch: partition outputs, optional raw.csv, ClearML publish.
 
     Writes dataset/obsolete/in_progress/deleted CSVs (plus raw.csv when
-    ``options.raw``) into *output_dir* and returns the partition.
+    ``options.raw``) into ``target.output_dir`` and returns the partition.
     """
-    result = _fetch_core(
-        client,
-        project_id,
-        project_name,
-        output_dir,
-        cs_info,
-        options,
-        prune_cache=True,
-    )
+    output_dir = target.output_dir
+    result = _fetch_core(client, target, options, prune_cache=True)
 
     if options.raw:
         write_raw_csv(result, output_dir)
@@ -113,44 +119,31 @@ def fetch_project(  # noqa: PLR0913, PLR0917
     if options.publish_clearml:
         from cveta2._clearml import maybe_publish_clearml  # noqa: PLC0415
 
-        maybe_publish_clearml(project_name, output_dir)
+        maybe_publish_clearml(target.project_name, output_dir)
 
     return partition
 
 
-def fetch_selected_tasks(  # noqa: PLR0913, PLR0917
+def fetch_selected_tasks(
     client: CvatClient,
-    project_id: int,
-    project_name: str,
-    output_dir: Path,
-    cs_info: CloudStorageInfo | None,
+    target: FetchTarget,
     options: FetchOptions,
 ) -> ProjectAnnotations:
     """Selected-tasks fetch: writes dataset.csv + deleted.csv, returns result."""
-    result = _fetch_core(
-        client,
-        project_id,
-        project_name,
-        output_dir,
-        cs_info,
-        options,
-        prune_cache=False,
-    )
-    write_dataset_and_deleted(result, output_dir)
+    result = _fetch_core(client, target, options, prune_cache=False)
+    write_dataset_and_deleted(result, target.output_dir)
     return result
 
 
-def _fetch_core(  # noqa: PLR0913, PLR0917
+def _fetch_core(
     client: CvatClient,
-    project_id: int,
-    project_name: str,
-    output_dir: Path,
-    cs_info: CloudStorageInfo | None,
+    target: FetchTarget,
     options: FetchOptions,
     *,
     prune_cache: bool,
 ) -> ProjectAnnotations:
     """Shared fetch flow: prepare, cache loop, prune, download, path population."""
+    project_id, project_name = target.project_id, target.project_name
     started = time.monotonic()
     ctx = client.prepare_fetch(
         project_id,
@@ -171,7 +164,7 @@ def _fetch_core(  # noqa: PLR0913, PLR0917
     result = _fetch_and_save_tasks(
         client,
         ctx,
-        output_dir,
+        target.output_dir,
         policy,
         save_tasks=options.save_tasks,
     )
@@ -188,7 +181,7 @@ def _fetch_core(  # noqa: PLR0913, PLR0917
             result,
             options.images_dir,
             project_id=project_id,
-            project_cloud_storage=cs_info,
+            project_cloud_storage=target.cs_info,
             ignored_prefix=cache_settings.ignored_prefix,
         )
         logger.info(
@@ -198,7 +191,7 @@ def _fetch_core(  # noqa: PLR0913, PLR0917
         )
     populate_record_paths(
         result,
-        cs_info,
+        target.cs_info,
         options.images_dir,
         ignored_prefix=cache_settings.ignored_prefix,
     )

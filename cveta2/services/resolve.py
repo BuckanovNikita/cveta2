@@ -115,6 +115,23 @@ def infer_project_from_tasks(
     return None
 
 
+def project_cloud_storage(
+    client: CvatClient,
+    project_id: int,
+    project_name: str,
+    root: str | None = None,
+) -> CloudStorageInfo | None:
+    """Detect the project's cloud storage and apply any sync-root override.
+
+    The pair is always composed together — detecting storage without
+    honouring ``sync_roots`` would download from the wrong bucket — so it
+    lives here rather than being spelled out at each call site.
+    """
+    return apply_sync_root_override(
+        project_name, client.detect_project_cloud_storage(project_id), root
+    )
+
+
 def apply_sync_root_override(
     project_name: str,
     cs_info: CloudStorageInfo | None,

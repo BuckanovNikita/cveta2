@@ -23,7 +23,12 @@ from cveta2.models import (
     TaskAnnotations,
     TaskInfo,
 )
-from cveta2.services.fetch import FetchOptions, fetch_project, fetch_selected_tasks
+from cveta2.services.fetch import (
+    FetchOptions,
+    FetchTarget,
+    fetch_project,
+    fetch_selected_tasks,
+)
 from cveta2.task_cache import (
     CACHE_SCHEMA_VERSION,
     CachedTaskEnvelope,
@@ -569,10 +574,7 @@ def _fetch_task_cached(
     """
     fetch_selected_tasks(
         CvatClient(CFG, api=fake_api),
-        fake.project.id,
-        fake.project.name,
-        output_dir,
-        cs_info,
+        FetchTarget(fake.project.id, fake.project.name, output_dir, cs_info),
         replace(options, task_selector=[fake.tasks[0].name]),
     )
 
@@ -658,10 +660,7 @@ class TestFullFetchPrunesCache:
 
         fetch_project(
             CvatClient(CFG, api=api),
-            fake.project.id,
-            fake.project.name,
-            tmp_path / "out",
-            None,
+            FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
             FetchOptions(use_cache=True, publish_clearml=False),
         )
 
@@ -866,10 +865,7 @@ class TestFetchBuildsTheS3CacheBackend:
         with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
             fetch_selected_tasks(
                 CvatClient(CFG, api=api),
-                fake.project.id,
-                fake.project.name,
-                output_dir,
-                None,
+                FetchTarget(fake.project.id, fake.project.name, output_dir, None),
                 FetchOptions(
                     task_selector=[fake.tasks[0].name],
                     config_path=config_path,

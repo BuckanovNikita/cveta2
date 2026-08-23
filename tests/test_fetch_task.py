@@ -37,6 +37,7 @@ from cveta2.exceptions import (
 from cveta2.models import CSV_COLUMNS, TaskInfo
 from cveta2.services.fetch import (
     FetchOptions,
+    FetchTarget,
     fetch_selected_tasks,
     load_ignore_sets,
 )
@@ -740,10 +741,7 @@ class TestFetchSelectedTasks:
 
         fetch_selected_tasks(
             make_fake_client(fake),
-            fake.project.id,
-            fake.project.name,
-            out_dir,
-            None,
+            FetchTarget(fake.project.id, fake.project.name, out_dir, None),
             FetchOptions(
                 task_selector=[t.name for t in fake.tasks],
                 use_cache=False,
@@ -793,10 +791,7 @@ class TestFetchSelectedTasks:
 
         fetch_selected_tasks(
             make_fake_client(fake),
-            fake.project.id,
-            fake.project.name,
-            out_dir,
-            None,
+            FetchTarget(fake.project.id, fake.project.name, out_dir, None),
             FetchOptions(
                 task_selector=[fake.tasks[0].name],
                 ignore_task_ids={ignored_task_id},
@@ -835,10 +830,7 @@ class TestFetchSelectedTasks:
         ):
             fetch_selected_tasks(
                 CvatClient(CFG, api=api),
-                fake.project.id,
-                fake.project.name,
-                out_dir,
-                None,
+                FetchTarget(fake.project.id, fake.project.name, out_dir, None),
                 FetchOptions(task_selector=list(selector), use_cache=False),
             )
 
@@ -859,10 +851,7 @@ class TestFetchSelectedTasks:
         with pytest.raises(TaskNotFoundError):
             fetch_selected_tasks(
                 make_fake_client(fake),
-                fake.project.id,
-                fake.project.name,
-                tmp_path / "out",
-                None,
+                FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
                 FetchOptions(
                     task_selector=["nonexistent-task-xyz"],
                     use_cache=False,

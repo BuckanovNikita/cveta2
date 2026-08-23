@@ -16,7 +16,7 @@ from cveta2.config import (
 )
 from cveta2.exceptions import MissingHostError
 from cveta2.projects_cache import PERSONAL_WORKSPACE_SLUG, load_projects_cache
-from cveta2.services.resolve import apply_project_org, apply_sync_root_override
+from cveta2.services.resolve import apply_project_org, project_cloud_storage
 
 if TYPE_CHECKING:
     import argparse
@@ -158,8 +158,7 @@ def resolve_project_and_cloud_storage(
 
     """
     project_id, project_name = resolve_project(client, project_spec)
-    cs_info = client.detect_project_cloud_storage(project_id)
-    cs_info = apply_sync_root_override(project_name, cs_info, sync_root)
+    cs_info = project_cloud_storage(client, project_id, project_name, sync_root)
     return (project_id, project_name, cs_info)
 
 

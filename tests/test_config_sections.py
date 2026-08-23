@@ -516,12 +516,12 @@ def test_save_to_file_creates_missing_directories(tmp_path: Path) -> None:
     assert CvatConfig.from_file(cfg_path).host == "https://new.example"
 
 
-def test_save_to_file_persists_credentials_and_image_cache(tmp_path: Path) -> None:
-    """Every optional ``cvat`` key, plus the ``image_cache`` section, survives.
+def test_save_to_file_persists_every_optional_cvat_key(tmp_path: Path) -> None:
+    """Every optional ``cvat`` key survives the round trip.
 
     ``request_timeout`` already had a test; ``organization``/``username``/
-    ``password`` and the whole ``image_cache`` branch did not, so their keys
-    could be misspelled or their values replaced by ``None`` undetected.
+    ``password`` did not, so their keys could be misspelled or their values
+    replaced by ``None`` undetected.
     """
     cfg_path = tmp_path / "custom.yaml"
 
@@ -530,30 +530,25 @@ def test_save_to_file_persists_credentials_and_image_cache(tmp_path: Path) -> No
         organization="acme",
         username="user1",
         password="secret",
-    ).save_to_file(
-        cfg_path, image_cache=ImageCacheConfig(projects={"proj": Path("/data/proj")})
-    )
+    ).save_to_file(cfg_path)
 
     reloaded = CvatConfig.from_file(cfg_path)
     assert reloaded.organization == "acme"
     assert reloaded.username == "user1"
     assert reloaded.password == "secret"
-    assert ImageCacheConfig.load(cfg_path).get_cache_dir("proj") == Path("/data/proj")
 
 
-def test_save_to_file_without_image_cache_leaves_the_section_alone(
+def test_save_to_file_leaves_the_image_cache_section_alone(
     tmp_path: Path,
 ) -> None:
-    """An empty ``image_cache`` argument must not overwrite what is on disk."""
+    """``setup`` writes only ``cvat``; ``setup-cache`` owns ``image_cache``."""
     cfg_path = write_config_yaml(
         tmp_path / "custom.yaml",
         cvat={"host": "http://localhost:8080"},
         image_cache={"proj": "/data/existing"},
     )
 
-    CvatConfig(host="https://new.example").save_to_file(
-        cfg_path, image_cache=ImageCacheConfig()
-    )
+    CvatConfig(host="https://new.example").save_to_file(cfg_path)
 
     assert ImageCacheConfig.load(cfg_path).get_cache_dir("proj") == Path(
         "/data/existing"

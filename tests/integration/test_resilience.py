@@ -18,7 +18,7 @@ import pytest
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2._concurrency import Workers, configure_workers
 from cveta2.client import CvatClient
-from cveta2.services.fetch import FetchOptions, fetch_project
+from cveta2.services.fetch import FetchOptions, FetchTarget, fetch_project
 from cveta2.services.upload import (
     UploadOptions,
     UploadPlan,
@@ -71,7 +71,9 @@ def test_a_parallel_fetch_survives_rate_limiting(tmp_path: Path) -> None:
         serial_ctx = client.prepare_fetch(project_id, project_name=project_name)
         expected_tasks = len(serial_ctx.tasks)
         partition = fetch_project(
-            client, project_id, project_name, tmp_path / "out", None, options
+            client,
+            FetchTarget(project_id, project_name, tmp_path / "out", None),
+            options,
         )
 
     assert expected_tasks > 0

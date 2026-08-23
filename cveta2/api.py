@@ -9,6 +9,14 @@ Every remote function accepts an optional ``connection=`` argument (a
 resolved from environment variables, ``~/.config/cveta2/config.yaml``
 and the built-in preset.  The API never prompts — missing settings raise
 :class:`MissingHostError` / :class:`MissingCredentialsError`.
+
+The ``PLR0913`` suppressions in this module are deliberate and are
+explained here once rather than at each site: these are the public
+library signatures, and every argument is an explicit keyword a caller
+names.  Collapsing them into option objects would move the width into a
+type the caller has to import first, and would be a breaking change for
+anyone already calling them.  Internal layers do use option objects —
+see :class:`~cveta2.services.fetch.FetchTarget`.
 """
 
 from __future__ import annotations
@@ -41,6 +49,7 @@ from cveta2.services.convert import (
 )
 from cveta2.services.fetch import (
     FetchOptions,
+    FetchTarget,
     fetch_project,
     fetch_selected_tasks,
     load_ignore_sets,
@@ -48,11 +57,13 @@ from cveta2.services.fetch import (
 from cveta2.services.merge import merge_datasets
 from cveta2.services.output import read_dataset_csv
 from cveta2.services.resolve import (
-    apply_sync_root_override,
     infer_project_from_tasks,
+    project_cloud_storage,
     resolve_project_spec,
 )
+from cveta2.services.task_ops import resolved_task
 from cveta2.services.upload import (
+    UPLOAD_REQUIRED_COLUMNS,
     UploadOptions,
     UploadRequest,
     build_search_dirs,
@@ -62,7 +73,6 @@ from cveta2.services.upload import (
     upload_dataset,
 )
 from cveta2.services.whats_new import REQUIRED_COLUMNS, compute_baseline
-from cveta2.task_cache import invalidate_local_entry
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
@@ -201,6 +211,26 @@ def _cache_flags(cache: CacheMode) -> tuple[bool, bool]:
         ) from None
 
 
+def _resolve_fetch_target(
+    client: CvatClient,
+    project: int | str,
+    output_dir: Path,
+    config_path: Path | None,
+) -> tuple[FetchTarget, set[int] | None, set[int] | None]:
+    """Resolve project, cloud storage and ignore sets for a fetch.
+
+    Shared by ``fetch`` and ``fetch_task``, which resolved the identical
+    three steps. Deliberately not shared with ``commands/fetch.py``: that
+    layer resolves the project interactively first, and re-resolving from
+    a bare name here would lose the sync-root and TUI paths.
+    """
+    project_id, project_name = resolve_project_spec(client, project)
+    cs_info = project_cloud_storage(client, project_id, project_name)
+    ignore_set, silent_set = load_ignore_sets(project_name, config_path)
+    target = FetchTarget(project_id, project_name, output_dir, cs_info)
+    return target, ignore_set, silent_set
+
+
 def _resolve_images_dir(
     images_dir: str | Path | None,
     download_images: bool,  # noqa: FBT001
@@ -260,11 +290,9 @@ def fetch(  # noqa: PLR0913
     use_cache, force = _cache_flags(cache)
     config_path = _config_path(connection)
     with _open(connection) as c:
-        project_id, project_name = resolve_project_spec(c, project)
-        cs_info = apply_sync_root_override(
-            project_name, c.detect_project_cloud_storage(project_id)
+        resolved, ignore_set, silent_set = _resolve_fetch_target(
+            c, project, Path(output_dir), config_path
         )
-        ignore_set, silent_set = load_ignore_sets(project_name, config_path)
         options = FetchOptions(
             completed_only=completed_only,
             ignore_task_ids=ignore_set,
@@ -273,15 +301,13 @@ def fetch(  # noqa: PLR0913
             force=force,
             save_tasks=save_tasks,
             images_dir=_resolve_images_dir(
-                images_dir, download_images, project_name, config_path
+                images_dir, download_images, resolved.project_name, config_path
             ),
             raw=raw,
             publish_clearml=publish_clearml,
             config_path=config_path,
         )
-        return fetch_project(
-            c, project_id, project_name, Path(output_dir), cs_info, options
-        )
+        return fetch_project(c, resolved, options)
 
 
 def fetch_task(  # noqa: PLR0913
@@ -314,11 +340,9 @@ def fetch_task(  # noqa: PLR0913
             project = infer_project_from_tasks(c, tasks)
             if project is None:
                 raise Cveta2Error(_ERR_PROJECT_UNRESOLVED)
-        project_id, project_name = resolve_project_spec(c, project)
-        cs_info = apply_sync_root_override(
-            project_name, c.detect_project_cloud_storage(project_id)
+        resolved, ignore_set, silent_set = _resolve_fetch_target(
+            c, project, Path(output_dir), config_path
         )
-        ignore_set, silent_set = load_ignore_sets(project_name, config_path)
         options = FetchOptions(
             completed_only=completed_only,
             task_selector=list(tasks),
@@ -328,13 +352,11 @@ def fetch_task(  # noqa: PLR0913
             force=force,
             save_tasks=save_tasks,
             images_dir=_resolve_images_dir(
-                images_dir, download_images, project_name, config_path
+                images_dir, download_images, resolved.project_name, config_path
             ),
             config_path=config_path,
         )
-        result = fetch_selected_tasks(
-            c, project_id, project_name, Path(output_dir), cs_info, options
-        )
+        result = fetch_selected_tasks(c, resolved, options)
     return pd.DataFrame(result.to_csv_rows())
 
 
@@ -366,7 +388,7 @@ def upload(  # noqa: PLR0913
     df = (
         dataset
         if isinstance(dataset, pd.DataFrame)
-        else read_dataset_csv(Path(dataset), {"image_name", "instance_label"})
+        else read_dataset_csv(Path(dataset), UPLOAD_REQUIRED_COLUMNS)
     )
     df_normal, deleted_names = split_deleted_rows(df)
     exclude_names = read_exclude_names(
@@ -469,9 +491,7 @@ def s3_sync(
     config_path = _config_path(connection)
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
-        cs_info = apply_sync_root_override(
-            project_name, c.detect_project_cloud_storage(project_id), root
-        )
+        cs_info = project_cloud_storage(c, project_id, project_name, root)
         ignored_prefix = (
             CacheConfig.load(config_path).for_project(project_name).ignored_prefix
         )
@@ -545,11 +565,6 @@ def ignore(  # noqa: PLR0913
     return ignore_cfg.get_ignored_entries(project_name)
 
 
-def _resolve_task(client: CvatClient, project_id: int, task: int | str) -> TaskInfo:
-    tasks = client.list_project_tasks(project_id)
-    return client.resolve_task_selectors(tasks, [task])[0]
-
-
 @contextmanager
 def _resolved_task(
     connection: Connection | None,
@@ -558,17 +573,13 @@ def _resolved_task(
 ) -> Iterator[tuple[CvatClient, TaskInfo]]:
     """Open a client, resolve *project*/*task*, and invalidate the cache on exit.
 
-    Every task mutation shares this scaffold; centralising the local
-    cache-invalidation here keeps a stale entry from surviving a future
-    mutation that forgets to call ``invalidate_local_entry``.
+    Resolves the project without prompting, then hands off to the shared
+    scaffold in ``services.task_ops`` that the CLI uses too.
     """
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
-        task_info = _resolve_task(c, project_id, task)
-        try:
+        with resolved_task(c, project_id, project_name, task) as task_info:
             yield c, task_info
-        finally:
-            invalidate_local_entry(project_id, task_info.id, project_name)
 
 
 def task_mark_deleted(
