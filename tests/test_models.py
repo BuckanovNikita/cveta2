@@ -298,3 +298,22 @@ def test_frame_path_survives_json_round_trip() -> None:
     bbox = make_bbox(image_name="sub/img.jpg")
     restored = type(bbox).model_validate_json(bbox.model_dump_json())
     assert restored.frame_path == "sub/img.jpg"
+
+
+class TestConfidenceField:
+    """Tests for the confidence field on BBoxAnnotation."""
+
+    def test_confidence_in_csv_columns(self) -> None:
+        assert "confidence" in CSV_COLUMNS
+
+    def test_bbox_annotation_with_confidence(self) -> None:
+        ann = make_bbox(confidence=0.95)
+        assert ann.confidence == 0.95
+        row = ann.to_csv_row()
+        assert row["confidence"] == 0.95
+
+    def test_bbox_annotation_without_confidence(self) -> None:
+        ann = make_bbox()
+        assert ann.confidence is None
+        row = ann.to_csv_row()
+        assert row["confidence"] is None

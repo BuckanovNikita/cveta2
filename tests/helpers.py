@@ -384,6 +384,11 @@ def write_dataset_csv(
     return path
 
 
+def write_convert_csv(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
+    """Write a `dataset.csv` with the canonical column order, for convert tests."""
+    return write_dataset_csv(tmp_path / "dataset.csv", rows, columns=CSV_COLUMNS)
+
+
 def make_args(**kwargs: object) -> argparse.Namespace:
     """Build an argparse.Namespace from keyword arguments."""
     return argparse.Namespace(**kwargs)
