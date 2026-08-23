@@ -226,6 +226,10 @@ only_mutate = [
     "cveta2/_concurrency.py",
     "cveta2/upload_manifest.py",
     "cveta2/services/task_ops.py",
+    "cveta2/_client/dtos.py",
+    "cveta2/_client/mapping.py",
+    "cveta2/client.py",
+    "cveta2/commands/_bootstrap.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
