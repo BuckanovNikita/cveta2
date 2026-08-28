@@ -11,6 +11,7 @@ import pytest
 
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.client import CvatClient
+from cveta2.exceptions import Cveta2Error
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import IMAGE_NAMES, _get_project_and_storage
 
@@ -107,7 +108,7 @@ class TestDropLabelAnnotationsIntegration:
             task_id = _create_task(
                 client, project_id, cs_info.id, "integration-task-ops-drop-unknown", 1
             )
-            with pytest.raises(ValueError, match="no-such-label"):
+            with pytest.raises(Cveta2Error, match="no-such-label"):
                 client.drop_label_annotations(task_id, "no-such-label")
 
 
