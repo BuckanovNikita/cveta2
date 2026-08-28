@@ -57,7 +57,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation with optional `confidence`, DeletedImage, etc.)
 - **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
 - **`cveta2/dataset_partition.py`** - Core logic: splits annotations into dataset/obsolete/in_progress
-- **`cveta2/task_cache.py`** - Cache of completed-task annotations: local dir + shared S3 mirror, invalidated by task `updated_date`
+- **`cveta2/task_cache.py`** - Cache of completed-task annotations: local dir + shared S3 mirror, valid for as long as CVAT still calls the task `completed`
 - **`cveta2/image_downloader.py`** - S3 → local sync; resolves a small batch of images by probing the key each CVAT frame name implies (`s3_utils.s3_object_exists`) and falls back to the whole-prefix listing only for what that misses
 - **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
 - **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
@@ -72,7 +72,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 
 1. **Fetch**: `cli`/`api.fetch` → `commands/fetch.py` (or `api.py`) → `services/fetch.py:fetch_project()` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
    - Task selection scales with the request, not the project: `_client_ops/fetch.py:_select_tasks_for_fetch` retrieves each selector through `get_task` when all of them are numeric ids, and only walks the project task list otherwise — for a name selector, an id that turns out to name a task, a task belonging to another project, or an ignored id (all of which the listing path still owns, and all of which end in an error or a skip)
-   - Completed tasks are served from `task_cache.py` when the cached `task_updated_date` matches (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
+   - Completed tasks are served from `task_cache.py` whenever an entry exists (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); the live `completed` status is the whole freshness check, since a job moved back to annotation takes that status away. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
    - Annotations converted to `BBoxAnnotation` by `extractors.py`
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
@@ -88,7 +88,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 3. **Convert**: `commands/convert.py` (or `api.convert_*`) → `services/convert/`: `convert_to_yolo` exports CSV to YOLO format (images + labels), `convert_from_yolo` imports YOLO predictions back to CSV, `convert_to_coco` exports COCO detection format. Uses `PixelBox`/`YoloBox` NamedTuples for coordinate conversion.
 
 4. **Partition Logic** (`dataset_partition.py`):
-   - For each image, finds **latest task** by `task_updated_date` (comparing annotations + deletions)
+   - For each image, finds **latest task** by `task_id` (comparing annotations + deletions). Ids are monotone with task creation and never move; `task_updated_date` does — a project label edit rewrites it on every task at once
    - If latest task is deletion → image goes to `obsolete`, added to `deleted_images`
    - Otherwise: completed tasks → `dataset` (latest) or `obsolete` (stale), non-completed → `in_progress`
    - **Completed** is read from `job_stage`/`job_state`, not from a task-level field: `completed_task_ids()` requires *every* row of the task — deletion records included — to sit on `acceptance`/`completed`, which is how CVAT itself derives a task's status from its jobs
@@ -106,9 +106,9 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 CVAT allows frames to be marked as deleted (`data_meta.deleted_frames`), but annotation shapes for those frames **still exist** in the task data. This is handled in two places:
 
 1. **Collection** (`_client/extractors.py`): Shapes are collected for ALL frames including deleted ones (needed for label counting, etc.)
-2. **Partition** (`dataset_partition.py`): Deletion records are placed FIRST in the concat so `idxmax()` picks them in case of ties
+2. **Partition** (`dataset_partition.py`): Deletion records are placed FIRST in the concat, so the `sort_values` + `drop_duplicates(keep="first")` in `_latest_row_per_image` picks them in case of ties
 
-**Bug fix history**: Previously, when an image had both annotations and deletion record with same `task_updated_date`, annotations won the tie. Fixed by reordering concat (see `test_deleted_image_with_annotations_in_same_task`).
+Two different tasks can no longer tie, so the only tie left is inside one task: a frame it annotated and also marked deleted. That is the case the concat order settles (see `test_deleted_image_with_annotations_in_same_task`, and `test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort` for why the row position is an explicit sort key rather than assumed sort stability).
 
 ## Nested frame names
 

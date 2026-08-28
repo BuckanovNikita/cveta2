@@ -262,7 +262,7 @@ uv run pytest -n0       # в один поток (для отладки)
 
 Покрытие:
 
-- **merge** (`tests/test_merge.py`) — split propagation, default merge (new wins), by-time merge, I/O (CSV и legacy), CLI end-to-end
+- **merge** (`tests/test_merge.py`) — split propagation, default merge (new wins), by-task merge, I/O (CSV и legacy), CLI end-to-end
 - **partition** (`tests/test_partition.py`) — разбиение на dataset/obsolete/in_progress
 - **extractors** (`tests/test_extractors.py`) — конвертация shapes в BBoxAnnotation
 - **image download** (`tests/test_image_downloader.py`) — S3 download, caching, S3Syncer

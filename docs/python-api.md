@@ -40,8 +40,8 @@ cveta2.convert_to_coco("out/dataset.csv", "coco_out/")
 # Прочие операции
 cveta2.merge("old/dataset.csv", "new/dataset.csv", "merged.csv")
 news = cveta2.whats_new("my-project", "out/dataset.csv")
-for task in news.tasks:  # news.updated_task_ids — задачи, уже имеющиеся в CSV
-    print(task.id, task.name, task.id in news.updated_task_ids)
+for task in news.tasks:  # news.cutoff — task_id отсечки (int)
+    print(task.id, task.name)
 stats = cveta2.s3_sync(
     "my-project", "/mnt/data/my-project"
 )  # синхронизация изображений из S3

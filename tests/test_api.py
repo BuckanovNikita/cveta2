@@ -1520,7 +1520,7 @@ class TestWhatsNewApi:
         """The CSV path is passed to ``compute_baseline`` only for this message."""
         dataset = write_dataset_csv(
             tmp_path / "dataset.csv",
-            [csv_row("a.jpg", task_id=None)],
+            [csv_row("a.jpg") | {"task_id": None}],
             columns=CSV_COLUMNS,
         )
         _api, connection = _scoped(normal_fake)

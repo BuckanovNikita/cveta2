@@ -51,7 +51,7 @@ segmentation project produces no annotation rows at all.
 | `task_name` | `str` | Task name |
 | `job_stage` | `str` | Review stage of the job owning the frame (`annotation`, `validation`, `acceptance`) |
 | `job_state` | `str` | Review state of that job (`new`, `in progress`, `completed`, `rejected`) |
-| `task_updated_date` | `str` | Date/time of the task's last update |
+| `task_updated_date` | `str` | Date/time of the task's last update. Informational only — nothing orders on it |
 | `created_by_username` | `str` | Username of the annotation's author |
 | `frame_id` | `int` | Frame index within the task |
 | `split` | `"train" \| "val" \| "test" \| None` | Dataset split (see the note below) |
@@ -87,10 +87,16 @@ of frames deleted from it, which live in `deleted.csv` — carries that pair.
 Anything else lands in `in_progress.csv`. `cveta2 task status --stage acceptance
 --state completed` sets the pair on every job of a task.
 
-> **Caveat:** the annotation cache is keyed on `task_updated_date`. Moving a job's
-> stage or state through the CVAT UI does not necessarily bump that date, so a
-> cached task can serve a stale pair; `cveta2 task status` invalidates the local
-> entry, and `--no-cache` or `--force` bypasses the cache entirely.
+**Which task wins.** When several tasks hold the same image, the one with the
+highest `task_id` decides — ids are handed out in creation order and never move.
+`task_updated_date` is not used for this: editing a project's labels rewrites it
+on every task of the project at once, which would scramble the ordering.
+
+> **Caveat:** the annotation cache is not keyed on `task_updated_date` either —
+> an entry is served for as long as CVAT still reports the task as `completed`.
+> Shapes edited inside an already-completed task are therefore served stale;
+> `cveta2 task status` invalidates the local entry, and `--no-cache` or
+> `--force` bypasses the cache entirely.
 
 ### Issues (`issue_text` / `issue_state`)
 
@@ -124,7 +130,7 @@ Images without bbox annotations. They are still included in the CSV with empty b
 | `task_name` | `str` | Task name |
 | `job_stage` | `str` | Review stage of the job owning the frame |
 | `job_state` | `str` | Review state of that job |
-| `task_updated_date` | `str` | Date/time of the task's last update |
+| `task_updated_date` | `str` | Date/time of the task's last update. Informational only — nothing orders on it |
 | `frame_id` | `int` | Frame index within the task |
 | `split` | `"train" \| "val" \| "test" \| None` | Dataset split |
 | `subset` | `str` | Subset from CVAT |
@@ -147,7 +153,7 @@ Record of a deleted image. Written to `deleted.csv` with `instance_shape="delete
 | `task_name` | `str` | Task name |
 | `job_stage` | `str` | Review stage of the job owning the frame |
 | `job_state` | `str` | Review state of that job |
-| `task_updated_date` | `str` | Task update date |
+| `task_updated_date` | `str` | Task update date. Informational only — nothing orders on it |
 | `frame_id` | `int` | Frame index |
 | `subset` | `str` | Subset from CVAT |
 | `s3_image_path` | `str \| None` | Full S3 key relative to the bucket, `None` when unknown |

@@ -71,7 +71,9 @@ details.
 
 The one gotcha worth carrying everywhere: CVAT keeps annotation shapes for
 frames marked deleted, so `dataset_partition.py` concatenates deletion records
-**before** annotation records to win same-date ties.
+**before** annotation records to win same-**task** ties. Recency is ordered by
+`task_id`, never by `task_updated_date` — editing a project's labels bumps that
+date on every task at once.
 
 ## Testing
 
