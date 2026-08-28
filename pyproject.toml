@@ -514,6 +514,7 @@ full = []
 # str, which write_bytes rejects) and needs no entry here.
 "cveta2.services.output.x_read_dataset_csv__mutmut_7" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
 "cveta2.services.upload.x_read_exclude_names__mutmut_9" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
+"cveta2.services.whats_new.x__known_task_ids__mutmut_10" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
 
 # task_to_records: `ctx.frame_issues.get(fid, ("", ""))[N]` reads one fixed
 # element of the default tuple, so mutating the *other* element cannot be
@@ -530,21 +531,21 @@ full = []
 # _latest_task_per_image: the pre-dedup only trims work, and the concatenated
 # frame is immediately re-indexed by image_name.
 "cveta2.dataset_partition.x__latest_task_per_image__mutmut_2" = "drop_duplicates over all columns; _latest_row_per_image dedups by image_name anyway"
-"cveta2.dataset_partition.x__latest_task_per_image__mutmut_4" = "_is_deleted=None instead of 0; the column is only ever compared against 1"
-"cveta2.dataset_partition.x__latest_task_per_image__mutmut_26" = "ignore_index=None; set_index(\"image_name\") replaces the index next"
-"cveta2.dataset_partition.x__latest_task_per_image__mutmut_28" = "drops ignore_index; set_index(\"image_name\") replaces the index next"
-"cveta2.dataset_partition.x__latest_task_per_image__mutmut_29" = "ignore_index=False; set_index(\"image_name\") replaces the index next"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_3" = "_is_deleted=None instead of 0; the column is only ever compared against 1"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_17" = "ignore_index=None; set_index(\"image_name\") replaces the index next"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_19" = "drops ignore_index; set_index(\"image_name\") replaces the index next"
+"cveta2.dataset_partition.x__latest_task_per_image__mutmut_20" = "ignore_index=False; set_index(\"image_name\") replaces the index next"
 
 # _split_completed: latest_completed is derived from the left frame, so every
 # key matches and image_name is the only column the two share.
-"cveta2.dataset_partition.x__split_completed__mutmut_16" = "on=None falls back to the shared columns, which is exactly image_name"
-"cveta2.dataset_partition.x__split_completed__mutmut_19" = "drops on=; the shared columns are exactly image_name"
-"cveta2.dataset_partition.x__split_completed__mutmut_20" = "drops how=\"left\"; an inner join matches every row and keeps left order"
+"cveta2.dataset_partition.x__split_completed__mutmut_14" = "on=None falls back to the shared columns, which is exactly image_name"
+"cveta2.dataset_partition.x__split_completed__mutmut_17" = "drops on=; the shared columns are exactly image_name"
+"cveta2.dataset_partition.x__split_completed__mutmut_18" = "drops how=\"left\"; an inner join matches every row and keeps left order"
 
 # partition_annotations_df: obsolete is reset_index(drop=True)'d on the way out.
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_59" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_61" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_62" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_50" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_52" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_53" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
 
 [tool.vulture]
 min_confidence = 80

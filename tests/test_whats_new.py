@@ -210,14 +210,35 @@ class TestComputeCutoff:
         assert baseline.known_task_ids == {4, 5, 6, 7}
         assert baseline.cutoff == 7
 
-    def test_an_unreadable_sibling_is_skipped_not_fatal(self, tmp_path: Path) -> None:
-        """A damaged obsolete.csv costs recall, never the whole command."""
-        (tmp_path / "obsolete.csv").write_text('a,b\n"unclosed\n', encoding="utf-8")
+    def test_a_missing_sibling_does_not_stop_the_later_ones(
+        self, tmp_path: Path
+    ) -> None:
+        """Absent siblings are skipped over, not treated as the end of the list.
+
+        ``deleted.csv`` is last, so nothing before it may abandon the loop.
+        """
+        write_dataset_csv(tmp_path / "deleted.csv", [_row(6)])
         df = pd.DataFrame([_row(7)])
 
         baseline = compute_baseline(df, tmp_path / "dataset.csv")
 
-        assert baseline.known_task_ids == {7}
+        assert baseline.known_task_ids == {6, 7}
+
+    def test_an_unreadable_sibling_does_not_stop_the_later_ones(
+        self, tmp_path: Path
+    ) -> None:
+        """A damaged obsolete.csv costs its own ids, never the whole command.
+
+        The valid ``deleted.csv`` behind it must still be read, so the
+        failure has to be skipped rather than abandon the loop.
+        """
+        (tmp_path / "obsolete.csv").write_text('a,b\n"unclosed\n', encoding="utf-8")
+        write_dataset_csv(tmp_path / "deleted.csv", [_row(6)])
+        df = pd.DataFrame([_row(7)])
+
+        baseline = compute_baseline(df, tmp_path / "dataset.csv")
+
+        assert baseline.known_task_ids == {6, 7}
 
 
 # ---------------------------------------------------------------------------
