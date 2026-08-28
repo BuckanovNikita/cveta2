@@ -86,11 +86,11 @@ def test_list_project_tasks_forwards_project_id() -> None:
     api.get_project_tasks.assert_called_once_with(17)
 
 
-def test_list_tasks_completed_after_forwards_project_id() -> None:
+def test_list_new_completed_tasks_forwards_project_id() -> None:
     """The cutoff filter runs the same over any project's tasks."""
     api = _mock_port()
 
-    client_with_api(api).list_tasks_completed_after(23, "2026-01-01T00:00:00+00:00")
+    client_with_api(api).list_new_completed_tasks(23, 1, set())
 
     api.get_project_tasks.assert_called_once_with(23)
 

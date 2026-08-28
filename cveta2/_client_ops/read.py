@@ -47,26 +47,31 @@ class _ReadMixin(_ClientBase):
         """
         return self._require_api("get_task_size").get_task_size(task_id)
 
-    def list_tasks_completed_after(
+    def list_new_completed_tasks(
         self,
         project_id: int,
-        cutoff: str,
+        cutoff: int,
+        known_task_ids: set[int],
     ) -> list[TaskInfo]:
-        """List completed project tasks updated strictly after *cutoff*.
+        """List completed project tasks a fetched dataset does not account for.
 
-        *cutoff* and task ``updated_date`` values are normalized ISO
-        strings (see ``_extract_updated_date`` in the SDK adapter), so
-        lexicographic comparison matches chronological order.  Tasks
-        without an ``updated_date`` are treated as not-newer.  The result
-        is sorted by ``updated_date`` ascending.
+        A task qualifies when its id is above *cutoff* or when the fetch
+        never saw it at all — the second half catches a task that was
+        still in progress when the dataset was written and finished
+        afterwards, which its id alone cannot reveal.  The result is
+        sorted by id ascending.
+
+        ``updated_date`` deliberately plays no part: a project-wide label
+        edit bumps it on every task at once and would report the whole
+        project as new.
         """
         tasks = self.list_project_tasks(project_id)
-        newer = [
+        new = [
             t
             for t in tasks
-            if t.status == "completed" and t.updated_date and t.updated_date > cutoff
+            if t.status == "completed" and (t.id > cutoff or t.id not in known_task_ids)
         ]
-        return sorted(newer, key=lambda t: t.updated_date)
+        return sorted(new, key=lambda t: t.id)
 
     def get_project_labels(self, project_id: int) -> list[LabelInfo]:
         """Fetch label definitions for a project from CVAT."""

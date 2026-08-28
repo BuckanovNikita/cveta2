@@ -59,12 +59,12 @@ def read_dataset_csv(
     path: Path,
     required_columns: set[str],
     *,
-    require_time_column: bool = False,
+    require_task_id_column: bool = False,
 ) -> pd.DataFrame:
     """Read a dataset CSV and validate required columns.
 
     Raises ``Cveta2Error`` if the file is missing or columns are invalid.
-    When *require_time_column* is True, ``task_updated_date`` must also be present.
+    When *require_task_id_column* is True, ``task_id`` must also be present.
     """
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
@@ -75,10 +75,9 @@ def read_dataset_csv(
             f"Ошибка: в {path} отсутствуют обязательные столбцы: "
             f"{', '.join(sorted(missing))}"
         )
-    if require_time_column and "task_updated_date" not in df.columns:
+    if require_task_id_column and "task_id" not in df.columns:
         raise Cveta2Error(
-            f"Ошибка: --by-time требует столбец 'task_updated_date' "
-            f"в {path}, но он отсутствует."
+            f"Ошибка: --by-task требует столбец 'task_id' в {path}, но он отсутствует."
         )
     logger.info(f"Загружен {path}: {len(df)} строк")
     return df

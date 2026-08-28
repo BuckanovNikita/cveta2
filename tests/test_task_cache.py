@@ -146,13 +146,21 @@ class TestLocalCache:
 
         assert cache.get(make_task(updated=_UPDATED)) is None
 
-    def test_stale_updated_date_miss_and_deletes_file(self, tmp_path: Path) -> None:
-        cache = TaskAnnotationCache(tmp_path / "cache")
-        cache.put(make_task(updated="2026-01-01T00:00:00"), _payload())
-        newer_task = make_task(updated="2026-02-02T00:00:00")
+    def test_bumped_updated_date_is_still_served(self, tmp_path: Path) -> None:
+        """A moved ``updated_date`` is not a reason to refetch a done task.
 
-        assert cache.get(newer_task) is None
-        assert not (tmp_path / "cache" / "task_1.json").exists()
+        Editing a project's labels bumps the date on every task of the
+        project at once; treating that as staleness threw away the whole
+        project's cache.  The live ``completed`` status is the freshness
+        check instead.
+        """
+        cache = TaskAnnotationCache(tmp_path / "cache")
+        payload = _payload()
+        cache.put(make_task(updated="2026-01-01T00:00:00"), payload)
+        relabelled_task = make_task(updated="2026-02-02T00:00:00")
+
+        assert cache.get(relabelled_task) == payload
+        assert (tmp_path / "cache" / "task_1.json").exists()
 
     def test_wrong_schema_version_miss_and_deletes_file(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"
@@ -415,16 +423,37 @@ class TestS3Backend:
         assert fake_s3.put_calls == [f"bkt/{_s3_key(1)}"]
 
     def test_stale_s3_entry_ignored_without_remote_delete(self, tmp_path: Path) -> None:
-        stale_task = make_task(updated="2025-01-01T00:00:00")
+        task = make_task(updated=_UPDATED)
         key = f"bkt/{_s3_key(1)}"
-        fake_s3 = FakeS3Client({key: _envelope_bytes(stale_task, _payload())})
+        fake_s3 = FakeS3Client(
+            {
+                key: _envelope_bytes(
+                    task, _payload(), schema_version=CACHE_SCHEMA_VERSION + 1
+                )
+            }
+        )
         cache = TaskAnnotationCache(
             tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx")
         )
 
-        assert cache.get(make_task(updated="2026-06-06T00:00:00")) is None
+        assert cache.get(task) is None
         assert key in fake_s3.objects
         assert not (tmp_path / "local" / "task_1.json").exists()
+
+    def test_s3_entry_with_a_bumped_date_is_served_and_backfilled(
+        self, tmp_path: Path
+    ) -> None:
+        payload = _payload()
+        key = f"bkt/{_s3_key(1)}"
+        fake_s3 = FakeS3Client(
+            {key: _envelope_bytes(make_task(updated="2025-01-01T00:00:00"), payload)}
+        )
+        cache = TaskAnnotationCache(
+            tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx")
+        )
+
+        assert cache.get(make_task(updated="2026-06-06T00:00:00")) == payload
+        assert (tmp_path / "local" / "task_1.json").exists()
 
     def test_missing_key_is_plain_miss_not_disable(self, tmp_path: Path) -> None:
         fake_s3 = FakeS3Client()

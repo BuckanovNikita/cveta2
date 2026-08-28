@@ -133,14 +133,14 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
         },
     ),
     (
-        ["merge", "--old", "a.csv", "--new", "b.csv", "-o", "m.csv", "--by-time"],
+        ["merge", "--old", "a.csv", "--new", "b.csv", "-o", "m.csv", "--by-task"],
         {
             "command": "merge",
             "old": "a.csv",
             "new": "b.csv",
             "output": "m.csv",
             "deleted": None,
-            "by_time": True,
+            "by_task": True,
         },
     ),
     (

@@ -134,6 +134,24 @@ def test_deleted_then_restored() -> None:
     assert result.obsolete["task_id"].iloc[0] == 1
 
 
+def test_higher_task_id_wins_when_the_dates_disagree() -> None:
+    """A label edit rewrites every task date; only the id still means anything.
+
+    Updating a project's labels in CVAT bumps ``updated_date`` on every task of
+    the project at once, in an order nobody controls, so the dates stop
+    tracking which task annotated an image last.  The higher ``task_id`` is
+    what decides, even when it carries the older date.
+    """
+    rows = [
+        _row("a.jpg", 1, "2026-05-01T00:00:00"),  # older task, newer date
+        _row("a.jpg", 2, "2026-01-01T00:00:00"),  # newer task, older date
+    ]
+    result = partition_annotations_df(_df(rows), [])
+
+    assert result.dataset["task_id"].tolist() == [2]
+    assert result.obsolete["task_id"].tolist() == [1]
+
+
 def test_multiple_completed_tasks_latest_wins() -> None:
     """Same image in 2 completed tasks -- latest goes to dataset, older to obsolete."""
     rows = [
@@ -146,6 +164,30 @@ def test_multiple_completed_tasks_latest_wins() -> None:
     assert result.dataset["task_id"].iloc[0] == 2
     assert len(result.obsolete) == 1
     assert result.obsolete["task_id"].iloc[0] == 1
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_row_order_no_longer_decides_between_two_completed_tasks(
+    *,
+    reverse: bool,
+) -> None:
+    """The higher id wins whichever way CVAT happened to list the tasks.
+
+    Before ids ordered the partition, two completed tasks holding the same
+    image were separated by their dates, and an exact tie fell through to
+    the order CVAT returned the tasks in.
+    """
+    rows = [
+        _row("a.jpg", 5, "2026-01-01T00:00:00"),
+        _row("a.jpg", 9, "2026-01-01T00:00:00"),
+    ]
+    if reverse:
+        rows.reverse()
+
+    result = partition_annotations_df(_df(rows), [])
+
+    assert result.dataset["task_id"].tolist() == [9]
+    assert result.obsolete["task_id"].tolist() == [5]
 
 
 def test_completed_and_in_progress_split() -> None:
@@ -289,21 +331,6 @@ def test_multi_annotation_per_image_all_go_to_dataset() -> None:
     assert len(result.in_progress) == 0
 
 
-def test_timezone_mixed_dates() -> None:
-    """Dates with different timezone offsets are parsed correctly via utc=True."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T12:00:00+03:00"),  # = 09:00 UTC
-        _row("a.jpg", 2, "2026-01-01T08:00:00+00:00"),  # = 08:00 UTC (older)
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    # Task 1 is newer in UTC, so it goes to dataset
-    assert len(result.dataset) == 1
-    assert result.dataset["task_id"].iloc[0] == 1
-    assert len(result.obsolete) == 1
-    assert result.obsolete["task_id"].iloc[0] == 2
-
-
 def test_three_tasks_same_image() -> None:
     """3 tasks for same image: completed(T1) + annotation(T2) + completed(T3).
 
@@ -418,16 +445,19 @@ def test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort() -> None:
     assert len(contested_obsolete) == 2
 
 
-def test_unparseable_task_date_becomes_nat_instead_of_raising() -> None:
-    """A malformed ``task_updated_date`` must not abort the whole partition."""
-    rows = [
-        _row("a.jpg", 1, "definitely-not-a-date"),
-        _row("b.jpg", 2, "2026-01-02T00:00:00"),
-    ]
+def test_a_row_without_a_task_id_loses_to_one_that_has_it() -> None:
+    """A missing ``task_id`` sorts last instead of aborting the partition.
+
+    ``completed_task_ids`` already drops such rows, so the row belongs to no
+    task and cannot be the latest one for its image.
+    """
+    orphan = _row("a.jpg", 1, "2026-01-01T00:00:00")
+    orphan["task_id"] = None
+    rows = [orphan, _row("a.jpg", 2, "2026-01-02T00:00:00")]
 
     result = partition_annotations_df(_df(rows), [])
 
-    assert "b.jpg" in set(result.dataset["image_name"])
+    assert result.dataset["task_id"].tolist() == [2]
     assert len(result.dataset) + len(result.obsolete) + len(result.in_progress) == 2
 
 

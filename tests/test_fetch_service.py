@@ -51,7 +51,6 @@ from tests.helpers import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
     from cveta2.client import FetchContext
     from cveta2.image_downloader import CloudStorageInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -70,21 +69,6 @@ _IMAGE_NAMES = [
     "000000000049.jpg",
     "000000000061.jpg",
 ]
-
-
-def _with_dates(
-    fixtures: LoadedFixtures,
-    dates: dict[int, str],
-) -> LoadedFixtures:
-    """Return fixtures with updated_date overrides by task position."""
-    new_tasks = [
-        task.model_copy(update={"updated_date": dates[i]}) if i in dates else task
-        for i, task in enumerate(fixtures.tasks)
-    ]
-    new_data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {
-        t.id: fixtures.task_data[fixtures.tasks[i].id] for i, t in enumerate(new_tasks)
-    }
-    return fixtures._replace(tasks=new_tasks, task_data=new_data)
 
 
 def _fetch_and_partition(
@@ -235,26 +219,19 @@ def test_fetch_to_partition_restore_and_three_way(
     """Fetch feeds partition: restore wins, non-completed -> in_progress.
 
     Combines three pipeline behaviours end-to-end:
-    - a frame deleted in an older completed task but re-annotated in a
-      newer completed task is NOT reported deleted (restore wins);
+    - a frame deleted in an earlier completed task but re-annotated in a
+      later one is NOT reported deleted (restore wins).  ``build_fake``
+      numbers the tasks ascending in the order named below, so
+      ``all-removed`` is the earlier task and ``normal`` the later one;
     - a non-completed task fetched alongside produces ``in_progress`` rows;
-    - an externally-injected deletion newer than every task wins, sending
-      its images to ``deleted``/``obsolete``.
+    - an externally-injected deletion from a task id above every fixture
+      task wins, sending its images to ``deleted``/``obsolete``.
     """
     fake = build_fake(
         coco8_fixtures,
         ["all-removed", "normal", "all-empty"],
         statuses=["completed", "completed", "annotation"],
     )
-    fake = _with_dates(
-        fake,
-        {
-            0: "2026-01-01T00:00:00+00:00",
-            1: "2026-02-01T00:00:00+00:00",
-            2: "2026-01-15T00:00:00+00:00",
-        },
-    )
-
     result = fetch_all_annotations(make_fake_client(fake), fake.project.id)
     df = pd.DataFrame(result.to_csv_rows())
 
@@ -268,8 +245,8 @@ def test_fetch_to_partition_restore_and_three_way(
     all_deleted = [*result.deleted_images, external_delete]
     partition = partition_annotations_df(df, all_deleted)
 
-    # Only the external deletion survives; the older all-removed deletions
-    # are overridden by the newer normal re-annotation (restore wins).
+    # Only the external deletion survives; the earlier all-removed deletions
+    # are overridden by the later normal re-annotation (restore wins).
     assert [d.image_name for d in partition.deleted_images] == [_IMAGE_NAMES[0]]
     assert _IMAGE_NAMES[0] in set(partition.obsolete["image_name"])
 

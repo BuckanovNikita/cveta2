@@ -21,5 +21,5 @@ def run_merge(args: argparse.Namespace) -> None:
         args.new,
         args.output,
         deleted=args.deleted,
-        by_time=args.by_time,
+        by_task=args.by_task,
     )

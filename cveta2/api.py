@@ -442,18 +442,17 @@ def merge(
     output: str | Path,
     *,
     deleted: str | Path | None = None,
-    by_time: bool = False,
+    by_task: bool = False,
 ) -> pd.DataFrame:
     """Merge two fetched datasets like ``cveta2 merge``."""
-    return merge_datasets(old, new, output, deleted=deleted, by_time=by_time)
+    return merge_datasets(old, new, output, deleted=deleted, by_task=by_task)
 
 
 class WhatsNewResult(BaseModel):
-    """Completed tasks newer than a fetched dataset CSV."""
+    """Completed tasks a fetched dataset CSV does not account for."""
 
     tasks: list[TaskInfo]
-    updated_task_ids: set[int]
-    cutoff: str
+    cutoff: int
 
 
 def whats_new(
@@ -462,22 +461,21 @@ def whats_new(
     *,
     connection: Connection | None = None,
 ) -> WhatsNewResult:
-    """List completed tasks newer than a fetched dataset CSV.
+    """List completed tasks a fetched dataset CSV does not account for.
 
-    ``updated_task_ids`` marks the returned tasks that are already
-    present in the CSV (updated since the fetch, rather than new).
+    ``cutoff`` is the highest ``task_id`` the CSV holds for a completed
+    task; a task is returned when its id is above that or when the fetch
+    never saw it (it was still in progress and has since finished).
     """
     dataset_path = Path(dataset)
     df = read_dataset_csv(dataset_path, REQUIRED_COLUMNS)
     baseline = compute_baseline(df, dataset_path)
     with _open(connection) as c:
         project_id, _ = resolve_project_spec(c, project)
-        tasks = c.list_tasks_completed_after(project_id, baseline.cutoff)
-    return WhatsNewResult(
-        tasks=tasks,
-        updated_task_ids={t.id for t in tasks if t.id in baseline.known_task_ids},
-        cutoff=baseline.cutoff,
-    )
+        tasks = c.list_new_completed_tasks(
+            project_id, baseline.cutoff, baseline.known_task_ids
+        )
+    return WhatsNewResult(tasks=tasks, cutoff=baseline.cutoff)
 
 
 def s3_sync(

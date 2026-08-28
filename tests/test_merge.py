@@ -1,4 +1,4 @@
-"""Unit tests for merge: split propagation, by-time resolution, and I/O."""
+"""Unit tests for merge: split propagation, by-task resolution, and I/O."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from cveta2.services.merge import (
     _merge_datasets,
     _propagate_splits,
     _read_deleted_names,
-    _resolve_by_time,
+    _resolve_by_task,
     merge_datasets,
 )
 from tests.helpers import csv_row, make_args, make_df, write_dataset_csv
@@ -297,22 +297,22 @@ class TestMergeDatasetsEdgeCases:
 
 
 # ---------------------------------------------------------------------------
-# By-time resolution — _resolve_by_time
+# By-task resolution — _resolve_by_task
 # ---------------------------------------------------------------------------
 
-_T_OLD = "2026-01-01T00:00:00+00:00"
-_T_NEW = "2026-02-01T00:00:00+00:00"
+_ID_OLD = 10
+_ID_NEW = 20
 
 
 def _trow(
     image: str,
-    date: str | None = None,
+    task_id: object = None,
     label: str = "cat",
     split: str | None = None,
 ) -> dict[str, object]:
-    """Row helper that always includes task_updated_date."""
+    """Row helper that always includes task_id."""
     d = _row(image, label=label, split=split)
-    d["task_updated_date"] = date
+    d["task_id"] = task_id
     return d
 
 
@@ -320,212 +320,210 @@ def _tdf(rows: list[dict[str, object]]) -> pd.DataFrame:
     return make_df(rows)
 
 
-class TestResolveByTime:
-    """Unit tests for _resolve_by_time."""
+class TestResolveByTask:
+    """Unit tests for _resolve_by_task."""
 
-    def test_new_newer_wins(self) -> None:
-        old = _tdf([_trow("a.jpg", date=_T_OLD)])
-        new = _tdf([_trow("a.jpg", date=_T_NEW)])
+    def test_new_has_the_later_task_and_wins(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
+        new = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
 
-        result = _resolve_by_time(old, new, {"a.jpg"})
+        result = _resolve_by_task(old, new, {"a.jpg"})
 
         assert result == {"a.jpg"}
 
-    def test_old_newer_keeps_old(self) -> None:
-        old = _tdf([_trow("a.jpg", date=_T_NEW)])
-        new = _tdf([_trow("a.jpg", date=_T_OLD)])
+    def test_old_has_the_later_task_and_keeps_it(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
+        new = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
 
-        result = _resolve_by_time(old, new, {"a.jpg"})
+        result = _resolve_by_task(old, new, {"a.jpg"})
 
         assert result == set()
 
-    def test_equal_dates_new_wins(self) -> None:
-        old = _tdf([_trow("a.jpg", date=_T_OLD)])
-        new = _tdf([_trow("a.jpg", date=_T_OLD)])
+    def test_equal_task_ids_new_wins(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
+        new = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
 
-        result = _resolve_by_time(old, new, {"a.jpg"})
-
-        assert result == {"a.jpg"}
-
-    def test_unparseable_old_date_falls_back_to_new(self) -> None:
-        old = _tdf([_trow("a.jpg", date="not-a-date")])
-        new = _tdf([_trow("a.jpg", date=_T_NEW)])
-
-        result = _resolve_by_time(old, new, {"a.jpg"})
+        result = _resolve_by_task(old, new, {"a.jpg"})
 
         assert result == {"a.jpg"}
 
-    def test_unparseable_new_date_falls_back_to_new(self) -> None:
-        old = _tdf([_trow("a.jpg", date=_T_OLD)])
-        new = _tdf([_trow("a.jpg", date="not-a-date")])
+    def test_unusable_old_task_id_falls_back_to_new(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id="not-an-id")])
+        new = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
 
-        result = _resolve_by_time(old, new, {"a.jpg"})
-
-        assert result == {"a.jpg"}
-
-    def test_both_dates_unparseable_falls_back_to_new(self) -> None:
-        old = _tdf([_trow("a.jpg", date="garbage")])
-        new = _tdf([_trow("a.jpg", date="garbage")])
-
-        result = _resolve_by_time(old, new, {"a.jpg"})
+        result = _resolve_by_task(old, new, {"a.jpg"})
 
         assert result == {"a.jpg"}
 
-    def test_multiple_rows_per_image_uses_max_date(self) -> None:
-        """With multiple rows per image, the max date per side is compared."""
+    def test_unusable_new_task_id_falls_back_to_new(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
+        new = _tdf([_trow("a.jpg", task_id="not-an-id")])
+
+        result = _resolve_by_task(old, new, {"a.jpg"})
+
+        assert result == {"a.jpg"}
+
+    def test_both_task_ids_unusable_falls_back_to_new(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id="garbage")])
+        new = _tdf([_trow("a.jpg", task_id="garbage")])
+
+        result = _resolve_by_task(old, new, {"a.jpg"})
+
+        assert result == {"a.jpg"}
+
+    def test_multiple_rows_per_image_uses_max_task_id(self) -> None:
+        """With multiple rows per image, the max id per side is compared."""
         old = _tdf(
             [
-                _trow("a.jpg", date="2026-01-01T00:00:00+00:00", label="cat"),
-                _trow("a.jpg", date="2026-01-15T00:00:00+00:00", label="dog"),
+                _trow("a.jpg", task_id=10, label="cat"),
+                _trow("a.jpg", task_id=15, label="dog"),
             ]
         )
         new = _tdf(
             [
-                _trow("a.jpg", date="2026-01-10T00:00:00+00:00", label="cat"),
-                _trow("a.jpg", date="2026-01-12T00:00:00+00:00", label="dog"),
+                _trow("a.jpg", task_id=11, label="cat"),
+                _trow("a.jpg", task_id=12, label="dog"),
             ]
         )
 
-        result = _resolve_by_time(old, new, {"a.jpg"})
+        result = _resolve_by_task(old, new, {"a.jpg"})
 
-        # old max = Jan 15, new max = Jan 12 → old wins
+        # old max = 15, new max = 12 -> old wins
         assert result == set()
 
-    def test_dates_are_compared_as_instants(self) -> None:
-        """A naive date on one side is read as UTC, not compared as wall time.
+    def test_task_ids_are_compared_as_numbers_not_text(self) -> None:
+        """Ids read from a CSV must not be compared as strings.
 
-        Every other case here uses the same ``+00:00`` offset on both sides,
-        so parsing without ``utc=True`` happened to agree.  Here old is naive
-        and new carries an offset: without normalisation the two timestamps
-        cannot be compared at all.
+        Every other case here uses ids of equal width, where a string
+        comparison happens to agree.  9 against 100 is where it stops:
+        as text "9" sorts above "100".
         """
-        old = _tdf([_trow("a.jpg", date="2026-01-01T12:00:00")])
-        new = _tdf([_trow("a.jpg", date="2026-01-01T10:00:00+03:00")])
+        old = _tdf([_trow("a.jpg", task_id="100")])
+        new = _tdf([_trow("a.jpg", task_id="9")])
 
-        result = _resolve_by_time(old, new, {"a.jpg"})
+        result = _resolve_by_task(old, new, {"a.jpg"})
 
-        # new is 07:00 UTC, old is 12:00 UTC → old wins.
         assert result == set()
 
     def test_mixed_images_resolved_independently(self) -> None:
         old = _tdf(
             [
-                _trow("a.jpg", date=_T_NEW),
-                _trow("b.jpg", date=_T_OLD),
+                _trow("a.jpg", task_id=_ID_NEW),
+                _trow("b.jpg", task_id=_ID_OLD),
             ]
         )
         new = _tdf(
             [
-                _trow("a.jpg", date=_T_OLD),
-                _trow("b.jpg", date=_T_NEW),
+                _trow("a.jpg", task_id=_ID_OLD),
+                _trow("b.jpg", task_id=_ID_NEW),
             ]
         )
 
-        result = _resolve_by_time(old, new, {"a.jpg", "b.jpg"})
+        result = _resolve_by_task(old, new, {"a.jpg", "b.jpg"})
 
-        assert "a.jpg" not in result  # old is newer
-        assert "b.jpg" in result  # new is newer
+        assert "a.jpg" not in result  # old holds the later task
+        assert "b.jpg" in result  # new holds the later task
 
 
 # ---------------------------------------------------------------------------
-# Integration — _merge_datasets with by_time=True
+# Integration — _merge_datasets with by_task=True
 # ---------------------------------------------------------------------------
 
 
-class TestMergeDatasetsByTime:
-    """Integration tests: by-time merge resolution through _merge_datasets."""
+class TestMergeDatasetsByTask:
+    """Integration tests: by-task merge resolution through _merge_datasets."""
 
-    def test_by_time_new_newer_keeps_new(self) -> None:
-        old = _tdf([_trow("a.jpg", date=_T_OLD, label="cat")])
-        new = _tdf([_trow("a.jpg", date=_T_NEW, label="dog")])
+    def test_by_task_later_new_task_keeps_new(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id=_ID_OLD, label="cat")])
+        new = _tdf([_trow("a.jpg", task_id=_ID_NEW, label="dog")])
 
-        merged = _merge_datasets(old, new, set(), by_time=True)
+        merged = _merge_datasets(old, new, set(), by_task=True)
 
         assert len(merged) == 1
         assert merged.iloc[0]["instance_label"] == "dog"
 
-    def test_by_time_old_newer_keeps_old(self) -> None:
-        old = _tdf([_trow("a.jpg", date=_T_NEW, label="cat")])
-        new = _tdf([_trow("a.jpg", date=_T_OLD, label="dog")])
+    def test_by_task_later_old_task_keeps_old(self) -> None:
+        old = _tdf([_trow("a.jpg", task_id=_ID_NEW, label="cat")])
+        new = _tdf([_trow("a.jpg", task_id=_ID_OLD, label="dog")])
 
-        merged = _merge_datasets(old, new, set(), by_time=True)
+        merged = _merge_datasets(old, new, set(), by_task=True)
 
         assert len(merged) == 1
         assert merged.iloc[0]["instance_label"] == "cat"
 
-    def test_default_mode_ignores_dates(self) -> None:
-        """Without --by-time new wins even when old carries a later date.
+    def test_default_mode_ignores_task_ids(self) -> None:
+        """Without --by-task new wins even when old holds the later task.
 
-        The other default-mode tests leave every row on the same date, where
-        date-based resolution would pick new anyway; only a strictly newer old
-        row separates "new always wins" from "the later date wins".
+        The other default-mode tests leave every row on the same task, where
+        id-based resolution would pick new anyway; only a strictly later old
+        row separates "new always wins" from "the later task wins".
         """
-        old = _tdf([_trow("a.jpg", date=_T_NEW, label="old_a")])
-        new = _tdf([_trow("a.jpg", date=_T_OLD, label="new_a")])
+        old = _tdf([_trow("a.jpg", task_id=_ID_NEW, label="old_a")])
+        new = _tdf([_trow("a.jpg", task_id=_ID_OLD, label="new_a")])
 
         merged = _merge_datasets(old, new, set())
 
         assert len(merged) == 1
         assert merged.iloc[0]["instance_label"] == "new_a"
 
-    def test_by_time_deleted_still_excluded(self) -> None:
+    def test_by_task_deleted_still_excluded(self) -> None:
         old = _tdf(
             [
-                _trow("a.jpg", date=_T_OLD, split="train"),
-                _trow("b.jpg", date=_T_OLD, split="val"),
+                _trow("a.jpg", task_id=_ID_OLD, split="train"),
+                _trow("b.jpg", task_id=_ID_OLD, split="val"),
             ]
         )
         new = _tdf(
             [
-                _trow("a.jpg", date=_T_NEW),
-                _trow("b.jpg", date=_T_NEW),
+                _trow("a.jpg", task_id=_ID_NEW),
+                _trow("b.jpg", task_id=_ID_NEW),
             ]
         )
 
-        merged = _merge_datasets(old, new, {"a.jpg"}, by_time=True)
+        merged = _merge_datasets(old, new, {"a.jpg"}, by_task=True)
 
         assert "a.jpg" not in merged["image_name"].to_numpy()
         assert "b.jpg" in merged["image_name"].to_numpy()
 
-    def test_by_time_split_propagation(self) -> None:
-        """Split from old propagated even when new wins via by_time."""
-        old = _tdf([_trow("a.jpg", date=_T_OLD, split="train")])
-        new = _tdf([_trow("a.jpg", date=_T_NEW)])
+    def test_by_task_split_propagation(self) -> None:
+        """Split from old propagated even when new wins via by_task."""
+        old = _tdf([_trow("a.jpg", task_id=_ID_OLD, split="train")])
+        new = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
 
-        merged = _merge_datasets(old, new, set(), by_time=True)
+        merged = _merge_datasets(old, new, set(), by_task=True)
 
         assert merged.iloc[0]["split"] == "train"
 
-    def test_by_time_only_old_and_only_new_preserved(self) -> None:
+    def test_by_task_only_old_and_only_new_preserved(self) -> None:
         """Images exclusive to one side are always kept."""
-        old = _tdf([_trow("old_only.jpg", date=_T_OLD)])
-        new = _tdf([_trow("new_only.jpg", date=_T_NEW)])
+        old = _tdf([_trow("old_only.jpg", task_id=_ID_OLD)])
+        new = _tdf([_trow("new_only.jpg", task_id=_ID_NEW)])
 
-        merged = _merge_datasets(old, new, set(), by_time=True)
+        merged = _merge_datasets(old, new, set(), by_task=True)
 
         names = set(merged["image_name"])
         assert names == {"old_only.jpg", "new_only.jpg"}
 
-    def test_by_time_mixed_conflict_resolution(self) -> None:
+    def test_by_task_mixed_conflict_resolution(self) -> None:
         """Some common images won by old, some by new."""
         old = _tdf(
             [
-                _trow("a.jpg", date=_T_NEW, label="old_a"),
-                _trow("b.jpg", date=_T_OLD, label="old_b"),
+                _trow("a.jpg", task_id=_ID_NEW, label="old_a"),
+                _trow("b.jpg", task_id=_ID_OLD, label="old_b"),
             ]
         )
         new = _tdf(
             [
-                _trow("a.jpg", date=_T_OLD, label="new_a"),
-                _trow("b.jpg", date=_T_NEW, label="new_b"),
+                _trow("a.jpg", task_id=_ID_OLD, label="new_a"),
+                _trow("b.jpg", task_id=_ID_NEW, label="new_b"),
             ]
         )
 
-        merged = _merge_datasets(old, new, set(), by_time=True)
+        merged = _merge_datasets(old, new, set(), by_task=True)
 
         labels = merged.set_index("image_name")["instance_label"].to_dict()
-        assert labels["a.jpg"] == "old_a"  # old was newer
-        assert labels["b.jpg"] == "new_b"  # new was newer
+        assert labels["a.jpg"] == "old_a"  # old held the later task
+        assert labels["b.jpg"] == "new_b"  # new held the later task
 
 
 # ---------------------------------------------------------------------------
@@ -599,7 +597,7 @@ class TestReadDeletedNames:
 class TestReadDatasetCsvMerge:
     """Tests for _read_dataset_csv validation in merge context."""
 
-    def test_by_time_without_time_column_exits(self, tmp_path: Path) -> None:
+    def test_by_task_without_task_id_column_exits(self, tmp_path: Path) -> None:
         from cveta2.services.merge import _read_dataset_csv
 
         csv_path = tmp_path / "dataset.csv"
@@ -607,7 +605,7 @@ class TestReadDatasetCsvMerge:
         csv_path.write_text(",".join(cols) + "\n", encoding="utf-8")
 
         with pytest.raises(Cveta2Error):
-            _read_dataset_csv(csv_path, by_time=True)
+            _read_dataset_csv(csv_path, by_task=True)
 
     def test_missing_required_columns_exits(self, tmp_path: Path) -> None:
         from cveta2.services.merge import _read_dataset_csv
@@ -616,18 +614,18 @@ class TestReadDatasetCsvMerge:
         csv_path.write_text("image_name,split\na.jpg,train\n", encoding="utf-8")
 
         with pytest.raises(Cveta2Error):
-            _read_dataset_csv(csv_path, by_time=False)
+            _read_dataset_csv(csv_path, by_task=False)
 
-    def test_valid_csv_without_time_column_ok(self, tmp_path: Path) -> None:
+    def test_valid_csv_without_task_id_column_ok(self, tmp_path: Path) -> None:
         from cveta2.services.merge import _read_dataset_csv
 
         csv_path = tmp_path / "dataset.csv"
         row = _row("a.jpg")
-        del row["task_updated_date"]
+        del row["task_id"]
         df = pd.DataFrame([row])
         df.to_csv(csv_path, index=False, encoding="utf-8")
 
-        result = _read_dataset_csv(csv_path, by_time=False)
+        result = _read_dataset_csv(csv_path, by_task=False)
 
         assert len(result) == 1
 
@@ -673,40 +671,40 @@ class TestMergeDatasetsIO:
         assert "a.jpg" not in names
         assert names == {"b.jpg", "c.jpg"}
 
-    def test_merge_by_time(self, tmp_path: Path) -> None:
+    def test_merge_by_task(self, tmp_path: Path) -> None:
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
         write_dataset_csv(
             old_path,
-            [_trow("a.jpg", date=_T_NEW, label="old_label")],
+            [_trow("a.jpg", task_id=_ID_NEW, label="old_label")],
         )
         write_dataset_csv(
             new_path,
-            [_trow("a.jpg", date=_T_OLD, label="new_label")],
+            [_trow("a.jpg", task_id=_ID_OLD, label="new_label")],
         )
 
-        merge_datasets(old_path, new_path, out_path, by_time=True)
+        merge_datasets(old_path, new_path, out_path, by_task=True)
 
         result = pd.read_csv(out_path)
         assert result.iloc[0]["instance_label"] == "old_label"
 
-    def test_by_time_missing_column_raises(self, tmp_path: Path) -> None:
+    def test_by_task_missing_column_raises(self, tmp_path: Path) -> None:
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
-        no_time = _row("a.jpg")
-        del no_time["task_updated_date"]
-        write_dataset_csv(old_path, [dict(no_time)])
-        write_dataset_csv(new_path, [dict(no_time)])
+        no_task_id = _row("a.jpg")
+        del no_task_id["task_id"]
+        write_dataset_csv(old_path, [dict(no_task_id)])
+        write_dataset_csv(new_path, [dict(no_task_id)])
 
         with pytest.raises(Cveta2Error):
-            merge_datasets(old_path, new_path, out_path, by_time=True)
+            merge_datasets(old_path, new_path, out_path, by_task=True)
 
-    def test_by_time_missing_column_in_old_only_raises(self, tmp_path: Path) -> None:
-        """--by-time validates the old CSV too, before any date is compared.
+    def test_by_task_missing_column_in_old_only_raises(self, tmp_path: Path) -> None:
+        """--by-task validates the old CSV too, before any id is compared.
 
         With the column missing on one side only, skipping that side's check
         defers the failure to a raw pandas KeyError deep inside the merge
@@ -716,40 +714,44 @@ class TestMergeDatasetsIO:
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
-        no_time = _row("a.jpg")
-        del no_time["task_updated_date"]
-        write_dataset_csv(old_path, [dict(no_time)])
-        write_dataset_csv(new_path, [_trow("a.jpg", date=_T_NEW)])
+        no_task_id = _row("a.jpg")
+        del no_task_id["task_id"]
+        write_dataset_csv(old_path, [dict(no_task_id)])
+        write_dataset_csv(new_path, [_trow("a.jpg", task_id=_ID_NEW)])
 
         with pytest.raises(Cveta2Error, match=re.escape(str(old_path))):
-            merge_datasets(old_path, new_path, out_path, by_time=True)
+            merge_datasets(old_path, new_path, out_path, by_task=True)
 
-    def test_by_time_missing_column_in_new_only_raises(self, tmp_path: Path) -> None:
-        """--by-time validates the new CSV too, before any date is compared."""
+    def test_by_task_missing_column_in_new_only_raises(self, tmp_path: Path) -> None:
+        """--by-task validates the new CSV too, before any id is compared."""
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
-        no_time = _row("a.jpg")
-        del no_time["task_updated_date"]
-        write_dataset_csv(old_path, [_trow("a.jpg", date=_T_NEW)])
-        write_dataset_csv(new_path, [dict(no_time)])
+        no_task_id = _row("a.jpg")
+        del no_task_id["task_id"]
+        write_dataset_csv(old_path, [_trow("a.jpg", task_id=_ID_NEW)])
+        write_dataset_csv(new_path, [dict(no_task_id)])
 
         with pytest.raises(Cveta2Error, match=re.escape(str(new_path))):
-            merge_datasets(old_path, new_path, out_path, by_time=True)
+            merge_datasets(old_path, new_path, out_path, by_task=True)
 
     def test_default_mode_keeps_new_when_old_is_newer(self, tmp_path: Path) -> None:
-        """Through the public entry point, --by-time off means new always wins.
+        """Through the public entry point, --by-task off means new always wins.
 
-        ``test_merge_by_time`` pins the opposite outcome for the same data, so
-        without this pair the default of the ``by_time`` flag is unpinned.
+        ``test_merge_by_task`` pins the opposite outcome for the same data, so
+        without this pair the default of the ``by_task`` flag is unpinned.
         """
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
 
-        write_dataset_csv(old_path, [_trow("a.jpg", date=_T_NEW, label="old_label")])
-        write_dataset_csv(new_path, [_trow("a.jpg", date=_T_OLD, label="new_label")])
+        write_dataset_csv(
+            old_path, [_trow("a.jpg", task_id=_ID_NEW, label="old_label")]
+        )
+        write_dataset_csv(
+            new_path, [_trow("a.jpg", task_id=_ID_OLD, label="new_label")]
+        )
 
         merge_datasets(old_path, new_path, out_path)
 
@@ -779,7 +781,7 @@ class TestMergeDatasetsIO:
 # ---------------------------------------------------------------------------
 
 
-def test_run_merge_by_time_missing_column_exits(tmp_path: Path) -> None:
+def test_run_merge_by_task_missing_column_exits(tmp_path: Path) -> None:
     """A merge-logic error propagates to the CLI boundary."""
     from cveta2.commands.merge import run_merge
 
@@ -787,17 +789,17 @@ def test_run_merge_by_time_missing_column_exits(tmp_path: Path) -> None:
     new_path = tmp_path / "new.csv"
     out_path = tmp_path / "merged.csv"
 
-    no_time = _row("a.jpg")
-    del no_time["task_updated_date"]
-    write_dataset_csv(old_path, [dict(no_time)])
-    write_dataset_csv(new_path, [dict(no_time)])
+    no_task_id = _row("a.jpg")
+    del no_task_id["task_id"]
+    write_dataset_csv(old_path, [dict(no_task_id)])
+    write_dataset_csv(new_path, [dict(no_task_id)])
 
     args = make_args(
         old=str(old_path),
         new=str(new_path),
         output=str(out_path),
         deleted=None,
-        by_time=True,
+        by_task=True,
     )
 
     with pytest.raises(Cveta2Error):

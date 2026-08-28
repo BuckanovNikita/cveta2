@@ -54,7 +54,11 @@ _SOURCE_S3 = "S3-кэш"
 
 
 class CachedTaskEnvelope(BaseModel):
-    """Versioned wrapper around a cached :class:`TaskAnnotations` payload."""
+    """Versioned wrapper around a cached :class:`TaskAnnotations` payload.
+
+    ``task_updated_date`` and ``cached_at`` are written for diagnostics
+    only; neither is read back to decide whether the entry is still good.
+    """
 
     schema_version: int
     task_id: int
@@ -201,8 +205,12 @@ class S3CacheBackend:
 class TaskAnnotationCache:
     """Local (plus optional S3) cache of per-task annotation payloads.
 
-    Only tasks with status ``completed`` are cached; an entry is valid
-    only while its ``task_updated_date`` matches the live task.
+    Only tasks CVAT currently reports as ``completed`` are cached or
+    served, and that live status is the whole freshness check: a task
+    whose job moved back to annotation stops being completed and so
+    stops being served.  ``task_updated_date`` deliberately plays no
+    part — editing a project's labels bumps it on every task at once,
+    which used to throw the entire project's cache away.
     """
 
     def __init__(self, local_dir: Path, s3: S3CacheBackend | None = None) -> None:
@@ -331,13 +339,6 @@ def _validate_envelope(
         logger.info(
             f"{source}: запись задачи {task.id} принадлежит задаче "
             f"{envelope.task_id} — задача будет загружена заново"
-        )
-        return None
-    if envelope.task_updated_date != task.updated_date:
-        logger.info(
-            f"{source}: запись задачи {task.id} устарела "
-            f"(в кэше updated_date={envelope.task_updated_date!r}, "
-            f"в CVAT {task.updated_date!r}) — задача будет загружена заново"
         )
         return None
     return envelope

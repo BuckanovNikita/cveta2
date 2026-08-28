@@ -303,11 +303,11 @@ def _configure_merge(parser: argparse.ArgumentParser) -> None:
         help="Path for the merged output CSV.",
     )
     parser.add_argument(
-        "--by-time",
+        "--by-task",
         action="store_true",
         help=(
-            "Resolve conflicts by task_updated_date instead "
-            "of argument order (requires task_updated_date column)."
+            "Resolve conflicts by task_id instead "
+            "of argument order (requires task_id column)."
         ),
     )
 

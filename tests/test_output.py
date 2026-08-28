@@ -77,14 +77,14 @@ def test_read_dataset_csv_lists_missing_columns_alphabetically(tmp_path: Path) -
         read_dataset_csv(path, {"image_name", "task_name", "task_id"})
 
 
-def test_read_dataset_csv_by_time_error_names_the_column(tmp_path: Path) -> None:
-    """The --by-time error names the column that is missing.
+def test_read_dataset_csv_by_task_error_names_the_column(tmp_path: Path) -> None:
+    """The --by-task error names the column that is missing.
 
     Without this the message could be replaced by ``None`` unnoticed.
     """
     path = write_dataset_csv(tmp_path / "d.csv", [{"image_name": "a.jpg"}])
-    with pytest.raises(Cveta2Error, match="task_updated_date"):
-        read_dataset_csv(path, {"image_name"}, require_time_column=True)
+    with pytest.raises(Cveta2Error, match="task_id"):
+        read_dataset_csv(path, {"image_name"}, require_task_id_column=True)
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-"""Dataset merge service: split propagation, by-time resolution, and I/O."""
+"""Dataset merge service: split propagation, by-task resolution, and I/O."""
 
 from __future__ import annotations
 
@@ -22,20 +22,19 @@ _REQUIRED_COLUMNS: set[str] = {
     "bbox_y_br",
 }
 
-# Column required when --by-time is used.
-_TIME_COLUMN = "task_updated_date"
+# Column required when --by-task is used.
+_TASK_ID_COLUMN = "task_id"
 
 
-def _read_dataset_csv(path: Path, *, by_time: bool) -> pd.DataFrame:
+def _read_dataset_csv(path: Path, *, by_task: bool) -> pd.DataFrame:
     """Read a dataset CSV and validate required columns.
 
-    When *by_time* is ``True`` the ``task_updated_date`` column is also
-    required.
+    When *by_task* is ``True`` the ``task_id`` column is also required.
     """
     return read_dataset_csv(
         path,
         _REQUIRED_COLUMNS,
-        require_time_column=by_time,
+        require_task_id_column=by_task,
     )
 
 
@@ -128,15 +127,15 @@ def _split_winners(
     new: pd.DataFrame,
     common_images: set[str],
     *,
-    by_time: bool,
+    by_task: bool,
 ) -> tuple[set[str], set[str]]:
     """Return ``(keep_from_new, keep_from_old)`` for the conflicting images.
 
-    By default **new** wins every conflict; in *by_time* mode each image
-    goes to the side with the more recent ``task_updated_date``.
+    By default **new** wins every conflict; in *by_task* mode each image
+    goes to the side that annotated it in the later CVAT task.
     """
-    if by_time and common_images:
-        keep_from_new = _resolve_by_time(old, new, common_images)
+    if by_task and common_images:
+        keep_from_new = _resolve_by_task(old, new, common_images)
         return keep_from_new, common_images - keep_from_new
     return common_images, set()
 
@@ -146,23 +145,23 @@ def _merge_datasets(
     new: pd.DataFrame,
     deleted: set[str],
     *,
-    by_time: bool = False,
+    by_task: bool = False,
 ) -> pd.DataFrame:
     """Merge *old* and *new* datasets, removing images from *deleted*.
 
-    Default behaviour (``by_time=False``):
+    Default behaviour (``by_task=False``):
         For images present in both datasets keep only **new** annotations.
 
-    ``--by-time`` mode (``by_time=True``):
+    ``--by-task`` mode (``by_task=True``):
         For images present in both datasets keep annotations from whichever
-        dataset has the more recent ``task_updated_date`` for that image.
+        dataset holds the higher ``task_id`` for that image.
     """
     old_images: set[str] = set(old["image_name"].dropna().unique())
     new_images: set[str] = set(new["image_name"].dropna().unique())
     common_images = old_images & new_images
 
     keep_from_new, keep_from_old = _split_winners(
-        old, new, common_images, by_time=by_time
+        old, new, common_images, by_task=by_task
     )
 
     old_keep_mask = old["image_name"].isin(
@@ -186,17 +185,15 @@ def _merge_datasets(
     return merged
 
 
-def _max_updated_per_image(
-    df: pd.DataFrame, images: set[str]
-) -> pd.Series[pd.Timestamp]:
-    """Return the max parsed ``task_updated_date`` per image within *images*."""
+def _max_task_id_per_image(df: pd.DataFrame, images: set[str]) -> pd.Series[float]:
+    """Return the max ``task_id`` per image within *images*."""
     subset = df[df["image_name"].isin(images)]
-    parsed = pd.to_datetime(subset[_TIME_COLUMN], errors="coerce", utc=True)
-    latest: pd.Series[pd.Timestamp] = parsed.groupby(subset["image_name"]).max()
+    parsed = pd.to_numeric(subset[_TASK_ID_COLUMN], errors="coerce")
+    latest: pd.Series[float] = parsed.groupby(subset["image_name"]).max()
     return latest
 
 
-def _resolve_by_time(
+def _resolve_by_task(
     old: pd.DataFrame,
     new: pd.DataFrame,
     common_images: set[str],
@@ -204,18 +201,20 @@ def _resolve_by_time(
     """Return the subset of *common_images* where **new** should win.
 
     For each image present in both datasets, compare the maximum
-    ``task_updated_date``.  If new >= old the image goes to the
-    "keep from new" set, otherwise it stays with old.
+    ``task_id``.  If new >= old the image goes to the "keep from new"
+    set, otherwise it stays with old.  Ids are used rather than
+    ``task_updated_date`` because a project-wide label edit rewrites
+    every task's date at once.
     """
-    old_max = _max_updated_per_image(old, common_images)
-    new_max = _max_updated_per_image(new, common_images)
+    old_max = _max_task_id_per_image(old, common_images)
+    new_max = _max_task_id_per_image(new, common_images)
 
     keep_from_new: set[str] = set()
     for img in sorted(common_images):
-        old_ts = old_max.get(img)
-        new_ts = new_max.get(img)
-        # If either side has no parseable date, fall back to new-wins.
-        if pd.isna(old_ts) or pd.isna(new_ts) or new_ts >= old_ts:
+        old_id = old_max.get(img)
+        new_id = new_max.get(img)
+        # If either side has no usable task id, fall back to new-wins.
+        if pd.isna(old_id) or pd.isna(new_id) or new_id >= old_id:
             keep_from_new.add(img)
     return keep_from_new
 
@@ -226,17 +225,17 @@ def merge_datasets(
     output: str | Path,
     *,
     deleted: str | Path | None = None,
-    by_time: bool = False,
+    by_task: bool = False,
 ) -> pd.DataFrame:
     """Merge two dataset CSVs and write the result to *output*.
 
     Returns the merged DataFrame.
     """
-    old_df = _read_dataset_csv(Path(old), by_time=by_time)
-    new_df = _read_dataset_csv(Path(new), by_time=by_time)
+    old_df = _read_dataset_csv(Path(old), by_task=by_task)
+    new_df = _read_dataset_csv(Path(new), by_task=by_task)
     deleted_names = _read_deleted_names(Path(deleted) if deleted else None)
 
-    merged = _merge_datasets(old_df, new_df, deleted_names, by_time=by_time)
+    merged = _merge_datasets(old_df, new_df, deleted_names, by_task=by_task)
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1444,23 +1444,23 @@ class TestMergeApi:
         old = write_dataset_csv(
             tmp_path / "old.csv",
             [
-                csv_row("a.jpg", label="cat", updated="2026-05-01T00:00:00Z"),
-                csv_row("b.jpg", label="cat", updated="2026-05-01T00:00:00Z"),
+                csv_row("a.jpg", label="cat", task_id=9),
+                csv_row("b.jpg", label="cat", task_id=9),
             ],
             columns=CSV_COLUMNS,
         )
         new = write_dataset_csv(
             tmp_path / "new.csv",
             [
-                csv_row("a.jpg", label="dog", updated="2026-01-01T00:00:00Z"),
-                csv_row("c.jpg", label="dog", updated="2026-01-01T00:00:00Z"),
+                csv_row("a.jpg", label="dog", task_id=3),
+                csv_row("c.jpg", label="dog", task_id=3),
             ],
             columns=CSV_COLUMNS,
         )
         return old, new
 
     def test_new_wins_and_the_output_is_written(self, tmp_path: Path) -> None:
-        """Also pins ``by_time``'s default: old is the newer side here."""
+        """Also pins ``by_task``'s default: old holds the later task here."""
         old, new = self._pair(tmp_path)
         output = tmp_path / "merged.csv"
 
@@ -1481,10 +1481,10 @@ class TestMergeApi:
 
         assert set(merged["image_name"]) == {"a.jpg", "c.jpg"}
 
-    def test_by_time_keeps_the_more_recent_side(self, tmp_path: Path) -> None:
+    def test_by_task_keeps_the_later_task_side(self, tmp_path: Path) -> None:
         old, new = self._pair(tmp_path)
 
-        merged = cveta2.merge(old, new, tmp_path / "merged.csv", by_time=True)
+        merged = cveta2.merge(old, new, tmp_path / "merged.csv", by_task=True)
 
         assert _labels_by_image(merged)["a.jpg"] == "cat"
 
@@ -1511,9 +1511,8 @@ class TestWhatsNewApi:
 
         result = cveta2.whats_new(fake.project.id, dataset, connection=connection)
 
-        assert {t.id for t in result.tasks} == {old_task.id, new_task.id}
-        assert result.updated_task_ids == {old_task.id}
-        assert result.cutoff == "2020-01-01T00:00:00+00:00"
+        assert {t.id for t in result.tasks} == {new_task.id}
+        assert result.cutoff == old_task.id
 
     def test_error_names_the_dataset_file(
         self, normal_fake: LoadedFixtures, tmp_path: Path
@@ -1521,7 +1520,7 @@ class TestWhatsNewApi:
         """The CSV path is passed to ``compute_baseline`` only for this message."""
         dataset = write_dataset_csv(
             tmp_path / "dataset.csv",
-            [csv_row("a.jpg", updated="")],
+            [csv_row("a.jpg", task_id=None)],
             columns=CSV_COLUMNS,
         )
         _api, connection = _scoped(normal_fake)

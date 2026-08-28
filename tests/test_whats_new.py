@@ -32,68 +32,83 @@ def _client_with_tasks(tasks: list[TaskInfo]) -> CvatClient:
     return CvatClient(CvatConfig(), api=FakeCvatApi.from_tasks(tasks))
 
 
+def _row(task_id: object, *, completed: bool = True) -> dict[str, object]:
+    """Build the three columns ``compute_cutoff`` reads."""
+    stage, state = ("acceptance", "completed") if completed else ("annotation", "new")
+    return {"task_id": task_id, "job_stage": stage, "job_state": state}
+
+
 # ---------------------------------------------------------------------------
-# Client method: list_tasks_completed_after
+# Client method: list_new_completed_tasks
 # ---------------------------------------------------------------------------
 
 
-class TestListTasksCompletedAfter:
-    """Tests for ``CvatClient.list_tasks_completed_after``."""
+class TestListNewCompletedTasks:
+    """Tests for ``CvatClient.list_new_completed_tasks``."""
 
     @pytest.mark.parametrize(
-        ("tasks", "cutoff", "expected_ids"),
+        ("tasks", "cutoff", "known", "expected_ids"),
         [
-            (
+            pytest.param(
                 [
-                    make_task(
-                        1, status="annotation", updated="2026-01-05T00:00:00+00:00"
-                    ),
-                    make_task(
-                        2, status="validation", updated="2026-01-05T00:00:00+00:00"
-                    ),
-                    make_task(
-                        3, status="completed", updated="2026-01-05T00:00:00+00:00"
-                    ),
+                    make_task(1, status="annotation"),
+                    make_task(2, status="validation"),
+                    make_task(3, status="completed"),
                 ],
-                "2026-01-01T00:00:00+00:00",
+                0,
+                set(),
                 [3],
+                id="only-completed-tasks-qualify",
             ),
-            (
-                [
-                    make_task(1, updated="2026-01-04T00:00:00+00:00"),
-                    make_task(2, updated="2026-01-05T00:00:00+00:00"),
-                    make_task(3, updated="2026-01-06T00:00:00+00:00"),
-                ],
-                "2026-01-05T00:00:00+00:00",
+            pytest.param(
+                [make_task(1), make_task(2), make_task(3)],
+                2,
+                {1, 2},
                 [3],
+                id="ids-at-or-below-the-cutoff-are-known",
             ),
-            (
-                [
-                    make_task(1, updated=""),
-                    make_task(2, updated="2026-01-06T00:00:00+00:00"),
-                ],
-                "2026-01-01T00:00:00+00:00",
-                [2],
+            pytest.param(
+                [make_task(40), make_task(58)],
+                57,
+                {57},
+                [40, 58],
+                id="a-task-the-fetch-never-saw-is-reported-below-the-cutoff",
             ),
-            (
-                [
-                    make_task(1, updated="2026-01-08T00:00:00+00:00"),
-                    make_task(2, updated="2026-01-06T00:00:00+00:00"),
-                    make_task(3, updated="2026-01-07T00:00:00+00:00"),
-                ],
-                "2026-01-01T00:00:00+00:00",
-                [2, 3, 1],
+            pytest.param(
+                [make_task(8), make_task(6), make_task(7)],
+                0,
+                set(),
+                [6, 7, 8],
+                id="result-is-sorted-by-id",
             ),
         ],
     )
     def test_filters_and_sorts(
-        self, tasks: list[TaskInfo], cutoff: str, expected_ids: list[int]
+        self,
+        tasks: list[TaskInfo],
+        cutoff: int,
+        known: set[int],
+        expected_ids: list[int],
     ) -> None:
         client = _client_with_tasks(tasks)
 
-        result = client.list_tasks_completed_after(1, cutoff)
+        result = client.list_new_completed_tasks(1, cutoff, known)
 
         assert [t.id for t in result] == expected_ids
+
+    def test_a_bumped_updated_date_reports_nothing(self) -> None:
+        """Editing project labels must not resurrect every completed task.
+
+        A label edit rewrites ``updated_date`` on every task at once, which
+        is what made a date cutoff report the whole project as new.
+        """
+        tasks = [
+            make_task(1, updated="2026-09-09T00:00:00+00:00"),
+            make_task(2, updated="2026-09-09T00:00:00+00:00"),
+        ]
+        client = _client_with_tasks(tasks)
+
+        assert client.list_new_completed_tasks(1, 2, {1, 2}) == []
 
 
 # ---------------------------------------------------------------------------
@@ -106,123 +121,54 @@ class TestComputeCutoff:
 
     def test_cutoff_from_completed_rows_only(self, tmp_path: Path) -> None:
         """Non-completed rows must not push the cutoff forward."""
-        df = pd.DataFrame(
-            [
-                {
-                    "task_id": 1,
-                    "job_stage": "acceptance",
-                    "job_state": "completed",
-                    "task_updated_date": "2026-01-02T00:00:00+00:00",
-                },
-                {
-                    "task_id": 2,
-                    "job_stage": "annotation",
-                    "job_state": "new",
-                    "task_updated_date": "2026-01-09T00:00:00+00:00",
-                },
-            ]
-        )
+        df = pd.DataFrame([_row(1), _row(2, completed=False)])
 
-        cutoff = compute_cutoff(df, tmp_path / "dataset.csv")
-
-        assert cutoff == "2026-01-02T00:00:00+00:00"
+        assert compute_cutoff(df, tmp_path / "dataset.csv") == 1
 
     def test_falls_back_to_all_rows_when_no_completed(self, tmp_path: Path) -> None:
         """With no completed rows, the max over all rows is used."""
-        df = pd.DataFrame(
-            [
-                {
-                    "task_id": 1,
-                    "job_stage": "annotation",
-                    "job_state": "new",
-                    "task_updated_date": "2026-01-04T00:00:00+00:00",
-                },
-                {
-                    "task_id": 2,
-                    "job_stage": "validation",
-                    "job_state": "in progress",
-                    "task_updated_date": "2026-01-06T00:00:00+00:00",
-                },
-            ]
-        )
+        df = pd.DataFrame([_row(1, completed=False), _row(2, completed=False)])
 
-        cutoff = compute_cutoff(df, tmp_path / "dataset.csv")
+        assert compute_cutoff(df, tmp_path / "dataset.csv") == 2
 
-        assert cutoff == "2026-01-06T00:00:00+00:00"
-
-    def test_empty_date_column_raises(self, tmp_path: Path) -> None:
-        df = pd.DataFrame(
-            [
-                {
-                    "task_id": 1,
-                    "job_stage": "acceptance",
-                    "job_state": "completed",
-                    "task_updated_date": None,
-                },
-            ]
-        )
+    def test_missing_task_ids_raise(self, tmp_path: Path) -> None:
+        df = pd.DataFrame([_row(None)])
 
         with pytest.raises(Cveta2Error, match="пуст"):
             compute_cutoff(df, tmp_path / "dataset.csv")
 
-    def test_blank_dates_count_as_missing(self, tmp_path: Path) -> None:
-        """Empty strings are dropped as well as NaN.
+    def test_unusable_task_ids_raise(self, tmp_path: Path) -> None:
+        """A column of non-numeric text is as empty as a column of NaN.
 
-        ``dropna()`` alone does not remove ``""`` — a CSV round-trip turns a
-        missing date into an empty cell, not None — so the explicit
-        ``!= ""`` filters carry the behaviour. Without a blank row here they
-        are unexercised and free to compare against any other literal.
+        Pins the numeric coercion specifically: without it these values
+        survive as strings and the max() below returns one of them.
         """
-        df = pd.DataFrame(
-            [
-                {
-                    "task_id": 1,
-                    "job_stage": "acceptance",
-                    "job_state": "completed",
-                    "task_updated_date": "",
-                },
-                {
-                    "task_id": 2,
-                    "job_stage": "annotation",
-                    "job_state": "new",
-                    "task_updated_date": "",
-                },
-            ]
-        )
+        df = pd.DataFrame([_row("not-an-id"), _row("also-not", completed=False)])
 
         with pytest.raises(Cveta2Error, match="пуст"):
             compute_cutoff(df, tmp_path / "dataset.csv")
 
-    def test_blank_completed_date_falls_back_to_all_rows(self, tmp_path: Path) -> None:
-        """A completed row with a blank date must not win the max().
+    def test_ids_are_compared_as_numbers_not_text(self, tmp_path: Path) -> None:
+        """Ids read from a CSV must not be ranked as strings.
 
-        Pins the second ``!= ""`` filter specifically: string comparison would
-        otherwise rank ``""`` below any date and quietly pick the annotation
-        row anyway, hiding the bug. Here the blank row is the only completed
-        one, so the fallback to all rows is what produces a usable cutoff.
+        Same-width ids agree either way; 9 against 100 is where text
+        ordering diverges and would pick the lower id as the cutoff.
         """
-        df = pd.DataFrame(
-            [
-                {
-                    "task_id": 1,
-                    "job_stage": "acceptance",
-                    "job_state": "completed",
-                    "task_updated_date": "",
-                },
-                {
-                    "task_id": 2,
-                    "job_stage": "annotation",
-                    "job_state": "new",
-                    "task_updated_date": "2026-01-06T00:00:00+00:00",
-                },
-            ]
-        )
+        df = pd.DataFrame([_row("9"), _row("100")])
 
-        assert (
-            compute_cutoff(df, tmp_path / "dataset.csv") == "2026-01-06T00:00:00+00:00"
-        )
+        assert compute_cutoff(df, tmp_path / "dataset.csv") == 100
 
-    def test_baseline_reports_the_csv_path_when_dates_are_unusable(
+    def test_missing_completed_id_falls_back_to_all_rows(self, tmp_path: Path) -> None:
+        """A completed row with no id must not win the max().
+
+        Here the id-less row is the only completed one, so the fallback to
+        all rows is what produces a usable cutoff.
+        """
+        df = pd.DataFrame([_row(None), _row(6, completed=False)])
+
+        assert compute_cutoff(df, tmp_path / "dataset.csv") == 6
+
+    def test_baseline_reports_the_csv_path_when_ids_are_unusable(
         self, tmp_path: Path
     ) -> None:
         """compute_baseline must forward its own path into the error message.
@@ -232,48 +178,46 @@ class TestComputeCutoff:
         ``None``.
         """
         csv_path = tmp_path / "dataset.csv"
-        df = pd.DataFrame(
-            [
-                {
-                    "task_id": 1,
-                    "job_stage": "acceptance",
-                    "job_state": "completed",
-                    "task_updated_date": None,
-                }
-            ]
-        )
+        df = pd.DataFrame([_row(None)])
 
         with pytest.raises(Cveta2Error, match=str(csv_path)):
             compute_baseline(df, csv_path)
 
     def test_baseline_collects_known_task_ids(self, tmp_path: Path) -> None:
-        df = pd.DataFrame(
-            [
-                {
-                    "task_id": 1,
-                    "job_stage": "acceptance",
-                    "job_state": "completed",
-                    "task_updated_date": "2026-01-02T00:00:00+00:00",
-                },
-                {
-                    "task_id": 1,
-                    "job_stage": "acceptance",
-                    "job_state": "completed",
-                    "task_updated_date": "2026-01-03T00:00:00+00:00",
-                },
-                {
-                    "task_id": None,
-                    "job_stage": "annotation",
-                    "job_state": "new",
-                    "task_updated_date": "2026-01-04T00:00:00+00:00",
-                },
-            ]
-        )
+        df = pd.DataFrame([_row(1), _row(1), _row(None, completed=False)])
 
         baseline = compute_baseline(df, tmp_path / "dataset.csv")
 
         assert baseline.known_task_ids == {1}
-        assert baseline.cutoff == "2026-01-03T00:00:00+00:00"
+        assert baseline.cutoff == 1
+
+    def test_baseline_also_reads_the_csvs_fetch_wrote_alongside(
+        self, tmp_path: Path
+    ) -> None:
+        """A task living only in obsolete.csv is known, not new.
+
+        Reading dataset.csv alone would leave every superseded task absent
+        from ``known_task_ids``, so the unknown-id sweep would report them
+        on every single run.
+        """
+        write_dataset_csv(tmp_path / "obsolete.csv", [_row(4)])
+        write_dataset_csv(tmp_path / "in_progress.csv", [_row(5, completed=False)])
+        write_dataset_csv(tmp_path / "deleted.csv", [_row(6)])
+        df = pd.DataFrame([_row(7)])
+
+        baseline = compute_baseline(df, tmp_path / "dataset.csv")
+
+        assert baseline.known_task_ids == {4, 5, 6, 7}
+        assert baseline.cutoff == 7
+
+    def test_an_unreadable_sibling_is_skipped_not_fatal(self, tmp_path: Path) -> None:
+        """A damaged obsolete.csv costs recall, never the whole command."""
+        (tmp_path / "obsolete.csv").write_text('a,b\n"unclosed\n', encoding="utf-8")
+        df = pd.DataFrame([_row(7)])
+
+        baseline = compute_baseline(df, tmp_path / "dataset.csv")
+
+        assert baseline.known_task_ids == {7}
 
 
 # ---------------------------------------------------------------------------
@@ -281,19 +225,9 @@ class TestComputeCutoff:
 # ---------------------------------------------------------------------------
 
 
-def test_run_whats_new_empty_date_column_exits(tmp_path: Path) -> None:
+def test_run_whats_new_empty_task_id_column_exits(tmp_path: Path) -> None:
     """A ``compute_cutoff`` error propagates to the CLI boundary."""
-    csv_path = write_dataset_csv(
-        tmp_path / "dataset.csv",
-        [
-            {
-                "task_id": 1,
-                "job_stage": "acceptance",
-                "job_state": "completed",
-                "task_updated_date": None,
-            },
-        ],
-    )
+    csv_path = write_dataset_csv(tmp_path / "dataset.csv", [_row(None)])
 
     def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
         return CvatClient(cfg, api=FakeCvatApi.from_tasks([]))

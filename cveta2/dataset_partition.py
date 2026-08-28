@@ -75,21 +75,15 @@ def completed_task_ids(
     return finished - unfinished
 
 
-def _parse_task_dates(dates: pd.Series[str]) -> pd.Series[pd.Timestamp]:
-    """Parse ``task_updated_date`` strings to UTC timestamps (NaT on failure)."""
-    return pd.to_datetime(dates, errors="coerce", utc=True)
-
-
 def _deleted_registry_frame(
     deleted_images: list[DeletedImage],
 ) -> pd.DataFrame:
     """Build a frame of deletion records (one row per deleted task/image)."""
-    columns = ["image_name", "task_id", "task_updated_date", "_is_deleted"]
+    columns = ["image_name", "task_id", "_is_deleted"]
     rows = [
         {
             "image_name": d.image_name,
             "task_id": d.task_id,
-            "task_updated_date": d.task_updated_date,
             "_is_deleted": 1,
         }
         for d in deleted_images
@@ -98,16 +92,21 @@ def _deleted_registry_frame(
 
 
 def _latest_row_per_image(df: pd.DataFrame) -> pd.DataFrame:
-    """Return one row per ``image_name``: the one with the max ``_parsed_date``.
+    """Return one row per ``image_name``: the one with the max ``task_id``.
 
-    Equal dates are broken by row position, so callers express precedence by
+    CVAT hands out task ids in creation order, and unlike ``updated_date``
+    an id never moves: editing a project's labels rewrites every task's
+    date at once, which would otherwise scramble this ordering.  A row
+    without a ``task_id`` sorts last and so loses to any row that has one.
+
+    Equal ids are broken by row position, so callers express precedence by
     ordering *df* (deletion records first). That position is sorted on
     explicitly instead of leaning on sort stability, which the single-key
     ``sort_values`` path only delivers for frames small enough to stay in
     insertion sort.
     """
     ordered = df.assign(_row_order=list(range(len(df)))).sort_values(
-        ["_parsed_date", "_row_order"], ascending=[False, True]
+        ["task_id", "_row_order"], ascending=[False, True]
     )
     latest: pd.DataFrame = ordered.drop_duplicates(
         subset=["image_name"], keep="first"
@@ -118,22 +117,21 @@ def _latest_row_per_image(df: pd.DataFrame) -> pd.DataFrame:
 def _latest_task_per_image(
     df: pd.DataFrame,
     deleted_images: list[DeletedImage],
-    parsed_dates: pd.Series[pd.Timestamp],
 ) -> pd.DataFrame:
     """Return the latest task per ``image_name`` across df rows and deletions.
 
-    Deletion records are concatenated **first** so they win ties on an
-    identical ``task_updated_date`` (annotations may exist for a frame the
-    same task also deleted).  Indexed by ``image_name``.
+    Two different tasks can no longer tie, so the only tie left is within a
+    single task: a frame that task annotated and also marked deleted.
+    Deletion records are concatenated **first** to win it.  Indexed by
+    ``image_name``.
     """
     latest_from_df = (
         df[["image_name", "task_id"]]
-        .assign(_parsed_date=parsed_dates, _is_deleted=0)
+        .assign(_is_deleted=0)
         .drop_duplicates(subset=["image_name", "task_id"])
     )
 
     registry = _deleted_registry_frame(deleted_images)
-    registry["_parsed_date"] = _parse_task_dates(registry["task_updated_date"])
 
     combined = pd.concat(
         [registry[latest_from_df.columns], latest_from_df],
@@ -147,16 +145,14 @@ def _latest_task_per_image(
 
 def _split_completed(
     completed_non_deleted: pd.DataFrame,
-    parsed_dates: pd.Series[pd.Timestamp],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split completed rows into (latest-task dataset, stale obsolete)."""
     if completed_non_deleted.empty:
         return completed_non_deleted.copy(), completed_non_deleted.copy()
 
-    cnd = completed_non_deleted.assign(_parsed_date=parsed_dates)
-    latest_completed = _latest_row_per_image(cnd)[["image_name", "task_id"]].rename(
-        columns={"task_id": "_latest_task_id"}
-    )
+    latest_completed = _latest_row_per_image(completed_non_deleted)[
+        ["image_name", "task_id"]
+    ].rename(columns={"task_id": "_latest_task_id"})
     # is_latest is applied positionally below, so the merge must preserve row
     # order. image_name is the only column the two frames share and every key
     # matches, which is also why on=/how= cannot change the outcome here.
@@ -201,8 +197,8 @@ def partition_annotations_df(
 ) -> PartitionResult:
     """Partition an annotation DataFrame into dataset, obsolete and in-progress parts.
 
-    Required columns in *df*: ``image_name``, ``task_id``, ``task_updated_date``,
-    ``job_stage``, ``job_state``.
+    Required columns in *df*: ``image_name``, ``task_id``, ``job_stage``,
+    ``job_state``.
 
     Algorithm
     ---------
@@ -222,8 +218,7 @@ def partition_annotations_df(
             dataset=empty, obsolete=empty.copy(), in_progress=empty.copy()
         )
 
-    parsed_dates = _parse_task_dates(df["task_updated_date"])
-    latest_per_image = _latest_task_per_image(df, deleted_images, parsed_dates)
+    latest_per_image = _latest_task_per_image(df, deleted_images)
 
     deleted_image_names: set[str] = set(
         latest_per_image.index[latest_per_image["_is_deleted"] == 1]
@@ -244,9 +239,7 @@ def partition_annotations_df(
     in_progress = df[~is_deleted & ~is_completed]
     completed_non_deleted = df[~is_deleted & is_completed]
 
-    dataset, obsolete_stale = _split_completed(
-        completed_non_deleted, parsed_dates[completed_non_deleted.index]
-    )
+    dataset, obsolete_stale = _split_completed(completed_non_deleted)
     obsolete = pd.concat([obsolete_deleted, obsolete_stale], ignore_index=True)
 
     logger.debug(
