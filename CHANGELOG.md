@@ -2,6 +2,37 @@
 
 <!-- version list -->
 
+## v0.5.0 (2026-08-28)
+
+### Documentation
+
+- Describe task_id ordering and the cache's status-only freshness
+  ([`6742b71`](https://github.com/BuckanovNikita/cveta2/commit/6742b710a38b424d824ae6b075ea5337a8864baa))
+
+### Features
+
+- Order tasks by task_id instead of task_updated_date
+  ([`8e3ba4f`](https://github.com/BuckanovNikita/cveta2/commit/8e3ba4fb48d1c12f01f82dfcf5d807062c16ae2d))
+
+### Testing
+
+- Close the sibling-CSV gaps and re-triage the mutation allowlist
+  ([`c79916e`](https://github.com/BuckanovNikita/cveta2/commit/c79916ebf25439b8e90d91c045d85be1620f0ef5))
+
+- **integration**: Expect Cveta2Error from drop_label_annotations
+  ([`7acea36`](https://github.com/BuckanovNikita/cveta2/commit/7acea365bc4c002d4575f9d4af96da08bb95c729))
+
+- **integration**: Pin the label-edit premise against a live CVAT
+  ([`b2a6b57`](https://github.com/BuckanovNikita/cveta2/commit/b2a6b57db36b1bf29ae1af7ddeb346f21301a659))
+
+### Breaking Changes
+
+- `merge --by-time` is renamed to `--by-task` and now resolves conflicts by task_id rather than
+  task_updated_date; the Python API's `cveta2.merge(by_time=)` becomes `by_task=`.
+  `WhatsNewResult.cutoff` changes from an ISO date string to an int task id and `updated_task_ids`
+  is gone, as is the client's `list_tasks_completed_after` (replaced by `list_new_completed_tasks`).
+
+
 ## v0.4.0 (2026-08-23)
 
 ### Bug Fixes
