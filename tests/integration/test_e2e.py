@@ -175,6 +175,14 @@ def _complete_task_jobs(task_id: int) -> None:
         sdk_client.close()
 
 
+def _task_updated_date(
+    adapter: SdkCvatApiAdapter, project_id: int, task_name: str
+) -> str:
+    """Read one task's live ``updated_date`` straight from CVAT."""
+    tasks = adapter.get_project_tasks(project_id)
+    return next(t for t in tasks if t.name == task_name).updated_date
+
+
 class TestFetchTaskCacheLive:
     """Live round-trip of the task-annotation cache across two fetches."""
 
@@ -232,6 +240,85 @@ class TestFetchTaskCacheLive:
         df1 = pd.read_csv(tmp_path / "out1" / "dataset.csv")
         df2 = pd.read_csv(tmp_path / "out2" / "dataset.csv")
         pd.testing.assert_frame_equal(df1, df2)
+
+    def test_a_project_label_edit_neither_busts_the_cache_nor_the_partition(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The premise of ordering by task_id, checked against a live CVAT.
+
+        Editing a project's labels rewrites every task in the project and
+        bumps its ``updated_date``.  Nothing downstream may react to that:
+        the cache must still serve the task, and the partition must place
+        the same rows in the same files.
+        """
+        project_id, project_name, cs_info, cfg = _get_project_and_storage()
+        task_name = "integration-label-edit-test"
+        with CvatClient(cfg) as client:
+            task_id = client.create_upload_task(
+                project_id=project_id,
+                name=task_name,
+                image_names=IMAGE_NAMES[:2],
+                cloud_storage_id=cs_info.id,
+                segment_size=10,
+            )
+        _complete_task_jobs(task_id)
+
+        monkeypatch.delenv("CVETA2_DISABLE_CACHE", raising=False)
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+
+        sdk_client = _make_sdk_client()
+        try:
+            adapter = SdkCvatApiAdapter(sdk_client)
+            spy = MagicMock(wraps=adapter.get_task_annotations)
+            monkeypatch.setattr(adapter, "get_task_annotations", spy)
+            client = CvatClient(cfg, api=adapter)
+            options = FetchOptions(task_selector=[task_name])
+            with patch(
+                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                return_value=_cs_info_for_host(cs_info),
+            ):
+                fetch_selected_tasks(
+                    client,
+                    FetchTarget(project_id, project_name, tmp_path / "before", None),
+                    options,
+                )
+                before_date = _task_updated_date(adapter, project_id, task_name)
+
+                probe = "cveta2-label-edit-probe"
+                client.update_project_labels(project_id, add=[probe])
+                try:
+                    after_date = _task_updated_date(adapter, project_id, task_name)
+                    assert after_date != before_date, (
+                        "the premise of this change: a project label edit must "
+                        "bump the task's updated_date"
+                    )
+
+                    fetch_selected_tasks(
+                        client,
+                        FetchTarget(project_id, project_name, tmp_path / "after", None),
+                        options,
+                    )
+                    assert spy.call_count == 1, (
+                        "a label edit must not invalidate the task cache"
+                    )
+                finally:
+                    # The seeded project is shared with every other test here,
+                    # one of which pins its exact label count.
+                    client.update_project_labels(
+                        project_id,
+                        delete=[
+                            lbl.id
+                            for lbl in adapter.get_project_labels(project_id)
+                            if lbl.name == probe
+                        ],
+                    )
+        finally:
+            sdk_client.close()
+
+        for name in ("dataset.csv", "deleted.csv"):
+            before = pd.read_csv(tmp_path / "before" / name)
+            after = pd.read_csv(tmp_path / "after" / name)
+            pd.testing.assert_frame_equal(before, after)
 
 
 class TestRealCliFetchTask:
