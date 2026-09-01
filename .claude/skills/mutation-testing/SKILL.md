@@ -128,17 +128,18 @@ could ever be lifted:
   tests** — admission costs runtime for no new signal: `fs_utils.py` (its whole
   contract is the module-level `_DIR_MODE`/`_FILE_MODE`) and
   `_client/context.py`.
-- **The rest of `commands/`** — prompts, arg mapping and `sys.exit`. The three
-  that *are* gated (`_helpers.py`, `interactive/primitives.py`, `upload.py`)
-  were selected on message density: they carry 0, 1 and 2 logger calls
-  respectively, against 18–20 for `doctor.py`, `setup.py` and `labels.py`.
-  `commands/upload.py` additionally encodes a contract `ARCHITECTURE.md` states
-  as a guarantee — `--labels all` loses to a literal dataset label named `all` —
-  which is worth pinning precisely.
-- **Adapters** — `cli.py` is a wall of `add_argument()` calls whose mutable content
-  is help text and arguments that restate argparse defaults; `commands/*` is
-  prompts, arg mapping and `sys.exit`. Note the reason is prompt/wiring
-  density, *not* log-message density: message text was never mutated.
+
+**Adapters** are the second reason at layer scale: `cli.py` is a wall of
+`add_argument()` calls whose mutable content is help text and arguments that
+restate argparse defaults, and the rest of `commands/` is prompts, arg mapping
+and `sys.exit`. The three that *are* gated (`_helpers.py`,
+`interactive/primitives.py`, `upload.py`) were selected on message density: they
+carry 0, 1 and 2 logger calls respectively, against 18–20 for `doctor.py`,
+`setup.py` and `labels.py`. `commands/upload.py` additionally encodes a contract
+`ARCHITECTURE.md` states as a guarantee — `--labels all` loses to a literal
+dataset label named `all` — which is worth pinning precisely. Note the exclusion
+reason is prompt/wiring density, *not* log-message density: message text was
+never mutated.
 
 `config.py` and `api.py` were the two undecided cases; both were measured
 (179 and 274 unexplained survivors) and are now gated. `api.py` needed no
