@@ -129,8 +129,7 @@ git push origin main --follow-tags
 - A merge of only `chore`/`docs`/`test` commits warrants no release; `--print`
   says so and exits 0. Still run it — that is how you learn which case you are in.
 - The push is separate on purpose: it fires the pre-push gates (full mutation
-  scope, version drift, integration tests), and semantic-release would push
-  branch and tag separately, paying for them twice.
+  scope, version drift, integration tests).
 - Releases never run from a feature branch — semantic-release refuses, since only
   `main` is a release branch.
 - No CI, no GitHub Release, no PyPI. A release is a tag, a changelog and a version.
@@ -172,9 +171,8 @@ writes them interactively.
   `python-api.md`
 - **pyproject.toml** - Dependencies, tool configs, import-linter contracts
 
-**Documentation language.** User- and contributor-facing docs are Russian
-(`README.md`, `CONTRIBUTING.md`, `docs/`); developer- and agent-facing docs are
-English (`CLAUDE.md`, `ARCHITECTURE.md`, `DATASET_FORMAT.md`).
+**Documentation language.** Russian: `README.md`, `CONTRIBUTING.md`, `docs/`.
+English: `CLAUDE.md`, `ARCHITECTURE.md`, `DATASET_FORMAT.md`.
 `tests/test_docs.py` enforces this, along with three other checks that keep the
 docs from drifting: every documented Python example must match a real signature,
 every command / flag / env var / config field must be documented, and every
@@ -210,10 +208,10 @@ uv run pre-commit install
 ```
 
 **commit** — format → lint → import-linter → mypy → vulture → pytest → mutmut
-(fast profile) → count-lines → build → lock. `git commit` runs it; there is no
-separate manual step, and unstaged changes are stashed for the run, so what is
-checked is what is being committed. A hook that rewrites files (ruff format,
-`uv lock`) aborts the commit — re-`git add` and commit again.
+(fast profile) → count-lines → build → lock. `git commit` runs it, and unstaged
+changes are stashed for the run, so what is checked is what is being committed.
+A hook that rewrites files (ruff format, `uv lock`) aborts the commit —
+re-`git add` and commit again.
 
 **commit-msg** — `conventional-commit` rejects a subject python-semantic-release
 cannot parse, and a `!` marker with no `BREAKING CHANGE:` footer. Merge, revert

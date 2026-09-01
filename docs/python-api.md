@@ -92,8 +92,6 @@ result = cveta2.fetch(
 `CvatClient` даёт низкоуровневый доступ к CVAT для сценариев, которых нет среди функций-команд. Для любых обращений к серверу он **требует** контекстного менеджера (`with ... as client:`) и, как и функции API, **не спрашивает** учётные данные интерактивно — при их отсутствии поднимается `MissingCredentialsError`. Интерактивные промпты живут только в CLI.
 
 ```python
-from cveta2 import CvatClient
-
 from cveta2 import CvatClient, TaskAnnotations
 
 # Конфигурация загружается автоматически (env, config file, preset)

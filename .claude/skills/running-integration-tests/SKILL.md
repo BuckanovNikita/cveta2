@@ -38,7 +38,7 @@ Integration tests run against a real CVAT + MinIO + ClearML Docker stack. The fu
 ## Quick Start (Single Agent)
 
 ```bash
-# 1. Start the stack (downloads images, seeds test data — takes 2-3 min first time)
+# 1. Start the stack (downloads images, seeds test data — slow on first run)
 ./scripts/integration_up.sh
 
 # 2. Run all integration tests
@@ -159,5 +159,5 @@ INTEGRATION_USER=agent-b ./scripts/integration_up.sh --port 9188 --minio-port 91
 
 1. **No xdist**: Do NOT add `-n auto` to integration tests. CVAT returns 429 errors under parallel load.
 2. **Fresh state required**: Upload tests create tasks in the seeded project. Re-running against the same instance without re-seeding fails with `ValueError: Duplicate base task name`. Always tear down and restart between full runs — this is why the pre-push gate builds its own stack instead of reusing one.
-3. **First run is slow**: Docker image pulls + coco8 download + CVAT startup takes 2-3 minutes. Subsequent runs are faster (images cached).
+3. **First run is slow**: Docker image pulls + coco8 download + CVAT startup. Subsequent runs are faster (images cached).
 4. **Health timeout**: If CVAT doesn't become healthy within 180s, the script fails. Check `docker logs USERNAME-cvat_server`.

@@ -25,10 +25,10 @@ git add -A  # or stage selectively
 git commit -m "<type>: <description>"
 ```
 
-`git commit` runs the quality gate; there is no separate step for it. Unstaged
-changes are stashed for the run, so what gets checked is what gets committed.
-`.pre-commit-config.yaml` is the source of truth for which hooks run and in what
-order — read it there rather than trusting a list written here.
+`git commit` runs the quality gate. Unstaged changes are stashed for the run, so
+what gets checked is what gets committed. `.pre-commit-config.yaml` is the source
+of truth for which hooks run and in what order — read it there rather than
+trusting a list written here.
 
 A hook that rewrites files (`ruff format`, `uv lock`) aborts the commit. Re-`git
 add` the rewritten files and commit again.

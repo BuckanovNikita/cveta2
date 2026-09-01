@@ -92,7 +92,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
    - If latest task is deletion → image goes to `obsolete`, added to `deleted_images`
    - Otherwise: completed tasks → `dataset` (latest) or `obsolete` (stale), non-completed → `in_progress`
    - **Completed** is read from `job_stage`/`job_state`, not from a task-level field: `completed_task_ids()` requires *every* row of the task — deletion records included — to sit on `acceptance`/`completed`, which is how CVAT itself derives a task's status from its jobs
-   - **Important**: Deletion records are concatenated **before** annotation records to win ties (same date)
+   - Deletion records are concatenated **before** annotation records to win same-task ties; see [Deleted images handling](#deleted-images-handling)
 
 ## Project specs and organizations
 
