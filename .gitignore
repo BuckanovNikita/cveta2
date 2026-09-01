@@ -57,3 +57,5 @@ tests/integration/.seeded
 
 # Claude Code agent worktrees
 .claude/worktrees/
+.agents/**
+.claude/skills/lossless-doc-compress

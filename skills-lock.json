@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "ai-stage-gate": {
+      "source": "ML-SystemDesign/MLSystemDesign",
+      "sourceType": "github",
+      "skillPath": "skills/ai-stage-gate/SKILL.md",
+      "computedHash": "43c8f50092fcb625967e46e1f7d842669efb1b5db21b3dcfe294f10e4af6d7f2"
+    },
+    "lossless-doc-compress": {
+      "source": "ML-SystemDesign/MLSystemDesign",
+      "sourceType": "github",
+      "skillPath": "skills/lossless-doc-compress/SKILL.md",
+      "computedHash": "15b603b769610ded398cfbbe860aad248ac8888fccc21640700627cc46ab8619"
+    },
+    "ml-system-design-review": {
+      "source": "ML-SystemDesign/MLSystemDesign",
+      "sourceType": "github",
+      "skillPath": "skills/ml-system-design-review/SKILL.md",
+      "computedHash": "eb680f0ee7d820977dfdeef03ae1370129ecc0f379a129c9550eff12ecbc7210"
+    }
+  }
+}
