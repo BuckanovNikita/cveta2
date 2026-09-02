@@ -6,8 +6,7 @@
 
 set -euo pipefail
 
-INTEGRATION_USER=$(printf '%s' "${USER:-default}" | sed 's/[^a-zA-Z0-9_.-]/_/g')
-INTEGRATION_USER="${INTEGRATION_USER:-default}"
+INTEGRATION_USER=$(printf '%s' "${INTEGRATION_USER:-${USER:-default}}" | sed 's/[^a-zA-Z0-9_.-]/_/g')
 
 log() { echo "==> $*"; }
 

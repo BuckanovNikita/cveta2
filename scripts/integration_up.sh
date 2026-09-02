@@ -15,6 +15,11 @@
 # Usage:
 #   ./scripts/integration_up.sh [--cvat-version v2.26.0] [--port 9080]
 #
+# Every port and the INTEGRATION_USER container prefix can also be set through
+# the environment (CVAT_PORT, MINIO_PORT, MINIO_CONSOLE_PORT, CLEARML_API_PORT,
+# CLEARML_FILES_PORT, CLEARML_WEB_PORT), which is how a second stack runs next
+# to one that already holds the defaults.
+#
 # If --port is omitted, fixed well-known ports are used:
 #   CVAT API: 9988
 #   MinIO API:          9989
@@ -37,17 +42,16 @@ COCO8_IMAGES_DIR="$REPO_ROOT/tests/fixtures/data/coco8/images"
 COMPOSE_CACHE_DIR="$REPO_ROOT/.cache/cvat"
 
 CVAT_VERSION="v2.59.1"
-CVAT_PORT="9988"
-MINIO_PORT="9989"
-MINIO_CONSOLE_PORT="9990"
-CLEARML_API_PORT="8880"
-CLEARML_FILES_PORT="8881"
-CLEARML_WEB_PORT="8882"
+CVAT_PORT="${CVAT_PORT:-9988}"
+MINIO_PORT="${MINIO_PORT:-9989}"
+MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9990}"
+CLEARML_API_PORT="${CLEARML_API_PORT:-8880}"
+CLEARML_FILES_PORT="${CLEARML_FILES_PORT:-8881}"
+CLEARML_WEB_PORT="${CLEARML_WEB_PORT:-8882}"
 HEALTH_TIMEOUT=180
 
 # ── Container name prefix (username) ───────────────────────────────
-INTEGRATION_USER=$(printf '%s' "${USER:-default}" | sed 's/[^a-zA-Z0-9_.-]/_/g')
-INTEGRATION_USER="${INTEGRATION_USER:-default}"
+INTEGRATION_USER=$(printf '%s' "${INTEGRATION_USER:-${USER:-default}}" | sed 's/[^a-zA-Z0-9_.-]/_/g')
 export INTEGRATION_USER
 
 # ── Parse arguments ─────────────────────────────────────────────────
