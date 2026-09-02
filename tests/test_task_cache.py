@@ -493,7 +493,9 @@ class TestS3Backend:
 
         assert not (local_dir / "task_1.json").exists()
         assert failing.calls == 1
-        assert sum("S3-кэш" in m for m in capture_logs) == 1
+        warnings = [m for m in capture_logs if "S3-кэш" in m]
+        assert len(warnings) == 1
+        assert "s3.invalid" in warnings[0]
 
     def test_stale_s3_entry_ignored_without_remote_delete(self, tmp_path: Path) -> None:
         task = make_task(updated=_UPDATED)

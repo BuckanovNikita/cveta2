@@ -453,6 +453,11 @@ full = []
 # can produce — a test that asserts nothing about cveta2.
 "cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_7" = "catch=None; only reachable if Path.exists raises, which no real filesystem does here"
 
+# _load_class_names_yaml: the flat-dict branch hands _normalize_class_names a
+# value that is already a dict, so the "neither list nor dict" error that
+# would name the source path can never fire there.
+"cveta2.services.convert.yolo.x__load_class_names_yaml__mutmut_17" = "source=None on the flat-dict branch; the path is only read by an error branch a dict never reaches"
+
 # ensure_shared_dir: the walk up to the first existing parent stops at the
 # filesystem root as a safety net. Reaching that guard needs a root directory
 # that does not exist, which no real filesystem has, so `break` and `return`
