@@ -17,12 +17,13 @@ if TYPE_CHECKING:
 
 REQUIRED_COLUMNS = {"job_stage", "job_state", "task_id"}
 
-SIBLING_CSV_NAMES = ("obsolete.csv", "in_progress.csv", "deleted.csv")
-"""The other files ``fetch`` writes beside ``dataset.csv``.
+SIBLING_CSV_NAMES = ("obsolete.csv", "deleted.csv")
+"""The CSVs ``fetch`` writes beside ``dataset.csv`` whose tasks are done for good.
 
 A task superseded by a newer one keeps no row in ``dataset.csv``; without
 reading these too, every such task would look unknown and be reported as
-new on every run.
+new on every run.  ``in_progress.csv`` is deliberately left out: a task
+listed there that has since completed is exactly what whats-new reports.
 """
 
 
@@ -37,9 +38,10 @@ class WhatsNewBaseline:
 def compute_baseline(df: pd.DataFrame, path: Path) -> WhatsNewBaseline:
     """Build the comparison baseline from a fetched dataset CSV.
 
-    ``known_task_ids`` spans every CSV ``fetch`` wrote next to *path*, so a
-    task that was still in progress at fetch time can be told apart from
-    one the dataset already accounts for.
+    ``known_task_ids`` spans *df* plus the finished-for-good CSVs ``fetch``
+    wrote next to *path* (:data:`SIBLING_CSV_NAMES`), so a task that was
+    still in progress at fetch time can be told apart from one the dataset
+    already accounts for.
     """
     return WhatsNewBaseline(
         cutoff=compute_cutoff(df, path),

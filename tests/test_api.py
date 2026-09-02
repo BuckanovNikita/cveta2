@@ -664,6 +664,28 @@ class TestFetchApi:
         assert set(every["task_id"].unique()) == {done.id, ongoing.id}
         assert set(only_done["task_id"].unique()) == {done.id}
 
+    def test_fetch_task_with_nothing_selected_keeps_the_columns(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """An empty result still has the documented ``CSV_COLUMNS`` columns.
+
+        ``pd.DataFrame([])`` has no columns at all, so a caller indexing
+        ``df["task_id"]`` on the result of an unfinished-task fetch crashed.
+        """
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["annotation"])
+
+        df = cveta2.fetch_task(
+            [fake.tasks[0].name],
+            tmp_path / "out",
+            project=fake.project.id,
+            completed_only=True,
+            download_images=False,
+            connection=fake_connection(fake),
+        )
+
+        assert list(df.columns) == list(CSV_COLUMNS)
+        assert len(df) == 0
+
     def test_fetch_task_honours_the_sync_root_override(
         self,
         normal_fake: LoadedFixtures,

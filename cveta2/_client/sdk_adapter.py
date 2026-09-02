@@ -207,7 +207,7 @@ class SdkCvatApiAdapter:
 
     The caller is responsible for opening and closing the SDK client.
     This adapter is a thin stateless converter: SDK objects in, DTOs out.
-    All public methods are wrapped with retry logic for transient errors.
+    Every SDK call is wrapped with retry logic for transient errors.
     """
 
     def __init__(self, client: CvatSdkClient) -> None:
@@ -227,7 +227,7 @@ class SdkCvatApiAdapter:
 
     def set_organization(self, org: str | None) -> None:
         """Scope subsequent requests to *org* (``None`` = personal workspace)."""
-        self.client.organization_slug = org
+        self.client.organization_slug = "" if org is None else org
         logger.trace(f"Switched organization to: {org!r}")
 
     @_api_retry
@@ -404,8 +404,6 @@ class SdkCvatApiAdapter:
         logger.info(f"Создана задача: {task.name} (id={task.id})")
         return int(task.id)
 
-    @_write_retry
-    @_translate_api_errors
     def attach_task_data(self, task_id: int, spec: UploadTaskSpec) -> None:
         """Attach cloud-storage files to *task_id* and wait for processing.
 
@@ -414,25 +412,14 @@ class SdkCvatApiAdapter:
         Raises :class:`CvatApiError` when processing fails (e.g. images
         not found in cloud storage).
 
-        The trailing size read is deliberately shielded: it feeds a log
-        line, but it runs *after* ``create_data`` has already succeeded,
-        and ``create_data`` is not idempotent.  Letting a throttled read
-        escape would hand ``_write_retry`` a 429 and re-attach every image
-        to a task CVAT has already finished processing.
+        The data POST and the status poll are retried separately: the POST
+        is not idempotent, so it gets the write policy on its own, while
+        the poll is a plain read that may be repeated freely.  The trailing
+        size read only feeds a log line and runs after the attach has
+        already succeeded, so a failure there is logged, not raised.
         """
-        result, _ = self.client.api_client.tasks_api.create_data(
-            task_id,
-            data_request=build_data_request(spec),
-        )
-        try:
-            self.client.wait_for_completion(
-                result.rq_id,
-                status_check_period=_DATA_CHECK_PERIOD,
-            )
-        except BackgroundRequestException as exc:
-            msg = f"Задача {task_id}: обработка данных не удалась — {exc}"
-            raise CvatApiError(msg) from exc
-
+        rq_id = self._start_data_processing(task_id, spec)
+        self._wait_for_data_processing(task_id, rq_id)
         try:
             size: int | str = self.get_task_size(task_id)
         except (CvatApiError, *_TRANSPORT_ERRORS) as exc:
@@ -443,6 +430,29 @@ class SdkCvatApiAdapter:
             f"(cloud_storage_id={spec.cloud_storage_id}, "
             f"segment_size={spec.segment_size}, size={size})"
         )
+
+    @_write_retry
+    @_translate_api_errors
+    def _start_data_processing(self, task_id: int, spec: UploadTaskSpec) -> str:
+        """Issue the data POST and return the id of CVAT's background request."""
+        result, _ = self.client.api_client.tasks_api.create_data(
+            task_id,
+            data_request=build_data_request(spec),
+        )
+        return str(result.rq_id)
+
+    @_api_retry
+    @_translate_api_errors
+    def _wait_for_data_processing(self, task_id: int, rq_id: str) -> None:
+        """Poll background request *rq_id* until CVAT has processed the data."""
+        try:
+            self.client.wait_for_completion(
+                rq_id,
+                status_check_period=_DATA_CHECK_PERIOD,
+            )
+        except BackgroundRequestException as exc:
+            msg = f"Задача {task_id}: обработка данных не удалась — {exc}"
+            raise CvatApiError(msg) from exc
 
     @_write_retry
     @_translate_api_errors

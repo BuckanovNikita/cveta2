@@ -13,6 +13,7 @@ name cannot tell an explicitly passed path apart from the env fallback.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -208,6 +209,21 @@ def test_require_credentials_rejects_a_half_filled_pair(cfg: CvatConfig) -> None
     """
     with pytest.raises(MissingCredentialsError):
         cfg.require_credentials()
+
+
+def test_require_credentials_names_the_config_file_actually_read(
+    isolated_config_path: Path,
+) -> None:
+    """The hint must point at ``CVETA2_CONFIG``, not the default location.
+
+    A CI job with a custom config path and no env credentials is exactly the
+    user who hits this error, and telling them to edit
+    ``~/.config/cveta2/config.yaml`` sends them to a file nothing reads.
+    """
+    with pytest.raises(
+        MissingCredentialsError, match=re.escape(str(isolated_config_path))
+    ):
+        CvatConfig().require_credentials()
 
 
 # ---------------------------------------------------------------------------

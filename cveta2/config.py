@@ -107,9 +107,14 @@ class _YamlDumpOptions(TypedDict):
 
     sort_keys: bool
     encoding: str
+    allow_unicode: bool
 
 
-_YAML_DUMP: _YamlDumpOptions = {"sort_keys": False, "encoding": "utf-8"}
+_YAML_DUMP: _YamlDumpOptions = {
+    "sort_keys": False,
+    "encoding": "utf-8",
+    "allow_unicode": True,
+}
 
 
 def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
@@ -303,7 +308,8 @@ class CvatConfig(BaseModel):
             return self
         raise MissingCredentialsError(
             f"Учётные данные CVAT не настроены. Задайте CVAT_USERNAME и "
-            f"CVAT_PASSWORD или заполните cvat.username/password в {CONFIG_PATH}."
+            f"CVAT_PASSWORD или заполните cvat.username/password в "
+            f"{get_config_path()}."
         )
 
 
@@ -313,9 +319,13 @@ def _none_if_falsy(value: object) -> object:
 
 
 def _coerce_mapping_scalars(value: object) -> object:
-    """Coerce a raw YAML mapping's keys and values to str (pre-validation)."""
+    """Coerce a raw YAML mapping's keys and values to str (pre-validation).
+
+    A ``null`` or empty value means "not configured", as in
+    :class:`CacheConfig`; ``str(None)`` would otherwise become a real path.
+    """
     if isinstance(value, dict):
-        return {str(k): str(v) for k, v in value.items()}
+        return {str(k): str(v) for k, v in value.items() if v is not None and v != ""}
     return value
 
 
@@ -519,15 +529,21 @@ class IgnoreConfig(_ProjectsSection):
         description: str = "",
         *,
         silent: bool = False,
-    ) -> None:
-        """Add a task to the ignore list for *project_name*."""
+    ) -> bool:
+        """Add a task to the ignore list for *project_name*.
+
+        Returns True if the task was newly added; an existing id is left
+        untouched.
+        """
         entries = self.projects.setdefault(project_name, [])
-        if not any(e.id == task_id for e in entries):
-            entries.append(
-                IgnoredTask(
-                    id=task_id, name=task_name, description=description, silent=silent
-                )
+        if any(e.id == task_id for e in entries):
+            return False
+        entries.append(
+            IgnoredTask(
+                id=task_id, name=task_name, description=description, silent=silent
             )
+        )
+        return True
 
     def remove_task(self, project_name: str, task_id: int) -> bool:
         """Remove a task from the ignore list for *project_name*.
@@ -610,14 +626,18 @@ class NetworkConfig(SectionConfig):
         return cls(
             s3_workers=_parse_int_env("CVETA2_S3_WORKERS") or base.s3_workers,
             cvat_workers=_parse_int_env("CVETA2_CVAT_WORKERS") or base.cvat_workers,
-            retry_attempts=_parse_int_env("CVETA2_RETRY_ATTEMPTS")
+            retry_attempts=_parse_int_env("CVETA2_RETRY_ATTEMPTS", minimum=2)
             or base.retry_attempts,
             retry_max_wait=base.retry_max_wait,
         )
 
 
-def _parse_int_env(name: str) -> int | None:
-    """Read a positive int from the environment; warn and ignore garbage."""
+def _parse_int_env(name: str, minimum: int = 1) -> int | None:
+    """Read an int of at least *minimum* from the environment.
+
+    Garbage and out-of-range values are warned about and ignored, never
+    raised: the file or default value must survive a typo in the shell.
+    """
     raw = os.environ.get(name)
     if not raw:
         return None
@@ -629,9 +649,9 @@ def _parse_int_env(name: str) -> int | None:
             f"значение игнорируется."
         )
         return None
-    if value <= 0:
+    if value < minimum:
         logger.warning(
-            f"Значение {name}={value} должно быть больше нуля; игнорируется."
+            f"Значение {name}={value} должно быть не меньше {minimum}; игнорируется."
         )
         return None
     return value

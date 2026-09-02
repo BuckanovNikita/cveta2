@@ -485,6 +485,26 @@ class TestMergeDatasetsByTask:
         assert "a.jpg" not in merged["image_name"].to_numpy()
         assert "b.jpg" in merged["image_name"].to_numpy()
 
+    def test_by_task_deleted_excluded_when_old_wins(self) -> None:
+        """A --deleted image stays out even when the by-task rule assigns it to old."""
+        old = _tdf(
+            [
+                _trow("a.jpg", task_id=_ID_NEW, label="old_a"),
+                _trow("b.jpg", task_id=_ID_NEW, label="old_b"),
+            ]
+        )
+        new = _tdf(
+            [
+                _trow("a.jpg", task_id=_ID_OLD, label="new_a"),
+                _trow("b.jpg", task_id=_ID_OLD, label="new_b"),
+            ]
+        )
+
+        merged = _merge_datasets(old, new, {"a.jpg"}, by_task=True)
+
+        assert merged["image_name"].tolist() == ["b.jpg"]
+        assert merged["instance_label"].tolist() == ["old_b"]
+
     def test_by_task_split_propagation(self) -> None:
         """Split from old propagated even when new wins via by_task."""
         old = _tdf([_trow("a.jpg", task_id=_ID_OLD, split="train")])

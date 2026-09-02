@@ -79,14 +79,16 @@ def run_concurrent(  # noqa: PLR0913
     outcomes: dict[int, _R | Exception] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         pending = {pool.submit(work, item): index for index, item in enumerate(items)}
-        with tqdm(total=len(items), desc=desc, unit=unit, leave=False) as bar:
-            for future in as_completed(pending):
-                error = future.exception()
-                if error is not None and not isinstance(error, catch):
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    raise error
-                outcomes[pending[future]] = (
-                    error if error is not None else future.result()
-                )
-                bar.update(1)
+        try:
+            with tqdm(total=len(items), desc=desc, unit=unit, leave=False) as bar:
+                for future in as_completed(pending):
+                    error = future.exception()
+                    if error is not None and not isinstance(error, catch):
+                        raise error
+                    outcomes[pending[future]] = (
+                        error if error is not None else future.result()
+                    )
+                    bar.update(1)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
     return [outcomes[index] for index in range(len(items))]

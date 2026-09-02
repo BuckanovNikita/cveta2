@@ -165,7 +165,7 @@ def _merge_datasets(
     )
 
     old_keep_mask = old["image_name"].isin(
-        (old_images - common_images - deleted) | keep_from_old
+        (old_images - common_images - deleted) | (keep_from_old - deleted)
     )
     new_keep_mask = new["image_name"].isin((new_images - deleted) - keep_from_old)
     merged: pd.DataFrame = pd.concat(

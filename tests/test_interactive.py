@@ -168,6 +168,14 @@ class TestPromptHistory:
         assert expected_dir.is_dir()
         assert history.filename == str(expected_dir / "task-name")
 
+    def test_history_follows_default_cache_base(self, tmp_path: Path) -> None:
+        with patch(
+            "cveta2.commands.interactive._history.default_cache_base",
+            return_value=tmp_path / "elsewhere",
+        ):
+            history = history_for("k")
+        assert history.filename == str(tmp_path / "elsewhere" / "prompt_history" / "k")
+
     def test_text_with_history_key_forwards_history(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

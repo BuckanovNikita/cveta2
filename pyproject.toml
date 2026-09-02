@@ -459,18 +459,15 @@ full = []
 # observe the collision this guards against.
 "cveta2.task_cache.xǁTaskAnnotationCacheǁ_write_local__mutmut_2" = "writer=None; the temp name stays unique for every writer a test can create"
 
-# run_concurrent's cancellation. The pool is being torn down because a
-# worker raised something the caller did not opt to catch, so every result
-# is about to be discarded and the exception re-raised either way. The
-# arguments only decide how much already-queued work still runs and whether
-# the teardown blocks on it — neither is observable from the outside, and
-# faking a deterministic race to look would test the fake.
-"cveta2._concurrency.x_run_concurrent__mutmut_22" = "shutdown(wait=None); the results are discarded and the exception re-raised regardless"
-"cveta2._concurrency.x_run_concurrent__mutmut_23" = "shutdown(cancel_futures=None); as above, only queued-work waste differs"
-"cveta2._concurrency.x_run_concurrent__mutmut_24" = "shutdown without wait=; as above"
-"cveta2._concurrency.x_run_concurrent__mutmut_25" = "shutdown without cancel_futures=; as above"
-"cveta2._concurrency.x_run_concurrent__mutmut_26" = "shutdown(wait=True); blocks a little longer on a run that is already failing"
-"cveta2._concurrency.x_run_concurrent__mutmut_27" = "shutdown(cancel_futures=False); queued work runs and its results are discarded"
+# run_concurrent's pool teardown. Its `finally` cancels the still-queued
+# futures so an uncaught worker error or a Ctrl+C aborts the batch instead
+# of draining it - that half is observable, and the queued-work cancellation
+# tests kill every cancel_futures= mutant. `wait=` is not: the pool's
+# __exit__ joins the in-flight threads either way, so blocking here or there
+# yields the same outcomes, the same exception and the same wall time.
+"cveta2._concurrency.x_run_concurrent__mutmut_24" = "shutdown(wait=None); the pool's __exit__ joins the in-flight threads regardless"
+"cveta2._concurrency.x_run_concurrent__mutmut_26" = "shutdown without wait=; defaults to True, and __exit__ joins regardless"
+"cveta2._concurrency.x_run_concurrent__mutmut_28" = "shutdown(wait=True); blocks in the finally instead of in __exit__, same outcome"
 
 # Counts and separators that reach nothing but one message. `already` is
 # computed solely to say how many issues were skipped, and the join is the
@@ -543,9 +540,9 @@ full = []
 "cveta2.dataset_partition.x__split_completed__mutmut_18" = "drops how=\"left\"; an inner join matches every row and keeps left order"
 
 # partition_annotations_df: obsolete is reset_index(drop=True)'d on the way out.
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_50" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_52" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
-"cveta2.dataset_partition.x_partition_annotations_df__mutmut_53" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_58" = "ignore_index=None; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_60" = "drops ignore_index; the result is reset_index(drop=True)'d before return"
+"cveta2.dataset_partition.x_partition_annotations_df__mutmut_61" = "ignore_index=False; the result is reset_index(drop=True)'d before return"
 
 [tool.vulture]
 min_confidence = 80

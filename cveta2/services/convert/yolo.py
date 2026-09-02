@@ -188,7 +188,9 @@ def _parse_label_file(path: Path) -> list[list[float]]:
     """Read a YOLO label .txt file.
 
     Returns list of float lists. Each has 5 fields (class xc yc w h) or 6
-    fields (class xc yc w h conf).
+    fields (class xc yc w h conf). Longer lines — segmentation, OBB or
+    keypoint labels — are kept as they are and later read as detection boxes
+    from their first six fields; their count is reported as a warning.
 
     Short and non-numeric lines are skipped rather than aborting the whole
     conversion — a label set that went through other tooling may carry a
@@ -199,6 +201,7 @@ def _parse_label_file(path: Path) -> list[list[float]]:
         return []
     rows: list[list[float]] = []
     skipped = 0
+    extra_fields = 0
     for line in read_text_utf8(path).strip().splitlines():
         parts = line.strip().split()
         if len(parts) < _YOLO_BOX_FIELDS:
@@ -208,9 +211,30 @@ def _parse_label_file(path: Path) -> list[list[float]]:
             rows.append([float(part) for part in parts])
         except ValueError:
             skipped += 1
+            continue
+        if len(parts) > _YOLO_CONF_FIELDS:
+            extra_fields += 1
     if skipped:
         logger.warning(f"Пропущено нечитаемых строк в {path}: {skipped}")
+    if extra_fields:
+        logger.warning(
+            f"Строк с полями сверх {_YOLO_CONF_FIELDS} (сегментация/OBB/keypoints?) "
+            f"в {path}: {extra_fields}; учтены только class xc yc w h [conf]"
+        )
     return rows
+
+
+def _normalize_class_names(names: object, source: Path) -> dict[int, str]:
+    """Turn the ``names`` value of a YOLO yaml into ``{class_id: name}``.
+
+    Ultralytics accepts both ``names: {0: cat, 1: dog}`` and the older
+    ``names: [cat, dog]``, where the position is the class id.
+    """
+    if isinstance(names, list):
+        return {index: str(name) for index, name in enumerate(names)}
+    if isinstance(names, dict):
+        return {int(k): str(v) for k, v in names.items()}
+    raise Cveta2Error(f"Ошибка: names в {source} должен быть списком или словарём")
 
 
 def _load_class_names_yaml(path: Path) -> dict[int, str]:
@@ -219,9 +243,9 @@ def _load_class_names_yaml(path: Path) -> dict[int, str]:
         raise Cveta2Error(f"Ошибка: файл имён классов не найден: {path}")
     data = yaml.safe_load(read_text_utf8(path))
     if isinstance(data, dict) and "names" in data:
-        return {int(k): str(v) for k, v in data["names"].items()}
+        return _normalize_class_names(data["names"], path)
     if isinstance(data, dict):
-        return {int(k): str(v) for k, v in data.items()}
+        return _normalize_class_names(data, path)
     return {}
 
 
@@ -269,9 +293,7 @@ def _from_yolo_dataset(
     if not isinstance(ds_config, dict):
         raise Cveta2Error(f"Ошибка: {yaml_path} не содержит YAML-словарь")
 
-    class_names: dict[int, str] = {
-        int(k): str(v) for k, v in ds_config.get("names", {}).items()
-    }
+    class_names = _normalize_class_names(ds_config.get("names", {}), yaml_path)
     if not class_names:
         raise Cveta2Error(f"Ошибка: в {yaml_path} не найдены имена классов (names)")
 

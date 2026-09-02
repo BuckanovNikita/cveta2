@@ -600,6 +600,25 @@ class TestIgnoreConfigEntries:
 
         assert cfg.get_ignored_tasks("proj") == [1, 2]
 
+    def test_add_task_reports_whether_anything_was_added(self) -> None:
+        """A repeat id is left exactly as it was, and the caller learns so.
+
+        The command layer turns ``False`` into a warning; a batch
+        ``cveta2.ignore("p", add=[...])`` with default flags must never blank
+        an earlier description or un-silence an entry.
+        """
+        cfg = IgnoreConfig()
+
+        assert cfg.add_task("proj", 1, "one", "flaky", silent=True) is True
+        assert cfg.add_task("proj", 1, "one-again", "other") is False
+
+        entry = cfg.get_ignored_entries("proj")[0]
+        assert (entry.name, entry.description, entry.silent) == (
+            "one",
+            "flaky",
+            True,
+        )
+
     def test_remove_task_keeps_the_project_while_entries_remain(self) -> None:
         """The project key is deleted only once its last entry is gone."""
         cfg = IgnoreConfig(

@@ -12,6 +12,7 @@ from cveta2.config import (
     CacheConfig,
     CacheProjectSettings,
     CvatConfig,
+    IgnoreConfig,
     ImageCacheConfig,
     NetworkConfig,
     SyncRootsConfig,
@@ -122,6 +123,24 @@ def test_load_config_invalid_section(tmp_path: Path) -> None:
     )
     cfg = SyncRootsConfig.load(cfg_path)
     assert cfg.projects == {}
+
+
+def test_empty_project_entries_mean_not_configured(tmp_path: Path) -> None:
+    """A cleared value (``coco8-dev:`` or ``''``) must not become a real path.
+
+    ``str(None)`` is the literal ``"None"`` — images would land in ``./None/``
+    and a sync root of ``"None"`` lists nothing — and ``Path("")`` is the
+    working directory.  ``CacheConfig`` already reads the same input as
+    "unset"; the per-project sections must agree with it.
+    """
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        image_cache={"a": None, "b": "", "c": "/x"},
+        sync_roots={"a": None, "c": "pre"},
+    )
+
+    assert ImageCacheConfig.load(cfg_path).projects == {"c": Path("/x")}
+    assert SyncRootsConfig.load(cfg_path).projects == {"c": "pre"}
 
 
 def test_save_load_round_trip_preserves_other_sections(tmp_path: Path) -> None:
@@ -479,6 +498,25 @@ def test_section_save_creates_missing_directories(tmp_path: Path) -> None:
     assert SyncRootsConfig.load(target).get_root("p") == "root"
 
 
+def test_section_save_keeps_cyrillic_unescaped(tmp_path: Path) -> None:
+    """``allow_unicode=True`` is what keeps the file readable to a human.
+
+    No roundtrip test can pin it: ``safe_load`` turns an escaped code point
+    back into the same string as raw Cyrillic, so dropping the flag is
+    invisible to every other assertion here — and ``cveta2 ignore --add``
+    writes Russian task names into a file people open and edit.
+    """
+    cfg_path = tmp_path / "custom.yaml"
+    cfg = IgnoreConfig()
+    cfg.add_task("proj", 456, "Партия 3", description="Дубликаты")
+
+    cfg.save(cfg_path)
+
+    text = cfg_path.read_text(encoding="utf-8")
+    assert "Партия 3" in text
+    assert "Дубликаты" in text
+
+
 def test_section_save_keeps_the_existing_section_order(tmp_path: Path) -> None:
     """``sort_keys=False`` keeps a hand-edited config in the order it was in.
 
@@ -626,6 +664,39 @@ def test_unusable_environment_values_fall_back_to_the_file(
     monkeypatch.setenv("CVETA2_S3_WORKERS", raw)
 
     assert NetworkConfig.resolve(cfg_path).s3_workers == 12
+
+
+def test_a_single_retry_attempt_from_the_environment_is_reported_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    """``=1`` is a natural spelling of "no retries", and the field rejects it.
+
+    Letting it through to ``NetworkConfig`` raises a pydantic error no CLI
+    layer catches; the env override promises to warn and ignore instead.
+    """
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        network={"retry_attempts": 3},
+    )
+    monkeypatch.setenv("CVETA2_RETRY_ATTEMPTS", "1")
+
+    assert NetworkConfig.resolve(cfg_path).retry_attempts == 3
+    assert any("CVETA2_RETRY_ATTEMPTS" in message for message in capture_logs)
+
+
+def test_the_lowest_usable_retry_count_from_the_environment_is_honoured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two attempts is the field's own floor, so the env bound must match it."""
+    cfg_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080"},
+        network={"retry_attempts": 3},
+    )
+    monkeypatch.setenv("CVETA2_RETRY_ATTEMPTS", "2")
+
+    assert NetworkConfig.resolve(cfg_path).retry_attempts == 2
 
 
 @pytest.mark.parametrize("raw", ["0", "-3"], ids=["zero", "negative"])

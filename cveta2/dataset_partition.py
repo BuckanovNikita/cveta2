@@ -213,9 +213,10 @@ def partition_annotations_df(
          **dataset** and the rest to **obsolete**.
     """
     if df.empty:
-        empty = df.copy()
-        return PartitionResult(
-            dataset=empty, obsolete=empty.copy(), in_progress=empty.copy()
+        df = df.reindex(
+            columns=df.columns.union(
+                ["image_name", "task_id", "job_stage", "job_state"], sort=False
+            )
         )
 
     latest_per_image = _latest_task_per_image(df, deleted_images)

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from cveta2.dataset_partition import PartitionResult
+from cveta2.dataset_partition import PartitionResult, partition_annotations_df
 from cveta2.exceptions import Cveta2Error
 from cveta2.models import CSV_COLUMNS, ProjectAnnotations
 from cveta2.services.output import (
@@ -64,6 +64,26 @@ def test_read_dataset_csv_missing_file_names_the_path(tmp_path: Path) -> None:
     missing = tmp_path / "nope.csv"
     with pytest.raises(Cveta2Error, match=re.escape(str(missing))):
         read_dataset_csv(missing, {"image_name"})
+
+
+def test_read_dataset_csv_header_only_file_returns_no_rows(tmp_path: Path) -> None:
+    """A CSV holding only the header is a valid, empty dataset."""
+    path = write_dataset_csv(tmp_path / "d.csv", [], columns=CSV_COLUMNS)
+    df = read_dataset_csv(path, set(CSV_COLUMNS))
+    assert list(df.columns) == list(CSV_COLUMNS)
+    assert len(df) == 0
+
+
+def test_read_dataset_csv_blank_file_names_the_path(tmp_path: Path) -> None:
+    """A file without even a header fails as ``Cveta2Error`` naming the file.
+
+    pandas raises its own ``EmptyDataError`` here, which the CLI would print
+    as a traceback instead of the clean exit every other bad input gets.
+    """
+    blank = tmp_path / "blank.csv"
+    blank.write_bytes(b"\n")
+    with pytest.raises(Cveta2Error, match=re.escape(str(blank))):
+        read_dataset_csv(blank, {"image_name"})
 
 
 def test_read_dataset_csv_lists_missing_columns_alphabetically(tmp_path: Path) -> None:
@@ -141,6 +161,14 @@ def test_write_raw_csv_creates_nested_dir_and_is_repeatable(tmp_path: Path) -> N
     assert set(df["image_name"]) == {"kept.jpg", "gone.jpg"}
 
 
+def test_raw_csv_keeps_full_header_when_empty(tmp_path: Path) -> None:
+    """An empty raw.csv still carries every CSV column, in order."""
+    write_raw_csv(ProjectAnnotations(annotations=[], deleted_images=[]), tmp_path)
+
+    header = (tmp_path / "raw.csv").read_text(encoding="utf-8").splitlines()[0]
+    assert header.split(",") == list(CSV_COLUMNS)
+
+
 # ---------------------------------------------------------------------------
 # write_partition_csvs
 # ---------------------------------------------------------------------------
@@ -166,6 +194,21 @@ def test_write_partition_csvs_creates_nested_dir_and_is_repeatable(
         df = pd.read_csv(output_dir / name)
         assert list(df.columns) == list(CSV_COLUMNS), name
         assert list(df["image_name"]) == [image], name
+
+
+def test_write_partition_csvs_of_empty_fetch_are_readable(tmp_path: Path) -> None:
+    """Partitioning an empty fetch writes files ``read_dataset_csv`` accepts.
+
+    Without the schema on the empty frame every partition CSV was a lone
+    newline, which pandas refuses to parse.
+    """
+    empty = pd.DataFrame([], columns=list(CSV_COLUMNS))
+    write_partition_csvs(partition_annotations_df(empty, []), tmp_path)
+
+    for name in ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv"):
+        df = read_dataset_csv(tmp_path / name, set(CSV_COLUMNS))
+        assert list(df.columns) == list(CSV_COLUMNS), name
+        assert len(df) == 0, name
 
 
 # ---------------------------------------------------------------------------
@@ -199,3 +242,18 @@ def test_deleted_csv_keeps_full_header_when_empty(tmp_path: Path) -> None:
 
     header = (tmp_path / "deleted.csv").read_text(encoding="utf-8").splitlines()[0]
     assert header.split(",") == list(CSV_COLUMNS)
+
+
+def test_dataset_csv_keeps_full_header_when_empty(tmp_path: Path) -> None:
+    """An empty dataset.csv still carries every CSV column, in order.
+
+    ``fetch-task --completed-only`` on an unfinished task selects nothing;
+    the file it leaves behind must still be one ``upload`` can read.
+    """
+    write_dataset_and_deleted(
+        ProjectAnnotations(annotations=[], deleted_images=[]), tmp_path
+    )
+
+    header = (tmp_path / "dataset.csv").read_text(encoding="utf-8").splitlines()[0]
+    assert header.split(",") == list(CSV_COLUMNS)
+    assert len(read_dataset_csv(tmp_path / "dataset.csv", set(CSV_COLUMNS))) == 0

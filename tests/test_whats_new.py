@@ -191,14 +191,16 @@ class TestComputeCutoff:
         assert baseline.known_task_ids == {1}
         assert baseline.cutoff == 1
 
-    def test_baseline_also_reads_the_csvs_fetch_wrote_alongside(
+    def test_baseline_also_reads_obsolete_and_deleted_but_not_in_progress(
         self, tmp_path: Path
     ) -> None:
-        """A task living only in obsolete.csv is known, not new.
+        """A task living only in obsolete.csv or deleted.csv is known, not new.
 
         Reading dataset.csv alone would leave every superseded task absent
         from ``known_task_ids``, so the unknown-id sweep would report them
-        on every single run.
+        on every single run.  ``in_progress.csv`` must stay unread: a task
+        listed there that has since completed is exactly what whats-new
+        exists to report.
         """
         write_dataset_csv(tmp_path / "obsolete.csv", [_row(4)])
         write_dataset_csv(tmp_path / "in_progress.csv", [_row(5, completed=False)])
@@ -207,8 +209,28 @@ class TestComputeCutoff:
 
         baseline = compute_baseline(df, tmp_path / "dataset.csv")
 
-        assert baseline.known_task_ids == {4, 5, 6, 7}
+        assert baseline.known_task_ids == {4, 6, 7}
         assert baseline.cutoff == 7
+
+    def test_a_task_in_progress_at_fetch_time_is_reported_once_completed(
+        self, tmp_path: Path
+    ) -> None:
+        """The baseline and the client together must surface the promised case.
+
+        Task 5 sat in ``in_progress.csv`` when the dataset was written and
+        has a lower id than the cutoff, so only the unknown-id half of the
+        filter can report it after CVAT marks it completed.
+        """
+        write_dataset_csv(tmp_path / "in_progress.csv", [_row(5, completed=False)])
+        df = pd.DataFrame([_row(7)])
+        client = _client_with_tasks([make_task(5), make_task(7)])
+
+        baseline = compute_baseline(df, tmp_path / "dataset.csv")
+        result = client.list_new_completed_tasks(
+            1, baseline.cutoff, baseline.known_task_ids
+        )
+
+        assert [t.id for t in result] == [5]
 
     def test_a_missing_sibling_does_not_stop_the_later_ones(
         self, tmp_path: Path

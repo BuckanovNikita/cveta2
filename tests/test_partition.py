@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
+import pandas as pd
 import pytest
 
 from cveta2.dataset_partition import partition_annotations_df
+from cveta2.models import CSV_COLUMNS
 from tests.helpers import csv_row, make_deleted, make_df
-
-if TYPE_CHECKING:
-    import pandas as pd
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,6 +42,45 @@ def test_empty_dataframe() -> None:
     assert len(result.dataset) == 0
     assert len(result.obsolete) == 0
     assert len(result.in_progress) == 0
+    assert result.deleted_images == []
+
+
+def test_empty_dataframe_keeps_deletions() -> None:
+    """A frame without rows or columns still reports its deleted images.
+
+    A task whose every frame is deleted and that carries no shapes yields
+    zero annotation records, so the fetch builds a column-less frame. The
+    early return used to drop the deletions with it, leaving deleted.csv
+    empty although CVAT reported the frames deleted.
+    """
+    deleted = [
+        make_deleted("a.jpg", 1, "2026-01-01T00:00:00"),
+        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),
+        make_deleted("b.jpg", 2, "2026-01-02T00:00:00"),
+    ]
+    result = partition_annotations_df(pd.DataFrame([]), deleted)
+
+    assert [(d.image_name, d.task_id) for d in result.deleted_images] == [
+        ("a.jpg", 2),
+        ("b.jpg", 2),
+    ]
+    assert len(result.dataset) == 0
+    assert len(result.obsolete) == 0
+    assert len(result.in_progress) == 0
+
+
+def test_empty_dataframe_keeps_column_order() -> None:
+    """An empty frame that already has the CSV schema keeps it, in order.
+
+    The three output frames become the CSV headers, so the schema must
+    survive unsorted: ``reindex`` with an alphabetised union would write
+    ``attributes`` first.
+    """
+    result = partition_annotations_df(pd.DataFrame([], columns=list(CSV_COLUMNS)), [])
+
+    for frame in (result.dataset, result.obsolete, result.in_progress):
+        assert list(frame.columns) == list(CSV_COLUMNS)
+        assert len(frame) == 0
     assert result.deleted_images == []
 
 

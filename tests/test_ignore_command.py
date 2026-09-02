@@ -69,6 +69,25 @@ class TestAdd:
         entry = IgnoreConfig.load().get_ignored_entries(fake.project.name)[0]
         assert (entry.description, entry.silent) == ("", False)
 
+    def test_re_adding_an_ignored_task_warns_and_changes_nothing(
+        self, fake: LoadedFixtures, capture_logs: list[str]
+    ) -> None:
+        """``--add 456 --silent`` on an already-ignored task used to claim success.
+
+        The entry stayed loud and the per-fetch warning kept firing; the user
+        must be told the flags were not applied and how to apply them.
+        """
+        task = fake.tasks[0]
+        _run(fake, "--add", str(task.id))
+
+        _run(fake, "--add", str(task.id), "--silent", "--description", "шум")
+
+        assert any("уже в ignore-списке" in line for line in capture_logs)
+        entries = IgnoreConfig.load().get_ignored_entries(fake.project.name)
+        assert [(e.id, e.description, e.silent) for e in entries] == [
+            (task.id, "", False)
+        ]
+
     def test_a_task_can_be_named_instead_of_numbered(
         self, fake: LoadedFixtures
     ) -> None:

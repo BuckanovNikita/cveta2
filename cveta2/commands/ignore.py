@@ -70,13 +70,20 @@ def run_ignore(args: argparse.Namespace) -> None:
             silent = args.silent
             resolved = _resolve_selectors(client, project_id, args.add)
             for task in resolved:
-                ignore_cfg.add_task(
+                added = ignore_cfg.add_task(
                     project_name, task.id, task.name, description, silent=silent
                 )
-                logger.info(
-                    f"Задача {task.name!r} (id={task.id}) добавлена "
-                    f"в ignore-список проекта {project_name!r}"
-                )
+                if added:
+                    logger.info(
+                        f"Задача {task.name!r} (id={task.id}) добавлена "
+                        f"в ignore-список проекта {project_name!r}"
+                    )
+                else:
+                    logger.warning(
+                        f"Задача {task.name!r} (id={task.id}) уже в ignore-списке "
+                        f"проекта {project_name!r} — описание и silent не изменены "
+                        f"(используйте --remove, затем --add)"
+                    )
             ignore_cfg.save()
             return
 

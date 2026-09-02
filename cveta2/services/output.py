@@ -63,12 +63,16 @@ def read_dataset_csv(
 ) -> pd.DataFrame:
     """Read a dataset CSV and validate required columns.
 
-    Raises ``Cveta2Error`` if the file is missing or columns are invalid.
-    When *require_task_id_column* is True, ``task_id`` must also be present.
+    Raises ``Cveta2Error`` if the file is missing, has no header row or
+    lacks required columns.  When *require_task_id_column* is True,
+    ``task_id`` must also be present.
     """
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
-    df = pd.read_csv(path, **CSV_READ_OPTIONS)
+    try:
+        df = pd.read_csv(path, **CSV_READ_OPTIONS)
+    except pd.errors.EmptyDataError as e:
+        raise Cveta2Error(f"Ошибка: файл {path} пуст, нет даже строки заголовка") from e
     missing = required_columns - set(df.columns)
     if missing:
         raise Cveta2Error(
@@ -193,7 +197,8 @@ def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     rows = result.to_csv_rows()
     deleted_rows = [d.to_csv_row() for d in result.deleted_images]
     output_dir.mkdir(parents=True, exist_ok=True)
-    save_csv(pd.DataFrame(rows + deleted_rows), output_dir / "raw.csv")
+    raw_df = pd.DataFrame(rows + deleted_rows, columns=list(CSV_COLUMNS))
+    save_csv(raw_df, output_dir / "raw.csv")
 
 
 def _write_deleted_csv(
@@ -220,6 +225,6 @@ def write_partition_csvs(partition: PartitionResult, output_dir: Path) -> None:
 def write_dataset_and_deleted(result: ProjectAnnotations, output_dir: Path) -> None:
     """Write dataset.csv and deleted.csv from annotation result into *output_dir*."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame(result.to_csv_rows())
+    df = pd.DataFrame(result.to_csv_rows(), columns=list(CSV_COLUMNS))
     save_csv(df, output_dir / "dataset.csv")
     _write_deleted_csv(result.deleted_images, output_dir)

@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 
 def run_convert(args: argparse.Namespace) -> None:
     """Map CLI arguments onto the conversion service functions."""
+    if (args.to_yolo or args.to_coco) and not args.dataset:
+        raise Cveta2Error("Ошибка: для --to-yolo / --to-coco укажите --dataset / -d.")
+    if args.from_yolo and not args.input:
+        raise Cveta2Error("Ошибка: для --from-yolo укажите --input / -i.")
     if args.to_yolo:
         convert_to_yolo(
             args.dataset,

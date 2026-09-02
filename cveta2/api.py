@@ -41,7 +41,7 @@ from cveta2.config import (
     resolve_images_cache_dir,
 )
 from cveta2.exceptions import Cveta2Error, MissingHostError
-from cveta2.models import JOB_STAGES, JOB_STATES, TaskInfo
+from cveta2.models import CSV_COLUMNS, JOB_STAGES, JOB_STATES, TaskInfo
 from cveta2.services.convert import (
     convert_from_yolo,
     convert_to_coco,
@@ -357,7 +357,7 @@ def fetch_task(  # noqa: PLR0913
             config_path=config_path,
         )
         result = fetch_selected_tasks(c, resolved, options)
-    return pd.DataFrame(result.to_csv_rows())
+    return pd.DataFrame(result.to_csv_rows(), columns=list(CSV_COLUMNS))
 
 
 def upload(  # noqa: PLR0913

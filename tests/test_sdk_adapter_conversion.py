@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
-from cvat_sdk.api_client.exceptions import ApiAttributeError
+from cvat_sdk import Client
+from cvat_sdk.api_client.exceptions import ApiAttributeError, ApiException
 from cvat_sdk.core.exceptions import BackgroundRequestException
 
 from cveta2._client.dtos import (
@@ -509,11 +510,72 @@ class TestAttachTaskData:
 
         assert client.api_client.tasks_api.create_data.call_count == 1
 
+    def test_a_throttled_status_poll_does_not_re_upload_the_data(self) -> None:
+        """Polling the request status is a read; a 429 there must only re-poll.
+
+        Retrying the whole attach would re-issue ``create_data`` on a task
+        that already holds its images, which CVAT rejects.
+        """
+        client = MagicMock()
+        client.wait_for_completion.side_effect = [ApiException(status=429), None]
+        adapter = self._adapter(client)
+
+        adapter.attach_task_data(1, self._spec())
+
+        assert client.api_client.tasks_api.create_data.call_count == 1
+        assert client.wait_for_completion.call_count == 2
+
+    def test_a_throttled_data_post_is_retried(self) -> None:
+        """A 429 on the data POST itself is a refusal, so the write is repeated."""
+        client = MagicMock()
+        adapter = self._adapter(client)
+        client.api_client.tasks_api.create_data.side_effect = [
+            ApiException(status=429),
+            (SimpleNamespace(rq_id="rq-1"), None),
+        ]
+
+        adapter.attach_task_data(1, self._spec())
+
+        assert client.api_client.tasks_api.create_data.call_count == 2
+        client.wait_for_completion.assert_called_once()
+        assert client.wait_for_completion.call_args.args == ("rq-1",)
+
     def test_a_processing_failure_raises_a_domain_error(self) -> None:
         """``CliApp`` catches only ``Cveta2Error``; anything else is a traceback."""
         client = MagicMock()
         client.wait_for_completion.side_effect = BackgroundRequestException("boom")
         adapter = self._adapter(client)
 
-        with pytest.raises(Cveta2Error):
+        with pytest.raises(Cveta2Error, match="обработка данных не удалась"):
             adapter.attach_task_data(1, self._spec())
+
+        assert client.wait_for_completion.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# set_organization
+# ---------------------------------------------------------------------------
+
+
+class TestSetOrganization:
+    """The port's ``None`` is the personal workspace, not "no org context".
+
+    ``cvat_sdk`` drops the ``X-Organization`` header on ``None``, and CVAT
+    then lists resources from every organization the user can access; an
+    empty header is what scopes requests to the sandbox.
+    """
+
+    @pytest.fixture
+    def sdk_client(self) -> Generator[Client, None, None]:
+        with Client("http://localhost:1", check_server_version=False) as client:
+            yield client
+
+    def test_none_sends_an_empty_organization_header(self, sdk_client: Client) -> None:
+        SdkCvatApiAdapter(sdk_client).set_organization(None)
+
+        assert sdk_client.api_client.default_headers["X-Organization"] == ""
+
+    def test_a_slug_is_sent_verbatim(self, sdk_client: Client) -> None:
+        SdkCvatApiAdapter(sdk_client).set_organization("acme")
+
+        assert sdk_client.api_client.default_headers["X-Organization"] == "acme"

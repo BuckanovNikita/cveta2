@@ -10,12 +10,19 @@ input if completion order leaked through.
 from __future__ import annotations
 
 import threading
+import time
+from typing import NoReturn
 
 import pytest
 
 from cveta2._concurrency import Workers, configure_workers, run_concurrent
 
 _BARRIER_TIMEOUT = 5.0
+_HOLD_A_WORKER = 0.25
+
+
+class _Interrupt(BaseException):
+    """Stands in for Ctrl+C, which pytest would read as its own abort signal."""
 
 
 class TestOrdering:
@@ -104,6 +111,54 @@ class TestFailurePolicy:
                 desc="t",
                 unit="item",
             )
+
+    def test_an_uncaught_failure_cancels_the_queued_work(self) -> None:
+        """Nothing still queued behind the failing item may start once it propagates."""
+        items = list(range(20))
+        executed: set[int] = set()
+        lock = threading.Lock()
+
+        def work(n: int) -> None:
+            if n == 0:
+                raise ValueError("boom")
+            with lock:
+                executed.add(n)
+            time.sleep(_HOLD_A_WORKER)
+
+        with pytest.raises(ValueError, match="boom"):
+            run_concurrent(
+                items, work, max_workers=2, catch=(OSError,), desc="t", unit="item"
+            )
+
+        assert executed < set(items[1:])
+
+    def test_an_interrupt_while_waiting_cancels_the_queued_work(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ctrl+C must abort the batch, not drain every queued item first.
+
+        The inline path stops at once. The pool's `__exit__` would instead run
+        the whole queue to completion unless the queued futures are cancelled
+        on the way out, so a large `fetch` looked hung after an interrupt.
+        """
+        items = list(range(20))
+        executed: set[int] = set()
+        lock = threading.Lock()
+
+        def work(n: int) -> None:
+            with lock:
+                executed.add(n)
+            time.sleep(_HOLD_A_WORKER)
+
+        def interrupt_while_waiting(_pending: object) -> NoReturn:
+            raise _Interrupt
+
+        monkeypatch.setattr("cveta2._concurrency.as_completed", interrupt_while_waiting)
+
+        with pytest.raises(_Interrupt):
+            run_concurrent(items, work, max_workers=2, catch=(), desc="t", unit="item")
+
+        assert executed < set(items)
 
 
 class TestParallelism:

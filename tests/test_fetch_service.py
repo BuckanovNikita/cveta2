@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
+from cveta2._client.dtos import RawAnnotations
 from cveta2._concurrency import configure_workers
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig
@@ -36,6 +37,7 @@ from cveta2.services.fetch import (
     _retrieve_task,
     fetch_project,
 )
+from cveta2.services.output import read_dataset_csv
 from cveta2.task_cache import TaskAnnotationCache
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
@@ -703,6 +705,58 @@ class TestTaskCsvDirectory:
         )
 
         assert set(partition.dataset["task_id"].unique()) == {fake.tasks[1].id}
+
+    def test_a_fetch_that_selects_nothing_writes_readable_csvs(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """``--completed-only`` with no finished task still writes the schema.
+
+        The partition CSVs used to be a lone newline, which
+        ``upload``/``whats-new``/``merge`` then failed on with a pandas
+        traceback instead of reading an empty dataset.
+        """
+        fake = build_fake(coco8_fixtures, ["normal"], statuses=["annotation"])
+        out = tmp_path / "out"
+
+        partition = _fetch_project(
+            FakeCvatApi(fake),
+            fake,
+            out,
+            FetchOptions(completed_only=True, publish_clearml=False),
+        )
+
+        assert partition.dataset.empty
+        for name in ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv"):
+            df = read_dataset_csv(out / name, set(CSV_COLUMNS))
+            assert list(df.columns) == list(CSV_COLUMNS), name
+            assert len(df) == 0, name
+
+    def test_a_shapeless_all_deleted_task_still_reports_its_deletions(
+        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """Deleted frames reach deleted.csv even when no annotation row exists.
+
+        The ``all-removed`` fixture keeps its shapes, so the fetch always had
+        rows to partition. Without them the frame is column-less, and the
+        partition's empty-frame shortcut used to drop the deletions with it.
+        """
+        fake = build_fake(coco8_fixtures, ["all-removed"], statuses=["completed"])
+        shapeless = fake._replace(
+            task_data={
+                task_id: (meta, RawAnnotations())
+                for task_id, (meta, _) in fake.task_data.items()
+            }
+        )
+        out = tmp_path / "out"
+
+        partition = _fetch_project(
+            FakeCvatApi(shapeless), shapeless, out, FetchOptions(publish_clearml=False)
+        )
+
+        assert {d.image_name for d in partition.deleted_images} == set(_IMAGE_NAMES)
+        deleted = read_dataset_csv(out / "deleted.csv", set(CSV_COLUMNS))
+        assert set(deleted["image_name"]) == set(_IMAGE_NAMES)
+        assert len(read_dataset_csv(out / "dataset.csv", set(CSV_COLUMNS))) == 0
 
     def test_the_saved_per_task_csv_holds_that_task_s_rows(
         self, normal_fake: LoadedFixtures, tmp_path: Path

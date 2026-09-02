@@ -109,10 +109,64 @@ class TestParseLabelFile:
     def test_well_formed_file_warns_nothing(
         self, tmp_path: Path, capture_logs: list[str]
     ) -> None:
+        """Neither a 5-field box nor a 6-field prediction line is reported.
+
+        The 6-field line pins the ``>`` in the extra-fields guard: with only
+        5-field lines here, ``>=`` would warn about every prediction file
+        and still pass.
+        """
         p = tmp_path / "label.txt"
-        p.write_text("0 0.5 0.5 0.3 0.4\n")
-        _parse_label_file(p)
+        p.write_text("0 0.5 0.5 0.3 0.4\n1 0.5 0.5 0.3 0.4 0.95\n")
+        assert len(_parse_label_file(p)) == 2
         assert capture_logs == []
+
+    def test_extra_fields_are_kept_but_counted_in_a_warning(
+        self, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        """A segmentation/OBB line is still returned whole, and reported.
+
+        Such lines used to be read silently as boxes made of the first two
+        polygon vertices. They are still accepted — ultralytics track output
+        (``cls xc yc w h conf id``) and pose labels start with a valid
+        detection line — but the caller now learns how many there were.
+        Two such lines separate ``+= 1`` from ``= 1``.
+        """
+        p = tmp_path / "label.txt"
+        obb = "0 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9"
+        p.write_text(f"{obb}\n1 0.5 0.5 0.3 0.4\n{obb}\n")
+
+        rows = _parse_label_file(p)
+
+        assert [len(row) for row in rows] == [9, 5, 9]
+        assert rows[0] == [0.0, 0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9]
+        assert len(capture_logs) == 1
+        assert "Строк с полями сверх 6" in capture_logs[0]
+        assert str(p) in capture_logs[0]
+        assert capture_logs[0].endswith(": 2; учтены только class xc yc w h [conf]")
+
+    def test_extra_fields_and_skipped_lines_are_counted_apart(
+        self, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        """Each warning carries its own count; a bad long line counts once.
+
+        A non-numeric 9-field line is a skipped line, not an extra-fields
+        line, so it must not inflate the second counter.
+        """
+        p = tmp_path / "label.txt"
+        p.write_text(
+            "0 0.5 0.5 0.3\n"
+            "x y z w h a b c d\n"
+            "0 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n"
+            "1 0.5 0.5 0.3 0.4\n"
+        )
+
+        assert len(_parse_label_file(p)) == 2
+        assert [m.split(": ", 1)[0] for m in capture_logs] == [
+            "Пропущено нечитаемых строк в " + str(p),
+            f"Строк с полями сверх 6 (сегментация/OBB/keypoints?) в {p}",
+        ]
+        assert capture_logs[0].endswith(": 2")
+        assert capture_logs[1].endswith(": 1; учтены только class xc yc w h [conf]")
 
 
 class TestToYolo:
@@ -538,7 +592,7 @@ def _write_yolo_label(root: Path, split: str, stem: str, text: str) -> None:
 
 def _write_yolo_yaml(
     root: Path,
-    names: dict[int, str],
+    names: dict[int, str] | list[str],
     splits: list[str],
     *,
     include_names: bool = True,
@@ -725,6 +779,41 @@ class TestFromYoloDatasetSplits:
         with pytest.raises(Cveta2Error, match="не найдены имена классов"):
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
 
+    def test_list_form_names_are_indexed_by_position(self, tmp_path: Path) -> None:
+        """``names: [cat, dog]`` — the YOLOv5-era form — maps ids by position.
+
+        Ultralytics accepts the list form and normalises it itself; here it
+        raised a bare ``AttributeError`` on ``.items()``.
+        """
+        root = tmp_path / "ds"
+        make_image(root / "images" / "train" / "a.jpg")
+        _write_yolo_label(root, "train", "a", _TWO_BOXES)
+        _write_yolo_yaml(root, ["cat", "dog"], ["train"])
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(root, out, read_all_sizes=False)
+
+        assert pd.read_csv(out)["instance_label"].tolist() == ["cat", "dog"]
+
+    @pytest.mark.parametrize("names_value", ["names: 3\n", "names: null\n"])
+    def test_scalar_names_are_rejected(self, tmp_path: Path, names_value: str) -> None:
+        """A ``names`` that is neither list nor mapping aborts with an explanation.
+
+        A missing key keeps its own message (see the test above); only an
+        explicit wrong-typed value reaches this one.
+        """
+        root = tmp_path / "ds"
+        self._labelled(root, "train", "a")
+        (root / "dataset.yaml").write_text(
+            f"train: images/train\n{names_value}", encoding="utf-8"
+        )
+
+        with pytest.raises(
+            Cveta2Error,
+            match=r"names в .*dataset\.yaml должен быть списком или словарём",
+        ):
+            convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
+
     def test_empty_yaml_is_rejected(self, tmp_path: Path) -> None:
         """An empty dataset.yaml aborts with an explanation, not AttributeError.
 
@@ -881,6 +970,19 @@ class TestFromYoloPredictions:
 
         assert pd.read_csv(out)["instance_label"].tolist() == ["class_7"]
 
+    def test_list_form_names_file_maps_ids_by_position(self, tmp_path: Path) -> None:
+        """A ``--names-file`` holding ``names: [cat, dog]`` labels boxes by index."""
+        pred_dir = tmp_path / "preds"
+        make_image(pred_dir / "images" / "a.jpg")
+        (pred_dir / "a.txt").write_text(_TWO_BOXES, encoding="utf-8")
+        names_path = tmp_path / "names.yaml"
+        names_path.write_text("names: [cat, dog]\n", encoding="utf-8")
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(pred_dir, out, names_file=names_path, read_all_sizes=False)
+
+        assert pd.read_csv(out)["instance_label"].tolist() == ["cat", "dog"]
+
     def test_read_all_sizes_measures_every_image(self, tmp_path: Path) -> None:
         """``read_all_sizes=True`` reaches prediction mode too.
 
@@ -952,3 +1054,29 @@ class TestLoadClassNamesYaml:
         path = tmp_path / "names.yaml"
         path.write_text("names\n", encoding="utf-8")
         assert _load_class_names_yaml(path) == {}
+
+    def test_list_form_names_are_indexed_and_stringified(self, tmp_path: Path) -> None:
+        """``names: [cat, 7]`` yields ``{0: "cat", 1: "7"}``.
+
+        Asserted on the function, not through the CSV: ``pd.read_csv`` would
+        coerce ``"7"`` back to an int and hide a missing ``str()``.
+        """
+        path = tmp_path / "names.yaml"
+        path.write_text("names: [cat, 7]\n", encoding="utf-8")
+        assert _load_class_names_yaml(path) == {0: "cat", 1: "7"}
+
+    @pytest.mark.parametrize("document", ["names: 3\n", "names: null\n"])
+    def test_scalar_names_value_is_rejected(
+        self, tmp_path: Path, document: str
+    ) -> None:
+        """A mapping whose ``names`` is a scalar aborts, naming the file.
+
+        A bare scalar document still yields ``{}`` (see the test above); the
+        raise is reserved for an explicit ``names`` of the wrong type.
+        """
+        path = tmp_path / "names.yaml"
+        path.write_text(document, encoding="utf-8")
+        with pytest.raises(
+            Cveta2Error, match=r"names в .*names\.yaml должен быть списком или словарём"
+        ):
+            _load_class_names_yaml(path)

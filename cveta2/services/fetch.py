@@ -19,7 +19,7 @@ from loguru import logger
 from cveta2._concurrency import Workers, run_concurrent
 from cveta2.config import CacheConfig, IgnoreConfig, is_cache_disabled
 from cveta2.dataset_partition import partition_annotations_df
-from cveta2.models import TaskAnnotations
+from cveta2.models import CSV_COLUMNS, TaskAnnotations
 from cveta2.services.output import (
     CSV_WRITE_OPTIONS,
     format_counts,
@@ -111,7 +111,7 @@ def fetch_project(
         write_raw_csv(result, output_dir)
 
     started = time.monotonic()
-    df = pd.DataFrame(result.to_csv_rows())
+    df = pd.DataFrame(result.to_csv_rows(), columns=list(CSV_COLUMNS))
     partition = partition_annotations_df(df, result.deleted_images)
     write_partition_csvs(partition, output_dir)
     logger.info(f"Партиционирование и запись CSV: {time.monotonic() - started:.1f} с")

@@ -129,6 +129,28 @@ def test_setup_existing_org_kept_on_enter(
     assert not any("нет организации" in prompt for prompt in prompts)
 
 
+def test_setup_rerun_keeps_existing_request_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={
+            "host": "http://localhost:8080",
+            "organization": "old-org",
+            "username": "user1",
+            "password": "pw",
+            "request_timeout": 300,
+        },
+    )
+    run_setup_with_inputs(monkeypatch, config_path, ["", "", ""])
+
+    saved = CvatConfig.from_file(config_path)
+    assert saved.request_timeout == 300
+    assert saved.host == "http://localhost:8080"
+    assert saved.organization == "old-org"
+    assert saved.username == "user1"
+
+
 @pytest.fixture
 def two_projects(monkeypatch: pytest.MonkeyPatch) -> list[ProjectInfo]:
     projects = [ProjectInfo(id=1, name="alpha"), ProjectInfo(id=2, name="beta")]

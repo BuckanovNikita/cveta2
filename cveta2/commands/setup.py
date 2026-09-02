@@ -56,6 +56,7 @@ def run_setup(args: argparse.Namespace) -> None:
         organization=organization,
         username=username,
         password=password,
+        request_timeout=existing.request_timeout,
     )
 
     saved_path = cfg.save_to_file(config_path)

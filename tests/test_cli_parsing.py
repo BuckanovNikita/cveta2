@@ -304,6 +304,21 @@ def test_run_dispatches_to_handler(handler: str, argv: list[str]) -> None:
     mock_handler.assert_called_once()
 
 
+_MISSING_PATH_CASES: list[tuple[list[str], str]] = [
+    (["convert", "--to-yolo", "-o", "out"], "--dataset"),
+    (["convert", "--to-coco", "-o", "out"], "--dataset"),
+    (["convert", "--from-yolo", "-o", "out.csv"], "--input"),
+]
+
+
+@pytest.mark.parametrize(("argv", "flag"), _MISSING_PATH_CASES)
+def test_convert_without_path_exits_cleanly(argv: list[str], flag: str) -> None:
+    """A missing -d / -i is a clean Cveta2Error exit, not a pathlib traceback."""
+    with pytest.raises(SystemExit) as excinfo:
+        CliApp().run(argv)
+    assert flag in str(excinfo.value.code)
+
+
 _TASK_DISPATCH_CASES: list[tuple[str, list[str]]] = [
     (
         "run_task_mark_deleted",
