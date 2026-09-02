@@ -2,6 +2,41 @@
 
 <!-- version list -->
 
+## v0.5.1 (2026-09-02)
+
+### Bug Fixes
+
+- Close the remaining verified defects in resolution, config paths and I/O
+  ([`33c55bb`](https://github.com/BuckanovNikita/cveta2/commit/33c55bbca2630e301eb7b5aa0a7946c5068120a7))
+
+- Correct ten verified defects found by the project-wide review
+  ([`c63853f`](https://github.com/BuckanovNikita/cveta2/commit/c63853f0a61abbbd29aa25c7bf6ef283bed08b50))
+
+- **scripts**: Let the integration stack honour INTEGRATION_USER and port env overrides
+  ([`f54e21d`](https://github.com/BuckanovNikita/cveta2/commit/f54e21d6b8cda5b8c74182313b2e996fe5965624))
+
+### Documentation
+
+- Describe the upload refusal of unreachable images and list-form names
+  ([`f501542`](https://github.com/BuckanovNikita/cveta2/commit/f50154240efb904ba04464945293e89995960be6))
+
+- Fix the miscounted out-of-scope list in the mutation-testing skill
+  ([`341131b`](https://github.com/BuckanovNikita/cveta2/commit/341131bbf144acf0a1e97168f32eeabf8e137018))
+
+- Remove restated prose and collapse cross-document duplication
+  ([`a2cf8ca`](https://github.com/BuckanovNikita/cveta2/commit/a2cf8ca749ae7151b0ddac8a0ad8730f7395097e))
+
+### Refactoring
+
+- Remove duplicated logic and needless indirection found by the review
+  ([`a63f8bc`](https://github.com/BuckanovNikita/cveta2/commit/a63f8bce4bbd145528c11636726c5a67177186ee))
+
+### Testing
+
+- Kill the two survivors the full mutation profile found
+  ([`0e47759`](https://github.com/BuckanovNikita/cveta2/commit/0e4775993bdb1b6c6c255c19bcc7ffe443df0ad6))
+
+
 ## v0.5.0 (2026-08-28)
 
 ### Documentation
