@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import (
+    ConnectionClosedError,
+    EndpointConnectionError,
+    IncompleteReadError,
+)
 
 from cveta2._concurrency import Workers, configure_workers
+from cveta2._retry import RetryPolicy
 from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
@@ -15,6 +22,7 @@ from cveta2.s3_utils import (
     parse_sync_root,
     pick_latest_duplicate,
     run_s3_transfers,
+    s3_get_bytes,
     set_default_data_timeout,
     strip_key_prefix,
 )
@@ -260,11 +268,22 @@ class TestRunS3Transfers:
 
     @pytest.mark.parametrize(
         "error",
-        [OSError("boom"), ConnectionError("boom"), KeyError("Body")],
-        ids=["os", "connection", "key"],
+        [
+            OSError("boom"),
+            ConnectionError("boom"),
+            KeyError("Body"),
+            IncompleteReadError(actual_bytes=1, expected_bytes=2),
+            EndpointConnectionError(endpoint_url="http://x"),
+            ConnectionClosedError(endpoint_url="http://x"),
+        ],
+        ids=["os", "connection", "key", "incomplete-read", "endpoint", "closed"],
     )
     def test_transport_failures_are_absorbed(self, error: Exception) -> None:
-        """Every member of S3_TRANSFER_ERRORS keeps the remaining items going."""
+        """Every member of S3_TRANSFER_ERRORS keeps the remaining items going.
+
+        The botocore faults are ``BotoCoreError`` only, not ``OSError``:
+        a connection dropped mid-body used to escape the batch entirely.
+        """
 
         def transfer(item: str) -> None:
             if item == "bad":
@@ -284,6 +303,37 @@ class TestRunS3Transfers:
 
         with pytest.raises(ValueError, match="a"):
             run_s3_transfers(["a"], transfer, str, desc="d", unit="u")
+
+
+class _BodyDroppedOnce:
+    """Streaming body whose first ``read`` dies the way a cut connection does."""
+
+    def __init__(self) -> None:
+        self.reads = 0
+
+    def read(self) -> bytes:
+        self.reads += 1
+        if self.reads == 1:
+            raise IncompleteReadError(actual_bytes=1, expected_bytes=2)
+        return b"data"
+
+
+def test_get_bytes_retries_a_body_dropped_mid_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A body cut mid-read is the fault botocore's own retries cannot see.
+
+    ``get_object`` has already returned by then, so only ``s3_retry`` can
+    repeat the read.
+    """
+    monkeypatch.setattr(RetryPolicy, "attempts", 3)
+    monkeypatch.setattr(RetryPolicy, "max_wait", 0.01)
+    body = _BodyDroppedOnce()
+    client = MagicMock()
+    client.get_object.return_value = {"Body": body}
+
+    assert s3_get_bytes(client, "bkt", "key") == b"data"
+    assert body.reads == 2
 
 
 class TestPickLatestDuplicate:

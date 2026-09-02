@@ -227,6 +227,8 @@ def validate_labels(
 def build_search_dirs(
     image_dirs: Sequence[str | Path] | str | Path | None,
     project_name: str,
+    *,
+    config_path: Path | None = None,
 ) -> list[Path]:
     """Build list of directories to search for image files.
 
@@ -239,7 +241,7 @@ def build_search_dirs(
     if isinstance(image_dirs, (str, Path)):
         image_dirs = [image_dirs]
     dirs: list[Path] = [Path(d).resolve() for d in (image_dirs or [])]
-    cache_dir = resolve_images_cache_dir(project_name)
+    cache_dir = resolve_images_cache_dir(project_name, config_path)
     if cache_dir is not None:
         dirs.append(cache_dir)
     if not dirs:
@@ -326,6 +328,16 @@ def _stage_images(
             )
 
     _warn_missing_images(missing)
+    unreachable = [
+        name
+        for name in missing
+        if build_s3_key(cs_info.prefix, name_to_server_file[name]) not in existing_keys
+    ]
+    if unreachable:
+        raise Cveta2Error(
+            f"Ошибка: {len(unreachable)} изображений нет ни локально, ни на S3: "
+            f"{preview_names(unreachable)}. Задача не создана."
+        )
 
     task_image_names = [
         build_s3_key(cs_info.prefix, name_to_server_file[n]) for n in all_image_names

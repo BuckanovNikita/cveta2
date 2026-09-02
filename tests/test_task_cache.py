@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
+from cveta2._retry import RetryPolicy
 from cveta2.client import CvatClient
 from cveta2.image_downloader import CloudStorageInfo
 from cveta2.models import (
@@ -29,6 +30,7 @@ from cveta2.services.fetch import (
     fetch_project,
     fetch_selected_tasks,
 )
+from cveta2.services.task_ops import resolved_task
 from cveta2.task_cache import (
     CACHE_SCHEMA_VERSION,
     CachedTaskEnvelope,
@@ -358,6 +360,11 @@ class _FailingS3Client:
         self.calls += 1
         raise EndpointConnectionError(endpoint_url="http://s3.invalid")
 
+    def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
+        del Bucket, Key
+        self.calls += 1
+        raise EndpointConnectionError(endpoint_url="http://s3.invalid")
+
     def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
         del kwargs
         self.calls += 1
@@ -389,6 +396,12 @@ class _ClientErrorS3Client(FakeS3Client):
 
 
 class TestS3Backend:
+    @pytest.fixture(autouse=True)
+    def _single_attempt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``_FailingS3Client`` raises a retryable fault; one attempt is enough."""
+        monkeypatch.setattr(RetryPolicy, "attempts", 1)
+        monkeypatch.setattr(RetryPolicy, "max_wait", 0.01)
+
     def test_s3_hit_backfills_local(self, tmp_path: Path) -> None:
         task = make_task(updated=_UPDATED)
         payload = _payload()
@@ -421,6 +434,66 @@ class TestS3Backend:
 
         assert (tmp_path / "local" / "task_1.json").exists()
         assert fake_s3.put_calls == [f"bkt/{_s3_key(1)}"]
+
+    def test_invalidate_drops_the_s3_entry_so_get_misses(self, tmp_path: Path) -> None:
+        """A task mutation must not be undone by the S3 mirror.
+
+        ``invalidate_local`` alone left the S3 copy in place, and the next
+        ``get`` backfilled the pre-mutation payload from it.
+        """
+        task = make_task(updated=_UPDATED)
+        fake_s3 = FakeS3Client()
+        cache = TaskAnnotationCache(
+            tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx")
+        )
+        cache.put(task, _payload())
+        key = f"bkt/{_s3_key(1)}"
+        assert key in fake_s3.objects
+
+        cache.invalidate(1)
+
+        assert cache.get(task) is None
+        assert key not in fake_s3.objects
+        assert fake_s3.delete_calls == [key]
+        assert not (tmp_path / "local" / "task_1.json").exists()
+
+    def test_invalidate_without_s3_only_unlinks_locally(self, tmp_path: Path) -> None:
+        task = make_task(updated=_UPDATED)
+        cache = TaskAnnotationCache(tmp_path / "local")
+        cache.put(task, _payload())
+
+        cache.invalidate(1)
+
+        assert cache.get(task) is None
+        assert not (tmp_path / "local" / "task_1.json").exists()
+
+    def test_delete_of_a_missing_key_is_a_noop(self) -> None:
+        fake_s3 = FakeS3Client()
+        backend = S3CacheBackend(fake_s3, "bkt", "pfx")
+
+        backend.delete(1)
+        backend.put(1, b"data")
+
+        assert fake_s3.delete_calls == [f"bkt/{_s3_key(1)}"]
+        assert fake_s3.objects[f"bkt/{_s3_key(1)}"] == b"data"
+
+    def test_failing_delete_disables_s3_and_still_unlinks_locally(
+        self, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        task = make_task(updated=_UPDATED)
+        local_dir = tmp_path / "local"
+        TaskAnnotationCache(local_dir).put(task, _payload())
+        failing = _FailingS3Client()
+        backend = S3CacheBackend(failing, "bkt", "pfx")
+        cache = TaskAnnotationCache(local_dir, s3=backend)
+
+        cache.invalidate(1)
+        backend.delete(1)
+        backend.put(1, b"data")
+
+        assert not (local_dir / "task_1.json").exists()
+        assert failing.calls == 1
+        assert sum("S3-кэш" in m for m in capture_logs) == 1
 
     def test_stale_s3_entry_ignored_without_remote_delete(self, tmp_path: Path) -> None:
         task = make_task(updated=_UPDATED)
@@ -751,6 +824,68 @@ class TestCacheSettings:
 
         assert not (cache_dir / "task_1.json").exists()
 
+    def test_invalidate_local_entry_drops_the_default_s3_entry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+        cache_dir = get_task_cache_dir(5)
+        TaskAnnotationCache(cache_dir).put(make_task(updated=_UPDATED), _payload())
+        key = f"bkt/{_s3_key(1)}"
+        fake_s3 = FakeS3Client({key: b"stale"})
+
+        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+            invalidate_local_entry(5, 1, "", _PROJECT_STORAGE)
+
+        assert not (cache_dir / "task_1.json").exists()
+        assert fake_s3.delete_calls == [key]
+        assert key not in fake_s3.objects
+
+    def test_invalidate_local_entry_honors_task_cache_s3(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The explicit-location key is the one dropped, not the default one.
+
+        Losing the ``task_cache_s3`` pass-through would delete a key nobody
+        wrote and leave the team's shared entry to be served again.
+        """
+        config_path = write_config_yaml(
+            tmp_path / "cfg.yaml",
+            cache={"projects": {"proj": {"task_cache_s3": "s3://ml-cache/proj"}}},
+        )
+        monkeypatch.setenv("CVETA2_CONFIG", str(config_path))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+        explicit_key = "ml-cache/proj/task_annotations/task_1.json"
+        default_key = f"bkt/{_s3_key(1)}"
+        fake_s3 = FakeS3Client({explicit_key: b"stale", default_key: b"other"})
+
+        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+            invalidate_local_entry(5, 1, "proj", _PROJECT_STORAGE)
+
+        assert fake_s3.delete_calls == [explicit_key]
+        assert explicit_key not in fake_s3.objects
+        assert default_key in fake_s3.objects
+
+    def test_invalidate_local_entry_leaves_s3_alone_when_cache_disabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``CVETA2_DISABLE_CACHE`` means no S3 traffic at all, deletes included."""
+        monkeypatch.setenv("CVETA2_DISABLE_CACHE", "true")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+        cache_dir = get_task_cache_dir(5)
+        TaskAnnotationCache(cache_dir).put(make_task(updated=_UPDATED), _payload())
+        key = f"bkt/{_s3_key(1)}"
+        fake_s3 = FakeS3Client({key: b"stale"})
+
+        with patch(
+            "cveta2.task_cache.make_s3_client", return_value=fake_s3
+        ) as make_client:
+            invalidate_local_entry(5, 1, "", _PROJECT_STORAGE)
+
+        make_client.assert_not_called()
+        assert fake_s3.delete_calls == []
+        assert key in fake_s3.objects
+        assert not (cache_dir / "task_1.json").exists()
+
     def test_explicit_location_uses_plain_task_annotations_key(
         self, tmp_path: Path
     ) -> None:
@@ -963,6 +1098,33 @@ class TestFetchBuildsTheS3CacheBackend:
         assert fake_s3.put_calls == [
             f"ml-cache/proj/task_annotations/task_{fake.tasks[0].id}.json"
         ]
+
+
+class TestTaskMutationDropsTheS3Entry:
+    """``resolved_task`` hands the project's storage to the invalidation."""
+
+    def test_resolved_task_drops_the_s3_entry_on_exit(
+        self,
+        normal_fake: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+        fake = normal_fake
+        task = fake.tasks[0]
+        key = f"bkt/{_s3_key(task.id)}"
+        fake_s3 = FakeS3Client({key: b"stale"})
+        client = CvatClient(CFG, api=_FakeApiWithStorage(fake, _PROJECT_STORAGE))
+
+        with (
+            patch("cveta2.task_cache.make_s3_client", return_value=fake_s3),
+            client,
+            resolved_task(client, fake.project.id, fake.project.name, task.id),
+        ):
+            assert key in fake_s3.objects
+
+        assert fake_s3.delete_calls == [key]
+        assert key not in fake_s3.objects
 
 
 class TestSelectedFetchDoesNotPrune:

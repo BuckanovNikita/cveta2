@@ -134,6 +134,27 @@ class TestMaybePublishClearml:
 
         mock_publish.assert_not_called()
 
+    def test_config_path_reaches_the_config_loader(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An explicit config file is what the ``clearml`` section is read from."""
+        monkeypatch.delenv("CVETA2_CLEARML", raising=False)
+        config_path = tmp_path / "team.yaml"
+
+        with (
+            patch("cveta2._clearml.is_clearml_available", return_value=True),
+            patch(
+                "cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG
+            ) as load,
+            patch("cveta2._clearml._dataset.publish_to_clearml") as mock_publish,
+        ):
+            from cveta2._clearml import maybe_publish_clearml
+
+            maybe_publish_clearml("proj", tmp_path, config_path)
+
+        load.assert_called_once_with(config_path)
+        mock_publish.assert_called_once_with(_MAPPED_CONFIG.projects["proj"], tmp_path)
+
     def test_exception_caught_and_logged(
         self,
         tmp_path: Path,

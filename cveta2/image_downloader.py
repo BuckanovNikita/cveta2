@@ -8,6 +8,8 @@ pending images are counted as failed. Already-cached files are skipped.
 
 from __future__ import annotations
 
+import os
+import threading
 from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import parse_qs
 
@@ -363,10 +365,22 @@ def _download_one_s3(
     key: str,
     dest: Path,
 ) -> None:
-    """Download a single S3 object to *dest*."""
+    """Download a single S3 object to *dest*; a failed write leaves nothing behind.
+
+    The cache treats every existing file as complete, so the bytes go
+    through a per-writer temp name and reach *dest* only by an atomic
+    rename — a disk that fills up mid-write cannot leave a truncated
+    image that later runs would skip as cached.
+    """
     data = s3_get_bytes(s3_client, bucket, key)
     ensure_shared_dir(dest.parent)
-    write_shared_bytes(dest, data)
+    tmp_path = dest.with_name(f"{dest.name}.tmp{os.getpid()}-{threading.get_ident()}")
+    try:
+        write_shared_bytes(tmp_path, data)
+        tmp_path.replace(dest)
+    except OSError:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 class S3Syncer:

@@ -10,11 +10,22 @@ repeats a request the server might already have applied.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from botocore.exceptions import ClientError
+import urllib3
+import urllib3.exceptions
+from botocore.exceptions import (
+    ClientError,
+    ConnectionClosedError,
+    EndpointConnectionError,
+    IncompleteReadError,
+    NoCredentialsError,
+)
 from cvat_sdk.api_client.exceptions import ApiException
 
 from cveta2._client.sdk_adapter import (
+    SdkCvatApiAdapter,
     _should_retry_read,
     _should_retry_write,
     _translate_api_errors,
@@ -98,8 +109,23 @@ class TestS3Predicate:
     def test_permanent_codes_fail_fast(self, code: str) -> None:
         assert not _should_retry_s3(_client_error(code))
 
-    def test_transport_failures_are_retried(self) -> None:
-        assert _should_retry_s3(OSError("broken pipe"))
+    @pytest.mark.parametrize(
+        "error",
+        [
+            OSError("broken pipe"),
+            IncompleteReadError(actual_bytes=1, expected_bytes=2),
+            EndpointConnectionError(endpoint_url="http://x"),
+            ConnectionClosedError(endpoint_url="http://x"),
+        ],
+        ids=["os", "incomplete-read", "endpoint", "connection-closed"],
+    )
+    def test_transport_failures_are_retried(self, error: Exception) -> None:
+        """The botocore-only transport faults are not OSErrors but just as transient."""
+        assert _should_retry_s3(error)
+
+    def test_configuration_faults_fail_fast(self) -> None:
+        """Missing credentials never fix themselves; retrying only delays the error."""
+        assert not _should_retry_s3(NoCredentialsError())
 
 
 class TestRetryLoop:
@@ -162,6 +188,65 @@ class TestRetryLoop:
             always_throttled()
 
         assert len(calls) == 2
+
+
+class TestTransportErrorsLeaveTheAdapterTranslated:
+    """What escapes the retry budget must be a ``CvatApiError``, never urllib3.
+
+    ``_should_retry_read`` recognises the raw transport types and repeats
+    them, but ``network_retry`` re-raises the last one as-is once the budget
+    is spent. Nothing above ``_client`` catches urllib3, so a read timeout or
+    an outage mid-fetch used to end in a traceback instead of the clean exit
+    the ``ports`` contract promises.
+    """
+
+    def test_a_read_timeout_is_retried_and_then_surfaces_as_a_domain_error(
+        self,
+    ) -> None:
+        configure_retries(attempts=2, max_wait=0.01)
+        boom = urllib3.exceptions.ReadTimeoutError(
+            urllib3.HTTPConnectionPool("cvat.example"), "/api", "Read timed out"
+        )
+        client = MagicMock()
+        client.api_client.tasks_api.retrieve_annotations.side_effect = boom
+
+        with pytest.raises(CvatApiError) as caught:
+            SdkCvatApiAdapter(client).get_task_annotations(7)
+
+        assert client.api_client.tasks_api.retrieve_annotations.call_count == 2
+        assert caught.value.status_code == 0
+        assert caught.value.__cause__ is boom
+        assert str(caught.value) == f"Сетевая ошибка при обращении к CVAT: {boom}"
+
+    def test_a_dropped_connection_on_a_write_fails_once_as_a_domain_error(
+        self,
+    ) -> None:
+        """Writes never repeat a transport failure, but they still translate it."""
+        configure_retries(attempts=5, max_wait=0.01)
+        boom = urllib3.exceptions.MaxRetryError(
+            urllib3.HTTPConnectionPool("cvat.example"),
+            "/api",
+            ConnectionRefusedError("boom"),
+        )
+        client = MagicMock()
+        client.api_client.tasks_api.destroy.side_effect = boom
+
+        with pytest.raises(CvatApiError) as caught:
+            SdkCvatApiAdapter(client).delete_task(7)
+
+        assert client.api_client.tasks_api.destroy.call_count == 1
+        assert caught.value.__cause__ is boom
+
+    def test_an_api_status_is_not_rewrapped_as_a_transport_failure(self) -> None:
+        """The outer layer must not eat the status code the inner one produced."""
+        configure_retries(attempts=1, max_wait=0.01)
+        client = MagicMock()
+        client.api_client.tasks_api.destroy.side_effect = ApiException(status=404)
+
+        with pytest.raises(CvatApiError) as caught:
+            SdkCvatApiAdapter(client).delete_task(7)
+
+        assert caught.value.status_code == 404
 
 
 class _FakeOutcome:

@@ -14,11 +14,15 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn
 from unittest.mock import MagicMock
 
 import pytest
+import urllib3
+import urllib3.exceptions
+from cvat_sdk.api_client.exceptions import ApiException
 
 from cveta2._client.dtos import RawDataMeta, RawFrame, RawJob
 from cveta2._client.ports import CvatApiPort
 from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.client import CvatClient
+from cveta2.exceptions import CvatApiError
 from cveta2.models import LabelInfo
 from tests.helpers import CFG, client_with_api, csv_row, make_df
 
@@ -183,6 +187,77 @@ class TestConnectionLifecycle:
         assert exc_type is ValueError
         assert exc_val is boom
         assert exc_tb is not None
+
+
+def _failing_factory(boom: BaseException) -> Callable[..., NoReturn]:
+    """Build an ``SdkClientFactory`` whose ``make_client`` step fails with *boom*."""
+
+    def factory(**_kwargs: Any) -> NoReturn:
+        raise boom
+
+    return factory
+
+
+class TestConnectionFailures:
+    """Login and transport errors from ``make_client`` must leave as ``CvatApiError``.
+
+    ``make_client`` performs the server-about request and the login inside
+    the factory call, where no adapter method wraps it. ``cli._run_command``
+    catches only ``Cveta2Error``, so a wrong password or an unreachable host
+    used to print a traceback instead of the clean exit message.
+    """
+
+    def test_a_rejected_login_keeps_its_status_code(self) -> None:
+        boom = ApiException(status=401, reason="Unauthorized")
+
+        with (
+            pytest.raises(CvatApiError) as caught,
+            CvatClient(CFG, _failing_factory(boom)),
+        ):
+            pass
+
+        assert caught.value.status_code == 401
+        assert caught.value.__cause__ is boom
+
+    @pytest.mark.parametrize(
+        "boom",
+        [
+            urllib3.exceptions.MaxRetryError(
+                urllib3.HTTPConnectionPool("cvat.example"),
+                "/api/server/about",
+                ConnectionRefusedError("boom"),
+            ),
+            OSError("connection refused"),
+        ],
+        ids=["urllib3", "oserror"],
+    )
+    def test_an_unreachable_host_names_itself(self, boom: BaseException) -> None:
+        """The host is the actionable half of a connection failure."""
+        with (
+            pytest.raises(CvatApiError) as caught,
+            CvatClient(CFG, _failing_factory(boom)),
+        ):
+            pass
+
+        assert (
+            str(caught.value) == f"Не удалось подключиться к CVAT ({CFG.host}): {boom}"
+        )
+        assert caught.value.__cause__ is boom
+
+    def test_a_transport_error_inside_the_block_is_not_rewrapped(self) -> None:
+        """Only the connection step is translated; the caller's body stays raw.
+
+        The ``try`` must enclose the factory call alone. Wrapping the whole
+        ``with``/``yield`` would turn every ``OSError`` a caller raises while
+        connected into a bogus "could not connect" error.
+        """
+        client, factory = _client()
+        boom = OSError("disk full")
+
+        with pytest.raises(OSError, match="disk full"), client:
+            raise boom
+
+        assert factory.cm.exits[0][1] is boom
 
 
 _CONTEXT_REQUIRED_OPS: list[tuple[str, Callable[[CvatClient], object]]] = [

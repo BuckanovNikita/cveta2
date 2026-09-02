@@ -38,3 +38,7 @@ class S3Client(Protocol):
     def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> None:  # noqa: N803
         """Put an object to S3."""
         ...
+
+    def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
+        """Delete an object from S3 (a no-op for a missing key)."""
+        ...

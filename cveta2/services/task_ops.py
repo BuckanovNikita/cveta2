@@ -1,9 +1,10 @@
 """Task-mutation scaffolding shared by the CLI and the public API.
 
-The local cache entry is invalidated on exit even when the mutation
-fails or the user declines a confirmation — conservative but safe. It
-lives here so the CLI and the api layer cannot drift on the one step
-that keeps a stale entry from surviving a later mutation.
+The task's cache entry — local and in the S3 mirror — is invalidated
+on exit even when the mutation fails or the user declines a
+confirmation — conservative but safe. It lives here so the CLI and the
+api layer cannot drift on the one step that keeps a stale entry from
+surviving a later mutation.
 """
 
 from __future__ import annotations
@@ -31,11 +32,14 @@ def resolved_task(
 
     The project is already resolved by the caller: the CLI resolves it
     through a prompt, the api layer without one, and services may not
-    import the interactive layer.
+    import the interactive layer.  The project's cloud storage is looked
+    up before the block runs, so nothing that talks to CVAT sits in the
+    ``finally`` where it could mask the mutation's own error.
     """
     tasks = client.list_project_tasks(project_id)
     task_info = client.resolve_task_selectors(tasks, [task])[0]
+    cs_info = client.detect_project_cloud_storage(project_id)
     try:
         yield task_info
     finally:
-        invalidate_local_entry(project_id, task_info.id, project_name)
+        invalidate_local_entry(project_id, task_info.id, project_name, cs_info)

@@ -112,23 +112,35 @@ class _ReadMixin(_ClientBase):
         """Resolve project id from numeric id or project name.
 
         If project_spec is int or digit string, returns it as int.
-        If it is a name, looks in cached list first, then via API.
+        If it is a name, delegates to :meth:`find_project_by_name`.
         """
         if isinstance(project_spec, int):
             return project_spec
         s = str(project_spec).strip()
         if s.isdigit():
             return int(s)
-        search = s.casefold()
-        if cached:
-            for p in cached:
-                if p.name.casefold() == search:
-                    return p.id
-        projects = self.list_projects()
-        for p in projects:
+        return self.find_project_by_name(s, cached=cached).id
+
+    def find_project_by_name(
+        self,
+        name: str,
+        *,
+        cached: list[ProjectInfo] | None = None,
+    ) -> ProjectInfo:
+        """Find a project by name, case-insensitively.
+
+        Looks in the cached list first, then lists the organization's
+        projects.  Returns the matched project, so callers get CVAT's own
+        spelling of the name rather than the one they searched with.
+        """
+        search = name.casefold()
+        for p in cached or ():
             if p.name.casefold() == search:
-                return p.id
-        raise ProjectNotFoundError(f"Project not found: {s!r}")
+                return p
+        for p in self.list_projects():
+            if p.name.casefold() == search:
+                return p
+        raise ProjectNotFoundError(f"Project not found: {name!r}")
 
     def detect_project_cloud_storage(
         self,

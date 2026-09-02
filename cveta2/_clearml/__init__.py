@@ -22,12 +22,15 @@ def is_clearml_available() -> bool:
     return True
 
 
-def maybe_publish_clearml(project_name: str, output_dir: Path) -> None:
+def maybe_publish_clearml(
+    project_name: str, output_dir: Path, config_path: Path | None = None
+) -> None:
     """Publish CSV files to ClearML Dataset if configured.
 
     This is the single entry point called from fetch.py.
     All guard checks and error handling live here so the caller
-    needs no ClearML awareness.
+    needs no ClearML awareness. ``config_path`` selects the config file
+    the ``clearml`` section is read from; None means the default one.
     """
     if is_clearml_disabled():
         logger.debug("ClearML disabled via CVETA2_CLEARML=false")
@@ -37,7 +40,7 @@ def maybe_publish_clearml(project_name: str, output_dir: Path) -> None:
         logger.debug("ClearML package not installed — skipping dataset publish")
         return
 
-    cfg = ClearmlConfig.load()
+    cfg = ClearmlConfig.load(config_path)
     if not cfg.enabled:
         logger.debug("ClearML disabled in config")
         return

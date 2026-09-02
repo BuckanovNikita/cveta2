@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
 import pytest
+import urllib3
+import urllib3.exceptions
 from cvat_sdk import Client
 from cvat_sdk.api_client.exceptions import ApiAttributeError, ApiException
 from cvat_sdk.core.exceptions import BackgroundRequestException
@@ -509,6 +511,24 @@ class TestAttachTaskData:
         adapter.attach_task_data(1, self._spec())
 
         assert client.api_client.tasks_api.create_data.call_count == 1
+
+    def test_a_timed_out_size_read_is_only_logged(self) -> None:
+        """The size read feeds a log line; a transport failure there is not fatal.
+
+        ``get_task_size`` now translates urllib3 errors itself, so the
+        ``except`` around it names only ``CvatApiError``. This pins that the
+        attach still completes when the read times out on every attempt.
+        """
+        client = MagicMock()
+        client.tasks.retrieve.side_effect = urllib3.exceptions.ReadTimeoutError(
+            urllib3.HTTPConnectionPool("cvat.example"), "/api", "Read timed out"
+        )
+        adapter = self._adapter(client)
+
+        adapter.attach_task_data(1, self._spec())
+
+        assert client.api_client.tasks_api.create_data.call_count == 1
+        assert client.tasks.retrieve.call_count == RetryPolicy.attempts
 
     def test_a_throttled_status_poll_does_not_re_upload_the_data(self) -> None:
         """Polling the request status is a read; a 429 there must only re-poll.

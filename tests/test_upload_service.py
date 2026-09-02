@@ -164,6 +164,19 @@ def make_s3(monkeypatch: pytest.MonkeyPatch, s3: _ListCountingS3) -> None:
     monkeypatch.setattr("cveta2.image_uploader.make_s3_client", lambda _url=None: s3)
 
 
+def seeded_bucket(names: list[str]) -> _ListCountingS3:
+    """Build a bucket already holding *names* at the prefix root, no month folder.
+
+    That is the layout an earlier upload leaves behind, and the one
+    :func:`_seed_manifest_for` assumes when it maps every name to itself.
+    Staging refuses an image that is neither local nor on S3, so a test
+    that hands the service no ``search_dirs`` seeds its images here.
+    """
+    return _ListCountingS3(
+        {f"{BUCKET}/{build_s3_key(PREFIX, name)}": b"seeded" for name in names}
+    )
+
+
 def make_local_images(tmp_path: Path, names: list[str]) -> Path:
     """Create placeholder files for *names* and return their directory."""
     image_dir = tmp_path / "images"
@@ -240,40 +253,33 @@ class TestStageImages:
         that passed ``cs_info`` / ``found_images`` /
         ``name_to_server_file`` from one that passed ``None`` or dropped
         the argument.  Running the real helpers over a seeded bucket makes
-        each of those visible: ``a.jpg`` keeps the month folder it already
-        occupies on S3 and is *not* re-uploaded, ``b.jpg`` is assigned the
-        current month and uploaded, and ``c.jpg`` is only reported missing.
-        A single ``list_objects_v2`` call is the contract behind passing
-        ``existing_keys`` down to the uploader.
+        each of those visible: ``a.jpg`` is absent locally but keeps the
+        month folder it already occupies on S3 — reported missing, *not*
+        re-uploaded and not refused — while ``b.jpg`` is assigned the
+        current month and uploaded.  A single ``list_objects_v2`` call is
+        the contract behind passing ``existing_keys`` down to the uploader.
         """
         s3 = _ListCountingS3({f"{BUCKET}/{SEEDED_KEY}": b"seeded"})
         make_s3(monkeypatch, s3)
-        image_dir = make_local_images(tmp_path, ["a.jpg", "b.jpg"])
+        image_dir = make_local_images(tmp_path, ["b.jpg"])
         cs_info = make_cs_info(bucket=BUCKET, prefix=PREFIX)
         client = make_client(cloud_storage=cs_info)
         request = make_request(
-            image_names=["a.jpg", "b.jpg", "c.jpg"],
+            image_names=["a.jpg", "b.jpg"],
             search_dirs=[image_dir],
         )
 
         staged = _stage_images(client, request)
 
         assert staged.cs_info == cs_info
-        assert staged.task_image_names == [
-            SEEDED_KEY,
-            current_month_key("b.jpg"),
-            current_month_key("c.jpg"),
-        ]
+        assert staged.task_image_names == [SEEDED_KEY, current_month_key("b.jpg")]
         assert staged.annotations["s3_image_path"].tolist() == staged.task_image_names
         image_paths = staged.annotations["image_path"]
-        assert image_paths.tolist()[:2] == [
-            str((image_dir / "a.jpg").resolve()),
-            str((image_dir / "b.jpg").resolve()),
-        ]
-        assert pd.isna(image_paths.iloc[2])
+        assert pd.isna(image_paths.iloc[0])
+        assert image_paths.iloc[1] == str((image_dir / "b.jpg").resolve())
         assert s3.uploaded_keys == [current_month_key("b.jpg")]
         assert s3.list_calls == 1
-        assert any("c.jpg" in message for message in capture_logs)
+        assert any("a.jpg" in message for message in capture_logs)
 
     def test_missing_cloud_storage_names_the_project(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -643,7 +649,7 @@ class TestResume:
     ) -> None:
         """A finished upload has nothing to resume; a stale file would mislead."""
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         upload_dataset(client, make_request(image_names=["a.jpg"]))
 
@@ -658,7 +664,7 @@ class TestResume:
         manifest knows about; without this checkpoint it is orphaned.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=["a.jpg"]))
@@ -676,8 +682,8 @@ class TestResume:
         second one; the frame count is what tells the two apart.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
@@ -699,8 +705,8 @@ class TestResume:
         the upload twice, which is exactly what --resume exists to avoid.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
 
         outcome = upload_dataset(client, make_request(image_names=names))
         _seed_manifest_for(client, make_request(image_names=names), outcome.task_id)
@@ -716,7 +722,7 @@ class TestResume:
     ) -> None:
         """Guessing which frames it holds would misplace every annotation."""
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
+        make_s3(monkeypatch, seeded_bucket(["a.jpg", "b.jpg"]))
 
         outcome = upload_dataset(client, make_request(image_names=["a.jpg", "b.jpg"]))
         request = make_request(image_names=["a.jpg"])
@@ -734,8 +740,8 @@ class TestResume:
         all, which looks finished and is not.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_uploading_annotations(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
@@ -756,8 +762,8 @@ class TestResume:
         readback both exist to prevent.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
 
         outcome = upload_dataset(client, make_request(image_names=names))
         before = len(_writes_of(client).shapes[outcome.task_id])
@@ -774,7 +780,7 @@ class TestResume:
     ) -> None:
         """The likely mistake is a different CSV, so name what *is* pending."""
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=["a.jpg"]))
@@ -794,7 +800,7 @@ class TestResume:
             upload_dataset(client, _resume_request(["a.jpg"]))
 
     def test_resume_keeps_the_server_paths_the_first_run_chose(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """``_assign_month_folder`` reads the clock.
 
@@ -805,22 +811,29 @@ class TestResume:
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg", "b.jpg"]
+        image_dir = make_local_images(tmp_path, names)
         monkeypatch.setattr(
             "cveta2.image_uploader._assign_month_folder",
             lambda name: f"2026-01/{name}",
         )
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=names))
+            upload_dataset(
+                client, make_request(image_names=names, search_dirs=[image_dir])
+            )
         pinned = list_manifests(PROJECT_ID)[0]
 
-        # The clock has moved on, and none of these images reached S3, so a
-        # recomputed mapping would put every one of them somewhere new.
+        # The clock has moved on, and the bucket lost what the first run put
+        # there, so a recomputed mapping would send every image somewhere new.
+        make_s3(monkeypatch, _ListCountingS3())
         monkeypatch.setattr(
             "cveta2.image_uploader._assign_month_folder",
             lambda name: f"9999-12/{name}",
         )
-        upload_dataset(client, _resume_request(names))
+        upload_dataset(
+            client,
+            make_request(image_names=names, search_dirs=[image_dir], resume=True),
+        )
 
         attached = _writes_of(client).created_tasks[-1].server_files
         assert attached == pinned.task_image_names
@@ -837,8 +850,8 @@ class TestManifestLifecycle:
         it, and `--resume` can no longer reach it.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
@@ -854,7 +867,7 @@ class TestManifestLifecycle:
     ) -> None:
         """The warning must key on a real stranded task, not on any manifest."""
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         upload_dataset(client, make_request(image_names=["a.jpg"]))
 
@@ -870,7 +883,7 @@ class TestManifestLifecycle:
         not small.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
+        make_s3(monkeypatch, seeded_bucket(["a.jpg", "b.jpg", "c.jpg"]))
 
         upload_dataset(
             client,
@@ -914,6 +927,31 @@ class TestS3FailureAbortsBeforeTaskCreation:
 
         assert _writes_of(client).created_tasks == []
 
+    def test_an_image_found_nowhere_stops_the_upload(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A name that is neither local nor on S3 reaches the same dead end.
+
+        Bound into the task anyway, CVAT would reject the data after the
+        task and its manifest exist, and every ``--resume`` would recreate
+        the empty task and fail again without ever naming the image.
+        """
+        s3 = _ListCountingS3()
+        make_s3(monkeypatch, s3)
+        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        image_dir = make_local_images(tmp_path, ["a.jpg"])
+
+        with pytest.raises(Cveta2Error, match=r"c\.jpg") as caught:
+            upload_dataset(
+                client,
+                make_request(image_names=["a.jpg", "c.jpg"], search_dirs=[image_dir]),
+            )
+
+        assert "a.jpg" not in str(caught.value)
+        assert s3.uploaded_keys == [current_month_key("a.jpg")]
+        assert _writes_of(client).created_tasks == []
+        assert list_manifests(PROJECT_ID) == []
+
 
 class TestResumeWithIssues:
     def test_resuming_does_not_reopen_the_issues_already_created(
@@ -925,7 +963,7 @@ class TestResumeWithIssues:
         the frame, which no read-back can undo.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
         rows = [
             annotation_row("a.jpg", issue_state="new", issue_text="смотри"),
         ]
@@ -954,8 +992,8 @@ class TestResumeAfterManualDeletion:
         over.
         """
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
@@ -973,8 +1011,8 @@ class TestResumeAfterManualDeletion:
     ) -> None:
         """Only 404 means "gone"; a 500 must not be read as one."""
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))

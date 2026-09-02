@@ -83,7 +83,7 @@ class TestResolveProjectFromArgs:
         assert resolve_project_from_args(_client(), spec) is None
 
     def test_name_spec_is_resolved_against_the_cache(self) -> None:
-        """The loaded cache must reach ``resolve_project_id``.
+        """The loaded cache must reach the client's name lookup.
 
         Passing ``cached=None`` (or dropping the keyword) still resolves —
         by falling through to a live ``list_projects`` call — so the two
@@ -97,18 +97,38 @@ class TestResolveProjectFromArgs:
     def test_numeric_spec_takes_its_name_from_the_matching_entry(self) -> None:
         """A numeric spec is named by the cache entry with *that* id.
 
-        Pins the ``p.id == project_id`` scan: inverting it names the
-        project after the first non-matching entry, nulling the assignment
-        yields ``(5, None)``, and returning instead of breaking drops the
-        result entirely.
+        Pins the ``p.id == project_id`` scan in the display-name lookup:
+        inverting it names the project after the first non-matching entry,
+        and the fake answers 404 for id 5, so nothing else can supply
+        ``gamma``.
         """
         cached = [ProjectInfo(id=4, name="beta"), ProjectInfo(id=5, name="gamma")]
         with patch(_LOAD_CACHE, return_value=cached):
             assert resolve_project_from_args(_client(), "5") == (5, "gamma")
 
-    def test_numeric_spec_keeps_the_id_when_the_cache_is_silent(self) -> None:
+    def test_numeric_spec_is_named_by_cvat_when_the_cache_is_silent(self) -> None:
+        """An id absent from the projects cache is named through ``get_project``.
+
+        A fresh machine has no cache at all, and ``fetch -p 1`` must still
+        key the ignore list and the image cache by the real project name.
+        """
+        with patch(_LOAD_CACHE, return_value=[]):
+            assert resolve_project_from_args(_client(), "1") == (1, "alpha")
+
+    def test_numeric_spec_keeps_the_id_when_nobody_owns_it(self) -> None:
+        """The fake answers 404 for id 5, so the id itself stands in as the name."""
         with patch(_LOAD_CACHE, return_value=[]):
             assert resolve_project_from_args(_client(), "5") == (5, "5")
+
+    def test_name_spec_takes_the_cached_spelling(self) -> None:
+        """A differently-cased spec returns the name as the cache spells it.
+
+        Config sections are keyed by the project name, so ``-p ALPHA`` has
+        to come back as ``Alpha`` rather than echoing what was typed.
+        """
+        cached = [ProjectInfo(id=77, name="Alpha")]
+        with patch(_LOAD_CACHE, return_value=cached):
+            assert resolve_project_from_args(_client(), "ALPHA") == (77, "Alpha")
 
 
 class TestResolveProject:

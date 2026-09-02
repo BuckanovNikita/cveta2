@@ -346,6 +346,19 @@ def test_build_search_dirs_includes_cache(
     assert cache_dir in dirs
 
 
+def test_build_search_dirs_reads_the_explicit_config_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``config_path=`` beats the ambient ``CVETA2_CONFIG`` file."""
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    cfg_path = tmp_path / "explicit.yaml"
+    cfg_path.write_text(f"image_cache:\n  my-project: {cache_dir}\n", encoding="utf-8")
+    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
+
+    assert build_search_dirs(None, "my-project", config_path=cfg_path) == [cache_dir]
+
+
 # ---------------------------------------------------------------------------
 # populate_record_paths
 # ---------------------------------------------------------------------------

@@ -30,7 +30,8 @@ class FakeS3Client:
     Objects are stored as ``{"bucket/key": bytes}`` by default; with
     ``keyed_by_bucket=False`` bare keys are used (project-storage / sync
     tests).  ``get_calls`` and ``put_calls`` record the store keys in
-    call order, so tests can assert whether S3 was touched.
+    call order (``delete_calls`` likewise), so tests can assert whether
+    S3 was touched.
     """
 
     def __init__(
@@ -43,6 +44,7 @@ class FakeS3Client:
         self.objects: dict[str, bytes] = dict(objects or {})
         self.get_calls: list[str] = []
         self.put_calls: list[str] = []
+        self.delete_calls: list[str] = []
         self.head_calls: list[str] = []
         self.list_requests: list[dict[str, str]] = []
         self._keyed_by_bucket = keyed_by_bucket
@@ -74,6 +76,11 @@ class FakeS3Client:
         full_key = self._store_key(Bucket, Key)
         self.put_calls.append(full_key)
         self.objects[full_key] = Body
+
+    def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
+        full_key = self._store_key(Bucket, Key)
+        self.delete_calls.append(full_key)
+        self.objects.pop(full_key, None)
 
     def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
         self.list_requests.append(dict(kwargs))

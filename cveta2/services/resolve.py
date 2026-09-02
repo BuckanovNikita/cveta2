@@ -12,9 +12,11 @@ from cveta2.s3_utils import parse_sync_root
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
+    from cveta2.models import ProjectInfo
 
 
 def split_project_spec(project: int | str) -> tuple[str | None, int | str]:
@@ -52,15 +54,23 @@ def apply_project_org(client: CvatClient, project: int | str) -> int | str:
     return spec
 
 
-def _project_display_name(client: CvatClient, project_id: int) -> str:
+def _project_display_name(
+    client: CvatClient,
+    project_id: int,
+    cached: list[ProjectInfo] | None = None,
+) -> str:
     """Return the project's name, falling back to the id when unreadable.
 
-    An id nobody owns must still produce a usable name: it ends up in log
-    lines, in the task-cache directory and as the ignore-list key, and an
-    empty one would be shown to the user verbatim.  Reading the single
-    project costs one request, where listing the whole organization to
-    find its name costs one per page.
+    A matching entry in *cached* (the local projects cache) answers without
+    a request.  Otherwise an id nobody owns must still produce a usable
+    name: it ends up in log lines, in the task-cache directory and as the
+    ignore-list key, and an empty one would be shown to the user verbatim.
+    Reading the single project costs one request, where listing the whole
+    organization to find its name costs one per page.
     """
+    for p in cached or ():
+        if p.id == project_id:
+            return p.name
     try:
         return client.get_project(project_id).name or str(project_id)
     except CvatApiError as e:
@@ -71,7 +81,12 @@ def _project_display_name(client: CvatClient, project_id: int) -> str:
         return str(project_id)
 
 
-def resolve_project_spec(client: CvatClient, project: int | str) -> tuple[int, str]:
+def resolve_project_spec(
+    client: CvatClient,
+    project: int | str,
+    *,
+    cached: list[ProjectInfo] | None = None,
+) -> tuple[int, str]:
     """Resolve a project spec to ``(project_id, project_name)``.
 
     Accepts an id, a name, or an ``ORG/PROJECT`` string (the org part
@@ -80,11 +95,28 @@ def resolve_project_spec(client: CvatClient, project: int | str) -> tuple[int, s
     :func:`cveta2.commands._helpers.resolve_project`.
     """
     spec = apply_project_org(client, project)
-    project_id = client.resolve_project_id(spec)
+    return resolve_bare_project_spec(client, spec, cached=cached)
+
+
+def resolve_bare_project_spec(
+    client: CvatClient,
+    spec: int | str,
+    *,
+    cached: list[ProjectInfo] | None = None,
+) -> tuple[int, str]:
+    """Resolve an id or a name (no ``ORG/`` prefix) to ``(project_id, project_name)``.
+
+    The name is always CVAT's own spelling — from *cached* (the local
+    projects cache, consulted first) or from CVAT — never the caller's:
+    the name lookup is case-insensitive, and the returned name keys the
+    ignore list, the image-cache directory and the ClearML dataset.
+    """
     name = str(spec).strip()
     if isinstance(spec, int) or name.isdigit():
-        name = _project_display_name(client, project_id)
-    return project_id, name
+        project_id = client.resolve_project_id(spec)
+        return project_id, _project_display_name(client, project_id, cached)
+    project = client.find_project_by_name(name, cached=cached)
+    return project.id, project.name
 
 
 def infer_project_from_tasks(
@@ -120,6 +152,8 @@ def project_cloud_storage(
     project_id: int,
     project_name: str,
     root: str | None = None,
+    *,
+    config_path: Path | None = None,
 ) -> CloudStorageInfo | None:
     """Detect the project's cloud storage and apply any sync-root override.
 
@@ -128,7 +162,10 @@ def project_cloud_storage(
     lives here rather than being spelled out at each call site.
     """
     return apply_sync_root_override(
-        project_name, client.detect_project_cloud_storage(project_id), root
+        project_name,
+        client.detect_project_cloud_storage(project_id),
+        root,
+        config_path=config_path,
     )
 
 
@@ -136,9 +173,11 @@ def apply_sync_root_override(
     project_name: str,
     cs_info: CloudStorageInfo | None,
     explicit_root: str | None = None,
+    *,
+    config_path: Path | None = None,
 ) -> CloudStorageInfo | None:
     """Override cs_info bucket/prefix from an explicit root or sync_roots config."""
-    root = explicit_root or SyncRootsConfig.load().get_root(project_name)
+    root = explicit_root or SyncRootsConfig.load(config_path).get_root(project_name)
     if not root:
         return cs_info
     if cs_info is None:

@@ -696,7 +696,7 @@ def test_stage_images_keeps_plan_order() -> None:
         ),
         patch(
             "cveta2.services.upload.build_server_file_mapping",
-            return_value=(mapping, set()),
+            return_value=(mapping, {f"images/{n}" for n in mapping}),
         ),
     ):
         staged = _stage_images(client, request)

@@ -118,12 +118,14 @@ class TestResolveProjectSpecWithOrg:
 
         assert resolve_project_spec(client, 1) == (1, "1")
 
-    def test_name_spec_is_not_treated_as_an_id_lookup(self) -> None:
-        """Non-numeric specs keep the caller's name verbatim.
+    @pytest.mark.parametrize("spec", ["beta", " BETA "], ids=["exact", "cased"])
+    def test_name_spec_returns_the_canonical_cvat_spelling(self, spec: str) -> None:
+        """A name resolves to the matching project *and* CVAT's spelling of it.
 
-        Guards the `or` in ``isinstance(spec, int) or name.isdigit()``: an
-        `and` there would send every name through the id branch, replacing it
-        with the id-derived fallback.
+        The name lookup is case-insensitive, so the name that keys the ignore
+        list, the image-cache directory and the ClearML dataset must be the
+        one CVAT holds — not whatever the caller typed.  Two projects keep
+        the lookup distinguishable from "take whatever is first".
         """
         api = FakeCvatApi.from_tasks(
             [make_task(42)],
@@ -132,7 +134,28 @@ class TestResolveProjectSpecWithOrg:
         )
         client = CvatClient(CvatConfig(), api=api)
 
-        assert resolve_project_spec(client, "beta") == (2, "beta")
+        assert resolve_project_spec(client, spec) == (2, "beta")
+
+    def test_name_spec_is_matched_against_the_cache_first(self) -> None:
+        """A cached entry answers the name lookup without a listing request.
+
+        The cache says 77 where the server says 1, and the cached spelling
+        is the one returned, so dropping ``cached=`` on the way to the client
+        is visible in both halves of the result.
+        """
+        client, api = _fake_client(project_name="alpha")
+        cached = [ProjectInfo(id=77, name="Alpha")]
+
+        assert resolve_project_spec(client, "ALPHA", cached=cached) == (77, "Alpha")
+        assert api.call_counts["list_projects"] == 0
+
+    def test_numeric_spec_is_named_from_the_cache_before_cvat(self) -> None:
+        """A cached entry with the matching id names the project without a request."""
+        client, api = _fake_client(project_name="alpha")
+        cached = [ProjectInfo(id=2, name="beta"), ProjectInfo(id=1, name="Alpha")]
+
+        assert resolve_project_spec(client, "1", cached=cached) == (1, "Alpha")
+        assert api.call_counts["get_project"] == 0
 
     def test_default_organization_property_stays(self) -> None:
         client, _api = _fake_client(organization="default-org")
@@ -150,6 +173,18 @@ class TestResolveProjectFromArgsWithOrg:
             assert resolve_project_from_args(client, "acme/alpha") == (1, "alpha")
         assert api.organization == "acme"
         assert load_cache.call_args.kwargs == {"org": "acme"}
+
+    def test_only_the_first_slash_separates_the_org(self) -> None:
+        """A project name containing a slash must not be split a second time.
+
+        The helper switches the org before loading the cache and then hands
+        the bare spec down; resolving ``acme/al/pha`` must switch to ``acme``
+        exactly once and look up ``al/pha``, never org ``al`` / project ``pha``.
+        """
+        client, api = _fake_client(project_name="al/pha", organization="default-org")
+        with patch("cveta2.commands._helpers.load_projects_cache", return_value=[]):
+            assert resolve_project_from_args(client, "acme/al/pha") == (1, "al/pha")
+        assert api.organization_calls == ["acme"]
 
 
 class TestInferProjectFromTasks:

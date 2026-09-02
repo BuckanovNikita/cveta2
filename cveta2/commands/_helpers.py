@@ -16,7 +16,11 @@ from cveta2.config import (
 )
 from cveta2.exceptions import MissingHostError
 from cveta2.projects_cache import PERSONAL_WORKSPACE_SLUG, load_projects_cache
-from cveta2.services.resolve import apply_project_org, project_cloud_storage
+from cveta2.services.resolve import (
+    apply_project_org,
+    project_cloud_storage,
+    resolve_bare_project_spec,
+)
 
 if TYPE_CHECKING:
     import argparse
@@ -89,12 +93,13 @@ def resolve_project_from_args(
 ) -> tuple[int, str] | None:
     """Resolve project ID and name from CLI project argument.
 
-    When *project_arg* is non-empty, resolves via cache and returns
-    ``(project_id, project_name)``. An ``ORG/PROJECT`` spec switches the
+    When *project_arg* is non-empty, returns ``(project_id, project_name)``
+    with the name as CVAT spells it. An ``ORG/PROJECT`` spec switches the
     client's session organization first (``/PROJECT`` selects the
-    personal workspace). When the project part is a digit string, looks
-    up the human-readable name from cache. Returns ``None`` when
-    *project_arg* is None or empty (caller should run interactive TUI).
+    personal workspace). The local projects cache of that organization is
+    consulted before CVAT (see :func:`resolve_bare_project_spec`). Returns
+    ``None`` when *project_arg* is None or empty (caller should run
+    interactive TUI).
 
     Raises
     ------
@@ -104,16 +109,9 @@ def resolve_project_from_args(
     """
     if not project_arg or not project_arg.strip():
         return None
-    spec = str(apply_project_org(client, project_arg.strip()))
+    spec = apply_project_org(client, project_arg.strip())
     cached = load_projects_cache(org=client.organization or PERSONAL_WORKSPACE_SLUG)
-    project_id = client.resolve_project_id(spec, cached=cached)
-    project_name = spec
-    if project_name.isdigit():
-        for p in cached:
-            if p.id == project_id:
-                project_name = p.name
-                break
-    return (project_id, project_name)
+    return resolve_bare_project_spec(client, spec, cached=cached)
 
 
 def resolve_project(

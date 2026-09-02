@@ -18,7 +18,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
-from cveta2.config import CacheConfig
+from cveta2.config import CacheConfig, is_cache_disabled
 from cveta2.fs_utils import default_cache_base, ensure_shared_dir, write_shared_bytes
 from cveta2.models import TaskAnnotations
 from cveta2.s3_utils import (
@@ -78,17 +78,41 @@ def get_task_cache_dir(project_id: int, root: Path | None = None) -> Path:
     return default_cache_base() / "task_annotations" / f"project_{project_id}"
 
 
-def invalidate_local_entry(project_id: int, task_id: int, project_name: str) -> None:
-    """Drop the local cache entry for *task_id* after a task mutation."""
-    root = CacheConfig.load().for_project(project_name).tasks_root
-    cache_dir = get_task_cache_dir(project_id, root=root)
-    TaskAnnotationCache(cache_dir).invalidate_local(task_id)
+def invalidate_local_entry(
+    project_id: int,
+    task_id: int,
+    project_name: str,
+    cs_info: CloudStorageInfo | None = None,
+) -> None:
+    """Drop the cache entry for *task_id* after a task mutation.
+
+    The local entry always goes.  With *cs_info* (the project's CVAT cloud
+    storage) the S3 mirror entry goes too — otherwise the next fetch would
+    backfill the pre-mutation payload from S3.  ``CVETA2_DISABLE_CACHE``
+    keeps S3 untouched, as it does for every other cache operation.
+    """
+    settings = CacheConfig.load().for_project(project_name)
+    cache_dir = get_task_cache_dir(project_id, root=settings.tasks_root)
+    s3 = (
+        None
+        if is_cache_disabled()
+        else S3CacheBackend.from_cloud_storage(
+            cs_info, task_cache_s3=settings.task_cache_s3
+        )
+    )
+    TaskAnnotationCache(cache_dir, s3=s3).invalidate(task_id)
 
 
 @s3_retry
 def _s3_put_bytes(s3_client: S3Client, bucket: str, key: str, data: bytes) -> None:
     """Upload bytes to an S3 object."""
     s3_client.put_object(Bucket=bucket, Key=key, Body=data)
+
+
+@s3_retry
+def _s3_delete_object(s3_client: S3Client, bucket: str, key: str) -> None:
+    """Delete an S3 object (S3 answers a missing key with a plain 204)."""
+    s3_client.delete_object(Bucket=bucket, Key=key)
 
 
 def _client_error_code(error: ClientError) -> str:
@@ -186,6 +210,15 @@ class S3CacheBackend:
         except (ClientError, BotoCoreError, OSError) as e:
             self._disable(e)
 
+    def delete(self, task_id: int) -> None:
+        """Drop the raw cache entry for *task_id* (best effort, idempotent)."""
+        if self._disabled:
+            return
+        try:
+            _s3_delete_object(self._s3, self._bucket, self._entry_key(task_id))
+        except (ClientError, BotoCoreError, OSError) as e:
+            self._disable(e)
+
     def _entry_key(self, task_id: int) -> str:
         """Build the S3 key of the cache entry for *task_id*."""
         entry = f"task_annotations/task_{task_id}.json"
@@ -246,6 +279,17 @@ class TaskAnnotationCache:
     def invalidate_local(self, task_id: int) -> None:
         """Remove the local cache entry for *task_id* if present."""
         self._local_path(task_id).unlink(missing_ok=True)
+
+    def invalidate(self, task_id: int) -> None:
+        """Remove the entry for *task_id* from every layer, S3 included.
+
+        Only a task mutation calls this: :meth:`prune` and a schema
+        mismatch drop the local copy alone, since a valid S3 entry
+        written by a newer cveta2 must survive an older one's run.
+        """
+        self.invalidate_local(task_id)
+        if self._s3 is not None:
+            self._s3.delete(task_id)
 
     def prune(self, live_task_ids: set[int]) -> int:
         """Remove local entries whose task no longer exists; return count.

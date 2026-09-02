@@ -225,7 +225,9 @@ def _resolve_fetch_target(
     a bare name here would lose the sync-root and TUI paths.
     """
     project_id, project_name = resolve_project_spec(client, project)
-    cs_info = project_cloud_storage(client, project_id, project_name)
+    cs_info = project_cloud_storage(
+        client, project_id, project_name, config_path=config_path
+    )
     ignore_set, silent_set = load_ignore_sets(project_name, config_path)
     target = FetchTarget(project_id, project_name, output_dir, cs_info)
     return target, ignore_set, silent_set
@@ -404,11 +406,14 @@ def upload(  # noqa: PLR0913
         include_unannotated=include_unannotated,
         exclude_names=exclude_names,
     )
-    upload_cfg = UploadConfig.load(_config_path(connection))
+    config_path = _config_path(connection)
+    upload_cfg = UploadConfig.load(config_path)
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
         options = UploadOptions(
-            search_dirs=build_search_dirs(image_dirs, project_name),
+            search_dirs=build_search_dirs(
+                image_dirs, project_name, config_path=config_path
+            ),
             segment_size=upload_cfg.images_per_job,
             image_quality=upload_cfg.image_quality,
             mark_all_deleted=mark_all_deleted,
@@ -489,7 +494,9 @@ def s3_sync(
     config_path = _config_path(connection)
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
-        cs_info = project_cloud_storage(c, project_id, project_name, root)
+        cs_info = project_cloud_storage(
+            c, project_id, project_name, root, config_path=config_path
+        )
         ignored_prefix = (
             CacheConfig.load(config_path).for_project(project_name).ignored_prefix
         )

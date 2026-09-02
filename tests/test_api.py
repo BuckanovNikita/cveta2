@@ -30,6 +30,7 @@ from cveta2.exceptions import (
 )
 from cveta2.image_uploader import UploadStats
 from cveta2.models import CSV_COLUMNS
+from cveta2.s3_utils import build_s3_key
 from cveta2.services.upload import UploadOutcome, UploadRequest
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
@@ -311,7 +312,41 @@ class TestFetchApi:
 
         assert not (out / "raw.csv").exists()
         assert not (out / ".tasks").exists()
-        publish.assert_called_once_with(fake.project.name, out)
+        publish.assert_called_once_with(fake.project.name, out, None)
+
+    def test_clearml_mapping_is_read_from_the_connection_config(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """The ``clearml`` section must come from ``Connection.config_path``.
+
+        The mapping exists only in that file; the ambient config is
+        empty, so the publish happens only if the path reaches
+        ``ClearmlConfig.load`` through ``FetchOptions``.
+        """
+        fake = normal_fake
+        out = tmp_path / "out"
+        config = write_config_yaml(
+            tmp_path / "team.yaml",
+            clearml={
+                "projects": {
+                    fake.project.name: {"clearml_project": "p", "clearml_dataset": "d"}
+                }
+            },
+        )
+        _api, connection = _scoped(fake, config_path=config)
+
+        with (
+            patch("cveta2._clearml.is_clearml_available", return_value=True),
+            patch("cveta2._clearml._dataset.publish_to_clearml") as publish,
+        ):
+            cveta2.fetch(
+                fake.project.id, out, download_images=False, connection=connection
+            )
+
+        publish.assert_called_once()
+        mapping, published_dir = publish.call_args.args
+        assert (mapping.clearml_project, mapping.clearml_dataset) == ("p", "d")
+        assert published_dir == out
 
     def test_raw_and_save_tasks_reach_the_pipeline(
         self, normal_fake: LoadedFixtures, tmp_path: Path
@@ -389,26 +424,27 @@ class TestFetchApi:
         assert _fetched_task_ids(only_done) == {done.id}
 
     def test_sync_root_override_reaches_the_output_rows(
-        self,
-        normal_fake: LoadedFixtures,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """``cs_info`` is otherwise invisible: the fixtures have no storage.
 
         With a cloud storage on the project and a ``sync_roots`` entry
-        keyed by project *name*, the effective prefix lands in every
-        row's ``s3_image_path`` — so the detection call, the override and
-        the value handed to ``fetch_project`` all become observable.
+        keyed by project *name* in the connection's config file, the
+        effective prefix lands in every row's ``s3_image_path`` — so the
+        detection call, the override, the config path it reads and the
+        value handed to ``fetch_project`` all become observable. The
+        ambient config is empty, so only ``Connection.config_path`` can
+        supply the override.
         """
         fake = normal_fake
         config = write_config_yaml(
             tmp_path / "sync.yaml",
             sync_roots={fake.project.name: "s3://other-bucket/synced"},
         )
-        monkeypatch.setenv("CVETA2_CONFIG", str(config))
         _api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(bucket="own-bucket", prefix="raw")
+            fake,
+            cloud_storage=make_cs_info(bucket="own-bucket", prefix="raw"),
+            config_path=config,
         )
 
         result = cveta2.fetch(
@@ -687,20 +723,18 @@ class TestFetchApi:
         assert len(df) == 0
 
     def test_fetch_task_honours_the_sync_root_override(
-        self,
-        normal_fake: LoadedFixtures,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
         """The ``fetch_task`` twin of the ``fetch`` cs_info wiring test."""
         fake = normal_fake
-        env_config = write_config_yaml(
+        config = write_config_yaml(
             tmp_path / "sync.yaml",
             sync_roots={fake.project.name: "s3://other-bucket/synced"},
         )
-        monkeypatch.setenv("CVETA2_CONFIG", str(env_config))
         _api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(bucket="own-bucket", prefix="raw")
+            fake,
+            cloud_storage=make_cs_info(bucket="own-bucket", prefix="raw"),
+            config_path=config,
         )
 
         df = cveta2.fetch_task(
@@ -1055,12 +1089,20 @@ class TestUploadApi:
     @pytest.fixture(autouse=True)
     def _stub_s3(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _RecordingUploader.calls = []
+
+        def mapping_with_every_image_on_s3(
+            cs_info: CloudStorageInfo,
+            names: list[str],
+            pinned: dict[str, str] | None = None,
+        ) -> tuple[dict[str, str], set[str]]:
+            mapping = dict(pinned) if pinned is not None else {n: n for n in names}
+            return mapping, {
+                build_s3_key(cs_info.prefix, sf) for sf in mapping.values()
+            }
+
         monkeypatch.setattr(
             "cveta2.services.upload.build_server_file_mapping",
-            lambda _cs_info, names, pinned=None: (
-                dict(pinned) if pinned is not None else {name: name for name in names},
-                set(),
-            ),
+            mapping_with_every_image_on_s3,
         )
         monkeypatch.setattr("cveta2.services.upload.S3Uploader", _RecordingUploader)
 
@@ -1312,12 +1354,14 @@ class TestUploadApi:
         assert [sorted(call) for call in _RecordingUploader.calls] == [["a.jpg"]]
 
     def test_project_image_cache_is_searched_when_no_dirs_given(
-        self,
-        normal_fake: LoadedFixtures,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        """``build_search_dirs`` needs the project *name* for that fallback."""
+        """``build_search_dirs`` needs the project *name* and the config path.
+
+        The ``image_cache`` entry lives only in the connection's config
+        file; the ambient config is empty, so the fallback is found only
+        if ``Connection.config_path`` reaches the lookup.
+        """
         fake = normal_fake
         cached = tmp_path / "cached"
         cached.mkdir()
@@ -1325,9 +1369,10 @@ class TestUploadApi:
         config = write_config_yaml(
             tmp_path / "images.yaml", image_cache={fake.project.name: str(cached)}
         )
-        monkeypatch.setenv("CVETA2_CONFIG", str(config))
         _api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
+            fake,
+            cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images"),
+            config_path=config,
         )
 
         cveta2.upload(
@@ -1406,23 +1451,19 @@ class TestS3SyncApi:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Two per-project settings read from two different config files.
+        """Two per-project settings read from the connection's config file.
 
-        ``sync_roots`` is loaded from the ambient config and keyed by
-        project name; ``cache.projects.<name>.ignored_prefix`` comes from
-        the connection's explicit config path. Between them they pin the
-        project name, both config lookups and the ``ignored_prefix``
-        keyword.
+        ``sync_roots`` and ``cache.projects.<name>.ignored_prefix`` are
+        both keyed by project name and both come from
+        ``Connection.config_path`` — the ambient config is empty. Between
+        them they pin the project name, both config lookups and the
+        ``ignored_prefix`` keyword.
         """
         self._fake_bucket(monkeypatch)
         target = tmp_path / "images"
-        env_config = write_config_yaml(
+        config = write_config_yaml(
             tmp_path / "sync.yaml",
             sync_roots={normal_fake.project.name: "synced"},
-        )
-        monkeypatch.setenv("CVETA2_CONFIG", str(env_config))
-        cache_config = write_config_yaml(
-            tmp_path / "cache.yaml",
             cache={
                 "projects": {normal_fake.project.name: {"ignored_prefix": "synced/sub"}}
             },
@@ -1430,7 +1471,7 @@ class TestS3SyncApi:
         _api, connection = _scoped(
             normal_fake,
             cloud_storage=make_cs_info(bucket="bkt", prefix="raw"),
-            config_path=cache_config,
+            config_path=config,
         )
 
         cveta2.s3_sync(normal_fake.project.id, target, connection=connection)

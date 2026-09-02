@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from cveta2.cli import CliApp
 from cveta2.image_downloader import DownloadStats
+from cveta2.models import ProjectInfo
 from tests.helpers import mock_client_ctx, patch_cli_client, write_test_config
 
 
@@ -50,7 +51,10 @@ def test_s3_sync_all_projects(
     )
 
     mock_client = _s3_sync_client()
-    mock_client.resolve_project_id.side_effect = [1, 2]
+    mock_client.find_project_by_name.side_effect = [
+        ProjectInfo(id=1, name="project-a"),
+        ProjectInfo(id=2, name="project-b"),
+    ]
 
     with patch_cli_client(mock_client):
         app = CliApp()

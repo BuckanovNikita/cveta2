@@ -119,7 +119,7 @@ def fetch_project(
     if options.publish_clearml:
         from cveta2._clearml import maybe_publish_clearml  # noqa: PLC0415
 
-        maybe_publish_clearml(target.project_name, output_dir)
+        maybe_publish_clearml(target.project_name, output_dir, options.config_path)
 
     return partition
 

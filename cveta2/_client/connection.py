@@ -9,12 +9,15 @@ from cvat_sdk import make_client
 from loguru import logger
 
 from cveta2._client.sdk_adapter import (
+    _TRANSPORT_ERRORS,
     SdkCvatApiAdapter,
+    _translate_api_errors,
     apply_request_timeout,
     install_global_request_timeout,
 )
 from cveta2._concurrency import configure_workers
 from cveta2._retry import configure_retries
+from cveta2.exceptions import CvatApiError
 from cveta2.s3_utils import set_default_data_timeout
 
 if TYPE_CHECKING:
@@ -34,8 +37,7 @@ def configure_data_timeout(timeout: float | None) -> None:
     ``apply_request_timeout`` wrapper cannot reach yet.
     """
     set_default_data_timeout(timeout)
-    if timeout:
-        install_global_request_timeout(timeout)
+    install_global_request_timeout(timeout)
 
 
 def configure_network(network: NetworkConfig) -> None:
@@ -82,11 +84,19 @@ def open_sdk_api(
     """Open an SDK client for *cfg* and yield an adapter wrapping it.
 
     Applies the configured request timeout and organization slug.
-    Credentials must already be present on *cfg*.
+    Credentials must already be present on *cfg*.  ``make_client`` performs
+    the server-about request and the login itself, so only that call is
+    translated into :class:`CvatApiError`; whatever the caller raises inside
+    the block passes through untouched.
     """
     factory = client_factory or make_client
     kwargs = _build_client_kwargs(cfg)
-    with factory(**kwargs) as sdk_client:
+    try:
+        sdk_cm = _translate_api_errors(factory)(**kwargs)
+    except _TRANSPORT_ERRORS as e:
+        msg = f"Не удалось подключиться к CVAT ({cfg.host}): {e}"
+        raise CvatApiError(msg) from e
+    with sdk_cm as sdk_client:
         if cfg.request_timeout:
             apply_request_timeout(sdk_client, cfg.request_timeout)
         if cfg.organization:

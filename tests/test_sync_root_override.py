@@ -10,6 +10,7 @@ import yaml
 
 from cveta2.commands._helpers import resolve_project_and_cloud_storage
 from cveta2.exceptions import Cveta2Error
+from cveta2.models import ProjectInfo
 from tests.helpers import make_cs_info
 
 if TYPE_CHECKING:
@@ -29,7 +30,7 @@ def _cvat_cs_info() -> CloudStorageInfo:
 
 def _make_client(cs_info: CloudStorageInfo | None) -> MagicMock:
     client = MagicMock()
-    client.resolve_project_id.return_value = 1
+    client.find_project_by_name.return_value = ProjectInfo(id=1, name="my-project")
     client.detect_project_cloud_storage.return_value = cs_info
     return client
 

@@ -7,7 +7,16 @@ from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError, ConnectTimeoutError, ReadTimeoutError
+from botocore.exceptions import (
+    ClientError,
+    ConnectTimeoutError,
+    HTTPClientError,
+    IncompleteReadError,
+    ReadTimeoutError,
+)
+from botocore.exceptions import (
+    ConnectionError as BotoConnectionError,
+)
 from loguru import logger
 
 from cveta2._concurrency import Workers, run_concurrent
@@ -23,8 +32,19 @@ _T = TypeVar("_T")
 # KeyError covers malformed S3 responses (missing "Body"/"Contents" keys),
 # which surface exactly like transport failures for a transfer.  ClientError
 # is here so one object's 403/404 fails that object rather than the whole
-# run; the retryable subset below never reaches this far.
-S3_TRANSFER_ERRORS: Final = (OSError, ConnectionError, KeyError, ClientError)
+# run; the retryable subset below never reaches this far.  The botocore
+# classes are listed because they are not OSError subclasses: a connection
+# dropped mid-body (IncompleteReadError, ConnectionClosedError) or an
+# unreachable endpoint would otherwise abort the whole batch.
+S3_TRANSFER_ERRORS: Final = (
+    OSError,
+    ConnectionError,
+    KeyError,
+    ClientError,
+    BotoConnectionError,
+    HTTPClientError,
+    IncompleteReadError,
+)
 
 # S3's throttle and transient-fault codes.  SlowDown is S3's 429, and
 # without it a large parallel transfer dies with a raw traceback the moment
@@ -103,6 +123,9 @@ _S3_TRANSPORT_ERRORS: Final = (
     ConnectionError,
     ConnectTimeoutError,
     ReadTimeoutError,
+    BotoConnectionError,
+    HTTPClientError,
+    IncompleteReadError,
 )
 
 
@@ -294,12 +317,17 @@ def _iter_list_pages(
 
 
 def _page_pairs(page: dict[str, Any], prefix: str) -> list[tuple[str, str]]:
-    """Return one page's ``(key, name)`` pairs, dropping the folder marker."""
+    """Return one page's ``(key, name)`` pairs, dropping folder markers.
+
+    A console-created folder is a zero-byte object whose key ends in ``/``.
+    Kept, it would become a local *file* of that name, and every image
+    under the folder would then fail to be written beneath it.
+    """
     pairs: list[tuple[str, str]] = []
     for obj in page.get("Contents", []):
         key: str = obj["Key"]
         name = strip_key_prefix(key, prefix)
-        if name:
+        if name and not key.endswith("/"):
             pairs.append((key, name))
     return pairs
 
@@ -354,8 +382,9 @@ def list_s3_objects(
     """List all S3 objects under *prefix* and return ``(key, local_name)`` pairs.
 
     The *local_name* is the object key with the prefix stripped, suitable
-    for saving as a flat file name.  Empty names (the prefix directory
-    marker itself) are skipped.
+    for saving as a flat file name.  Folder markers — the prefix directory
+    itself and any console-created subfolder, i.e. keys ending in ``/`` —
+    are skipped.
 
     The server-side filter asks for ``prefix/`` rather than ``prefix``,
     because S3 matches ``Prefix`` as a raw substring: listing ``data/proj1``

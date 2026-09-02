@@ -29,6 +29,7 @@ from cveta2.models import (
     DeletedImage,
     ImageWithoutAnnotations,
     ProjectAnnotations,
+    ProjectInfo,
     TaskAnnotations,
     TaskInfo,
 )
@@ -412,11 +413,20 @@ def make_fetch_args(**overrides: object) -> argparse.Namespace:
 
 
 def mock_client_ctx(*, project_id: int = 1) -> MagicMock:
-    """Build a MagicMock CvatClient usable as a context manager."""
+    """Build a MagicMock CvatClient usable as a context manager.
+
+    Project lookups answer with *project_id* under whatever name was asked
+    for (a numeric spec is named by its id), so a spec round-trips through
+    the CLI resolvers unchanged instead of surfacing as a ``MagicMock``.
+    """
     client = MagicMock()
     client.__enter__ = MagicMock(return_value=client)
     client.__exit__ = MagicMock(return_value=False)
     client.resolve_project_id.return_value = project_id
+    client.get_project.return_value = ProjectInfo(id=project_id, name=str(project_id))
+    client.find_project_by_name.side_effect = lambda name, **_: ProjectInfo(
+        id=project_id, name=name
+    )
     return client
 
 

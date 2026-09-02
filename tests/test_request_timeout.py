@@ -205,24 +205,30 @@ _BOTO3_DEFAULT_READ_TIMEOUT = 60.0
 
 
 @pytest.mark.parametrize(
-    ("timeout", "expected_calls", "expected_read_timeout"),
+    ("timeout", "expected_read_timeout"),
     [
-        (45.0, [45.0], 45.0),
-        (None, [], _BOTO3_DEFAULT_READ_TIMEOUT),
-        (0.0, [], _BOTO3_DEFAULT_READ_TIMEOUT),
+        (45.0, 45.0),
+        (None, _BOTO3_DEFAULT_READ_TIMEOUT),
+        (0.0, _BOTO3_DEFAULT_READ_TIMEOUT),
     ],
-    ids=["value_installs_global", "none_skips", "zero_skips"],
+    ids=["value_installs_global", "none_clears_global", "zero_clears_global"],
 )
 @pytest.mark.usefixtures("s3_env")
 def test_configure_data_timeout_installs_global_backstop(
     monkeypatch: pytest.MonkeyPatch,
     timeout: float | None,
-    expected_calls: list[float],
     expected_read_timeout: float,
 ) -> None:
+    """Both halves receive the value verbatim, ``None`` and ``0`` included.
+
+    The SDK backstop used to be installed only for a truthy timeout, so a
+    second in-process connection without one kept the previous run's read
+    timeout on every CVAT request while S3 correctly went back to none.
+    """
     from cveta2._client import connection
 
-    calls: list[float] = []
+    calls: list[float | None] = []
+    expected_calls = [timeout]
     monkeypatch.setattr(connection, "install_global_request_timeout", calls.append)
     connection.configure_data_timeout(timeout)
     assert calls == expected_calls
@@ -283,21 +289,64 @@ def test_install_global_request_timeout_covers_new_rest_clients(
         recorded.update(kwargs)
 
     monkeypatch.setattr(RESTClientObject, "request", fake_request)
-    try:
-        sdk_adapter.install_global_request_timeout(7.0)
-        sdk_adapter.install_global_request_timeout(9.0)
+    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "installed", False)
+    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "value", None)
 
-        instance = object.__new__(RESTClientObject)
-        RESTClientObject.request(instance, "GET", "http://x")
-        installed_timeout = recorded["_request_timeout"]
-        assert installed_timeout == (10.0, 9.0)
+    sdk_adapter.install_global_request_timeout(7.0)
+    sdk_adapter.install_global_request_timeout(9.0)
 
+    instance = object.__new__(RESTClientObject)
+    RESTClientObject.request(instance, "GET", "http://x")
+    installed_timeout = recorded["_request_timeout"]
+    assert installed_timeout == (10.0, 9.0)
+
+    recorded.clear()
+    RESTClientObject.request(instance, "GET", "http://x", _request_timeout=5)
+    caller_timeout = recorded["_request_timeout"]
+    assert caller_timeout == 5
+
+
+@pytest.mark.parametrize("cleared", [None, 0.0], ids=["none", "zero"])
+def test_install_global_request_timeout_can_be_switched_off_again(
+    monkeypatch: pytest.MonkeyPatch,
+    cleared: float | None,
+) -> None:
+    """A later ``None``/``0`` must stop the injection, not keep the old value.
+
+    The patch lives on the SDK class for the rest of the process, so the only
+    way a second configuration can mean "no timeout" is for the wrapper to
+    read the current value and pass the kwargs through when it is falsy.
+    """
+    from cvat_sdk.api_client.rest import RESTClientObject
+
+    from cveta2._client import sdk_adapter
+
+    recorded: dict[str, object] = {}
+
+    def fake_request(_self: object, *_args: object, **kwargs: object) -> None:
         recorded.clear()
-        RESTClientObject.request(instance, "GET", "http://x", _request_timeout=5)
-        caller_timeout = recorded["_request_timeout"]
-        assert caller_timeout == 5
-    finally:
-        delattr(RESTClientObject, sdk_adapter._GLOBAL_TIMEOUT_MARKER)
+        recorded.update(kwargs)
+
+    monkeypatch.setattr(RESTClientObject, "request", fake_request)
+    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "installed", False)
+    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "value", None)
+    instance = object.__new__(RESTClientObject)
+
+    sdk_adapter.install_global_request_timeout(5.0)
+    RESTClientObject.request(instance, "GET", "http://x")
+    assert recorded["_request_timeout"] == (10.0, 5.0)
+
+    sdk_adapter.install_global_request_timeout(cleared)
+    RESTClientObject.request(instance, "GET", "http://x")
+    assert "_request_timeout" not in recorded
+
+    RESTClientObject.request(instance, "GET", "http://x", _request_timeout=5)
+    caller_timeout: object = recorded["_request_timeout"]
+    assert caller_timeout == 5
+
+    sdk_adapter.install_global_request_timeout(9.0)
+    RESTClientObject.request(instance, "GET", "http://x")
+    assert recorded["_request_timeout"] == (10.0, 9.0)
 
 
 # ---------------------------------------------------------------------------
