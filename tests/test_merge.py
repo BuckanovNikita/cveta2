@@ -25,16 +25,6 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_REQUIRED = [
-    "image_name",
-    "instance_shape",
-    "instance_label",
-    "bbox_x_tl",
-    "bbox_y_tl",
-    "bbox_x_br",
-    "bbox_y_br",
-]
-
 
 def _row(
     image: str,
@@ -607,47 +597,6 @@ class TestReadDeletedNames:
 
         with pytest.raises(Cveta2Error, match=re.escape(str(csv_path))):
             _read_deleted_names(csv_path)
-
-
-# ---------------------------------------------------------------------------
-# I/O helpers — _read_dataset_csv (merge wrapper)
-# ---------------------------------------------------------------------------
-
-
-class TestReadDatasetCsvMerge:
-    """Tests for _read_dataset_csv validation in merge context."""
-
-    def test_by_task_without_task_id_column_exits(self, tmp_path: Path) -> None:
-        from cveta2.services.merge import _read_dataset_csv
-
-        csv_path = tmp_path / "dataset.csv"
-        cols = [*_REQUIRED, "split"]
-        csv_path.write_text(",".join(cols) + "\n", encoding="utf-8")
-
-        with pytest.raises(Cveta2Error):
-            _read_dataset_csv(csv_path, by_task=True)
-
-    def test_missing_required_columns_exits(self, tmp_path: Path) -> None:
-        from cveta2.services.merge import _read_dataset_csv
-
-        csv_path = tmp_path / "dataset.csv"
-        csv_path.write_text("image_name,split\na.jpg,train\n", encoding="utf-8")
-
-        with pytest.raises(Cveta2Error):
-            _read_dataset_csv(csv_path, by_task=False)
-
-    def test_valid_csv_without_task_id_column_ok(self, tmp_path: Path) -> None:
-        from cveta2.services.merge import _read_dataset_csv
-
-        csv_path = tmp_path / "dataset.csv"
-        row = _row("a.jpg")
-        del row["task_id"]
-        df = pd.DataFrame([row])
-        df.to_csv(csv_path, index=False, encoding="utf-8")
-
-        result = _read_dataset_csv(csv_path, by_task=False)
-
-        assert len(result) == 1
 
 
 # ---------------------------------------------------------------------------

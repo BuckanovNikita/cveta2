@@ -6,22 +6,20 @@ and the frame order). It is deliberately not a record of what succeeded —
 the failure being recovered from is precisely the client losing track of
 what the server did, so every stage decision comes from reading CVAT back.
 
-Layout and durability follow ``task_cache``: a versioned pydantic envelope,
-written to a temp file and renamed into place, under an XDG cache root.
+Layout follows ``task_cache``: a versioned pydantic envelope under an XDG
+cache root, written atomically through ``fs_utils.replace_shared_bytes``.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
-import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
-from cveta2.fs_utils import default_cache_base, ensure_shared_dir, write_shared_bytes
+from cveta2.fs_utils import default_cache_base, replace_shared_bytes
 from cveta2.image_downloader import CloudStorageInfo
 
 if TYPE_CHECKING:
@@ -84,14 +82,11 @@ def get_upload_manifest_dir(project_id: int) -> Path:
 
 def save_manifest(manifest: UploadManifest) -> None:
     """Write *manifest* atomically; never fail the upload over bookkeeping."""
-    directory = get_upload_manifest_dir(manifest.project_id)
-    target = directory / f"{manifest.fingerprint}.json"
+    target = (
+        get_upload_manifest_dir(manifest.project_id) / f"{manifest.fingerprint}.json"
+    )
     try:
-        ensure_shared_dir(directory)
-        writer = f"{os.getpid()}-{threading.get_ident()}"
-        tmp_path = directory / f"{target.name}.tmp{writer}"
-        write_shared_bytes(tmp_path, manifest.model_dump_json().encode())
-        tmp_path.replace(target)
+        replace_shared_bytes(target, manifest.model_dump_json().encode())
     except OSError as e:
         logger.warning(
             f"Не удалось сохранить состояние загрузки ({e}) — "

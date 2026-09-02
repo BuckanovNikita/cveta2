@@ -17,7 +17,11 @@ from cveta2._client.sdk_adapter import SdkCvatApiAdapter
 from cveta2.client import CvatClient
 from cveta2.config import CvatConfig, IgnoreConfig
 from cveta2.image_downloader import CloudStorageInfo
-from cveta2.image_uploader import S3Uploader, resolve_images
+from cveta2.image_uploader import (
+    S3Uploader,
+    build_server_file_mapping,
+    resolve_images,
+)
 from tests.integration.conftest import _env, _make_sdk_client
 
 pytestmark = pytest.mark.integration
@@ -100,7 +104,8 @@ class TestS3UploaderIntegration:
         if not found:
             pytest.skip("No coco8 images found on disk")
         cs_host = _cs_info_for_host(cs_info)
-        stats = S3Uploader().upload(cs_host, found)
+        name_to_server_file, existing_keys = build_server_file_mapping(cs_host, found)
+        stats = S3Uploader().upload(cs_host, found, name_to_server_file, existing_keys)
         assert stats.total == len(found)
         assert stats.failed == 0
         assert stats.uploaded + stats.skipped_existing == stats.total

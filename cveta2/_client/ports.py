@@ -28,8 +28,8 @@ if TYPE_CHECKING:
     from cveta2.models import LabelInfo, OrganizationInfo, ProjectInfo, TaskInfo
 
 
-class CvatReadPort(Protocol):
-    """Read-only CVAT API operations used by ``CvatClient``."""
+class CvatApiPort(Protocol):
+    """Full CVAT API surface used by ``CvatClient``."""
 
     def list_organizations(self) -> list[OrganizationInfo]:
         """Return all organizations the user is a member of."""
@@ -87,10 +87,6 @@ class CvatReadPort(Protocol):
         """Return the number of frames in a task."""
         ...
 
-
-class CvatWritePort(Protocol):
-    """Mutating CVAT API operations used by ``CvatClient``."""
-
     def create_task(self, spec: UploadTaskSpec) -> int:
         """Create an empty task and return its id."""
         ...
@@ -136,7 +132,3 @@ class CvatWritePort(Protocol):
     ) -> None:
         """Apply label additions/renames/deletions/recolors to a project."""
         ...
-
-
-class CvatApiPort(CvatReadPort, CvatWritePort, Protocol):
-    """Full CVAT API surface used by ``CvatClient``."""

@@ -40,12 +40,10 @@ def run_convert(args: argparse.Namespace) -> None:
             read_all_sizes=args.read_all_sizes,
             image_dirs=args.image_dir,
         )
-    elif args.to_coco:
+    else:
         convert_to_coco(
             args.dataset,
             args.output,
             image_dirs=args.image_dir,
             link_mode=args.link_mode,
         )
-    else:
-        raise Cveta2Error("Ошибка: укажите --to-yolo, --from-yolo или --to-coco")

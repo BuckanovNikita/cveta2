@@ -26,18 +26,6 @@ _REQUIRED_COLUMNS: set[str] = {
 _TASK_ID_COLUMN = "task_id"
 
 
-def _read_dataset_csv(path: Path, *, by_task: bool) -> pd.DataFrame:
-    """Read a dataset CSV and validate required columns.
-
-    When *by_task* is ``True`` the ``task_id`` column is also required.
-    """
-    return read_dataset_csv(
-        path,
-        _REQUIRED_COLUMNS,
-        require_task_id_column=by_task,
-    )
-
-
 def _read_deleted_names(path: Path | None) -> set[str]:
     """Read *deleted.csv* and return image names as a set.
 
@@ -231,8 +219,12 @@ def merge_datasets(
 
     Returns the merged DataFrame.
     """
-    old_df = _read_dataset_csv(Path(old), by_task=by_task)
-    new_df = _read_dataset_csv(Path(new), by_task=by_task)
+    old_df = read_dataset_csv(
+        Path(old), _REQUIRED_COLUMNS, require_task_id_column=by_task
+    )
+    new_df = read_dataset_csv(
+        Path(new), _REQUIRED_COLUMNS, require_task_id_column=by_task
+    )
     deleted_names = _read_deleted_names(Path(deleted) if deleted else None)
 
     merged = _merge_datasets(old_df, new_df, deleted_names, by_task=by_task)

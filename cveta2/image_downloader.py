@@ -8,8 +8,6 @@ pending images are counted as failed. Already-cached files are skipped.
 
 from __future__ import annotations
 
-import os
-import threading
 from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import parse_qs
 
@@ -17,7 +15,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from cveta2._concurrency import Workers, run_concurrent
-from cveta2.fs_utils import ensure_shared_dir, write_shared_bytes
+from cveta2.fs_utils import ensure_shared_dir, replace_shared_bytes
 from cveta2.s3_types import Transfer
 from cveta2.s3_utils import (
     build_s3_key,
@@ -74,6 +72,13 @@ class DownloadStats(BaseModel):
     cached: int = 0
     failed: int = 0
     total: int = 0
+
+    def summary(self) -> str:
+        """Render the counters as the one-line log summary shared by every run."""
+        return (
+            f"{self.downloaded} загружено, {self.cached} из кэша, "
+            f"{self.failed} ошибок (всего {self.total})"
+        )
 
 
 class _ProgressLabels(NamedTuple):
@@ -161,11 +166,7 @@ class ImageDownloader:
         ensure_shared_dir(self._target_dir)
         self._download_all(pending, stats, project_cloud_storage)
 
-        logger.info(
-            f"Загрузка изображений: {stats.downloaded} загружено, "
-            f"{stats.cached} из кэша, {stats.failed} ошибок "
-            f"(всего {stats.total})"
-        )
+        logger.info(f"Загрузка изображений: {stats.summary()}")
         return stats
 
     @staticmethod
@@ -372,15 +373,7 @@ def _download_one_s3(
     rename — a disk that fills up mid-write cannot leave a truncated
     image that later runs would skip as cached.
     """
-    data = s3_get_bytes(s3_client, bucket, key)
-    ensure_shared_dir(dest.parent)
-    tmp_path = dest.with_name(f"{dest.name}.tmp{os.getpid()}-{threading.get_ident()}")
-    try:
-        write_shared_bytes(tmp_path, data)
-        tmp_path.replace(dest)
-    except OSError:
-        tmp_path.unlink(missing_ok=True)
-        raise
+    replace_shared_bytes(dest, s3_get_bytes(s3_client, bucket, key))
 
 
 class S3Syncer:
@@ -434,9 +427,5 @@ class S3Syncer:
             _S3_SYNC_PROGRESS,
         )
 
-        logger.info(
-            f"S3 sync: {stats.downloaded} загружено, "
-            f"{stats.cached} из кэша, {stats.failed} ошибок "
-            f"(всего {stats.total})"
-        )
+        logger.info(f"S3 sync: {stats.summary()}")
         return stats

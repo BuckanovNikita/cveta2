@@ -83,7 +83,9 @@ def run_fetch_task(args: argparse.Namespace) -> None:
         project_id, project_name, cs_info = _resolve_fetch_task_project(
             client, args.project, explicit_tasks
         )
-        options = _build_task_fetch_options(args, client, project_id, project_name)
+        options = _build_task_fetch_options(
+            args, explicit_tasks, client, project_id, project_name
+        )
         echo_if_prompted(
             "fetch-task",
             {
@@ -147,6 +149,7 @@ def _build_project_fetch_options(
 
 def _build_task_fetch_options(
     args: argparse.Namespace,
+    explicit_tasks: list[str],
     client: CvatClient,
     project_id: int,
     project_name: str,
@@ -155,7 +158,9 @@ def _build_task_fetch_options(
     ignore_set, silent_set = load_ignore_sets(project_name)
     return FetchOptions(
         completed_only=args.completed_only,
-        task_selector=_resolve_task_selector(args, client, project_id, ignore_set),
+        task_selector=_resolve_task_selector(
+            explicit_tasks, client, project_id, ignore_set
+        ),
         ignore_task_ids=ignore_set,
         silent_task_ids=silent_set,
         use_cache=not args.no_cache,
@@ -198,22 +203,19 @@ def _resolve_output_dir(output_dir: Path) -> Path:
 
 
 def _resolve_task_selector(
-    args: argparse.Namespace,
+    explicit_tasks: list[str],
     client: CvatClient,
     project_id: int,
     ignore_task_ids: set[int] | None,
 ) -> list[int | str]:
-    """Turn ``args.task`` into a task selector list.
+    """Turn the stripped, non-empty ``-t`` values into a task selector list.
 
-    Returns a list of task IDs/names.
-    When ``-t`` is omitted or passed without a value, launches
-    interactive TUI.
+    Returns a list of task IDs/names.  An empty *explicit_tasks* means
+    ``-t`` was omitted or passed without a value: the interactive TUI is
+    launched instead.
     """
-    raw: list[str] | None = args.task
-    if raw is not None:
-        explicit: list[int | str] = [v.strip() for v in raw if v.strip()]
-        if explicit:
-            return explicit
+    if explicit_tasks:
+        return list(explicit_tasks)
     selected = select_tasks(client, project_id, exclude_ids=ignore_task_ids)
     return [t.id for t in selected]
 

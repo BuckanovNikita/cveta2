@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
 
 from cveta2._client.connection import configure_network
-from cveta2._client.sdk_adapter import apply_request_timeout
 from cveta2._concurrency import Workers, configure_workers
 from cveta2._retry import RetryPolicy, configure_retries
 from cveta2.config import CvatConfig, NetworkConfig
@@ -17,8 +16,6 @@ from cveta2.s3_utils import make_s3_client, set_default_data_timeout
 if TYPE_CHECKING:
     from collections.abc import Generator
     from pathlib import Path
-
-    from cvat_sdk import Client as CvatSdkClient
 
 
 # ---------------------------------------------------------------------------
@@ -121,46 +118,6 @@ def test_saved_timeout_roundtrips_through_load(
     cfg_path = tmp_path / "config.yaml"
     CvatConfig(host="https://x.example", request_timeout=45.0).save_to_file(cfg_path)
     assert CvatConfig.load(config_path=cfg_path).request_timeout == 45.0
-
-
-# ---------------------------------------------------------------------------
-# apply_request_timeout wrapper
-# ---------------------------------------------------------------------------
-
-
-class _FakeRestClient:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def request(self, method: str, url: str, **kwargs: Any) -> str:
-        self.calls.append({"method": method, "url": url, **kwargs})
-        return "response"
-
-
-class _FakeApiClient:
-    def __init__(self) -> None:
-        self.rest_client = _FakeRestClient()
-
-
-class _FakeSdkClient:
-    def __init__(self) -> None:
-        self.api_client = _FakeApiClient()
-
-
-def test_apply_request_timeout_injects_default_tuple() -> None:
-    fake = _FakeSdkClient()
-    apply_request_timeout(cast("CvatSdkClient", fake), 30.0)
-    fake.api_client.rest_client.request("GET", "http://x")
-    (call,) = fake.api_client.rest_client.calls
-    assert call["_request_timeout"] == (10.0, 30.0)
-
-
-def test_apply_request_timeout_preserves_explicit_value() -> None:
-    fake = _FakeSdkClient()
-    apply_request_timeout(cast("CvatSdkClient", fake), 30.0)
-    fake.api_client.rest_client.request("GET", "http://x", _request_timeout=5)
-    (call,) = fake.api_client.rest_client.calls
-    assert call["_request_timeout"] == 5
 
 
 # ---------------------------------------------------------------------------

@@ -9,7 +9,7 @@ Verified against the installed mutmut 3.7 source; several of these are
 counter-intuitive and decide whether a module is worth gating at all.
 
 - **Only code inside a top-level `FunctionDef`.** Module-level constants
-  (`CSV_COLUMNS`, `_DIR_MODE`, `_HTTP_5XX_MIN`) produce no mutants. Note this
+  (`CSV_COLUMNS`, `DIR_MODE`, `_HTTP_5XX_MIN`) produce no mutants. Note this
   as a fact about the tool, not as a technique: hoist a literal when the
   *code* wants it hoisted (it is shared, or it names something), never to
   silence the gate — see the "never reshape working code" rule in `SKILL.md`.

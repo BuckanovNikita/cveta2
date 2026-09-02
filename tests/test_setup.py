@@ -1,4 +1,4 @@
-"""Tests for the interactive ``setup`` and ``setup-cache`` commands."""
+"""Tests for the interactive ``setup``, ``setup-cache``, ``setup-clearml`` commands."""
 
 from __future__ import annotations
 
@@ -8,13 +8,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from cveta2.commands import setup as setup_cmd
-from cveta2.commands.interactive import _questionary, primitives
+from cveta2.commands.interactive import _questionary, primitives, wizard
 from cveta2.commands.setup import run_setup, run_setup_cache
+from cveta2.commands.setup_clearml import run_setup_clearml
 from cveta2.config import CacheConfig, CvatConfig, ImageCacheConfig
+from cveta2.exceptions import InteractiveModeRequiredError
 from cveta2.models import ProjectInfo
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -58,6 +61,27 @@ def feed_inputs(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str
     monkeypatch.setattr(_questionary, "ask_text", fake_text)
     monkeypatch.setattr(_questionary, "ask_confirm", fake_confirm)
     return prompts
+
+
+@pytest.mark.parametrize(
+    ("command", "hint"),
+    [
+        (run_setup, wizard.SETUP_HINT),
+        (run_setup_cache, wizard.CACHE_HINT),
+        (run_setup_clearml, wizard.CLEARML_HINT),
+    ],
+)
+def test_setup_commands_refuse_non_interactive_with_wizard_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: Callable[[argparse.Namespace], None],
+    hint: str,
+) -> None:
+    """The top-level guard names the same hint the wizard prompts would."""
+    monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
+    with pytest.raises(InteractiveModeRequiredError) as excinfo:
+        command(_args(tmp_path / "config.yaml"))
+    assert str(excinfo.value).endswith(hint)
 
 
 def run_setup_with_inputs(

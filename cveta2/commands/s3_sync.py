@@ -13,7 +13,7 @@ from cveta2.commands._helpers import (
 from cveta2.config import (
     CacheConfig,
     ImageCacheConfig,
-    cache_dir_for_project,
+    images_cache_dir_from,
 )
 from cveta2.exceptions import Cveta2Error
 
@@ -32,10 +32,8 @@ class SyncTarget(NamedTuple):
 def _resolve_sync_dirs(project_filter: str | None) -> dict[str, SyncTarget]:
     """Map project name → local image dir from ``image_cache`` + ``cache``.
 
-    Per-project ``image_cache`` entries win; projects known only to the
-    ``cache`` section fall back to ``images_root/<sanitized_name>``.
-    ``ignored_prefix`` is read from the config already loaded here, so the
-    sync loop does not re-parse the YAML once per project.
+    Both sections are loaded once here, so the per-project resolution and
+    ``ignored_prefix`` lookup do not re-parse the YAML once per project.
     """
     ic_cfg = ImageCacheConfig.load()
     cache_cfg = CacheConfig.load()
@@ -46,12 +44,9 @@ def _resolve_sync_dirs(project_filter: str | None) -> dict[str, SyncTarget]:
     resolved: dict[str, SyncTarget] = {}
     for name in sorted(names):
         project_cache = cache_cfg.for_project(name)
-        cache_dir = ic_cfg.get_cache_dir(name)
+        cache_dir = images_cache_dir_from(ic_cfg, project_cache, name)
         if cache_dir is None:
-            images_root = project_cache.images_root
-            if images_root is None:
-                continue
-            cache_dir = cache_dir_for_project(images_root, name)
+            continue
         resolved[name] = SyncTarget(cache_dir, project_cache.ignored_prefix)
     return resolved
 
@@ -103,8 +98,4 @@ def run_s3_sync(args: argparse.Namespace) -> None:
                 project_cloud_storage=cs_info,
                 ignored_prefix=target.ignored_prefix,
             )
-            logger.info(
-                f"Проект {project_name!r}: {stats.downloaded} загружено, "
-                f"{stats.cached} из кэша, {stats.failed} ошибок "
-                f"(всего {stats.total})"
-            )
+            logger.info(f"Проект {project_name!r}: {stats.summary()}")

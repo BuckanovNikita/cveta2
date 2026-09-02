@@ -167,25 +167,6 @@ _write_retry = network_retry(_should_retry_write, label="CVAT write")
 _CONNECT_TIMEOUT = 10.0
 
 
-def apply_request_timeout(sdk_client: CvatSdkClient, timeout: float) -> None:
-    """Enforce a default (connect, read) timeout on every CVAT HTTP request.
-
-    Wraps the SDK's low-level ``rest_client.request`` so that requests
-    without an explicit ``_request_timeout`` get ``(10.0, timeout)``.
-    Explicit per-call timeouts set by the SDK are preserved.
-    """
-    rest_client = sdk_client.api_client.rest_client
-    original_request: Callable[..., object] = rest_client.request
-
-    @functools.wraps(original_request)
-    def request_with_timeout(*args: object, **kwargs: object) -> object:
-        if kwargs.get("_request_timeout") is None:
-            kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, timeout)
-        return original_request(*args, **kwargs)
-
-    rest_client.request = request_with_timeout
-
-
 class _GlobalTimeout:
     """Process-wide read timeout injected into every CVAT SDK request.
 
@@ -201,12 +182,12 @@ class _GlobalTimeout:
 def install_global_request_timeout(timeout: float | None) -> None:
     """Enforce the timeout on ALL CVAT SDK REST clients, present and future.
 
-    ``apply_request_timeout`` wraps one opened client, but ``make_client``
-    performs requests (server version check, login) before any wrapping is
-    possible; a black-holed host hangs there forever. Patching
-    ``RESTClientObject.request`` at class level covers that window too.
-    Idempotent: repeated calls only update the timeout value, and ``None``
-    or ``0`` switches the injection off without unpatching.
+    ``make_client`` performs requests (server version check, login) before
+    it returns a client that could be wrapped; a black-holed host hangs
+    there forever. Patching ``RESTClientObject.request`` at class level
+    covers that window too. Idempotent: repeated calls only update the
+    timeout value, and ``None`` or ``0`` switches the injection off without
+    unpatching.
     """
     from cvat_sdk.api_client.rest import RESTClientObject  # noqa: PLC0415
 
@@ -567,8 +548,6 @@ class SdkCvatApiAdapter:
         patches: list[LabelPatch],
     ) -> None:
         """Apply label additions/renames/deletions/recolors to a project."""
-        if not patches:
-            return
         self.client.api_client.projects_api.partial_update(
             project_id,
             patched_project_write_request=build_labels_patch_request(patches),

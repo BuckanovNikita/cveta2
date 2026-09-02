@@ -185,9 +185,7 @@ def _fetch_core(
             ignored_prefix=cache_settings.ignored_prefix,
         )
         logger.info(
-            f"Изображения: {stats.downloaded} загружено, "
-            f"{stats.cached} из кэша, {stats.failed} ошибок "
-            f"({time.monotonic() - started:.1f} с)"
+            f"Изображения: {stats.summary()} ({time.monotonic() - started:.1f} с)"
         )
     populate_record_paths(
         result,

@@ -27,10 +27,7 @@ def run_setup_clearml(args: argparse.Namespace) -> None:
         _list_mappings(config_path)
         return
 
-    require_interactive(
-        "The 'setup-clearml' command is fully interactive. "
-        "Edit the config file directly to set clearml mappings."
-    )
+    require_interactive(wizard.CLEARML_HINT)
 
     projects = load_projects_cache()
     if not projects:

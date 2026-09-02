@@ -125,9 +125,11 @@ could ever be lifted:
   `_clearml/*`. `session.py` is a decorated dataclass whose four guards are all
   `@property`, so it generates no mutants at all.
 - **Mutants exist but are low-signal plumbing already pinned by existing
-  tests** — admission costs runtime for no new signal: `fs_utils.py` (its whole
-  contract is the module-level `_DIR_MODE`/`_FILE_MODE`) and
-  `_client/context.py`.
+  tests** — admission costs runtime for no new signal: `_client/context.py`.
+  `fs_utils.py` sat here while its whole contract was the module-level
+  `DIR_MODE`/`FILE_MODE`; it joined the scope once `replace_shared_bytes`
+  gave it real control flow (the temp-name write, rename and failure
+  cleanup shared by the task cache, upload manifests and image downloads).
 
 **Adapters** are the second reason at layer scale: `cli.py` is a wall of
 `add_argument()` calls whose mutable content is help text and arguments that

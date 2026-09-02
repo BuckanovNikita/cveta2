@@ -149,8 +149,8 @@ def build_server_file_mapping(
     name_to_server_file : dict[str, str]
         Mapping ``image_name → server_file`` (path relative to prefix).
     existing_keys : set[str]
-        Full S3 keys of objects that already exist under *cs_info.prefix*.
-        Passed to :meth:`S3Uploader.upload` to avoid a redundant listing.
+        Full S3 keys of objects that already exist under *cs_info.prefix*;
+        :meth:`S3Uploader.upload` skips every image whose key is among them.
 
     """
     client = s3_client or make_s3_client(cs_info.endpoint_url or None)
@@ -202,8 +202,8 @@ class S3Uploader:
         self,
         cs_info: CloudStorageInfo,
         images: dict[str, Path],
-        name_to_server_file: dict[str, str] | None = None,
-        existing_keys: set[str] | None = None,
+        name_to_server_file: dict[str, str],
+        existing_keys: set[str],
     ) -> UploadStats:
         """Upload *images* to S3 under *cs_info* prefix.
 
@@ -214,13 +214,13 @@ class S3Uploader:
         images:
             Mapping ``image_name -> local_path`` of files to upload.
         name_to_server_file:
-            Optional mapping ``image_name -> server_file`` (path relative
-            to prefix).  When provided, the server_file is used to build
-            the S3 key instead of the bare image name.  Produced by
-            :func:`build_server_file_mapping`.
+            Mapping ``image_name -> server_file`` (path relative to prefix)
+            covering every name in *images*; the server_file builds the S3
+            key.  Produced by :func:`build_server_file_mapping`.
         existing_keys:
-            Pre-computed set of existing S3 keys.  When provided, the
-            internal ``list_s3_objects`` call is skipped.
+            Full S3 keys already present under the prefix, as returned by
+            :func:`build_server_file_mapping`; images whose key is among
+            them are skipped.
 
         Returns
         -------
@@ -235,19 +235,9 @@ class S3Uploader:
 
         s3 = make_s3_client(cs_info.endpoint_url or None)
 
-        # List existing objects to skip re-uploads
-        if existing_keys is None:
-            objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
-            existing_keys = {key for key, _name in objects}
-
         to_upload: list[Transfer] = []
         for name, local_path in images.items():
-            server_file = (
-                name_to_server_file[name]
-                if name_to_server_file and name in name_to_server_file
-                else name
-            )
-            s3_key = build_s3_key(cs_info.prefix, server_file)
+            s3_key = build_s3_key(cs_info.prefix, name_to_server_file[name])
             if s3_key in existing_keys:
                 stats.skipped_existing += 1
             else:

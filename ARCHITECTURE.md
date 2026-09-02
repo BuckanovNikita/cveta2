@@ -42,8 +42,8 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
   - `session.py` - `TaskWriteSession`, memoizing one `data_meta` fetch per task
   - `shared.py` - `FetchContext` and the 5xx skip helper
 - **`cveta2/_client/`** - All CVAT SDK code (internal):
-  - `ports.py` - `CvatReadPort` + `CvatWritePort` protocols (combined as `CvatApiPort`; enables test fakes)
-  - `sdk_adapter.py` - Implements both ports over `cvat_sdk`; translates SDK errors to `CvatApiError`
+  - `ports.py` - `CvatApiPort` protocol (enables test fakes)
+  - `sdk_adapter.py` - Implements `CvatApiPort` over `cvat_sdk`; translates SDK errors to `CvatApiError`
   - `sdk_requests.py` - Builds SDK request models
   - `connection.py` - Opens SDK clients, configures data timeout
   - `assembly.py` - Pure DTO → domain transforms
@@ -62,7 +62,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - **`cveta2/image_uploader.py`** - Local → S3 upload (organizes into `YYYY-MM/` subfolders)
 - **`cveta2/s3_types.py`** - `S3Client` Protocol (interface for S3 operations)
 - **`cveta2/s3_utils.py`** - S3 client construction, key helpers, the parallel transfer runner and the S3 retry predicate
-- **`cveta2/fs_utils.py`** - Local filesystem writes under the shared-cache permission modes (`_DIR_MODE`/`_FILE_MODE`)
+- **`cveta2/fs_utils.py`** - Local filesystem writes under the shared-cache permission modes (`DIR_MODE`/`FILE_MODE`)
 - **`cveta2/projects_cache.py`** - Local project metadata cache, keyed by organization (`organizations: [{slug, name, projects}]`; `""` slug = personal workspace)
 - **`cveta2/_concurrency.py`** - `run_concurrent`, the one bounded fan-out every parallel site goes through, plus the process-wide `Workers` counts
 - **`cveta2/_retry.py`** - retry mechanism (attempts, backoff, logging); the *predicates* deciding what is worth retrying live next to the calls they protect, in `_client/sdk_adapter.py` and `s3_utils.py`

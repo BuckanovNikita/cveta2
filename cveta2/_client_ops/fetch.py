@@ -168,8 +168,17 @@ class _FetchMixin(_ClientBase):
             host=self._cfg.host,
             project_name=project_name,
         )
-        source = self._require_api("prepare_fetch")
-        return self._prepare_fetch(source, project_id, options)
+        api = self._require_api("prepare_fetch")
+        tasks = _select_tasks_for_fetch(api, project_id, options)
+        label_names, attr_names = _build_label_maps(api.get_project_labels(project_id))
+        return FetchContext(
+            tasks=tasks,
+            label_names=label_names,
+            attr_names=attr_names,
+            host=options.host,
+            project_name=options.project_name,
+            raise_on_failure=should_raise_on_fetch_failure(),
+        )
 
     @staticmethod
     def _resolve_one_task_selector(
@@ -215,25 +224,6 @@ class _FetchMixin(_ClientBase):
                 seen_ids.add(task.id)
                 matched.append(task)
         return matched
-
-    @staticmethod
-    def _prepare_fetch(
-        api: CvatApiPort,
-        project_id: int,
-        options: _FetchAnnotationsOptions,
-    ) -> FetchContext:
-        """Get task list and labels, apply filters, return context."""
-        tasks = _select_tasks_for_fetch(api, project_id, options)
-        labels = api.get_project_labels(project_id)
-        label_names, attr_names = _build_label_maps(labels)
-        return FetchContext(
-            tasks=tasks,
-            label_names=label_names,
-            attr_names=attr_names,
-            host=options.host,
-            project_name=options.project_name,
-            raise_on_failure=should_raise_on_fetch_failure(),
-        )
 
     @staticmethod
     def fetch_one_task(

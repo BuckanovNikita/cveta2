@@ -155,9 +155,9 @@ def test_switching_organization_drops_the_cloud_storage_memo() -> None:
 def test_prepare_fetch_forwards_project_id_to_both_reads() -> None:
     """Tasks and labels must be read for the *requested* project.
 
-    ``prepare_fetch`` hands the id down two levels (to ``_prepare_fetch``,
-    then to each port call); a single-project fake cannot tell the right
-    id from ``None``.
+    ``prepare_fetch`` forwards the id to ``_select_tasks_for_fetch`` and to
+    ``get_project_labels``; a single-project fake cannot tell the right id
+    from ``None``.
     """
     api = _mock_port()
 

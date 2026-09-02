@@ -12,7 +12,6 @@ from cveta2._client.sdk_adapter import (
     _TRANSPORT_ERRORS,
     SdkCvatApiAdapter,
     _translate_api_errors,
-    apply_request_timeout,
     install_global_request_timeout,
 )
 from cveta2._concurrency import configure_workers
@@ -32,9 +31,8 @@ if TYPE_CHECKING:
 def configure_data_timeout(timeout: float | None) -> None:
     """Apply the configured timeout to S3 clients and all CVAT SDK requests.
 
-    The class-level SDK patch covers requests made while the client is still
-    being created (server version check, login), where the per-instance
-    ``apply_request_timeout`` wrapper cannot reach yet.
+    Called at bootstrap, before any client exists, so the first S3 transfer
+    and the very first CVAT request already carry the timeout.
     """
     set_default_data_timeout(timeout)
     install_global_request_timeout(timeout)
@@ -83,12 +81,14 @@ def open_sdk_api(
 ) -> Iterator[SdkCvatApiAdapter]:
     """Open an SDK client for *cfg* and yield an adapter wrapping it.
 
-    Applies the configured request timeout and organization slug.
-    Credentials must already be present on *cfg*.  ``make_client`` performs
-    the server-about request and the login itself, so only that call is
-    translated into :class:`CvatApiError`; whatever the caller raises inside
-    the block passes through untouched.
+    Installs the process-wide request timeout before ``make_client`` runs,
+    so the server version check and the login are covered too, and applies
+    the organization slug.  Credentials must already be present on *cfg*.
+    ``make_client`` performs the server-about request and the login itself,
+    so only that call is translated into :class:`CvatApiError`; whatever the
+    caller raises inside the block passes through untouched.
     """
+    install_global_request_timeout(cfg.request_timeout)
     factory = client_factory or make_client
     kwargs = _build_client_kwargs(cfg)
     try:
@@ -97,8 +97,6 @@ def open_sdk_api(
         msg = f"Не удалось подключиться к CVAT ({cfg.host}): {e}"
         raise CvatApiError(msg) from e
     with sdk_cm as sdk_client:
-        if cfg.request_timeout:
-            apply_request_timeout(sdk_client, cfg.request_timeout)
         if cfg.organization:
             sdk_client.organization_slug = cfg.organization
             logger.trace(f"Using organization: {cfg.organization}")

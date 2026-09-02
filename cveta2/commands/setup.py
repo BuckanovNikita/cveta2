@@ -34,11 +34,7 @@ if TYPE_CHECKING:
 def run_setup(args: argparse.Namespace) -> None:
     """Interactively ask user for CVAT credentials and core settings."""
     config_path = config_path_from_args(args)
-    require_interactive(
-        "The 'setup' command is fully interactive. "
-        "Configure via env vars (CVAT_HOST, CVAT_USERNAME, CVAT_PASSWORD) "
-        "or edit the config file directly."
-    )
+    require_interactive(wizard.SETUP_HINT)
     existing = CvatConfig.from_file(config_path)
 
     host_default = existing.host or "https://app.cvat.ai"
@@ -70,10 +66,7 @@ def run_setup_cache(args: argparse.Namespace) -> None:
         _list_cache_paths(config_path)
         return
 
-    require_interactive(
-        "The 'setup-cache' command is fully interactive. "
-        "Edit the config file directly to set image_cache paths."
-    )
+    require_interactive(wizard.CACHE_HINT)
 
     projects = _ensure_projects_list(config_path)
     if not projects:

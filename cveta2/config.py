@@ -430,22 +430,35 @@ def cache_dir_for_project(root: Path, project_name: str) -> Path:
     return root / safe
 
 
+def images_cache_dir_from(
+    image_cache: ImageCacheConfig,
+    project_settings: CacheProjectSettings,
+    project_name: str,
+) -> Path | None:
+    """Return the image-cache dir for a project from already-loaded config.
+
+    The explicit ``image_cache`` entry wins; otherwise the project's
+    effective ``images_root`` yields ``images_root/<sanitized_name>``;
+    with neither configured the result is None.
+    """
+    cached_dir = image_cache.get_cache_dir(project_name)
+    if cached_dir is not None:
+        return cached_dir
+    if project_settings.images_root is not None:
+        return cache_dir_for_project(project_settings.images_root, project_name)
+    return None
+
+
 def resolve_images_cache_dir(
     project_name: str,
     config_path: Path | None = None,
 ) -> Path | None:
-    """Return the configured image-cache dir for a project, or None.
-
-    Checks the explicit ``image_cache`` project mapping first, then falls
-    back to the effective ``cache.images_root`` for the project.
-    """
-    cached_dir = ImageCacheConfig.load(config_path).get_cache_dir(project_name)
-    if cached_dir is not None:
-        return cached_dir
-    images_root = CacheConfig.load(config_path).for_project(project_name).images_root
-    if images_root is not None:
-        return cache_dir_for_project(images_root, project_name)
-    return None
+    """Load the ``image_cache`` and ``cache`` sections and resolve the dir."""
+    return images_cache_dir_from(
+        ImageCacheConfig.load(config_path),
+        CacheConfig.load(config_path).for_project(project_name),
+        project_name,
+    )
 
 
 class SyncRootsConfig(_ProjectsSection):

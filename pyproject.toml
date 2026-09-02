@@ -232,6 +232,7 @@ only_mutate = [
     "cveta2/_client/mapping.py",
     "cveta2/client.py",
     "cveta2/commands/_bootstrap.py",
+    "cveta2/fs_utils.py",
 ]
 # `-n 0` is mandatory: mutmut runs pytest.main() inside each forked child and
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
@@ -400,7 +401,6 @@ full = []
 "cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_2" = "stats.failed = len(pending); the no-storage branch returns before any transfer, so failed is still 0"
 "cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_33" = "stats.failed = len(missing); the misses are counted before any transfer runs, so failed is still 0"
 "cveta2.image_downloader.x_parse_cloud_storage__mutmut_11" = "or \"XXXX\"; parse_qs of a string with no \"=\" yields {} exactly as for \"\""
-"cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_13" = "prefix=None widens the listing with out-of-prefix keys that no computed s3_key can equal"
 
 # Bar captions, second half. The `desc=`/`unit=` line patterns kill the
 # mutants that rewrite the caption *text*, but not the one that drops the
@@ -410,7 +410,7 @@ full = []
 # else changes.
 "cveta2.image_downloader.x__download_pending__mutmut_5" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_8" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
-"cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_43" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.image_uploader.xǁS3Uploaderǁupload__mutmut_31" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.s3_utils.x_list_s3_objects__mutmut_29" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.services.fetch.x__fetch_and_save_tasks__mutmut_37" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2._client_ops.task_ops.xǁ_TaskOpsMixinǁset_task_jobs_status__mutmut_15" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
@@ -453,11 +453,11 @@ full = []
 # can produce — a test that asserts nothing about cveta2.
 "cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_7" = "catch=None; only reachable if Path.exists raises, which no real filesystem does here"
 
-# _write_local: the temp name only has to be unique per writer before the
-# atomic replace. Dropping the thread id still yields a name unique per
-# process, and one task id is written by exactly one thread, so no test can
-# observe the collision this guards against.
-"cveta2.task_cache.xǁTaskAnnotationCacheǁ_write_local__mutmut_2" = "writer=None; the temp name stays unique for every writer a test can create"
+# ensure_shared_dir: the walk up to the first existing parent stops at the
+# filesystem root as a safety net. Reaching that guard needs a root directory
+# that does not exist, which no real filesystem has, so `break` and `return`
+# are indistinguishable to any test that does not patch Path.exists.
+"cveta2.fs_utils.x_ensure_shared_dir__mutmut_6" = "break→return at the root guard; only reachable if the filesystem root does not exist"
 
 # run_concurrent's pool teardown. Its `finally` cancels the still-queued
 # futures so an uncaught worker error or a Ctrl+C aborts the batch instead
@@ -476,12 +476,9 @@ full = []
 "cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_27" = "already = len+len; still truthy, still only reaches that info line"
 "cveta2.services.upload.x__resume_manifest__mutmut_13" = "join separator; formats the bullet list in an error message and nothing else"
 
-# upload_manifest: the temp name only has to be unique per writer before the
-# atomic rename, and one fingerprint is written by one thread, so dropping
-# the thread id leaves a name no test can collide. The describe() placeholder
-# stands in for a task id that does not exist yet — prose, and the test that
-# matters asserts a bare "None" never appears.
-"cveta2.upload_manifest.x_save_manifest__mutmut_6" = "writer=None; the temp name stays unique for every writer a test can create"
+# upload_manifest: the describe() placeholder stands in for a task id that
+# does not exist yet — prose, and the test that matters asserts a bare "None"
+# never appears.
 "cveta2.upload_manifest.xǁUploadManifestǁdescribe__mutmut_2" = "placeholder text for a missing task id; the assertion that matters is that it is not 'None'"
 
 # fetch_one_task: the degrade path's [] and None are normalized identically by

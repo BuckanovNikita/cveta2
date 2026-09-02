@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -52,6 +53,8 @@ from tests.helpers import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 # ---------------------------------------------------------------------------
@@ -74,9 +77,8 @@ class TestResolveTaskSelector:
         fake = normal_fake
         client = make_fake_client(fake)
         task_id_str = str(fake.tasks[0].id)
-        args = make_fetch_args(task=[task_id_str], output_dir="unused")
 
-        result = _resolve_task_selector(args, client, fake.project.id, None)
+        result = _resolve_task_selector([task_id_str], client, fake.project.id, None)
 
         assert result == [task_id_str]
 
@@ -85,9 +87,8 @@ class TestResolveTaskSelector:
         fake = normal_fake
         client = make_fake_client(fake)
         task_name = fake.tasks[0].name
-        args = make_fetch_args(task=[task_name], output_dir="unused")
 
-        result = _resolve_task_selector(args, client, fake.project.id, None)
+        result = _resolve_task_selector([task_name], client, fake.project.id, None)
 
         assert result == [task_name]
 
@@ -100,17 +101,15 @@ class TestResolveTaskSelector:
         )
         client = make_fake_client(fake)
         ids = [str(t.id) for t in fake.tasks]
-        args = make_fetch_args(task=ids, output_dir="unused")
 
-        result = _resolve_task_selector(args, client, fake.project.id, None)
+        result = _resolve_task_selector(ids, client, fake.project.id, None)
 
         assert result == ids
 
-    def test_empty_task_triggers_tui(self, normal_fake: LoadedFixtures) -> None:
-        """``-t`` without a value (empty string) falls through to TUI."""
+    def test_no_explicit_tasks_triggers_tui(self, normal_fake: LoadedFixtures) -> None:
+        """An empty list falls through to the interactive task picker."""
         fake = normal_fake
         client = make_fake_client(fake)
-        args = make_fetch_args(task=[""], output_dir="unused")
 
         with (
             patch(
@@ -119,36 +118,7 @@ class TestResolveTaskSelector:
             ),
             pytest.raises(InteractiveModeRequiredError),
         ):
-            _resolve_task_selector(args, client, fake.project.id, None)
-
-    def test_none_task_triggers_tui(self, normal_fake: LoadedFixtures) -> None:
-        """``task=None`` (no -t flag at all) falls through to TUI."""
-        fake = normal_fake
-        client = make_fake_client(fake)
-        args = make_fetch_args(task=None, output_dir="unused")
-
-        with (
-            patch(
-                "cveta2.commands.interactive.primitives.require_interactive",
-                side_effect=InteractiveModeRequiredError("non-interactive"),
-            ),
-            pytest.raises(InteractiveModeRequiredError),
-        ):
-            _resolve_task_selector(args, client, fake.project.id, None)
-
-    def test_whitespace_only_values_filtered(
-        self,
-        normal_fake: LoadedFixtures,
-    ) -> None:
-        """Whitespace-only task values are stripped and filtered out."""
-        fake = normal_fake
-        client = make_fake_client(fake)
-        task_name = fake.tasks[0].name
-        args = make_fetch_args(task=["  ", task_name, ""], output_dir="unused")
-
-        result = _resolve_task_selector(args, client, fake.project.id, None)
-
-        assert result == [task_name]
+            _resolve_task_selector([], client, fake.project.id, None)
 
 
 # ---------------------------------------------------------------------------
@@ -883,6 +853,25 @@ class TestFetchSelectedTasks:
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
+def _patched_fetch_task_cli(fake: LoadedFixtures) -> Iterator[None]:
+    """Route ``run_fetch_task`` onto *fake* with no ignore config or cloud storage."""
+    fake_api = FakeCvatApi(fake)
+
+    def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
+        return CvatClient(cfg, api=fake_api)
+
+    with (
+        patch_cli_client(factory=make_client, config=CFG),
+        patch("cveta2.config.IgnoreConfig.load", return_value=IgnoreConfig()),
+        patch(
+            "cveta2.client.CvatClient.detect_project_cloud_storage",
+            return_value=None,
+        ),
+    ):
+        yield
+
+
 class TestRunFetchTaskProjectInference:
     """Without ``--project``, the project comes from the first numeric task id."""
 
@@ -893,32 +882,69 @@ class TestRunFetchTaskProjectInference:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         fake = normal_fake
-        fake_api = FakeCvatApi(fake)
         monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "missing-config.yaml"))
-
-        def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
-            return CvatClient(cfg, api=fake_api)
-
         args = make_fetch_args(
             project=None,
             task=[str(fake.tasks[0].id)],
             output_dir=str(tmp_path / "out"),
         )
 
-        with (
-            patch_cli_client(factory=make_client, config=CFG),
-            patch(
-                "cveta2.config.IgnoreConfig.load",
-                return_value=IgnoreConfig(),
-            ),
-            patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
-                return_value=None,
-            ),
-        ):
+        with _patched_fetch_task_cli(fake):
             run_fetch_task(args)
 
         assert (tmp_path / "out" / "dataset.csv").exists()
+
+
+class TestRunFetchTaskTaskArgument:
+    """``-t`` values are stripped once in ``run_fetch_task`` before dispatch."""
+
+    @pytest.mark.parametrize("task", [None, [""], ["  "]])
+    def test_blank_task_triggers_tui(
+        self,
+        normal_fake: LoadedFixtures,
+        tmp_path: Path,
+        task: list[str] | None,
+    ) -> None:
+        """No ``-t``, ``-t ""`` and ``-t "  "`` all open the task picker."""
+        fake = normal_fake
+        args = make_fetch_args(
+            project=str(fake.project.id),
+            task=task,
+            output_dir=str(tmp_path / "out"),
+        )
+
+        with (
+            _patched_fetch_task_cli(fake),
+            patch(
+                "cveta2.commands.interactive.primitives.require_interactive",
+                side_effect=InteractiveModeRequiredError("non-interactive"),
+            ),
+            pytest.raises(InteractiveModeRequiredError),
+        ):
+            run_fetch_task(args)
+
+    def test_whitespace_only_values_filtered(
+        self,
+        normal_fake: LoadedFixtures,
+        tmp_path: Path,
+    ) -> None:
+        """Blank ``-t`` values are dropped; the rest are stripped and kept."""
+        fake = normal_fake
+        task_name = fake.tasks[0].name
+        args = make_fetch_args(
+            project=str(fake.project.id),
+            task=["  ", f" {task_name} ", ""],
+            output_dir=str(tmp_path / "out"),
+        )
+
+        with (
+            _patched_fetch_task_cli(fake),
+            patch(f"{_MODULE}.fetch_selected_tasks") as fetch_mock,
+        ):
+            run_fetch_task(args)
+
+        (_client, _target, options), _kwargs = fetch_mock.call_args
+        assert options.task_selector == [task_name]
 
 
 class TestRunFetchTaskCliExit:
@@ -931,27 +957,11 @@ class TestRunFetchTaskCliExit:
     ) -> None:
         """Non-existent task name raises ``TaskNotFoundError`` from the command."""
         fake = normal_fake
-        fake_api = FakeCvatApi(fake)
-
-        def make_client(cfg: CvatConfig, **_kw: object) -> CvatClient:
-            return CvatClient(cfg, api=fake_api)
-
         args = make_fetch_args(
             project=str(fake.project.id),
             task=["nonexistent-task-xyz"],
             output_dir=str(tmp_path / "out"),
         )
 
-        with (
-            patch_cli_client(factory=make_client, config=CFG),
-            patch(
-                "cveta2.config.IgnoreConfig.load",
-                return_value=IgnoreConfig(),
-            ),
-            patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
-                return_value=None,
-            ),
-            pytest.raises(TaskNotFoundError),
-        ):
+        with _patched_fetch_task_cli(fake), pytest.raises(TaskNotFoundError):
             run_fetch_task(args)

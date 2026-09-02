@@ -55,15 +55,9 @@ def ask_text(
     *history* (a prompt_toolkit history) enables arrow-up recall of
     previously entered values; accepted input is appended automatically.
     """
-    if validate is not None and history is not None:
-        prompt = questionary.text(message, validate=validate, history=history)
-    elif validate is not None:
-        prompt = questionary.text(message, validate=validate)
-    elif history is not None:
-        prompt = questionary.text(message, history=history)
-    else:
-        prompt = questionary.text(message)
-    result: str | None = prompt.ask()
+    result: str | None = questionary.text(
+        message, validate=validate, history=history
+    ).ask()
     return result
 
 

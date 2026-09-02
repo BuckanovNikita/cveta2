@@ -9,8 +9,6 @@ every S3 error self-disables the backend for the rest of the run.
 
 from __future__ import annotations
 
-import os
-import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -19,7 +17,7 @@ from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 from cveta2.config import CacheConfig, is_cache_disabled
-from cveta2.fs_utils import default_cache_base, ensure_shared_dir, write_shared_bytes
+from cveta2.fs_utils import default_cache_base, replace_shared_bytes
 from cveta2.models import TaskAnnotations
 from cveta2.s3_utils import (
     build_s3_key,
@@ -343,11 +341,7 @@ class TaskAnnotationCache:
     def _write_local(self, task_id: int, data: bytes) -> None:
         """Atomically write the local entry (best effort)."""
         try:
-            ensure_shared_dir(self._local_dir)
-            writer = f"{os.getpid()}-{threading.get_ident()}"
-            tmp_path = self._local_dir / f"task_{task_id}.json.tmp{writer}"
-            write_shared_bytes(tmp_path, data)
-            tmp_path.replace(self._local_path(task_id))
+            replace_shared_bytes(self._local_path(task_id), data)
         except OSError as e:
             logger.warning(f"Не удалось сохранить локальный кэш задачи {task_id}: {e}")
 

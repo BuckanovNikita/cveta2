@@ -408,8 +408,10 @@ class TestS3Uploader:
 
     The method was reachable only from ``tests/integration/``, which is
     skipped without a live CVAT: under unit tests not a single line of it
-    ran.  :class:`FakeS3Client` implements both ``list_objects_v2`` and
-    ``upload_file``, so the whole method works in memory.
+    ran.  :class:`FakeS3Client` implements ``upload_file``, so the whole
+    method works in memory.  The mapping and the existing keys are the
+    caller's job (``build_server_file_mapping`` in production), so every
+    test hands them over explicitly.
     """
 
     def test_no_images_returns_zeroed_stats(
@@ -420,7 +422,7 @@ class TestS3Uploader:
             monkeypatch, "cveta2.image_uploader", FakeS3Client()
         )
 
-        stats = S3Uploader().upload(_upload_cs_info(), {})
+        stats = S3Uploader().upload(_upload_cs_info(), {}, {}, set())
 
         assert stats.total == 0
         assert stats.uploaded == 0
@@ -430,10 +432,10 @@ class TestS3Uploader:
     def test_uploads_new_files_and_skips_existing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """New files land under prefix; ones already in the bucket are skipped.
+        """New files land under prefix; ones named in ``existing_keys`` are skipped.
 
-        Without ``existing_keys`` the method lists the bucket itself, so
-        this also pins the endpoint, the bucket and the prefix it lists.
+        The seeded foreign-bucket copy of ``new.jpg`` and the recorded
+        endpoint pin the bucket and the endpoint the upload targets.
         """
         client = FakeS3Client(
             {
@@ -449,7 +451,12 @@ class TestS3Uploader:
             "old2.jpg": _touch(tmp_path / "old2.jpg"),
         }
 
-        stats = S3Uploader().upload(_upload_cs_info(), images)
+        stats = S3Uploader().upload(
+            _upload_cs_info(),
+            images,
+            {name: name for name in images},
+            {"project/images/old.jpg", "project/images/old2.jpg"},
+        )
 
         assert factory.endpoints == ["http://minio:9000"]
         assert stats.total == 3
@@ -467,44 +474,46 @@ class TestS3Uploader:
     def test_server_file_mapping_decides_the_key(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A mapped name uses its server_file; an unmapped one uses the name.
+        """Each image lands at its server_file, not at its bare name.
 
-        The mapping deliberately omits ``unmapped.jpg`` so the membership
-        test in the conditional is load-bearing, not just the truthiness
-        of the mapping itself.
+        The two names map into different month folders, so a version that
+        keys by name or by a single folder produces a different bucket.
         """
         client = FakeS3Client()
         patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
         images = {
-            "mapped.jpg": _touch(tmp_path / "mapped.jpg"),
-            "unmapped.jpg": _touch(tmp_path / "unmapped.jpg"),
+            "january.jpg": _touch(tmp_path / "january.jpg"),
+            "february.jpg": _touch(tmp_path / "february.jpg"),
         }
 
         stats = S3Uploader().upload(
             _upload_cs_info(),
             images,
-            name_to_server_file={"mapped.jpg": "2026-01/mapped.jpg"},
-            existing_keys=set(),
+            {
+                "january.jpg": "2026-01/january.jpg",
+                "february.jpg": "2026-02/february.jpg",
+            },
+            set(),
         )
 
         assert stats.uploaded == 2
         assert set(client.objects) == {
-            "upload-bucket/project/images/2026-01/mapped.jpg",
-            "upload-bucket/project/images/unmapped.jpg",
+            "upload-bucket/project/images/2026-01/january.jpg",
+            "upload-bucket/project/images/2026-02/february.jpg",
         }
 
     @pytest.mark.parametrize("case", _EXISTING_KEYS_CASES)
-    def test_existing_keys_argument_replaces_the_listing(
+    def test_existing_keys_alone_decide_the_skip(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         case: _ExistingKeysCase,
     ) -> None:
-        """A supplied ``existing_keys`` is used *instead of* listing the bucket.
+        """``existing_keys`` decides the skip; the bucket is never consulted.
 
         Both cases make the argument disagree with the bucket, so a
-        version that lists anyway — or ignores the argument — gets the
-        opposite answer.
+        version that lists the bucket — or ignores the argument — gets
+        the opposite answer.
         """
         client = FakeS3Client(case.seeded)
         patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
@@ -512,7 +521,8 @@ class TestS3Uploader:
         stats = S3Uploader().upload(
             _upload_cs_info(),
             {"img.jpg": _touch(tmp_path / "img.jpg")},
-            existing_keys=case.existing_keys,
+            {"img.jpg": "img.jpg"},
+            case.existing_keys,
         )
 
         assert stats.uploaded == case.expected_uploaded
@@ -536,7 +546,9 @@ class TestS3Uploader:
             "bad.jpg": _touch(tmp_path / "bad.jpg"),
         }
 
-        stats = S3Uploader().upload(_upload_cs_info(), images, existing_keys=set())
+        stats = S3Uploader().upload(
+            _upload_cs_info(), images, {name: name for name in images}, set()
+        )
 
         assert stats.total == 2
         assert stats.uploaded == 1

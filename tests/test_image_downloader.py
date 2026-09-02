@@ -5,19 +5,16 @@ from __future__ import annotations
 import errno
 import os
 import stat
-import threading
 from typing import TYPE_CHECKING, Any, NamedTuple
 from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
 
-from cveta2.fs_utils import write_shared_bytes
 from cveta2.image_downloader import (
     CloudStorageInfo,
     ImageDownloader,
     S3Syncer,
-    _download_one_s3,
     parse_cloud_storage,
 )
 from cveta2.models import (
@@ -486,7 +483,7 @@ def test_failed_write_leaves_no_partial_file_and_is_retried_next_run(
     target = tmp_path / "images"
 
     with monkeypatch.context() as patched:
-        patched.setattr("cveta2.image_downloader.write_shared_bytes", _raise_no_space)
+        patched.setattr("cveta2.fs_utils.write_shared_bytes", _raise_no_space)
         failed_run = downloader.download(
             annotations, project_cloud_storage=_project_cs()
         )
@@ -501,56 +498,6 @@ def test_failed_write_leaves_no_partial_file_and_is_retried_next_run(
     assert retry_run.cached == 0
     assert retry_run.downloaded == 1
     assert (target / "a.jpg").read_bytes() == b"full-data"
-
-
-def test_download_one_s3_reraises_the_write_error_when_no_temp_file_was_created(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def refuse_to_write(_path: Path, _data: bytes) -> None:
-        raise OSError(errno.ENOSPC, "No space left on device")
-
-    monkeypatch.setattr("cveta2.image_downloader.write_shared_bytes", refuse_to_write)
-    dest = tmp_path / "images" / "a.jpg"
-
-    with pytest.raises(OSError, match="No space left"):
-        _download_one_s3(
-            FakeS3Client({"test-bucket/images/a.jpg": b"data"}),
-            "test-bucket",
-            "images/a.jpg",
-            dest,
-        )
-
-    assert not dest.exists()
-    assert _temp_leftovers(dest.parent) == []
-
-
-def test_download_writes_through_a_temp_name_unique_to_the_writing_thread(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    writes: list[tuple[Path, int]] = []
-
-    def record_then_write(path: Path, data: bytes) -> None:
-        writes.append((path, threading.get_ident()))
-        write_shared_bytes(path, data)
-
-    monkeypatch.setattr("cveta2.image_downloader.write_shared_bytes", record_then_write)
-    annotations = ProjectAnnotations(
-        annotations=[_ann(10, 0, "a.jpg")], deleted_images=[]
-    )
-    s3_data = {"test-bucket/images/a.jpg": b"data-a"}
-    downloader = _make_downloader_env(tmp_path, annotations, s3_data)
-    _patch_boto(monkeypatch, FakeS3Client(s3_data))
-    dest = tmp_path / "images" / "a.jpg"
-
-    stats = downloader.download(annotations, project_cloud_storage=_project_cs())
-
-    assert stats.downloaded == 1
-    [(temp_path, writer_thread)] = writes
-    assert temp_path == dest.with_name(f"a.jpg.tmp{os.getpid()}-{writer_thread}")
-    assert dest.read_bytes() == b"data-a"
-    assert _temp_leftovers(dest.parent) == []
 
 
 # ======================================================================

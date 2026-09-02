@@ -19,16 +19,16 @@ if TYPE_CHECKING:
 _YES_TOKENS = {"да", "yes", "y", "true", "1"}
 _NO_TOKENS = {"нет", "no", "n", "false", "0"}
 
-_SETUP_HINT = (
+SETUP_HINT = (
     "The 'setup' command is fully interactive. "
     "Configure via env vars (CVAT_HOST, CVAT_USERNAME, CVAT_PASSWORD) "
     "or edit the config file directly."
 )
-_CACHE_HINT = (
+CACHE_HINT = (
     "The 'setup-cache' command is fully interactive. "
     "Edit the config file directly to set image_cache paths."
 )
-_CLEARML_HINT = (
+CLEARML_HINT = (
     "The 'setup-clearml' command is fully interactive. "
     "Edit the config file directly to set the ClearML mapping."
 )
@@ -58,20 +58,20 @@ def _prompt_with_default(
 def prompt_host(default: str) -> str:
     """Ask for the CVAT host, defaulting to *default*."""
     return _prompt_with_default(
-        "Хост CVAT", default, hint=_SETUP_HINT, history_key="cvat-host"
+        "Хост CVAT", default, hint=SETUP_HINT, history_key="cvat-host"
     )
 
 
 def prompt_username(default: str) -> str:
     """Ask for the CVAT username, defaulting to *default*."""
     return _prompt_with_default(
-        "Имя пользователя", default, hint=_SETUP_HINT, history_key="cvat-username"
+        "Имя пользователя", default, hint=SETUP_HINT, history_key="cvat-username"
     )
 
 
 def prompt_password() -> str:
     """Ask for the CVAT password without echo (empty means unchanged)."""
-    require_interactive(_SETUP_HINT)
+    require_interactive(SETUP_HINT)
     return primitives.prompt_password("Пароль: ")
 
 
@@ -82,14 +82,14 @@ def prompt_organization(existing_org: str | None) -> str | None:
         organization = _prompt_with_default(
             "Slug организации",
             org_default,
-            hint=_SETUP_HINT,
+            hint=SETUP_HINT,
             history_key="cvat-organization",
         )
         if organization:
             return organization
         if primitives.confirm(
             "Организация не указана. Подтвердите, что у вас нет организации",
-            hint=_SETUP_HINT,
+            hint=SETUP_HINT,
         ):
             return None
 
@@ -98,7 +98,7 @@ def prompt_cache_root() -> Path | None:
     """Ask for the cache root directory; ``None`` when left empty."""
     return primitives.path(
         "Корневая директория кэша (по умолчанию для проектов: корень/имя_проекта) []: ",
-        hint=_CACHE_HINT,
+        hint=CACHE_HINT,
         history_key="cache-root",
     )
 
@@ -108,7 +108,7 @@ def prompt_tasks_root(default: Path | None) -> Path | None:
     shown = str(default) if default else "~/.cache/cveta2/task_annotations"
     return primitives.path(
         f"Локальный кэш аннотаций задач [{shown}]: ",
-        hint=_CACHE_HINT,
+        hint=CACHE_HINT,
         history_key="tasks-root",
     )
 
@@ -118,7 +118,7 @@ def confirm_project_cache_settings() -> bool:
     return primitives.confirm(
         "Настроить ignored_prefix / task_cache_s3 по проектам?",
         default=False,
-        hint=_CACHE_HINT,
+        hint=CACHE_HINT,
     )
 
 
@@ -128,7 +128,7 @@ def prompt_ignored_prefix(project_name: str, default: str | None) -> str | None:
     return (
         primitives.text(
             f"  {project_name}: игнорируемый префикс S3 [{shown}]: ",
-            hint=_CACHE_HINT,
+            hint=CACHE_HINT,
             allow_empty=True,
             history_key="ignored-prefix",
         )
@@ -142,7 +142,7 @@ def prompt_task_cache_s3(project_name: str, default: str | None) -> str | None:
     return (
         primitives.text(
             f"  {project_name}: S3-путь кэша задач [{shown}]: ",
-            hint=_CACHE_HINT,
+            hint=CACHE_HINT,
             allow_empty=True,
             history_key="task-cache-s3",
         )
@@ -153,7 +153,7 @@ def prompt_task_cache_s3(project_name: str, default: str | None) -> str | None:
 def confirm_apply_to_all() -> bool:
     """Ask whether to apply the derived cache paths to all projects."""
     return primitives.confirm(
-        "Применить ко всем проектам?", default=True, hint=_CACHE_HINT
+        "Применить ко всем проектам?", default=True, hint=CACHE_HINT
     )
 
 
@@ -161,7 +161,7 @@ def prompt_project_cache_dir(label: str, default_path: Path | None) -> Path | No
     """Ask for one project's cache dir.  ``None`` keeps the current value."""
     shown = str(default_path) if default_path is not None else "не задан"
     return primitives.path(
-        f"{label} [{shown}]: ", hint=_CACHE_HINT, history_key="project-cache-dir"
+        f"{label} [{shown}]: ", hint=CACHE_HINT, history_key="project-cache-dir"
     )
 
 
@@ -170,7 +170,7 @@ def prompt_clearml_enabled(*, current: bool) -> bool | None:
     default = "да" if current else "нет"
     answer = primitives.text(
         f"Включить ClearML интеграцию? [{default}]: ",
-        hint=_CLEARML_HINT,
+        hint=CLEARML_HINT,
         allow_empty=True,
     )
     token = (answer or "").lower()
@@ -187,7 +187,7 @@ def prompt_clearml_project(label: str, default_proj: str) -> str:
     return (
         primitives.text(
             f"{label} clearml_project{suffix}: ",
-            hint=_CLEARML_HINT,
+            hint=CLEARML_HINT,
             default=default_proj,
             allow_empty=True,
             history_key="clearml-project",
@@ -202,7 +202,7 @@ def prompt_clearml_dataset(default_ds: str, fallback: str) -> str:
     return (
         primitives.text(
             f"    clearml_dataset [{shown}]: ",
-            hint=_CLEARML_HINT,
+            hint=CLEARML_HINT,
             allow_empty=True,
             history_key="clearml-dataset",
         )

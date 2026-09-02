@@ -17,7 +17,12 @@ if TYPE_CHECKING:
 from cveta2.cli import CliApp
 from cveta2.image_downloader import DownloadStats
 from cveta2.models import ProjectInfo
-from tests.helpers import mock_client_ctx, patch_cli_client, write_test_config
+from tests.helpers import (
+    mock_client_ctx,
+    patch_cli_client,
+    write_config_yaml,
+    write_test_config,
+)
 
 
 def _s3_sync_client() -> MagicMock:
@@ -64,6 +69,49 @@ def test_s3_sync_all_projects(
     call_dirs = {str(c[0][1]) for c in mock_client.sync_project_images.call_args_list}
     assert str(tmp_path / "images-a") in call_dirs
     assert str(tmp_path / "images-b") in call_dirs
+
+
+def test_s3_sync_falls_back_to_cache_images_root(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    """A project known only to ``cache`` lands in ``images_root/<name>``.
+
+    ``s3-sync`` shares the resolution with ``fetch``/``upload``; an explicit
+    ``image_cache`` entry still wins over the per-project root.
+    """
+    write_config_yaml(
+        test_config,
+        cvat={"host": "http://localhost:8080", "username": "u", "password": "p"},
+        image_cache={"project-a": str(tmp_path / "explicit-a")},
+        cache={
+            "images_root": str(tmp_path / "global"),
+            "projects": {
+                "project-a": {"images_root": str(tmp_path / "per-project")},
+                "project-b": {"images_root": str(tmp_path / "per-project")},
+                "project-c": {"ignored_prefix": "raw/"},
+            },
+        },
+    )
+
+    mock_client = _s3_sync_client()
+    mock_client.find_project_by_name.side_effect = [
+        ProjectInfo(id=1, name="project-a"),
+        ProjectInfo(id=2, name="project-b"),
+        ProjectInfo(id=3, name="project-c"),
+    ]
+
+    with patch_cli_client(mock_client):
+        CliApp().run(["s3-sync"])
+
+    calls = mock_client.sync_project_images.call_args_list
+    call_dirs = [c[0][1] for c in calls]
+    assert call_dirs == [
+        tmp_path / "explicit-a",
+        tmp_path / "per-project" / "project-b",
+        tmp_path / "global" / "project-c",
+    ]
+    assert [c.kwargs["ignored_prefix"] for c in calls] == [None, None, "raw/"]
 
 
 def test_s3_sync_root_without_project_exits(

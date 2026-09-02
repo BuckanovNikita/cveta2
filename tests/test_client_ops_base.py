@@ -118,6 +118,36 @@ class TestConnectionLifecycle:
             "credentials": (CFG.username, CFG.password),
         }
 
+    @pytest.mark.parametrize(
+        "timeout",
+        [30.0, None, 0.0],
+        ids=["value", "none_clears", "zero_clears"],
+    )
+    def test_enter_installs_the_request_timeout_before_the_factory_runs(
+        self, monkeypatch: pytest.MonkeyPatch, timeout: float | None
+    ) -> None:
+        """The SDK timeout must be process-wide and in place before login.
+
+        ``make_client`` logs in and checks the server version inside the
+        factory call, so a timeout installed on the opened client would
+        leave that window free to hang forever.  The value goes through
+        verbatim -- ``None`` and ``0`` must clear a previous run's timeout,
+        not keep it.
+        """
+        factory = _RecordingFactory()
+        installs: list[tuple[float | None, int]] = []
+        monkeypatch.setattr(
+            "cveta2._client.connection.install_global_request_timeout",
+            lambda value: installs.append((value, len(factory.calls))),
+        )
+        cfg = CFG.model_copy(update={"request_timeout": timeout})
+
+        with CvatClient(cfg, factory):
+            pass
+
+        assert installs == [(timeout, 0)]
+        assert len(factory.calls) == 1
+
     def test_injected_api_short_circuits_the_factory(self) -> None:
         """``api=`` means "already connected" -- no SDK client may be opened.
 
