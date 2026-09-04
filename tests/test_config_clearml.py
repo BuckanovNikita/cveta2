@@ -6,17 +6,11 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from cveta2.config import (
-    ClearmlConfig,
-    ClearmlProjectMapping,
-    is_clearml_disabled,
-)
+from cveta2.config import ClearmlConfig, ClearmlProjectMapping
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def _parse_clearml_section(raw: object) -> ClearmlConfig:
@@ -191,23 +185,3 @@ class TestLoadSaveClearmlConfig:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert raw["cvat"]["host"] == "https://example.com"
         assert raw["clearml"]["enabled"] is False
-
-
-class TestIsClearmlDisabled:
-    """Tests for is_clearml_disabled."""
-
-    def test_not_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("CVETA2_CLEARML", raising=False)
-        assert is_clearml_disabled() is False
-
-    def test_set_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CVETA2_CLEARML", "false")
-        assert is_clearml_disabled() is True
-
-    def test_set_false_uppercase(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CVETA2_CLEARML", "FALSE")
-        assert is_clearml_disabled() is True
-
-    def test_set_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CVETA2_CLEARML", "true")
-        assert is_clearml_disabled() is False

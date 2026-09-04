@@ -491,9 +491,9 @@ full = []
 # tests kill every cancel_futures= mutant. `wait=` is not: the pool's
 # __exit__ joins the in-flight threads either way, so blocking here or there
 # yields the same outcomes, the same exception and the same wall time.
-"cveta2._concurrency.x_run_concurrent__mutmut_24" = "shutdown(wait=None); the pool's __exit__ joins the in-flight threads regardless"
-"cveta2._concurrency.x_run_concurrent__mutmut_26" = "shutdown without wait=; defaults to True, and __exit__ joins regardless"
-"cveta2._concurrency.x_run_concurrent__mutmut_28" = "shutdown(wait=True); blocks in the finally instead of in __exit__, same outcome"
+"cveta2._concurrency.x_run_concurrent__mutmut_26" = "shutdown(wait=None); the pool's __exit__ joins the in-flight threads regardless"
+"cveta2._concurrency.x_run_concurrent__mutmut_28" = "shutdown without wait=; defaults to True, and __exit__ joins regardless"
+"cveta2._concurrency.x_run_concurrent__mutmut_30" = "shutdown(wait=True); blocks in the finally instead of in __exit__, same outcome"
 
 # Counts and separators that reach nothing but one message. `already` is
 # computed solely to say how many issues were skipped, and the join is the

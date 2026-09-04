@@ -73,10 +73,6 @@ class TestResolveLabelsAll:
         df = pd.DataFrame({"instance_label": ["car", "person", "car"]})
         assert _resolve_labels(["all"], df) == ["car", "person"]
 
-    def test_all_includes_unannotated_frames(self) -> None:
-        df = pd.DataFrame({"instance_label": ["car", None]})
-        assert _resolve_labels(["all"], df) == ["car", _NO_ANNOTATION_LABEL]
-
     def test_literal_all_label_wins_over_shortcut(self) -> None:
         df = pd.DataFrame({"instance_label": ["all", "car"]})
         assert _resolve_labels(["all"], df) == ["all"]

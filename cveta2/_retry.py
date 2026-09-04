@@ -10,6 +10,7 @@ provably never applied).
 from __future__ import annotations
 
 import functools
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Final
 
 from loguru import logger
@@ -29,22 +30,33 @@ _INITIAL_BACKOFF: Final = 1.0
 _JITTER: Final = 1.0
 
 
-class RetryPolicy:
-    """Process-wide retry budget, set once at client bootstrap.
+_RETRY_POLICY: ContextVar[tuple[int, float]] = ContextVar(
+    "cveta2_retry_policy",
+    default=(DEFAULT_RETRY_ATTEMPTS, DEFAULT_RETRY_MAX_WAIT),
+)
 
-    Mutable module state rather than decorator arguments: the decorators
-    are applied at import time, long before the config that sizes them has
-    been read.  Mirrors ``s3_utils._DataTimeoutDefault``.
+
+class _RetryPolicyMeta(type):
+    @property
+    def attempts(cls) -> int:
+        return _RETRY_POLICY.get()[0]
+
+    @property
+    def max_wait(cls) -> float:
+        return _RETRY_POLICY.get()[1]
+
+
+class RetryPolicy(metaclass=_RetryPolicyMeta):
+    """Context-local retry budget, set at client bootstrap.
+
+    Decorators are applied before configuration is loaded and consult this
+    context-local view on every retry decision.
     """
-
-    attempts: int = DEFAULT_RETRY_ATTEMPTS
-    max_wait: float = DEFAULT_RETRY_MAX_WAIT
 
 
 def configure_retries(attempts: int, max_wait: float) -> None:
-    """Set the retry budget used by every retrying call in the process."""
-    RetryPolicy.attempts = attempts
-    RetryPolicy.max_wait = max_wait
+    """Set the retry budget used by calls in the current context."""
+    _RETRY_POLICY.set((attempts, max_wait))
 
 
 def _budget_exhausted(retry_state: RetryCallState) -> bool:

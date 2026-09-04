@@ -41,9 +41,9 @@ def configure_data_timeout(timeout: float | None) -> None:
 def configure_network(network: NetworkConfig) -> None:
     """Install the retry budget and the transfer fan-out width.
 
-    Called once per client bootstrap, before any transfer starts: both are
-    process-wide, and the retry decorators were already bound at import
-    time with nothing but their defaults.
+    Called once per client bootstrap, before any transfer starts. Values are
+    local to the current runtime context; retry decorators were already bound
+    at import time and read that context when a call runs.
     """
     configure_retries(network.retry_attempts, network.retry_max_wait)
     configure_workers(s3=network.s3_workers, cvat=network.cvat_workers)
@@ -81,9 +81,9 @@ def open_sdk_api(
 ) -> Iterator[SdkCvatApiAdapter]:
     """Open an SDK client for *cfg* and yield an adapter wrapping it.
 
-    Installs the process-wide request timeout before ``make_client`` runs,
-    so the server version check and the login are covered too, and applies
-    the organization slug.  Credentials must already be present on *cfg*.
+    Installs the current context's request timeout before ``make_client`` runs,
+    so the server version check and login are covered too, and applies the
+    organization slug. Credentials must already be present on *cfg*.
     ``make_client`` performs the server-about request and the login itself,
     so only that call is translated into :class:`CvatApiError`; whatever the
     caller raises inside the block passes through untouched.

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import yaml
 
-from cveta2._client.connection import configure_network
+from cveta2._client.connection import configure_data_timeout, configure_network
 from cveta2._concurrency import Workers, configure_workers
 from cveta2._retry import RetryPolicy, configure_retries
 from cveta2.config import CvatConfig, NetworkConfig
@@ -247,7 +249,6 @@ def test_install_global_request_timeout_covers_new_rest_clients(
 
     monkeypatch.setattr(RESTClientObject, "request", fake_request)
     monkeypatch.setattr(sdk_adapter._GlobalTimeout, "installed", False)
-    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "value", None)
 
     sdk_adapter.install_global_request_timeout(7.0)
     sdk_adapter.install_global_request_timeout(9.0)
@@ -286,7 +287,6 @@ def test_install_global_request_timeout_can_be_switched_off_again(
 
     monkeypatch.setattr(RESTClientObject, "request", fake_request)
     monkeypatch.setattr(sdk_adapter._GlobalTimeout, "installed", False)
-    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "value", None)
     instance = object.__new__(RESTClientObject)
 
     sdk_adapter.install_global_request_timeout(5.0)
@@ -374,3 +374,36 @@ def test_configure_network_installs_both_worker_counts() -> None:
     finally:
         configure_retries(attempts, max_wait)
         configure_workers(s3=1, cvat=1)
+
+
+@pytest.mark.usefixtures("s3_env")
+def test_parallel_callers_keep_independent_network_settings() -> None:
+    barrier = threading.Barrier(2, timeout=5)
+
+    def configure_and_read(
+        workers: int, attempts: int, max_wait: float, timeout: float
+    ) -> tuple[int, int, float, float]:
+        configure_network(
+            NetworkConfig(
+                s3_workers=workers,
+                cvat_workers=1,
+                retry_attempts=attempts,
+                retry_max_wait=max_wait,
+            )
+        )
+        configure_data_timeout(timeout)
+        barrier.wait()
+        client: Any = make_s3_client()
+        return (
+            Workers.s3,
+            RetryPolicy.attempts,
+            RetryPolicy.max_wait,
+            client.meta.config.read_timeout,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(configure_and_read, 3, 4, 5.0, 6.0)
+        second = pool.submit(configure_and_read, 7, 8, 9.0, 10.0)
+
+    assert first.result() == (3, 4, 5.0, 6.0)
+    assert second.result() == (7, 8, 9.0, 10.0)

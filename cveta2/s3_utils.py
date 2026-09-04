@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, TypeVar
 
@@ -65,8 +66,8 @@ def run_s3_transfers(
     """Transfer every item, up to ``Workers.s3`` at a time; ``(ok, failed)``.
 
     This is the one fan-out both directions go through — uploads and
-    downloads alike — so the worker count is read from the process-wide
-    setting rather than threaded through every caller. One object's failure
+    downloads alike — so the worker count is read from the caller's runtime
+    context rather than threaded through every caller. One object's failure
     is logged and counted; the rest of the batch still runs.
     """
     outcomes = run_concurrent(
@@ -141,10 +142,9 @@ s3_retry = network_retry(_should_retry_s3, label="S3")
 _S3_CONNECT_TIMEOUT = 10.0
 
 
-class _DataTimeoutDefault:
-    """Process-wide default read timeout (seconds) for S3 clients."""
-
-    value: float | None = None
+_DATA_TIMEOUT: ContextVar[float | None] = ContextVar(
+    "cveta2_s3_data_timeout", default=None
+)
 
 
 _MIN_POOL_SIZE: Final = 10
@@ -156,7 +156,7 @@ def set_default_data_timeout(timeout: float | None) -> None:
 
     ``None`` or ``0`` disables the timeout (boto3 defaults apply).
     """
-    _DataTimeoutDefault.value = timeout
+    _DATA_TIMEOUT.set(timeout)
 
 
 # botocore retries sit *under* the tenacity ``s3_retry``, so the two
@@ -182,8 +182,9 @@ def make_s3_client(endpoint_url: str | None = None) -> S3Client:
     }
     # An unset or zero timeout means "no opinion", so the key is omitted
     # rather than passed: urllib3 rejects a read timeout of 0 outright.
-    if _DataTimeoutDefault.value:
-        options["read_timeout"] = _DataTimeoutDefault.value
+    data_timeout = _DATA_TIMEOUT.get()
+    if data_timeout:
+        options["read_timeout"] = data_timeout
     client: S3Client = boto3.Session().client(
         "s3", endpoint_url=endpoint_url, config=Config(**options)
     )

@@ -64,7 +64,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - **`cveta2/s3_utils.py`** - S3 client construction, key helpers, the parallel transfer runner and the S3 retry predicate
 - **`cveta2/fs_utils.py`** - Local filesystem writes under the shared-cache permission modes (`DIR_MODE`/`FILE_MODE`)
 - **`cveta2/projects_cache.py`** - Local project metadata cache, keyed by organization (`organizations: [{slug, name, projects}]`; `""` slug = personal workspace)
-- **`cveta2/_concurrency.py`** - `run_concurrent`, the one bounded fan-out every parallel site goes through, plus the process-wide `Workers` counts
+- **`cveta2/_concurrency.py`** - `run_concurrent`, the one bounded fan-out every parallel site goes through, plus context-local `Workers` counts propagated into its threads
 - **`cveta2/_retry.py`** - retry mechanism (attempts, backoff, logging); the *predicates* deciding what is worth retrying live next to the calls they protect, in `_client/sdk_adapter.py` and `s3_utils.py`
 - **`cveta2/upload_manifest.py`** - crash record of an in-flight upload, read by `upload --resume`
 

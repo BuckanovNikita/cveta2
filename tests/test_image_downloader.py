@@ -26,7 +26,7 @@ from cveta2.models import (
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
-from cveta2.s3_utils import build_s3_key, list_s3_objects, parse_sync_root
+from cveta2.s3_utils import parse_sync_root
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import make_bbox, make_cs_info, patch_recording_s3
 
@@ -239,18 +239,6 @@ def test_parse_cloud_storage_missing_attributes_uses_defaults() -> None:
     assert info.bucket == ""
     assert info.prefix == ""
     assert info.endpoint_url == ""
-
-
-def test_s3_key_with_prefix() -> None:
-    assert build_s3_key("data/images", "cat.jpg") == "data/images/cat.jpg"
-
-
-def test_s3_key_without_prefix() -> None:
-    assert build_s3_key("", "cat.jpg") == "cat.jpg"
-
-
-def test_s3_key_frame_already_has_prefix() -> None:
-    assert build_s3_key("data/images", "data/images/cat.jpg") == "data/images/cat.jpg"
 
 
 def test_download_saves_to_target_dir_flat(
@@ -507,43 +495,6 @@ def test_failed_write_leaves_no_partial_file_and_is_retried_next_run(
 # ======================================================================
 # S3 sync tests
 # ======================================================================
-
-
-# --- list_s3_objects tests ---
-
-
-def testlist_s3_objects_returns_keys_stripped_of_prefix() -> None:
-    """list_s3_objects strips the prefix from keys."""
-    fake_s3 = FakeS3Client(
-        {"images/a.jpg": b"data-a", "images/b.jpg": b"data-b"}, keyed_by_bucket=False
-    )
-    result = list_s3_objects(fake_s3, "test-bucket", "images")
-    assert sorted(result) == [("images/a.jpg", "a.jpg"), ("images/b.jpg", "b.jpg")]
-
-
-def testlist_s3_objects_no_prefix() -> None:
-    """list_s3_objects with empty prefix returns keys as-is."""
-    fake_s3 = FakeS3Client(
-        {"cat.jpg": b"cat", "dog.jpg": b"dog"}, keyed_by_bucket=False
-    )
-    result = list_s3_objects(fake_s3, "bucket", "")
-    assert sorted(result) == [("cat.jpg", "cat.jpg"), ("dog.jpg", "dog.jpg")]
-
-
-def testlist_s3_objects_empty_bucket() -> None:
-    """list_s3_objects returns empty list for empty bucket."""
-    fake_s3 = FakeS3Client({}, keyed_by_bucket=False)
-    result = list_s3_objects(fake_s3, "bucket", "prefix")
-    assert result == []
-
-
-def testlist_s3_objects_skips_prefix_marker() -> None:
-    """list_s3_objects skips the prefix directory marker (empty name after strip)."""
-    fake_s3 = FakeS3Client(
-        {"images/": b"", "images/a.jpg": b"data"}, keyed_by_bucket=False
-    )
-    result = list_s3_objects(fake_s3, "bucket", "images/")
-    assert result == [("images/a.jpg", "a.jpg")]
 
 
 # --- S3Syncer tests ---

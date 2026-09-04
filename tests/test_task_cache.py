@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
-from cveta2._retry import RetryPolicy
+from cveta2._retry import RetryPolicy, configure_retries
 from cveta2.client import CvatClient
 from cveta2.image_downloader import CloudStorageInfo
 from cveta2.models import (
@@ -44,6 +44,7 @@ from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import CFG, build_fake, make_bbox, make_task, write_config_yaml
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
     from tests.fixtures.fake_cvat_project import LoadedFixtures
@@ -391,10 +392,12 @@ class _ClientErrorS3Client(FakeS3Client):
 
 class TestS3Backend:
     @pytest.fixture(autouse=True)
-    def _single_attempt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _single_attempt(self) -> Generator[None, None, None]:
         """``_FailingS3Client`` raises a retryable fault; one attempt is enough."""
-        monkeypatch.setattr(RetryPolicy, "attempts", 1)
-        monkeypatch.setattr(RetryPolicy, "max_wait", 0.01)
+        previous = (RetryPolicy.attempts, RetryPolicy.max_wait)
+        configure_retries(1, 0.01)
+        yield
+        configure_retries(*previous)
 
     def test_s3_hit_backfills_local(self, tmp_path: Path) -> None:
         task = make_task(updated=_UPDATED)

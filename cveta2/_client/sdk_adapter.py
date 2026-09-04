@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import functools
 import json
+import threading
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Final
 
 import urllib3.exceptions
@@ -168,45 +170,48 @@ _CONNECT_TIMEOUT = 10.0
 
 
 class _GlobalTimeout:
-    """Process-wide read timeout injected into every CVAT SDK request.
+    """One-time SDK patch state; timeout values themselves are context-local."""
 
-    Mutable module state, like ``s3_utils._DataTimeoutDefault``: the class
-    patch is installed once and reads the current value per request, so a
-    later ``configure_data_timeout`` can raise, lower or switch it off.
-    """
-
-    value: float | None = None
     installed: bool = False
+    lock = threading.Lock()
+
+
+_REQUEST_TIMEOUT: ContextVar[float | None] = ContextVar(
+    "cveta2_cvat_request_timeout", default=None
+)
 
 
 def install_global_request_timeout(timeout: float | None) -> None:
-    """Enforce the timeout on ALL CVAT SDK REST clients, present and future.
+    """Install the SDK hook and set this context's request timeout.
 
     ``make_client`` performs requests (server version check, login) before
     it returns a client that could be wrapped; a black-holed host hangs
     there forever. Patching ``RESTClientObject.request`` at class level
-    covers that window too. Idempotent: repeated calls only update the
-    timeout value, and ``None`` or ``0`` switches the injection off without
-    unpatching.
+    covers that window too. The class hook is process-wide and idempotent;
+    its timeout value is context-local. ``None`` or ``0`` switches injection
+    off for the caller without unpatching the SDK.
     """
     from cvat_sdk.api_client.rest import RESTClientObject  # noqa: PLC0415
 
-    _GlobalTimeout.value = timeout
+    _REQUEST_TIMEOUT.set(timeout)
     if _GlobalTimeout.installed:
         return
+    with _GlobalTimeout.lock:
+        if _GlobalTimeout.installed:
+            return
+        original_request = RESTClientObject.request
 
-    original_request = RESTClientObject.request
+        @functools.wraps(original_request)
+        def request_with_timeout(
+            self: RESTClientObject, *args: object, **kwargs: object
+        ) -> object:
+            request_timeout = _REQUEST_TIMEOUT.get()
+            if kwargs.get("_request_timeout") is None and request_timeout:
+                kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, request_timeout)
+            return original_request(self, *args, **kwargs)
 
-    @functools.wraps(original_request)
-    def request_with_timeout(
-        self: RESTClientObject, *args: object, **kwargs: object
-    ) -> object:
-        if kwargs.get("_request_timeout") is None and _GlobalTimeout.value:
-            kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, _GlobalTimeout.value)
-        return original_request(self, *args, **kwargs)
-
-    RESTClientObject.request = request_with_timeout
-    _GlobalTimeout.installed = True
+        RESTClientObject.request = request_with_timeout
+        _GlobalTimeout.installed = True
 
 
 class SdkCvatApiAdapter:

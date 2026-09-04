@@ -14,33 +14,19 @@ from cveta2.services.upload import validate_labels
 class TestLabelsMismatchError:
     """Tests for the LabelsMismatchError exception."""
 
-    def test_unknown_labels_stored(self) -> None:
+    def test_carries_structured_details_and_renders_them(self) -> None:
         err = LabelsMismatchError(
             unknown_labels=["cat", "dog"],
             project_name="my_project",
             available_labels=["car", "person"],
         )
         assert err.unknown_labels == ["cat", "dog"]
-
-    def test_available_labels_stored(self) -> None:
-        err = LabelsMismatchError(
-            unknown_labels=["cat"],
-            project_name="my_project",
-            available_labels=["car", "person"],
-        )
         assert err.available_labels == ["car", "person"]
-
-    @pytest.mark.parametrize(
-        "fragment",
-        ["cat", "dog", "my_project", "car", "person"],
-    )
-    def test_message_contains_fragment(self, fragment: str) -> None:
-        err = LabelsMismatchError(
-            unknown_labels=["cat", "dog"],
-            project_name="my_project",
-            available_labels=["car", "person"],
+        message = str(err)
+        assert all(
+            fragment in message
+            for fragment in ("cat", "dog", "my_project", "car", "person")
         )
-        assert fragment in str(err)
 
 
 def _client_with_labels(names: set[str]) -> MagicMock:
@@ -63,7 +49,7 @@ class TestUploadLabelValidation:
             ["car", "person"],
         )
 
-    def test_labels_mismatch_raises(self) -> None:
+    def test_mismatch_error_carries_every_diagnostic(self) -> None:
         with pytest.raises(LabelsMismatchError) as exc_info:
             validate_labels(
                 _client_with_labels({"car", "person"}),
@@ -72,6 +58,8 @@ class TestUploadLabelValidation:
                 ["car", "cat", "dog"],
             )
         assert exc_info.value.unknown_labels == ["cat", "dog"]
+        assert exc_info.value.available_labels == ["car", "person"]
+        assert "test_project" in str(exc_info.value)
 
     def test_empty_real_labels_no_error(self) -> None:
         client = _client_with_labels({"car", "person"})
@@ -93,23 +81,3 @@ class TestUploadLabelValidation:
 
         with pytest.raises(LabelsMismatchError):
             validate_labels(client, 2, "test_project", ["car"])
-
-    def test_mismatch_error_names_the_project(self) -> None:
-        """The raised error must carry the project name it was given."""
-        with pytest.raises(LabelsMismatchError, match="test_project"):
-            validate_labels(
-                _client_with_labels({"car"}),
-                1,
-                "test_project",
-                ["unknown"],
-            )
-
-    def test_mismatch_error_lists_available(self) -> None:
-        with pytest.raises(LabelsMismatchError) as exc_info:
-            validate_labels(
-                _client_with_labels({"car", "person"}),
-                1,
-                "test_project",
-                ["unknown"],
-            )
-        assert exc_info.value.available_labels == ["car", "person"]

@@ -9,6 +9,7 @@ it is the caller's to supply.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import ContextVar, copy_context
 from typing import TYPE_CHECKING, TypeVar
 
 from tqdm import tqdm
@@ -20,23 +21,33 @@ _T = TypeVar("_T")
 _R = TypeVar("_R")
 
 
-class Workers:
-    """Process-wide fan-out width, set once at client bootstrap.
+_WORKERS: ContextVar[tuple[int, int]] = ContextVar("cveta2_workers", default=(1, 1))
+
+
+class _WorkersMeta(type):
+    @property
+    def s3(cls) -> int:
+        return _WORKERS.get()[0]
+
+    @property
+    def cvat(cls) -> int:
+        return _WORKERS.get()[1]
+
+
+class Workers(metaclass=_WorkersMeta):
+    """Context-local fan-out width installed at client bootstrap.
 
     Both default to 1 — fully sequential — so an entry point that never
     went through ``configure_network`` behaves exactly as it did before
     concurrency existed. ``cvat`` is expected to stay well below ``s3``:
-    CVAT rate-limits long before object storage does.
+    CVAT rate-limits long before object storage does. Worker threads inherit
+    the context that submitted their work.
     """
-
-    s3: int = 1
-    cvat: int = 1
 
 
 def configure_workers(*, s3: int, cvat: int) -> None:
-    """Set the process-wide fan-out width for S3 and CVAT calls."""
-    Workers.s3 = max(s3, 1)
-    Workers.cvat = max(cvat, 1)
+    """Set the current context's fan-out width for S3 and CVAT calls."""
+    _WORKERS.set((max(s3, 1), max(cvat, 1)))
 
 
 def _capture(
@@ -78,7 +89,10 @@ def run_concurrent(  # noqa: PLR0913
 
     outcomes: dict[int, _R | Exception] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        pending = {pool.submit(work, item): index for index, item in enumerate(items)}
+        pending = {
+            pool.submit(copy_context().run, work, item): index
+            for index, item in enumerate(items)
+        }
         try:
             with tqdm(total=len(items), desc=desc, unit=unit, leave=False) as bar:
                 for future in as_completed(pending):

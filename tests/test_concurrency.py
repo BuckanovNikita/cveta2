@@ -255,3 +255,17 @@ class TestWorkerConfiguration:
         configure_workers(s3=12, cvat=3)
 
         assert (Workers.s3, Workers.cvat) == (12, 3)
+
+    def test_worker_threads_inherit_the_callers_counts(self) -> None:
+        configure_workers(s3=12, cvat=3)
+
+        observed = run_concurrent(
+            [0, 1],
+            lambda _item: (Workers.s3, Workers.cvat),
+            max_workers=2,
+            catch=(),
+            desc="t",
+            unit="item",
+        )
+
+        assert observed == [(12, 3), (12, 3)]

@@ -13,7 +13,7 @@ from botocore.exceptions import (
 )
 
 from cveta2._concurrency import Workers, configure_workers
-from cveta2._retry import RetryPolicy
+from cveta2._retry import RetryPolicy, configure_retries
 from cveta2.s3_utils import (
     build_s3_key,
     list_s3_objects,
@@ -318,22 +318,23 @@ class _BodyDroppedOnce:
         return b"data"
 
 
-def test_get_bytes_retries_a_body_dropped_mid_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_get_bytes_retries_a_body_dropped_mid_read() -> None:
     """A body cut mid-read is the fault botocore's own retries cannot see.
 
     ``get_object`` has already returned by then, so only ``s3_retry`` can
     repeat the read.
     """
-    monkeypatch.setattr(RetryPolicy, "attempts", 3)
-    monkeypatch.setattr(RetryPolicy, "max_wait", 0.01)
+    previous = (RetryPolicy.attempts, RetryPolicy.max_wait)
+    configure_retries(3, 0.01)
     body = _BodyDroppedOnce()
     client = MagicMock()
     client.get_object.return_value = {"Body": body}
 
-    assert s3_get_bytes(client, "bkt", "key") == b"data"
-    assert body.reads == 2
+    try:
+        assert s3_get_bytes(client, "bkt", "key") == b"data"
+        assert body.reads == 2
+    finally:
+        configure_retries(*previous)
 
 
 class TestPickLatestDuplicate:
@@ -435,6 +436,32 @@ class TestListS3Objects:
         """S3 drops ``Contents`` from an empty page instead of sending ``[]``."""
         s3 = PagedFakeS3Client([[]])
         assert list_s3_objects(s3, "test-bucket", "images") == []
+
+    def test_names_are_relative_to_the_prefix(self) -> None:
+        s3 = FakeS3Client(
+            {"images/a.jpg": b"a", "images/b.jpg": b"b"},
+            keyed_by_bucket=False,
+        )
+
+        assert list_s3_objects(s3, "test-bucket", "images") == [
+            ("images/a.jpg", "a.jpg"),
+            ("images/b.jpg", "b.jpg"),
+        ]
+
+    def test_an_empty_prefix_keeps_full_names(self) -> None:
+        s3 = FakeS3Client({"cat.jpg": b"cat", "dog.jpg": b"dog"}, keyed_by_bucket=False)
+
+        assert list_s3_objects(s3, "test-bucket", "") == [
+            ("cat.jpg", "cat.jpg"),
+            ("dog.jpg", "dog.jpg"),
+        ]
+
+    def test_folder_marker_is_not_returned_as_a_file(self) -> None:
+        s3 = FakeS3Client({"images/": b"", "images/a.jpg": b"a"}, keyed_by_bucket=False)
+
+        assert list_s3_objects(s3, "test-bucket", "images") == [
+            ("images/a.jpg", "a.jpg")
+        ]
 
 
 # ---------------------------------------------------------------------------

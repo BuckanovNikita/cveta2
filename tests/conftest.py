@@ -129,9 +129,9 @@ def _disable_task_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 def _sequential_transfers() -> Generator[None, None, None]:
     """Run every test sequentially unless it asks for fan-out.
 
-    Worker counts are process-wide and ``open_client`` installs the
-    configured ones, so a single CLI test would otherwise leave every later
-    test in that worker running its transfers concurrently — and a fan-out
+    Worker counts persist in the current runtime context and ``open_client``
+    installs the configured ones, so a single CLI test would otherwise leave
+    every later test in that worker running its transfers concurrently — and a fan-out
     reorders S3 calls and adds a listing round-trip, which several tests
     legitimately assert on. Concurrency tests call ``configure_workers``
     themselves.
