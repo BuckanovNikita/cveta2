@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.5.2 (2026-09-04)
+
+### Bug Fixes
+
+- Harden dataset and configuration workflows
+  ([`62cad9d`](https://github.com/BuckanovNikita/cveta2/commit/62cad9dd7c385ab1380b0672f4a77f2c83c2538e))
+
+
 ## v0.5.1 (2026-09-02)
 
 ### Bug Fixes
