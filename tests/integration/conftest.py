@@ -41,11 +41,22 @@ def make_integration_config() -> CvatConfig:
 
 
 def _make_sdk_client() -> CvatSdkClient:
-    """Create and return an opened cvat_sdk client scoped to the organization."""
-    from cvat_sdk import make_client
+    """Create and return an opened cvat_sdk client scoped to the organization.
+
+    Skips the SDK's server-version check: the stand throttles anonymous
+    requests per client IP, and that check would be a second one per open,
+    next to the login itself.
+    """
+    from cvat_sdk.api_client.exceptions import ApiException
+    from cvat_sdk.core.client import Client
 
     cfg = make_integration_config()
-    client = make_client(host=cfg.host, credentials=(cfg.username, cfg.password))
+    client = Client(cfg.host, check_server_version=False)
+    try:
+        client.login((cfg.username, cfg.password))
+    except (OSError, ApiException):
+        client.close()
+        raise
     if cfg.organization:
         client.organization_slug = cfg.organization
     return client

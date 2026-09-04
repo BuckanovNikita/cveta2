@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiException
-from cvat_sdk.core.client import Client, make_client
+from cvat_sdk.core.client import Client
 from loguru import logger
 from pydantic import BaseModel
 
@@ -98,14 +98,22 @@ def _owner_name(item: object) -> str:
 
 
 def _login(settings: StandSettings) -> Client:
-    return make_client(
-        host=settings.host,
-        credentials=(settings.username, settings.password),
-    )
+    """Open a client with one anonymous request (the login), not two.
+
+    The stand throttles anonymous requests per client IP, and the server
+    version check every ``make_client`` performs is one of them.
+    """
+    client = Client(settings.host, check_server_version=False)
+    try:
+        client.login((settings.username, settings.password))
+    except ApiException:
+        client.close()
+        raise
+    return client
 
 
 def _register(settings: StandSettings) -> None:
-    client = Client(settings.host)
+    client = Client(settings.host, check_server_version=False)
     request = cvat_models.RegisterSerializerExRequest(
         username=settings.username,
         password1=settings.password,

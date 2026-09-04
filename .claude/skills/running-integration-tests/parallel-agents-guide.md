@@ -82,11 +82,14 @@ tag first, so leftover state from an interrupted run is replaced automatically.
 
 ## Rate limits on the shared stand
 
-The stand throttles anonymous requests only (100/min per client IP): the
-`about` and login calls that every client open makes. A full suite opens a few
-dozen clients over several minutes, so two or three concurrent agents stay
-under the limit, and cveta2 retries 429s. If a run does see 429s on login,
-stagger the agents; do not add xdist.
+The stand throttles anonymous requests only (100/min per client IP), and
+every client open pays one of them: the login. The test helpers skip the
+SDK's server-version check for that reason, and nothing in the unit suite
+touches the stand at all — one pytest session per mutant, times a mutation
+run, once drained the whole budget and starved a concurrent gate. A full
+integration suite opens a few dozen clients over a few minutes, so two
+concurrent agents fit; a third should stagger its start. cveta2 itself
+retries 429s; the SDK login in the test helpers does not.
 
 ## Cleanup After Failures
 

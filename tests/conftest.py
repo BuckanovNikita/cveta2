@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import threading
-import urllib.request
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -93,24 +92,6 @@ def coco8_tasks_by_name(
         data_meta, annotations = coco8_fixtures.task_data[task.id]
         result[key] = (task, data_meta, annotations)
     return result
-
-
-def pytest_report_header() -> list[str]:
-    """Warn when CVAT is running but CVAT_INTEGRATION_HOST is not set."""
-    if os.environ.get("CVAT_INTEGRATION_HOST"):
-        return []
-    try:
-        urllib.request.urlopen("http://cvat.k8s.localhost/api/server/about", timeout=1)
-    except OSError:
-        return []
-    return [
-        (
-            "WARNING: CVAT detected at cvat.k8s.localhost but"
-            " CVAT_INTEGRATION_HOST is not set."
-        ),
-        "  Integration tests will NOT run. To include them:",
-        "  ./scripts/integration_up.sh && ./scripts/integration_test.sh",
-    ]
 
 
 @pytest.fixture(scope="session", autouse=True)

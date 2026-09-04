@@ -34,8 +34,8 @@ if TYPE_CHECKING:
 
 import boto3
 from botocore.config import Config as BotoConfig
-from cvat_sdk import make_client
 from cvat_sdk.api_client import models as cvat_models
+from cvat_sdk.core.client import Client
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from cvat_sdk.core.proxies.tasks import ResourceType
 from loguru import logger
@@ -310,7 +310,8 @@ def main() -> None:
         f"Loaded {len(fixture_labels)} labels, {len(task_fixtures)} task fixtures"
     )
 
-    with make_client(host=host, credentials=(username, password)) as client:
+    with Client(host, check_server_version=False) as client:
+        client.login((username, password))
         client.organization_slug = organization
         _refuse_existing_project(client, project_name)
         cs_id = _register_cloud_storage(
