@@ -30,7 +30,7 @@ uv run lint-imports        # architecture contracts
 uv run vulture             # dead code detection
 ./scripts/mutation_test.sh --profile fast  # mutation testing gate (pre-commit subset)
 ./scripts/mutation_test.sh --profile full  # mutation testing gate (whole scope, pre-push)
-./scripts/integration_gate.sh              # integration gate: stack up, tests, stack down (pre-push)
+./scripts/integration_gate.sh              # integration gate: stack up, tests, keep on main / stop elsewhere (pre-push)
 ```
 
 **Style**: Always use `loguru` for logging (never `print`), pydantic for configs, f-strings over structured logging.
@@ -93,11 +93,12 @@ uv run pytest -x                 # stop on first failure
 - **`tests/test_api.py`** covers the public `cveta2.*` workflow functions; **`tests/test_cli_parsing.py`** covers argparse wiring
 
 Integration tests (`tests/integration/`) run only when `CVAT_INTEGRATION_HOST`
-is set, against a live CVAT + MinIO + ClearML stack, and at pre-push through
-`scripts/integration_gate.sh` on machines that have `tests/integration/.env`.
-The lifecycle scripts, the `.env` keys, the fixed ports and the no-xdist /
-fresh-state caveats live in the **`running-integration-tests` skill** — use it
-rather than starting the stack by hand.
+is set, against the cluster CVAT stand plus a MinIO + ClearML compose stack,
+and at pre-push through `scripts/integration_gate.sh` on machines that have
+`tests/integration/.env`. The lifecycle scripts, the `.env` keys, the run tag
+that isolates parallel agents and the keep-on-main rule live in the
+**`running-integration-tests` skill** — use it rather than starting the stack
+by hand.
 
 ## Mutation Testing
 
@@ -221,13 +222,15 @@ and autosquash subjects are exempt.
 `version-drift` (the `version` field must match the nearest tag, so a hand edit
 cannot reach `main`), then `integration-tests`.
 
-`integration-tests` runs `scripts/integration_gate.sh`, which builds the CVAT +
-MinIO + ClearML stack from scratch, runs `tests/integration`, and tears it down
-again. It arms itself on `tests/integration/.env`: no such file, no integration
-tests, which is what a fresh clone and every other machine gets. **A push
-therefore destroys a stack you left running** — `integration_up.sh` starts with
-`down -v`, volumes included. Skip it for one push with
-`SKIP=integration-tests git push`.
+`integration-tests` runs `scripts/integration_gate.sh`: it recreates this
+run's MinIO + ClearML compose stack and its project on the cluster CVAT stand
+(`http://cvat.k8s.localhost`), runs `tests/integration`, then either keeps the
+run for inspection (a push of `main`) or removes it (any other branch). It arms
+itself on `tests/integration/.env`: no such file, no integration tests, which
+is what a fresh clone and every other machine gets. **A push therefore
+replaces the compose stack and the CVAT project of your run tag** —
+`integration_up.sh` starts with `down -v` and `cvat_stand.py cleanup --tag`.
+Skip it for one push with `SKIP=integration-tests git push`.
 
 To run one hook by hand: `uv run pre-commit run --all-files`, or
 `uv run pre-commit run <id> --hook-stage pre-push`.

@@ -22,7 +22,12 @@ from cveta2.image_uploader import (
     build_server_file_mapping,
     resolve_images,
 )
-from tests.integration.conftest import _env, _make_sdk_client
+from tests.integration.conftest import (
+    _env,
+    _make_sdk_client,
+    find_seeded_project,
+    make_integration_config,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -51,7 +56,7 @@ def _coco8_search_dirs() -> list[Path]:
 
 
 def _get_project_and_storage() -> tuple[int, str, CloudStorageInfo, CvatConfig]:
-    """Connect to CVAT, resolve coco8-dev project and cloud storage.
+    """Connect to CVAT, resolve the seeded project and its cloud storage.
 
     Skips if unreachable.
     """
@@ -61,20 +66,14 @@ def _get_project_and_storage() -> tuple[int, str, CloudStorageInfo, CvatConfig]:
         pytest.skip(f"CVAT not reachable: {exc}")
     try:
         adapter = SdkCvatApiAdapter(sdk_client)
-        projects = adapter.list_projects()
-        project = next(
-            (p for p in projects if p.name.strip().lower() == "coco8-dev"), None
-        )
-        if project is None:
-            pytest.skip("coco8-dev project not found (run seed_cvat.py first)")
-        host = _env("CVAT_INTEGRATION_HOST", "http://localhost:8080")
-        username = _env("CVAT_INTEGRATION_USER", "admin")
-        password = _env("CVAT_INTEGRATION_PASSWORD", "admin")
-        cfg = CvatConfig(host=host, username=username, password=password)
+        project = find_seeded_project(adapter)
+        cfg = make_integration_config()
         with CvatClient(cfg) as client:
             cs_info = client.detect_project_cloud_storage(project.id)
         if cs_info is None:
-            pytest.skip("coco8-dev has no cloud storage (run seed_cvat.py first)")
+            pytest.skip(
+                f"'{project.name}' has no cloud storage (run seed_cvat.py first)"
+            )
         return project.id, project.name, cs_info, cfg
     finally:
         sdk_client.close()

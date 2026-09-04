@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""Seed a fresh CVAT instance with coco8-dev test data.
+"""Seed one run's coco8-dev project into the integration organization.
 
 Reads the JSON fixture files from tests/fixtures/cvat/coco8-dev/ and
-recreates the same project/task structure in a live CVAT instance.
-Images are uploaded from tests/fixtures/data/coco8/images/.
+recreates the same project/task structure on the CVAT stand, under the run
+tag: cloud storage "<tag> minio" and project "<tag> coco8-dev". Images are
+uploaded from tests/fixtures/data/coco8/images/ to MinIO first.
 
-Environment variables (defaults match tests/integration/.env):
-  CVAT_INTEGRATION_HOST  (default http://localhost:8080)
-  DJANGO_SUPERUSER_USERNAME / DJANGO_SUPERUSER_PASSWORD  (default admin/admin)
-  MINIO_ENDPOINT  (default http://localhost:9000)
-  MINIO_ROOT_USER / MINIO_ROOT_PASSWORD  (default minioadmin)
-  MINIO_BUCKET  (default cveta2-test)
+Environment (scripts/integration_env.sh exports all of it):
+  CVAT_INTEGRATION_HOST / CVAT_INTEGRATION_USER / CVAT_INTEGRATION_PASSWORD
+  CVAT_INTEGRATION_ORG      organization every object is created in
+  CVAT_INTEGRATION_PROJECT  full project name, "<tag> coco8-dev"
+  INTEGRATION_RUN_TAG       the tag, names the cloud storage
+  MINIO_ENDPOINT            MinIO as this script sees it
+  MINIO_ENDPOINT_FOR_CVAT   the same MinIO as the CVAT pods see it
+  MINIO_ROOT_USER / MINIO_ROOT_PASSWORD / MINIO_BUCKET
+
+Create-only on purpose: cvat_stand.py cleanup --tag runs first, and a project
+with the configured name already present is an error, not a second copy.
 """
 
 from __future__ import annotations
@@ -18,7 +24,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
@@ -34,11 +39,11 @@ from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from cvat_sdk.core.proxies.tasks import ResourceType
 from loguru import logger
+from pydantic import BaseModel
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "cvat" / "coco8-dev"
 IMAGES_DIR = REPO_ROOT / "tests" / "fixtures" / "data" / "coco8" / "images"
-SEEDED_FILE = Path(__file__).resolve().parent / ".seeded"
 
 IMAGE_NAMES = [
     "000000000009.jpg",
@@ -52,8 +57,12 @@ IMAGE_NAMES = [
 ]
 
 
-def _env(key: str, default: str) -> str:
-    return os.environ.get(key, default).strip()
+def _env(key: str, default: str = "") -> str:
+    value = os.environ.get(key, default).strip()
+    if not value:
+        logger.error(f"{key} is not set; source scripts/integration_env.sh first")
+        sys.exit(1)
+    return value
 
 
 def _collect_image_paths() -> list[str]:
@@ -103,46 +112,36 @@ def _upload_images_to_minio(
     logger.info(f"Uploaded images to s3://{bucket}/")
 
 
+class MinioAccess(BaseModel):
+    """MinIO as the CVAT pods reach it, plus the bucket and its credentials."""
+
+    endpoint_for_cvat: str
+    access_key: str
+    secret_key: str
+    bucket: str
+
+
 def _register_cloud_storage(
-    client: CvatClient,
-    bucket: str,
-    minio_endpoint_for_cvat: str,
-    access_key: str,
-    secret_key: str,
+    client: CvatClient, display_name: str, minio: MinioAccess
 ) -> int:
     """Register MinIO as cloud storage in CVAT. Returns cloud_storage_id."""
-    api = client.api_client.cloudstorages_api
-
     specific_attributes = urlencode(
         {
-            "endpoint_url": minio_endpoint_for_cvat,
+            "endpoint_url": minio.endpoint_for_cvat,
             "region_name": "us-east-1",
         }
     )
-
     cs_spec = cvat_models.CloudStorageWriteRequest(
-        display_name="cveta2-test-minio",
+        display_name=display_name,
         provider_type=cvat_models.ProviderTypeEnum("AWS_S3_BUCKET"),
-        resource=bucket,
+        resource=minio.bucket,
         credentials_type=cvat_models.CredentialsTypeEnum("KEY_SECRET_KEY_PAIR"),
-        key=access_key,
-        secret_key=secret_key,
+        key=minio.access_key,
+        secret_key=minio.secret_key,
         specific_attributes=specific_attributes,
     )
-    # OPA may not have loaded auth rules yet right after CVAT starts
-    for attempt in range(10):
-        try:
-            cs, _ = api.create(cs_spec)
-            break
-        except Exception:
-            if attempt == 9:
-                raise
-            logger.warning(
-                f"Cloud storage creation failed (attempt {attempt + 1}/10),"
-                " retrying in 5s..."
-            )
-            time.sleep(5)
-    logger.info(f"Registered cloud storage: id={cs.id}, bucket={bucket}")
+    cs, _ = client.api_client.cloudstorages_api.create(cs_spec)
+    logger.info(f"Registered cloud storage: id={cs.id}, bucket={minio.bucket}")
     return int(cs.id)
 
 
@@ -163,12 +162,23 @@ def _load_task_fixtures() -> list[dict[str, Any]]:
     return fixtures
 
 
+def _refuse_existing_project(client: CvatClient, name: str) -> None:
+    existing = [p for p in client.projects.list() if p.name == name]
+    if existing:
+        ids = ", ".join(str(p.id) for p in existing)
+        logger.error(
+            f"project '{name}' already exists (id {ids}); "
+            "run cvat_stand.py cleanup --tag first"
+        )
+        sys.exit(1)
+
+
 def _create_project(
-    client: CvatClient, labels: list[dict[str, Any]], cloud_storage_id: int
+    client: CvatClient, name: str, labels: list[dict[str, Any]], cloud_storage_id: int
 ) -> CvatProject:
-    """Create coco8-dev project with labels and cloud storage source."""
+    """Create the run's coco8-dev project with labels and cloud storage source."""
     project_spec = {
-        "name": "coco8-dev",
+        "name": name,
         "labels": [{"name": lbl["name"]} for lbl in labels],
         "source_storage": {
             "location": "cloud_storage",
@@ -273,26 +283,27 @@ def _create_task(
 
 
 def main() -> None:
-    host = _env("CVAT_INTEGRATION_HOST", "http://localhost:8080")
-    username = _env("DJANGO_SUPERUSER_USERNAME", "admin")
-    password = _env("DJANGO_SUPERUSER_PASSWORD", "admin")
-    minio_endpoint = _env("MINIO_ENDPOINT", "http://localhost:9000")
+    host = _env("CVAT_INTEGRATION_HOST")
+    username = _env("CVAT_INTEGRATION_USER")
+    password = _env("CVAT_INTEGRATION_PASSWORD")
+    organization = _env("CVAT_INTEGRATION_ORG")
+    project_name = _env("CVAT_INTEGRATION_PROJECT")
+    run_tag = _env("INTEGRATION_RUN_TAG")
+    minio_endpoint = _env("MINIO_ENDPOINT")
+    minio_endpoint_for_cvat = _env("MINIO_ENDPOINT_FOR_CVAT")
     minio_access_key = _env("MINIO_ROOT_USER", "minioadmin")
     minio_secret_key = _env("MINIO_ROOT_PASSWORD", "minioadmin")
     minio_bucket = _env("MINIO_BUCKET", "cveta2-test")
 
-    # MinIO endpoint as seen from inside Docker network
-    minio_internal = "http://cveta2-minio:9000"
+    logger.info(f"CVAT host: {host}, organization: {organization}")
+    logger.info(
+        f"MinIO endpoint: {minio_endpoint} (for CVAT: {minio_endpoint_for_cvat})"
+    )
 
-    logger.info(f"CVAT host: {host}")
-    logger.info(f"MinIO endpoint: {minio_endpoint}")
-
-    # Upload images to MinIO
     _upload_images_to_minio(
         minio_endpoint, minio_access_key, minio_secret_key, minio_bucket
     )
 
-    # Load fixture data
     fixture_labels = _load_project_labels()
     task_fixtures = _load_task_fixtures()
     logger.info(
@@ -300,35 +311,27 @@ def main() -> None:
     )
 
     with make_client(host=host, credentials=(username, password)) as client:
-        # Register MinIO cloud storage (using internal Docker URL)
+        client.organization_slug = organization
+        _refuse_existing_project(client, project_name)
         cs_id = _register_cloud_storage(
-            client, minio_bucket, minio_internal, minio_access_key, minio_secret_key
+            client,
+            f"{run_tag} minio",
+            MinioAccess(
+                endpoint_for_cvat=minio_endpoint_for_cvat,
+                access_key=minio_access_key,
+                secret_key=minio_secret_key,
+                bucket=minio_bucket,
+            ),
         )
+        project = _create_project(client, project_name, fixture_labels, cs_id)
 
-        # Create project
-        project = _create_project(client, fixture_labels, cs_id)
-
-        # Get real label IDs
         real_labels = project.get_labels()
         label_id_map = _build_label_id_map(fixture_labels, real_labels)
 
-        # Create tasks
-        task_ids = {}
         for tf in task_fixtures:
-            task_name = tf["task"]["name"]
-            tid = _create_task(client, project.id, tf, label_id_map, cs_id)
-            task_ids[task_name] = tid
+            _create_task(client, project.id, tf, label_id_map, cs_id)
 
-    # Write seeded marker
-    seeded_data = {
-        "project_id": project.id,
-        "project_name": "coco8-dev",
-        "task_ids": task_ids,
-        "cloud_storage_id": cs_id,
-    }
-    SEEDED_FILE.write_text(json.dumps(seeded_data, indent=2), encoding="utf-8")
-    logger.info(f"Wrote seeded marker: {SEEDED_FILE}")
-    logger.info("Seeding complete!")
+    logger.info(f"Seeding complete: project '{project_name}' (id={project.id})")
 
 
 if __name__ == "__main__":

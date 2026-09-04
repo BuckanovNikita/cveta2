@@ -1,116 +1,120 @@
 # Parallel Agents: Avoiding Conflicts
 
-When multiple Claude Code agents (or CI jobs, or developers) run integration tests simultaneously on the same machine, they can clash on **ports** and **container names**. The scripts have built-in isolation via `INTEGRATION_USER`, but same-user parallel runs require extra care.
+When multiple Claude Code agents (or developers) run integration tests at the
+same time on this machine, they share two things: the host's ports and the CVAT
+stand's organization. The scripts isolate both through the **run tag**, but
+same-tag runs collide, and the collision on the CVAT side is silent.
 
 ## How Isolation Works
 
-The scripts use two isolation mechanisms:
+### 1. The run tag (`INTEGRATION_USER`, the branch, or `INTEGRATION_RUN_TAG`)
 
-### 1. Container Name Prefix (`INTEGRATION_USER`)
+`scripts/integration_env.sh` derives the tag: `<INTEGRATION_USER>` on `main`,
+`<INTEGRATION_USER>-<branch>` elsewhere, or `INTEGRATION_RUN_TAG` verbatim.
+`INTEGRATION_USER` defaults to `$USER`.
 
-Every container is named `${INTEGRATION_USER}-<service>` (e.g., `nkt-cvat_server`). The compose project name is `${INTEGRATION_USER}-cvat`. By default, `INTEGRATION_USER=$USER`.
+The tag names:
 
-This means:
-- **Different OS users** on the same machine are isolated automatically
-- **Same OS user** running two agents will collide — both try to create `nkt-cvat_server`
+| Side | Object |
+|---|---|
+| host | compose project `<tag>-cveta2`; containers `<tag>-cveta2-minio`, `<tag>-clearml-*`; their volumes |
+| CVAT stand, organization `cveta2-tests` | cloud storage `<tag> minio`, project `<tag> coco8-dev` and its tasks |
+
+`integration_up.sh` starts by removing everything with its own tag on both
+sides; `integration_stop.sh` ends the same way. Objects of other tags are never
+touched: the match is `"<tag> "` with a trailing space, so `nkt` does not match
+`nkt-feature coco8-dev`.
 
 ### 2. Port Binding
 
 Default ports are fixed:
-| Service        | Default Port |
-|----------------|-------------|
-| CVAT API       | 9988        |
-| MinIO API      | 9989        |
-| MinIO console  | 9990        |
-| ClearML API    | 8880        |
-| ClearML files  | 8881        |
-| ClearML web    | 8882        |
 
-Two agents using the same ports will fail at startup (`check_port_free` in `integration_up.sh`).
+| Service        | Default Port | Override |
+|----------------|-------------|---|
+| MinIO API      | 9989        | `--minio-port` / `MINIO_PORT` |
+| MinIO console  | 9990        | `MINIO_CONSOLE_PORT` |
+| ClearML API    | 8880        | `CLEARML_API_PORT` |
+| ClearML files  | 8881        | `CLEARML_FILES_PORT` |
+| ClearML web    | 8882        | `CLEARML_WEB_PORT` |
 
-## Strategy for Parallel Agents
+Two agents using the same ports fail at startup (`check_port_free` in
+`integration_up.sh`). CVAT has no port of its own any more: it is reached at
+`http://cvat.k8s.localhost` by everyone.
 
-### Option 1: Unique INTEGRATION_USER + Unique Ports (Recommended)
-
-Give each agent a unique prefix and port range:
+## Strategy: Unique tag + unique ports (the only safe one)
 
 ```bash
-# Agent A
-INTEGRATION_USER=agent-a ./scripts/integration_up.sh --port 9988 --minio-port 9989
-INTEGRATION_USER=agent-a CVAT_INTEGRATION_HOST=http://localhost:9988 \
-  MINIO_ENDPOINT=http://localhost:9989 \
-  uv run pytest -o 'addopts=-v --tb=short' tests/integration/
-INTEGRATION_USER=agent-a ./scripts/integration_stop.sh
+# Agent A (defaults)
+./scripts/integration_up.sh
+./scripts/integration_test.sh tests/integration
+./scripts/integration_stop.sh
 
 # Agent B
-INTEGRATION_USER=agent-b ./scripts/integration_up.sh --port 10088 --minio-port 10089
-INTEGRATION_USER=agent-b CVAT_INTEGRATION_HOST=http://localhost:10088 \
-  MINIO_ENDPOINT=http://localhost:10089 \
-  uv run pytest -o 'addopts=-v --tb=short' tests/integration/
-INTEGRATION_USER=agent-b ./scripts/integration_stop.sh
-```
-
-Each agent gets:
-- Its own compose project (`agent-a-cvat`, `agent-b-cvat`)
-- Its own containers (`agent-a-cvat_server`, `agent-b-cvat_server`)
-- Its own ports (no bind conflicts)
-- Its own Docker volumes (`agent-a-cvat_cveta2-minio-data`, etc.)
-
-### Option 2: Sequential Execution
-
-If parallel isolation is too complex, run agents sequentially. Each agent does the full cycle (up -> test -> stop) before the next starts. The `integration_up.sh` script always tears down first, so leftover state from a previous run is cleaned automatically.
-
-### Option 3: Shared Stack, Partitioned Tests
-
-Start the stack once, then run non-overlapping test subsets:
-
-```bash
-# Start once
+export INTEGRATION_USER=agent-b
+export MINIO_PORT=10089 MINIO_CONSOLE_PORT=10090
+export CLEARML_API_PORT=18880 CLEARML_FILES_PORT=18881 CLEARML_WEB_PORT=18882
 ./scripts/integration_up.sh
-
-# Agent A runs fetch/partition tests (read-only, safe to parallelize)
-./scripts/integration_test.sh -k "not upload and not clearml"
-
-# Agent B runs upload tests (creates tasks, must run alone)
-./scripts/integration_test.sh -k "upload"
+./scripts/integration_test.sh tests/integration
+./scripts/integration_stop.sh
 ```
 
-**Warning**: Upload tests mutate CVAT state (create tasks). Running two upload test sessions against the same CVAT instance causes `Duplicate base task name` errors. Only use this option if you can guarantee non-overlapping mutations.
+Export the variables once per shell: `integration_test.sh` and
+`integration_stop.sh` derive the same tag and ports from them, so a run that
+was prepared as `agent-b` on port 10089 must be tested and stopped with the
+same environment.
 
-## ClearML Port Conflicts
+Agents in worktrees get a distinct tag for free (the branch is part of it), but
+still need distinct ports and, if two worktrees share one branch name, a
+distinct `INTEGRATION_USER`.
 
-ClearML uses three additional ports (8880-8882). Currently, `integration_up.sh` does NOT accept `--clearml-port` flags — ports are set via env vars in `.env`. To override for parallel agents:
+### Why same-tag parallel runs are worse than before
+
+With the Compose CVAT, two same-tag runs failed loudly on the CVAT port. Now
+the second run's `cvat_stand.py cleanup --tag` deletes the first run's project
+on the stand while its tests are using it. Nothing detects that; the first run
+just starts failing on missing tasks. Do not share a tag.
+
+## Sequential Execution
+
+If isolation is not worth the setup, run agents one after another. Each does
+the full cycle (up -> test -> stop). `integration_up.sh` always cleans its own
+tag first, so leftover state from an interrupted run is replaced automatically.
+
+## Rate limits on the shared stand
+
+The stand throttles anonymous requests only (100/min per client IP): the
+`about` and login calls that every client open makes. A full suite opens a few
+dozen clients over several minutes, so two or three concurrent agents stay
+under the limit, and cveta2 retries 429s. If a run does see 429s on login,
+stagger the agents; do not add xdist.
+
+## Cleanup After Failures
+
+An interrupted run leaves its containers and its CVAT project behind. Clean up
+by tag:
 
 ```bash
-export CLEARML_API_PORT=18880
-export CLEARML_FILES_PORT=18881
-export CLEARML_WEB_PORT=18882
+# Host side: which compose projects exist
+docker compose ls | grep -- '-cveta2'
+
+# Both sides, for one tag
+INTEGRATION_RUN_TAG=agent-b-feature ./scripts/integration_stop.sh
+
+# CVAT side only: what is in the organization, and orphans older than a day
+source scripts/integration_env.sh
+uv run python tests/integration/cvat_stand.py ls
+uv run python tests/integration/cvat_stand.py cleanup --stale 24 --dry-run   # read the list first
+uv run python tests/integration/cvat_stand.py cleanup --stale 24
 ```
 
-Set these before running `integration_up.sh`.
-
-## Cleanup After Parallel Failures
-
-If an agent crashes mid-test, its containers and volumes remain. Clean up by name prefix:
-
-```bash
-# List all integration compose projects
-docker compose ls | grep cvat
-
-# Stop a specific agent's stack
-INTEGRATION_USER=agent-b ./scripts/integration_stop.sh
-
-# Nuclear option: stop ALL integration stacks on this machine
-for project in $(docker compose ls --format json | jq -r '.[].Name' | grep -- '-cvat$'); do
-  docker compose -p "$project" down -v --remove-orphans
-done
-```
+A `main` run is kept on purpose (see the gate in `SKILL.md`); `--stale` will
+list it too once it is a day old — leave it unless the human agrees.
 
 ## Summary
 
-| Scenario | Container Isolation | Port Isolation | Mutation Safety |
-|----------|-------------------|----------------|-----------------|
-| Different OS users | Automatic (`$USER` prefix) | Must override ports | Independent stacks |
-| Same user, unique `INTEGRATION_USER` | Yes | Must override ports | Independent stacks |
+| Scenario | Host isolation | CVAT isolation | Safe? |
+|----------|----------------|----------------|-------|
+| Different `INTEGRATION_USER`, different ports | yes | yes | yes |
+| Same user, different branches (worktrees), different ports | yes | yes | yes |
+| Same user, same branch, different ports | NO — same compose project | NO — same project on the stand | NO |
 | Same user, default settings | NO — collides | NO — collides | NO |
-| Shared stack, split tests | N/A (one stack) | N/A | Only if tests don't overlap on writes |

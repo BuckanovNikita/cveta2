@@ -9,42 +9,43 @@ description: |
 
 # Running cveta2 Integration Tests
 
-Integration tests run against a real CVAT + MinIO + ClearML Docker stack. The full lifecycle is: **start stack -> run tests -> tear down**.
+Integration tests run against a real CVAT + MinIO + ClearML. CVAT is the
+**persistent stand in the local Kubernetes cluster** (`http://cvat.k8s.localhost`,
+namespace `cvat`, described by the `k8s-infra` skill); the scripts never start
+or stop it. MinIO and ClearML run in Docker Compose next to the tests and are
+recreated per run. The lifecycle is **prepare run -> run tests -> stop (or keep)**.
 
 ## Prerequisites
 
-- Docker and Docker Compose v2.24.6+
-- `uv` (Python package manager)
-- Network access to `raw.githubusercontent.com` on the first run of a given CVAT
-  version — `integration_up.sh` downloads CVAT's own `docker-compose.yml` into
-  `.cache/cvat/<version>/` and reuses it offline afterwards. Without that access,
-  point `CVAT_COMPOSE_FILE` at a local copy of that file.
-- Free ports (defaults: 9988, 9989, 9990, 8880-8882) — see parallel section for overrides
+- The CVAT stand is deployed and answers on `http://cvat.k8s.localhost/api/server/about`
+  (if not: `k8s-infra` skill, `cvat-stand/deploy_cvat.sh`).
+- Docker and Docker Compose v2.24.6+, `uv`, `curl`, `unzip`.
+- Free host ports for MinIO and ClearML (defaults: 9989, 9990, 8880-8882);
+  see the parallel section for overrides.
 - `tests/integration/.env` — gitignored, so a fresh clone does not have one and
-  every script fails on `couldn't find env file` until you create it:
+  every script fails on it until you create it:
 
   ```bash
   cp tests/integration/.env.example tests/integration/.env
   ```
 
-  The same file is the switch for the pre-push gate below. The username and
-  password in it must match what `tests/integration/conftest.py` logs in with
-  (`admin`/`admin` unless `CVAT_INTEGRATION_USER` / `CVAT_INTEGRATION_PASSWORD`
-  say otherwise). `SMOKESCREEN_OPTS` is not optional: CVAT proxies outbound S3
-  through smokescreen, which denies private ranges, so without it seeding dies
-  registering the cloud storage with "The resource cveta2-test not found" while
-  MinIO is healthy and reachable.
+  Fill in `CVAT_INTEGRATION_PASSWORD`. The first `integration_up.sh` registers
+  the account (`CVAT_INTEGRATION_USER`, default `cveta2`) on the stand with that
+  password and creates the organization (`CVAT_INTEGRATION_ORG`, default
+  `cveta2-tests`) it owns. A missing or placeholder key is a hard error on
+  purpose: a defaulted password would register a user on a shared server
+  without anyone noticing. The same file is the switch for the pre-push gate below.
 
 ## Quick Start (Single Agent)
 
 ```bash
-# 1. Start the stack (downloads images, seeds test data — slow on first run)
+# 1. Prepare the run: check the stand, recreate MinIO + ClearML, seed this run's project
 ./scripts/integration_up.sh
 
 # 2. Run all integration tests
 ./scripts/integration_test.sh
 
-# 3. Tear down (removes containers AND volumes)
+# 3. Tear down: compose stack (volumes included) AND this run's CVAT project
 ./scripts/integration_stop.sh
 ```
 
@@ -55,17 +56,43 @@ Forward extra pytest args to `integration_test.sh`:
 ./scripts/integration_test.sh -x --tb=long     # stop on first failure, long tracebacks
 ```
 
+## The run tag: what a run owns
+
+`scripts/integration_env.sh` (sourced by every script) derives one **run tag**
+and names everything the run owns after it:
+
+| Situation | Tag |
+|---|---|
+| `main` checked out, or pre-commit pushing `refs/heads/main` | `<INTEGRATION_USER>` |
+| any other branch | `<INTEGRATION_USER>-<branch slug>` |
+| `INTEGRATION_RUN_TAG` set | that value |
+
+`INTEGRATION_USER` defaults to `$USER`. The tag names the compose project
+(`<tag>-cveta2`, containers `<tag>-cveta2-minio`, `<tag>-clearml-*`), the CVAT
+cloud storage (`<tag> minio`, pointing at this run's MinIO through the
+docker-desktop host gateway) and the CVAT project (`<tag> coco8-dev`, 80 labels,
+the seeded tasks). Tests find the project through `CVAT_INTEGRATION_PROJECT`.
+
+Everything happens inside organization `CVAT_INTEGRATION_ORG` as the
+integration account. To look at a run in the CVAT UI, log in as the stand's
+`admin` (a superuser sees every organization) or as the integration account
+with the `.env` password, and switch to the organization.
+
 ## The pre-push gate
 
-`scripts/integration_gate.sh` runs the same lifecycle from the `integration-tests`
-pre-push hook: start the stack, run `tests/integration`, tear it down. It owns the
-whole cycle rather than reusing whatever is running because of caveat 2 below —
-a stack that already ran the upload tests is not safe to run them against again.
+`scripts/integration_gate.sh` runs from the `integration-tests` pre-push hook:
+prepare the run, run `tests/integration`, then decide by branch:
+
+- **`main`** (a push of `refs/heads/main`, or `main` checked out): the run is
+  **kept** — the compose stack stays up so images still render, and the
+  `<tag> coco8-dev` project stays on the stand for inspection. The next `main`
+  run replaces it.
+- **any other branch**: `integration_stop.sh` removes the stack and the CVAT data.
+- `INTEGRATION_KEEP_DATA=1` / `=0` overrides the decision either way.
 
 It arms itself on `tests/integration/.env`, so a machine that was never set up
-for integration testing skips it silently. That is the *only* silent skip: with
-docker down or a port taken, an armed gate fails the push instead of waving it
-through.
+skips it silently. That is the *only* silent skip: with docker down, the stand
+not answering or a port taken, an armed gate fails the push.
 
 ```bash
 ./scripts/integration_gate.sh                # the same thing by hand
@@ -73,66 +100,65 @@ through.
 SKIP=integration-tests git push              # skip it for one push
 ```
 
-Two consequences worth knowing before your first push: it **destroys a stack you
-left running** (the cycle starts with `down -v`), and it runs only
-`tests/integration` — the `live-cvat` re-run of the unit suite that
-`CVAT_INTEGRATION_HOST` also switches on stays a manual
+The gate runs only `tests/integration` — the `live-cvat` re-run of the unit
+suite that `CVAT_INTEGRATION_HOST` also switches on stays a manual
 `./scripts/integration_test.sh`.
 
 ## What Each Script Does
 
+### `integration_env.sh` (sourced)
+
+Sanitizes `INTEGRATION_USER`, derives the run tag and compose project name,
+loads `tests/integration/.env`, and exports `CVAT_INTEGRATION_{HOST,USER,
+PASSWORD,ORG,PROJECT}`, `MINIO_ENDPOINT` (host view), `MINIO_ENDPOINT_FOR_CVAT`
+(pod view, `http://192.168.65.254:<MINIO_PORT>`) and the port variables.
+
 ### `integration_up.sh`
 
-1. Resolves the base compose file: `CVAT_COMPOSE_FILE` if set, else
-   `.cache/cvat/<version>/docker-compose.yml`, downloading it from the CVAT repo
-   when that cache entry is missing. `--cvat-version` selects both this file and
-   the `cvat/*` image tags (default `v2.41.0`).
-2. Tears down any existing stack (`docker compose -p <project> down -v`, by project
-   label, so it does not matter which CVAT version started it)
-3. Checks that default ports (9988, 9989, 9990, 8880-8882) are free — in that
-   order, so a plain re-run is not refused by the ports its own teardown just
-   released. A port still taken here belongs to something else: another user's
-   stack, or a second agent that picked the same `--port`.
-4. Downloads coco8 dataset images (if missing)
-5. Starts minimal CVAT services: `cvat_server`, `cvat_worker_import`, `cvat_worker_chunks`, `cveta2-minio`, plus ClearML (`clearml-apiserver`, `clearml-webserver`, `clearml-fileserver`). No `traefik` and no `cvat_ui`: `cvat_server` publishes its own nginx on the CVAT port, so the stack serves the API and has no web UI. See the header of `docker-compose.override.yml` for why traefik is kept out — in short, a traefik from any *other* CVAT stack on the machine discovers these containers through the Docker socket and breaks both stacks at once.
-6. Waits for CVAT and ClearML health endpoints (up to 180s)
-7. Creates CVAT superuser (`admin`/`admin`)
-8. Creates MinIO bucket (`cveta2-test`)
-9. Seeds CVAT with `coco8-dev` test project via `tests/integration/seed_cvat.py`
+1. `cvat_stand.py bootstrap` — registers the account and creates the
+   organization when missing, and proves the stand is reachable.
+2. `docker compose -p <tag>-cveta2 down -v`, then checks the MinIO/ClearML
+   ports are free — in that order, so a plain re-run is not refused by ports
+   its own teardown just released. A port still taken belongs to something else.
+3. Downloads coco8 images (if missing), starts MinIO + ClearML, waits for both
+   health endpoints, creates the bucket.
+4. `cvat_stand.py cleanup --tag <tag>` — removes this tag's previous project,
+   tasks and cloud storage from the organization and fails if anything remains.
+5. `seed_cvat.py` — uploads the images to MinIO, registers the cloud storage,
+   creates `<tag> coco8-dev` and its tasks. It refuses to run if a project with
+   that name already exists, so a hand-run seeder cannot create a duplicate.
+
+Options: `--minio-port PORT`; `CLEARML_API_PORT` / `CLEARML_FILES_PORT` /
+`CLEARML_WEB_PORT` / `MINIO_CONSOLE_PORT` through the environment.
 
 ### `integration_test.sh`
 
-1. Sets env vars: `CVAT_INTEGRATION_HOST`, `MINIO_ENDPOINT`, AWS credentials, ClearML endpoints
-2. Disables xdist (`-o 'addopts=-v --tb=short'`) — parallel pytest workers cause CVAT 429 rate-limiting
-3. Forwards any extra args to pytest
+Sources the env file, exports the MinIO credentials and the ClearML endpoints
+(soft-gated on `/debug.ping`; ClearML tests skip when it is down), disables
+xdist (`-o 'addopts=-v --tb=short -p tests.env_isolation'` — parallel workers
+trip CVAT rate limits), forwards extra args to pytest. Give it the same
+`INTEGRATION_USER` / ports as `integration_up.sh`.
 
 ### `integration_stop.sh`
 
-1. Runs `docker compose -p "${INTEGRATION_USER}-cvat" down -v --remove-orphans` to
-   remove all containers, networks and volumes
-2. Passes no compose file at all — docker compose finds everything by project
-   label, so teardown needs no download and works whichever CVAT version started it
+`docker compose -p <tag>-cveta2 down -v --remove-orphans` first, then
+`cvat_stand.py cleanup --tag <tag>`. If the stand is unreachable the containers
+are still gone; the exit code reports the failed CVAT step and the command to
+retry it.
 
-## Shutdown
-
-Always tear down with `./scripts/integration_stop.sh` (not manual `docker compose down`), because:
-
-- It uses the correct compose project name (`${INTEGRATION_USER}-cvat`)
-- It removes volumes (`-v`) to ensure clean state for next run
-- It removes orphan containers (`--remove-orphans`)
-
-If a test run is interrupted (Ctrl-C, crash), the stack keeps running. Run `integration_stop.sh` to clean up. The stack is designed to be disposable — `integration_up.sh` always tears down first before starting.
-
-To tear down another user's or another agent's stack, run the same command with
-their project name:
+### `tests/integration/cvat_stand.py`
 
 ```bash
-# Find the project name
-docker compose ls | grep cvat
-
-# Manual teardown (replace USERNAME with the prefix that stack used)
-docker compose -p "USERNAME-cvat" down -v --remove-orphans
+uv run python tests/integration/cvat_stand.py bootstrap                 # account, organization, reachability
+uv run python tests/integration/cvat_stand.py ls                        # projects, tasks, storages in the org
+uv run python tests/integration/cvat_stand.py cleanup --tag <tag>       # one run's objects
+uv run python tests/integration/cvat_stand.py cleanup --stale 24 --dry-run   # orphans from dead runs
 ```
+
+Needs the `CVAT_INTEGRATION_*` variables: run it as
+`source scripts/integration_env.sh && uv run python tests/integration/cvat_stand.py ls`,
+or from inside a script that already sourced them. `--tag` matches
+`"<tag> "` (tag plus a space), so `nkt` never matches `nkt-feature coco8-dev`.
 
 ## Parallel Agents: Avoiding Conflicts
 
@@ -140,24 +166,35 @@ See `./parallel-agents-guide.md` for the full strategy.
 
 **Key points:**
 
-- Container names and compose project names are prefixed with `$USER` by default (e.g., `nkt-cvat_server`)
-- **Same-user agents** on the same machine WILL conflict because they share the same prefix and ports
-- Use `--port` and `--minio-port` flags to assign unique ports per agent
-- Set `INTEGRATION_USER` env var to give each agent a unique container prefix
-
-Quick example for two parallel agents on the same machine:
+- Isolation on both sides comes from the run tag: compose project and
+  containers on the host, project and cloud storage in the shared organization.
+- **Two runs with the same tag conflict twice**: on ports, and — new with the
+  shared CVAT — the second run's pre-run cleanup deletes the first run's
+  project. Give parallel agents distinct `INTEGRATION_USER` values and distinct
+  ports.
+- The stand throttles only anonymous requests (per client IP); each run logs
+  in serially and cveta2 retries 429s, so several agents fit comfortably.
 
 ```bash
 # Agent A (default ports)
 ./scripts/integration_up.sh
 
 # Agent B (different ports + unique prefix)
-INTEGRATION_USER=agent-b ./scripts/integration_up.sh --port 9188 --minio-port 9189
+INTEGRATION_USER=agent-b MINIO_CONSOLE_PORT=9190 CLEARML_API_PORT=8890 CLEARML_FILES_PORT=8891 CLEARML_WEB_PORT=8892 \
+  ./scripts/integration_up.sh --minio-port 9189
 ```
 
 ## Important Caveats
 
 1. **No xdist**: Do NOT add `-n auto` to integration tests. CVAT returns 429 errors under parallel load.
-2. **Fresh state required**: Upload tests create tasks in the seeded project. Re-running against the same instance without re-seeding fails with `ValueError: Duplicate base task name`. Always tear down and restart between full runs — this is why the pre-push gate builds its own stack instead of reusing one.
-3. **First run is slow**: Docker image pulls + coco8 download + CVAT startup. Subsequent runs are faster (images cached).
-4. **Health timeout**: If CVAT doesn't become healthy within 180s, the script fails. Check `docker logs USERNAME-cvat_server`.
+2. **Fresh project per run**: Upload tests create tasks with fixed names in the
+   seeded project, and the `live-cvat` unit re-run fails on
+   `ValueError: Duplicate base task name` when a project holds two tasks of one
+   name. `integration_up.sh` removes the tag's previous project before seeding,
+   so re-running `up` between full runs is what keeps that true — do not run
+   the suite twice against one seeded project.
+3. **First run is slow**: image pulls for MinIO/ClearML and the coco8 download.
+4. **Health timeout**: MinIO or ClearML not healthy within 180s fails the
+   script. Check `docker compose -p <tag>-cveta2 logs`.
+5. **The stand is shared**: never run `cvat_stand.py cleanup --stale` without
+   `--dry-run` first, and never point the scripts at another organization.

@@ -1,72 +1,14 @@
-# Override for CVAT integration tests.
+# Docker Compose side of the integration stack: MinIO (S3 for the seeded
+# project) and ClearML. CVAT itself is the persistent stand in the local
+# Kubernetes cluster; it reaches this MinIO through the docker-desktop host
+# gateway, which is why the MinIO port is published on every interface.
 #
-# Adds MinIO and ClearML. Disables the analytics pipeline.
-# Layered on top of CVAT's own docker-compose.yml, which integration_up.sh
-# downloads into .cache/cvat/; CVAT_VERSION picks that file and the image tags.
-#
-# INTEGRATION_USER is set by integration_up.sh (defaults to "default")
-# and used as a container-name prefix to avoid clashes between users.
-#
-# cvat_server publishes its own nginx on CVAT_PORT; traefik and cvat_ui are
-# not started, so this stack serves the API only and has no web UI.
-#
-# traefik.enable is forced to "false" on every service the base compose
-# labels. A traefik discovers containers through the Docker socket, not
-# through a network, so an unrelated CVAT stack on this machine would
-# otherwise adopt these containers into its own `cvat` service (they carry
-# identical router/service labels) and load-balance real traffic into them.
-# TRAEFIK_PROVIDERS_DOCKER_NETWORK does not prevent this: it only picks
-# which IP to use, so the foreign, unreachable endpoint stays in rotation
-# and every other request dies on a 30 s dial timeout. Both stacks break.
+# INTEGRATION_RUN_TAG is set by scripts/integration_env.sh and used as a
+# container-name prefix so that parallel runs do not clash.
 
 services:
-  cvat_db:
-    container_name: ${INTEGRATION_USER:-default}-cvat_db
-
-  cvat_redis_inmem:
-    container_name: ${INTEGRATION_USER:-default}-cvat_redis_inmem
-
-  cvat_redis_ondisk:
-    container_name: ${INTEGRATION_USER:-default}-cvat_redis_ondisk
-
-  cvat_opa:
-    container_name: ${INTEGRATION_USER:-default}-cvat_opa
-
-  # Renamed for the same reason as the rest, but it only started colliding
-  # at CVAT v2.59.1, which added cvat_clickhouse to x-backend-deps: before
-  # that cvat_server did not depend on it, so the analytics pipeline this
-  # stack disables was never brought up at all.
-  cvat_clickhouse:
-    container_name: ${INTEGRATION_USER:-default}-cvat_clickhouse
-
-  cvat_server:
-    container_name: ${INTEGRATION_USER:-default}-cvat_server
-    environment:
-      CVAT_ANALYTICS: 0
-    labels:
-      traefik.enable: "false"
-    ports:
-      - "${CVAT_PORT:-8080}:8080"
-
-  cvat_worker_import:
-    container_name: ${INTEGRATION_USER:-default}-cvat_worker_import
-
-  cvat_worker_chunks:
-    container_name: ${INTEGRATION_USER:-default}-cvat_worker_chunks
-
-  traefik:
-    container_name: ${INTEGRATION_USER:-default}-traefik
-    ports: !override []
-    labels:
-      traefik.enable: "false"
-
-  cvat_ui:
-    container_name: ${INTEGRATION_USER:-default}-cvat_ui
-    labels:
-      traefik.enable: "false"
-
   cveta2-minio:
-    container_name: ${INTEGRATION_USER:-default}-cveta2-minio
+    container_name: ${INTEGRATION_RUN_TAG:-default}-cveta2-minio
     image: minio/minio:latest
     restart: unless-stopped
     environment:
@@ -79,7 +21,7 @@ services:
     volumes:
       - cveta2-minio-data:/data
     networks:
-      - cvat
+      - integration
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -87,10 +29,10 @@ services:
       retries: 5
 
   clearml-redis:
-    container_name: ${INTEGRATION_USER:-default}-clearml-redis
+    container_name: ${INTEGRATION_RUN_TAG:-default}-clearml-redis
     image: redis:7.4.1
     networks:
-      - cvat
+      - integration
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -98,10 +40,10 @@ services:
       retries: 5
 
   clearml-mongo:
-    container_name: ${INTEGRATION_USER:-default}-clearml-mongo
+    container_name: ${INTEGRATION_RUN_TAG:-default}-clearml-mongo
     image: mongo:7.0.22
     networks:
-      - cvat
+      - integration
     volumes:
       - clearml-mongo-data:/data/db
     healthcheck:
@@ -111,14 +53,14 @@ services:
       retries: 5
 
   clearml-elastic:
-    container_name: ${INTEGRATION_USER:-default}-clearml-elastic
+    container_name: ${INTEGRATION_RUN_TAG:-default}-clearml-elastic
     image: elasticsearch:8.17.0
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms256m -Xmx256m
     networks:
-      - cvat
+      - integration
     volumes:
       - clearml-elastic-data:/usr/share/elasticsearch/data
     healthcheck:
@@ -128,7 +70,7 @@ services:
       retries: 10
 
   clearml-fileserver:
-    container_name: ${INTEGRATION_USER:-default}-clearml-fileserver
+    container_name: ${INTEGRATION_RUN_TAG:-default}-clearml-fileserver
     image: allegroai/clearml:latest
     command: fileserver
     ports:
@@ -138,7 +80,7 @@ services:
       CLEARML__HOSTS__REDIS__FILESERVER__HOST: "clearml-redis"
       CLEARML__HOSTS__REDIS__FILESERVER__PORT: "6379"
     networks:
-      - cvat
+      - integration
     volumes:
       - clearml-fileserver-data:/mnt/fileserver
     depends_on:
@@ -146,7 +88,7 @@ services:
         condition: service_healthy
 
   clearml-apiserver:
-    container_name: ${INTEGRATION_USER:-default}-clearml-apiserver
+    container_name: ${INTEGRATION_RUN_TAG:-default}-clearml-apiserver
     image: allegroai/clearml:latest
     command: apiserver
     ports:
@@ -162,7 +104,7 @@ services:
       CLEARML__HOSTS__REDIS__WORKERS__PORT: "6379"
       CLEARML__APISERVER__PRE_POPULATE__ENABLED: "true"
     networks:
-      - cvat
+      - integration
     depends_on:
       clearml-redis:
         condition: service_healthy
@@ -172,7 +114,7 @@ services:
         condition: service_healthy
 
   clearml-webserver:
-    container_name: ${INTEGRATION_USER:-default}-clearml-webserver
+    container_name: ${INTEGRATION_RUN_TAG:-default}-clearml-webserver
     image: allegroai/clearml:latest
     command: webserver
     ports:
@@ -181,7 +123,7 @@ services:
       NGINX_APISERVER_ADDRESS: "http://clearml-apiserver:8008"
       NGINX_FILESERVER_ADDRESS: "http://clearml-fileserver:8081"
     networks:
-      - cvat
+      - integration
     depends_on:
       clearml-apiserver:
         condition: service_started
@@ -192,3 +134,6 @@ volumes:
   clearml-elastic-data:
   clearml-redis-data:
   clearml-fileserver-data:
+
+networks:
+  integration:

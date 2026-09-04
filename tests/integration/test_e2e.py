@@ -28,7 +28,13 @@ from cveta2.models import (
 from cveta2.services.fetch import FetchOptions, FetchTarget, fetch_selected_tasks
 from cveta2.task_cache import get_task_cache_dir
 from tests.helpers import fetch_all_annotations
-from tests.integration.conftest import _env, _make_sdk_client
+from tests.integration.conftest import (
+    _env,
+    _make_sdk_client,
+    find_seeded_project,
+    make_integration_config,
+    seeded_project_name,
+)
 from tests.integration.test_upload import (
     IMAGE_NAMES,
     _cs_info_for_host,
@@ -58,11 +64,10 @@ class TestSdkAdapterRoundTrip:
     def test_list_projects(self) -> None:
         projects = self.adapter.list_projects()
         names = {p.name for p in projects}
-        assert "coco8-dev" in names
+        assert seeded_project_name() in names
 
     def test_get_project_tasks(self) -> None:
-        projects = self.adapter.list_projects()
-        project = next(p for p in projects if p.name == "coco8-dev")
+        project = find_seeded_project(self.adapter)
         tasks = self.adapter.get_project_tasks(project.id)
         assert len(tasks) == EXPECTED_TASK_COUNT
         task_names = {t.name for t in tasks}
@@ -71,8 +76,7 @@ class TestSdkAdapterRoundTrip:
         assert "all-removed" in task_names
 
     def test_get_project_labels(self) -> None:
-        projects = self.adapter.list_projects()
-        project = next(p for p in projects if p.name == "coco8-dev")
+        project = find_seeded_project(self.adapter)
         labels = self.adapter.get_project_labels(project.id)
         assert len(labels) == EXPECTED_LABEL_COUNT
         label_names = {lbl.name for lbl in labels}
@@ -81,8 +85,7 @@ class TestSdkAdapterRoundTrip:
         assert "dog" in label_names
 
     def test_get_task_data_meta(self) -> None:
-        projects = self.adapter.list_projects()
-        project = next(p for p in projects if p.name == "coco8-dev")
+        project = find_seeded_project(self.adapter)
         tasks = self.adapter.get_project_tasks(project.id)
         normal_task = next(t for t in tasks if t.name == "normal")
         data_meta = self.adapter.get_task_data_meta(normal_task.id)
@@ -92,8 +95,7 @@ class TestSdkAdapterRoundTrip:
         assert "000000000009.jpg" in frame_names
 
     def test_get_task_annotations_normal(self) -> None:
-        projects = self.adapter.list_projects()
-        project = next(p for p in projects if p.name == "coco8-dev")
+        project = find_seeded_project(self.adapter)
         tasks = self.adapter.get_project_tasks(project.id)
         normal_task = next(t for t in tasks if t.name == "normal")
         annotations = self.adapter.get_task_annotations(normal_task.id)
@@ -102,16 +104,14 @@ class TestSdkAdapterRoundTrip:
             assert s.type == "rectangle"
 
     def test_all_removed_task_has_deleted_frames(self) -> None:
-        projects = self.adapter.list_projects()
-        project = next(p for p in projects if p.name == "coco8-dev")
+        project = find_seeded_project(self.adapter)
         tasks = self.adapter.get_project_tasks(project.id)
         task = next(t for t in tasks if t.name == "all-removed")
         data_meta = self.adapter.get_task_data_meta(task.id)
         assert sorted(data_meta.deleted_frames) == list(range(8))
 
     def test_frames_1_2_removed_task(self) -> None:
-        projects = self.adapter.list_projects()
-        project = next(p for p in projects if p.name == "coco8-dev")
+        project = find_seeded_project(self.adapter)
         tasks = self.adapter.get_project_tasks(project.id)
         task = next(t for t in tasks if t.name == "frames-1-2-removed")
         data_meta = self.adapter.get_task_data_meta(task.id)
@@ -129,8 +129,7 @@ class TestRealClientFetchAnnotations:
             cfg = CvatConfig(host=host)
             client = CvatClient(cfg, api=adapter)
 
-            projects = adapter.list_projects()
-            project = next(p for p in projects if p.name == "coco8-dev")
+            project = find_seeded_project(adapter)
             result = fetch_all_annotations(client, project.id)
 
             bbox_records = [
@@ -335,21 +334,16 @@ class TestRealCliFetchTask:
         from cveta2.commands.fetch import run_fetch_task
         from cveta2.config import IgnoreConfig
 
-        host = _env("CVAT_INTEGRATION_HOST", "http://localhost:8080")
-        username = _env("CVAT_INTEGRATION_USER", "admin")
-        password = _env("CVAT_INTEGRATION_PASSWORD", "admin")
-
         sdk_client = _make_sdk_client()
         try:
             adapter = SdkCvatApiAdapter(sdk_client)
-            projects = adapter.list_projects()
-            project = next(p for p in projects if p.name == "coco8-dev")
+            project = find_seeded_project(adapter)
             tasks = adapter.get_project_tasks(project.id)
             normal_task = next(t for t in tasks if t.name == "normal")
         finally:
             sdk_client.close()
 
-        cfg = CvatConfig(host=host, username=username, password=password)
+        cfg = make_integration_config()
         out_dir = tmp_path / "out"
 
         args = argparse.Namespace(

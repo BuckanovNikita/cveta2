@@ -148,7 +148,7 @@ pre-commit, `full` на pre-push. Профили заданы в
 
 | Скрипт | Где описан |
 |---|---|
-| `integration_up.sh`, `integration_test.sh`, `integration_stop.sh`, `integration_gate.sh` | Скилл `running-integration-tests` и раздел «Интеграционные тесты» в [CONTRIBUTING.md](../CONTRIBUTING.md) |
+| `integration_env.sh`, `integration_up.sh`, `integration_test.sh`, `integration_stop.sh`, `integration_gate.sh` | Скилл `running-integration-tests` и раздел «Интеграционные тесты» в [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | `mutation_config.py` | Вспомогательный модуль `mutation_test.sh` (профили и сброс `mutants/` при смене охвата) |
 | `check_commit_msg.py` | Хук `commit-msg`, см. «Ветки и релизы» в [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | `check_version_drift.py` | Хук `pre-push`, там же |

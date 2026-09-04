@@ -282,54 +282,83 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 
 ### Интеграционные тесты
 
-Прогоняют тесты против живого CVAT + MinIO + ClearML.
+Прогоняют тесты против живого CVAT + MinIO + ClearML. CVAT — постоянный стенд
+в локальном Kubernetes-кластере (`http://cvat.k8s.localhost`, см. скилл
+`k8s-infra`); скрипты его не поднимают и не гасят. MinIO и ClearML живут в
+Docker Compose (`tests/integration/docker-compose.yml`) и пересоздаются на
+каждый прогон.
 
 ```bash
-# 1. Поднять стек (порт по умолчанию 9988, всегда с нуля)
+# 1. Подготовить прогон: проверить стенд, поднять MinIO + ClearML, засеять проект
 ./scripts/integration_up.sh
-./scripts/integration_up.sh --port 9080        # конкретный порт
-./scripts/integration_up.sh --cvat-version v2.26.0  # конкретная версия CVAT
+./scripts/integration_up.sh --minio-port 9189   # если порт по умолчанию занят
 
 # 2. Запустить тесты (скрипт сам выставляет env-переменные и отключает xdist)
 ./scripts/integration_test.sh
 ./scripts/integration_test.sh -k upload        # только upload-тесты
 ./scripts/integration_test.sh -x --tb=long     # остановиться на первой ошибке
 
-# 3. Остановить и удалить volumes
+# 3. Снести compose-стек и данные прогона в CVAT
 ./scripts/integration_stop.sh
 ```
 
-Базовый compose-файл — это `docker-compose.yml` самого CVAT. `integration_up.sh`
-скачивает его один раз на версию в `.cache/cvat/<версия>/` (каталог в `.gitignore`),
-дальше стек поднимается без сети. `--cvat-version` задаёт и compose-файл, и теги
-образов `cvat/*`. Если машина не имеет доступа к `raw.githubusercontent.com`,
-укажите свою копию файла: `CVAT_COMPOSE_FILE=/path/to/docker-compose.yml`.
+Тесты ходят в CVAT под отдельным пользователем внутри одной организации
+(по умолчанию `cveta2` и `cveta2-tests`); `integration_up.sh` регистрирует
+обоих при первом запуске. Все объекты прогона в CVAT носят **тег прогона**:
+проект `<тег> coco8-dev` и облачное хранилище `<тег> minio`. Тег выводит
+`scripts/integration_env.sh` — на `main` это `INTEGRATION_USER` (по умолчанию
+`$USER`), на любой другой ветке `INTEGRATION_USER-<ветка>`; переопределяется
+через `INTEGRATION_RUN_TAG`. Тот же тег даёт имя compose-проекту
+(`<тег>-cveta2`).
 
-Останавливающий скрипт compose-файл не читает — он сносит стек по метке проекта,
-поэтому работает при любой версии и без сети.
+Перед засевом `integration_up.sh` удаляет из организации всё с этим тегом,
+поэтому повторный прогон всегда начинается с чистого проекта — именно так
+upload-тесты не встречают собственных остатков (`Duplicate base task name`).
+Два одновременных прогона с одним тегом несовместимы: второй снесёт проект
+первого. Параллельным агентам нужны разные `INTEGRATION_USER` и разные порты.
+
+Управление аккаунтом и организацией — `tests/integration/cvat_stand.py`:
+
+```bash
+uv run python tests/integration/cvat_stand.py bootstrap             # пользователь, организация, доступность стенда
+uv run python tests/integration/cvat_stand.py ls                    # что сейчас лежит в организации
+uv run python tests/integration/cvat_stand.py cleanup --tag <тег>   # удалить объекты одного прогона
+uv run python tests/integration/cvat_stand.py cleanup --stale 24 --dry-run   # сироты от погибших прогонов
+```
+
+Посмотреть данные прогона в интерфейсе стенда можно под `admin` стенда
+(суперпользователь видит все организации) или под `cveta2` с паролем из `.env`.
 
 Без `CVAT_INTEGRATION_HOST` интеграционные тесты не запускаются. Скрипт `integration_test.sh` выставляет эту переменную автоматически.
 
 ### Гейт на pre-push
 
 `scripts/integration_gate.sh` (хук `integration-tests`) делает на пуше весь цикл
-сам: поднимает стек, гоняет `tests/integration`, гасит стек. Прогоняется только
-`tests/integration` — переменная `CVAT_INTEGRATION_HOST` заодно добавляет
-параметр `live-cvat` в фикстуру `coco8_fixtures`, и юнит-тесты пошли бы по
-живому CVAT ещё раз, последовательно. Такой прогон запускают руками:
+сам: готовит стек, гоняет `tests/integration`, а дальше смотрит на ветку.
+Прогон с `main` (пуш `refs/heads/main` или `main` в рабочей копии) **остаётся**:
+compose-стек и проект `<тег> coco8-dev` на стенде не удаляются, чтобы последний
+прогон можно было открыть в интерфейсе CVAT; следующий прогон с `main` заменит
+его. Прогон с любой другой ветки убирает за собой. `INTEGRATION_KEEP_DATA=1`
+или `=0` переопределяет это решение.
+
+Прогоняется только `tests/integration` — переменная `CVAT_INTEGRATION_HOST`
+заодно добавляет параметр `live-cvat` в фикстуру `coco8_fixtures`, и юнит-тесты
+пошли бы по живому CVAT ещё раз, последовательно. Такой прогон запускают руками:
 `./scripts/integration_test.sh`.
 
 Гейт включается сам по наличию `tests/integration/.env` — файл в `.gitignore`,
 поэтому на свежем клоне и на любой другой машине интеграционных тестов на пуше
-просто нет. Включить: `cp tests/integration/.env.example tests/integration/.env`.
+просто нет. Включить: `cp tests/integration/.env.example tests/integration/.env`
+и заполнить пароль.
 
 Два следствия, о которых лучше знать заранее:
 
-- **Пуш сносит поднятый стек.** `integration_up.sh` всегда начинает с
-  `docker compose down -v`, вместе с volumes — свежее состояние здесь требование
-  корректности, иначе upload-тесты падают на `Duplicate base task name`.
+- **Пуш пересоздаёт стек этого тега.** `integration_up.sh` всегда начинает с
+  `docker compose down -v` и с удаления прошлого проекта тега в CVAT — свежее
+  состояние здесь требование корректности.
 - **Отсутствие `.env` — единственный тихий пропуск.** Если машина включена, а
-  docker не поднят или порт занят, гейт валит пуш, а не пропускает его.
+  docker не поднят, стенд не отвечает или порт занят, гейт валит пуш, а не
+  пропускает его.
 
 Пропустить гейт на один пуш (`mutmut-full` при этом отработает):
 
@@ -339,10 +368,15 @@ SKIP=integration-tests git push
 
 | Переменная | По умолчанию | Описание |
 |---|---|---|
-| `CVAT_INTEGRATION_HOST` | — | URL CVAT; включает интеграционные тесты |
-| `CVAT_INTEGRATION_USER` | `admin` | Пользователь CVAT |
-| `CVAT_INTEGRATION_PASSWORD` | `admin` | Пароль CVAT |
-| `CVAT_COMPOSE_FILE` | — | Локальный `docker-compose.yml` CVAT вместо скачивания |
+| `CVAT_INTEGRATION_HOST` | из `.env` | URL стенда CVAT; включает интеграционные тесты |
+| `CVAT_INTEGRATION_USER` | из `.env` | Пользователь CVAT (регистрируется при первом запуске) |
+| `CVAT_INTEGRATION_PASSWORD` | из `.env` | Его пароль |
+| `CVAT_INTEGRATION_ORG` | из `.env` | Организация, в которой живут все объекты тестов |
+| `CVAT_INTEGRATION_PROJECT` | `<тег> coco8-dev` | Полное имя засеянного проекта |
+| `INTEGRATION_USER` | `$USER` | Префикс контейнеров и основа тега прогона |
+| `INTEGRATION_RUN_TAG` | см. выше | Тег прогона, если нужно задать явно |
+| `INTEGRATION_KEEP_DATA` | по ветке | `1` — оставить прогон после гейта, `0` — убрать |
+| `MINIO_PORT`, `CLEARML_API_PORT`, … | `9989`, `8880`, … | Порты compose-стека |
 
 ## Ветки и релизы
 
@@ -456,15 +490,15 @@ semantic-release пушит ветку и тег двумя разными пу�
 
 ## Решение проблем
 
-**Порт занят** — `./scripts/integration_up.sh --port 9080`
+**Порт занят** — `./scripts/integration_up.sh --minio-port 9189` (ClearML — через `CLEARML_*_PORT`)
 
-**CVAT не стартует** — проверьте логи:
+**Стенд CVAT не отвечает** — `uv run python tests/integration/cvat_stand.py bootstrap` скажет, чего не хватает; сам стенд описан в скилле `k8s-infra`
+
+**MinIO или ClearML не стартуют** — проверьте логи:
 
 ```bash
-docker logs "$(whoami)-cvat_server"
+docker compose -p "$(whoami)-cveta2" logs
 ```
-
-**Не скачивается compose-файл CVAT** — задайте `CVAT_COMPOSE_FILE` с путём к локальной копии `docker-compose.yml` CVAT
 
 **Тесты падают после изменения фикстур** — перезапустите `./scripts/integration_up.sh`
 

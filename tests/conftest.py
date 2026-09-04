@@ -100,16 +100,16 @@ def pytest_report_header() -> list[str]:
     if os.environ.get("CVAT_INTEGRATION_HOST"):
         return []
     try:
-        urllib.request.urlopen("http://localhost:8080/api/server/about", timeout=1)
+        urllib.request.urlopen("http://cvat.k8s.localhost/api/server/about", timeout=1)
     except OSError:
         return []
     return [
         (
-            "WARNING: CVAT detected at localhost:8080 but"
+            "WARNING: CVAT detected at cvat.k8s.localhost but"
             " CVAT_INTEGRATION_HOST is not set."
         ),
         "  Integration tests will NOT run. To include them:",
-        "  CVAT_INTEGRATION_HOST=http://localhost:8080 uv run pytest",
+        "  ./scripts/integration_up.sh && ./scripts/integration_test.sh",
     ]
 
 

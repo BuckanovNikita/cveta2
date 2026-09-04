@@ -88,9 +88,10 @@ repos:
         always_run: true
         stages: [pre-push]
 
-      # Integration tests need a live CVAT + MinIO + ClearML stack, and the stack
-      # must be fresh (a reused one fails with "Duplicate base task name"), so the
-      # script owns up -> test -> stop and a run costs minutes. Hence pre-push,
+      # Integration tests need the cluster CVAT stand plus a MinIO + ClearML
+      # compose stack, and this run's CVAT project must be fresh (a reused one
+      # fails with "Duplicate base task name"), so the script owns
+      # up -> test -> keep-or-stop and a run costs minutes. Hence pre-push,
       # after the mutation gate.
       #
       # It disables itself when tests/integration/.env is missing, which is the
