@@ -72,7 +72,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 
 1. **Fetch**: `cli`/`api.fetch` → `commands/fetch.py` (or `api.py`) → `services/fetch.py:fetch_project()` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
    - Task selection scales with the request, not the project: `_client_ops/fetch.py:_select_tasks_for_fetch` retrieves each selector through `get_task` when all of them are numeric ids, and only walks the project task list otherwise — for a name selector, an id that turns out to name a task, a task belonging to another project, or an ignored id (all of which the listing path still owns, and all of which end in an error or a skip)
-   - Completed tasks are served from `task_cache.py` whenever an entry exists (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`); the live `completed` status is the whole freshness check, since a job moved back to annotation takes that status away. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
+  - Completed tasks are served from `task_cache.py` when an entry exists and its cached `task_updated_date` matches CVAT (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`). A task or project-label edit invalidates the rendered payload; a job moved back to annotation also makes it ineligible. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
    - Annotations converted to `BBoxAnnotation` by `extractors.py`
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
@@ -118,6 +118,15 @@ cache JSON, excluded from the CSV — and used to build `s3_image_path`. The
 local image cache mirrors the S3 key layout below the effective storage prefix
 (`sync_roots` overrides the prefix, `cache.projects.<name>.ignored_prefix`
 skips less of the hierarchy); see README.md for the user-facing description.
+Frame names are a supported-data contract: POSIX-relative to the configured
+storage root, with a basename unique across the project. Absolute names below
+that root are normalized to relative names; traversal and outside-root names
+are rejected. Duplicate basenames are intentionally not assigned a stable
+winner because CSV identity is basename-only.
+
+CVAT tracks are intentionally outside the extraction model. The SDK adapter
+warns with the task id and count whenever it ignores tracks; only standalone
+rectangle shapes reach `RawAnnotations`.
 
 ## Task-by-task processing
 

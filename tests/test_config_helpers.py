@@ -32,7 +32,7 @@ from cveta2.config import (
     resolve_images_cache_dir,
     should_raise_on_fetch_failure,
 )
-from cveta2.exceptions import MissingCredentialsError
+from cveta2.exceptions import Cveta2Error, MissingCredentialsError
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
@@ -309,3 +309,11 @@ def test_saving_an_all_default_section_absent_from_the_file_is_a_no_op(
     assert yaml.safe_load(config_path.read_bytes()) == {
         "cvat": {"host": "http://localhost:8080"}
     }
+
+
+def test_malformed_yaml_is_reported_as_domain_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "broken.yaml"
+    config_path.write_text("cvat: [unterminated", encoding="utf-8")
+
+    with pytest.raises(Cveta2Error, match=r"broken\.yaml"):
+        CvatConfig.from_file(config_path)

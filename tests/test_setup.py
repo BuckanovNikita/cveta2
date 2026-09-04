@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from cveta2.commands import setup as setup_cmd
+from cveta2.commands import setup_clearml as setup_clearml_cmd
 from cveta2.commands.interactive import _questionary, primitives, wizard
 from cveta2.commands.setup import run_setup, run_setup_cache
 from cveta2.commands.setup_clearml import run_setup_clearml
@@ -82,6 +83,42 @@ def test_setup_commands_refuse_non_interactive_with_wizard_hint(
     with pytest.raises(InteractiveModeRequiredError) as excinfo:
         command(_args(tmp_path / "config.yaml"))
     assert str(excinfo.value).endswith(hint)
+
+
+def test_setup_cache_reads_projects_beside_custom_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "profile" / "config.yaml"
+    config_path.parent.mkdir()
+    seen: list[Path] = []
+
+    def load_projects(path: Path) -> list[ProjectInfo]:
+        seen.append(path)
+        return [ProjectInfo(id=1, name="alpha")]
+
+    monkeypatch.setattr(setup_cmd, "load_projects_cache", load_projects)
+    feed_inputs(monkeypatch, ["", "", "", ""])
+
+    run_setup_cache(_args(config_path))
+
+    assert seen == [config_path.parent / "projects.yaml"]
+
+
+def test_setup_clearml_reads_projects_beside_custom_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "profile" / "config.yaml"
+    seen: list[Path] = []
+
+    def load_projects(path: Path) -> list[ProjectInfo]:
+        seen.append(path)
+        return []
+
+    monkeypatch.setattr(setup_clearml_cmd, "load_projects_cache", load_projects)
+
+    run_setup_clearml(_args(config_path))
+
+    assert seen == [config_path.parent / "projects.yaml"]
 
 
 def run_setup_with_inputs(
@@ -178,7 +215,7 @@ def test_setup_rerun_keeps_existing_request_timeout(
 @pytest.fixture
 def two_projects(monkeypatch: pytest.MonkeyPatch) -> list[ProjectInfo]:
     projects = [ProjectInfo(id=1, name="alpha"), ProjectInfo(id=2, name="beta")]
-    monkeypatch.setattr(setup_cmd, "load_projects_cache", lambda: projects)
+    monkeypatch.setattr(setup_cmd, "load_projects_cache", lambda *_args: projects)
     return projects
 
 

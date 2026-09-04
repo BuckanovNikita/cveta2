@@ -280,6 +280,20 @@ class TestConvertAnnotations:
             shapes=[]
         )
 
+    def test_adapter_warns_when_tracks_are_ignored(
+        self, capture_logs: list[str]
+    ) -> None:
+        client = MagicMock()
+        client.api_client.tasks_api.retrieve_annotations.return_value = (
+            SimpleNamespace(shapes=[], tracks=[object(), object()]),
+            None,
+        )
+
+        result = SdkCvatApiAdapter(client).get_task_annotations(17)
+
+        assert result == RawAnnotations(shapes=[])
+        assert any("17" in message and "2" in message for message in capture_logs)
+
 
 # ---------------------------------------------------------------------------
 # convert_task

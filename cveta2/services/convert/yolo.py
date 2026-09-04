@@ -281,8 +281,80 @@ def _yolo_fields_to_row(  # noqa: PLR0913, PLR0917
     )
 
 
+def _resolve_dataset_root(yaml_path: Path, raw_root: object) -> Path:
+    """Resolve YOLO's optional ``path`` relative to the dataset YAML."""
+    if raw_root in (None, ""):
+        return yaml_path.parent.resolve()
+    root = Path(str(raw_root)).expanduser()
+    if not root.is_absolute():
+        root = yaml_path.parent / root
+    return root.resolve()
+
+
+def _resolve_listed_image(raw: str, list_path: Path, dataset_root: Path) -> Path:
+    """Resolve one image named by a YOLO split list file."""
+    path = Path(raw).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    if raw.startswith("./"):
+        return (list_path.parent / raw[2:]).resolve()
+    return (dataset_root / path).resolve()
+
+
+def _images_from_split_source(source: Path, dataset_root: Path) -> list[Path]:
+    """Expand one YOLO split directory, image, or image-list file."""
+    if source.is_dir():
+        return sorted(
+            path
+            for path in source.rglob("*")
+            if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS
+        )
+    if source.is_file() and source.suffix.lower() == ".txt":
+        images: list[Path] = []
+        for line in read_text_utf8(source).splitlines():
+            raw = line.strip()
+            if raw:
+                images.append(_resolve_listed_image(raw, source, dataset_root))
+        return images
+    if source.is_file() and source.suffix.lower() in _IMAGE_EXTENSIONS:
+        return [source]
+    logger.warning(f"Источник изображений не найден: {source}")
+    return []
+
+
+def _split_images(raw_split: object, dataset_root: Path) -> list[Path]:
+    """Resolve a YOLO split value while preserving declared source order."""
+    entries = raw_split if isinstance(raw_split, list) else [raw_split]
+    result: list[Path] = []
+    seen: set[Path] = set()
+    for entry in entries:
+        if not isinstance(entry, (str, Path)):
+            raise Cveta2Error(
+                f"Ошибка: путь split должен быть строкой или списком строк, "
+                f"получено {entry!r}"
+            )
+        source = Path(entry).expanduser()
+        if not source.is_absolute():
+            source = dataset_root / source
+        for image in _images_from_split_source(source.resolve(), dataset_root):
+            resolved = image.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                result.append(resolved)
+    return result
+
+
+def _label_path_for_image(img_path: Path) -> Path:
+    """Return the conventional YOLO label path for an image path."""
+    parts = list(img_path.parts)
+    image_indexes = [index for index, part in enumerate(parts) if part == "images"]
+    if image_indexes:
+        parts[image_indexes[-1]] = "labels"
+        return Path(*parts).with_suffix(".txt")
+    return img_path.with_suffix(".txt")
+
+
 def _from_yolo_dataset(
-    input_dir: Path,
     yaml_path: Path,
     output_path: Path,
     *,
@@ -298,6 +370,7 @@ def _from_yolo_dataset(
         raise Cveta2Error(f"Ошибка: в {yaml_path} не найдены имена классов (names)")
 
     sizes = _SizeCache(read_all=read_all_sizes)
+    dataset_root = _resolve_dataset_root(yaml_path, ds_config.get("path"))
 
     rows: list[dict[str, object]] = []
     frame_id = 0
@@ -308,20 +381,14 @@ def _from_yolo_dataset(
         if not split_val:
             continue
 
-        images_dir = input_dir / str(split_val)
-        labels_dir = input_dir / str(split_val).replace("images", "labels")
-
-        if not images_dir.is_dir():
-            logger.warning(f"Директория изображений не найдена: {images_dir}")
-            continue
-
-        for img_path in sorted(images_dir.iterdir()):
-            if img_path.suffix.lower() not in _IMAGE_EXTENSIONS:
+        for img_path in _split_images(split_val, dataset_root):
+            if not img_path.is_file():
+                logger.warning(f"Изображение из списка не найдено: {img_path}")
                 continue
 
             img_w, img_h = sizes.get(img_path)
             _require_positive_dimensions(img_w, img_h, img_path.name)
-            labels = _parse_label_file(labels_dir / f"{img_path.stem}.txt")
+            labels = _parse_label_file(_label_path_for_image(img_path))
 
             if not labels:
                 rows.append(
@@ -438,7 +505,6 @@ def convert_from_yolo(
     if yaml_path.is_file():
         logger.info(f"Режим датасета: найден {yaml_path}")
         _from_yolo_dataset(
-            in_dir,
             yaml_path,
             output_path,
             read_all_sizes=read_all_sizes,

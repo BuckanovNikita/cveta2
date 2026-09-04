@@ -175,6 +175,7 @@ def run_upload(args: argparse.Namespace) -> None:
                 "--name": task_name,
                 "--complete": args.complete,
                 "--mark-all-deleted": args.mark_all_deleted,
+                "--resume": args.resume,
             },
             prompted=prompted,
         )

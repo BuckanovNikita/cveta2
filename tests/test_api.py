@@ -205,6 +205,34 @@ class TestOpenConnection:
         assert captured["host"] == "http://explicit"
         assert captured["user"] == "user"
 
+    def test_empty_organization_explicitly_selects_personal_workspace(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "cveta2.api.CvatConfig.load",
+            lambda *_a, **_k: cveta2.CvatConfig(
+                host="http://from-config", organization="team"
+            ),
+        )
+        captured: dict[str, str | None] = {}
+
+        class _FakeClient:
+            def __init__(self, cfg: cveta2.CvatConfig) -> None:
+                captured["organization"] = cfg.organization
+
+            def __enter__(self) -> Self:
+                return self
+
+            def __exit__(self, *_exc: object) -> None:
+                return None
+
+        monkeypatch.setattr("cveta2.api.CvatClient", _FakeClient)
+
+        with _open(cveta2.Connection(organization="")):
+            pass
+
+        assert captured["organization"] is None
+
 
 def _images_dir(
     images_dir: str | Path | None,

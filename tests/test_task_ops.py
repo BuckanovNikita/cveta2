@@ -240,6 +240,13 @@ class TestMarkFramesDeleted:
 
 
 class TestMarkFramesDeletedByIds:
+    def test_already_deleted_frame_is_not_patched_or_counted(self) -> None:
+        api = _api_with_frames("a.jpg", "b.jpg", deleted=[1])
+        client = _client_with_api(api)
+
+        assert client.mark_frames_deleted_by_ids(7, [1]) == 0
+        api.set_deleted_frames.assert_not_called()
+
     def test_skips_unknown_frame_ids_with_warning(
         self, capture_logs: list[str]
     ) -> None:

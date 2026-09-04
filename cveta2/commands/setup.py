@@ -15,6 +15,7 @@ from cveta2.config import (
     CvatConfig,
     ImageCacheConfig,
     cache_dir_for_project,
+    get_projects_cache_path,
     require_interactive,
 )
 from cveta2.exceptions import Cveta2Error
@@ -238,7 +239,8 @@ def _prompt_project_cache_dir(
 
 def _ensure_projects_list(config_path: Path) -> list[ProjectInfo]:
     """Return cached projects; fetch the default org's list if cache is empty."""
-    projects = load_projects_cache()
+    projects_cache_path = get_projects_cache_path(config_path)
+    projects = load_projects_cache(projects_cache_path)
     if projects:
         return projects
 
@@ -248,6 +250,8 @@ def _ensure_projects_list(config_path: Path) -> list[ProjectInfo]:
         org = client.organization or ""
 
     if projects:
-        update_org_projects(org, org or PERSONAL_WORKSPACE_TITLE, projects)
+        update_org_projects(
+            org, org or PERSONAL_WORKSPACE_TITLE, projects, projects_cache_path
+        )
         logger.info(f"Загружено проектов: {len(projects)}")
     return projects

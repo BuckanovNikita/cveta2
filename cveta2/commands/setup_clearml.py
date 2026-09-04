@@ -11,6 +11,7 @@ from cveta2.commands.interactive import wizard
 from cveta2.config import (
     ClearmlConfig,
     ClearmlProjectMapping,
+    get_projects_cache_path,
     require_interactive,
 )
 from cveta2.projects_cache import load_projects_cache
@@ -29,7 +30,7 @@ def run_setup_clearml(args: argparse.Namespace) -> None:
 
     require_interactive(wizard.CLEARML_HINT)
 
-    projects = load_projects_cache()
+    projects = load_projects_cache(get_projects_cache_path(config_path))
     if not projects:
         logger.warning(
             "Кэш проектов пуст. Сначала выполните 'cveta2 setup-cache' "

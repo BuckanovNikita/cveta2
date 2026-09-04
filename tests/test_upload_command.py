@@ -672,6 +672,15 @@ class TestRunUploadPromptedPredicate:
 
         assert capsys.readouterr().out == ""
 
+    @pytest.mark.usefixtures("isolated_config")
+    def test_prompted_resume_echo_keeps_resume_flag(
+        self, csv: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        args = _upload_args(csv, project=None, name="t1", labels=["car"], resume=True)
+        _run_upload_capturing(args, project=(1, "proj"))
+
+        assert "--resume" in shlex.split(capsys.readouterr().out)
+
 
 def test_stage_images_keeps_plan_order() -> None:
     plan = UploadPlan(

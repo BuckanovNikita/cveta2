@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 from botocore.exceptions import ClientError
 
+from cveta2.exceptions import Cveta2Error
 from cveta2.image_downloader import (
     CloudStorageInfo,
     ImageDownloader,
@@ -943,6 +944,49 @@ def test_s3_syncer_ignored_prefix_keeps_remainder(
     assert stats.downloaded == 2
     assert (target / "projA" / "2026-01" / "a.jpg").read_bytes() == b"data-a"
     assert (target / "projA" / "b.jpg").read_bytes() == b"data-b"
+
+
+def test_absolute_frame_path_is_made_relative_to_storage_root(tmp_path: Path) -> None:
+    downloader = ImageDownloader(tmp_path / "cache")
+
+    destination = downloader._dest_path(
+        "/images/nested/a.jpg", make_cs_info(prefix="images")
+    )
+
+    assert destination == tmp_path / "cache" / "nested" / "a.jpg"
+
+
+@pytest.mark.parametrize("frame_ref", ["/outside/a.jpg", "../escape.jpg"])
+def test_frame_path_cannot_escape_storage_root(tmp_path: Path, frame_ref: str) -> None:
+    downloader = ImageDownloader(tmp_path / "cache")
+
+    with pytest.raises(Cveta2Error, match=r"путь|корня"):
+        downloader._dest_path(frame_ref, make_cs_info(prefix="images"))
+
+
+def test_frame_path_cannot_escape_through_cache_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "cache"
+    target.mkdir()
+    (target / "linked").symlink_to(tmp_path)
+
+    with pytest.raises(Cveta2Error, match="вне локального кэша"):
+        ImageDownloader(target)._dest_path(
+            "linked/escape.jpg", make_cs_info(prefix="images")
+        )
+
+
+def test_s3_sync_rejects_traversal_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_boto(
+        monkeypatch,
+        FakeS3Client({"images/../../escape.jpg": b"bad"}, keyed_by_bucket=False),
+    )
+
+    with pytest.raises(Cveta2Error, match="Небезопасный путь"):
+        S3Syncer(tmp_path / "cache").sync(make_cs_info(prefix="images"))
+
+    assert not (tmp_path / "escape.jpg").exists()
 
 
 # ---------------------------------------------------------------------------

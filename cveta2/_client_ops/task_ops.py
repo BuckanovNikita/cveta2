@@ -110,10 +110,14 @@ class _TaskOpsMixin(_ClientBase):
         """Union *frame_ids* with the task's deleted frames and PATCH data_meta."""
         if not frame_ids:
             return 0
-        new_deleted = sorted(set(raw_meta.deleted_frames) | set(frame_ids))
+        existing = set(raw_meta.deleted_frames)
+        added = set(frame_ids) - existing
+        if not added:
+            return 0
+        new_deleted = sorted(existing | added)
         api.set_deleted_frames(task_id, new_deleted)
-        logger.info(f"Помечено удалёнными {len(frame_ids)} кадров в задаче {task_id}")
-        return len(frame_ids)
+        logger.info(f"Помечено удалёнными {len(added)} кадров в задаче {task_id}")
+        return len(added)
 
     def count_task_label_shapes(self, task_id: int, label: str) -> int:
         """Count annotation shapes with the given label name in a task.

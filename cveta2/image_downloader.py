@@ -8,6 +8,7 @@ pending images are counted as failed. Already-cached files are skipped.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import parse_qs
 
@@ -15,6 +16,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from cveta2._concurrency import Workers, run_concurrent
+from cveta2.exceptions import Cveta2Error
 from cveta2.fs_utils import ensure_shared_dir, replace_shared_bytes
 from cveta2.s3_types import Transfer
 from cveta2.s3_utils import (
@@ -103,6 +105,51 @@ fetched one's.  Probing therefore wins by orders of magnitude when a fetch
 wants a few images out of a large project, and loses when it wants nearly
 all of them, which is what a whole-project fetch does.
 """
+
+
+def _validate_relative_key(value: str, *, original: str) -> str:
+    """Return a safe relative POSIX key, rejecting filesystem traversal."""
+    parts = value.split("/")
+    if not value or any(part in {"", ".", ".."} for part in parts):
+        raise Cveta2Error(
+            f"Небезопасный путь изображения {original!r}: "
+            f"путь должен оставаться внутри настроенного корня хранилища"
+        )
+    return PurePosixPath(*parts).as_posix()
+
+
+def _canonical_frame_key(prefix: str, frame_ref: str) -> str:
+    """Resolve a relative or rooted frame reference within an S3 prefix."""
+    if PurePosixPath(frame_ref).is_absolute():
+        unrooted = frame_ref.lstrip("/")
+        if prefix:
+            prefix_dir = f"{prefix.rstrip('/')}/"
+            if unrooted != prefix.rstrip("/") and not unrooted.startswith(prefix_dir):
+                raise Cveta2Error(
+                    f"Абсолютный путь изображения {frame_ref!r} находится вне "
+                    f"настроенного корня {prefix!r}"
+                )
+        key = unrooted
+    else:
+        key = build_s3_key(prefix, frame_ref)
+    return _validate_relative_key(key, original=frame_ref)
+
+
+def _local_name_from_key(key: str, root: str, *, original: str) -> str:
+    """Turn a canonical S3 key into a safe path below the local cache root."""
+    relative = strip_key_prefix(key, root).lstrip("/")
+    return _validate_relative_key(relative, original=original)
+
+
+def _confined_destination(target_dir: Path, local_name: str, *, original: str) -> Path:
+    """Join a local name while preventing escape through existing symlinks."""
+    destination = target_dir / local_name
+    if not destination.resolve().is_relative_to(target_dir.resolve()):
+        raise Cveta2Error(
+            f"Небезопасный путь изображения {original!r}: "
+            f"назначение находится вне локального кэша {target_dir}"
+        )
+    return destination
 
 
 def _download_pending(
@@ -197,10 +244,11 @@ class ImageDownloader:
         stripped instead of the full storage prefix (keeping more of the
         S3 hierarchy locally).
         """
-        if self._ignored_prefix and project_cloud_storage is not None:
-            full_key = build_s3_key(project_cloud_storage.prefix, frame_ref)
-            return self._target_dir / strip_key_prefix(full_key, self._ignored_prefix)
-        return self._target_dir / frame_ref
+        prefix = project_cloud_storage.prefix if project_cloud_storage else ""
+        full_key = _canonical_frame_key(prefix, frame_ref)
+        local_root = self._ignored_prefix or prefix
+        local_name = _local_name_from_key(full_key, local_root, original=frame_ref)
+        return _confined_destination(self._target_dir, local_name, original=frame_ref)
 
     def _filter_cached(
         self,
@@ -304,7 +352,13 @@ class ImageDownloader:
             project_cloud_storage.prefix,
         )
         for image_name, frame_ref in unresolved.items():
-            s3_key = name_to_key.get(frame_ref) or name_to_key.get(image_name)
+            canonical = _canonical_frame_key(project_cloud_storage.prefix, frame_ref)
+            relative = strip_key_prefix(canonical, project_cloud_storage.prefix)
+            s3_key = (
+                name_to_key.get(relative)
+                or name_to_key.get(canonical)
+                or name_to_key.get(image_name)
+            )
             if s3_key is not None:
                 resolved[image_name] = s3_key
         return resolved
@@ -321,7 +375,7 @@ class ImageDownloader:
         """
         entries = list(pending.items())
         keys = [
-            build_s3_key(project_cloud_storage.prefix, frame_ref)
+            _canonical_frame_key(project_cloud_storage.prefix, frame_ref)
             for _, frame_ref in entries
         ]
         found = run_concurrent(
@@ -398,19 +452,27 @@ class S3Syncer:
         """
         s3 = make_s3_client(cs_info.endpoint_url or None)
         objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
-        if self._ignored_prefix:
-            objects = [
-                (key, strip_key_prefix(key, self._ignored_prefix)) for key, _ in objects
-            ]
         if not objects:
             logger.info(f"Нет объектов в s3://{cs_info.bucket}/{cs_info.prefix}")
             return DownloadStats(total=0)
 
         stats = DownloadStats(total=len(objects))
-        to_download = [
-            Transfer(name=name, key=key, path=self._target_dir / name)
+        local_root = self._ignored_prefix or cs_info.prefix
+        safe_objects = [
+            (
+                key,
+                _local_name_from_key(key, local_root, original=name),
+            )
             for key, name in objects
-            if not (self._target_dir / name).exists()
+        ]
+        to_download = [
+            Transfer(
+                name=name,
+                key=key,
+                path=_confined_destination(self._target_dir, name, original=name),
+            )
+            for key, name in safe_objects
+            if not _confined_destination(self._target_dir, name, original=name).exists()
         ]
         stats.cached = stats.total - len(to_download)
 

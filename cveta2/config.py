@@ -11,7 +11,11 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
-from cveta2.exceptions import InteractiveModeRequiredError, MissingCredentialsError
+from cveta2.exceptions import (
+    Cveta2Error,
+    InteractiveModeRequiredError,
+    MissingCredentialsError,
+)
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -89,7 +93,10 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
     """Load a YAML file and return its top-level mapping (or empty dict)."""
     if not path.is_file():
         return {}
-    data = yaml.safe_load(path.read_bytes()) or {}
+    try:
+        data = yaml.safe_load(path.read_bytes()) or {}
+    except yaml.YAMLError as e:
+        raise Cveta2Error(f"Ошибка чтения YAML-конфигурации {path}: {e}") from e
     if not isinstance(data, dict):
         logger.warning(f"Invalid config format in {path}; expected mapping.")
         return {}

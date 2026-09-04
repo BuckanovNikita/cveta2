@@ -92,11 +92,14 @@ highest `task_id` decides — ids are handed out in creation order and never mov
 `task_updated_date` is not used for this: editing a project's labels rewrites it
 on every task of the project at once, which would scramble the ordering.
 
-> **Caveat:** the annotation cache is not keyed on `task_updated_date` either —
-> an entry is served for as long as CVAT still reports the task as `completed`.
-> Shapes edited inside an already-completed task are therefore served stale;
-> `cveta2 task status` invalidates the local entry, and `--no-cache` or
-> `--force` bypasses the cache entirely.
+The annotation cache does compare `task_updated_date`: a changed task or a
+project-wide label edit invalidates the entry and fetches it again. This favors
+correct rendered labels over retaining the whole project's cache after a label
+change. `--no-cache` and `--force` remain available to bypass cache reads.
+
+CVAT frame names are expected to be relative POSIX paths whose basenames are
+unique within a project. CSV keeps only the basename in `image_name`; duplicate
+basenames therefore have undefined identity and selection behavior.
 
 ### Issues (`issue_text` / `issue_state`)
 

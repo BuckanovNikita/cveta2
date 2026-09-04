@@ -185,6 +185,8 @@ def _open(connection: Connection | None) -> Iterator[CvatClient]:
             organization=conn.organization,
         )
     )
+    if conn.organization is not None:
+        cfg = cfg.model_copy(update={"organization": conn.organization or None})
     if not cfg.host:
         raise MissingHostError(
             "Хост CVAT не настроен. Передайте host= или задайте CVAT_HOST "

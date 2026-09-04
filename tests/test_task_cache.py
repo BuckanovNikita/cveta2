@@ -148,21 +148,15 @@ class TestLocalCache:
 
         assert cache.get(make_task(updated=_UPDATED)) is None
 
-    def test_bumped_updated_date_is_still_served(self, tmp_path: Path) -> None:
-        """A moved ``updated_date`` is not a reason to refetch a done task.
-
-        Editing a project's labels bumps the date on every task of the
-        project at once; treating that as staleness threw away the whole
-        project's cache.  The live ``completed`` status is the freshness
-        check instead.
-        """
+    def test_bumped_updated_date_invalidates_local_entry(self, tmp_path: Path) -> None:
+        """A changed task revision must not serve rendered stale annotations."""
         cache = TaskAnnotationCache(tmp_path / "cache")
         payload = _payload()
         cache.put(make_task(updated="2026-01-01T00:00:00"), payload)
         relabelled_task = make_task(updated="2026-02-02T00:00:00")
 
-        assert cache.get(relabelled_task) == payload
-        assert (tmp_path / "cache" / "task_1.json").exists()
+        assert cache.get(relabelled_task) is None
+        assert not (tmp_path / "cache" / "task_1.json").exists()
 
     def test_wrong_schema_version_miss_and_deletes_file(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"
@@ -515,7 +509,7 @@ class TestS3Backend:
         assert key in fake_s3.objects
         assert not (tmp_path / "local" / "task_1.json").exists()
 
-    def test_s3_entry_with_a_bumped_date_is_served_and_backfilled(
+    def test_s3_entry_with_a_bumped_date_is_rejected_without_backfill(
         self, tmp_path: Path
     ) -> None:
         payload = _payload()
@@ -527,8 +521,8 @@ class TestS3Backend:
             tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx")
         )
 
-        assert cache.get(make_task(updated="2026-06-06T00:00:00")) == payload
-        assert (tmp_path / "local" / "task_1.json").exists()
+        assert cache.get(make_task(updated="2026-06-06T00:00:00")) is None
+        assert not (tmp_path / "local" / "task_1.json").exists()
 
     def test_missing_key_is_plain_miss_not_disable(self, tmp_path: Path) -> None:
         fake_s3 = FakeS3Client()

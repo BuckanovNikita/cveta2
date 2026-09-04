@@ -58,4 +58,8 @@ tests/integration/.seeded
 # Claude Code agent worktrees
 .claude/worktrees/
 .agents/**
+!.agents/skills/
+!.agents/skills/commit
+!.agents/skills/mutation-testing
+!.agents/skills/running-integration-tests
 .claude/skills/lossless-doc-compress

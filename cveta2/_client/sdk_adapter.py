@@ -304,6 +304,12 @@ class SdkCvatApiAdapter:
         """Return shapes for a task."""
         tasks_api = self.client.api_client.tasks_api
         labeled_data, _ = tasks_api.retrieve_annotations(task_id)
+        tracks = labeled_data.tracks or []
+        if tracks:
+            logger.warning(
+                f"Задача {task_id}: проигнорировано треков CVAT: {len(tracks)}; "
+                f"поддерживаются только отдельные rectangle shapes"
+            )
         return convert_annotations(labeled_data)
 
     @_translate_transport_errors

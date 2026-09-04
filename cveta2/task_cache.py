@@ -237,11 +237,9 @@ class TaskAnnotationCache:
     """Local (plus optional S3) cache of per-task annotation payloads.
 
     Only tasks CVAT currently reports as ``completed`` are cached or
-    served, and that live status is the whole freshness check: a task
-    whose job moved back to annotation stops being completed and so
-    stops being served.  ``task_updated_date`` deliberately plays no
-    part — editing a project's labels bumps it on every task at once,
-    which used to throw the entire project's cache away.
+    served. A cached entry must also match the task's live ``updated_date``;
+    annotation and project-label edits therefore cannot leave rendered
+    annotations stale.
     """
 
     def __init__(self, local_dir: Path, s3: S3CacheBackend | None = None) -> None:
@@ -377,6 +375,13 @@ def _validate_envelope(
         logger.info(
             f"{source}: запись задачи {task.id} принадлежит задаче "
             f"{envelope.task_id} — задача будет загружена заново"
+        )
+        return None
+    if envelope.task_updated_date != task.updated_date:
+        logger.info(
+            f"{source}: запись задачи {task.id} устарела "
+            f"({envelope.task_updated_date!r} вместо {task.updated_date!r}) — "
+            f"задача будет загружена заново"
         )
         return None
     return envelope

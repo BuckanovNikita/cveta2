@@ -743,6 +743,64 @@ class TestFromYoloDatasetSplits:
 
         assert sorted(pd.read_csv(out)["split"]) == ["test", "val"]
 
+    def test_relative_dataset_root_is_resolved_from_yaml(self, tmp_path: Path) -> None:
+        data_root = tmp_path / "data"
+        self._labelled(data_root, "train", "a")
+        config_root = tmp_path / "config"
+        config_root.mkdir()
+        (config_root / "dataset.yaml").write_text(
+            yaml.dump(
+                {
+                    "path": "../data",
+                    "train": "images/train",
+                    "names": {0: "cat"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(config_root, out, read_all_sizes=True)
+
+        assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg"]
+
+    def test_split_list_combines_directories_and_list_files(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "ds"
+        self._labelled(root, "train", "a")
+        self._labelled(root, "val", "b")
+        list_file = root / "selected.txt"
+        list_file.write_text(
+            "./images/val/b.jpg\nimages/train/a.jpg\n", encoding="utf-8"
+        )
+        (root / "dataset.yaml").write_text(
+            yaml.dump(
+                {
+                    "path": str(root),
+                    "train": ["images/train", "selected.txt"],
+                    "names": {0: "cat"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(root, out, read_all_sizes=True)
+
+        assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg", "b.jpg"]
+
+    def test_directory_split_is_recursive(self, tmp_path: Path) -> None:
+        root = tmp_path / "ds"
+        make_image(root / "images" / "train" / "nested" / "a.jpg")
+        _write_yolo_label(root, "train/nested", "a", "0 0.5 0.5 0.2 0.2\n")
+        _write_yolo_yaml(root, {0: "cat"}, ["train"])
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(root, out, read_all_sizes=True)
+
+        assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg"]
+
     def test_split_with_missing_images_dir_is_skipped(self, tmp_path: Path) -> None:
         """A yaml entry pointing at a nonexistent dir warns and moves on."""
         root = tmp_path / "ds"
