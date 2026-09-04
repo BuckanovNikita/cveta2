@@ -2,6 +2,28 @@
 
 <!-- version list -->
 
+## v0.5.3 (2026-09-04)
+
+### Bug Fixes
+
+- Isolate network settings between parallel callers
+  ([`547756b`](https://github.com/BuckanovNikita/cveta2/commit/547756b31a61adccee227a265b1500e9f408c234))
+
+### Testing
+
+- Align integration cache freshness contract
+  ([`ca2f0a8`](https://github.com/BuckanovNikita/cveta2/commit/ca2f0a8ad72934130beabbba1409b130f030d449))
+
+- Run integration tests against the cluster CVAT stand
+  ([`13371d2`](https://github.com/BuckanovNikita/cveta2/commit/13371d2993e5ef808032f93ca38537d3e315e9f3))
+
+- Stop unit runs from spending the stand's anonymous request budget
+  ([`6e34697`](https://github.com/BuckanovNikita/cveta2/commit/6e34697bac4e81a3a57744ec1e934599c14600ad))
+
+- Strengthen path conversion mutation coverage
+  ([`40c0038`](https://github.com/BuckanovNikita/cveta2/commit/40c00381a0ecef40674d0b2c997ec4b1815eb632))
+
+
 ## v0.5.2 (2026-09-04)
 
 ### Bug Fixes
