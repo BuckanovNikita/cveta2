@@ -241,15 +241,15 @@ class TestFetchTaskCacheLive:
         df2 = pd.read_csv(tmp_path / "out2" / "dataset.csv")
         pd.testing.assert_frame_equal(df1, df2)
 
-    def test_a_project_label_edit_neither_busts_the_cache_nor_the_partition(
+    def test_a_project_label_edit_refreshes_cache_without_changing_partition(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The premise of ordering by task_id, checked against a live CVAT.
+        """A live task date change refreshes the cache but not partition order.
 
         Editing a project's labels rewrites every task in the project and
-        bumps its ``updated_date``.  Nothing downstream may react to that:
-        the cache must still serve the task, and the partition must place
-        the same rows in the same files.
+        bumps its ``updated_date``.  The conservative freshness check must
+        refetch that task, while partitioning by task id must still place the
+        same rows in the same files.
         """
         project_id, project_name, cs_info, cfg = _get_project_and_storage()
         task_name = "integration-label-edit-test"
@@ -298,8 +298,8 @@ class TestFetchTaskCacheLive:
                         FetchTarget(project_id, project_name, tmp_path / "after", None),
                         options,
                     )
-                    assert spy.call_count == 1, (
-                        "a label edit must not invalidate the task cache"
+                    assert spy.call_count == 2, (
+                        "an advanced task updated_date must invalidate the cache"
                     )
                 finally:
                     # The seeded project is shared with every other test here,
@@ -318,7 +318,12 @@ class TestFetchTaskCacheLive:
         for name in ("dataset.csv", "deleted.csv"):
             before = pd.read_csv(tmp_path / "before" / name)
             after = pd.read_csv(tmp_path / "after" / name)
-            pd.testing.assert_frame_equal(before, after)
+            if not before.empty:
+                assert (before["task_updated_date"] != after["task_updated_date"]).all()
+            pd.testing.assert_frame_equal(
+                before.drop(columns="task_updated_date"),
+                after.drop(columns="task_updated_date"),
+            )
 
 
 class TestRealCliFetchTask:
