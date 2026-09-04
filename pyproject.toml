@@ -440,7 +440,28 @@ full = []
 # probe path. The lookup itself is load-bearing on the over-limit path, where
 # unresolved is `pending` itself, and is killed there by
 # test_the_listing_prefers_the_frame_path_over_a_same_named_file.
-"cveta2.image_downloader.xǁImageDownloaderǁ_probe_expected_keys__mutmut_42" = "records None instead of the frame name; every name the listing resolves by full path was already found by the probe"
+
+# Path-safety helpers: mutmut's replacement strings still contain `/`, and
+# str.strip treats its argument as a character set, so the slash handling is
+# unchanged.  The `original` keyword is used only to preserve the user's input
+# in an exception message; validation and destination selection do not read it.
+"cveta2.image_downloader.x__canonical_frame_key__mutmut_5" = "lstrip('XX/XX') removes the same leading slash characters as lstrip('/')"
+"cveta2.image_downloader.x__canonical_frame_key__mutmut_9" = "rstrip('XX/XX') removes the same trailing slash characters as rstrip('/')"
+"cveta2.image_downloader.x__canonical_frame_key__mutmut_14" = "rstrip('XX/XX') removes the same trailing slash characters as rstrip('/')"
+"cveta2.image_downloader.x__canonical_frame_key__mutmut_25" = "original=None changes only the validation error prose"
+"cveta2.image_downloader.x__local_name_from_key__mutmut_2" = "strip_key_prefix never returns leading whitespace or slash, so lstrip is a no-op for both arguments"
+"cveta2.image_downloader.x__local_name_from_key__mutmut_3" = "strip_key_prefix never returns a trailing slash for an object key, so this remains a no-op"
+"cveta2.image_downloader.x__local_name_from_key__mutmut_8" = "strip_key_prefix never returns a leading slash, and the replacement character set still contains slash"
+"cveta2.image_downloader.x__local_name_from_key__mutmut_10" = "original=None changes only the validation error prose"
+"cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_2" = "the invented prefix is added to and then stripped from relative keys; rooted keys cannot occur without storage metadata"
+"cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_13" = "original=None changes only the validation error prose"
+"cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_19" = "original=None changes only the confinement error prose"
+"cveta2.image_downloader.xǁImageDownloaderǁ_resolve_s3_keys__mutmut_33" = "the listed map contains prefix-relative names and basenames; its full canonical-key lookup is redundant"
+"cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_21" = "original=None changes only the validation error prose"
+"cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_34" = "original=None changes only the confinement error prose"
+"cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_41" = "original=None changes only the confinement error prose"
+"cveta2.services.convert.yolo.x__resolve_dataset_root__mutmut_2" = "Path('') resolves through yaml_path.parent to the same directory as the explicit empty-root branch"
+"cveta2.services.convert.yolo.x__split_images__mutmut_5" = "the replacement changes only the invalid split entry's exception prose"
 
 # pandas lowercases the `orient` argument before dispatching on it, so every
 # spelling of "records" that differs only in case is the same call.

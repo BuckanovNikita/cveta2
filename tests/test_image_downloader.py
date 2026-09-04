@@ -16,6 +16,9 @@ from cveta2.image_downloader import (
     CloudStorageInfo,
     ImageDownloader,
     S3Syncer,
+    _canonical_frame_key,
+    _local_name_from_key,
+    _validate_relative_key,
     parse_cloud_storage,
 )
 from cveta2.models import (
@@ -954,6 +957,78 @@ def test_absolute_frame_path_is_made_relative_to_storage_root(tmp_path: Path) ->
     )
 
     assert destination == tmp_path / "cache" / "nested" / "a.jpg"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "frame_ref", "expected"),
+    [
+        ("images/", "/images/nested/a.jpg", "images/nested/a.jpg"),
+        ("images/", "/images", "images"),
+        ("", "/nested/a.jpg", "nested/a.jpg"),
+        ("images", "nested/a.jpg", "images/nested/a.jpg"),
+    ],
+)
+def test_frame_keys_are_canonical(prefix: str, frame_ref: str, expected: str) -> None:
+    assert _canonical_frame_key(prefix, frame_ref) == expected
+
+
+@pytest.mark.parametrize("value", ["", ".", "..", "a//b", "a/./b", "a/../b"])
+def test_relative_key_rejects_empty_and_dot_segments(value: str) -> None:
+    with pytest.raises(Cveta2Error):
+        _validate_relative_key(value, original=value)
+
+
+def test_relative_key_and_local_name_preserve_nested_segments() -> None:
+    assert _validate_relative_key("a/b.jpg", original="a/b.jpg") == "a/b.jpg"
+    assert (
+        _local_name_from_key("images/a/b.jpg", "images/", original="a/b.jpg")
+        == "a/b.jpg"
+    )
+
+
+def test_storage_name_map_forwards_bucket_and_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[object, str, str]] = []
+    client = FakeS3Client({}, keyed_by_bucket=False)
+
+    def record_listing(
+        received_client: object, bucket: str, prefix: str
+    ) -> list[tuple[str, str]]:
+        calls.append((received_client, bucket, prefix))
+        return [("images/a.jpg", "a.jpg")]
+
+    monkeypatch.setattr("cveta2.image_downloader.list_s3_objects", record_listing)
+
+    result = ImageDownloader(tmp_path)._build_project_storage_name_map(
+        client, "bucket", "images"
+    )
+
+    assert calls == [(client, "bucket", "images")]
+    assert result["a.jpg"] == "images/a.jpg"
+
+
+def test_listing_fallback_still_validates_absolute_frame_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    downloader = ImageDownloader(tmp_path)
+    storage = make_cs_info(prefix="images")
+    listed_prefixes: list[str] = []
+
+    def storage_map(_client: object, _bucket: str, prefix: str) -> dict[str, str]:
+        listed_prefixes.append(prefix)
+        return {"a.jpg": "images/a.jpg"}
+
+    monkeypatch.setattr(
+        downloader,
+        "_probe_expected_keys",
+        lambda *_args: ({}, {"a.jpg": "/outside/a.jpg"}),
+    )
+    monkeypatch.setattr(downloader, "_build_project_storage_name_map", storage_map)
+
+    with pytest.raises(Cveta2Error, match="вне"):
+        downloader._resolve_s3_keys(FakeS3Client({}), storage, {"a.jpg": "unused"})
+    assert listed_prefixes == ["images"]
 
 
 @pytest.mark.parametrize("frame_ref", ["/outside/a.jpg", "../escape.jpg"])

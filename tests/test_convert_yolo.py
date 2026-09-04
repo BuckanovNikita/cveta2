@@ -15,7 +15,14 @@ from cveta2.services.convert import (
     convert_from_yolo,
     convert_to_yolo,
 )
-from cveta2.services.convert.yolo import _load_class_names_yaml, _parse_label_file
+from cveta2.services.convert.yolo import (
+    _images_from_split_source,
+    _label_path_for_image,
+    _load_class_names_yaml,
+    _parse_label_file,
+    _resolve_dataset_root,
+    _resolve_listed_image,
+)
 from tests.helpers import (
     csv_row,
     make_image,
@@ -789,6 +796,54 @@ class TestFromYoloDatasetSplits:
         convert_from_yolo(root, out, read_all_sizes=True)
 
         assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg", "b.jpg"]
+
+    def test_missing_first_listed_image_does_not_hide_later_image(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "ds"
+        self._labelled(root, "train", "present")
+        listing = root / "train.txt"
+        listing.write_text(
+            "images/train/missing.jpg\nimages/train/present.jpg\n", encoding="utf-8"
+        )
+        (root / "dataset.yaml").write_text(
+            yaml.dump({"train": "train.txt", "names": {0: "cat"}}),
+            encoding="utf-8",
+        )
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(root, out, read_all_sizes=True)
+
+        assert pd.read_csv(out)["image_name"].tolist() == ["present.jpg"]
+
+    def test_direct_image_split_and_extension_filter(self, tmp_path: Path) -> None:
+        root = tmp_path / "ds"
+        image = root / "single.JpG"
+        make_image(image)
+        assert _images_from_split_source(image, root) == [image]
+
+        note = root / "note.md"
+        note.write_text("not an image", encoding="utf-8")
+        assert _images_from_split_source(note, root) == []
+
+    def test_list_dot_paths_are_relative_to_list_location(self, tmp_path: Path) -> None:
+        root = tmp_path / "dataset"
+        listing = tmp_path / "lists" / "train.txt"
+        listing.parent.mkdir()
+        assert (
+            _resolve_listed_image("./a.jpg", listing, root)
+            == (listing.parent / "a.jpg").resolve()
+        )
+
+    def test_empty_dataset_root_uses_yaml_directory(self, tmp_path: Path) -> None:
+        yaml_path = tmp_path / "config" / "dataset.yaml"
+        assert _resolve_dataset_root(yaml_path, "") == yaml_path.parent.resolve()
+
+    def test_label_path_without_images_directory_uses_txt_suffix(
+        self, tmp_path: Path
+    ) -> None:
+        image = tmp_path / "photos" / "a.JPG"
+        assert _label_path_for_image(image) == tmp_path / "photos" / "a.txt"
 
     def test_directory_split_is_recursive(self, tmp_path: Path) -> None:
         root = tmp_path / "ds"
