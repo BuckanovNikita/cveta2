@@ -1,83 +1,82 @@
 ---
 name: commit
-description: >
-  Use when the user wants to commit and push code changes. Handles the full
-  commit workflow: updating docs, staging files, creating a conventional commit
-  through the quality gate, fixing what the hooks report, and pushing via SSH.
-  Trigger on: "commit", "push", "/commit".
+description: Commit or push a reviewed set of cveta2 changes when the user asks. Preserves unrelated working-tree work, stages exact intended paths, uses Conventional Commits, handles hook rewrites and failures, and runs push gates without silently bypassing them.
 ---
 
-# Commit Workflow
+# Commit cveta2 changes
 
-## 1. Review changes
+Create the requested commit from the intended change set while preserving every
+unrelated working-tree change. A request to commit does not imply a push; push
+only when the user asks for it.
 
-Run `git diff --stat` and `git status` to understand what changed.
+## Establish the change set
 
-## 2. Update documentation
-
-Review the change and update the docs it invalidates — README.md, CONTRIBUTING.md,
-ARCHITECTURE.md, and the other `.md` files at the repo root.
-
-## 3. Stage and commit
+Inspect before staging:
 
 ```bash
-git add -A  # or stage selectively
-git commit -m "<type>: <description>"
+git status --short --branch
+git diff -- <intended paths>
+git diff --cached
+git remote -v
 ```
 
-`git commit` runs the quality gate. Unstaged changes are stashed for the run, so
-what gets checked is what gets committed. `.pre-commit-config.yaml` is the source
-of truth for which hooks run and in what order — read it there rather than
-trusting a list written here.
+Identify which modified and untracked paths belong to the current task. Existing
+changes outside that set remain untouched. If ownership is unclear, use the
+conversation and earlier status snapshots; ask only when ambiguity could place
+someone else's work in the commit.
 
-A hook that rewrites files (`ruff format`, `uv lock`) aborts the commit. Re-`git
-add` the rewritten files and commit again.
+Update documentation only when the change invalidates it. CLI or public API
+changes normally require the Russian user docs and their index; architecture or
+data-format changes require their named documents. A docs-only change does not
+require unrelated code edits.
 
-The `commit-msg` hook rejects a subject semantic-release cannot parse, so use
-[Conventional Commits](https://www.conventionalcommits.org/):
-- `feat:` — new feature
-- `fix:` — bug fix
-- `refactor:` — code change that neither fixes a bug nor adds a feature
-- `test:` — adding or updating tests
-- `docs:` — documentation only
-- `chore:` — maintenance (deps, config, CI)
+## Stage exact paths
 
-Keep the subject line concise. Use the body for details when needed. A breaking
-change needs both the `!` marker and a `BREAKING CHANGE:` footer.
+Use `git add -- <path>...` for the intended files. Never use `git add -A`,
+`git add .`, a broad glob, or a manual stash. Pre-commit may temporarily stash
+unstaged changes as part of its own isolation; leave that to the hook.
 
-## 4. Fix failures
-
-- **ruff** — `uv run ruff check --fix .` clears the autofixable ones; fix the rest by hand
-- **mypy** — the project is `strict = true`, so every new symbol needs annotations
-- **import-linter** — the contracts live under `[tool.importlinter]` in `pyproject.toml`;
-  read the failing contract's layers there rather than guessing at the hierarchy
-- **vulture** — delete the dead code, or whitelist it when the finding is a false positive
-- **pytest** — tests run in parallel (`-n auto`); fix failures instead of skipping them
-- **mutmut** — a surviving mutant means a test asserts too little; strengthen the
-  assertion rather than deleting the mutant. See the `mutation-testing` skill
-
-Commit again once they pass. To see the whole gate without making a commit:
-`uv run pre-commit run --all-files`.
-
-## 5. Push via SSH
+Review the actual candidate:
 
 ```bash
-git push
+git diff --cached --stat
+git diff --cached
 ```
 
-The remote must use SSH format (`git@github.com:<org>/<repo>.git`). If it is
-HTTPS, fix it with:
+Confirm it contains only the intended changes and no credentials, generated
+artifacts, integration `.env`, mutation workspace, or unrelated edits.
 
-```bash
-git remote set-url origin git@github.com:<org>/<repo>.git
-```
+## Commit
 
-The push fires its own gates: the full mutation scope, `version-drift`, and —
-on a machine with `tests/integration/.env` — the integration suite against a
-stack the hook builds and tears down itself. That last one costs minutes and
-destroys any stack you had running. Skip just it with
-`SKIP=integration-tests git push`.
+Use a Conventional Commit subject accepted by
+`scripts/check_commit_msg.py`: `feat:`, `fix:`, `refactor:`, `test:`,
+`docs:`, or `chore:`. Add a body when it helps explain behavior or
+tradeoffs. A breaking change requires both the `!` marker and a
+`BREAKING CHANGE:` footer.
 
-## Use `--no-verify` only as a last resort
+`git commit` runs the configured hooks. Read `.pre-commit-config.yaml` for
+the current gate rather than copying its list here. If a hook rewrites files,
+inspect the new diff and restage only task-owned paths before retrying. If a hook
+fails because of unrelated pre-existing work, report the exact blocker; do not
+modify, stage, stash, or discard that work.
 
-Always prefer fixing the failure over skipping the hooks.
+Do not use `--no-verify` unless the user explicitly asks to bypass hooks.
+After success, read back the commit summary and verify that unrelated changes
+remain in the working tree.
+
+## Push only when requested
+
+The repository convention is an SSH remote. Inspect it, but do not rewrite an
+HTTPS or unexpected remote automatically. Push the requested branch/ref with
+plain `git push` when its configured upstream is correct, or name the explicit
+ref when needed.
+
+Pre-push runs the full mutation profile, version-drift check, and, when
+`tests/integration/.env` exists, a live integration gate. That gate recreates
+MinIO/ClearML and exact-tag CVAT objects according to the
+`running-integration-tests` skill. A push request authorizes the configured
+hooks; if a hook cannot run, report the failure. Use
+`SKIP=integration-tests` only when the user explicitly requests that skip.
+
+Return the commit hash and subject, pushed ref if any, checks run by the hooks,
+and the remaining unrelated working-tree state.

@@ -1,149 +1,114 @@
 ---
 name: mutation-testing
-description: |
-  Use when working with the cveta2 mutation-testing gate: a failing mutmut hook (pre-commit fast profile or pre-push full profile),
-  a surviving mutant to triage, editing [tool.mutmut].only_mutate or [tool.cveta2.mutation.equivalent], adding a module to the gated
-  scope, or deciding whether a module is worth gating at all.
-  Trigger on: "mutmut", "mutation testing", "mutation gate", "survivor", "surviving mutant", "only_mutate", "equivalent mutant",
-  "allowlist", "mutation_test.sh", "pre-push hook failed", "mutation score".
+description: Diagnose or change cveta2's mutmut gate. Use for surviving or uncovered mutants, fast/full profile failures, mutation-score interpretation, equivalent-mutant decisions, or edits to only_mutate, profiles, and mutation configuration.
 ---
 
-# The cveta2 mutation gate
+# Maintain the cveta2 mutation gate
 
-`./scripts/mutation_test.sh` runs mutmut over the modules in
-`[tool.mutmut].only_mutate` and fails if any mutant survives unexplained.
+`scripts/mutation_test.sh` runs mutmut for the current
+`[tool.mutmut].only_mutate` scope and uses `scripts/mutation_gate.py` for
+the real pass/fail result. Read live `pyproject.toml` and the scripts before
+changing configuration; do not rely on a copied module inventory.
 
-**Two profiles**, defined in `[tool.cveta2.mutation.profiles]`:
+## Commands and profiles
 
 ```bash
-./scripts/mutation_test.sh --profile fast   # pre-commit subset
-./scripts/mutation_test.sh --profile full   # whole gated scope (pre-push)
-./scripts/mutation_test.sh                  # whole scope, no filter
-uv run pre-commit install                   # required once; installs the pre-push gate too
+./scripts/mutation_test.sh --profile fast
+./scripts/mutation_test.sh --profile full
+./scripts/mutation_test.sh
+./scripts/mutation_test.sh '<mutant-name-or-glob>'
+uv run mutmut show <name>
+uv run mutmut browse
 ```
 
-`full` is an **empty glob list** on purpose. mutmut honours a cached verdict
-only when no positional mutant name is given, so writing it as `"*"` would
-re-execute every mutant on every push. `fast` accepts that cost for its subset
-in exchange for skipping the rest.
+`fast` is the pre-commit subset. `full` is the pre-push scope and its
+profile list is intentionally empty: that produces a bare `mutmut run`, which
+can reuse cached verdicts. Replacing the empty list with `"*"` passes a
+positional filter and re-executes the whole scope. A run without `--profile`
+also covers the full configured scope.
 
-## Rules
+## What pass, score, and profile output mean
 
-**Scope is a ratchet.** A module joins `only_mutate` in the *same commit* that
-drives it to zero unexplained survivors, so the hook is never red on `main`.
-There is no "measured but ungated" tier: `mutmut results` walks every file in
-`only_mutate` regardless of what the run filtered on, so a parked module with
-survivors reddens the full profile immediately. Measure a candidate by
-temporarily adding it and reverting before committing.
+`mutmut run` itself exits zero, so it does not decide the gate.
+`mutation_test.sh` exports CI stats and textual results, then the gate:
 
-**Two-stage entry criterion.** `mutate_only_covered_lines` is off, so every
-mutant on an *uncovered* line is an automatic survivor that says nothing about
-assertion quality. Close line coverage first, then triage mutants. The real
-disqualifier is mutmut's own `no tests` status (exit code 33), not the
-`[tool.coverage.run] omit` list — that is a reporting setting mutmut never
-consults.
+- treats `killed`, `skipped`, and `caught by type check` as benign;
+- fails on any other result not justified in
+  `[tool.cveta2.mutation.equivalent]`;
+- fails when an equivalent entry no longer names a live survivor;
+- narrows both survivors and allowlist entries to the selected profile.
 
-**When the hook fails**, inspect with `uv run mutmut show <name>` or
-`uv run mutmut browse`, then: strengthen a test (the default), or — only when
-the mutation genuinely cannot change behaviour — add it to
-`[tool.cveta2.mutation.equivalent]` with a reason. The gate also fails on a
-*stale* allowlist entry: mutmut renumbers mutants whenever a function changes,
-so a justification cannot silently drift onto a different mutant. Keep the
-allowlist small; at scale every refactor of a mutated function forces
-re-triage.
+The printed mutation score is `killed / total` for the whole configured scope.
+It includes whole-scope context even during a filtered profile and is not a
+quality threshold. A passing gate means zero unexplained survivors and zero
+stale justifications in the selected scope; read the profile's “not killed”
+count separately from the whole-scope score.
 
-**Never reshape working code to satisfy the gate.** A progress-bar caption
-hoisted into a module-level constant does remove the mutant — mutmut only
-mutates code inside a top-level function — but it buys a green gate by adding
-indirection that every later feature has to carry, and it hides the caption
-from the call site that owns it. Presentation surfaces are excluded once, by
-pattern, in `[tool.mutmut].do_not_mutate_patterns`; a new one goes there. This
-rule is the reason `_TASK_BAR` and `_LABEL_SCAN_BAR` no longer exist.
+## Scope decisions
 
-Two anti-patterns, both of which produce brittle change-detector tests:
+Scope is a ratchet. Add a module to `only_mutate` only with the coverage,
+assertions, and justified equivalents that make the gate pass in the same
+change. There is no parked measured tier because `mutmut results` walks every
+configured file. Evaluate a candidate in an isolated worktree or disposable
+copy so temporary scope edits cannot overwrite a shared working tree.
 
-- Do not assert exact `yaml.safe_dump` / `json.dumps` output when the only
-  reader parses it back — `safe_load` is blind to escaping, key order and flow
-  style, so such a test breaks on any unrelated field addition.
-- Do not write a test whose only purpose is pinning the wording of a message.
-  If the mutant only reaches text a person reads, it belongs behind a
-  `do_not_mutate_patterns` entry, not behind an assertion on prose.
+Use two admission stages:
 
-Before triaging a survivor whose diff looks unkillable — or before judging
-whether a module is worth gating — read `mutation-internals.md` in this
-directory: what mutmut actually mutates, the config settings that fail
-silently, and where the runtime goes.
+1. Close meaningful line coverage. With `mutate_only_covered_lines` off, an
+   uncovered line produces automatic survivors; mutmut's `no tests` result is
+   the relevant disqualifier.
+2. Triage survivors for assertion quality and genuine equivalence.
 
-## Current scope
+Exclude zero-mutable or low-signal presentation/plumbing surfaces only for a
+specific, documented reason. Do not preserve static “in/out of scope” lists in
+this skill; `only_mutate` is authoritative.
 
-Every module in `only_mutate` sits at zero *unexplained* survivors; everything
-still escaping is justified in `[tool.cveta2.mutation.equivalent]`. A new
-module joining `cveta2/` should come with its own `only_mutate` entry rather
-than being added to a to-do list.
+## Triage a survivor
 
-One module is deliberately outside that ratchet and is **not** "nothing left to
-do": **`_client/sdk_adapter.py`**, the SDK boundary, and the one module where
-line coverage itself is the blocker, so the two-stage entry criterion says
-close coverage first. Most of it is only reachable against a live CVAT, which
-is why the integration suite exists.
+Inspect the exact mutant and the test path that should observe it.
 
-`services/fetch.py` was the other one and is now gated. Its survivors were an
-assertion-quality gap, not a coverage one — zero `no tests` mutants — and they
-clustered in three places worth knowing about, because they are the parts of
-the pipeline that end-to-end CSV assertions structurally cannot see:
+1. Strengthen a behavioral assertion when the mutation changes an outcome,
+   boundary, side effect, or contract.
+2. If the mutation genuinely cannot change behavior, add the exact mutant name
+   to `[tool.cveta2.mutation.equivalent]` with a reason that proves
+   equivalence.
+3. Use `do_not_mutate_patterns` for a stable class of low-signal presentation
+   surfaces, not to hide functional logic.
 
-- **the cache-hit vs live-fetch accounting** in `_retrieve_task`. Its counters
-  and elapsed-time fields feed one summary line, and every assertion available
-  on a real clock ("roughly zero") leaves `+=` and `=` indistinguishable.
-  `TestRetrieveTaskAccounting` scripts the `time` module instead, which makes
-  each field exactly predictable.
-- **the arguments `_fetch_core` forwards** to `download_images` and
-  `populate_record_paths`. Dropping one changes *where* images land or whether
-  they land at all — never how many rows the CSV has, so nothing that reads
-  `dataset.csv` reacts.
-- **the S3 half of the task cache.** `FakeCvatApi.get_project_cloud_storage`
-  returns `None`, so every service-level fetch test ran local-only and the
-  whole shared-cache path was reachable only from direct `S3CacheBackend` unit
-  tests. `_FakeApiWithStorage` in `tests/test_task_cache.py` closes that.
+Never reshape correct production code solely to make mutmut stop generating a
+mutant. Do not pin serialized formatting when consumers parse it, or message
+wording when only presentation changes. Test the contract the user or caller
+observes.
 
-The group before it was the one the rollout plan called conditional:
-`_client_ops/{base,images}.py` and the three command-layer exceptions
-(`commands/_helpers.py`, `commands/interactive/primitives.py`,
-`commands/upload.py`). None of them had a single `no tests` mutant in
-`_client_ops`; the survivors sat on code every scenario test already ran and
-none asserted — nothing constructed a client without `api=` and entered it, so
-the whole `client_factory` → `ExitStack` → SDK-client lifecycle was
-integration-only.
+Equivalent names are unstable when a function changes. Re-read every affected
+justification after renumbering; stale entries intentionally fail the gate.
 
-## Permanently out of scope
+## Configuration invariants
 
-Two distinct reasons, which imply different things about whether the exclusion
-could ever be lifted:
+Read [mutation-internals.md](mutation-internals.md) before an unkillable mutant,
+scope/profile edit, cache surprise, or performance diagnosis. Preserve these
+current invariants unless the underlying tool behavior changes and is verified:
 
-- **Zero mutable surface** — nothing to gate, ever: `_client/{ports,dtos,mapping}.py`,
-  `_client_ops/{shared,session}.py`, `exceptions.py`, `client.py`, `_retry.py`,
-  `_clearml/*`. `session.py` is a decorated dataclass whose four guards are all
-  `@property`, so it generates no mutants at all.
-- **Mutants exist but are low-signal plumbing already pinned by existing
-  tests** — admission costs runtime for no new signal: `_client/context.py`.
-  `fs_utils.py` sat here while its whole contract was the module-level
-  `DIR_MODE`/`FILE_MODE`; it joined the scope once `replace_shared_bytes`
-  gave it real control flow (the temp-name write, rename and failure
-  cleanup shared by the task cache, upload manifests and image downloads).
+- `pytest_add_cli_args` includes `-n 0`; an xdist pool per mutant can hang
+  or distort results.
+- `cache_invalidation_files` and
+  `on_dependency_change = "rerun"` prevent weakened tests from reusing stale
+  verdicts.
+- `mutate_only_covered_lines` stays off because its coverage pre-pass corrupts
+  the later stats run in this environment.
+- `mutation_config.py sync-scope` fingerprints mutation-scope fields and
+  recreates `mutants/` when they change; mutmut's own fingerprint omits them.
+- `PYTEST_DEBUG_TEMPROOT` stays under this checkout's `mutants/` so another
+  pytest session cannot remove a shared temp-root link and create a false kill.
+- `mutants/` remains generated, gitignored, and excluded from normal analysis.
 
-**Adapters** are the second reason at layer scale: `cli.py` is a wall of
-`add_argument()` calls whose mutable content is help text and arguments that
-restate argparse defaults, and the rest of `commands/` is prompts, arg mapping
-and `sys.exit`. The three that *are* gated (`_helpers.py`,
-`interactive/primitives.py`, `upload.py`) were selected on message density: they
-carry 0, 1 and 2 logger calls respectively, against 18–20 for `doctor.py`,
-`setup.py` and `labels.py`. `commands/upload.py` additionally encodes a contract
-`ARCHITECTURE.md` states as a guarantee — `--labels all` loses to a literal
-dataset label named `all` — which is worth pinning precisely. Note the exclusion
-reason is prompt/wiring density, *not* log-message density: message text was
-never mutated.
+Adding a new targeted test may require regenerating `mutants/` because mutmut
+can retain the old test-to-mutant association. Confirm that diagnosis before
+removing the generated workspace; never delete source or test files.
 
-`config.py` and `api.py` were the two undecided cases; both were measured
-(179 and 274 unexplained survivors) and are now gated. `api.py` needed no
-allowlist entries at all — every one of its 274 survivors was a real test gap,
-107 of them on functions no test executed.
+## Completion
+
+For a survivor, report its diff, classification, observing test, and targeted
+rerun. For a configuration or scope change, report the changed live settings
+and the required fast/full result. Do not claim a mutation gate passed unless
+the corresponding script completed and printed no unexplained mutants.

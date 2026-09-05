@@ -1,123 +1,90 @@
-# Parallel Agents: Avoiding Conflicts
+# Concurrent integration runs
 
-When multiple Claude Code agents (or developers) run integration tests at the
-same time on this machine, they share two things: the host's ports and the CVAT
-stand's organization. The scripts isolate both through the **run tag**, but
-same-tag runs collide, and the collision on the CVAT side is silent.
+Read this reference when another developer or automated run may use the shared
+CVAT stand or local Docker ports.
 
-## How Isolation Works
+## Isolation model
 
-### 1. The run tag (`INTEGRATION_USER`, the branch, or `INTEGRATION_RUN_TAG`)
+A run needs both a unique tag and unique ports.
 
-`scripts/integration_env.sh` derives the tag: `<INTEGRATION_USER>` on `main`,
-`<INTEGRATION_USER>-<branch>` elsewhere, or `INTEGRATION_RUN_TAG` verbatim.
-`INTEGRATION_USER` defaults to `$USER`.
+`scripts/integration_env.sh` uses explicit `INTEGRATION_RUN_TAG` when set.
+Otherwise it derives `<INTEGRATION_USER>` on main or
+`<INTEGRATION_USER>-<branch>` elsewhere. The sanitized tag names the Compose
+project, containers, CVAT project `<tag> coco8-dev`, and cloud storage
+`<tag> minio`.
 
-The tag names:
+The current defaults are:
 
-| Side | Object |
-|---|---|
-| host | compose project `<tag>-cveta2`; containers `<tag>-cveta2-minio`, `<tag>-clearml-*`; their volumes |
-| CVAT stand, organization `cveta2-tests` | cloud storage `<tag> minio`, project `<tag> coco8-dev` and its tasks |
+| Service | Port | Override |
+|---|---:|---|
+| MinIO API | 9989 | `MINIO_PORT` or `integration_up.sh --minio-port` |
+| MinIO console | 9990 | `MINIO_CONSOLE_PORT` |
+| ClearML API | 8880 | `CLEARML_API_PORT` |
+| ClearML files | 8881 | `CLEARML_FILES_PORT` |
+| ClearML web | 8882 | `CLEARML_WEB_PORT` |
 
-`integration_up.sh` starts by removing everything with its own tag on both
-sides; `integration_stop.sh` ends the same way. Objects of other tags are never
-touched: the match is `"<tag> "` with a trailing space, so `nkt` does not match
-`nkt-feature coco8-dev`.
+Different ports with the same tag are unsafe: the second setup removes the
+first run's Compose project and exact-tag CVAT objects. Different tags with the
+same ports fail at startup. Worktrees usually make branch-derived tags
+different, but do not isolate ports and do not help when two worktrees share a
+branch name.
 
-### 2. Port Binding
+## Start an isolated run
 
-Default ports are fixed:
-
-| Service        | Default Port | Override |
-|----------------|-------------|---|
-| MinIO API      | 9989        | `--minio-port` / `MINIO_PORT` |
-| MinIO console  | 9990        | `MINIO_CONSOLE_PORT` |
-| ClearML API    | 8880        | `CLEARML_API_PORT` |
-| ClearML files  | 8881        | `CLEARML_FILES_PORT` |
-| ClearML web    | 8882        | `CLEARML_WEB_PORT` |
-
-Two agents using the same ports fail at startup (`check_port_free` in
-`integration_up.sh`). CVAT has no port of its own any more: it is reached at
-`http://cvat.k8s.localhost` by everyone.
-
-## Strategy: Unique tag + unique ports (the only safe one)
+Choose values that belong to this run and keep them in the same shell:
 
 ```bash
-# Agent A (defaults)
-./scripts/integration_up.sh
-./scripts/integration_test.sh tests/integration
-./scripts/integration_stop.sh
+export INTEGRATION_RUN_TAG=cveta2-review-<unique-suffix>
+export MINIO_PORT=<free-port>
+export MINIO_CONSOLE_PORT=<free-port>
+export CLEARML_API_PORT=<free-port>
+export CLEARML_FILES_PORT=<free-port>
+export CLEARML_WEB_PORT=<free-port>
 
-# Agent B
-export INTEGRATION_USER=agent-b
-export MINIO_PORT=10089 MINIO_CONSOLE_PORT=10090
-export CLEARML_API_PORT=18880 CLEARML_FILES_PORT=18881 CLEARML_WEB_PORT=18882
 ./scripts/integration_up.sh
-./scripts/integration_test.sh tests/integration
+./scripts/integration_test.sh tests/integration/<target>.py
 ./scripts/integration_stop.sh
 ```
 
-Export the variables once per shell: `integration_test.sh` and
-`integration_stop.sh` derive the same tag and ports from them, so a run that
-was prepared as `agent-b` on port 10089 must be tested and stopped with the
-same environment.
+The scripts must see the same variables for setup, test, and stop. Do not reuse
+a tag shown by another active run. If assigning ports is not worthwhile, run
+sequentially and still preserve exact tag ownership.
 
-Agents in worktrees get a distinct tag for free (the branch is part of it), but
-still need distinct ports and, if two worktrees share one branch name, a
-distinct `INTEGRATION_USER`.
+## Diagnose collisions
 
-### Why same-tag parallel runs are worse than before
-
-With the Compose CVAT, two same-tag runs failed loudly on the CVAT port. Now
-the second run's `cvat_stand.py cleanup --tag` deletes the first run's project
-on the stand while its tests are using it. Nothing detects that; the first run
-just starts failing on missing tasks. Do not share a tag.
-
-## Sequential Execution
-
-If isolation is not worth the setup, run agents one after another. Each does
-the full cycle (up -> test -> stop). `integration_up.sh` always cleans its own
-tag first, so leftover state from an interrupted run is replaced automatically.
-
-## Rate limits on the shared stand
-
-The stand throttles anonymous requests only (100/min per client IP), and
-every client open pays one of them: the login. The test helpers skip the
-SDK's server-version check for that reason, and nothing in the unit suite
-touches the stand at all — one pytest session per mutant, times a mutation
-run, once drained the whole budget and starved a concurrent gate. A full
-integration suite opens a few dozen clients over a few minutes, so two
-concurrent agents fit; a third should stagger its start. cveta2 itself
-retries 429s; the SDK login in the test helpers does not.
-
-## Cleanup After Failures
-
-An interrupted run leaves its containers and its CVAT project behind. Clean up
-by tag:
+`integration_up.sh` first removes its own Compose project, then checks ports.
+A remaining occupied port therefore belongs to another process or run. Inspect
+before acting:
 
 ```bash
-# Host side: which compose projects exist
-docker compose ls | grep -- '-cveta2'
-
-# Both sides, for one tag
-INTEGRATION_RUN_TAG=agent-b-feature ./scripts/integration_stop.sh
-
-# CVAT side only: what is in the organization, and orphans older than a day
+docker compose ls
 source scripts/integration_env.sh
 uv run python tests/integration/cvat_stand.py ls
-uv run python tests/integration/cvat_stand.py cleanup --stale 24 --dry-run   # read the list first
-uv run python tests/integration/cvat_stand.py cleanup --stale 24
 ```
 
-A `main` run is kept on purpose (see the gate in `SKILL.md`); `--stale` will
-list it too once it is a day old — leave it unless the human agrees.
+Do not stop an unknown Compose project or change a running process. Choose
+different ports and a different tag.
 
-## Summary
+Same-tag collisions on CVAT can appear as missing projects or tasks because the
+second setup uses `cleanup --tag`. The selector includes a trailing space
+(`"<tag> "`) to avoid prefix collisions, but it cannot distinguish two runs
+that deliberately share the exact tag.
 
-| Scenario | Host isolation | CVAT isolation | Safe? |
-|----------|----------------|----------------|-------|
-| Different `INTEGRATION_USER`, different ports | yes | yes | yes |
-| Same user, different branches (worktrees), different ports | yes | yes | yes |
-| Same user, same branch, different ports | NO — same compose project | NO — same project on the stand | NO |
-| Same user, default settings | NO — collides | NO — collides | NO |
+## Cleanup after failure
+
+Clean only the tag recorded for the current run:
+
+```bash
+INTEGRATION_RUN_TAG=<owned-tag> \
+MINIO_PORT=<owned-port> MINIO_CONSOLE_PORT=<owned-port> \
+CLEARML_API_PORT=<owned-port> CLEARML_FILES_PORT=<owned-port> CLEARML_WEB_PORT=<owned-port> \
+./scripts/integration_stop.sh
+```
+
+If only CVAT cleanup needs retrying, source the same environment and use
+`cvat_stand.py cleanup --tag <owned-tag>`. Never substitute a broader prefix.
+
+For possible orphan inventory, `cleanup --stale <hours> --dry-run` is
+read-only. Do not remove its results until the user explicitly authorizes the
+deletion and every object's ownership has been verified. A retained main run
+is expected and may appear stale.
