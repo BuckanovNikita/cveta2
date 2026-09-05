@@ -11,9 +11,10 @@ Environment (scripts/integration_env.sh exports all of it):
   CVAT_INTEGRATION_ORG      organization every object is created in
   CVAT_INTEGRATION_PROJECT  full project name, "<tag> coco8-dev"
   INTEGRATION_RUN_TAG       the tag, names the cloud storage
-  MINIO_ENDPOINT            MinIO as this script sees it
+  MINIO_ENDPOINT            the shared MinIO as this script sees it
   MINIO_ENDPOINT_FOR_CVAT   the same MinIO as the CVAT pods see it
-  MINIO_ROOT_USER / MINIO_ROOT_PASSWORD / MINIO_BUCKET
+  MINIO_ACCESS_KEY / MINIO_SECRET_KEY / MINIO_BUCKET
+                            the cveta2 key and this run's bucket, <tag>
 
 Create-only on purpose: cvat_stand.py cleanup --tag runs first, and a project
 with the configured name already present is an error, not a second copy.
@@ -291,9 +292,9 @@ def main() -> None:
     run_tag = _env("INTEGRATION_RUN_TAG")
     minio_endpoint = _env("MINIO_ENDPOINT")
     minio_endpoint_for_cvat = _env("MINIO_ENDPOINT_FOR_CVAT")
-    minio_access_key = _env("MINIO_ROOT_USER", "minioadmin")
-    minio_secret_key = _env("MINIO_ROOT_PASSWORD", "minioadmin")
-    minio_bucket = _env("MINIO_BUCKET", "cveta2-test")
+    minio_access_key = _env("MINIO_ACCESS_KEY")
+    minio_secret_key = _env("MINIO_SECRET_KEY")
+    minio_bucket = _env("MINIO_BUCKET")
 
     logger.info(f"CVAT host: {host}, organization: {organization}")
     logger.info(

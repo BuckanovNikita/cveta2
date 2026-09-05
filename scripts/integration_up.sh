@@ -1,29 +1,39 @@
 #!/usr/bin/env bash
 # Prepare one run of the integration tests.
 #
-# CVAT is the persistent stand in the local Kubernetes cluster
-# (http://cvat.k8s.localhost, see the k8s-infra skill); this script never
-# starts or stops it. What it does own, per run tag (scripts/integration_env.sh):
+# CVAT, MinIO and ClearML are the shared stands in the local Kubernetes
+# cluster (k8s-infra skill); this script never starts or stops them. It acts
+# as project `cveta2` under one run tag (scripts/integration_env.sh):
 #
-#   1. cvat_stand.py bootstrap   the integration account and organization exist,
-#                                the stand is reachable
-#   2. docker compose            MinIO + ClearML, recreated from scratch
-#                                (project <tag>-cveta2, volumes included)
-#   3. port checks               MinIO and ClearML host ports are free
-#   4. coco8 images              downloaded once into tests/fixtures/data/
-#   5. MinIO bucket
-#   6. cvat_stand.py cleanup     this tag's previous project / storage are gone
-#   7. seed_cvat.py              "<tag> coco8-dev" and "<tag> minio" created
+#   1. the run tag             INFRA_RUN_TAG when exported; `cveta2-main` on
+#                              main; otherwise a fresh tag from
+#                              `infra.py newtag --project cveta2 --slug integration`,
+#                              recorded in tests/integration/.run-tag. An
+#                              existing file means a run is active: stop it,
+#                              or export INFRA_RUN_TAG to adopt it.
+#   2. cvat_stand.py bootstrap the integration account and organization exist,
+#                              the stand is reachable
+#   3. docker compose          the Compose stack of this tag (project
+#                              <tag>-cveta2), recreated for the ClearML tests
+#                              until they move to the stand; its MinIO is no
+#                              longer used
+#   4. coco8 images            downloaded once into tests/fixtures/data/
+#   5. previous run objects    bucket <tag> on the shared MinIO
+#                              (minio.py cleanup --prefix <tag>) and this tag's
+#                              CVAT project / cloud storage (cvat_stand.py
+#                              cleanup --tag) are gone; on main this clears
+#                              the durable `cveta2-main` slot
+#   6. seed_cvat.py            "<tag> coco8-dev" and "<tag> minio" created,
+#                              images uploaded to bucket <tag>
 #
 # Usage:
 #   ./scripts/integration_up.sh [--minio-port 9189]
 #
-# Every port can also be set through the environment (MINIO_PORT,
-# MINIO_CONSOLE_PORT, CLEARML_API_PORT, CLEARML_FILES_PORT, CLEARML_WEB_PORT);
-# a second run next to one that holds the defaults needs distinct ports AND a
-# distinct INTEGRATION_USER, since the tag also names the CVAT objects.
+# The Compose ports (MINIO_PORT, MINIO_CONSOLE_PORT, CLEARML_API_PORT,
+# CLEARML_FILES_PORT, CLEARML_WEB_PORT) can be set through the environment.
 #
-# Requirements: docker, docker compose v2, uv, curl, unzip, tests/integration/.env
+# Requirements: docker, docker compose v2, uv, curl, unzip, python3, kubectl,
+# the k8s-infra skill, tests/integration/.env
 
 set -euo pipefail
 
@@ -47,8 +57,8 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             echo "Usage: $0 [--minio-port PORT]"
             echo ""
-            echo "Prepare the integration stack: MinIO + ClearML in Docker Compose,"
-            echo "this run's project on the cluster CVAT. Always recreates both."
+            echo "Prepare one integration run on the shared stands: bucket <tag> on"
+            echo "MinIO, project '<tag> coco8-dev' on CVAT. Always recreates both."
             echo ""
             echo "Options:"
             echo "  --minio-port PORT    Host port for MinIO API (default: 9989)"
@@ -61,9 +71,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 export MINIO_PORT
-MINIO_ENDPOINT="http://localhost:${MINIO_PORT}"
-MINIO_ENDPOINT_FOR_CVAT="http://${INTEGRATION_HOST_GATEWAY}:${MINIO_PORT}"
-export MINIO_ENDPOINT MINIO_ENDPOINT_FOR_CVAT
+integration_claim_run_tag
 
 log() { echo "==> $*"; }
 
@@ -134,12 +142,10 @@ compose up -d --pull=missing
 wait_healthy "http://localhost:${MINIO_PORT}/minio/health/live" "MinIO"
 wait_healthy "http://localhost:${CLEARML_API_PORT}/debug.ping" "ClearML API"
 
-# ── 5. Bucket ─────────────────────────────────────────────────────────
-log "Ensuring MinIO bucket $MINIO_BUCKET exists"
-docker exec "${INTEGRATION_RUN_TAG}-cveta2-minio" mc alias set local http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" > /dev/null
-docker exec "${INTEGRATION_RUN_TAG}-cveta2-minio" mc mb --ignore-existing "local/${MINIO_BUCKET}" > /dev/null
-
-# ── 6-7. This tag's CVAT data: wipe the previous run, seed this one ───
+# ── 5-6. This tag's previous run: bucket and CVAT objects, then seed ──
+# A freshly minted tag owns nothing yet; an adopted tag and the main slot do.
+log "Removing bucket '$MINIO_BUCKET' of the previous '$INTEGRATION_RUN_TAG' run from MinIO"
+integration_helper minio cleanup --prefix "$INTEGRATION_RUN_TAG"
 log "Removing the previous '$INTEGRATION_RUN_TAG' run from organization $CVAT_INTEGRATION_ORG"
 uv run python tests/integration/cvat_stand.py cleanup --tag "$INTEGRATION_RUN_TAG"
 
@@ -148,8 +154,8 @@ uv run python tests/integration/seed_cvat.py
 
 log "Done."
 log "CVAT:          $CVAT_INTEGRATION_HOST  (organization $CVAT_INTEGRATION_ORG, project '$CVAT_INTEGRATION_PROJECT')"
-log "MinIO API:     $MINIO_ENDPOINT  (for CVAT: $MINIO_ENDPOINT_FOR_CVAT)"
-log "MinIO console: http://localhost:${MINIO_CONSOLE_PORT}"
+log "MinIO bucket:  $MINIO_BUCKET at $MINIO_ENDPOINT  (for CVAT: $MINIO_ENDPOINT_FOR_CVAT)"
+log "MinIO console: ${MINIO_CONSOLE:-not published by the Secret}"
 log "ClearML API:   http://localhost:${CLEARML_API_PORT}"
 log "ClearML Web:   http://localhost:${CLEARML_WEB_PORT}"
 log ""

@@ -15,9 +15,9 @@
 #
 # What happens to the run's data afterwards depends on the branch:
 #   - main (a push of refs/heads/main, or main checked out): everything stays -
-#     the MinIO/ClearML stack and the "<tag> coco8-dev" project on the stand -
-#     so the last main run can be inspected in the CVAT UI. The next main run
-#     replaces it.
+#     the `cveta2-main` slot ("cveta2-main coco8-dev" on CVAT, bucket
+#     cveta2-main on MinIO) - so the last main run can be inspected in the CVAT
+#     UI. The next main run replaces it.
 #   - any other branch: stack and CVAT data are removed.
 #   INTEGRATION_KEEP_DATA=1 / =0 overrides that decision.
 #
@@ -67,7 +67,7 @@ fi
 if ! curl -sf "$CVAT_INTEGRATION_HOST/api/server/about" > /dev/null 2>&1; then
     echo "ERROR: the integration gate is armed (tests/integration/.env exists)" >&2
     echo "       but the CVAT stand at $CVAT_INTEGRATION_HOST does not answer." >&2
-    echo "       Deploy it (k8s-infra skill: cvat-stand/deploy_cvat.sh), or push without this gate:" >&2
+    echo "       Diagnose it with the k8s-infra skill, or push without this gate:" >&2
     echo "           SKIP=integration-tests git push" >&2
     exit 1
 fi
@@ -82,18 +82,21 @@ keep_data() {
 
 cd "$REPO_ROOT"
 
-# Fresh state comes from integration_up.sh: it wipes this tag's previous
-# project on the stand and recreates MinIO/ClearML, so the upload tests never
-# meet their own leftovers ("Duplicate base task name").
+# Fresh state comes from integration_up.sh: it clears this tag's previous
+# bucket and CVAT project, so the upload tests never meet their own leftovers
+# ("Duplicate base task name").
 #
-# The trap is armed only here, past the skip and the preflight, so a run that
-# never prepared a stack cannot tear one down.
+# The trap is armed only here, past the skip, the preflight and the active-run
+# check, so a run that never prepared anything cannot tear another one down:
+# stop would otherwise resolve the other run's tag from tests/integration/.run-tag.
+integration_refuse_active_run || exit 1
+
 teardown() {
     local rc=$?
     if keep_data; then
         log "keeping the run for inspection (main):"
         log "    CVAT:  $CVAT_INTEGRATION_HOST  organization $CVAT_INTEGRATION_ORG, project '$CVAT_INTEGRATION_PROJECT'"
-        log "    MinIO/ClearML compose project $COMPOSE_PROJECT stays up"
+        log "    MinIO: bucket $MINIO_BUCKET at $MINIO_ENDPOINT; compose project $COMPOSE_PROJECT stays up"
         log "    remove both with ./scripts/integration_stop.sh"
         return
     fi
@@ -107,8 +110,10 @@ teardown() {
 }
 trap teardown EXIT
 
-log "integration gate: preparing the stack (tag '$INTEGRATION_RUN_TAG')"
+log "integration gate: preparing the run"
 "$SCRIPT_DIR/integration_up.sh"
+integration_resolve_run_tag
+log "integration gate: run tag '$INTEGRATION_RUN_TAG'"
 
 # Scoped to tests/integration rather than the whole suite: CVAT_INTEGRATION_HOST
 # also adds a `live-cvat` parameter to the coco8_fixtures session fixture, which
