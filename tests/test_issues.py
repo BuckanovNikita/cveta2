@@ -498,7 +498,7 @@ class TestCreateTaskIssues:
 class TestGetTaskIssuesAdapter:
     def test_converts_issues_and_comments_in_order(self) -> None:
         sdk = MagicMock()
-        issue = SimpleNamespace(id=7, frame=3, resolved=False)
+        issue = SimpleNamespace(id=7, frame=3, resolved=False, position=[1, 2, 3, 4])
         sdk.api_client.issues_api.list_endpoint.call_with_http_info.return_value = (
             _single_page([issue])
         )
@@ -515,7 +515,13 @@ class TestGetTaskIssuesAdapter:
         result = adapter.get_task_issues(42)
 
         assert result == [
-            RawIssue(id=7, frame=3, resolved=False, comments=["первый", "", "третий"])
+            RawIssue(
+                id=7,
+                frame=3,
+                resolved=False,
+                comments=["первый", "", "третий"],
+                position=[1.0, 2.0, 3.0, 4.0],
+            )
         ]
         issues_call = (
             sdk.api_client.issues_api.list_endpoint.call_with_http_info.call_args
@@ -575,21 +581,95 @@ class TestIssuesNotYetOnTask:
     genuinely end up half-applied — and `create_issue` always creates.
     """
 
+    @pytest.mark.parametrize(
+        ("position", "matched"),
+        [
+            ([1.0000001, 2.0, 3.0, 4.0], True),
+            ([1.1, 2.0, 3.0, 4.0], False),
+            ([1.0, 2.0, 3.0], False),
+            ([], False),
+        ],
+    )
+    def test_bbox_identity_tolerates_only_small_roundtrip_error(
+        self, position: list[float], *, matched: bool
+    ) -> None:
+        existing = [
+            RawIssue(id=1, frame=5, resolved=False, comments=["a"], position=position)
+        ]
+        built = [_new_issue(frame=5, message="a")]
+        assert _issues_not_yet_on_task(existing, built) == ([] if matched else built)
+
+    def test_each_existing_issue_is_consumed_only_once(self) -> None:
+        existing = [
+            RawIssue(
+                id=1, frame=5, resolved=False, comments=["a"], position=[1, 2, 3, 4]
+            )
+        ]
+        issue = _new_issue(frame=5, message="a")
+        assert _issues_not_yet_on_task(existing, [issue, issue]) == [issue]
+
+    def test_bbox_tolerance_does_not_grow_with_image_coordinates(self) -> None:
+        """Large-image coordinates still use the same absolute pixel tolerance."""
+        existing = [
+            RawIssue(
+                id=1,
+                frame=5,
+                resolved=False,
+                comments=["a"],
+                position=[100_000.00005, 2, 100_001, 4],
+            )
+        ]
+        issue = NewIssue(
+            frame=5, job_id=201, message="a", position=[100_000, 2, 100_001, 4]
+        )
+        assert _issues_not_yet_on_task(existing, [issue]) == [issue]
+
+    def test_an_issue_without_comments_cannot_match(self) -> None:
+        existing = [
+            RawIssue(id=1, frame=5, resolved=False, comments=[], position=[1, 2, 3, 4])
+        ]
+        built = [_new_issue(frame=5, message="a")]
+        assert _issues_not_yet_on_task(existing, built) == built
+
     def test_an_issue_already_on_the_task_is_dropped(self) -> None:
-        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["первая"])]
+        existing = [
+            RawIssue(
+                id=1,
+                frame=5,
+                resolved=False,
+                comments=["первая"],
+                position=[1.0, 2.0, 3.0, 4.0],
+            )
+        ]
         built = [_new_issue(frame=5, message="первая")]
 
         assert _issues_not_yet_on_task(existing, built) == []
 
     def test_a_missing_issue_survives(self) -> None:
-        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["первая"])]
+        existing = [
+            RawIssue(
+                id=1,
+                frame=5,
+                resolved=False,
+                comments=["первая"],
+                position=[1.0, 2.0, 3.0, 4.0],
+            )
+        ]
         built = [_new_issue(frame=5, message="вторая")]
 
         assert _issues_not_yet_on_task(existing, built) == built
 
     def test_the_same_text_on_another_frame_is_not_a_match(self) -> None:
         """One comment per frame; matching on text alone would lose the rest."""
-        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["текст"])]
+        existing = [
+            RawIssue(
+                id=1,
+                frame=5,
+                resolved=False,
+                comments=["текст"],
+                position=[1.0, 2.0, 3.0, 4.0],
+            )
+        ]
         built = [_new_issue(frame=6, message="текст")]
 
         assert _issues_not_yet_on_task(existing, built) == built
@@ -599,12 +679,20 @@ class TestIssuesNotYetOnTask:
 
         assert _issues_not_yet_on_task([], built) == built
 
-    def test_every_comment_of_an_issue_counts_as_seen(self) -> None:
-        """CVAT joins follow-up comments onto one issue; all of them match."""
-        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["a", "b"])]
+    def test_a_reply_does_not_replace_another_issue(self) -> None:
+        """A matching reply is not proof that a separate issue was created."""
+        existing = [
+            RawIssue(
+                id=1,
+                frame=5,
+                resolved=False,
+                comments=["a", "b"],
+                position=[1.0, 2.0, 3.0, 4.0],
+            )
+        ]
         built = [_new_issue(frame=5, message="b")]
 
-        assert _issues_not_yet_on_task(existing, built) == []
+        assert _issues_not_yet_on_task(existing, built) == built
 
 
 class TestSkipExistingIssues:
@@ -612,7 +700,13 @@ class TestSkipExistingIssues:
         """Without the read-back every resumed upload doubles its comments."""
         api = _api_for_issue_creation(200, _TWO_JOBS)
         api.get_task_issues.return_value = [
-            RawIssue(id=1, frame=5, resolved=False, comments=["первая"])
+            RawIssue(
+                id=1,
+                frame=5,
+                resolved=False,
+                comments=["первая"],
+                position=[1.0, 2.0, 3.0, 4.0],
+            )
         ]
         client = _client_with_api(api)
         df = pd.DataFrame(

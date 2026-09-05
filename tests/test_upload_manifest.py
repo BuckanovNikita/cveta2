@@ -8,6 +8,7 @@ back out exactly as they went in.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -22,10 +23,12 @@ from cveta2.upload_manifest import (
     list_manifests,
     load_manifest,
     new_manifest,
+    normalize_upload_host,
     save_manifest,
 )
 
 PROJECT_ID = 7
+HOST = "http://fake-cvat"
 
 
 def _cs_info() -> CloudStorageInfo:
@@ -46,6 +49,7 @@ def _manifest(
         cs_info=_cs_info(),
         name_to_server_file={"a.jpg": "2026-01/a.jpg"},
         task_image_names=["images/2026-01/a.jpg"],
+        host=HOST,
     )
     if started_at is not None:
         manifest.started_at = started_at
@@ -54,47 +58,106 @@ def _manifest(
 
 
 class TestLocation:
+    def test_host_normalization_preserves_deployment_path(self) -> None:
+        """Canonical identity retains path case and strips only URL decorations."""
+        assert (
+            normalize_upload_host(
+                "HTTP://Example.TEST/TeamX///?session=ignored#fragment"
+            )
+            == "http://example.test/TeamX"
+        )
+
+    def test_servers_do_not_share_state(self) -> None:
+        save_manifest(_manifest())
+        assert load_manifest(PROJECT_ID, "abc123", host="http://other-cvat") is None
+        assert list_manifests(PROJECT_ID, host="http://other-cvat") == []
+        delete_manifest(PROJECT_ID, "abc123", host="http://other-cvat")
+        assert load_manifest(PROJECT_ID, "abc123", host=HOST) is not None
+
+    def test_equivalent_host_spelling_shares_state(self) -> None:
+        original = _manifest()
+        save_manifest(original)
+        assert load_manifest(PROJECT_ID, "abc123", host="HTTP://FAKE-CVAT/") == original
+
     def test_manifests_live_under_the_xdg_cache_root(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Land under XDG_CACHE_HOME, not in a developer's real cache."""
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
-        directory = get_upload_manifest_dir(PROJECT_ID)
+        directory = get_upload_manifest_dir(PROJECT_ID, host=HOST)
 
-        assert directory == tmp_path / "cache" / "cveta2" / "uploads" / "project_7"
+        assert directory.parent.parent == tmp_path / "cache" / "cveta2" / "uploads"
+        assert directory.name == "project_7"
 
     def test_projects_do_not_share_a_directory(self) -> None:
         """Keep projects apart: `--resume` lists candidates by project."""
-        assert get_upload_manifest_dir(1) != get_upload_manifest_dir(2)
+        assert get_upload_manifest_dir(1, host=HOST) != get_upload_manifest_dir(
+            2, host=HOST
+        )
 
     def test_the_default_root_is_the_home_cache(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
 
-        directory = get_upload_manifest_dir(PROJECT_ID)
+        directory = get_upload_manifest_dir(PROJECT_ID, host=HOST)
 
         assert directory.is_relative_to(Path.home() / ".cache" / "cveta2")
 
 
 class TestRoundTrip:
+    def test_preexisting_v2_manifest_keeps_its_storage_address(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Previously persisted state must remain discoverable across upgrades."""
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        original = _manifest(task_id=42)
+        # Frozen v2 namespace for http://fake-cvat; do not derive it using the writer.
+        directory = tmp_path / "cveta2" / "uploads" / "08468f7e097478f5" / "project_7"
+        directory.mkdir(parents=True)
+        (directory / "abc123.json").write_text(original.model_dump_json())
+        assert load_manifest(PROJECT_ID, "abc123", host=HOST) == original
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("host", "http://other-cvat"), ("project_id", 99), ("fingerprint", "other")],
+    )
+    def test_misfiled_state_is_not_resumed(self, field: str, value: object) -> None:
+        save_manifest(_manifest())
+        path = get_upload_manifest_dir(PROJECT_ID, host=HOST) / "abc123.json"
+        data = json.loads(path.read_text())
+        data[field] = value
+        path.write_text(json.dumps(data))
+        assert load_manifest(PROJECT_ID, "abc123", host=HOST) is None
+        assert list_manifests(PROJECT_ID, host=HOST) == []
+
+    def test_hostless_legacy_state_is_not_resumed(self) -> None:
+        data = _manifest(task_id=1).model_dump(mode="json")
+        data.pop("host")
+        data["schema_version"] = 1
+        # Even copying old state into the new namespace cannot authorize a task write.
+        directory = get_upload_manifest_dir(PROJECT_ID, host=HOST)
+        directory.mkdir(parents=True)
+        (directory / "abc123.json").write_text(json.dumps(data))
+        assert load_manifest(PROJECT_ID, "abc123", host=HOST) is None
+
     def test_a_saved_manifest_comes_back_field_for_field(self) -> None:
         """The mapping and frame order are decisions a resume must not redo."""
         original = _manifest(task_id=42)
 
         save_manifest(original)
-        loaded = load_manifest(PROJECT_ID, "abc123")
+        loaded = load_manifest(PROJECT_ID, "abc123", host=HOST)
 
         assert loaded == original
 
     def test_an_absent_manifest_is_not_an_error(self) -> None:
-        assert load_manifest(PROJECT_ID, "nothing-here") is None
+        assert load_manifest(PROJECT_ID, "nothing-here", host=HOST) is None
 
     def test_a_manifest_from_another_schema_version_is_ignored(self) -> None:
         """An older layout would resume with fields that mean something else."""
         save_manifest(_manifest())
-        path = get_upload_manifest_dir(PROJECT_ID) / "abc123.json"
+        path = get_upload_manifest_dir(PROJECT_ID, host=HOST) / "abc123.json"
         path.write_text(
             path.read_text(encoding="utf-8").replace(
                 f'"schema_version":{MANIFEST_SCHEMA_VERSION}',
@@ -103,21 +166,21 @@ class TestRoundTrip:
             encoding="utf-8",
         )
 
-        assert load_manifest(PROJECT_ID, "abc123") is None
+        assert load_manifest(PROJECT_ID, "abc123", host=HOST) is None
 
     def test_a_truncated_manifest_is_ignored(self) -> None:
         """Exactly what a crash mid-write would leave without the atomic rename."""
         save_manifest(_manifest())
-        path = get_upload_manifest_dir(PROJECT_ID) / "abc123.json"
+        path = get_upload_manifest_dir(PROJECT_ID, host=HOST) / "abc123.json"
         path.write_text('{"schema_version": 1, "task_', encoding="utf-8")
 
-        assert load_manifest(PROJECT_ID, "abc123") is None
+        assert load_manifest(PROJECT_ID, "abc123", host=HOST) is None
 
     def test_the_write_is_atomic(self) -> None:
         """No temp file may survive: a stray one would be listed as a manifest."""
         save_manifest(_manifest())
 
-        directory = get_upload_manifest_dir(PROJECT_ID)
+        directory = get_upload_manifest_dir(PROJECT_ID, host=HOST)
         assert [p.name for p in directory.iterdir()] == ["abc123.json"]
 
 
@@ -127,31 +190,36 @@ class TestListing:
         save_manifest(_manifest(fingerprint="old", started_at="2026-01-01T00:00:00"))
         save_manifest(_manifest(fingerprint="new", started_at="2026-06-01T00:00:00"))
 
-        assert [m.fingerprint for m in list_manifests(PROJECT_ID)] == ["new", "old"]
+        assert [m.fingerprint for m in list_manifests(PROJECT_ID, host=HOST)] == [
+            "new",
+            "old",
+        ]
 
     def test_a_project_with_no_directory_lists_nothing(self) -> None:
-        assert list_manifests(4242) == []
+        assert list_manifests(4242, host=HOST) == []
 
     def test_an_unreadable_entry_does_not_hide_the_readable_ones(self) -> None:
         save_manifest(_manifest(fingerprint="good"))
-        (get_upload_manifest_dir(PROJECT_ID) / "broken.json").write_text(
+        (get_upload_manifest_dir(PROJECT_ID, host=HOST) / "broken.json").write_text(
             "not json", encoding="utf-8"
         )
 
-        assert [m.fingerprint for m in list_manifests(PROJECT_ID)] == ["good"]
+        assert [m.fingerprint for m in list_manifests(PROJECT_ID, host=HOST)] == [
+            "good"
+        ]
 
 
 class TestDelete:
     def test_deleting_removes_the_entry(self) -> None:
         save_manifest(_manifest())
 
-        delete_manifest(PROJECT_ID, "abc123")
+        delete_manifest(PROJECT_ID, "abc123", host=HOST)
 
-        assert load_manifest(PROJECT_ID, "abc123") is None
+        assert load_manifest(PROJECT_ID, "abc123", host=HOST) is None
 
     def test_deleting_what_is_not_there_is_not_an_error(self) -> None:
         """An upload that never wrote one still finishes by clearing it."""
-        delete_manifest(PROJECT_ID, "never-existed")
+        delete_manifest(PROJECT_ID, "never-existed", host=HOST)
 
 
 class TestFingerprint:

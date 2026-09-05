@@ -40,6 +40,54 @@ def test_read_exclude_names_valid_csv(tmp_path: Path) -> None:
     assert read_exclude_names(str(csv)) == {"foo.jpg", "bar.jpg"}
 
 
+@pytest.mark.parametrize("name", ["001", "NA"])
+def test_excluded_image_identifiers_keep_their_literal_names(
+    tmp_path: Path, name: str
+) -> None:
+    path = tmp_path / "in_progress.csv"
+    path.write_text(f"image_name,task_id\n{name},1\n", encoding="utf-8")
+    assert read_exclude_names(str(path)) == {name}
+
+
+def test_local_frame_path_without_cloud_storage_is_relative_to_cache(
+    tmp_path: Path,
+) -> None:
+    cached = tmp_path / "nested" / "a.jpg"
+    cached.parent.mkdir()
+    cached.write_bytes(b"image")
+    record = make_bbox(image_name="a.jpg", frame_path="/nested/a.jpg")
+
+    populate_record_paths(
+        ProjectAnnotations(annotations=[record], deleted_images=[]), None, tmp_path
+    )
+
+    assert record.image_path == str(cached)
+    assert record.s3_image_path is None
+
+
+def test_invalid_resolved_key_reports_the_original_frame_name(tmp_path: Path) -> None:
+    record = make_bbox(image_name="bad.jpg", s3_image_path="images/../bad.jpg")
+    with pytest.raises(Cveta2Error, match=r"bad\.jpg"):
+        populate_record_paths(
+            ProjectAnnotations(annotations=[record], deleted_images=[]),
+            make_cs_info(prefix="images"),
+            tmp_path,
+        )
+
+
+def test_cache_symlink_escape_reports_the_original_frame_name(tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / "nested").symlink_to(tmp_path, target_is_directory=True)
+    record = make_bbox(image_name="bad.jpg", frame_path="nested/bad.jpg")
+    with pytest.raises(Cveta2Error, match=r"bad\.jpg"):
+        populate_record_paths(
+            ProjectAnnotations(annotations=[record], deleted_images=[]),
+            make_cs_info(prefix="images"),
+            cache,
+        )
+
+
 def test_read_exclude_names_missing_file(tmp_path: Path) -> None:
     """The error must name the file; ``Cveta2Error(None)`` stringifies to "None"."""
     with pytest.raises(Cveta2Error, match=r"nope\.csv"):
@@ -166,6 +214,23 @@ def test_build_upload_plan_keeps_deleted_names_without_images() -> None:
 
     assert plan.image_names == []
     assert plan.deleted_names == ["gone.jpg"]
+
+
+def test_exclusions_also_remove_deleted_frames() -> None:
+    plan = build_upload_plan(
+        _plan_input_df(),
+        ["busy.jpg", "gone.jpg"],
+        labels=["Edge"],
+        exclude_names={"a.jpg", "busy.jpg"},
+    )
+    assert plan.image_names == ["c.jpg"]
+    assert plan.deleted_names == ["gone.jpg"]
+
+
+def test_excluding_every_deleted_frame_leaves_nothing_to_upload() -> None:
+    empty = pd.DataFrame({"image_name": [], "instance_label": []})
+    with pytest.raises(Cveta2Error):
+        build_upload_plan(empty, ["busy.jpg"], labels=[], exclude_names={"busy.jpg"})
 
 
 # ---------------------------------------------------------------------------

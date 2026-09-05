@@ -55,6 +55,30 @@ def test_read_dataset_csv_returns_rows(tmp_path: Path) -> None:
     assert list(df["image_name"]) == ["a.jpg", "b.jpg"]
 
 
+@pytest.mark.parametrize(
+    "column", ["instance_label", "image_name", "task_name", "issue_text"]
+)
+@pytest.mark.parametrize("value", ["001", "NA", "null", "None"])
+def test_csv_preserves_text_and_distinguishes_empty_cells(
+    tmp_path: Path, column: str, value: str
+) -> None:
+    path = write_dataset_csv(
+        tmp_path / "strings.csv",
+        [
+            {column: value, "image_width": 640, "confidence": 0.75},
+            {column: "", "image_width": 480, "confidence": None},
+        ],
+    )
+
+    df = read_dataset_csv(path, {column})
+
+    assert df.loc[0, column] == value
+    assert pd.isna(df.loc[1, column])
+    assert df["image_width"].tolist() == [640, 480]
+    assert df.loc[0, "confidence"] == 0.75
+    assert pd.isna(df.loc[1, "confidence"])
+
+
 def test_read_dataset_csv_missing_file_names_the_path(tmp_path: Path) -> None:
     """The not-found error names the file the user asked for.
 

@@ -25,10 +25,15 @@ class PartitionResult:
 
 
 def _rows_are_finished(frame: pd.DataFrame) -> pd.Series[bool]:
-    """Per-row mask: this row's job sits on the finished ``(stage, state)``."""
-    return (frame["job_stage"] == COMPLETED_JOB_STAGE) & (
+    """Use explicit task completion, falling back to legacy per-job columns."""
+    finished = (frame["job_stage"] == COMPLETED_JOB_STAGE) & (
         frame["job_state"] == COMPLETED_JOB_STATE
     )
+    if "task_completed" in frame:
+        finished = finished.where(
+            frame["task_completed"].isna(), frame["task_completed"].eq(other=True)
+        )
+    return finished
 
 
 def completed_task_ids(
@@ -37,9 +42,9 @@ def completed_task_ids(
 ) -> set[int]:
     """Return the ids of tasks whose every job has finished review.
 
-    ``job_stage``/``job_state`` are per-job, so a task counts as finished
-    only when all of its rows do — the same "no job left at annotation or
-    validation" rule CVAT applies to derive a task's status.
+    ``task_completed`` captures every live job, even jobs with no exported
+    frames. When absent/null (legacy CSV), fall back to per-row
+    ``job_stage``/``job_state``. Any unfinished row excludes the task.
 
     *deleted_images* are folded in because their rows live in a separate
     file: a job whose every frame was deleted contributes nothing to *df*
@@ -51,7 +56,10 @@ def completed_task_ids(
     to mean anything.  A row without a ``task_id`` belongs to no task and
     neither qualifies nor disqualifies one.
     """
-    frames = [df.loc[:, ["task_id", "job_stage", "job_state"]]]
+    columns = ["task_id", "job_stage", "job_state"]
+    if "task_completed" in df:
+        columns.append("task_completed")
+    frames = [df.loc[:, columns]]
     if deleted_images:
         frames.append(
             pd.DataFrame(
@@ -60,6 +68,7 @@ def completed_task_ids(
                         "task_id": d.task_id,
                         "job_stage": d.job_stage,
                         "job_state": d.job_state,
+                        "task_completed": d.task_completed,
                     }
                     for d in deleted_images
                 ]

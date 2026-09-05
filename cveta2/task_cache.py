@@ -34,13 +34,15 @@ if TYPE_CHECKING:
     from cveta2.models import TaskInfo
     from cveta2.s3_types import S3Client
 
+# v4: payload records carry task-wide completion; older per-frame job
+# mappings lost unfinished jobs in overlapping or sparse job layouts.
 # v3: payload records carry ``job_stage``/``job_state`` in place of
 # ``task_status``; a v2 entry has no per-job review position, and the
 # partition would read every one of its rows as still unreviewed.
 # v2: payload records carry ``frame_path`` (nested CVAT frame names); v1
 # entries were saved after basename collapse and would rebuild a wrong
 # ``s3_image_path`` for multilevel S3 hierarchies.
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 4
 
 _COMPLETED_STATUS = "completed"
 _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})
@@ -54,8 +56,8 @@ _SOURCE_S3 = "S3-кэш"
 class CachedTaskEnvelope(BaseModel):
     """Versioned wrapper around a cached :class:`TaskAnnotations` payload.
 
-    ``task_updated_date`` and ``cached_at`` are written for diagnostics
-    only; neither is read back to decide whether the entry is still good.
+    ``task_updated_date`` invalidates stale payloads; ``cached_at`` records
+    when the payload was fetched for diagnostics.
     """
 
     schema_version: int
@@ -257,8 +259,8 @@ class TaskAnnotationCache:
         return self._get_s3(task)
 
     def put(self, task: TaskInfo, result: TaskAnnotations) -> None:
-        """Cache *result* for a completed *task* (no-op otherwise)."""
-        if task.status != _COMPLETED_STATUS:
+        """Cache complete results for completed tasks; omit degraded issues."""
+        if task.status != _COMPLETED_STATUS or not result.issues_complete:
             return
         envelope = CachedTaskEnvelope(
             schema_version=CACHE_SCHEMA_VERSION,

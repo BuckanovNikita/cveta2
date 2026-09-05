@@ -339,6 +339,7 @@ class SdkCvatApiAdapter:
                     frame=int(issue.frame),
                     resolved=bool(issue.resolved),
                     comments=[str(c.message or "") for c in comments],
+                    position=[float(coordinate) for coordinate in issue.position],
                 ),
             )
         return result
@@ -398,6 +399,7 @@ class SdkCvatApiAdapter:
                 stop_frame=int(job.stop_frame),
                 stage=str(job.stage or ""),
                 state=str(job.state or ""),
+                type=str(job.type or "annotation"),
             )
             for job in jobs
         ]

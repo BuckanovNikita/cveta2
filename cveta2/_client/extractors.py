@@ -42,6 +42,7 @@ def _collect_shapes(
                 task_name=ctx.task_name,
                 job_stage=job_stage,
                 job_state=job_state,
+                task_completed=ctx.task_completed,
                 task_updated_date=ctx.task_updated_date,
                 created_by_username=shape.created_by,
                 frame_id=shape.frame,

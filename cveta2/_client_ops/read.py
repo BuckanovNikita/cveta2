@@ -55,21 +55,20 @@ class _ReadMixin(_ClientBase):
     ) -> list[TaskInfo]:
         """List completed project tasks a fetched dataset does not account for.
 
-        A task qualifies when its id is above *cutoff* or when the fetch
-        never saw it at all — the second half catches a task that was
-        still in progress when the dataset was written and finished
-        afterwards, which its id alone cannot reveal.  The result is
-        sorted by id ascending.
+        A task qualifies when its id is absent from *known_task_ids*,
+        including tasks that were still in progress at fetch time.
+        *cutoff* is retained for diagnostics and compatibility; known tasks
+        above it may already be accounted for by deleted/obsolete CSVs.
+        The result is sorted by id ascending.
 
         ``updated_date`` deliberately plays no part: a project-wide label
         edit bumps it on every task at once and would report the whole
         project as new.
         """
+        logger.trace(f"Checking completed tasks against baseline task_id={cutoff}")
         tasks = self.list_project_tasks(project_id)
         new = [
-            t
-            for t in tasks
-            if t.status == "completed" and (t.id > cutoff or t.id not in known_task_ids)
+            t for t in tasks if t.status == "completed" and t.id not in known_task_ids
         ]
         return sorted(new, key=lambda t: t.id)
 

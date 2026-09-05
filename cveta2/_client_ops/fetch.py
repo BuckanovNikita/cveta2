@@ -261,6 +261,7 @@ class _FetchMixin(_ClientBase):
                 return None
             raise
 
+        issues_complete = True
         try:
             issues = api.get_task_issues(task.id)
         except CvatApiError as e:
@@ -269,6 +270,7 @@ class _FetchMixin(_ClientBase):
                 f"колонки issue_text/issue_state останутся пустыми"
             )
             issues = []
+            issues_complete = False
 
         records, deleted = task_to_records(
             task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues, jobs
@@ -278,4 +280,5 @@ class _FetchMixin(_ClientBase):
             task_name=task.name,
             annotations=records,
             deleted_images=deleted,
+            issues_complete=issues_complete,
         )

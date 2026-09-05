@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit, urlunsplit
 
 from loguru import logger
 from pydantic import BaseModel, ValidationError
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
     from pathlib import Path
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 
 _FINGERPRINT_LENGTH = 16
 
@@ -39,6 +40,7 @@ class UploadManifest(BaseModel):
     dataset_path: str
     fingerprint: str
     project_id: int
+    host: str
     task_name: str
     cs_info: CloudStorageInfo
     # Frozen because _assign_month_folder reads the clock: a resume that
@@ -75,15 +77,25 @@ def compute_fingerprint(
     return digest.hexdigest()[:_FINGERPRINT_LENGTH]
 
 
-def get_upload_manifest_dir(project_id: int) -> Path:
+def normalize_upload_host(host: str) -> str:
+    """Canonical server identity, preserving a case-sensitive deployment path."""
+    url = urlsplit(host)
+    return urlunsplit(
+        (url.scheme.lower(), url.netloc.lower(), url.path.rstrip("/"), "", "")
+    )
+
+
+def get_upload_manifest_dir(project_id: int, *, host: str) -> Path:
     """Return the directory holding a project's unfinished upload manifests."""
-    return default_cache_base() / "uploads" / f"project_{project_id}"
+    server = hashlib.sha256(normalize_upload_host(host).encode()).hexdigest()[:16]
+    return default_cache_base() / "uploads" / server / f"project_{project_id}"
 
 
 def save_manifest(manifest: UploadManifest) -> None:
     """Write *manifest* atomically; never fail the upload over bookkeeping."""
     target = (
-        get_upload_manifest_dir(manifest.project_id) / f"{manifest.fingerprint}.json"
+        get_upload_manifest_dir(manifest.project_id, host=manifest.host)
+        / f"{manifest.fingerprint}.json"
     )
     try:
         replace_shared_bytes(target, manifest.model_dump_json().encode())
@@ -94,18 +106,35 @@ def save_manifest(manifest: UploadManifest) -> None:
         )
 
 
-def load_manifest(project_id: int, fingerprint: str) -> UploadManifest | None:
+def load_manifest(
+    project_id: int, fingerprint: str, *, host: str
+) -> UploadManifest | None:
     """Return the manifest for *fingerprint*, or None when absent or stale."""
-    path = get_upload_manifest_dir(project_id) / f"{fingerprint}.json"
-    return _read_manifest(path)
+    path = get_upload_manifest_dir(project_id, host=host) / f"{fingerprint}.json"
+    manifest = _read_manifest(path)
+    if manifest is None:
+        return None
+    if (
+        manifest.host != normalize_upload_host(host)
+        or manifest.project_id != project_id
+        or manifest.fingerprint != fingerprint
+    ):
+        logger.warning(
+            f"Состояние загрузки {path} относится к другой загрузке — игнорируем."
+        )
+        return None
+    return manifest
 
 
-def list_manifests(project_id: int) -> list[UploadManifest]:
+def list_manifests(project_id: int, *, host: str) -> list[UploadManifest]:
     """Return every readable manifest for *project_id*, newest first."""
-    directory = get_upload_manifest_dir(project_id)
+    directory = get_upload_manifest_dir(project_id, host=host)
     if not directory.is_dir():
         return []
-    found = [_read_manifest(path) for path in sorted(directory.glob("*.json"))]
+    found = [
+        load_manifest(project_id, path.stem, host=host)
+        for path in sorted(directory.glob("*.json"))
+    ]
     return sorted(
         (m for m in found if m is not None),
         key=lambda m: m.started_at,
@@ -113,9 +142,9 @@ def list_manifests(project_id: int) -> list[UploadManifest]:
     )
 
 
-def delete_manifest(project_id: int, fingerprint: str) -> None:
+def delete_manifest(project_id: int, fingerprint: str, *, host: str) -> None:
     """Drop the manifest once its upload has finished."""
-    path = get_upload_manifest_dir(project_id) / f"{fingerprint}.json"
+    path = get_upload_manifest_dir(project_id, host=host) / f"{fingerprint}.json"
     path.unlink(missing_ok=True)
 
 
@@ -127,6 +156,8 @@ def new_manifest(  # noqa: PLR0913, PLR0917
     cs_info: CloudStorageInfo,
     name_to_server_file: dict[str, str],
     task_image_names: list[str],
+    *,
+    host: str,
 ) -> UploadManifest:
     """Build a manifest for an upload that is about to touch CVAT."""
     return UploadManifest(
@@ -135,6 +166,7 @@ def new_manifest(  # noqa: PLR0913, PLR0917
         dataset_path=dataset_path,
         fingerprint=fingerprint,
         project_id=project_id,
+        host=normalize_upload_host(host),
         task_name=task_name,
         cs_info=cs_info,
         name_to_server_file=name_to_server_file,

@@ -471,8 +471,9 @@ def whats_new(
     """List completed tasks a fetched dataset CSV does not account for.
 
     ``cutoff`` is the highest ``task_id`` the CSV holds for a completed
-    task; a task is returned when its id is above that or when the fetch
-    never saw it (it was still in progress and has since finished).
+    task, for reference. A completed task is returned when it was not already
+    recorded as completed in the dataset and its obsolete/deleted sibling
+    CSVs, including tasks that were still in progress and have since finished.
     """
     dataset_path = Path(dataset)
     df = read_dataset_csv(dataset_path, REQUIRED_COLUMNS)

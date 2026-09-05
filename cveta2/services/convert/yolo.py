@@ -11,6 +11,7 @@ from loguru import logger
 from cveta2.exceptions import Cveta2Error
 from cveta2.services.convert.common import (
     _IMAGE_EXTENSIONS,
+    ExportContext,
     PixelBox,
     YoloBox,
     _build_search_dirs,
@@ -93,12 +94,14 @@ def _write_box_labels(  # noqa: PLR0913, PLR0917
         write_text_utf8(label_path, "\n".join(lines) + "\n")
 
 
-def _write_none_labels(
+def _write_none_labels(  # noqa: PLR0913
     none_df: pd.DataFrame,
     output_dir: Path,
     found: dict[str, Path],
     link_mode: str,
     images_processed: set[str],
+    *,
+    box_images: set[tuple[str, str]],
 ) -> None:
     """Write empty label files and place images for none-shape rows."""
     if none_df.empty:
@@ -113,8 +116,36 @@ def _write_none_labels(
             images_processed.add(image_name)
 
         label_path = output_dir / "labels" / split / f"{Path(image_name).stem}.txt"
-        if not label_path.exists():
-            label_path.touch()
+        if (image_name, split) not in box_images:
+            write_text_utf8(label_path, "")
+
+
+def _prune_yolo_output(ctx: ExportContext) -> None:
+    """Remove files for images and splits absent from the current export."""
+    expected_images: set[Path] = set()
+    expected_labels: set[Path] = set()
+    for name, split in ctx.df[["image_name", "split"]].itertuples(
+        index=False, name=None
+    ):
+        expected_images.add(ctx.output_dir / "images" / split / name)
+        expected_labels.add(
+            ctx.output_dir / "labels" / split / f"{Path(name).stem}.txt"
+        )
+    for directory, expected, suffixes in (
+        ("images", expected_images, _IMAGE_EXTENSIONS),
+        ("labels", expected_labels, (".txt",)),
+    ):
+        tree = ctx.output_dir / directory
+        if tree.is_symlink():
+            continue
+        for path in tree.glob("*/*"):
+            if (
+                path.suffix.lower() in suffixes
+                and path not in expected
+                and not path.parent.is_symlink()
+                and (path.is_file() or path.is_symlink())
+            ):
+                path.unlink()
 
 
 def _write_dataset_yaml(
@@ -174,7 +205,11 @@ def convert_to_yolo(
         ctx.found,
         ctx.link_mode,
         images_processed,
+        box_images=set(
+            box_df[["image_name", "split"]].itertuples(index=False, name=None)
+        ),
     )
+    _prune_yolo_output(ctx)
     _write_dataset_yaml(ctx.output_dir, ctx.splits, ctx.label_map)
 
     logger.info(
@@ -295,10 +330,10 @@ def _resolve_listed_image(raw: str, list_path: Path, dataset_root: Path) -> Path
     """Resolve one image named by a YOLO split list file."""
     path = Path(raw).expanduser()
     if path.is_absolute():
-        return path.resolve()
+        return path
     if raw.startswith("./"):
-        return (list_path.parent / raw[2:]).resolve()
-    return (dataset_root / path).resolve()
+        return (list_path.parent / raw[2:]).absolute()
+    return (dataset_root / path).absolute()
 
 
 def _images_from_split_source(source: Path, dataset_root: Path) -> list[Path]:
@@ -336,11 +371,12 @@ def _split_images(raw_split: object, dataset_root: Path) -> list[Path]:
         source = Path(entry).expanduser()
         if not source.is_absolute():
             source = dataset_root / source
-        for image in _images_from_split_source(source.resolve(), dataset_root):
+        for image in _images_from_split_source(source.absolute(), dataset_root):
+            # Labels belong to the dataset path, even when its image is a symlink.
             resolved = image.resolve()
             if resolved not in seen:
                 seen.add(resolved)
-                result.append(resolved)
+                result.append(image.absolute())
     return result
 
 

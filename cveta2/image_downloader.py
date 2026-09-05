@@ -211,7 +211,11 @@ class ImageDownloader:
             return stats
 
         ensure_shared_dir(self._target_dir)
-        self._download_all(pending, stats, project_cloud_storage)
+        resolved = self._download_all(pending, stats, project_cloud_storage)
+        for record in (*annotations.annotations, *annotations.deleted_images):
+            key = resolved.get(record.image_name)
+            if key is not None:
+                record.s3_image_path = key
 
         logger.info(f"Загрузка изображений: {stats.summary()}")
         return stats
@@ -285,7 +289,7 @@ class ImageDownloader:
         pending: dict[str, str],
         stats: DownloadStats,
         project_cloud_storage: CloudStorageInfo | None = None,
-    ) -> None:
+    ) -> dict[str, str]:
         """Download all pending images from project cloud storage by name lookup."""
         if project_cloud_storage is None:
             stats.failed += len(pending)
@@ -294,17 +298,20 @@ class ImageDownloader:
                     "Project cloud storage не задан — все изображения помечены "
                     "как failed. Укажите project_id при вызове download_images."
                 )
-            return
+            return {}
         s3_client = make_s3_client(project_cloud_storage.endpoint_url or None)
         name_to_key = self._resolve_s3_keys(s3_client, project_cloud_storage, pending)
         to_download: list[Transfer] = []
         missing: list[str] = []
-        for image_name, frame_ref in pending.items():
+        for image_name in pending:
             s3_key = name_to_key.get(image_name)
             if s3_key is None:
                 missing.append(image_name)
                 continue
-            dest = self._dest_path(frame_ref, project_cloud_storage)
+            dest = self._dest_path(f"/{s3_key}", project_cloud_storage)
+            if dest.is_file():
+                stats.cached += 1
+                continue
             to_download.append(Transfer(name=image_name, key=s3_key, path=dest))
         if missing:
             stats.failed += len(missing)
@@ -320,6 +327,7 @@ class ImageDownloader:
             stats,
             _PROJECT_STORAGE_PROGRESS,
         )
+        return name_to_key
 
     def _resolve_s3_keys(
         self,

@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     import argparse
     from pathlib import Path
 
+    from cveta2.client import CvatClient
+    from cveta2.image_downloader import CloudStorageInfo
+
 
 class SyncTarget(NamedTuple):
     """Where one project's images live locally, and how to lay them out."""
@@ -59,15 +62,26 @@ def run_s3_sync(args: argparse.Namespace) -> None:
         )
 
     project_filter = args.project.strip() if args.project else None
-    projects_to_sync = _resolve_sync_dirs(project_filter)
-    if not projects_to_sync:
-        if project_filter:
-            raise Cveta2Error(
-                f"Ошибка: для проекта {project_filter!r} не настроен путь "
-                f"кэширования изображений.\n"
-                f"Добавьте image_cache.{project_filter} или cache.images_root "
-                f"в конфигурацию (cveta2 setup-cache)."
+    if project_filter:
+        with open_client() as client:
+            project_id, project_name, cs_info = resolve_project_and_cloud_storage(
+                client, project_filter, sync_root=args.root
             )
+            targets = _resolve_sync_dirs(project_name)
+            if project_name not in targets:
+                raise Cveta2Error(
+                    f"Ошибка: для проекта {project_name!r} не настроен путь "
+                    f"кэширования изображений.\n"
+                    f"Добавьте image_cache.{project_name} или cache.images_root "
+                    f"в конфигурацию (cveta2 setup-cache)."
+                )
+            _sync_project(
+                client, project_id, project_name, cs_info, targets[project_name]
+            )
+        return
+
+    projects_to_sync = _resolve_sync_dirs(None)
+    if not projects_to_sync:
         raise Cveta2Error(
             "Ошибка: нет проектов для синхронизации — не настроены ни "
             "image_cache, ни cache.projects.\n"
@@ -76,6 +90,7 @@ def run_s3_sync(args: argparse.Namespace) -> None:
         )
 
     with open_client() as client:
+        skipped: list[str] = []
         for project_name, target in projects_to_sync.items():
             logger.info(f"--- Синхронизация проекта: {project_name} ---")
             try:
@@ -84,18 +99,33 @@ def run_s3_sync(args: argparse.Namespace) -> None:
                 )
             except Cveta2Error as e:
                 logger.error(f"Проект {project_name!r}: не удалось определить ID — {e}")
+                skipped.append(project_name)
                 continue
 
-            if cs_info is None:
-                logger.warning(
-                    f"Проект {project_name!r}: cloud storage не найден — пропускаем."
-                )
-                continue
+            if not _sync_project(client, project_id, project_name, cs_info, target):
+                skipped.append(project_name)
+        if skipped:
+            logger.warning(f"Синхронизация неполная: пропущены проекты {skipped}")
 
-            stats = client.sync_project_images(
-                project_id,
-                target.cache_dir,
-                project_cloud_storage=cs_info,
-                ignored_prefix=target.ignored_prefix,
-            )
-            logger.info(f"Проект {project_name!r}: {stats.summary()}")
+
+def _sync_project(
+    client: CvatClient,
+    project_id: int,
+    project_name: str,
+    cs_info: CloudStorageInfo | None,
+    target: SyncTarget,
+) -> bool:
+    """Sync a resolved project; return False when it has no cloud storage."""
+    if cs_info is None:
+        logger.warning(
+            f"Проект {project_name!r}: cloud storage не найден — пропускаем."
+        )
+        return False
+    stats = client.sync_project_images(
+        project_id,
+        target.cache_dir,
+        project_cloud_storage=cs_info,
+        ignored_prefix=target.ignored_prefix,
+    )
+    logger.info(f"Проект {project_name!r}: {stats.summary()}")
+    return True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -57,12 +58,35 @@ def _issues_not_yet_on_task(
 ) -> list[NewIssue]:
     """Drop the built issues a previous run already opened on the task.
 
-    Matched on ``(frame, message)``: the position is a float bbox that has
-    round-tripped through CVAT, so comparing it would report every issue as
-    missing and duplicate the lot.
+    Match the frame, initial message and bbox. Coordinates tolerate a small
+    round-trip error; each existing issue satisfies only one requested issue.
     """
-    seen = {(issue.frame, comment) for issue in existing for comment in issue.comments}
-    return [issue for issue in built if (issue.frame, issue.message) not in seen]
+    positions: dict[tuple[int, str], list[list[float]]] = {}
+    for stored in existing:
+        if stored.comments:
+            positions.setdefault((stored.frame, stored.comments[0]), []).append(
+                stored.position
+            )
+    pending: list[NewIssue] = []
+    for issue in built:
+        candidates = positions.get((issue.frame, issue.message), [])
+        match = next(
+            (
+                index
+                for index, position in enumerate(candidates)
+                if len(position) == len(issue.position)
+                and all(
+                    math.isclose(a, b, rel_tol=0, abs_tol=1e-5)
+                    for a, b in zip(position, issue.position, strict=True)
+                )
+            ),
+            None,
+        )
+        if match is None:
+            pending.append(issue)
+        else:
+            candidates.pop(match)
+    return pending
 
 
 class _WriteMixin(_ClientBase):

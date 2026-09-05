@@ -45,6 +45,17 @@ def test_empty_dataframe() -> None:
     assert result.deleted_images == []
 
 
+def test_deleted_record_carries_unfinished_task_into_legacy_annotation_rows() -> None:
+    deleted = make_deleted("gone.jpg", task_id=7, updated="2026-09-04")
+    deleted.task_completed = False
+    annotations = _df([_row("kept.jpg", task_id=7, updated="2026-09-04")])
+
+    result = partition_annotations_df(annotations, [deleted])
+
+    assert result.dataset.empty
+    assert result.in_progress["image_name"].tolist() == ["kept.jpg"]
+
+
 def test_empty_dataframe_keeps_deletions() -> None:
     """A frame without rows or columns still reports its deleted images.
 

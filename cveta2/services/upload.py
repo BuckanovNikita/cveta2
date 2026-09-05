@@ -191,6 +191,9 @@ def build_upload_plan(
         exclude_names=exclude_names,
     )
     image_names: list[str] = list(filtered["image_name"].dropna().unique())
+    deleted_names = [
+        name for name in deleted_names if name not in (exclude_names or set())
+    ]
     if not image_names and not deleted_names:
         raise Cveta2Error(_NOTHING_TO_UPLOAD)
     logger.info(
@@ -407,6 +410,13 @@ def _ensure_task(
         return create()
 
     try:
+        task = client.get_task(manifest.task_id)
+        if task.project_id != request.project_id:
+            raise Cveta2Error(
+                f"Ошибка: задача {manifest.task_id} принадлежит проекту "
+                f"{task.project_id}, а загрузка — проекту {request.project_id}. "
+                "Продолжить нельзя; задача не изменена."
+            )
         size = client.get_task_size(manifest.task_id)
     except CvatApiError as e:
         if e.status_code != _HTTP_NOT_FOUND:
@@ -482,7 +492,9 @@ def _push_to_cvat(
     return task_id, num_shapes, num_issues
 
 
-def _resume_manifest(request: UploadRequest, fingerprint: str) -> UploadManifest:
+def _resume_manifest(
+    request: UploadRequest, fingerprint: str, *, host: str
+) -> UploadManifest:
     """Load the manifest ``--resume`` was asked to continue, or explain why not.
 
     A missing manifest is reported against whatever unfinished uploads the
@@ -490,10 +502,10 @@ def _resume_manifest(request: UploadRequest, fingerprint: str) -> UploadManifest
     different CSV or label selection — and "nothing to resume" alone would
     leave the user guessing which one.
     """
-    manifest = load_manifest(request.project_id, fingerprint)
+    manifest = load_manifest(request.project_id, fingerprint, host=host)
     if manifest is not None:
         return manifest
-    others = list_manifests(request.project_id)
+    others = list_manifests(request.project_id, host=host)
     if not others:
         raise Cveta2Error(
             f"Ошибка: незавершённых загрузок для проекта "
@@ -514,7 +526,7 @@ def _fresh_manifest(
     fingerprint: str,
 ) -> tuple[_StagedUpload, UploadManifest]:
     """Stage images for a new upload and record what it decided."""
-    existing = load_manifest(request.project_id, fingerprint)
+    existing = load_manifest(request.project_id, fingerprint, host=client.host)
     if existing is not None and existing.task_id is not None:
         logger.warning(
             f"Найдена незавершённая загрузка этого набора "
@@ -530,6 +542,7 @@ def _fresh_manifest(
         cs_info=staged.cs_info,
         name_to_server_file=staged.name_to_server_file,
         task_image_names=staged.task_image_names,
+        host=client.host,
     )
     save_manifest(manifest)
     return staged, manifest
@@ -551,13 +564,13 @@ def upload_dataset(client: CvatClient, request: UploadRequest) -> UploadOutcome:
         request.plan.image_names, request.plan.deleted_names, request.labels
     )
     if request.resume:
-        manifest = _resume_manifest(request, fingerprint)
+        manifest = _resume_manifest(request, fingerprint, host=client.host)
         staged = _stage_images(client, request, manifest.name_to_server_file)
     else:
         staged, manifest = _fresh_manifest(client, request, fingerprint)
 
     task_id, num_shapes, num_issues = _push_to_cvat(client, request, staged, manifest)
-    delete_manifest(request.project_id, fingerprint)
+    delete_manifest(request.project_id, fingerprint, host=client.host)
 
     invalidate_local_entry(request.project_id, task_id, request.project_name)
 

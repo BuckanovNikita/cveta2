@@ -155,7 +155,7 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
             client.api.attach_task_data = original  # type: ignore[method-assign]
 
         fingerprint = compute_fingerprint(names, [], ("person",))
-        stranded = load_manifest(project_id, fingerprint)
+        stranded = load_manifest(project_id, fingerprint, host=client.host)
         assert stranded is not None
         assert stranded.task_id is not None
 
@@ -165,8 +165,8 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
 
     assert outcome.images == len(names)
     # The manifest is the run's own record; CVAT is the judge of the rest.
-    assert load_manifest(project_id, fingerprint) is None
-    assert list_manifests(project_id) == []
+    assert load_manifest(project_id, fingerprint, host=client.host) is None
+    assert list_manifests(project_id, host=client.host) == []
 
     sdk_client = _make_sdk_client()
     try:

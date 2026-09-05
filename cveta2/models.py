@@ -192,6 +192,7 @@ class BBoxAnnotation(_ImageRecordBase):
     task_name: str
     job_stage: str = ""
     job_state: str = ""
+    task_completed: bool | None = None
     task_updated_date: str = ""
     created_by_username: str = ""
     frame_id: int
@@ -259,6 +260,7 @@ class ImageWithoutAnnotations(_ImageRecordBase):
     task_name: str
     job_stage: str = ""
     job_state: str = ""
+    task_completed: bool | None = None
     task_updated_date: str = ""
     frame_id: int
     split: Split | None = None
@@ -285,6 +287,7 @@ class DeletedImage(_ImageRecordBase):
     task_name: str
     job_stage: str = ""
     job_state: str = ""
+    task_completed: bool | None = None
     task_updated_date: str = ""
     frame_id: int
     subset: str = ""
@@ -316,6 +319,7 @@ class TaskAnnotations(ProjectAnnotations):
 
     task_id: int
     task_name: str
+    issues_complete: bool = True
 
     @staticmethod
     def merge(task_results: list[TaskAnnotations]) -> ProjectAnnotations:

@@ -52,7 +52,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
   - `context.py` - API context management
   - `mapping.py` - Data mapping utilities
   - `sdk_convert.py` - Opaque SDK objects → typed DTOs
-- **`cveta2/_clearml/`** - Optional ClearML dataset publishing (isolated layer)
+- **`cveta2/_clearml/`** - Optional ClearML dataset publishing (isolated layer). Its existing SDK boundary in `_dataset.py` translates `Exception` into `ClearmlPublishError`, preserving the cause. ClearML and its storage backends do not share one failure type; enumerating only known exceptions would let other publishing failures abort an otherwise successful fetch. Callers catch the domain exception and log the publishing failure. This broad translation is confined to this optional SDK boundary; it is not a pattern for application error handling.
 - **`cveta2/exceptions.py`** - `Cveta2Error` and its subclasses; every layer above raises these and the CLI turns them into a clean exit
 - **`cveta2/models.py`** - Pydantic data models (BBoxAnnotation with optional `confidence`, DeletedImage, etc.)
 - **`cveta2/config.py`** - Config loading (YAML + env vars + presets)
@@ -72,14 +72,14 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 
 1. **Fetch**: `cli`/`api.fetch` → `commands/fetch.py` (or `api.py`) → `services/fetch.py:fetch_project()` → `client.fetch_one_task()` per task → `_client/sdk_adapter.py` → CVAT API
    - Task selection scales with the request, not the project: `_client_ops/fetch.py:_select_tasks_for_fetch` retrieves each selector through `get_task` when all of them are numeric ids, and only walks the project task list otherwise — for a name selector, an id that turns out to name a task, a task belonging to another project, or an ignored id (all of which the listing path still owns, and all of which end in an error or a skip)
-  - Completed tasks are served from `task_cache.py` when an entry exists and its cached `task_updated_date` matches CVAT (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`). A task or project-label edit invalidates the rendered payload; a job moved back to annotation also makes it ineligible. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
+   - Completed tasks are served from `task_cache.py` when an entry exists and its cached `task_updated_date` matches CVAT (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`). Incomplete issue reads are not cached. A task or project-label edit invalidates the rendered payload; a job moved back to annotation also makes it ineligible. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
    - Annotations converted to `BBoxAnnotation` by `extractors.py`
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
 
 2. **Upload**: `commands/upload.py` (or `api.upload`) → `services/upload.py:upload_dataset()` → `client.create_upload_task()` + `client.upload_task_annotations()`
-   - A manifest is written to `~/.cache/cveta2/uploads/project_<id>/<fingerprint>.json` before CVAT is touched, and the task id recorded the instant it exists — `create_upload_task` splits the CVAT call in two (`create_task`, then `attach_task_data`) so there is a checkpoint between them. Removed on success.
-   - `--resume` reads the manifest for *which* task, then asks CVAT what that task actually holds: frame count decides reuse / recreate / abort, a non-zero shape count means the annotations already landed (`put_task_shapes` appends, so a second pass would duplicate them), and issues are diffed by `(frame, message)`. `set_deleted_frames` and `update_job` are idempotent and simply redone.
+   - A manifest is written to `~/.cache/cveta2/uploads/<host-hash>/project_<id>/<fingerprint>.json` before CVAT is touched, and the task id recorded the instant it exists — `create_upload_task` splits the CVAT call in two (`create_task`, then `attach_task_data`) so there is a checkpoint between them. Removed on success. Schema v2 records the normalized host; hostless legacy state cannot authorize a resume.
+   - `--resume` validates the manifest's server/project identity and the task's project ownership, then asks CVAT what that task actually holds: frame count decides reuse / recreate / abort, a non-zero shape count means the annotations already landed (`put_task_shapes` appends, so a second pass would duplicate them), and issues are matched individually by `(frame, initial message, bbox)` with coordinate tolerance. `set_deleted_frames` and `update_job` are idempotent and simply redone.
    - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
    - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels); `--labels all` selects every dataset label plus unannotated frames (a literal dataset label named `all` wins over the shortcut)
    - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues **attached to the row's bbox**; rows with issue text but no complete bbox are skipped with a warning (no full-frame issues)
@@ -91,7 +91,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
    - For each image, finds **latest task** by `task_id` (comparing annotations + deletions). Ids are monotone with task creation and never move; `task_updated_date` does — a project label edit rewrites it on every task at once
    - If latest task is deletion → image goes to `obsolete`, added to `deleted_images`
    - Otherwise: completed tasks → `dataset` (latest) or `obsolete` (stale), non-completed → `in_progress`
-   - **Completed** is read from `job_stage`/`job_state`, not from a task-level field: `completed_task_ids()` requires *every* row of the task — deletion records included — to sit on `acceptance`/`completed`, which is how CVAT itself derives a task's status from its jobs
+   - **Completed** is recorded as `task_completed`, computed from every job at `acceptance`/`completed`, including Ground Truth/replica jobs and jobs without exported frames. `job_stage`/`job_state` describe regular annotation jobs, preferring unfinished positions in overlaps. `completed_task_ids()` uses the explicit task result and falls back to per-row job columns for legacy CSVs.
    - Deletion records are concatenated **before** annotation records to win same-task ties; see [Deleted images handling](#deleted-images-handling)
 
 ## Project specs and organizations
@@ -119,10 +119,15 @@ local image cache mirrors the S3 key layout below the effective storage prefix
 (`sync_roots` overrides the prefix, `cache.projects.<name>.ignored_prefix`
 skips less of the hierarchy); see README.md for the user-facing description.
 Frame names are a supported-data contract: POSIX-relative to the configured
-storage root, with a basename unique across the project. Absolute names below
-that root are normalized to relative names; traversal and outside-root names
-are rejected. Duplicate basenames are intentionally not assigned a stable
-winner because CSV identity is basename-only.
+storage root. Distinct images must have unique basenames and unique stems
+(filenames without the final extension) across the project or dataset,
+including all directories and splits: neither `dir1/xxx.jpg` and
+`dir2/xxx.jpg` nor `xx.jpg` and `xx.png` are supported together. The same image
+may still appear in multiple tasks or annotation rows. CSV identity uses the
+basename, while YOLO label filenames use the stem; uniqueness is an input
+requirement, not a guarantee of automatic validation. Absolute names below
+the storage root are normalized to relative names; traversal and outside-root
+names are rejected.
 
 CVAT tracks are intentionally outside the extraction model. The SDK adapter
 warns with the task id and count whenever it ignores tracks; only standalone

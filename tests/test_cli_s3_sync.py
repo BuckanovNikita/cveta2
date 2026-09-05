@@ -7,7 +7,7 @@ section) is covered by ``tests/test_sync_root_override.py``.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -18,6 +18,7 @@ from cveta2.cli import CliApp
 from cveta2.image_downloader import DownloadStats
 from cveta2.models import ProjectInfo
 from tests.helpers import (
+    make_cs_info,
     mock_client_ctx,
     patch_cli_client,
     write_config_yaml,
@@ -126,3 +127,54 @@ def test_s3_sync_root_without_project_exits(
     app = CliApp()
     with pytest.raises(SystemExit, match="--root"):
         app.run(["s3-sync", "--root", "s3://bucket/prefix"])
+
+
+@pytest.mark.parametrize("spec", ["team/Dataset", "1", "dataset", "/Dataset"])
+@pytest.mark.parametrize("explicit_cache", [True, False])
+def test_s3_sync_uses_canonical_project_settings(
+    tmp_path: Path,
+    test_config: Path,
+    spec: str,
+    *,
+    explicit_cache: bool,
+) -> None:
+    from cveta2.client import CvatClient
+    from cveta2.config import CvatConfig
+    from tests.fixtures.fake_cvat_api import FakeCvatApi
+
+    write_config_yaml(
+        test_config,
+        cvat={"host": "http://localhost:8080", "username": "u", "password": "p"},
+        image_cache={"Dataset": str(tmp_path / "explicit")} if explicit_cache else {},
+        cache={
+            "images_root": str(tmp_path / "global"),
+            "projects": {"Dataset": {"ignored_prefix": "raw"}},
+        },
+        sync_roots={"Dataset": "s3://override/raw/data"},
+    )
+    fake = FakeCvatApi.from_tasks([], project_name="Dataset")
+    client = CvatClient(CvatConfig(), api=fake)
+    sync = MagicMock(
+        return_value=DownloadStats(downloaded=1, cached=0, failed=0, total=1)
+    )
+
+    with (
+        patch_cli_client(client),
+        patch.object(
+            client, "detect_project_cloud_storage", return_value=make_cs_info()
+        ),
+        patch.object(client, "sync_project_images", sync),
+    ):
+        CliApp().run(["s3-sync", "-p", spec])
+
+    args, kwargs = sync.call_args
+    assert args == (
+        1,
+        tmp_path / "explicit" if explicit_cache else tmp_path / "global" / "Dataset",
+    )
+    assert kwargs["ignored_prefix"] == "raw"
+    assert kwargs["project_cloud_storage"].bucket == "override"
+    assert kwargs["project_cloud_storage"].prefix == "raw/data"
+    assert fake.organization_calls == (
+        [spec.split("/", maxsplit=1)[0] or None] if "/" in spec else []
+    )

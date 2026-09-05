@@ -399,7 +399,7 @@ full = []
 # where the counter is provably still zero at that point.
 "cveta2.image_downloader.x__download_pending__mutmut_22" = "stats.downloaded = ok; _download_pending is the only writer of `downloaded` and runs once per stats object"
 "cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_2" = "stats.failed = len(pending); the no-storage branch returns before any transfer, so failed is still 0"
-"cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_33" = "stats.failed = len(missing); the misses are counted before any transfer runs, so failed is still 0"
+"cveta2.image_downloader.xǁImageDownloaderǁ_download_all__mutmut_37" = "stats.failed = len(missing); the misses are counted before any transfer runs, so failed is still 0"
 "cveta2.image_downloader.x_parse_cloud_storage__mutmut_11" = "or \"XXXX\"; parse_qs of a string with no \"=\" yields {} exactly as for \"\""
 
 # Bar captions, second half. The `desc=`/`unit=` line patterns kill the
@@ -452,7 +452,6 @@ full = []
 "cveta2.image_downloader.x__local_name_from_key__mutmut_2" = "strip_key_prefix never returns leading whitespace or slash, so lstrip is a no-op for both arguments"
 "cveta2.image_downloader.x__local_name_from_key__mutmut_3" = "strip_key_prefix never returns a trailing slash for an object key, so this remains a no-op"
 "cveta2.image_downloader.x__local_name_from_key__mutmut_8" = "strip_key_prefix never returns a leading slash, and the replacement character set still contains slash"
-"cveta2.image_downloader.x__local_name_from_key__mutmut_10" = "original=None changes only the validation error prose"
 "cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_2" = "the invented prefix is added to and then stripped from relative keys; rooted keys cannot occur without storage metadata"
 "cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_13" = "original=None changes only the validation error prose"
 "cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_19" = "original=None changes only the confinement error prose"
@@ -500,7 +499,7 @@ full = []
 # bullet list in the mismatch report.
 "cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_26" = "already=None; the value only decides whether one info line is emitted"
 "cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_27" = "already = len+len; still truthy, still only reaches that info line"
-"cveta2.services.upload.x__resume_manifest__mutmut_13" = "join separator; formats the bullet list in an error message and nothing else"
+"cveta2.services.upload.x__resume_manifest__mutmut_18" = "join separator; formats the bullet list in an error message and nothing else"
 
 # upload_manifest: the describe() placeholder stands in for a task id that
 # does not exist yet — prose, and the test that matters asserts a bare "None"
@@ -509,7 +508,7 @@ full = []
 
 # fetch_one_task: the degrade path's [] and None are normalized identically by
 # _build_frame_issues(issues or []); the branch itself is tested.
-"cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_20" = "issues=None instead of []; _build_frame_issues normalizes it with `issues or []`"
+"cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_22" = "issues=None instead of []; _build_frame_issues normalizes it with `issues or []`"
 
 # fetch_selected_tasks: prune_cache is read as `cache is not None and
 # prune_cache`, so None and False take the same branch.
@@ -527,21 +526,40 @@ full = []
 "cveta2.services.fetch.x__fetch_core__mutmut_9" = "project_name=None; the only reader is the 5xx hint's `if ctx.project_name` fallback"
 "cveta2.services.fetch.x__fetch_core__mutmut_15" = "drops project_name=; same single reader as above"
 
-# The CSV reader's only option is `encoding`, which pandas' io.common.get_handle
-# already resolves as `encoding or "utf-8"` - so dropping the whole mapping is
-# the one mutation the round-trip tests cannot see. Every *writer* mapping is
-# killable (to_csv defaults index=True; yaml.safe_dump without encoding= returns
-# str, which write_bytes rejects) and needs no entry here.
-"cveta2.services.output.x_read_dataset_csv__mutmut_7" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
-"cveta2.services.upload.x_read_exclude_names__mutmut_9" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
-"cveta2.services.whats_new.x__known_task_ids__mutmut_10" = "drops **CSV_READ_OPTIONS; pandas' get_handle falls back to the same utf-8"
+# The baseline consumes numeric task IDs, boolean completion and fixed job
+# stage/state values. CSV text options do not change these values for valid
+# generated CSVs; pandas also defaults to UTF-8. The full dataset and image
+# exclusion readers DO need these options to preserve textual identifiers.
+"cveta2.services.whats_new.x__known_task_ids__mutmut_13" = "drops CSV_READ_OPTIONS; numeric task IDs, completion booleans and fixed job statuses are parsed identically by pandas defaults"
 
 # task_to_records: `ctx.frame_issues.get(fid, ("", ""))[N]` reads one fixed
 # element of the default tuple, so mutating the *other* element cannot be
 # observed. The element each expression does read is pinned by
 # TestTaskToRecords::test_unannotated_frames_default_to_blank_issue_fields.
-"cveta2._client.assembly.x_task_to_records__mutmut_89" = "issue_text takes [0]; the mutation changes the unread [1] of the default"
-"cveta2._client.assembly.x_task_to_records__mutmut_95" = "issue_state takes [1]; the mutation changes the unread [0] of the default"
+"cveta2._client.assembly.x_task_to_records__mutmut_93" = "issue_text takes [0]; the mutation changes the unread [1] of the default"
+"cveta2._client.assembly.x_task_to_records__mutmut_99" = "issue_state takes [1]; the mutation changes the unread [0] of the default"
+
+# Resume compares coordinate sequences only after verifying equal lengths.
+"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_34" = "zip inputs have equal lengths from the preceding guard; disabling strict cannot change output"
+"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_37" = "zip inputs have equal lengths from the preceding guard; disabling strict cannot change output"
+"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_38" = "zip inputs have equal lengths from the preceding guard; disabling strict cannot change output"
+
+# Recovery errors include task/project IDs; the following fixed explanatory
+# sentence is presentation only, and tests pin rejection without writes.
+"cveta2.services.upload.x__ensure_task__mutmut_26" = "changes only explanatory sentence decoration; project IDs, rejection and no-write behavior remain unchanged"
+"cveta2.services.upload.x__ensure_task__mutmut_27" = "changes only explanatory sentence capitalization; project IDs, rejection and no-write behavior remain unchanged"
+"cveta2.services.upload.x__ensure_task__mutmut_28" = "changes only explanatory sentence capitalization; project IDs, rejection and no-write behavior remain unchanged"
+
+# Pandas iteration keeps the same unpacked values and tuple identity under
+# these representation changes. Adding an index DOES change behavior.
+"cveta2.services.convert.yolo.x__prune_yolo_output__mutmut_3" = "itertuples index=None and index=False both omit the DataFrame index"
+"cveta2.services.convert.yolo.x__prune_yolo_output__mutmut_5" = "default namedtuples unpack into the same image_name and split values as name=None tuples"
+"cveta2.services.convert.yolo.x_convert_to_yolo__mutmut_73" = "itertuples index=None and index=False both omit the DataFrame index"
+"cveta2.services.convert.yolo.x_convert_to_yolo__mutmut_75" = "namedtuple identities retain plain-tuple equality and hashing, so box-image membership is unchanged"
+
+# Known task membership now determines whats-new; the old cutoff argument is
+# retained by CvatClient for compatibility and read only by a trace message.
+"cveta2.api.x_whats_new__mutmut_21" = "cutoff=None affects only the client's trace; task membership and returned baseline cutoff are unchanged"
 
 # _latest_row_per_image: pandas' multi-key sort_values is stable on its own, so
 # _row_order only makes the intent explicit; keep="first" is the default.

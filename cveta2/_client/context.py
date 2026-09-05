@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from cveta2.models import COMPLETED_JOB_STAGE, COMPLETED_JOB_STATE
+
 if TYPE_CHECKING:
     from cveta2._client.dtos import RawDataMeta, RawFrame, RawIssue, RawJob
     from cveta2.models import TaskInfo
@@ -39,15 +41,24 @@ def _build_frame_issues(issues: list[RawIssue]) -> dict[int, tuple[str, str]]:
 def _build_frame_jobs(jobs: list[RawJob]) -> dict[int, tuple[str, str]]:
     """Map every frame covered by a job to that job's ``(stage, state)``.
 
-    A frame belongs to exactly one job, so the review position CVAT
-    records per job is the one every record of that frame carries.
-    Frames no job covers are absent and read as empty.
+    Ground-truth/replica jobs do not replace regular annotation-job facts.
+    Overlapping regular jobs prefer an unfinished position, with job id
+    breaking ties deterministically. Completion of the entire task is
+    recorded separately, including jobs without exported frames.
     """
-    return {
-        frame: (job.stage, job.state)
-        for job in jobs
-        for frame in range(job.start_frame, job.stop_frame + 1)
-    }
+    positions: dict[int, tuple[str, str]] = {}
+    for job in sorted(jobs, key=lambda item: item.id):
+        if job.type != "annotation":
+            continue
+        position = (job.stage, job.state)
+        for frame in range(job.start_frame, job.stop_frame + 1):
+            previous = positions.get(frame)
+            if previous is None or previous == (
+                COMPLETED_JOB_STAGE,
+                COMPLETED_JOB_STATE,
+            ):
+                positions[frame] = position
+    return positions
 
 
 @dataclass
@@ -61,6 +72,7 @@ class _TaskContext:
     task_name: str
     task_updated_date: str
     subset: str
+    task_completed: bool | None = None
     frame_issues: dict[int, tuple[str, str]] = field(default_factory=dict)
     frame_jobs: dict[int, tuple[str, str]] = field(default_factory=dict)
 
@@ -87,6 +99,14 @@ class _TaskContext:
             task_name=task.name,
             task_updated_date=task.updated_date,
             subset=task.subset,
+            task_completed=(
+                all(
+                    (job.stage, job.state) == (COMPLETED_JOB_STAGE, COMPLETED_JOB_STATE)
+                    for job in jobs
+                )
+                if jobs is not None and jobs
+                else None
+            ),
             frame_issues=_build_frame_issues(issues or []),
             frame_jobs=_build_frame_jobs(jobs or []),
         )

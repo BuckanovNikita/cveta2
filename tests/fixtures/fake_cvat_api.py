@@ -311,6 +311,7 @@ class FakeCvatApi:
                 TaskInfo(
                     id=task_id,
                     name=spec.name,
+                    project_id=spec.project_id,
                     status="annotation",
                     subset="",
                     updated_date="",
@@ -374,6 +375,7 @@ class FakeCvatApi:
                     frame=issue.frame,
                     resolved=False,
                     comments=[issue.message],
+                    position=list(issue.position),
                 ),
             ]
 

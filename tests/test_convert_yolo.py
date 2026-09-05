@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 import pytest
@@ -33,6 +34,173 @@ COCO8_ROOT = Path(__file__).parent / "fixtures" / "data" / "coco8"
 COCO8_YAML = Path(__file__).parent / "fixtures" / "data" / "coco8.yaml"
 
 _TWO_BOXES = "0 0.5 0.5 0.2 0.2\n1 0.25 0.25 0.1 0.1\n"
+
+
+class TestConversionRegressions:
+    """Exercise filesystem and CSV contracts across complete conversions."""
+
+    def test_reexport_reuses_current_image_when_source_is_unavailable(
+        self, tmp_path: Path
+    ) -> None:
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        csv_path = write_convert_csv(
+            tmp_path, [csv_row("a.jpg", label="cat", split="train")]
+        )
+        output = tmp_path / "yolo"
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+        (images / "a.jpg").unlink()
+
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+
+        assert (output / "images/train/a.jpg").is_file()
+
+    def test_box_row_takes_precedence_over_negative_row(self, tmp_path: Path) -> None:
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        csv_path = write_convert_csv(
+            tmp_path,
+            [
+                csv_row("a.jpg", label="cat", split="train"),
+                csv_row("a.jpg", shape="none", split="train"),
+            ],
+        )
+        output = tmp_path / "yolo"
+
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+
+        assert len(_parse_label_file(output / "labels/train/a.txt")) == 1
+
+    @pytest.mark.parametrize("source", ["directory", "image", "list", "link-dir"])
+    def test_symlink_images_keep_dataset_labels(
+        self, tmp_path: Path, source: str
+    ) -> None:
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        csv_path = write_convert_csv(
+            tmp_path, [csv_row("a.jpg", label="cat", split="train")]
+        )
+        output = tmp_path / "yolo"
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="symlink")
+        config_path = output / "dataset.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        if source == "image":
+            config["train"] = "images/train/a.jpg"
+        elif source == "list":
+            (output / "train.txt").write_text("./images/train/a.jpg\n")
+            config["train"] = "train.txt"
+        elif source == "link-dir":
+            (output / "images/train/a.jpg").unlink()
+            (output / "images/train").rmdir()
+            (output / "images/train").symlink_to(images, target_is_directory=True)
+        config_path.write_text(yaml.safe_dump(config))
+
+        imported = tmp_path / "imported.csv"
+        convert_from_yolo(output, imported)
+
+        result = pd.read_csv(imported)
+        assert result["image_name"].tolist() == ["a.jpg"]
+        assert result["instance_shape"].tolist() == ["box"]
+        assert result["instance_label"].tolist() == ["cat"]
+        assert result.loc[0, "bbox_x_tl"] == pytest.approx(10.0)
+
+    @pytest.mark.parametrize("link_mode", ["copy", "symlink"])
+    def test_reexport_removes_old_labels_and_images(
+        self, tmp_path: Path, link_mode: Literal["copy", "symlink"]
+    ) -> None:
+        images = tmp_path / "source"
+        for name in ("negative.jpg", "removed.jpg", "moved.jpg", "new.jpg"):
+            make_image(images / name)
+        csv_path = write_convert_csv(
+            tmp_path,
+            [
+                csv_row(name, label="cat", split="train")
+                for name in ("negative.jpg", "removed.jpg", "moved.jpg")
+            ],
+        )
+        output = tmp_path / "yolo"
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode=link_mode)
+        (images / "removed.jpg").unlink()
+        note = output / "images/train/README.md"
+        note.write_text("Keep this note")
+        write_convert_csv(
+            tmp_path,
+            [
+                csv_row("negative.jpg", shape="none", split="train"),
+                csv_row("moved.jpg", label="dog", split="val"),
+                csv_row("new.jpg", label="dog", split="train"),
+            ],
+        )
+
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode=link_mode)
+
+        assert (output / "labels/train/negative.txt").read_text() == ""
+        assert {
+            p.relative_to(output).as_posix() for p in output.glob("images/*/*.jpg")
+        } == {
+            "images/train/negative.jpg",
+            "images/val/moved.jpg",
+            "images/train/new.jpg",
+        }
+        assert {
+            p.relative_to(output).as_posix() for p in output.glob("labels/*/*.txt")
+        } == {
+            "labels/train/negative.txt",
+            "labels/val/moved.txt",
+            "labels/train/new.txt",
+        }
+        assert (images / "moved.jpg").is_file()
+        assert note.read_text() == "Keep this note"
+        imported = tmp_path / "imported.csv"
+        convert_from_yolo(output, imported)
+        result = pd.read_csv(imported).set_index("image_name")
+        assert result.loc["negative.jpg", "instance_shape"] == "none"
+        assert result.loc["moved.jpg", "split"] == "val"
+        assert result.loc["new.jpg", "instance_label"] == "dog"
+
+    @pytest.mark.parametrize("label", ["001", "NA"])
+    def test_text_labels_survive_export(self, tmp_path: Path, label: str) -> None:
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        csv_path = write_convert_csv(
+            tmp_path, [csv_row("a.jpg", label=label, split="train")]
+        )
+        output = tmp_path / "yolo"
+
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+
+        assert yaml.safe_load((output / "dataset.yaml").read_text())["names"] == {
+            0: label
+        }
+        imported = tmp_path / "imported.csv"
+        convert_from_yolo(output, imported)
+        assert pd.read_csv(imported, dtype=str, keep_default_na=False)[
+            "instance_label"
+        ].tolist() == [label]
+
+    @pytest.mark.parametrize("linked_directory", ["images", "images/train"])
+    def test_reexport_never_prunes_source_directory_symlinks(
+        self, tmp_path: Path, linked_directory: str
+    ) -> None:
+        images = tmp_path / "source"
+        nested = images / "train" if linked_directory == "images" else images
+        make_image(nested / "a.jpg")
+        make_image(nested / "unselected.jpg")
+        csv_path = write_convert_csv(
+            tmp_path, [csv_row("a.jpg", label="cat", split="train")]
+        )
+        output = tmp_path / "yolo"
+        link = output / linked_directory
+        link.parent.mkdir(parents=True)
+        link.symlink_to(images, target_is_directory=True)
+        stale_label = output / "labels/train/unselected.txt"
+        stale_label.parent.mkdir(parents=True)
+        stale_label.write_text(_TWO_BOXES)
+
+        convert_to_yolo(csv_path, output, image_dirs=[nested], link_mode="copy")
+
+        assert (nested / "unselected.jpg").is_file()
+        assert not stale_label.exists()
 
 
 class TestParseLabelFile:

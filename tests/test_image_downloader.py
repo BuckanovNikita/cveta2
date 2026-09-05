@@ -839,7 +839,7 @@ def test_download_key_lookup_prefers_frame_path_over_image_name(
     assert stats.downloaded == 2
     assert stats.failed == 0
     assert (target / "2026-01" / "one.jpg").read_bytes() == b"nested-one"
-    assert (target / "stale" / "two.jpg").read_bytes() == b"wanted-two"
+    assert (target / "2026-02" / "two.jpg").read_bytes() == b"wanted-two"
 
 
 def test_s3_syncer_scopes_to_bucket_and_reports_failures(
@@ -1092,7 +1092,7 @@ def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
     assert stats.failed == 0
     assert fake_s3.list_requests != []
     assert (target / "flat.jpg").read_bytes() == b"data-flat"
-    assert (target / "nested.jpg").read_bytes() == b"data-nested"
+    assert (target / "2026-02" / "nested.jpg").read_bytes() == b"data-nested"
 
 
 def test_a_denied_head_is_raised_rather_than_read_as_absent(
@@ -1204,3 +1204,68 @@ def test_a_batch_past_the_probe_limit_lists_instead(
     assert stats.downloaded == 2
     assert fake_s3.head_calls == []
     assert fake_s3.list_requests != []
+
+
+def test_nested_cache_hits_need_no_s3_requests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Storage-aware cache lookup must work while S3 is unavailable."""
+    target = tmp_path / "images"
+    cached = target / "project" / "nested" / "a.jpg"
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(b"cached")
+    storage = make_cs_info(bucket="test-bucket", prefix="data/project")
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, 0, "nested/a.jpg")], deleted_images=[]
+    )
+    fake_s3 = FakeS3Client({"test-bucket/data/project/nested/a.jpg": b"remote"})
+    _patch_boto(monkeypatch, fake_s3)
+
+    stats = ImageDownloader(target, ignored_prefix="data").download(
+        annotations, project_cloud_storage=storage
+    )
+
+    assert stats.cached == stats.total == 1
+    assert stats.downloaded == stats.failed == 0
+    assert not fake_s3.head_calls
+    assert not fake_s3.list_requests
+    assert not fake_s3.get_calls
+    assert cached.read_bytes() == b"cached"
+
+
+def test_fallback_cache_hits_accumulate_and_do_not_stop_later_images(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mixed batch counts both cache paths, downloads, and missing images."""
+    target = tmp_path / "images"
+    (target / "month").mkdir(parents=True)
+    (target / "direct.jpg").write_bytes(b"direct-cache")
+    (target / "month" / "a.jpg").write_bytes(b"cache-a")
+    (target / "month" / "b.jpg").write_bytes(b"cache-b")
+    names = ["direct.jpg", "a.jpg", "b.jpg", "new.jpg", "missing.jpg"]
+    annotations = ProjectAnnotations(
+        annotations=[_ann(10, index, name) for index, name in enumerate(names)],
+        deleted_images=[],
+    )
+    fake_s3 = FakeS3Client(
+        {
+            "test-bucket/images/month/a.jpg": b"remote-a",
+            "test-bucket/images/month/b.jpg": b"remote-b",
+            "test-bucket/images/new.jpg": b"new-image",
+        }
+    )
+    _patch_boto(monkeypatch, fake_s3)
+
+    stats = ImageDownloader(target).download(
+        annotations, project_cloud_storage=_project_cs()
+    )
+
+    assert stats.total == 5
+    assert stats.cached == 3
+    assert stats.downloaded == stats.failed == 1
+    assert fake_s3.get_calls == ["test-bucket/images/new.jpg"]
+    assert (target / "new.jpg").read_bytes() == b"new-image"
+    assert (target / "month" / "a.jpg").read_bytes() == b"cache-a"
+    assert (target / "month" / "b.jpg").read_bytes() == b"cache-b"

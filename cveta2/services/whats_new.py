@@ -38,10 +38,9 @@ class WhatsNewBaseline:
 def compute_baseline(df: pd.DataFrame, path: Path) -> WhatsNewBaseline:
     """Build the comparison baseline from a fetched dataset CSV.
 
-    ``known_task_ids`` spans *df* plus the finished-for-good CSVs ``fetch``
-    wrote next to *path* (:data:`SIBLING_CSV_NAMES`), so a task that was
-    still in progress at fetch time can be told apart from one the dataset
-    already accounts for.
+    ``known_task_ids`` spans completed tasks in *df* and the sibling CSVs
+    written next to *path*. Any observed unfinished rows keep that task
+    eligible for reporting when it subsequently completes.
     """
     return WhatsNewBaseline(
         cutoff=compute_cutoff(df, path),
@@ -81,6 +80,7 @@ def _known_task_ids(df: pd.DataFrame, path: Path) -> set[int]:
     which is the harmless direction to be wrong in.
     """
     known = _task_ids(df)
+    unfinished = known - completed_task_ids(df)
     for name in SIBLING_CSV_NAMES:
         sibling = path.parent / name
         if not sibling.is_file():
@@ -91,5 +91,8 @@ def _known_task_ids(df: pd.DataFrame, path: Path) -> set[int]:
             logger.info(f"{sibling} не прочитан ({e}) — его задачи считаются новыми")
             continue
         if "task_id" in sibling_df.columns:
-            known |= _task_ids(sibling_df)
-    return known
+            sibling_ids = _task_ids(sibling_df)
+            known |= sibling_ids
+            if REQUIRED_COLUMNS.issubset(sibling_df.columns):
+                unfinished |= sibling_ids - completed_task_ids(sibling_df)
+    return known - unfinished

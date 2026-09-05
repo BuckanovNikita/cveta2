@@ -29,6 +29,20 @@ def _run_to_coco(tmp_path: Path, csv_path: Path, img_dir: Path) -> Path:
 class TestToCoco:
     """Tests for --to-coco CSV to COCO conversion."""
 
+    @pytest.mark.parametrize("label", ["001", "NA"])
+    def test_text_labels_survive_export(self, tmp_path: Path, label: str) -> None:
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        csv_path = write_convert_csv(
+            tmp_path, [csv_row("a.jpg", label=label, split="train")]
+        )
+
+        output = _run_to_coco(tmp_path, csv_path, images)
+
+        data = json.loads((output / "train/_annotations.coco.json").read_text())
+        assert data["categories"] == [{"id": 1, "name": label, "supercategory": "none"}]
+        assert data["annotations"][0]["category_id"] == 1
+
     def test_basic_structure(self, tmp_path: Path) -> None:
         """Check directory layout, JSON schema, bbox/area/category values."""
         img_dir = tmp_path / "images"

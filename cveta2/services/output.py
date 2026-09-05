@@ -8,11 +8,16 @@ import pandas as pd
 from loguru import logger
 
 from cveta2.exceptions import Cveta2Error
+from cveta2.image_downloader import (
+    _canonical_frame_key,
+    _confined_destination,
+    _local_name_from_key,
+)
 from cveta2.models import CSV_COLUMNS
-from cveta2.s3_utils import build_s3_key, strip_key_prefix
+from cveta2.s3_utils import build_s3_key
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Hashable, Sequence
     from pathlib import Path
 
     from cveta2.dataset_partition import PartitionResult
@@ -27,6 +32,9 @@ class _CsvReadOptions(TypedDict):
     """Reader knobs shared by every CSV this project reads."""
 
     encoding: str
+    dtype: dict[Hashable, type[str]]
+    keep_default_na: bool
+    na_values: list[str]
 
 
 class _CsvWriteOptions(TypedDict):
@@ -36,7 +44,32 @@ class _CsvWriteOptions(TypedDict):
     encoding: str
 
 
-CSV_READ_OPTIONS: _CsvReadOptions = {"encoding": _UTF8}
+_CSV_TEXT_COLUMNS = (
+    "image_name",
+    "instance_shape",
+    "instance_label",
+    "task_name",
+    "job_stage",
+    "job_state",
+    "task_updated_date",
+    "created_by_username",
+    "split",
+    "subset",
+    "source",
+    "issue_text",
+    "issue_state",
+    "s3_image_path",
+    "image_path",
+    "attributes",
+)
+"""Textual schema fields must retain leading zeros and literal names like NA."""
+
+CSV_READ_OPTIONS: _CsvReadOptions = {
+    "encoding": _UTF8,
+    "dtype": dict.fromkeys(_CSV_TEXT_COLUMNS, str),
+    "keep_default_na": False,
+    "na_values": [""],
+}
 CSV_WRITE_OPTIONS: _CsvWriteOptions = {"index": False, "encoding": _UTF8}
 
 
@@ -108,15 +141,15 @@ def populate_record_paths(
     resolved: dict[Path, str | None] = {}
     for record in (*result.annotations, *result.deleted_images):
         frame_ref = record.frame_path or record.image_name
+        prefix = cs_info.prefix if cs_info is not None else ""
+        key = record.s3_image_path or _canonical_frame_key(prefix, frame_ref)
         if cs_info is not None:
-            record.s3_image_path = build_s3_key(cs_info.prefix, frame_ref)
+            record.s3_image_path = key
         if images_dir is not None:
-            local_rel = frame_ref
-            if ignored_prefix and cs_info is not None:
-                local_rel = strip_key_prefix(
-                    build_s3_key(cs_info.prefix, frame_ref), ignored_prefix
-                )
-            local = images_dir / local_rel
+            local_rel = _local_name_from_key(
+                key, ignored_prefix or prefix, original=frame_ref
+            )
+            local = _confined_destination(images_dir, local_rel, original=frame_ref)
             if local not in resolved:
                 resolved[local] = str(local.resolve()) if local.exists() else None
             found = resolved[local]

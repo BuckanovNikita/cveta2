@@ -2,6 +2,10 @@
 
 cveta2 stores bbox annotations in CSV files. The record type is determined by the `instance_shape` field: `"box"` (annotation), `"none"` (image without annotations) or `"deleted"` (deleted image).
 
+Text columns preserve their literal values when read: labels such as `"001"`
+and `"NA"` remain strings. An empty CSV cell represents a missing value;
+numeric and boolean columns retain their inferred types.
+
 Only CVAT shapes of type `rectangle` become `"box"` records. Every other CVAT
 shape type (`polygon`, `polyline`, `points`, …) is skipped with a warning, so a
 segmentation project produces no annotation rows at all.
@@ -51,6 +55,7 @@ segmentation project produces no annotation rows at all.
 | `task_name` | `str` | Task name |
 | `job_stage` | `str` | Review stage of the job owning the frame (`annotation`, `validation`, `acceptance`) |
 | `job_state` | `str` | Review state of that job (`new`, `in progress`, `completed`, `rejected`) |
+| `task_completed` | `bool \| None` | Whether every task job is finished; absent/null in legacy CSV |
 | `task_updated_date` | `str` | Date/time of the task's last update. Informational only — nothing orders on it |
 | `created_by_username` | `str` | Username of the annotation's author |
 | `frame_id` | `int` | Frame index within the task |
@@ -77,13 +82,19 @@ CVAT tracks review progress per **job**, not per task: `stage` moves
 `new` → `in progress` → `completed` (or `rejected`). A task is split into jobs
 by frame range, so both columns describe the job that owns *that row's frame* —
 two rows of the same task can differ when its jobs are at different points.
-Both are `""` for a frame no job covers.
+Both are `""` for a frame no regular annotation job covers. Ground Truth and
+replica jobs do not overwrite these columns. Overlapping regular jobs prefer
+an unfinished position, then the lowest job id to make ties deterministic.
 
 **What counts as completed.** CVAT reads a job as finished when its stage is
 `acceptance` *and* its state is `completed`, and a task as finished when none of
 its jobs is left at annotation or validation. `fetch` applies the same rule: a
-task reaches `dataset.csv` only when every one of its rows — including the rows
-of frames deleted from it, which live in `deleted.csv` — carries that pair.
+task reaches `dataset.csv` only when every job carries that pair. The
+`task_completed` column preserves this result, including overlapping Ground
+Truth jobs and jobs with no exported frames. An explicit false value excludes
+the task even when its exported frames show completed jobs. For older CSVs
+where the column is absent or null, completion falls back to the per-row job
+columns, including deletion rows.
 Anything else lands in `in_progress.csv`. `cveta2 task status --stage acceptance
 --state completed` sets the pair on every job of a task.
 
@@ -97,9 +108,14 @@ project-wide label edit invalidates the entry and fetches it again. This favors
 correct rendered labels over retaining the whole project's cache after a label
 change. `--no-cache` and `--force` remain available to bypass cache reads.
 
-CVAT frame names are expected to be relative POSIX paths whose basenames are
-unique within a project. CSV keeps only the basename in `image_name`; duplicate
-basenames therefore have undefined identity and selection behavior.
+CVAT frame names are expected to be relative POSIX paths. Distinct images must
+have unique basenames and unique stems (filenames without the final extension)
+within a project or dataset, across all directories and splits. Neither two
+different images named `xxx.jpg` (even in different directories) nor the pair
+`xx.jpg` / `xx.png` is allowed. Repeated rows or tasks for the same image are
+allowed. CSV keeps the basename in `image_name`; YOLO label filenames use the
+stem. This is an input requirement; cveta2 does not guarantee automatic
+detection of naming collisions.
 
 ### Issues (`issue_text` / `issue_state`)
 
@@ -133,6 +149,7 @@ Images without bbox annotations. They are still included in the CSV with empty b
 | `task_name` | `str` | Task name |
 | `job_stage` | `str` | Review stage of the job owning the frame |
 | `job_state` | `str` | Review state of that job |
+| `task_completed` | `bool \| None` | Whether every task job is finished; absent/null in legacy CSV |
 | `task_updated_date` | `str` | Date/time of the task's last update. Informational only — nothing orders on it |
 | `frame_id` | `int` | Frame index within the task |
 | `split` | `"train" \| "val" \| "test" \| None` | Dataset split |
@@ -156,6 +173,7 @@ Record of a deleted image. Written to `deleted.csv` with `instance_shape="delete
 | `task_name` | `str` | Task name |
 | `job_stage` | `str` | Review stage of the job owning the frame |
 | `job_state` | `str` | Review state of that job |
+| `task_completed` | `bool \| None` | Whether every task job is finished; absent/null in legacy CSV |
 | `task_updated_date` | `str` | Task update date. Informational only — nothing orders on it |
 | `frame_id` | `int` | Frame index |
 | `subset` | `str` | Subset from CVAT |

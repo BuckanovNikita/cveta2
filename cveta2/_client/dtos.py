@@ -69,6 +69,7 @@ class RawIssue:
     frame: int
     resolved: bool
     comments: list[str]
+    position: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +85,7 @@ class RawJob:
     stop_frame: int
     stage: str = ""
     state: str = ""
+    type: str = "annotation"
 
 
 @dataclass(frozen=True, slots=True)

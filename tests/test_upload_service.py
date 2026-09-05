@@ -43,7 +43,7 @@ from tests.helpers import client_with_api, make_cs_info
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from cveta2._client.dtos import RawDataMeta
+    from cveta2._client.dtos import NewIssue, RawDataMeta
     from cveta2.client import CvatClient
     from cveta2.image_downloader import CloudStorageInfo
 
@@ -611,6 +611,7 @@ def _seed_manifest_for(
         cs_info=cs_info,
         name_to_server_file=mapping,
         task_image_names=[build_s3_key(cs_info.prefix, mapping[n]) for n in names],
+        host=client.host,
     )
     manifest.task_id = task_id
     save_manifest(manifest)
@@ -644,6 +645,46 @@ class TestResume:
     track of it is the failure being recovered from.
     """
 
+    def test_a_manifest_from_another_host_cannot_delete_a_task(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        first = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        second = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        second._cfg = second._cfg.model_copy(update={"host": "http://other-cvat"})
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+        with _dies_attaching_frames(first), pytest.raises(_InterruptedRunError):
+            upload_dataset(first, make_request(image_names=["a.jpg"]))
+        unrelated_id = second.create_upload_task(PROJECT_ID, "unrelated", [], 1)
+
+        with pytest.raises(Cveta2Error):
+            upload_dataset(second, _resume_request(["a.jpg"]))
+
+        assert second.get_task(unrelated_id).name == "unrelated"
+        assert _writes_of(second).deleted_tasks == []
+        assert _writes_of(second).shapes == {}
+        assert len(_writes_of(second).created_tasks) == 1
+        assert len(list_manifests(PROJECT_ID, host=first.host)) == 1
+
+    @pytest.mark.parametrize("frames", [[], ["a.jpg"]])
+    def test_a_task_in_another_project_is_never_resumed_or_deleted(
+        self, monkeypatch: pytest.MonkeyPatch, frames: list[str]
+    ) -> None:
+        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+        task_id = client.create_upload_task(999, "unrelated", frames, 1)
+        _seed_manifest_for(client, make_request(image_names=["a.jpg"]), task_id)
+
+        with pytest.raises(Cveta2Error) as caught:
+            upload_dataset(client, _resume_request(["a.jpg"]))
+
+        assert "999" in str(caught.value)
+        assert str(PROJECT_ID) in str(caught.value)
+        assert client.get_task(task_id).project_id == 999
+        assert _writes_of(client).deleted_tasks == []
+        assert _writes_of(client).shapes == {}
+        assert len(_writes_of(client).created_tasks) == 1
+        assert len(list_manifests(PROJECT_ID, host=client.host)) == 1
+
     def test_a_fresh_upload_leaves_no_manifest_behind(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -653,7 +694,7 @@ class TestResume:
 
         upload_dataset(client, make_request(image_names=["a.jpg"]))
 
-        assert list_manifests(PROJECT_ID) == []
+        assert list_manifests(PROJECT_ID, host=client.host) == []
 
     def test_the_task_id_is_recorded_before_the_frames_are_attached(
         self, monkeypatch: pytest.MonkeyPatch
@@ -669,7 +710,7 @@ class TestResume:
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=["a.jpg"]))
 
-        pending = list_manifests(PROJECT_ID)
+        pending = list_manifests(PROJECT_ID, host=client.host)
         assert len(pending) == 1
         assert pending[0].task_id is not None
 
@@ -687,14 +728,14 @@ class TestResume:
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
-        stranded = list_manifests(PROJECT_ID)[0].task_id
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
         outcome = upload_dataset(client, _resume_request(names))
 
         assert _writes_of(client).deleted_tasks == [stranded]
         assert len(_writes_of(client).created_tasks) == 2
         assert outcome.images == len(names)
-        assert list_manifests(PROJECT_ID) == []
+        assert list_manifests(PROJECT_ID, host=client.host) == []
 
     def test_resume_keeps_a_task_whose_frames_did_attach(
         self, monkeypatch: pytest.MonkeyPatch
@@ -745,7 +786,7 @@ class TestResume:
 
         with _dies_uploading_annotations(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
-        stranded = list_manifests(PROJECT_ID)[0].task_id
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
         outcome = upload_dataset(client, _resume_request(names))
 
@@ -821,7 +862,7 @@ class TestResume:
             upload_dataset(
                 client, make_request(image_names=names, search_dirs=[image_dir])
             )
-        pinned = list_manifests(PROJECT_ID)[0]
+        pinned = list_manifests(PROJECT_ID, host=client.host)[0]
 
         # The clock has moved on, and the bucket lost what the first run put
         # there, so a recomputed mapping would send every image somewhere new.
@@ -855,7 +896,7 @@ class TestManifestLifecycle:
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
-        stranded = list_manifests(PROJECT_ID)[0].task_id
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
         upload_dataset(client, make_request(image_names=names))
 
@@ -950,10 +991,47 @@ class TestS3FailureAbortsBeforeTaskCreation:
         assert "a.jpg" not in str(caught.value)
         assert s3.uploaded_keys == [current_month_key("a.jpg")]
         assert _writes_of(client).created_tasks == []
-        assert list_manifests(PROJECT_ID) == []
+        assert list_manifests(PROJECT_ID, host=client.host) == []
 
 
 class TestResumeWithIssues:
+    def test_partial_same_text_issues_resume_each_bbox(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+        rows = [
+            annotation_row(
+                "a.jpg", issue_state="new", issue_text="проверь", bbox_x_tl=x
+            )
+            for x in (1.0, 2.0)
+        ]
+        original = client.api.create_issue
+        calls = 0
+
+        def interrupt_second(issue: NewIssue) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise CvatApiError("interrupted")
+            original(issue)
+
+        with monkeypatch.context() as interrupted:
+            interrupted.setattr(client.api, "create_issue", interrupt_second)
+            with pytest.raises(CvatApiError):
+                upload_dataset(client, make_request(image_names=["a.jpg"], rows=rows))
+
+        assert len(_writes_of(client).issues) == 1
+        outcome = upload_dataset(
+            client, make_request(image_names=["a.jpg"], rows=rows, resume=True)
+        )
+        assert outcome.issues == 1
+        assert [issue.position for issue in _writes_of(client).issues] == [
+            [1.0, 2.0, 3.0, 4.0],
+            [2.0, 2.0, 3.0, 4.0],
+        ]
+        assert list_manifests(PROJECT_ID, host=client.host) == []
+
     def test_resuming_does_not_reopen_the_issues_already_created(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -997,14 +1075,14 @@ class TestResumeAfterManualDeletion:
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
             upload_dataset(client, make_request(image_names=names))
-        stranded = list_manifests(PROJECT_ID)[0].task_id
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
         assert stranded is not None
         client.delete_task(stranded)
 
         outcome = upload_dataset(client, _resume_request(names))
 
         assert outcome.images == len(names)
-        assert list_manifests(PROJECT_ID) == []
+        assert list_manifests(PROJECT_ID, host=client.host) == []
 
     def test_another_error_reading_the_task_still_surfaces(
         self, monkeypatch: pytest.MonkeyPatch
