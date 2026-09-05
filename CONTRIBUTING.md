@@ -325,14 +325,19 @@ upload-тесты не встречают собственных остатко�
 Два одновременных прогона с одним тегом несовместимы: второй снесёт проект
 первого. Параллельным агентам нужны разные `INTEGRATION_USER` и разные порты.
 
-Управление аккаунтом и организацией — `tests/integration/cvat_stand.py`:
+Объекты пользователя `cveta2` на стенде — `tests/integration/cvat_stand.py`
+(видит и удаляет только то, чем владеет этот пользователь; аккаунт и членство
+в организации создаёт администратор стенда через `deploy_cvat.sh`, скрипт их
+не регистрирует):
 
 ```bash
-uv run python tests/integration/cvat_stand.py bootstrap             # пользователь, организация, доступность стенда
+uv run python tests/integration/cvat_stand.py verify                # вход и членство в организации
 uv run python tests/integration/cvat_stand.py ls                    # что сейчас лежит в организации
 uv run python tests/integration/cvat_stand.py cleanup --tag <тег>   # удалить объекты одного прогона
-uv run python tests/integration/cvat_stand.py cleanup --stale 24 --dry-run   # сироты от погибших прогонов
 ```
+
+Сироты от погибших прогонов — дело скилла `k8s-infra`
+(`cvat.py --project cveta2 cleanup --stale --dry-run`) и его уборщика.
 
 Посмотреть данные прогона в интерфейсе стенда можно под `admin` стенда
 (суперпользователь видит все организации) или под `cveta2` с паролем из `.env`.
@@ -514,7 +519,7 @@ git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
 
 **Порт занят** — `./scripts/integration_up.sh --minio-port 9189` (ClearML — через `CLEARML_*_PORT`)
 
-**Стенд CVAT не отвечает** — `uv run python tests/integration/cvat_stand.py bootstrap` скажет, чего не хватает; сам стенд описан в скилле `k8s-infra`
+**Стенд CVAT не отвечает** — `uv run python tests/integration/cvat_stand.py verify` скажет, чего не хватает; сам стенд описан в скилле `k8s-infra`
 
 **MinIO или ClearML не стартуют** — проверьте логи:
 

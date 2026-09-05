@@ -42,14 +42,16 @@ Create it from `.env.example` and supply a non-placeholder
 password, organization, and MinIO bucket. Its presence also arms the pre-push
 integration gate.
 
-`cvat_stand.py bootstrap` logs in without an organization header until the
-organization exists. On an HTTP 400/401/403 login rejection it registers the
-integration account and retries once. It then verifies membership in
-`CVAT_INTEGRATION_ORG`, creating the organization when the account can do so.
-It fails on a wrong password or an organization slug owned by another account;
-do not work around those identity errors by switching organizations or using an
-admin account. Tests authenticate as the integration account and set the
-organization slug after login. Admin is for inspection only.
+`cvat_stand.py verify` logs in as the integration user without an organization
+header, checks that the stand answers as that account and that it is a member
+of `CVAT_INTEGRATION_ORG`, and fails naming the missing piece. It never
+registers users or organizations: the stand admin creates both with
+`deploy_cvat.sh` (k8s-infra). Do not work around an identity error by switching
+organizations or using an admin account. `cvat_stand.py ls` and `cleanup --tag`
+touch only objects owned by the integration user; stale objects of dead runs
+belong to the skill's `cvat.py cleanup --stale` and its janitor. Tests
+authenticate as the integration account and set the organization slug after
+login.
 
 ## Run the requested scope
 

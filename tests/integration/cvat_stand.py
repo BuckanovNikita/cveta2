@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
-"""Manage the integration account and organization on the cluster CVAT stand.
+"""Inspect and clean this project's objects on the cluster CVAT stand.
 
-    uv run python tests/integration/cvat_stand.py bootstrap
+    uv run python tests/integration/cvat_stand.py verify
     uv run python tests/integration/cvat_stand.py ls
     uv run python tests/integration/cvat_stand.py cleanup --tag <run-tag> [--dry-run]
-    uv run python tests/integration/cvat_stand.py cleanup --stale <hours> [--dry-run]
 
 Credentials come from ``CVAT_INTEGRATION_HOST`` / ``CVAT_INTEGRATION_USER`` /
 ``CVAT_INTEGRATION_PASSWORD`` / ``CVAT_INTEGRATION_ORG``, which
-``scripts/integration_env.sh`` exports from ``tests/integration/.env``.
+``scripts/integration_env.sh`` derives from the project's Secret through the
+k8s-infra skill (``cvat.py --project cveta2 env``).
 
-``bootstrap`` registers the account when it does not exist yet, creates the
-organization when the account is not a member of one with that slug, and
-fails loudly on every other state (wrong password, slug owned by someone
-else). It runs without the organization header until the organization is
-known to exist: CVAT rejects every request, login included, whose
-``X-Organization`` names a missing slug.
+``verify`` logs in as that user, checks that the stand answers as the same
+account and that the account is a member of the organization, and fails with
+the exact missing piece otherwise. It never registers users or organizations:
+the stand admin creates both with ``deploy_cvat.sh`` (k8s-infra). The login
+runs without the organization header, which CVAT rejects for a slug the user
+is not a member of - the very state ``verify`` reports.
 
-``cleanup --tag`` matches ``"<tag> "`` - the tag followed by a space - so that
-tag ``nkt`` never matches ``nkt-feature coco8-dev``. Do not "simplify" it to
-a bare prefix. Projects go first (their tasks cascade), then standalone
-tasks, then cloud storages, which nothing may reference any more.
+``ls`` and ``cleanup`` see only objects owned by the integration user; the
+organization is shared with other projects. ``cleanup --tag`` matches
+``"<tag> "`` - the tag followed by a space - so that tag ``nkt`` never matches
+``nkt-feature coco8-dev``. Do not "simplify" it to a bare prefix. Projects go
+first (their tasks cascade), then standalone tasks, then cloud storages, which
+nothing may reference any more. Stale objects of dead runs belong to the
+skill's ``cvat.py cleanup --stale`` and the janitor, not to this script.
 """
 
 from __future__ import annotations
@@ -28,10 +31,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiException
 from cvat_sdk.core.client import Client
 from loguru import logger
@@ -41,7 +43,11 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 PAGE_SIZE = 100
-REGISTER_EMAIL_DOMAIN = "cveta2.local"
+SECRET_HINT = (
+    "the credentials are the cveta2 Secret on the cluster "
+    "(`cvat.py --project cveta2 env` from the k8s-infra skill); "
+    "the stand admin fixes the account with deploy_cvat.sh"
+)
 
 
 class StandError(RuntimeError):
@@ -67,7 +73,7 @@ class StandSettings(BaseModel):
         if missing:
             raise StandError(
                 f"{', '.join(missing)} not set; source scripts/integration_env.sh "
-                "(it reads tests/integration/.env, see .env.example)"
+                "(it exports them from the cveta2 Secret through the k8s-infra skill)"
             )
         values["host"] = values["host"].rstrip("/")
         return cls(**values)
@@ -106,52 +112,13 @@ def _login(settings: StandSettings) -> Client:
     client = Client(settings.host, check_server_version=False)
     try:
         client.login((settings.username, settings.password))
-    except ApiException:
+    except ApiException as exc:
         client.close()
-        raise
+        raise StandError(
+            f"login as '{settings.username}' at {settings.host} failed: "
+            f"{exc.status} {exc.body}; {SECRET_HINT}"
+        ) from exc
     return client
-
-
-def _register(settings: StandSettings) -> None:
-    client = Client(settings.host, check_server_version=False)
-    request = cvat_models.RegisterSerializerExRequest(
-        username=settings.username,
-        password1=settings.password,
-        password2=settings.password,
-        email=f"{settings.username}@{REGISTER_EMAIL_DOMAIN}",
-        first_name="cveta2",
-        last_name="integration",
-    )
-    try:
-        client.api_client.auth_api.create_register(request)
-    except ApiException as exc:
-        raise StandError(
-            f"cannot register user '{settings.username}' on {settings.host}: "
-            f"{exc.status} {exc.body}"
-        ) from exc
-    finally:
-        client.close()
-    logger.info(f"Registered user '{settings.username}' on {settings.host}")
-
-
-def _connect(settings: StandSettings, *, register_if_missing: bool) -> Client:
-    """Log in; on a rejected login optionally register the user and retry once."""
-    try:
-        return _login(settings)
-    except ApiException as exc:
-        if exc.status not in (400, 401, 403) or not register_if_missing:
-            raise StandError(
-                f"login as '{settings.username}' at {settings.host} failed: "
-                f"{exc.status} {exc.body}"
-            ) from exc
-    _register(settings)
-    try:
-        return _login(settings)
-    except ApiException as exc:
-        raise StandError(
-            f"user '{settings.username}' exists on {settings.host} but "
-            "CVAT_INTEGRATION_PASSWORD is not its password"
-        ) from exc
 
 
 def _list_pages(fetch: Callable[[int], object]) -> Iterator[object]:
@@ -164,39 +131,49 @@ def _list_pages(fetch: Callable[[int], object]) -> Iterator[object]:
         page += 1
 
 
-def _member_organizations(client: Client) -> list[object]:
+def _member_organization_slugs(client: Client) -> set[str]:
     api = client.api_client.organizations_api
-    return list(_list_pages(lambda page: api.list(page=page, page_size=PAGE_SIZE)[0]))
-
-
-def _ensure_organization(client: Client, settings: StandSettings) -> None:
-    slugs = {str(org.slug) for org in _member_organizations(client)}  # type: ignore[attr-defined]
-    if settings.organization in slugs:
-        logger.info(f"Organization '{settings.organization}': present")
-        return
-    request = cvat_models.OrganizationWriteRequest(
-        slug=settings.organization, name="cveta2 integration tests"
+    organizations = _list_pages(
+        lambda page: api.list(page=page, page_size=PAGE_SIZE)[0]
     )
+    return {str(org.slug) for org in organizations}  # type: ignore[attr-defined]
+
+
+def _verify_identity(client: Client, settings: StandSettings) -> None:
+    """Fail with the one thing that is wrong: the account, or its membership."""
     try:
-        client.api_client.organizations_api.create(request)
+        me = client.api_client.users_api.retrieve_self()[0]
+        slugs = _member_organization_slugs(client)
     except ApiException as exc:
         raise StandError(
-            f"cannot create organization '{settings.organization}': "
-            f"{exc.status} {exc.body}. If the slug already exists, another account "
-            "owns it; pick a different CVAT_INTEGRATION_ORG or have its owner add "
-            "this user"
+            f"{settings.host} rejected the logged-in user '{settings.username}': "
+            f"{exc.status} {exc.body}; {SECRET_HINT}"
         ) from exc
-    logger.info(f"Organization '{settings.organization}': created")
+    if str(me.username) != settings.username:
+        raise StandError(
+            f"logged in as '{me.username}' but CVAT_INTEGRATION_USER is "
+            f"'{settings.username}'; the Secret and the environment disagree, "
+            f"{SECRET_HINT}"
+        )
+    if settings.organization not in slugs:
+        member_of = ", ".join(sorted(slugs)) or "no organization"
+        raise StandError(
+            f"user '{settings.username}' is not a member of organization "
+            f"'{settings.organization}' on {settings.host} (member of: {member_of}); "
+            f"this script never creates memberships, {SECRET_HINT}"
+        )
 
 
-def open_stand(*, register_if_missing: bool = False) -> tuple[Client, StandSettings]:
+def open_stand() -> tuple[Client, StandSettings]:
     """Return an authenticated client scoped to the integration organization."""
     settings = StandSettings.from_env()
-    client = _connect(settings, register_if_missing=register_if_missing)
-    if register_if_missing:
-        _ensure_organization(client, settings)
+    client = _login(settings)
     client.organization_slug = settings.organization
     return client, settings
+
+
+def _owned_by(settings: StandSettings) -> Callable[[Listing], bool]:
+    return lambda item: item.owner == settings.username
 
 
 def list_projects(client: Client) -> list[Listing]:
@@ -242,52 +219,51 @@ def list_cloud_storages(client: Client) -> list[Listing]:
     ]
 
 
-def cmd_bootstrap(_: argparse.Namespace) -> int:
-    client, settings = open_stand(register_if_missing=True)
+def cmd_verify(_: argparse.Namespace) -> int:
+    settings = StandSettings.from_env()
+    client = _login(settings)
     try:
+        _verify_identity(client, settings)
+        client.organization_slug = settings.organization
         about = client.api_client.server_api.retrieve_about()[0]
-        me = client.api_client.users_api.retrieve_self()[0]
     finally:
         client.close()
     logger.info(
         f"Stand ready: CVAT {about.version} at {settings.host}, "
-        f"user '{me.username}' (id {me.id}), "
-        f"organization '{settings.organization}'"
+        f"user '{settings.username}' is a member of organization "
+        f"'{settings.organization}'"
     )
     return 0
 
 
 def cmd_ls(_: argparse.Namespace) -> int:
     client, settings = open_stand()
+    owned = _owned_by(settings)
     try:
-        projects = list_projects(client)
-        tasks = list_tasks(client)
-        storages = list_cloud_storages(client)
+        projects = [p for p in list_projects(client) if owned(p)]
+        tasks = [t for t in list_tasks(client) if owned(t)]
+        storages = [s for s in list_cloud_storages(client) if owned(s)]
     finally:
         client.close()
     logger.info(
-        f"organization {settings.organization}: {len(projects)} project(s), "
-        f"{len(tasks)} task(s), {len(storages)} cloud storage(s)"
+        f"organization {settings.organization}, owner {settings.username}: "
+        f"{len(projects)} project(s), {len(tasks)} task(s), "
+        f"{len(storages)} cloud storage(s)"
     )
     for item in sorted(projects + storages, key=lambda i: i.created):
-        logger.info(
-            f"{item.kind:<8}{item.id:>6}  {item.age():>7}  {item.owner:<12} {item.name}"
-        )
+        logger.info(f"{item.kind:<8}{item.id:>6}  {item.age():>7}  {item.name}")
     for task in sorted(tasks, key=lambda i: i.created):
         where = f"in project {task.project_id}" if task.project_id else "standalone"
         logger.info(
-            f"{task.kind:<8}{task.id:>6}  {task.age():>7}  {task.owner:<12} "
-            f"{task.name}  ({where})"
+            f"{task.kind:<8}{task.id:>6}  {task.age():>7}  {task.name}  ({where})"
         )
     return 0
 
 
-def _selector(args: argparse.Namespace) -> Callable[[Listing], bool]:
-    if args.tag:
-        prefix = f"{args.tag} "
-        return lambda item: item.name.startswith(prefix)
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=args.stale)
-    return lambda item: item.created < cutoff
+def _tagged_and_owned(tag: str, settings: StandSettings) -> Callable[[Listing], bool]:
+    prefix = f"{tag} "
+    owned = _owned_by(settings)
+    return lambda item: item.name.startswith(prefix) and owned(item)
 
 
 def _doomed(client: Client, selected: Callable[[Listing], bool]) -> list[Listing]:
@@ -313,16 +289,15 @@ def _destroy(client: Client, item: Listing) -> None:
 
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
-    if bool(args.tag) == (args.stale is not None):
-        raise StandError(
-            "cleanup needs exactly one of --tag <run-tag> or --stale <hours>"
-        )
-    selected = _selector(args)
     client, settings = open_stand()
+    selected = _tagged_and_owned(args.tag, settings)
     try:
         items = _doomed(client, selected)
         if not items:
-            logger.info(f"nothing to clean in organization {settings.organization}")
+            logger.info(
+                f"nothing of '{args.tag}' owned by {settings.username} in "
+                f"organization {settings.organization}"
+            )
             return 0
         verb = "would delete" if args.dry_run else "deleting"
         for item in items:
@@ -348,19 +323,20 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    bootstrap = commands.add_parser(
-        "bootstrap",
-        help="register the account and organization if missing; prove the stand is up",
+    verify = commands.add_parser(
+        "verify",
+        help="log in as the integration user and prove its organization membership",
     )
-    bootstrap.set_defaults(run=cmd_bootstrap)
+    verify.set_defaults(run=cmd_verify)
     ls = commands.add_parser(
-        "ls", help="projects, tasks and cloud storages in the organization"
+        "ls", help="projects, tasks and cloud storages the integration user owns"
     )
     ls.set_defaults(run=cmd_ls)
-    cleanup = commands.add_parser("cleanup", help="delete objects in the organization")
-    cleanup.add_argument("--tag", help="delete objects named '<tag> ...' (this run's)")
+    cleanup = commands.add_parser(
+        "cleanup", help="delete one run's objects owned by the integration user"
+    )
     cleanup.add_argument(
-        "--stale", type=float, help="delete objects older than N hours"
+        "--tag", required=True, help="delete objects named '<tag> ...' (this run's)"
     )
     cleanup.add_argument("--dry-run", action="store_true", help="list without deleting")
     cleanup.set_defaults(run=cmd_cleanup)

@@ -11,8 +11,8 @@
 #                              recorded in tests/integration/.run-tag. An
 #                              existing file means a run is active: stop it,
 #                              or export INFRA_RUN_TAG to adopt it.
-#   2. cvat_stand.py bootstrap the integration account and organization exist,
-#                              the stand is reachable
+#   2. cvat_stand.py verify   the cveta2 user of the Secret logs in and is a
+#                              member of the organization; nothing is registered
 #   3. docker compose          the Compose stack of this tag (project
 #                              <tag>-cveta2), recreated for the ClearML tests
 #                              until they move to the stand; its MinIO is no
@@ -105,9 +105,9 @@ wait_healthy() {
 
 cd "$INTEGRATION_REPO_ROOT"
 
-# ── 1. The stand: account, organization, reachability ─────────────────
-log "Run tag '$INTEGRATION_RUN_TAG': checking the CVAT stand at $CVAT_INTEGRATION_HOST"
-uv run python tests/integration/cvat_stand.py bootstrap
+# ── 1. The stand: the account and its membership ──────────────────────
+log "Run tag '$INTEGRATION_RUN_TAG': verifying user $CVAT_INTEGRATION_USER on the CVAT stand at $CVAT_INTEGRATION_HOST"
+uv run python tests/integration/cvat_stand.py verify
 
 # ── 2. Recreate MinIO + ClearML ───────────────────────────────────────
 log "Tearing down compose project $COMPOSE_PROJECT (down -v)"

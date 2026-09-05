@@ -84,7 +84,7 @@ CLEARML_API_PORT=<owned-port> CLEARML_FILES_PORT=<owned-port> CLEARML_WEB_PORT=<
 If only CVAT cleanup needs retrying, source the same environment and use
 `cvat_stand.py cleanup --tag <owned-tag>`. Never substitute a broader prefix.
 
-For possible orphan inventory, `cleanup --stale <hours> --dry-run` is
-read-only. Do not remove its results until the user explicitly authorizes the
+For possible orphan inventory, the skill's
+`cvat.py --project cveta2 cleanup --stale --dry-run` is read-only. Do not remove its results until the user explicitly authorizes the
 deletion and every object's ownership has been verified. A retained main run
 is expected and may appear stale.
