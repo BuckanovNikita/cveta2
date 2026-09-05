@@ -125,7 +125,7 @@ class TestRealClientFetchAnnotations:
         sdk_client = _make_sdk_client()
         try:
             adapter = SdkCvatApiAdapter(sdk_client)
-            host = _env("CVAT_INTEGRATION_HOST", "http://localhost:8080")
+            host = _env("CVAT_INTEGRATION_HOST", "http://cvat.k8s.localhost")
             cfg = CvatConfig(host=host)
             client = CvatClient(cfg, api=adapter)
 
