@@ -7,10 +7,18 @@ git clone <repo-url>
 cd cveta2
 uv sync
 uv run pre-commit install   # хуки commit, commit-msg и pre-push разом
+git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40"
 ```
 
 Одной команды достаточно: список стадий задан в `.pre-commit-config.yaml`
 (`default_install_hook_types`).
+
+Последняя строка нужна для пуша: git открывает SSH-соединение с GitHub **до**
+запуска pre-push-хуков, а гейты идут дольше, чем GitHub держит простаивающую
+сессию. Без keepalive пуш заканчивается сообщением
+`Connection to github.com closed by remote host` уже после того, как все
+хуки прошли, и на сервер ничего не попадает. Настройка локальная для этого
+клона и никак не влияет на другие репозитории; подробнее — в «Ветки и релизы».
 
 Требования: Python 3.10+ (пакет), [uv](https://docs.astral.sh/uv/),
 Docker + Compose v2 (только для интеграционных тестов).
@@ -447,6 +455,20 @@ git push origin main --follow-tags                            # коммит и 
 Пуш вынесен в отдельную команду не для красоты: он поднимает pre-push-хуки (полный
 профиль мутационного тестирования, `version-drift`, интеграционный гейт), а
 semantic-release пушит ветку и тег двумя разными пушами — гейты отработали бы дважды.
+
+Гейты занимают больше десяти минут, а SSH-соединение с GitHub git открывает
+до их запуска: без keepalive сервер закрывает простаивающую сессию, и пуш
+падает с `Connection to github.com closed by remote host` при зелёных хуках —
+`origin/main` и тег остаются старыми. Поэтому `core.sshCommand` с
+`ServerAliveInterval` из «Быстрого старта» обязателен, а после пуша через
+гейты стоит убедиться, что он дошёл:
+
+```bash
+git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
+```
+
+Повторный `git push` после такого обрыва безопасен: хуки просто отработают ещё
+раз. Обрезать их через `SKIP=…` из-за этого не нужно.
 
 `--no-vcs-release` отключает создание GitHub Release, поэтому токен не нужен. На PyPI
 пакет не публикуется.

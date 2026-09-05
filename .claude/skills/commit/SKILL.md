@@ -78,5 +78,15 @@ MinIO/ClearML and exact-tag CVAT objects according to the
 hooks; if a hook cannot run, report the failure. Use
 `SKIP=integration-tests` only when the user explicitly requests that skip.
 
+Git opens the SSH transport before the pre-push hooks run, and the gates
+outlast GitHub's idle timeout. The clone must therefore carry
+`core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40"`
+(the CONTRIBUTING quick start sets it); check with
+`git config --get core.sshCommand` before a gated push and set it when
+missing. A push that ends with `Connection to github.com closed by remote
+host` after green hooks delivered nothing: verify with
+`git ls-remote origin <refs>` and simply push again with the keepalive in
+place. Never shorten the gates with `SKIP` to work around this.
+
 Return the commit hash and subject, pushed ref if any, checks run by the hooks,
 and the remaining unrelated working-tree state.
