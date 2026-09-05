@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Tear down one run of the integration tests: this run tag's project and
-# cloud storage on the cluster CVAT, its bucket on the shared MinIO, and the
-# tests/integration/.run-tag file when it names this run.
+# cloud storage on the cluster CVAT, its bucket on the shared MinIO, its
+# projects on the shared ClearML, and the tests/integration/.run-tag file
+# when it names this run.
 #
 # Usage:
 #   ./scripts/integration_stop.sh
 #
 # The tag is INFRA_RUN_TAG when exported, the `cveta2-main` slot on main, else
 # the one recorded by integration_up.sh. CVAT goes first, because its cloud
-# storage points at the bucket; a failure on either stand is still reported
-# through the exit code, and the tag file stays so the retry finds the run.
+# storage points at the bucket; ClearML last, because nothing else refers to
+# it (the tests remove their own projects at session end, so this step
+# normally finds nothing and catches what a killed session left). A failure on
+# any stand is still reported through the exit code, and the tag file stays so
+# the retry finds the run.
 
 set -euo pipefail
 
@@ -36,6 +40,14 @@ if ! integration_helper minio cleanup --prefix "$INTEGRATION_RUN_TAG"; then
     echo "WARNING: bucket '$MINIO_BUCKET' could not be removed." >&2
     echo "         Retry once the stand is reachable:" >&2
     echo "         python3 \"$INTEGRATION_SKILL_DIR/scripts/minio.py\" --project $INTEGRATION_PROJECT cleanup --prefix '$INTEGRATION_RUN_TAG'" >&2
+    FAILED=1
+fi
+
+log "Removing '$INTEGRATION_RUN_TAG' projects from ClearML at $CLEARML_API_HOST"
+if ! integration_helper clearml cleanup --prefix "$INTEGRATION_RUN_TAG"; then
+    echo "WARNING: the ClearML projects of tag '$INTEGRATION_RUN_TAG' could not be removed." >&2
+    echo "         Retry once the stand is reachable:" >&2
+    echo "         python3 \"$INTEGRATION_SKILL_DIR/scripts/clearml.py\" --project $INTEGRATION_PROJECT cleanup --prefix '$INTEGRATION_RUN_TAG'" >&2
     FAILED=1
 fi
 

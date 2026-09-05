@@ -1,9 +1,11 @@
-"""scripts/integration_env.sh: run tag precedence, the .run-tag file, credentials.
+"""The integration lifecycle scripts against a fake skill and a fake ``uv``.
 
-The script derives its paths from its own location, so a copy in a temporary
-tree (``scripts/`` next to ``tests/integration/``) reads and writes only there.
-The k8s-infra helpers are stand-ins that print the exports a Secret would give;
-``PRE_COMMIT_REMOTE_BRANCH`` decides "main" so git is never consulted.
+``scripts/integration_env.sh`` derives its paths from its own location, so a
+copy in a temporary tree (``scripts/`` next to ``tests/integration/``) reads
+and writes only there; the gate, stop and test scripts are copied beside it.
+The k8s-infra helpers are stand-ins that print the exports a Secret would give
+and record every other call; ``PRE_COMMIT_REMOTE_BRANCH`` decides "main" so
+git is never consulted.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_SCRIPT = REPO_ROOT / "scripts" / "integration_env.sh"
 GATE_SCRIPT = REPO_ROOT / "scripts" / "integration_gate.sh"
+STOP_SCRIPT = REPO_ROOT / "scripts" / "integration_stop.sh"
+TEST_SCRIPT = REPO_ROOT / "scripts" / "integration_test.sh"
 
 # mutmut runs the suite from `mutants/`, a copy of the tree without `scripts/`.
 pytestmark = pytest.mark.skipif(
@@ -33,10 +37,22 @@ MAIN_BRANCH = "refs/heads/main"
 MINTED_TAG = "cveta2-claude-20260905-integration-k3x9"
 ACTIVE_TAG = "cveta2-claude-20260901-integration-a1b2"
 
+# A helper answers `env` with the Secret's exports; every other subcommand is
+# recorded in FAKE_TOOL_CALLS as "<stand> <args>" and succeeds, unless
+# FAKE_FAIL_COMMAND names it ("clearml whoami", "clearml cleanup").
 FAKE_HELPER = '''#!/usr/bin/env python3
 import os, sys
-if sys.argv[1:3] != ["--project", "cveta2"] or sys.argv[3:] != ["env"]:
+if sys.argv[1:3] != ["--project", "cveta2"] or not sys.argv[3:]:
     sys.exit(f"unexpected arguments {sys.argv[1:]}")
+command = sys.argv[3:]
+if command != ["env"]:
+    with open(os.environ["FAKE_TOOL_CALLS"], "a") as record:
+        print("@STAND@", *command, file=record)
+    if os.environ.get("FAKE_FAIL_COMMAND") == f"@STAND@ {command[0]}":
+        print(f"@STAND@.py: {command[0]} refused by the stand", file=sys.stderr)
+        sys.exit(1)
+    print(f"@STAND@ {command[0]} ok")
+    sys.exit(0)
 if os.environ.get("FAKE_FAIL_STAND") == "@STAND@":
     print("@STAND@.py: cannot read the Secret", file=sys.stderr)
     sys.exit(1)
@@ -68,6 +84,7 @@ echo up >> tests/integration/calls
 """,
     "integration_test.sh": """#!/usr/bin/env bash
 echo "test $*" >> tests/integration/calls
+[[ -z "${FAKE_FAIL_TESTS:-}" ]]
 """,
     "integration_stop.sh": """#!/usr/bin/env bash
 echo stop >> tests/integration/calls
@@ -75,6 +92,11 @@ rm -f tests/integration/.run-tag
 """,
 }
 FAKE_TOOL = "#!/usr/bin/env bash\nexit 0\n"
+# `uv run ...` from the real stop and test scripts: recorded, never executed.
+FAKE_UV = """#!/usr/bin/env bash
+echo "uv $*" >> "$FAKE_TOOL_CALLS"
+[[ "${FAKE_FAIL_COMMAND:-}" != "uv" ]]
+"""
 
 SECRET_EXPORTS = {
     "cvat": """
@@ -152,6 +174,10 @@ class Tree(BaseModel):
     def run_tag_file(self) -> Path:
         return self.root / "tests" / "integration" / ".run-tag"
 
+    @property
+    def tool_calls_file(self) -> Path:
+        return self.root / "tool-calls"
+
     def run(
         self,
         *commands: str,
@@ -194,6 +220,7 @@ class Tree(BaseModel):
             "PRE_COMMIT_REMOTE_BRANCH": branch,
             "K8S_INFRA_SKILL_DIR": str(skill_dir or self.skill_dir),
             "FAKE_TAG": MINTED_TAG,
+            "FAKE_TOOL_CALLS": str(self.tool_calls_file),
             **(env or {}),
         }
         return subprocess.run(  # noqa: S603  the script is this test's own text
@@ -220,11 +247,26 @@ class Tree(BaseModel):
         _write_executable(self.root / "bin" / "curl", FAKE_TOOL)
         return gate
 
+    def install_script(self, source: Path) -> Path:
+        """Install one real lifecycle script with a recording `uv` beside it."""
+        script = self.root / "scripts" / source.name
+        shutil.copy(source, script)
+        (self.root / "bin").mkdir(exist_ok=True)
+        _write_executable(self.root / "bin" / "uv", FAKE_UV)
+        return script
+
     def calls(self) -> list[str]:
-        record = self.root / "tests" / "integration" / "calls"
-        if not record.exists():
-            return []
-        return record.read_text(encoding="utf-8").splitlines()
+        return _lines(self.root / "tests" / "integration" / "calls")
+
+    def tool_calls(self) -> list[str]:
+        """Return what the skill helpers (beyond `env`) and `uv` were asked to do."""
+        return _lines(self.tool_calls_file)
+
+
+def _lines(record: Path) -> list[str]:
+    if not record.exists():
+        return []
+    return record.read_text(encoding="utf-8").splitlines()
 
 
 def _write_executable(path: Path, text: str) -> None:
@@ -480,12 +522,75 @@ class TestGate:
         assert f"run tag '{MINTED_TAG}'" in completed.stdout
         assert tree.recorded_tag() is None
 
+    def test_the_clearml_identity_is_verified_before_the_run_is_prepared(
+        self, tree: Tree
+    ) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(str(gate))
+        assert completed.returncode == 0, completed.stderr
+        assert tree.tool_calls() == ["clearml whoami"]
+        assert completed.stdout.index("clearml whoami ok") < completed.stdout.index(
+            "preparing the run"
+        )
+
+    def test_a_clearml_stand_refusing_the_identity_fails_the_armed_gate(
+        self, tree: Tree
+    ) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(str(gate), env={"FAKE_FAIL_COMMAND": "clearml whoami"})
+        assert completed.returncode == 1
+        assert "the integration gate is armed" in completed.stderr
+        assert "ClearML stand" in completed.stderr
+        assert "clearml.py --project cveta2 whoami failed" in completed.stderr
+        assert "k8s-infra skill" in completed.stderr
+        assert "deploy" not in completed.stderr
+        assert tree.calls() == []
+        assert tree.recorded_tag() is None
+
     def test_main_keeps_the_durable_slot(self, tree: Tree) -> None:
         gate = tree.install_gate()
         completed = tree.bash(str(gate), branch=MAIN_BRANCH)
         assert completed.returncode == 0, completed.stderr
         assert tree.calls() == ["up", "test tests/integration"]
+        assert "durable slot 'cveta2-main'" in completed.stdout
         assert "cveta2-main coco8-dev" in completed.stdout
+        assert "ClearML" in completed.stdout
+
+    def test_keep_data_keeps_a_branch_run_and_its_tag_file(self, tree: Tree) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(str(gate), env={"INTEGRATION_KEEP_DATA": "1"})
+        assert completed.returncode == 0, completed.stderr
+        assert tree.calls() == ["up", "test tests/integration"]
+        assert tree.recorded_tag() == f"{MINTED_TAG}\n"
+        assert "INTEGRATION_KEEP_DATA=1" in completed.stdout
+        assert ".run-tag still names it" in completed.stdout
+
+    def test_keep_data_zero_stops_the_main_slot(self, tree: Tree) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(
+            str(gate), branch=MAIN_BRANCH, env={"INTEGRATION_KEEP_DATA": "0"}
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert tree.calls() == ["up", "test tests/integration", "stop"]
+
+    def test_a_failed_branch_run_is_stopped_and_the_message_only_diagnoses(
+        self, tree: Tree
+    ) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(str(gate), env={"FAKE_FAIL_TESTS": "1"})
+        assert completed.returncode == 1
+        assert tree.calls() == ["up", "test tests/integration", "stop"]
+        assert "integration gate FAILED" in completed.stderr
+        assert "k8s-infra skill" in completed.stderr
+        assert "deploy" not in completed.stderr.replace("never deploy one", "")
+
+    def test_keep_stack_keeps_a_failed_branch_run(self, tree: Tree) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(f"{gate} --keep-stack", env={"FAKE_FAIL_TESTS": "1"})
+        assert completed.returncode == 1
+        assert tree.calls() == ["up", "test tests/integration"]
+        assert tree.recorded_tag() == f"{MINTED_TAG}\n"
+        assert "--keep-stack" in completed.stdout
 
     def test_an_active_run_is_refused_before_the_teardown_is_armed(
         self, tree: Tree
@@ -512,3 +617,94 @@ class TestGate:
         assert "integration gate skipped" in completed.stdout
         assert tree.calls() == []
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
+
+
+class TestStopScript:
+    """The real integration_stop.sh: three stands, one accumulator, the tag file."""
+
+    CVAT_CLEANUP = (
+        f"uv run python tests/integration/cvat_stand.py cleanup --tag {ACTIVE_TAG}"
+    )
+
+    def test_removes_cvat_then_the_bucket_then_clearml_and_releases_the_tag(
+        self, tree: Tree
+    ) -> None:
+        stop = tree.install_script(STOP_SCRIPT)
+        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
+        completed = tree.bash(str(stop))
+        assert completed.returncode == 0, completed.stderr
+        assert tree.tool_calls() == [
+            self.CVAT_CLEANUP,
+            f"minio cleanup --prefix {ACTIVE_TAG}",
+            f"clearml cleanup --prefix {ACTIVE_TAG}",
+        ]
+        assert tree.recorded_tag() is None
+
+    def test_a_failing_clearml_cleanup_keeps_the_tag_and_names_the_retry(
+        self, tree: Tree
+    ) -> None:
+        stop = tree.install_script(STOP_SCRIPT)
+        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
+        completed = tree.bash(str(stop), env={"FAKE_FAIL_COMMAND": "clearml cleanup"})
+        assert completed.returncode == 1
+        assert tree.tool_calls()[-1] == f"clearml cleanup --prefix {ACTIVE_TAG}"
+        assert "ClearML projects of tag" in completed.stderr
+        assert (
+            f"clearml.py\" --project cveta2 cleanup --prefix '{ACTIVE_TAG}'"
+            in completed.stderr
+        )
+        assert "not fully torn down" in completed.stderr
+        assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
+
+    def test_a_failing_cvat_cleanup_still_reaches_the_other_stands(
+        self, tree: Tree
+    ) -> None:
+        stop = tree.install_script(STOP_SCRIPT)
+        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
+        completed = tree.bash(str(stop), env={"FAKE_FAIL_COMMAND": "uv"})
+        assert completed.returncode == 1
+        assert len(tree.tool_calls()) == 3
+        assert "CVAT data of tag" in completed.stderr
+        assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
+
+    def test_refuses_without_a_run(self, tree: Tree) -> None:
+        stop = tree.install_script(STOP_SCRIPT)
+        completed = tree.bash(str(stop))
+        assert completed.returncode == 1
+        assert "no run is active" in completed.stderr
+        assert tree.tool_calls() == []
+
+
+class TestTestScript:
+    """The real integration_test.sh: whoami first, then pytest with the SDK extra."""
+
+    def test_whoami_then_pytest_without_xdist_and_with_the_clearml_extra(
+        self, tree: Tree
+    ) -> None:
+        script = tree.install_script(TEST_SCRIPT)
+        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
+        completed = tree.bash(f"{script} tests/integration -k upload")
+        assert completed.returncode == 0, completed.stderr
+        whoami, pytest_call = tree.tool_calls()
+        assert whoami == "clearml whoami"
+        assert pytest_call.startswith("uv run --extra clearml pytest -o addopts=")
+        assert "-p tests.env_isolation" in pytest_call
+        assert "-n auto" not in pytest_call
+        assert pytest_call.endswith(" tests/integration -k upload")
+
+    def test_a_refused_identity_runs_no_test(self, tree: Tree) -> None:
+        script = tree.install_script(TEST_SCRIPT)
+        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
+        completed = tree.bash(str(script), env={"FAKE_FAIL_COMMAND": "clearml whoami"})
+        assert completed.returncode == 1
+        assert tree.tool_calls() == ["clearml whoami"]
+        assert "clearml.py --project cveta2 whoami failed" in completed.stderr
+        assert "never skipped" in completed.stderr
+        assert "k8s-infra skill" in completed.stderr
+
+    def test_the_source_carries_no_soft_gate_and_no_key_pair(self) -> None:
+        source = TEST_SCRIPT.read_text(encoding="utf-8")
+        assert "debug.ping" not in source
+        assert "CLEARML_API_ACCESS_KEY=" not in source
+        assert "CLEARML_API_SECRET_KEY=" not in source
+        assert "localhost:" not in source
