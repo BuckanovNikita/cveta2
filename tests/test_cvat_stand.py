@@ -224,10 +224,10 @@ class TestVerify:
     def test_missing_membership_names_user_and_organization(
         self, stand: Stand, monkeypatch: pytest.MonkeyPatch, logs: list[str]
     ) -> None:
-        stand.organizations = ["cveta2-tests", "other"]
+        stand.organizations = ["another-org", "other"]
         assert run(monkeypatch, "verify") == 1
         assert f"user '{USER}' is not a member of organization '{ORG}'" in logs[-1]
-        assert "member of: cveta2-tests, other" in logs[-1]
+        assert "member of: another-org, other" in logs[-1]
         assert "never creates memberships" in logs[-1]
         assert stand.org_slugs_seen == [None]
 
