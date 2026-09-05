@@ -29,11 +29,13 @@
 #   MINIO_ENDPOINT     the shared MinIO as the host sees it (S3_ENDPOINT)
 #   MINIO_ENDPOINT_FOR_CVAT
 #                      the same MinIO as the CVAT pods see it (S3_ENDPOINT_IN_CLUSTER)
-#   MINIO_ACCESS_KEY / MINIO_SECRET_KEY / MINIO_CONSOLE
-#                      the cveta2 MinIO key and the console URL
+#   MINIO_ACCESS_KEY / MINIO_SECRET_KEY / MINIO_REGION / MINIO_CONSOLE
+#                      the cveta2 MinIO key, its region and the console URL
 #   MINIO_BUCKET       this run's bucket, <tag>
 #   CLEARML_*          the cveta2 ClearML identity, exported by the helper as is
-#   COMPOSE_PROJECT    <tag>-cveta2, the Docker Compose stack of a run
+#
+# Nothing runs on this host: the stands are the cluster's, so there are no
+# ports to pick and no Compose stack to start.
 #
 # tests/integration/.env must exist: its presence arms the machine for
 # integration tests (and the pre-push gate). It holds optional overrides only,
@@ -47,7 +49,6 @@ INTEGRATION_ENV_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEGRATION_REPO_ROOT="$(cd "$INTEGRATION_ENV_SCRIPT_DIR/.." && pwd)"
 INTEGRATION_ENV_FILE="$INTEGRATION_REPO_ROOT/tests/integration/.env"
 INTEGRATION_RUN_TAG_FILE="$INTEGRATION_REPO_ROOT/tests/integration/.run-tag"
-INTEGRATION_COMPOSE_FILE="$INTEGRATION_REPO_ROOT/tests/integration/docker-compose.yml"
 INTEGRATION_PROJECT="cveta2"
 INTEGRATION_MAIN_TAG="cveta2-main"
 INTEGRATION_TAG_SLUG="integration"
@@ -128,13 +129,11 @@ integration_set_run_tag() {
     INTEGRATION_RUN_TAG="$1"
     CVAT_INTEGRATION_PROJECT=""
     MINIO_BUCKET=""
-    COMPOSE_PROJECT=""
     if [[ -n "$INTEGRATION_RUN_TAG" ]]; then
         CVAT_INTEGRATION_PROJECT="${INTEGRATION_RUN_TAG} coco8-dev"
         MINIO_BUCKET="$INTEGRATION_RUN_TAG"
-        COMPOSE_PROJECT="${INTEGRATION_RUN_TAG}-cveta2"
     fi
-    export INTEGRATION_RUN_TAG CVAT_INTEGRATION_PROJECT MINIO_BUCKET COMPOSE_PROJECT
+    export INTEGRATION_RUN_TAG CVAT_INTEGRATION_PROJECT MINIO_BUCKET
 }
 
 integration_read_run_tag_file() {
@@ -239,24 +238,17 @@ CVAT_INTEGRATION_PASSWORD="$CVAT_PASSWORD"
 CVAT_INTEGRATION_ORG="$CVAT_ORG"
 
 integration_eval_env minio || return 1 2>/dev/null || exit 1
-integration_require_secret_keys minio S3_ENDPOINT S3_ENDPOINT_IN_CLUSTER S3_ACCESS_KEY S3_SECRET_KEY || return 1 2>/dev/null || exit 1
+integration_require_secret_keys minio S3_ENDPOINT S3_ENDPOINT_IN_CLUSTER S3_ACCESS_KEY S3_SECRET_KEY S3_REGION || return 1 2>/dev/null || exit 1
 MINIO_ENDPOINT="${S3_ENDPOINT%/}"
 MINIO_ENDPOINT_FOR_CVAT="${S3_ENDPOINT_IN_CLUSTER%/}"
 MINIO_ACCESS_KEY="$S3_ACCESS_KEY"
 MINIO_SECRET_KEY="$S3_SECRET_KEY"
+MINIO_REGION="$S3_REGION"
 MINIO_CONSOLE="${S3_CONSOLE:-}"
 
 integration_eval_env clearml || return 1 2>/dev/null || exit 1
 integration_require_secret_keys clearml CLEARML_API_HOST CLEARML_API_ACCESS_KEY CLEARML_API_SECRET_KEY || return 1 2>/dev/null || exit 1
 
-# Host ports of the Docker Compose stack integration_up.sh still starts.
-MINIO_PORT="${MINIO_PORT:-9989}"
-MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9990}"
-CLEARML_API_PORT="${CLEARML_API_PORT:-8880}"
-CLEARML_FILES_PORT="${CLEARML_FILES_PORT:-8881}"
-CLEARML_WEB_PORT="${CLEARML_WEB_PORT:-8882}"
-
 export INTEGRATION_SKILL_DIR INTEGRATION_PROJECT
-export MINIO_PORT MINIO_CONSOLE_PORT CLEARML_API_PORT CLEARML_FILES_PORT CLEARML_WEB_PORT
 export CVAT_INTEGRATION_HOST CVAT_INTEGRATION_USER CVAT_INTEGRATION_PASSWORD CVAT_INTEGRATION_ORG
-export MINIO_ENDPOINT MINIO_ENDPOINT_FOR_CVAT MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_CONSOLE
+export MINIO_ENDPOINT MINIO_ENDPOINT_FOR_CVAT MINIO_ACCESS_KEY MINIO_SECRET_KEY MINIO_REGION MINIO_CONSOLE

@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Pre-push gate: run tests/integration against a freshly prepared stack, on
-# the machines that are set up for it.
+# Pre-push gate: run tests/integration against a freshly prepared run on the
+# shared stands, on the machines that are set up for it.
 #
 # The gate arms itself on tests/integration/.env - the same gitignored file every
 # integration script hard-requires, so "this machine has an .env" and "this
 # machine was set up for integration tests" are the same statement. A missing
 # .env is the ONLY silent skip: once armed, the gate passes, fails, or is skipped
-# on purpose. A gate that quietly passes because docker or the CVAT stand is
-# down is worse than no gate, because it teaches everyone to ignore it.
+# on purpose. A gate that quietly passes because the CVAT stand is down is
+# worse than no gate, because it teaches everyone to ignore it.
 #
 #   ./scripts/integration_gate.sh                # what the hook runs
 #   ./scripts/integration_gate.sh -k upload      # extra args go to pytest
-#   ./scripts/integration_gate.sh --keep-stack   # leave the stack up on failure
+#   ./scripts/integration_gate.sh --keep-stack   # leave the run's data on failure
 #
 # What happens to the run's data afterwards depends on the branch:
 #   - main (a push of refs/heads/main, or main checked out): everything stays -
 #     the `cveta2-main` slot ("cveta2-main coco8-dev" on CVAT, bucket
 #     cveta2-main on MinIO) - so the last main run can be inspected in the CVAT
 #     UI. The next main run replaces it.
-#   - any other branch: stack and CVAT data are removed.
+#   - any other branch: the run's bucket and CVAT data are removed.
 #   INTEGRATION_KEEP_DATA=1 / =0 overrides that decision.
 #
 # Skip it for one push (mutmut-full still runs):
@@ -56,14 +56,6 @@ fi
 # shellcheck source=scripts/integration_env.sh
 source "$SCRIPT_DIR/integration_env.sh"
 
-if ! docker info > /dev/null 2>&1; then
-    echo "ERROR: the integration gate is armed (tests/integration/.env exists)" >&2
-    echo "       but the docker daemon is not reachable." >&2
-    echo "       Start docker, or push without this gate:" >&2
-    echo "           SKIP=integration-tests git push" >&2
-    exit 1
-fi
-
 if ! curl -sf "$CVAT_INTEGRATION_HOST/api/server/about" > /dev/null 2>&1; then
     echo "ERROR: the integration gate is armed (tests/integration/.env exists)" >&2
     echo "       but the CVAT stand at $CVAT_INTEGRATION_HOST does not answer." >&2
@@ -96,16 +88,16 @@ teardown() {
     if keep_data; then
         log "keeping the run for inspection (main):"
         log "    CVAT:  $CVAT_INTEGRATION_HOST  organization $CVAT_INTEGRATION_ORG, project '$CVAT_INTEGRATION_PROJECT'"
-        log "    MinIO: bucket $MINIO_BUCKET at $MINIO_ENDPOINT; compose project $COMPOSE_PROJECT stays up"
+        log "    MinIO: bucket $MINIO_BUCKET at $MINIO_ENDPOINT"
         log "    remove both with ./scripts/integration_stop.sh"
         return
     fi
     if [[ $rc -ne 0 && $KEEP_STACK -eq 1 ]]; then
-        log "leaving the stack up for triage (--keep-stack);"
-        log "    stop it with ./scripts/integration_stop.sh"
+        log "leaving the run's data for triage (--keep-stack);"
+        log "    remove it with ./scripts/integration_stop.sh"
         return
     fi
-    log "tearing down the integration stack"
+    log "tearing down the run"
     "$SCRIPT_DIR/integration_stop.sh" || true
 }
 trap teardown EXIT

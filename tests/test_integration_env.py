@@ -116,8 +116,10 @@ OBSERVED = (
     "MINIO_ACCESS_KEY",
     "MINIO_SECRET_KEY",
     "MINIO_CONSOLE",
+    "MINIO_REGION",
     "MINIO_BUCKET",
-    "COMPOSE_PROJECT",
+    "MINIO_PORT",
+    "CLEARML_API_PORT",
     "CLEARML_API_HOST",
     "CLEARML_API_ACCESS_KEY",
     "CLEARML_QUEUE",
@@ -209,14 +211,13 @@ class Tree(BaseModel):
         return self.run_tag_file.read_text(encoding="utf-8")
 
     def install_gate(self) -> Path:
-        """Install the real gate beside stubbed lifecycle scripts, docker and curl."""
+        """Install the real gate beside stubbed lifecycle scripts and curl."""
         gate = self.root / "scripts" / "integration_gate.sh"
         shutil.copy(GATE_SCRIPT, gate)
         for name, text in FAKE_LIFECYCLE.items():
             _write_executable(self.root / "scripts" / name, text)
         (self.root / "bin").mkdir(exist_ok=True)
-        for tool in ("docker", "curl"):
-            _write_executable(self.root / "bin" / tool, FAKE_TOOL)
+        _write_executable(self.root / "bin" / "curl", FAKE_TOOL)
         return gate
 
     def calls(self) -> list[str]:
@@ -309,9 +310,17 @@ class TestCredentials:
         assert outcome.values["MINIO_ACCESS_KEY"] == "ak"
         assert outcome.values["MINIO_SECRET_KEY"] == "sk"
         assert outcome.values["MINIO_CONSOLE"] == "http://minio-console.k8s.localhost"
+        assert outcome.values["MINIO_REGION"] == "us-east-1"
         assert outcome.values["CLEARML_API_HOST"] == "http://clearml-api.k8s.localhost"
         assert outcome.values["CLEARML_API_ACCESS_KEY"] == "cak"
         assert outcome.values["CLEARML_QUEUE"] == "agents"
+
+    def test_nothing_runs_on_this_host_so_no_port_is_derived(self, tree: Tree) -> None:
+        outcome = tree.run(env={"INFRA_RUN_TAG": MINTED_TAG})
+        assert outcome.returncode == 0, outcome.stderr
+        assert outcome.values["MINIO_PORT"] == ""
+        assert outcome.values["CLEARML_API_PORT"] == ""
+        assert "PORT" not in ENV_SCRIPT.read_text(encoding="utf-8")
 
     @pytest.mark.parametrize("stand", ["cvat", "minio", "clearml"])
     def test_a_failing_helper_fails_the_script(self, tree: Tree, stand: str) -> None:
@@ -327,6 +336,7 @@ class TestCredentials:
             ("cvat", "CVAT_PASSWORD"),
             ("cvat", "CVAT_ORG"),
             ("minio", "S3_ENDPOINT_IN_CLUSTER"),
+            ("minio", "S3_REGION"),
             ("clearml", "CLEARML_API_SECRET_KEY"),
         ],
     )
@@ -347,7 +357,6 @@ class TestRunTagPrecedence:
         assert outcome.values["INTEGRATION_RUN_TAG"] == MINTED_TAG
         assert outcome.values["CVAT_INTEGRATION_PROJECT"] == f"{MINTED_TAG} coco8-dev"
         assert outcome.values["MINIO_BUCKET"] == MINTED_TAG
-        assert outcome.values["COMPOSE_PROJECT"] == f"{MINTED_TAG}-cveta2"
 
     def test_main_is_the_durable_slot(self, tree: Tree) -> None:
         tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
@@ -369,7 +378,6 @@ class TestRunTagPrecedence:
         assert outcome.values["INTEGRATION_RUN_TAG"] == ""
         assert outcome.values["CVAT_INTEGRATION_PROJECT"] == ""
         assert outcome.values["MINIO_BUCKET"] == ""
-        assert outcome.values["COMPOSE_PROJECT"] == ""
 
     def test_require_run_tag_refuses_without_a_run(self, tree: Tree) -> None:
         outcome = tree.run("integration_require_run_tag")

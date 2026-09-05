@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Run integration tests against the run prepared by integration_up.sh: this
-# run's project on the cluster CVAT and its bucket on the shared MinIO.
+# run's project on the cluster CVAT, its bucket on the shared MinIO, and the
+# shared ClearML stand.
 #
-# Sets all required env vars (stand credentials, organization, project name,
-# xdist override) so you don't have to remember them. Extra pytest args are
-# forwarded as-is:
+# Every variable the tests read (stand credentials, organization, project
+# name, bucket, the CLEARML_* identity) is exported by integration_env.sh, so
+# there is nothing to remember. Extra pytest args are forwarded as-is:
 #
 #   ./scripts/integration_test.sh -k upload
 #   ./scripts/integration_test.sh -x --tb=long
 #
 # The run tag is INFRA_RUN_TAG when exported, else the one integration_up.sh
-# recorded in tests/integration/.run-tag; the same CLEARML_*_PORT values given
-# to integration_up.sh must be in the environment here too.
+# recorded in tests/integration/.run-tag.
 
 set -euo pipefail
 
@@ -20,23 +20,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/integration_env.sh"
 integration_require_run_tag
 
-# The Compose ClearML of this run wins while it answers; otherwise the stand's
-# CLEARML_* exported by integration_env.sh stay in force.
-CLEARML_API_URL="http://localhost:${CLEARML_API_PORT}"
-if curl -sf "$CLEARML_API_URL/debug.ping" > /dev/null 2>&1; then
-    export CLEARML_API_HOST="$CLEARML_API_URL"
-    export CLEARML_WEB_HOST="http://localhost:${CLEARML_WEB_PORT}"
-    export CLEARML_FILES_HOST="http://localhost:${CLEARML_FILES_PORT}"
-    export CLEARML_API_ACCESS_KEY="EGRTCO8JMSIGI6S39GTP43NFWXDQOW"
-    export CLEARML_API_SECRET_KEY="LPEJbGJ6bK4tujQcmrD3i1dbMBDdwUwelVa-LG0K0FFmY9bzH_H0Sw"
-    CLEARML_STATUS="$CLEARML_API_HOST"
-else
-    CLEARML_STATUS="$CLEARML_API_HOST (the shared stand)"
-fi
-
 echo "==> CVAT:    $CVAT_INTEGRATION_HOST  (org $CVAT_INTEGRATION_ORG, project '$CVAT_INTEGRATION_PROJECT')"
 echo "==> MinIO:   $MINIO_ENDPOINT  (bucket $MINIO_BUCKET)"
-echo "==> ClearML: $CLEARML_STATUS"
+echo "==> ClearML: $CLEARML_API_HOST  (the shared stand)"
 echo "==> Running pytest (xdist disabled for CVAT rate limits)"
 
 cd "$INTEGRATION_REPO_ROOT"

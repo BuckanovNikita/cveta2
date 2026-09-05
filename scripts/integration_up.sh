@@ -2,8 +2,9 @@
 # Prepare one run of the integration tests.
 #
 # CVAT, MinIO and ClearML are the shared stands in the local Kubernetes
-# cluster (k8s-infra skill); this script never starts or stops them. It acts
-# as project `cveta2` under one run tag (scripts/integration_env.sh):
+# cluster (k8s-infra skill); this script never starts or stops them and runs
+# nothing on this host. It acts as project `cveta2` under one run tag
+# (scripts/integration_env.sh):
 #
 #   1. the run tag             INFRA_RUN_TAG when exported; `cveta2-main` on
 #                              main; otherwise a fresh tag from
@@ -13,27 +14,23 @@
 #                              or export INFRA_RUN_TAG to adopt it.
 #   2. cvat_stand.py verify   the cveta2 user of the Secret logs in and is a
 #                              member of the organization; nothing is registered
-#   3. docker compose          the Compose stack of this tag (project
-#                              <tag>-cveta2), recreated for the ClearML tests
-#                              until they move to the stand; its MinIO is no
-#                              longer used
+#   3. previous run objects    this tag's CVAT project / cloud storage
+#                              (cvat_stand.py cleanup --tag) and bucket <tag>
+#                              on the shared MinIO (minio.py cleanup --prefix)
+#                              are gone; on main this clears the durable
+#                              `cveta2-main` slot
 #   4. coco8 images            downloaded once into tests/fixtures/data/
-#   5. previous run objects    bucket <tag> on the shared MinIO
-#                              (minio.py cleanup --prefix <tag>) and this tag's
-#                              CVAT project / cloud storage (cvat_stand.py
-#                              cleanup --tag) are gone; on main this clears
-#                              the durable `cveta2-main` slot
-#   6. seed_cvat.py            "<tag> coco8-dev" and "<tag> minio" created,
-#                              images uploaded to bucket <tag>
+#   5. seed_cvat.py            bucket <tag> created with the cveta2 key and the
+#                              images uploaded; cloud storage "<tag> minio"
+#                              registered against the in-cluster MinIO
+#                              endpoint; project "<tag> coco8-dev" and its
+#                              tasks created
 #
 # Usage:
-#   ./scripts/integration_up.sh [--minio-port 9189]
+#   ./scripts/integration_up.sh
 #
-# The Compose ports (MINIO_PORT, MINIO_CONSOLE_PORT, CLEARML_API_PORT,
-# CLEARML_FILES_PORT, CLEARML_WEB_PORT) can be set through the environment.
-#
-# Requirements: docker, docker compose v2, uv, curl, unzip, python3, kubectl,
-# the k8s-infra skill, tests/integration/.env
+# Requirements: uv, curl, unzip, python3, kubectl, the k8s-infra skill,
+# tests/integration/.env
 
 set -euo pipefail
 
@@ -42,26 +39,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/integration_env.sh"
 
 COCO8_IMAGES_DIR="$INTEGRATION_REPO_ROOT/tests/fixtures/data/coco8/images"
-HEALTH_TIMEOUT=180
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --minio-port)
-            MINIO_PORT="$2"
-            shift 2
-            ;;
-        --minio-port=*)
-            MINIO_PORT="${1#*=}"
-            shift
-            ;;
         -h|--help)
-            echo "Usage: $0 [--minio-port PORT]"
+            echo "Usage: $0"
             echo ""
             echo "Prepare one integration run on the shared stands: bucket <tag> on"
             echo "MinIO, project '<tag> coco8-dev' on CVAT. Always recreates both."
-            echo ""
-            echo "Options:"
-            echo "  --minio-port PORT    Host port for MinIO API (default: 9989)"
             exit 0
             ;;
         *)
@@ -70,55 +55,23 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-export MINIO_PORT
 integration_claim_run_tag
 
 log() { echo "==> $*"; }
 
-check_port_free() {
-    local port=$1 label=$2
-    if ss -tlnH "sport = :$port" 2>/dev/null | grep -q .; then
-        echo "ERROR: Port $port ($label) is already in use." >&2
-        echo "Free it or use --minio-port / the CLEARML_*_PORT variables to override." >&2
-        exit 1
-    fi
-}
-
-compose() {
-    docker compose -p "$COMPOSE_PROJECT" -f "$INTEGRATION_COMPOSE_FILE" "$@"
-}
-
-wait_healthy() {
-    local url=$1 label=$2 elapsed=0
-    log "Waiting for $label (timeout ${HEALTH_TIMEOUT}s)"
-    until curl -sf "$url" > /dev/null 2>&1; do
-        if [ "$elapsed" -ge "$HEALTH_TIMEOUT" ]; then
-            echo "ERROR: $label did not become healthy within ${HEALTH_TIMEOUT}s" >&2
-            echo "Check logs: docker compose -p $COMPOSE_PROJECT logs" >&2
-            exit 1
-        fi
-        sleep 3
-        elapsed=$((elapsed + 3))
-    done
-    log "$label is healthy"
-}
-
 cd "$INTEGRATION_REPO_ROOT"
 
-# ── 1. The stand: the account and its membership ──────────────────────
+# ── 1-2. The stand: the account and its membership ────────────────────
 log "Run tag '$INTEGRATION_RUN_TAG': verifying user $CVAT_INTEGRATION_USER on the CVAT stand at $CVAT_INTEGRATION_HOST"
 uv run python tests/integration/cvat_stand.py verify
 
-# ── 2. Recreate MinIO + ClearML ───────────────────────────────────────
-log "Tearing down compose project $COMPOSE_PROJECT (down -v)"
-docker compose -p "$COMPOSE_PROJECT" down -v --remove-orphans 2>/dev/null || true
-
-# ── 3. Ports, after our own teardown released them ────────────────────
-check_port_free "$MINIO_PORT" "MinIO API"
-check_port_free "$MINIO_CONSOLE_PORT" "MinIO console"
-check_port_free "$CLEARML_API_PORT" "ClearML API"
-check_port_free "$CLEARML_FILES_PORT" "ClearML fileserver"
-check_port_free "$CLEARML_WEB_PORT" "ClearML webserver"
+# ── 3. This tag's previous run: CVAT objects first, then the bucket ───
+# A freshly minted tag owns nothing yet; an adopted tag and the main slot do.
+# The cloud storage points at the bucket, so it goes before the bucket.
+log "Removing the previous '$INTEGRATION_RUN_TAG' run from organization $CVAT_INTEGRATION_ORG"
+uv run python tests/integration/cvat_stand.py cleanup --tag "$INTEGRATION_RUN_TAG"
+log "Removing bucket '$MINIO_BUCKET' of the previous '$INTEGRATION_RUN_TAG' run from MinIO at $MINIO_ENDPOINT"
+integration_helper minio cleanup --prefix "$INTEGRATION_RUN_TAG"
 
 # ── 4. coco8 images ───────────────────────────────────────────────────
 if [ ! -d "$COCO8_IMAGES_DIR/train" ] || [ ! -d "$COCO8_IMAGES_DIR/val" ]; then
@@ -137,27 +90,15 @@ else
     log "coco8 images already present"
 fi
 
-log "Starting MinIO + ClearML (project $COMPOSE_PROJECT, MinIO on port $MINIO_PORT)"
-compose up -d --pull=missing
-wait_healthy "http://localhost:${MINIO_PORT}/minio/health/live" "MinIO"
-wait_healthy "http://localhost:${CLEARML_API_PORT}/debug.ping" "ClearML API"
-
-# ── 5-6. This tag's previous run: bucket and CVAT objects, then seed ──
-# A freshly minted tag owns nothing yet; an adopted tag and the main slot do.
-log "Removing bucket '$MINIO_BUCKET' of the previous '$INTEGRATION_RUN_TAG' run from MinIO"
-integration_helper minio cleanup --prefix "$INTEGRATION_RUN_TAG"
-log "Removing the previous '$INTEGRATION_RUN_TAG' run from organization $CVAT_INTEGRATION_ORG"
-uv run python tests/integration/cvat_stand.py cleanup --tag "$INTEGRATION_RUN_TAG"
-
-log "Seeding '$CVAT_INTEGRATION_PROJECT'"
+# ── 5. Bucket, images, cloud storage, project, tasks ──────────────────
+log "Seeding bucket '$MINIO_BUCKET' and project '$CVAT_INTEGRATION_PROJECT'"
 uv run python tests/integration/seed_cvat.py
 
 log "Done."
 log "CVAT:          $CVAT_INTEGRATION_HOST  (organization $CVAT_INTEGRATION_ORG, project '$CVAT_INTEGRATION_PROJECT')"
 log "MinIO bucket:  $MINIO_BUCKET at $MINIO_ENDPOINT  (for CVAT: $MINIO_ENDPOINT_FOR_CVAT)"
 log "MinIO console: ${MINIO_CONSOLE:-not published by the Secret}"
-log "ClearML API:   http://localhost:${CLEARML_API_PORT}"
-log "ClearML Web:   http://localhost:${CLEARML_WEB_PORT}"
+log "ClearML:       $CLEARML_API_HOST  (the shared stand)"
 log ""
 log "Run integration tests:  ./scripts/integration_test.sh"
 log "Tear down:              ./scripts/integration_stop.sh"

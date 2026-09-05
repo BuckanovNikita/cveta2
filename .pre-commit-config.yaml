@@ -88,9 +88,9 @@ repos:
         always_run: true
         stages: [pre-push]
 
-      # Integration tests need the cluster CVAT stand plus a MinIO + ClearML
-      # compose stack, and this run's CVAT project must be fresh (a reused one
-      # fails with "Duplicate base task name"), so the script owns
+      # Integration tests need the shared CVAT, MinIO and ClearML stands of the
+      # cluster, and this run's CVAT project must be fresh (a reused one fails
+      # with "Duplicate base task name"), so the script owns
       # up -> test -> keep-or-stop and a run costs minutes. Hence pre-push,
       # after the mutation gate.
       #
@@ -101,7 +101,7 @@ repos:
       #
       # Skip it for one push with: SKIP=integration-tests git push
       - id: integration-tests
-        name: integration tests (live CVAT stack)
+        name: integration tests (live stands)
         entry: ./scripts/integration_gate.sh
         language: system
         pass_filenames: false
