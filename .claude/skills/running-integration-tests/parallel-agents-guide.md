@@ -1,90 +1,110 @@
 # Concurrent integration runs
 
-Read this reference when another developer or automated run may use the shared
-CVAT stand or local Docker ports.
+Read this reference when another developer, agent or pre-push gate may be
+running the integration tests against the shared stands at the same time.
 
 ## Isolation model
 
-A run needs both a unique tag and unique ports.
+Isolation is the run tag, nothing else. Every object a run creates carries its
+tag (CVAT project `<tag> coco8-dev` and cloud storage `<tag> minio`, MinIO
+bucket `<tag>`, ClearML projects `<tag> <what>`), every cleanup selects by that
+exact tag, and the tag is minted by the skill with a nonce
+(`infra.py newtag --project cveta2 --slug integration`), so two runs started on
+the same day from the same branch still get different tags. Nothing runs on
+this host: there are no ports, containers or volumes to keep apart.
 
-`scripts/integration_env.sh` uses explicit `INTEGRATION_RUN_TAG` when set.
-Otherwise it derives `<INTEGRATION_USER>` on main or
-`<INTEGRATION_USER>-<branch>` elsewhere. The sanitized tag names the Compose
-project, containers, CVAT project `<tag> coco8-dev`, and cloud storage
-`<tag> minio`.
+What is still shared:
 
-The current defaults are:
-
-| Service | Port | Override |
-|---|---:|---|
-| MinIO API | 9989 | `MINIO_PORT` or `integration_up.sh --minio-port` |
-| MinIO console | 9990 | `MINIO_CONSOLE_PORT` |
-| ClearML API | 8880 | `CLEARML_API_PORT` |
-| ClearML files | 8881 | `CLEARML_FILES_PORT` |
-| ClearML web | 8882 | `CLEARML_WEB_PORT` |
-
-Different ports with the same tag are unsafe: the second setup removes the
-first run's Compose project and exact-tag CVAT objects. Different tags with the
-same ports fail at startup. Worktrees usually make branch-derived tags
-different, but do not isolate ports and do not help when two worktrees share a
-branch name.
+- the stands themselves, and CVAT's anonymous throttle, which sees one client
+  IP for every run on this machine. The registry caps concurrent cveta2 suites
+  at `[capacity].cveta2_integration_runs` in the skill's `projects.toml`; read
+  the value there, and run `python3 <skill-dir>/scripts/infra.py room` before a
+  run (exit status 3 is WAIT);
+- the durable slot `cveta2-main`: a run on `main` (a checkout on `main`, or a
+  push of `refs/heads/main`) without an exported `INFRA_RUN_TAG` is that one
+  slot, so two such runs at once replace each other. Run branch work from a
+  branch, and only one main run at a time;
+- one checkout's `tests/integration/.run-tag` file, which names the run active
+  in that checkout. `integration_up.sh` and the gate refuse to mint while it
+  exists; a second run from the same checkout needs another worktree or must
+  adopt the tag (below).
 
 ## Start an isolated run
 
-Choose values that belong to this run and keep them in the same shell:
+The default path is already isolated: `integration_up.sh` mints a fresh tag and
+records it, and test and stop read the record.
 
 ```bash
-export INTEGRATION_RUN_TAG=cveta2-review-<unique-suffix>
-export MINIO_PORT=<free-port>
-export MINIO_CONSOLE_PORT=<free-port>
-export CLEARML_API_PORT=<free-port>
-export CLEARML_FILES_PORT=<free-port>
-export CLEARML_WEB_PORT=<free-port>
-
 ./scripts/integration_up.sh
 ./scripts/integration_test.sh tests/integration/<target>.py
 ./scripts/integration_stop.sh
 ```
 
-The scripts must see the same variables for setup, test, and stop. Do not reuse
-a tag shown by another active run. If assigning ports is not worthwhile, run
-sequentially and still preserve exact tag ownership.
-
-## Diagnose collisions
-
-`integration_up.sh` first removes its own Compose project, then checks ports.
-A remaining occupied port therefore belongs to another process or run. Inspect
-before acting:
+To run under a tag you chose (a `--keep` tag, a slug that names the work), mint
+it through the skill and export it before the first script; every script in
+that shell then acts on it and nothing is written to `.run-tag`:
 
 ```bash
-docker compose ls
-source scripts/integration_env.sh
-uv run python tests/integration/cvat_stand.py ls
-```
-
-Do not stop an unknown Compose project or change a running process. Choose
-different ports and a different tag.
-
-Same-tag collisions on CVAT can appear as missing projects or tasks because the
-second setup uses `cleanup --tag`. The selector includes a trailing space
-(`"<tag> "`) to avoid prefix collisions, but it cannot distinguish two runs
-that deliberately share the exact tag.
-
-## Cleanup after failure
-
-Clean only the tag recorded for the current run:
-
-```bash
-INTEGRATION_RUN_TAG=<owned-tag> \
-MINIO_PORT=<owned-port> MINIO_CONSOLE_PORT=<owned-port> \
-CLEARML_API_PORT=<owned-port> CLEARML_FILES_PORT=<owned-port> CLEARML_WEB_PORT=<owned-port> \
+INFRA_RUN_TAG=$(python3 <skill-dir>/scripts/infra.py newtag --project cveta2 --slug <what>) && export INFRA_RUN_TAG
+./scripts/integration_up.sh
+./scripts/integration_test.sh tests/integration/<target>.py
 ./scripts/integration_stop.sh
 ```
 
-If only CVAT cleanup needs retrying, source the same environment and use
-`cvat_stand.py cleanup --tag <owned-tag>`. Never substitute a broader prefix.
+Never hand-write a tag and never set `INTEGRATION_RUN_TAG`: the scripts derive
+it and refuse a conflicting shell value. Not Claude Code? Export
+`INFRA_HARNESS=codex|ci|human` first, so the tag records who ran it.
 
-For possible orphan inventory, the skill's
-`cvat.py --project cveta2 cleanup --stale --dry-run` is read-only. Do not remove its results until the user explicitly authorizes the
-deletion and every object's ownership has been verified. A retained main run
-is expected and may appear stale.
+## Adopt a run started elsewhere
+
+A run's tag is its only handle. To test or stop a run that another shell or a
+killed gate started, export its tag and use the same scripts:
+
+```bash
+export INFRA_RUN_TAG=<tag>          # from .run-tag, the gate log, or `ls` below
+./scripts/integration_test.sh tests/integration/<target>.py
+./scripts/integration_stop.sh
+```
+
+Adopt only a tag you own or were handed: adopting a live run of somebody else
+and stopping it deletes their objects. When in doubt, list first.
+
+## Diagnose collisions
+
+```bash
+source scripts/integration_env.sh
+cat tests/integration/.run-tag                               # the run active in this checkout
+uv run python tests/integration/cvat_stand.py ls             # what the cveta2 user owns on CVAT
+python3 "$INTEGRATION_SKILL_DIR/scripts/cvat.py"    --project cveta2 ls
+python3 "$INTEGRATION_SKILL_DIR/scripts/minio.py"   --project cveta2 ls
+python3 "$INTEGRATION_SKILL_DIR/scripts/clearml.py" --project cveta2 ls
+```
+
+Every cveta2 run tag reads as `cveta2-<harness>-<yyyymmdd>-integration-<nonce>`
+(or the slug the run chose), so the listings say who started what and when.
+A `Duplicate base task name` failure or a project that vanished mid-run means
+two runs share one tag: only the main slot and an adopted tag can do that.
+Choose a fresh tag; never stop a tag you did not start.
+
+## Cleanup after failure
+
+Clean only the tag recorded for the current run; `integration_stop.sh` prints
+the exact same-tag retry command for the stand that failed:
+
+```bash
+INFRA_RUN_TAG=<owned-tag> ./scripts/integration_stop.sh
+```
+
+If only one stand needs retrying, use the command the script printed:
+`cvat_stand.py cleanup --tag <owned-tag>` for CVAT, or the skill's
+`minio.py` / `clearml.py --project cveta2 cleanup --prefix <owned-tag>`. Never
+substitute a shorter prefix: the helpers refuse one that does not reach
+`cveta2-<harness>-<yyyymmdd>-`, and `cvat_stand.py` matches the tag followed by
+a space.
+
+Orphans of dead runs are inventoried with the skill's
+`cleanup --stale --dry-run` on each stand; for anyone but the janitor
+`cleanup --stale` is that listing whatever the flags say. Report what it shows
+and leave the deletion to the janitor or the human. The retained
+`cveta2-main` slot is a durable name of the registry: the listing never shows
+it, and it is never an orphan.

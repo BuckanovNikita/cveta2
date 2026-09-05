@@ -21,15 +21,16 @@ git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax
 клона и никак не влияет на другие репозитории; подробнее — в «Ветки и релизы».
 
 Требования: Python 3.10+ (пакет), [uv](https://docs.astral.sh/uv/),
-Docker + Compose v2 (только для интеграционных тестов).
+`kubectl` с контекстом `docker-desktop` и скилл `k8s-infra` (только для
+интеграционных тестов).
 
 Версии Python в проекте различаются намеренно: `requires-python = ">=3.10"` —
 это floor **пакета**; `.python-version` пинит **разработку** на 3.12; mypy
 анализирует как 3.11 (floor установленных зависимостей, см. ниже). Ставить
 везде одно число не нужно и вредно.
 
-Сабмодулей у репозитория нет: `docker-compose.yml` для стека CVAT
-`integration_up.sh` скачивает сам (см. «Интеграционные тесты»).
+Сабмодулей у репозитория нет: интеграционные тесты ходят на общие стенды
+кластера и ничего не собирают локально (см. «Интеграционные тесты»).
 
 ## Стиль кода
 
@@ -278,11 +279,15 @@ uv run mutmut browse                             # интерактивный р
 Чтобы пересоздать фикстуры из реального CVAT:
 
 ```bash
-export CVAT_HOST="http://localhost:8080"
-export CVAT_USERNAME="admin"
-export CVAT_PASSWORD="ваш_пароль"
+export CVAT_HOST="<url сервера CVAT>"
+export CVAT_USERNAME="<пользователь>"
+export CVAT_PASSWORD="<пароль>"
 uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 ```
+
+Скрипт работает в личном рабочем пространстве этого пользователя (организацию
+он не задаёт), поэтому проекты интеграционных прогонов на общем стенде ему не
+видны.
 
 По умолчанию вывод в `tests/fixtures/cvat/coco8-dev/`. Другой каталог: `--output-dir path`.
 
@@ -290,69 +295,103 @@ uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 
 ### Интеграционные тесты
 
-Прогоняют тесты против живого CVAT + MinIO + ClearML. CVAT — постоянный стенд
-в локальном Kubernetes-кластере (`http://cvat.k8s.localhost`, см. скилл
-`k8s-infra`); скрипты его не поднимают и не гасят. MinIO и ClearML живут в
-Docker Compose (`tests/integration/docker-compose.yml`) и пересоздаются на
-каждый прогон.
+Прогоняют тесты против живых CVAT, MinIO и ClearML — общих стендов локального
+Kubernetes-кластера, которыми владеет скилл `k8s-infra`. На этой машине ничего
+не поднимается: нет контейнеров, томов и портов, скрипты стенды не запускают и
+не гасят. Прогон действует как проект `cveta2` реестра скилла (`projects.toml`)
+под одним **тегом прогона**; контракт — `references/run-contract.md` скилла,
+выжимка для агентов — блок «Shared infra» в `AGENTS.md`.
 
 ```bash
-# 1. Подготовить прогон: проверить стенд, поднять MinIO + ClearML, засеять проект
+# 0. Один раз: включить машину (кредов в файле нет, важен сам факт его наличия)
+cp tests/integration/.env.example tests/integration/.env
+
+# 1. Подготовить прогон: проверить учётку на стенде, выбить тег, засеять бакет и проект
 ./scripts/integration_up.sh
-./scripts/integration_up.sh --minio-port 9189   # если порт по умолчанию занят
 
 # 2. Запустить тесты (скрипт сам выставляет env-переменные и отключает xdist)
 ./scripts/integration_test.sh
 ./scripts/integration_test.sh -k upload        # только upload-тесты
 ./scripts/integration_test.sh -x --tb=long     # остановиться на первой ошибке
 
-# 3. Снести compose-стек и данные прогона в CVAT
+# 3. Убрать данные прогона со всех трёх стендов
 ./scripts/integration_stop.sh
 ```
 
-Тесты ходят в CVAT под отдельным пользователем внутри одной организации
-(по умолчанию `cveta2` и `cveta2-tests`); `integration_up.sh` регистрирует
-обоих при первом запуске. Все объекты прогона в CVAT носят **тег прогона**:
-проект `<тег> coco8-dev` и облачное хранилище `<тег> minio`. Тег выводит
-`scripts/integration_env.sh` — на `main` это `INTEGRATION_USER` (по умолчанию
-`$USER`), на любой другой ветке `INTEGRATION_USER-<ветка>`; переопределяется
-через `INTEGRATION_RUN_TAG`. Тот же тег даёт имя compose-проекту
-(`<тег>-cveta2`).
+**Креды.** Ни одного пароля в файлах нет: `scripts/integration_env.sh`
+выполняет `cvat.py`, `minio.py` и `clearml.py --project cveta2 env` из скилла и
+раскладывает ключи Secret'ов кластера по переменным, которые читают тесты
+(`CVAT_INTEGRATION_*`, `MINIO_*`, `CLEARML_*`). Отсутствующий ключ — ошибка, а
+не значение по умолчанию. Скилл ищется в `~/.agents/skills/k8s-infra`, затем в
+`~/.claude/skills/k8s-infra`; другой checkout задаётся `K8S_INFRA_SKILL_DIR` —
+единственное, что имеет смысл писать в `.env`.
 
-Перед засевом `integration_up.sh` удаляет из организации всё с этим тегом,
+**Тег.** `integration_env.sh` выводит один тег для up / test / stop / gate:
+`INFRA_RUN_TAG`, если экспортирован (так подхватывают чужой или прерванный
+прогон); на `main` — постоянный слот `cveta2-main`; иначе — тег из
+`tests/integration/.run-tag`, который `integration_up.sh` записывает, выбив
+свежий `infra.py newtag --project cveta2 --slug integration`, а
+`integration_stop.sh` удаляет. Тег — единственный признак владения: проект
+`<тег> coco8-dev` и облачное хранилище `<тег> minio` в организации из
+Secret'а, бакет `<тег>` в MinIO, проекты `<тег> <что>` в ClearML (их тесты
+создают и удаляют сами в конце сессии). Два прогона с разными тегами друг друга
+не видят; сколько прогонов cveta2 допустимо одновременно, задаёт ключ
+`[capacity].cveta2_integration_runs` в `projects.toml` скилла (CVAT видит все
+прогоны с этой машины как одного клиента). Существующий `.run-tag` означает
+активный прогон: `integration_up.sh` и гейт откажутся выбивать новый тег,
+пока его не остановят или не подхватят через `INFRA_RUN_TAG`.
+
+Перед засевом `integration_up.sh` проверяет учётку `cveta2` и её членство в
+организации (`cvat_stand.py verify`; ничего не регистрирует — аккаунт создаёт
+администратор стенда через `deploy_cvat.sh`) и удаляет всё с этим тегом,
 поэтому повторный прогон всегда начинается с чистого проекта — именно так
 upload-тесты не встречают собственных остатков (`Duplicate base task name`).
-Два одновременных прогона с одним тегом несовместимы: второй снесёт проект
-первого. Параллельным агентам нужны разные `INTEGRATION_USER` и разные порты.
 
-Объекты пользователя `cveta2` на стенде — `tests/integration/cvat_stand.py`
-(видит и удаляет только то, чем владеет этот пользователь; аккаунт и членство
-в организации создаёт администратор стенда через `deploy_cvat.sh`, скрипт их
-не регистрирует):
+Посмотреть, что лежит на стендах, — от имени `cveta2`, без администратора:
 
 ```bash
-uv run python tests/integration/cvat_stand.py verify                # вход и членство в организации
-uv run python tests/integration/cvat_stand.py ls                    # что сейчас лежит в организации
-uv run python tests/integration/cvat_stand.py cleanup --tag <тег>   # удалить объекты одного прогона
+source scripts/integration_env.sh
+uv run python tests/integration/cvat_stand.py ls                       # объекты пользователя cveta2 в организации
+python3 "$INTEGRATION_SKILL_DIR/scripts/cvat.py"    --project cveta2 ls --prefix "$INTEGRATION_RUN_TAG"
+python3 "$INTEGRATION_SKILL_DIR/scripts/minio.py"   --project cveta2 ls --prefix "$INTEGRATION_RUN_TAG"
+python3 "$INTEGRATION_SKILL_DIR/scripts/clearml.py" --project cveta2 ls --prefix "$INTEGRATION_RUN_TAG"
 ```
 
-Сироты от погибших прогонов — дело скилла `k8s-infra`
-(`cvat.py --project cveta2 cleanup --stale --dry-run`) и его уборщика.
+В браузере: интерфейс CVAT (`CVAT_INTEGRATION_HOST`) — под пользователем
+`cveta2` с паролем из Secret'а, консоль MinIO (`MINIO_CONSOLE`) — с ключом
+проекта; значения берите из окружения, не печатайте и не вставляйте в файлы.
 
-Посмотреть данные прогона в интерфейсе стенда можно под `admin` стенда
-(суперпользователь видит все организации) или под `cveta2` с паролем из `.env`.
+`integration_stop.sh` удаляет объекты только своего тега: сначала CVAT
+(`cvat_stand.py cleanup --tag`, селектор `"<тег> "` с пробелом, чтобы короткий
+тег не задел длинный), потом бакет (`minio.py cleanup --prefix`), потом
+проекты ClearML (`clearml.py cleanup --prefix`). `.run-tag` отпускается только
+при полном успехе; при сбое скрипт печатает команду повтора для того же тега.
+Сироты от погибших прогонов — дело скилла: `cleanup --stale --dry-run` их
+перечисляет, а удаляет только уборщик кластера. Подробности и работа
+параллельных агентов — в скилле `running-integration-tests`.
 
-Без `CVAT_INTEGRATION_HOST` интеграционные тесты не запускаются. Скрипт `integration_test.sh` выставляет эту переменную автоматически.
+Без `CVAT_INTEGRATION_HOST` интеграционные тесты не собираются;
+`integration_test.sh` выставляет её сам. Тесты ClearML не пропускаются:
+`integration_test.sh` сначала требует, чтобы `clearml.py --project cveta2 whoami`
+узнал учётку `cveta2`, и запускает pytest как `uv run --extra clearml` (SDK —
+опциональная extra; обычный `uv sync` её убирает).
 
 ### Гейт на pre-push
 
 `scripts/integration_gate.sh` (хук `integration-tests`) делает на пуше весь цикл
-сам: готовит стек, гоняет `tests/integration`, а дальше смотрит на ветку.
-Прогон с `main` (пуш `refs/heads/main` или `main` в рабочей копии) **остаётся**:
-compose-стек и проект `<тег> coco8-dev` на стенде не удаляются, чтобы последний
-прогон можно было открыть в интерфейсе CVAT; следующий прогон с `main` заменит
-его. Прогон с любой другой ветки убирает за собой. `INTEGRATION_KEEP_DATA=1`
-или `=0` переопределяет это решение.
+сам: проверяет стенд CVAT и учётку ClearML, убеждается, что в этом checkout нет
+активного прогона, и только потом взводит teardown, готовит прогон, гоняет
+`tests/integration`, а дальше смотрит на ветку.
+Прогон с `main` (пуш `refs/heads/main` или `main` в рабочей копии) — это слот
+`cveta2-main`, постоянное имя реестра: он **остаётся**, чтобы последний прогон
+можно было открыть в интерфейсе CVAT; уборщик его не трогает, следующий прогон
+с `main` его заменяет (в ClearML ничего не остаётся — тесты удаляют свои
+проекты сами). Прогон с любой другой ветки убирает за собой.
+`INTEGRATION_KEEP_DATA=1` оставляет прогон на любой ветке (это обычный тег:
+уборщик снесёт его по истечении `[contract].stale_hours` реестра, а `.run-tag`
+останется, и следующий гейт откажет, пока не выполнить `integration_stop.sh`);
+`=0` убирает на любой ветке, на `main` — очищает слот до следующего прогона.
+`--keep-stack` оставляет только упавший прогон.
 
 Прогоняется только `tests/integration` — переменная `CVAT_INTEGRATION_HOST`
 заодно добавляет параметр `live-cvat` в фикстуру `coco8_fixtures`, и юнит-тесты
@@ -361,17 +400,17 @@ compose-стек и проект `<тег> coco8-dev` на стенде не у�
 
 Гейт включается сам по наличию `tests/integration/.env` — файл в `.gitignore`,
 поэтому на свежем клоне и на любой другой машине интеграционных тестов на пуше
-просто нет. Включить: `cp tests/integration/.env.example tests/integration/.env`
-и заполнить пароль.
+просто нет. Включить: `cp tests/integration/.env.example tests/integration/.env`.
 
 Два следствия, о которых лучше знать заранее:
 
-- **Пуш пересоздаёт стек этого тега.** `integration_up.sh` всегда начинает с
-  `docker compose down -v` и с удаления прошлого проекта тега в CVAT — свежее
-  состояние здесь требование корректности.
+- **Пуш пересоздаёт данные своего тега.** `integration_up.sh` всегда начинает с
+  удаления прошлого проекта тега в CVAT и его бакета — свежее состояние здесь
+  требование корректности; на `main` это и есть замена слота.
 - **Отсутствие `.env` — единственный тихий пропуск.** Если машина включена, а
-  docker не поднят, стенд не отвечает или порт занят, гейт валит пуш, а не
-  пропускает его.
+  стенд не отвечает, Secret не читается или учётка ClearML не проходит, гейт
+  валит пуш и предлагает диагностировать стенд скиллом `k8s-infra`; сами
+  скрипты стенды не разворачивают.
 
 Пропустить гейт на один пуш (`mutmut-full` при этом отработает):
 
@@ -379,17 +418,18 @@ compose-стек и проект `<тег> coco8-dev` на стенде не у�
 SKIP=integration-tests git push
 ```
 
-| Переменная | По умолчанию | Описание |
+| Переменная | Откуда | Описание |
 |---|---|---|
-| `CVAT_INTEGRATION_HOST` | из `.env` | URL стенда CVAT; включает интеграционные тесты |
-| `CVAT_INTEGRATION_USER` | из `.env` | Пользователь CVAT (регистрируется при первом запуске) |
-| `CVAT_INTEGRATION_PASSWORD` | из `.env` | Его пароль |
-| `CVAT_INTEGRATION_ORG` | из `.env` | Организация, в которой живут все объекты тестов |
-| `CVAT_INTEGRATION_PROJECT` | `<тег> coco8-dev` | Полное имя засеянного проекта |
-| `INTEGRATION_USER` | `$USER` | Префикс контейнеров и основа тега прогона |
-| `INTEGRATION_RUN_TAG` | см. выше | Тег прогона, если нужно задать явно |
+| `INFRA_RUN_TAG` | экспорт в shell | Явный тег прогона: подхватить чужой или прерванный либо выбитый `infra.py newtag --project cveta2` |
+| `INFRA_HARNESS` | экспорт в shell | Кто запускает (`codex`, `ci`, `human`); без неё тег помечается `claude` |
+| `INTEGRATION_RUN_TAG` | выводит `integration_env.sh` | Тег текущего прогона — читать, не задавать |
 | `INTEGRATION_KEEP_DATA` | по ветке | `1` — оставить прогон после гейта, `0` — убрать |
-| `MINIO_PORT`, `CLEARML_API_PORT`, … | `9989`, `8880`, … | Порты compose-стека |
+| `K8S_INFRA_SKILL_DIR` | `.env` | Checkout скилла `k8s-infra`, если он не установлен в `~/.agents/skills` или `~/.claude/skills` |
+| `CVAT_INTEGRATION_HOST`, `_USER`, `_PASSWORD`, `_ORG` | Secret `cvat/cvat-cveta2-access` | URL стенда (включает интеграционные тесты), учётка `cveta2` и организация всех объектов |
+| `CVAT_INTEGRATION_PROJECT` | `<тег> coco8-dev` | Полное имя засеянного проекта |
+| `MINIO_ENDPOINT`, `MINIO_ENDPOINT_FOR_CVAT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_REGION`, `MINIO_CONSOLE` | Secret `minio/minio-cveta2-access` | MinIO глазами хоста и глазами подов CVAT, ключ проекта, регион, консоль |
+| `MINIO_BUCKET` | `<тег>` | Бакет прогона |
+| `CLEARML_API_HOST`, `CLEARML_WEB_HOST`, `CLEARML_FILES_HOST`, `CLEARML_API_ACCESS_KEY`, `CLEARML_API_SECRET_KEY`, `CLEARML_QUEUE` | Secret `clearml/clearml-cveta2-access` | Учётка `cveta2` в ClearML, как её экспортирует скилл |
 
 ## Ветки и релизы
 
@@ -503,11 +543,11 @@ git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
 | `CONTRIBUTING.md` | Разработчиков | Русский |
 | `DATASET_FORMAT.md` | Пользователей — формат выходных CSV | Английский |
 | `ARCHITECTURE.md` | Разработчиков — карта модулей и потоки данных | Английский |
-| `CLAUDE.md` | Агентов и разработчиков | Английский |
+| `AGENTS.md` (`CLAUDE.md` — симлинк на него) | Агентов и разработчиков | Английский |
 
 Правило: пользовательская и контрибьюторская документация (`README.md`,
 `CONTRIBUTING.md`, `docs/`) — на русском; документация для разработчиков и
-агентов (`CLAUDE.md`, `ARCHITECTURE.md`, `DATASET_FORMAT.md`) — на английском.
+агентов (`AGENTS.md`, `ARCHITECTURE.md`, `DATASET_FORMAT.md`) — на английском.
 `tests/test_docs.py` это проверяет.
 
 Обновляйте `docs/` при изменении CLI или API — `tests/test_docs.py` падает,
@@ -517,21 +557,23 @@ git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
 
 ## Решение проблем
 
-**Порт занят** — `./scripts/integration_up.sh --minio-port 9189` (ClearML — через `CLEARML_*_PORT`)
+**Стенд не отвечает или Secret не читается** — `source scripts/integration_env.sh`
+называет, какого стенда или ключа не хватает; `uv run python tests/integration/cvat_stand.py verify`
+проверяет учётку `cveta2` и её членство в организации. Сами стенды описаны в
+скилле `k8s-infra`; скрипты их не разворачивают
 
-**Стенд CVAT не отвечает** — `uv run python tests/integration/cvat_stand.py verify` скажет, чего не хватает; сам стенд описан в скилле `k8s-infra`
+**`a run is active`** — в `tests/integration/.run-tag` записан тег
+незавершённого прогона: `./scripts/integration_stop.sh` его уберёт, либо
+`export INFRA_RUN_TAG=<тег>`, чтобы продолжить под ним
 
-**MinIO или ClearML не стартуют** — проверьте логи:
-
-```bash
-docker compose -p "$(whoami)-cveta2" logs
-```
+**`infra.py room` отвечает WAIT** — кластер занят; это не ошибка, подождите и
+повторите
 
 **Тесты падают после изменения фикстур** — перезапустите `./scripts/integration_up.sh`
 
-**Пуш падает на `integration-tests`** — не поднят docker или занят один из портов
-стека. Поднимите docker / освободите порт либо пропустите гейт на этот пуш:
-`SKIP=integration-tests git push`
+**Пуш падает на `integration-tests`** — стенд не отвечает, Secret не читается
+или в checkout активен другой прогон. Диагностируйте стенд скиллом `k8s-infra`
+либо пропустите гейт на этот пуш: `SKIP=integration-tests git push`
 
 **Пуш падает на `version-drift`** — `version` в `pyproject.toml` разошёлся с
 ближайшим тегом. Верните значение, которое проставил релиз; если ветка старше

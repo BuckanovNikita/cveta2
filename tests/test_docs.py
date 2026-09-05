@@ -44,6 +44,30 @@ ALL_DOCS = [
     *sorted((REPO_ROOT / "docs").glob("*.md")),
     REPO_ROOT / "scripts" / "README.md",
 ]
+AGENT_INSTRUCTIONS = REPO_ROOT / "AGENTS.md"
+SKILL_DOCS = sorted(
+    (REPO_ROOT / ".claude" / "skills" / "running-integration-tests").glob("*.md")
+)
+# The integration tests once ran a per-run MinIO/ClearML Compose stack on this
+# host with hand-picked ports and a user-derived tag. Every doc that still
+# names a piece of it sends a reader to a stack that no longer exists.
+RETIRED_STACK_TOKENS = (
+    "docker compose",
+    "docker-compose",
+    "Compose",
+    "9989",
+    "9990",
+    "8880",
+    "8881",
+    "8882",
+    "192.168.65.254",
+    "cveta2-tests",
+    "nkt-cvat",
+    "9988",
+    "INTEGRATION_USER",
+    "MINIO_PORT",
+    "CLEARML_API_PORT",
+)
 
 _PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
 
@@ -241,3 +265,32 @@ def test_only_readme_files_and_user_docs_are_russian(doc: Path) -> None:
     if russian_is_allowed:
         return
     assert not re.search(r"[А-Яа-я]", doc.read_text(encoding="utf-8"))
+
+
+class TestTheAgentInstructionsFollowTheSharedInfraConvention:
+    """AGENTS.md is the file, CLAUDE.md its symlink, and the block is present."""
+
+    def test_claude_md_is_a_symlink_to_agents_md(self) -> None:
+        claude = REPO_ROOT / "CLAUDE.md"
+        assert AGENT_INSTRUCTIONS.is_file()
+        assert not AGENT_INSTRUCTIONS.is_symlink()
+        assert claude.is_symlink()
+        assert claude.readlink() == Path("AGENTS.md")
+
+    def test_agents_md_carries_the_shared_infra_block(self) -> None:
+        text = AGENT_INSTRUCTIONS.read_text(encoding="utf-8")
+        assert "\n## Shared infra\n" in text
+        assert "infra.py newtag --project cveta2 --slug <what>" in text
+        assert 'cleanup --prefix "$INFRA_RUN_TAG"' in text
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [p for p in [*ALL_DOCS, *SKILL_DOCS] if p.exists() and p.name != "CHANGELOG.md"],
+    ids=lambda p: str(p.relative_to(REPO_ROOT)),
+)
+def test_no_doc_describes_the_retired_compose_stack(doc: Path) -> None:
+    """CHANGELOG.md is release history and may name what was retired."""
+    text = doc.read_text(encoding="utf-8")
+    found = [token for token in RETIRED_STACK_TOKENS if token in text]
+    assert found == [], f"{doc.name} still names the retired per-run stack: {found}"
