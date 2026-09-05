@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.5.4 (2026-09-05)
+
+### Bug Fixes
+
+- Close the verified defects from the fetch, upload and convert audit
+  ([`5eaf98f`](https://github.com/BuckanovNikita/cveta2/commit/5eaf98f29ec3c365e198be55cc3262613901546b))
+
+### Documentation
+
+- **skills**: Clarify CVAT task workflows
+  ([`512e0e0`](https://github.com/BuckanovNikita/cveta2/commit/512e0e03063af3132fc8047f920c48eadf544cdd))
+
+
 ## v0.5.3 (2026-09-04)
 
 ### Bug Fixes
