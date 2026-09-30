@@ -1,9 +1,9 @@
 # cveta2 architecture
 
-The layer diagram and the rule that governs it live in `CLAUDE.md`; this file
-is the map underneath it — which module owns what, how a command flows through
-the layers, and the two behaviours that are easy to get wrong when touching
-them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
+The layer diagram and its rule live in [engineering.md](engineering.md).
+This living Spec Kit context maps module ownership, command flows, and behavior
+constraints for future feature plans. [CONTRIBUTING.md](../../CONTRIBUTING.md)
+covers the same ground in Russian, at overview depth.
 
 ## Module organization
 

@@ -280,7 +280,8 @@ def fetch(  # noqa: PLR0913
     ``dataset`` / ``obsolete`` / ``in_progress`` DataFrames plus
     ``deleted_images``.  DataFrame columns follow
     :data:`cveta2.CSV_COLUMNS`; rows are flattened
-    :data:`cveta2.AnnotationRecord` variants (see ``DATASET_FORMAT.md``).
+    :data:`cveta2.AnnotationRecord` variants (see
+    ``specs/001-project-documentation/contracts/dataset-format.md``).
 
     *cache* controls the task-annotation cache: ``"use"`` reads and
     updates it, ``"refresh"`` re-downloads every task and updates it,

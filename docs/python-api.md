@@ -2,7 +2,7 @@
 
 ## Функции-команды (рекомендуемый способ)
 
-Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`setup-clearml`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. DATASET_FORMAT.md).
+Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`setup-clearml`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [контракт датасета](../specs/001-project-documentation/contracts/dataset-format.md)).
 
 ```python
 import cveta2

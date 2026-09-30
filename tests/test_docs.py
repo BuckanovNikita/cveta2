@@ -43,8 +43,11 @@ ALL_DOCS = [
     *sorted(REPO_ROOT.glob("*.md")),
     *sorted((REPO_ROOT / "docs").glob("*.md")),
     REPO_ROOT / "scripts" / "README.md",
+    *sorted((REPO_ROOT / ".specify" / "memory").glob("*.md")),
+    *sorted((REPO_ROOT / "specs").rglob("*.md")),
 ]
 AGENT_INSTRUCTIONS = REPO_ROOT / "AGENTS.md"
+ENGINEERING_GUIDANCE = REPO_ROOT / ".specify" / "memory" / "engineering.md"
 SKILL_DOCS = sorted(
     (REPO_ROOT / ".claude" / "skills" / "running-integration-tests").glob("*.md")
 )
@@ -267,8 +270,8 @@ def test_only_readme_files_and_user_docs_are_russian(doc: Path) -> None:
     assert not re.search(r"[А-Яа-я]", doc.read_text(encoding="utf-8"))
 
 
-class TestTheAgentInstructionsFollowTheSharedInfraConvention:
-    """AGENTS.md is the file, CLAUDE.md its symlink, and the block is present."""
+class TestTheAgentInstructionsDelegateToSpecKit:
+    """Both agents discover the same canonical Spec Kit rules and contracts."""
 
     def test_claude_md_is_a_symlink_to_agents_md(self) -> None:
         claude = REPO_ROOT / "CLAUDE.md"
@@ -277,11 +280,28 @@ class TestTheAgentInstructionsFollowTheSharedInfraConvention:
         assert claude.is_symlink()
         assert claude.readlink() == Path("AGENTS.md")
 
-    def test_agents_md_carries_the_shared_infra_block(self) -> None:
+    def test_agents_md_links_to_canonical_spec_kit_guidance(self) -> None:
         text = AGENT_INSTRUCTIONS.read_text(encoding="utf-8")
+        for target in (
+            ".specify/memory/constitution.md",
+            ".specify/memory/engineering.md",
+            ".specify/memory/architecture.md",
+            "specs/001-project-documentation/contracts/dataset-format.md",
+        ):
+            assert f"]({target})" in text
+            assert (REPO_ROOT / target).is_file()
+
+    def test_engineering_guidance_retains_the_shared_infra_contract(self) -> None:
+        text = ENGINEERING_GUIDANCE.read_text(encoding="utf-8")
         assert "\n## Shared infra\n" in text
         assert "infra.py newtag --project cveta2 --slug <what>" in text
-        assert 'cleanup --prefix "$INFRA_RUN_TAG"' in text
+        assert "running-integration-tests" in text
+        assert "references/run-contract.md" in text
+        assert "cleanup --stale" in text
+
+    def test_migrated_documents_have_no_standalone_copies(self) -> None:
+        for retired in ("ARCHITECTURE.md", "DATASET_FORMAT.md", "BUG_REVIEW.md"):
+            assert not (REPO_ROOT / retired).exists()
 
 
 @pytest.mark.parametrize(
