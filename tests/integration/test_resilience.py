@@ -23,9 +23,10 @@ from cveta2.services.upload import (
     UploadOptions,
     UploadPlan,
     UploadRequest,
+    request_fingerprint,
     upload_dataset,
 )
-from cveta2.upload_manifest import compute_fingerprint, list_manifests, load_manifest
+from cveta2.upload_manifest import list_manifests, load_manifest
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import (
     IMAGE_NAMES,
@@ -142,6 +143,7 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
         original = client.api.attach_task_data
 
         def die(_task_id: int, _spec: object) -> None:
+            original(_task_id, _spec)  # type: ignore[arg-type]
             raise _KilledRunError
 
         client.api.attach_task_data = die  # type: ignore[assignment]
@@ -154,7 +156,9 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
         finally:
             client.api.attach_task_data = original  # type: ignore[method-assign]
 
-        fingerprint = compute_fingerprint(names, [], ("person",))
+        fingerprint = request_fingerprint(
+            _upload_request(project_id, project_name, names, resume=False)
+        )
         stranded = load_manifest(project_id, fingerprint, host=client.host)
         assert stranded is not None
         assert stranded.task_id is not None

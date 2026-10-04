@@ -28,21 +28,24 @@ cd "$REPO_ROOT"
 # /tmp/pytest-of-$USER, and a concurrent session's cleanup can delete the
 # `pytest-current` symlink out from under a mutant's forked child. The child
 # then dies for reasons unrelated to the mutation, which mutmut reads as
-# "killed" - the gate lying in the unsafe direction. pytest still numbers runs
-# inside this root, so mutmut's own parallel children stay isolated from each
-# other.
+# "killed" - the gate lying in the unsafe direction. tests.env_isolation gives
+# each mutation child its own PID-based basetemp beneath this root, avoiding
+# races in pytest's numbered-directory cleanup between forked children.
 # Created after sync-scope below, which may wipe mutants/ wholesale.
 export PYTEST_DEBUG_TEMPROOT="$REPO_ROOT/mutants/.pytest-temproot"
 
 PROFILE=""
+PROFILE_SET=0
 MUTMUT_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile)
+            PROFILE_SET=1
             PROFILE="$2"
             shift 2
             ;;
         --profile=*)
+            PROFILE_SET=1
             PROFILE="${1#*=}"
             shift
             ;;
@@ -53,21 +56,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Drops a stale mutant tree when only_mutate / do_not_mutate_patterns changed.
-# mutmut's own fingerprint deliberately ignores those fields, so without this a
-# newly scoped module is never mutated and old verdicts survive renumbering.
-uv run python "$SCRIPT_DIR/mutation_config.py" sync-scope
-mkdir -p "$PYTEST_DEBUG_TEMPROOT"
-
 GATE_ARGS=()
-if [[ -n "$PROFILE" ]]; then
+if [[ "$PROFILE_SET" -eq 1 ]]; then
+    # Command substitution preserves the resolver's exit status under set -e.
+    # Process substitution would hide it and start an unfiltered mutation run.
+    PROFILE_GLOBS=$(uv run python "$SCRIPT_DIR/mutation_config.py" globs --profile "$PROFILE")
     GATE_ARGS+=(--profile "$PROFILE")
     while IFS= read -r glob; do
         [[ -n "$glob" ]] || continue
         MUTMUT_ARGS+=("$glob")
         GATE_ARGS+=(--glob "$glob")
-    done < <(uv run python "$SCRIPT_DIR/mutation_config.py" globs --profile "$PROFILE")
+    done <<< "$PROFILE_GLOBS"
 fi
+
+# Validate the profile before changing the generated workspace.
+# Drops a stale mutant tree when only_mutate / do_not_mutate_patterns changed.
+uv run python "$SCRIPT_DIR/mutation_config.py" sync-scope
+mkdir -p "$PYTEST_DEBUG_TEMPROOT"
 
 # mutmut draws a carriage-return spinner. On a TTY that renders fine; when the
 # output is captured (pre-commit, CI) it would otherwise dump tens of thousands

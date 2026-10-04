@@ -197,3 +197,13 @@ Record of a deleted image. Written to `deleted.csv` with `instance_shape="delete
 | `skipped_existing` | `int` | Skipped (already existed on S3) |
 | `failed` | `int` | Upload errors |
 | `total` | `int` | Total number of images |
+
+## Conversion and upload validation
+
+CSV readers preserve literal image names such as `NA`, including deletion records used during merge. Expected malformed CSV and YAML inputs raise contextual `Cveta2Error` diagnostics.
+
+Every exported row must have `split` equal to `train`, `val`, or `test`; missing and unsupported values fail before destination writes. Repeated exports refresh source image bytes. COCO export replaces prior metadata-owned images, annotations and obsolete splits while preserving unrelated files. Cleanup ownership comes from prior export metadata, whose paths must be safe and unambiguous; invalid metadata refuses replacement.
+
+YOLO class IDs are nonnegative integers; centers are finite values in `[0, 1]`, sizes in `(0, 1]`, and optional confidence in `[0, 1]`. Invalid lines produce file-and-line warnings and are skipped independently of valid sibling rows. Class mappings preserve original IDs and require valid names; upload helpers reject unknown class IDs.
+
+Labelled upload rows require all four finite bbox coordinates before external writes; valid empty and deleted rows remain supported. Recovery binds the complete normalized upload intent and reconciles existing annotation content; legacy manifests or changed intent cannot authorize automatic resume.

@@ -137,7 +137,7 @@ def _canonical_frame_key(prefix: str, frame_ref: str) -> str:
 
 def _local_name_from_key(key: str, root: str, *, original: str) -> str:
     """Turn a canonical S3 key into a safe path below the local cache root."""
-    relative = strip_key_prefix(key, root).lstrip("/")
+    relative = strip_key_prefix(key, root)
     return _validate_relative_key(relative, original=original)
 
 
@@ -268,7 +268,7 @@ class ImageDownloader:
         entries = list(image_tasks.items())
         cached_flags = run_concurrent(
             entries,
-            lambda entry: self._dest_path(entry[1], project_cloud_storage).exists(),
+            lambda entry: self._dest_path(entry[1], project_cloud_storage).is_file(),
             max_workers=Workers.s3,
             catch=(),
             desc="Checking local cache",
@@ -466,22 +466,29 @@ class S3Syncer:
 
         stats = DownloadStats(total=len(objects))
         local_root = self._ignored_prefix or cs_info.prefix
-        safe_objects = [
-            (
-                key,
-                _local_name_from_key(key, local_root, original=name),
+        transfers: list[Transfer] = []
+        destinations: dict[Path, str] = {}
+        for key, name in objects:
+            _validate_relative_key(key, original=key)
+            local_name = _local_name_from_key(key, local_root, original=key)
+            destination = _confined_destination(
+                self._target_dir, local_name, original=key
             )
-            for key, name in objects
-        ]
-        to_download = [
-            Transfer(
-                name=name,
-                key=key,
-                path=_confined_destination(self._target_dir, name, original=name),
-            )
-            for key, name in safe_objects
-            if not _confined_destination(self._target_dir, name, original=name).exists()
-        ]
+            resolved = destination.resolve()
+            if resolved in destinations:
+                raise Cveta2Error(
+                    f"Объекты S3 {destinations[resolved]!r} и {key!r} "
+                    f"имеют одно назначение {destination}"
+                )
+            destinations[resolved] = key
+            transfers.append(Transfer(name=name, key=key, path=destination))
+        # A file destination cannot also be a parent of another destination.
+        for destination in destinations:
+            if any(parent in destinations for parent in destination.parents):
+                raise Cveta2Error(
+                    f"Конфликт назначений S3: {destination} вложен в другой файл"
+                )
+        to_download = [t for t in transfers if not t.path.is_file()]
         stats.cached = stats.total - len(to_download)
 
         if not to_download:

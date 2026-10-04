@@ -88,17 +88,35 @@ def run_ignore(args: argparse.Namespace) -> None:
             return
 
         if args.remove:
-            resolved = _resolve_selectors(client, project_id, args.remove)
-            for task in resolved:
-                removed = ignore_cfg.remove_task(project_name, task.id)
+            stored = {
+                entry.id: entry
+                for entry in ignore_cfg.get_ignored_entries(project_name)
+            }
+            stored_ids = {
+                int(selector) for selector in args.remove if selector.isdigit()
+            } & stored.keys()
+            removal_entries: list[IgnoredTask | TaskInfo] = [
+                stored[task_id] for task_id in sorted(stored_ids)
+            ]
+            remaining = [
+                selector
+                for selector in args.remove
+                if not selector.isdigit() or int(selector) not in stored_ids
+            ]
+            if remaining:
+                removal_entries.extend(
+                    _resolve_selectors(client, project_id, remaining)
+                )
+            for entry in removal_entries:
+                removed = ignore_cfg.remove_task(project_name, entry.id)
                 if removed:
                     logger.info(
-                        f"Задача {task.name!r} (id={task.id}) удалена "
+                        f"Задача {entry.name!r} (id={entry.id}) удалена "
                         f"из ignore-списка проекта {project_name!r}"
                     )
                 else:
                     logger.warning(
-                        f"Задача {task.name!r} (id={task.id}) не найдена "
+                        f"Задача {entry.name!r} (id={entry.id}) не найдена "
                         f"в ignore-списке проекта {project_name!r}"
                     )
             ignore_cfg.save()

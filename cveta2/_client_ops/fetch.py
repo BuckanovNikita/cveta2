@@ -198,9 +198,15 @@ class _FetchMixin(_ClientBase):
                 if t.id == task_id:
                     return t
         search = s.casefold()
-        for t in tasks:
-            if t.name.casefold() == search:
-                return t
+        matches = [task for task in tasks if task.name.casefold() == search]
+        if len(matches) > 1:
+            raise Cveta2Error(
+                f"Имя задачи {s!r} неоднозначно: "
+                f"{_format_task_choices(sorted(matches, key=lambda task: task.id))}. "
+                "Укажите числовой ID задачи."
+            )
+        if matches:
+            return matches[0]
         raise TaskNotFoundError(
             f"Task not found: {s!r}. Available tasks: {_format_task_choices(tasks)}"
         )

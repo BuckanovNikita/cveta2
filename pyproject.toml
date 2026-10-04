@@ -318,6 +318,131 @@ full = []
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]
+"cveta2._client_ops.fetch.xǁ_FetchMixinǁ_resolve_one_task_selector__mutmut_18" = "Only numeric-ID suggestion capitalization/decoration changes; ambiguous rejection, complete matching IDs and absence of writes are preserved."
+"cveta2._client_ops.fetch.xǁ_FetchMixinǁ_resolve_one_task_selector__mutmut_19" = "Only numeric-ID suggestion capitalization/decoration changes; ambiguous rejection, complete matching IDs and absence of writes are preserved."
+"cveta2._client_ops.fetch.xǁ_FetchMixinǁ_resolve_one_task_selector__mutmut_20" = "Only numeric-ID suggestion capitalization/decoration changes; ambiguous rejection, complete matching IDs and absence of writes are preserved."
+"cveta2.services.upload.x_request_fingerprint__mutmut_13" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.services.upload.x_request_fingerprint__mutmut_14" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.services.upload.x_request_fingerprint__mutmut_15" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.services.upload.x_request_fingerprint__mutmut_16" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.services.upload.x_request_fingerprint__mutmut_17" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.services.upload.x_request_fingerprint__mutmut_18" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.services.upload.x_request_fingerprint__mutmut_19" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.services.upload.x_request_fingerprint__mutmut_20" = "Renames one distinct internal options key consistently; all option values remain included and no consumer parses this opaque hash payload. Intent equality and change distinctions are preserved without requiring literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_5" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_6" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_9" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_10" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_12" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_13" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_15" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_16" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_18" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_19" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_56" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_57" = "Renames a distinct internal hash-payload key; every intent component remains present under its own key. No consumer parses the preimage; identity distinctions remain intact without pinning literal digest bytes."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_36" = "Installed pandas to_dict lowercases orient before dispatch; records and RECORDS select exactly the same record conversion."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_43" = "Normalized record dictionaries are constructed from lexicographically sorted columns; disabling inner sort_keys produces identical serialized records. Outer sorting remains enabled for nested options."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_48" = "Normalized record dictionaries are constructed from lexicographically sorted columns; disabling inner sort_keys produces identical serialized records. Outer sorting remains enabled for nested options."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_52" = "Normalized record dictionaries are constructed from lexicographically sorted columns; disabling inner sort_keys produces identical serialized records. Outer sorting remains enabled for nested options."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_44" = "ensure_ascii=None and False are both falsy; Python JSON encoder takes the same Unicode encoding branch."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_62" = "ensure_ascii=None and False are both falsy; Python JSON encoder takes the same Unicode encoding branch."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_49" = "ASCII escaping is an injective consistent encoding of the same Unicode values; sorted records remain canonical and intent equality/change distinctions are preserved. Literal digest bytes are not asserted as the recovery contract."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_53" = "ASCII escaping is an injective consistent encoding of the same Unicode values; sorted records remain canonical and intent equality/change distinctions are preserved. Literal digest bytes are not asserted as the recovery contract."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_65" = "ASCII escaping is an injective consistent encoding of the same Unicode values; sorted records remain canonical and intent equality/change distinctions are preserved. Literal digest bytes are not asserted as the recovery contract."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_67" = "ASCII escaping is an injective consistent encoding of the same Unicode values; sorted records remain canonical and intent equality/change distinctions are preserved. Literal digest bytes are not asserted as the recovery contract."
+"cveta2.upload_manifest.x_compute_fingerprint__mutmut_46" = "allow_nan=None and False are both falsy; JSON rejects nonfinite semantic properties in both cases. Omitted/True variants are deliberately excluded and covered by a strict rejection test."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_2" = "Renames a distinct internal checksum payload key; storage, full mapping and ordered frames remain included. No consumer parses the preimage, so equality/change distinctions are preserved."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_3" = "Renames a distinct internal checksum payload key; storage, full mapping and ordered frames remain included. No consumer parses the preimage, so equality/change distinctions are preserved."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_7" = "Renames a distinct internal checksum payload key; storage, full mapping and ordered frames remain included. No consumer parses the preimage, so equality/change distinctions are preserved."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_8" = "Renames a distinct internal checksum payload key; storage, full mapping and ordered frames remain included. No consumer parses the preimage, so equality/change distinctions are preserved."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_9" = "Renames a distinct internal checksum payload key; storage, full mapping and ordered frames remain included. No consumer parses the preimage, so equality/change distinctions are preserved."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_10" = "Renames a distinct internal checksum payload key; storage, full mapping and ordered frames remain included. No consumer parses the preimage, so equality/change distinctions are preserved."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_4" = "CloudStorageInfo contains only int/string fields and no mode-dependent serializers. Installed Pydantic model_dump with json, None, XXjsonXX and JSON produces identical primitive mappings; all storage fields remain bound."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_5" = "CloudStorageInfo contains only int/string fields and no mode-dependent serializers. Installed Pydantic model_dump with json, None, XXjsonXX and JSON produces identical primitive mappings; all storage fields remain bound."
+"cveta2.upload_manifest.x_compute_mapping_identity__mutmut_6" = "CloudStorageInfo contains only int/string fields and no mode-dependent serializers. Installed Pydantic model_dump with json, None, XXjsonXX and JSON produces identical primitive mappings; all storage fields remain bound."
+"cveta2.services.upload.x__frames_match__mutmut_17" = "False and None are both falsy initial values; shortened is used only by Boolean OR and the final warning condition, giving identical matches and warning decisions."
+"cveta2.services.upload.x__frames_match__mutmut_21" = "An earlier length-equality guard precedes zip; each input is a plain list and expected retains intended length. Changing strict cannot change iteration, path checks, or warning behavior."
+"cveta2.services.upload.x__frames_match__mutmut_24" = "An earlier length-equality guard precedes zip; each input is a plain list and expected retains intended length. Changing strict cannot change iteration, path checks, or warning behavior."
+"cveta2.services.upload.x__frames_match__mutmut_25" = "An earlier length-equality guard precedes zip; each input is a plain list and expected retains intended length. Changing strict cannot change iteration, path checks, or warning behavior."
+"cveta2.services.upload.x__resume_manifest__mutmut_14" = "Only capitalization/decoration of the explanatory refusal text changes. The complete-intent rejection, unsafe-resume explanation and no-write boundary remain present."
+"cveta2.services.upload.x__resume_manifest__mutmut_15" = "Only capitalization/decoration of the explanatory refusal text changes. The complete-intent rejection, unsafe-resume explanation and no-write boundary remain present."
+"cveta2.services.upload.x__resume_manifest__mutmut_17" = "Only capitalization/decoration of the explanatory refusal text changes. The complete-intent rejection, unsafe-resume explanation and no-write boundary remain present."
+"cveta2.services.upload.x__resume_manifest__mutmut_18" = "Only capitalization/decoration of the explanatory refusal text changes. The complete-intent rejection, unsafe-resume explanation and no-write boundary remain present."
+"cveta2.services.upload.x__resume_manifest__mutmut_28" = "Only the separator formatting between complete manifest descriptions changes; every recovery identity remains listed and rejection behavior is unchanged."
+"cveta2._client_ops.fetch.x__resolve_selected_tasks_by_id__mutmut_12" = "Only tqdm caption is omitted; project/task resolution and returned tasks are unchanged."
+"cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_22" = "issues=None instead of [] is normalized by downstream issues or []; returned frame issue data remains identical."
+"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_34" = "Preceding equal-length guard establishes identical zip lengths; disabling strict cannot change issue comparisons or output."
+"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_37" = "Preceding equal-length guard establishes identical zip lengths; disabling strict cannot change issue comparisons or output."
+"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_38" = "Preceding equal-length guard establishes identical zip lengths; disabling strict cannot change issue comparisons or output."
+"cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_26" = "The already counter controls only an informational line; existing issue filtering, writes and returned counts do not use its mutated value."
+"cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_27" = "The already counter controls only an informational line; existing issue filtering, writes and returned counts do not use its mutated value."
+"cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_32" = "Only tqdm caption is omitted; issue writes and returned counts are unchanged."
+"cveta2.upload_manifest.xǁUploadManifestǁdescribe__mutmut_2" = "Missing-task placeholder decoration changes; task absence remains visibly represented and all manifest identity fields remain in the description."
+"cveta2.upload_manifest.x_validate_upload_boxes__mutmut_46" = "Only punctuation between complete row/image diagnostics changes; all invalid row identities and the prewrite refusal remain intact."
+"cveta2.upload_manifest.x_validate_upload_boxes__mutmut_48" = "Changes only the unavailable image-name placeholder when no image_name column exists; row identity and missing-box refusal remain actionable. Existing image names are unaffected."
+"cveta2.upload_manifest.x_validate_upload_boxes__mutmut_50" = "Changes only the unavailable image-name placeholder when no image_name column exists; row identity and missing-box refusal remain actionable. Existing image names are unaffected."
+"cveta2.upload_manifest.x_validate_upload_boxes__mutmut_53" = "Changes only the unavailable image-name placeholder when no image_name column exists; row identity and missing-box refusal remain actionable. Existing image names are unaffected."
+"cveta2.upload_manifest.x_save_manifest__mutmut_13" = "Only capitalization/decoration of required-checkpoint refusal advice changes; task ID, filesystem cause, fail-closed exception and next-write prevention are preserved."
+"cveta2.upload_manifest.x_save_manifest__mutmut_14" = "Only capitalization/decoration of required-checkpoint refusal advice changes; task ID, filesystem cause, fail-closed exception and next-write prevention are preserved."
+"cveta2._client_ops.read.xǁ_ReadMixinǁfind_project_by_name__mutmut_19" = "Only numeric-ID advice capitalization/decoration changes; authoritative ambiguity rejection, matching IDs and no-write behavior remain identical."
+"cveta2._client_ops.read.xǁ_ReadMixinǁfind_project_by_name__mutmut_20" = "Only numeric-ID advice capitalization/decoration changes; authoritative ambiguity rejection, matching IDs and no-write behavior remain identical."
+"cveta2._client_ops.read.xǁ_ReadMixinǁfind_project_by_name__mutmut_21" = "Only numeric-ID advice capitalization/decoration changes; authoritative ambiguity rejection, matching IDs and no-write behavior remain identical."
+"cveta2.services.upload.x__verify_existing_shapes__mutmut_58" = "Only capitalization/decoration of explanatory refusal sentence changes; task ID, exact shape mismatch, refusal and no append are preserved."
+"cveta2.services.upload.x__verify_existing_shapes__mutmut_59" = "Only capitalization/decoration of explanatory refusal sentence changes; task ID, exact shape mismatch, refusal and no append are preserved."
+"cveta2.services.upload.x__verify_existing_shapes__mutmut_60" = "Only capitalization/decoration of explanatory refusal sentence changes; task ID, exact shape mismatch, refusal and no append are preserved."
+"cveta2.services.upload.x__ensure_task__mutmut_5" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_6" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_8" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_9" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_42" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_43" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_44" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_59" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_60" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_64" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_65" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_67" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_68" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__ensure_task__mutmut_69" = "Only capitalization/decoration of explanatory rejection text changes. Relevant task/project identity, uncertainty or mismatch reason, and refusal without create/attach/delete remain present."
+"cveta2.services.upload.x__completed_outcome__mutmut_5" = "Only capitalization/decoration changes; damaged completed-state rejection and absence of writes remain identical."
+"cveta2.services.upload.x__completed_outcome__mutmut_6" = "Only capitalization/decoration changes; damaged completed-state rejection and absence of writes remain identical."
+"cveta2.services.upload.x__preflight_resume_target__mutmut_3" = "Only capitalization/decoration of the explanatory error changes. Unknown identity or incomplete frame reason, rejection and no reads/writes where identity is absent remain intact."
+"cveta2.services.upload.x__preflight_resume_target__mutmut_4" = "Only capitalization/decoration of the explanatory error changes. Unknown identity or incomplete frame reason, rejection and no reads/writes where identity is absent remain intact."
+"cveta2.services.upload.x__preflight_resume_target__mutmut_5" = "Only capitalization/decoration of the explanatory error changes. Unknown identity or incomplete frame reason, rejection and no reads/writes where identity is absent remain intact."
+"cveta2.services.upload.x__preflight_resume_target__mutmut_26" = "Only capitalization/decoration of the explanatory error changes. Unknown identity or incomplete frame reason, rejection and no reads/writes where identity is absent remain intact."
+"cveta2.services.upload.x__preflight_resume_target__mutmut_27" = "Only capitalization/decoration of the explanatory error changes. Unknown identity or incomplete frame reason, rejection and no reads/writes where identity is absent remain intact."
+"cveta2.services.upload.x_upload_dataset__mutmut_27" = "Only capitalization/decoration of recovery refusal explanation changes; uncertainty/storage mismatch and no duplicate write behavior remain intact."
+"cveta2.services.upload.x_upload_dataset__mutmut_28" = "Only capitalization/decoration of recovery refusal explanation changes; uncertainty/storage mismatch and no duplicate write behavior remain intact."
+"cveta2.services.upload.x_upload_dataset__mutmut_30" = "Only capitalization/decoration of recovery refusal explanation changes; uncertainty/storage mismatch and no duplicate write behavior remain intact."
+"cveta2.services.upload.x_upload_dataset__mutmut_31" = "Only capitalization/decoration of recovery refusal explanation changes; uncertainty/storage mismatch and no duplicate write behavior remain intact."
+"cveta2.services.upload.x_upload_dataset__mutmut_32" = "Only capitalization/decoration of recovery refusal explanation changes; uncertainty/storage mismatch and no duplicate write behavior remain intact."
+"cveta2.services.upload.x_upload_dataset__mutmut_37" = "Only capitalization/decoration of recovery refusal explanation changes; uncertainty/storage mismatch and no duplicate write behavior remain intact."
+"cveta2.services.convert.yolo.x_convert_to_yolo__mutmut_79" = "Renumbered old73: itertuples index=None and index=False both omit the DataFrame index; row values are unchanged."
+"cveta2.services.convert.yolo.x_convert_to_yolo__mutmut_81" = "Renumbered old75: default namedtuple rows have the same equality and hashing as plain tuples for box-image membership."
+"cveta2.services.convert.coco.x_convert_to_coco__mutmut_35" = "Renumbered old27: split_dir parent already exists because convert_to_coco explicitly mkdirs output_dir before split creation; parents=None changes no observable filesystem outcome."
+"cveta2.services.convert.coco.x_convert_to_coco__mutmut_37" = "Renumbered old29: omitted parents defaults to False; output_dir already exists before split creation."
+"cveta2.services.convert.coco.x_convert_to_coco__mutmut_39" = "Renumbered old31: parents=False is identical here because output_dir already exists before split creation."
+"cveta2.services.convert.yolo.x__parse_label_file__mutmut_38" = "Including width in center [0,1] validation adds a redundant condition: the subsequent size guard already requires width in (0,1]."
+"cveta2.services.convert.yolo.x__parse_label_file__mutmut_53" = "The numeric parse exception sets valid=None instead of False; the only subsequent read is if not valid, so both reject and warn identically."
+"cveta2.services.convert.yolo.x__write_box_labels__mutmut_37" = "Image-name argument is only used by the invalid-dimension diagnostic; prepare_export now validates every exported row dimension before invoking this writer, so this diagnostic branch is unreachable through export."
+"cveta2.services.convert.coco.x__coco_owned_paths__mutmut_28" = "itertuples index=None and index=False both omit the index; ownership destination row values are unchanged."
+"cveta2.services.convert.coco.x__coco_owned_paths__mutmut_30" = "Default namedtuple rows unpack into the same image name and split as name=None plain tuples."
+"cveta2.services.convert.coco.x__prune_coco_output__mutmut_2" = "itertuples index=None and index=False both omit the index; expected output paths are unchanged."
+"cveta2.services.convert.coco.x__prune_coco_output__mutmut_4" = "Default namedtuple rows unpack into the same image name and split as name=None plain tuples."
+"cveta2.services.convert.coco.x__owned_split_files__mutmut_26" = "Removing '.' from the special-name set is redundant: Path('.').name is the empty string, so the adjacent Path(name).name != name guard still rejects the same unsafe name with the same diagnostic."
+"cveta2.services.convert.common.x__link_or_copy__mutmut_53" = "The final unsupported-mode else is unreachable: the upfront allowed-mode guard rejects every unsupported mode before branching. Its diagnostic argument cannot affect a reachable result."
+"cveta2.services.convert.common.x__validate_export_rows__mutmut_43" = "Removing '.' from the special-name set is redundant: Path('.').name is the empty string and the adjacent basename guard still rejects '.' with the same diagnostic."
+"cveta2.services.convert.common.x__validate_export_rows__mutmut_47" = "The changed NUL-name check cannot affect prepare_export: read_dataset_csv rejects every NUL byte before pandas parses rows, so no exported name can contain a NUL."
+"cveta2.services.output.x_read_dataset_csv__mutmut_15" = "Reading all remaining bytes instead of buffered chunks preserves NUL detection and finite EOF termination for the same file contents; byte chunk size is not an external dataset contract."
+"cveta2.services.output.x_read_dataset_csv__mutmut_16" = "Reading chunks of 65537 instead of 65536 bytes preserves NUL detection and finite EOF termination; byte chunk size is not an external dataset contract."
+"cveta2.services.convert.common.x__validate_splits__mutmut_40" = "Adding XX markers around the allowed-split sentence changes presentation only; rejected rows, invalid split value, image names and all allowed split identifiers remain reported."
+"cveta2.services.convert.common.x__validate_splits__mutmut_41" = "Lowercasing the allowed-split sentence changes presentation only; all allowed split identifiers are already lower-case and rejection/context are unchanged."
+"cveta2.services.convert.common.x__validate_splits__mutmut_42" = "Uppercasing the allowed-split sentence changes presentation only; the same allowed identifiers remain recoverable case-insensitively and invalid value/image context plus rejected rows are unchanged."
+"cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_27" = "original=key -> None only replaces the rejected-key label in _local_name_from_key error prose; validation uses key/local_root, raises the same Cveta2Error and still writes zero destinations"
+"cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_41" = "destinations[resolved]=key -> None changes only the duplicate-key error label: collision and ancestor decisions depend exclusively on dictionary keys, and Transfer retains the actual remote key; replaces stale old confinement-error justification"
+"cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_51" = "ancestor collision Cveta2Error message -> None preserves exception type, rejection branch and zero destination writes; only diagnostic prose changes"
+"cveta2.config.x_cache_dir_for_project__mutmut_47" = "escaping destination Cveta2Error message -> None preserves resolved containment decision, exception type and refusal to return unsafe path; only diagnostic prose changes"
 # _ClientBase.__exit__: the traceback is the one element of the exit triple no
 # downstream __exit__ can distinguish. ExitStack forwards the triple verbatim
 # to contextlib._GeneratorContextManager.__exit__, which re-raises inside the
@@ -366,13 +491,6 @@ full = []
 "cveta2.services.convert.coco.x__write_coco_split__mutmut_130" = "key=None sorts by (name, id); prepare_export assigns ids in name-sorted order, so both orders coincide"
 "cveta2.services.convert.coco.x__write_coco_split__mutmut_132" = "drops key=; same coincidence of name order and id order"
 
-# convert_to_coco: prepare_export already created output_dir with parents=True,
-# so split_dir's parent always exists. exist_ok IS load-bearing (a second run
-# into the same tree) and is killed by test_nested_output_dir_and_rerun.
-"cveta2.services.convert.coco.x_convert_to_coco__mutmut_27" = "parents=None; split_dir's parent is the output dir prepare_export just created"
-"cveta2.services.convert.coco.x_convert_to_coco__mutmut_29" = "drops parents=; split_dir's parent is the output dir prepare_export just created"
-"cveta2.services.convert.coco.x_convert_to_coco__mutmut_31" = "parents=False; split_dir's parent is the output dir prepare_export just created"
-
 # config._env_flag: the `""` default is read only when the variable is unset,
 # and no spelling of an absent value lowercases to a trigger token.
 "cveta2.config.x__env_flag__mutmut_6" = "default \"XXXX\"; like \"\" it lowercases to something no caller compares against"
@@ -414,8 +532,6 @@ full = []
 "cveta2.s3_utils.x_list_s3_objects__mutmut_29" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.services.fetch.x__fetch_and_save_tasks__mutmut_37" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2._client_ops.task_ops.xǁ_TaskOpsMixinǁset_task_jobs_status__mutmut_15" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
-"cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_32" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
-"cveta2._client_ops.fetch.x__resolve_selected_tasks_by_id__mutmut_12" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.image_downloader.xǁImageDownloaderǁ_probe_expected_keys__mutmut_13" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 
 # run_concurrent returns exactly one outcome per item — that is its documented
@@ -441,24 +557,14 @@ full = []
 # unresolved is `pending` itself, and is killed there by
 # test_the_listing_prefers_the_frame_path_over_a_same_named_file.
 
-# Path-safety helpers: mutmut's replacement strings still contain `/`, and
-# str.strip treats its argument as a character set, so the slash handling is
-# unchanged.  The `original` keyword is used only to preserve the user's input
-# in an exception message; validation and destination selection do not read it.
-"cveta2.image_downloader.x__canonical_frame_key__mutmut_5" = "lstrip('XX/XX') removes the same leading slash characters as lstrip('/')"
-"cveta2.image_downloader.x__canonical_frame_key__mutmut_9" = "rstrip('XX/XX') removes the same trailing slash characters as rstrip('/')"
-"cveta2.image_downloader.x__canonical_frame_key__mutmut_14" = "rstrip('XX/XX') removes the same trailing slash characters as rstrip('/')"
+# Path-safety helpers: the `original` keyword changes diagnostic prose only;
+# validation and destination selection do not read it.
 "cveta2.image_downloader.x__canonical_frame_key__mutmut_25" = "original=None changes only the validation error prose"
-"cveta2.image_downloader.x__local_name_from_key__mutmut_2" = "strip_key_prefix never returns leading whitespace or slash, so lstrip is a no-op for both arguments"
-"cveta2.image_downloader.x__local_name_from_key__mutmut_3" = "strip_key_prefix never returns a trailing slash for an object key, so this remains a no-op"
-"cveta2.image_downloader.x__local_name_from_key__mutmut_8" = "strip_key_prefix never returns a leading slash, and the replacement character set still contains slash"
-"cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_2" = "the invented prefix is added to and then stripped from relative keys; rooted keys cannot occur without storage metadata"
 "cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_13" = "original=None changes only the validation error prose"
 "cveta2.image_downloader.xǁImageDownloaderǁ_dest_path__mutmut_19" = "original=None changes only the confinement error prose"
 "cveta2.image_downloader.xǁImageDownloaderǁ_resolve_s3_keys__mutmut_33" = "the listed map contains prefix-relative names and basenames; its full canonical-key lookup is redundant"
 "cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_21" = "original=None changes only the validation error prose"
 "cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_34" = "original=None changes only the confinement error prose"
-"cveta2.image_downloader.xǁS3Syncerǁsync__mutmut_41" = "original=None changes only the confinement error prose"
 "cveta2.services.convert.yolo.x__resolve_dataset_root__mutmut_2" = "Path('') resolves through yaml_path.parent to the same directory as the explicit empty-root branch"
 "cveta2.services.convert.yolo.x__split_images__mutmut_5" = "the replacement changes only the invalid split entry's exception prose"
 
@@ -466,17 +572,6 @@ full = []
 # spelling of "records" that differs only in case is the same call.
 "cveta2._client.assembly.x_build_task_issues__mutmut_4" = "to_dict(\"RECORDS\"); pandas lower-cases orient, so this is the same call as \"records\""
 "cveta2._client.assembly.x_build_upload_shapes__mutmut_11" = "to_dict(\"RECORDS\"); pandas lower-cases orient, so this is the same call as \"records\""
-
-# _filter_cached: catch=() means a stat failure aborts the fetch rather than
-# being silently read as "not cached". Reaching the mutated `isinstance(err,
-# None)` needs Path.exists itself to raise, which only a monkeypatched Path
-# can produce — a test that asserts nothing about cveta2.
-"cveta2.image_downloader.xǁImageDownloaderǁ_filter_cached__mutmut_7" = "catch=None; only reachable if Path.exists raises, which no real filesystem does here"
-
-# _load_class_names_yaml: the flat-dict branch hands _normalize_class_names a
-# value that is already a dict, so the "neither list nor dict" error that
-# would name the source path can never fire there.
-"cveta2.services.convert.yolo.x__load_class_names_yaml__mutmut_17" = "source=None on the flat-dict branch; the path is only read by an error branch a dict never reaches"
 
 # ensure_shared_dir: the walk up to the first existing parent stops at the
 # filesystem root as a safety net. Reaching that guard needs a root directory
@@ -497,18 +592,13 @@ full = []
 # Counts and separators that reach nothing but one message. `already` is
 # computed solely to say how many issues were skipped, and the join is the
 # bullet list in the mismatch report.
-"cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_26" = "already=None; the value only decides whether one info line is emitted"
-"cveta2._client_ops.write.xǁ_WriteMixinǁcreate_task_issues__mutmut_27" = "already = len+len; still truthy, still only reaches that info line"
-"cveta2.services.upload.x__resume_manifest__mutmut_18" = "join separator; formats the bullet list in an error message and nothing else"
 
 # upload_manifest: the describe() placeholder stands in for a task id that
 # does not exist yet — prose, and the test that matters asserts a bare "None"
 # never appears.
-"cveta2.upload_manifest.xǁUploadManifestǁdescribe__mutmut_2" = "placeholder text for a missing task id; the assertion that matters is that it is not 'None'"
 
 # fetch_one_task: the degrade path's [] and None are normalized identically by
 # _build_frame_issues(issues or []); the branch itself is tested.
-"cveta2._client_ops.fetch.xǁ_FetchMixinǁfetch_one_task__mutmut_22" = "issues=None instead of []; _build_frame_issues normalizes it with `issues or []`"
 
 # fetch_selected_tasks: prune_cache is read as `cache is not None and
 # prune_cache`, so None and False take the same branch.
@@ -540,22 +630,14 @@ full = []
 "cveta2._client.assembly.x_task_to_records__mutmut_99" = "issue_state takes [1]; the mutation changes the unread [0] of the default"
 
 # Resume compares coordinate sequences only after verifying equal lengths.
-"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_34" = "zip inputs have equal lengths from the preceding guard; disabling strict cannot change output"
-"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_37" = "zip inputs have equal lengths from the preceding guard; disabling strict cannot change output"
-"cveta2._client_ops.write.x__issues_not_yet_on_task__mutmut_38" = "zip inputs have equal lengths from the preceding guard; disabling strict cannot change output"
 
 # Recovery errors include task/project IDs; the following fixed explanatory
 # sentence is presentation only, and tests pin rejection without writes.
-"cveta2.services.upload.x__ensure_task__mutmut_26" = "changes only explanatory sentence decoration; project IDs, rejection and no-write behavior remain unchanged"
-"cveta2.services.upload.x__ensure_task__mutmut_27" = "changes only explanatory sentence capitalization; project IDs, rejection and no-write behavior remain unchanged"
-"cveta2.services.upload.x__ensure_task__mutmut_28" = "changes only explanatory sentence capitalization; project IDs, rejection and no-write behavior remain unchanged"
 
 # Pandas iteration keeps the same unpacked values and tuple identity under
 # these representation changes. Adding an index DOES change behavior.
 "cveta2.services.convert.yolo.x__prune_yolo_output__mutmut_3" = "itertuples index=None and index=False both omit the DataFrame index"
 "cveta2.services.convert.yolo.x__prune_yolo_output__mutmut_5" = "default namedtuples unpack into the same image_name and split values as name=None tuples"
-"cveta2.services.convert.yolo.x_convert_to_yolo__mutmut_73" = "itertuples index=None and index=False both omit the DataFrame index"
-"cveta2.services.convert.yolo.x_convert_to_yolo__mutmut_75" = "namedtuple identities retain plain-tuple equality and hashing, so box-image membership is unchanged"
 
 # Known task membership now determines whats-new; the old cutoff argument is
 # retained by CvatClient for compatibility and read only by a trace message.

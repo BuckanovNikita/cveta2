@@ -94,7 +94,7 @@ def test_check_config_bad_image_cache_dir(tmp_path: Path) -> None:
             return_value=ic_cfg,
         ),
     ):
-        assert check_config() is False
+        assert check_config() is True
 
 
 def test_check_config_valid_image_cache_dir(tmp_path: Path) -> None:

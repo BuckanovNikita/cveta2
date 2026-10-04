@@ -141,7 +141,7 @@ class TestLinkOrCopy:
         dst = tmp_path / "dst.txt"
         dst.write_text("old")
         _link_or_copy(src, dst, "copy")
-        assert dst.read_text() == "old"  # not overwritten
+        assert dst.read_text() == "new"  # refreshed from the current source
 
 
 class TestReflinkFallback:

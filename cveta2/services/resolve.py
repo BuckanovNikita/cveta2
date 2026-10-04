@@ -106,10 +106,10 @@ def resolve_bare_project_spec(
 ) -> tuple[int, str]:
     """Resolve an id or a name (no ``ORG/`` prefix) to ``(project_id, project_name)``.
 
-    The name is always CVAT's own spelling — from *cached* (the local
-    projects cache, consulted first) or from CVAT — never the caller's:
-    the name lookup is case-insensitive, and the returned name keys the
-    ignore list, the image-cache directory and the ClearML dataset.
+    The name is always CVAT's own spelling. Active clients revalidate name
+    selection on the server; disconnected clients may use explicit cached
+    entries. The case-insensitive lookup returns the spelling that keys the
+    ignore list, image-cache directory and ClearML dataset.
     """
     name = str(spec).strip()
     if isinstance(spec, int) or name.isdigit():

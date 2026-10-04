@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -133,8 +134,12 @@ def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
     Modes: auto (reflink, falling back to copy), reflink, hardlink,
     symlink, copy.
     """
-    if dst.exists():
+    if mode not in {"auto", "reflink", "hardlink", "symlink", "copy"}:
+        raise Cveta2Error(f"Неизвестный link-mode: {mode!r}")
+    if dst.exists() and src.samefile(dst) and not dst.is_symlink():
         return
+    if dst.exists() or dst.is_symlink():
+        dst.unlink()
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     if mode == "symlink":
@@ -229,6 +234,85 @@ def _validate_splits(df: pd.DataFrame) -> None:
             f"не задан split. Примеры: {preview_names(bad_images)}"
         )
 
+    unsupported = df[~df["split"].isin(["train", "val", "test"])]
+    if not unsupported.empty:
+        values = sorted(str(value) for value in unsupported["split"].unique())
+        names = sorted(str(value) for value in unsupported["image_name"].unique())
+        raise Cveta2Error(
+            f"Ошибка: недопустимый split {values}: {preview_names(names)}. "
+            "Допустимы train, val, test."
+        )
+
+
+def _validate_export_rows(df: pd.DataFrame, csv_path: Path) -> None:
+    """Validate external row values before creating or pruning output."""
+    boxes = df[df["instance_shape"] == "box"]
+    required = {"image_width", "image_height"}
+    if not boxes.empty:
+        required |= {
+            "instance_label",
+            "bbox_x_tl",
+            "bbox_y_tl",
+            "bbox_x_br",
+            "bbox_y_br",
+        }
+    missing = required - set(df.columns)
+    if missing:
+        raise Cveta2Error(
+            f"Ошибка: в {csv_path} отсутствуют столбцы: {sorted(missing)}"
+        )
+    for _, row in df.iterrows():
+        name = row["image_name"]
+        if (
+            not isinstance(name, str)
+            or not name
+            or Path(name).name != name
+            or name in {".", ".."}
+            or "\\" in name
+            or "\x00" in name
+        ):
+            raise Cveta2Error(
+                f"Ошибка: некорректное имя изображения в {csv_path}: {name!r}"
+            )
+        try:
+            dimensions = [
+                float(row[column]) for column in ("image_width", "image_height")
+            ]
+        except (ValueError, TypeError) as exc:
+            raise Cveta2Error(
+                f"Ошибка: некорректный размер {name!r} в {csv_path}"
+            ) from exc
+        if any(
+            not math.isfinite(value) or value <= 0 or not value.is_integer()
+            for value in dimensions
+        ):
+            raise Cveta2Error(
+                f"Ошибка: некорректный размер {name!r} "
+                f"({dimensions[0]:g}x{dimensions[1]:g}) в {csv_path}"
+            )
+        if row["instance_shape"] == "box":
+            _validate_export_box(row, csv_path)
+
+
+def _validate_export_box(row: pd.Series, csv_path: Path) -> None:
+    """Reject incomplete or nonfinite external box values."""
+    name = row["image_name"]
+    if not isinstance(row["instance_label"], str) or not row["instance_label"]:
+        raise Cveta2Error(f"Ошибка: не задан класс {name!r} в {csv_path}")
+    try:
+        coords = [
+            float(row[column])
+            for column in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
+        ]
+    except (ValueError, TypeError) as exc:
+        raise Cveta2Error(f"Ошибка: некорректный bbox {name!r} в {csv_path}") from exc
+    if (
+        any(not math.isfinite(value) for value in coords)
+        or coords[2] <= coords[0]
+        or coords[3] <= coords[1]
+    ):
+        raise Cveta2Error(f"Ошибка: некорректный bbox {name!r} в {csv_path}")
+
 
 class ExportContext(NamedTuple):
     """Shared state prepared by ``prepare_export``."""
@@ -259,6 +343,9 @@ def prepare_export(
     df = read_dataset_csv(csv_path, {"image_name", "instance_shape", "split"})
     df = df[df["instance_shape"].isin(["box", "none"])].copy()
     _validate_splits(df)
+    _validate_export_rows(df, csv_path)
+    if link_mode not in {"auto", "reflink", "hardlink", "symlink", "copy"}:
+        raise Cveta2Error(f"Неизвестный link-mode: {link_mode!r}")
 
     box_df = df[df["instance_shape"] == "box"]
     label_map: dict[str, int] = {}
@@ -277,7 +364,6 @@ def prepare_export(
     splits = sorted(df["split"].unique())
     logger.info(f"Сплиты: {splits}")
 
-    out_dir.mkdir(parents=True, exist_ok=True)
     return ExportContext(df, out_dir, link_mode, label_map, found, splits)
 
 

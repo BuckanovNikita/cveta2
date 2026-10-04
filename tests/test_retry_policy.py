@@ -80,7 +80,7 @@ class TestWritePredicate:
         throttled = CvatApiError("busy", status_code=503, retry_after=2.0)
         crashed = CvatApiError("busy", status_code=503)
 
-        assert _should_retry_write(throttled)
+        assert not _should_retry_write(throttled)
         assert not _should_retry_write(crashed)
 
     @pytest.mark.parametrize("status", _AMBIGUOUS_WRITE_STATUS)

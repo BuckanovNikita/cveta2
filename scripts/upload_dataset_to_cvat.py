@@ -17,10 +17,9 @@ Example:
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 # CVAT SDK only in this script (dev tool)
 from cvat_sdk import make_client
@@ -29,9 +28,15 @@ from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from cvat_sdk.core.proxies.tasks import ResourceType
 from loguru import logger
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from cveta2.config import CvatConfig
+from cveta2.exceptions import Cveta2Error
+from cveta2.services.convert.yolo import (
+    _load_yaml,
+    _normalize_class_names,
+    _parse_label_file,
+)
 
 # ---------------------------------------------------------------------------
 # Dataset YAML schema (coco/ultralytics-style)
@@ -64,18 +69,14 @@ def load_dataset_yaml(path: Path) -> tuple[DatasetYaml, Path]:
 
     Dataset root = yaml_path.parent / path (path from YAML).
     """
-    with path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+    data = _load_yaml(path)
     if not isinstance(data, dict):
-        raise TypeError(f"Invalid YAML: expected mapping, got {type(data)}")
-    # Normalize names: YAML may have int or str keys
-    names_raw = data.get("names") or {}
-    names = {}
-    for k, v in names_raw.items():
-        key = int(k) if isinstance(k, str) and k.isdigit() else k
-        names[key] = str(v)
-    data["names"] = names
-    model = DatasetYaml.model_validate(data)
+        raise Cveta2Error(f"Ошибка: {path} должен содержать YAML-словарь")
+    data["names"] = _normalize_class_names(data.get("names"), path)
+    try:
+        model = DatasetYaml.model_validate(data)
+    except ValidationError as exc:
+        raise Cveta2Error(f"Ошибка: некорректный YAML {path}: {exc}") from exc
     dataset_root = path.parent / model.path
     return model, dataset_root.resolve()
 
@@ -118,29 +119,23 @@ def parse_yolo_label_file(path: Path) -> list[tuple[int, float, float, float, fl
     """
     if not path.is_file():
         return []
-    rows: list[tuple[int, float, float, float, float]] = []
-    for raw_line in path.read_text(encoding="utf-8").strip().splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         parts = line.split()
-        if len(parts) < 5:
+        if not parts:
             continue
         try:
-            cid = int(parts[0])
-            xc = float(parts[1])
-            yc = float(parts[2])
-            w = float(parts[3])
-            h = float(parts[4])
-            rows.append((cid, xc, yc, w, h))
-        except (ValueError, IndexError):
-            logger.warning(
-                "Skipping malformed YOLO line in {}: {!r}",
-                path,
-                line,
-            )
-            continue
-    return rows
+            class_id = float(parts[0])
+        except ValueError as exc:
+            raise Cveta2Error(
+                f"Ошибка: некорректный ID класса в {path}:{line_number}"
+            ) from exc
+        if not math.isfinite(class_id) or class_id < 0 or not class_id.is_integer():
+            raise Cveta2Error(f"Ошибка: некорректный ID класса в {path}:{line_number}")
+    return [
+        (int(row[0]), row[1], row[2], row[3], row[4]) for row in _parse_label_file(path)
+    ]
 
 
 def yolo_norm_to_pixel_bbox(  # noqa: PLR0913, PLR0917
@@ -165,6 +160,7 @@ def yolo_norm_to_pixel_bbox(  # noqa: PLR0913, PLR0917
 def load_bbox_annotations(
     dataset_root: Path,
     image_paths: list[Path],
+    class_names: dict[int, str] | None = None,
 ) -> list[list[tuple[int, list[float]]]]:
     """Load YOLO labels for each image as ``(class_id, [x1, y1, x2, y2])``.
 
@@ -182,6 +178,8 @@ def load_bbox_annotations(
             w, h = 1, 1
         frame_boxes: list[tuple[int, list[float]]] = []
         for cid, xc, yc, bw, bh in yolo_rows:
+            if class_names is not None and cid not in class_names:
+                raise Cveta2Error(f"Ошибка: неизвестный ID класса {cid} в {label_path}")
             points = yolo_norm_to_pixel_bbox(xc, yc, bw, bh, w, h)
             frame_boxes.append((cid, points))
         result.append(frame_boxes)
@@ -230,7 +228,8 @@ def main() -> None:
         logger.error("No images found in train/val dirs.")
         raise SystemExit(1)
 
-    bbox_annotations = load_bbox_annotations(dataset_root, image_paths)
+    class_names = _normalize_class_names(dataset_spec.names, yaml_path)
+    bbox_annotations = load_bbox_annotations(dataset_root, image_paths, class_names)
     total_boxes = sum(len(f) for f in bbox_annotations)
     logger.info(
         f"Dataset: {dataset_root}, labels={len(label_names)}, "
@@ -277,13 +276,13 @@ def main() -> None:
             # Upload bbox annotations: map class index to task label_id by name
             task_labels = task.get_labels()
             name_to_id = {label.name: label.id for label in task_labels}
-            label_ids_by_class = [name_to_id[name] for name in label_names]
+            label_ids_by_class = {
+                class_id: name_to_id[name] for class_id, name in class_names.items()
+            }
 
             shapes: list[cvat_models.LabeledShapeRequest] = []
             for frame_idx, frame_boxes in enumerate(bbox_annotations):
                 for class_id, points in frame_boxes:
-                    if class_id >= len(label_ids_by_class):
-                        continue
                     shapes.append(
                         cvat_models.LabeledShapeRequest(
                             type=cvat_models.ShapeType("rectangle"),

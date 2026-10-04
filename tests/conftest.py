@@ -46,6 +46,16 @@ collect_ignore_glob: list[str] = (
 )
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Check reader termination before tests that could hang on a broken reader.
+
+    The bounded stream fails immediately if CSV scanning reads beyond EOF.
+    Running it first makes nontermination diagnosable even when a runner
+    supplies selected tests in arbitrary order. Every selected test remains.
+    """
+    items.sort(key=lambda item: item.name != "test_csv_reader_stops_after_first_eof")
+
+
 def _coco8_params() -> list[ParameterSet]:
     """Build parameterization list for coco8_fixtures."""
     params: list[ParameterSet] = [pytest.param("json", id="fixtures")]

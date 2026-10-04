@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypedDict
 
@@ -183,6 +184,7 @@ def convert_to_yolo(
         label_start=0,
     )
 
+    ctx.output_dir.mkdir(parents=True, exist_ok=True)
     for split in ctx.splits:
         (ctx.output_dir / "images" / split).mkdir(parents=True, exist_ok=True)
         (ctx.output_dir / "labels" / split).mkdir(parents=True, exist_ok=True)
@@ -237,16 +239,30 @@ def _parse_label_file(path: Path) -> list[list[float]]:
     rows: list[list[float]] = []
     skipped = 0
     extra_fields = 0
-    for line in read_text_utf8(path).strip().splitlines():
+    for line_number, line in enumerate(read_text_utf8(path).splitlines(), start=1):
         parts = line.strip().split()
-        if len(parts) < _YOLO_BOX_FIELDS:
-            skipped += 1
+        if not parts:
             continue
         try:
-            rows.append([float(part) for part in parts])
+            fields = [float(part) for part in parts]
+            valid = (
+                len(fields) >= _YOLO_BOX_FIELDS
+                and all(math.isfinite(value) for value in fields)
+                and fields[0] >= 0
+                and fields[0].is_integer()
+                and all(0 <= value <= 1 for value in fields[1:3])
+                and all(0 < value <= 1 for value in fields[3:5])
+                and (len(fields) < _YOLO_CONF_FIELDS or 0 <= fields[5] <= 1)
+            )
         except ValueError:
+            valid = False
+        if not valid:
             skipped += 1
+            logger.warning(
+                f"Пропущена некорректная строка {path}:{line_number}: {line!r}"
+            )
             continue
+        rows.append(fields)
         if len(parts) > _YOLO_CONF_FIELDS:
             extra_fields += 1
     if skipped:
@@ -266,22 +282,51 @@ def _normalize_class_names(names: object, source: Path) -> dict[int, str]:
     ``names: [cat, dog]``, where the position is the class id.
     """
     if isinstance(names, list):
-        return {index: str(name) for index, name in enumerate(names)}
-    if isinstance(names, dict):
-        return {int(k): str(v) for k, v in names.items()}
-    raise Cveta2Error(f"Ошибка: names в {source} должен быть списком или словарём")
+        entries = dict(enumerate(names))
+    elif isinstance(names, dict):
+        entries = names
+    else:
+        raise Cveta2Error(f"Ошибка: names в {source} должен быть списком или словарём")
+    result: dict[int, str] = {}
+    for key, name in entries.items():
+        if isinstance(key, bool) or not (
+            isinstance(key, int)
+            or (isinstance(key, str) and key.isascii() and key.isdecimal())
+        ):
+            raise Cveta2Error(f"Ошибка: некорректный ID класса {key!r} в {source}")
+        class_id = int(key)
+        if (
+            class_id < 0
+            or class_id in result
+            or not isinstance(name, str)
+            or not name.strip()
+            or name in result.values()
+        ):
+            raise Cveta2Error(
+                f"Ошибка: некорректный names в {source}: {key!r}: {name!r}"
+            )
+        result[class_id] = name
+    return result
+
+
+def _load_yaml(path: Path) -> object:
+    """Translate expected external YAML failures at the file boundary."""
+    try:
+        return yaml.safe_load(read_text_utf8(path))
+    except (yaml.YAMLError, UnicodeError, OSError) as exc:
+        raise Cveta2Error(f"Ошибка: не удалось прочитать YAML {path}: {exc}") from exc
 
 
 def _load_class_names_yaml(path: Path) -> dict[int, str]:
     """Load class names from a YAML file (supports {names: ...} or flat dict)."""
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл имён классов не найден: {path}")
-    data = yaml.safe_load(read_text_utf8(path))
+    data = _load_yaml(path)
     if isinstance(data, dict) and "names" in data:
         return _normalize_class_names(data["names"], path)
     if isinstance(data, dict):
         return _normalize_class_names(data, path)
-    return {}
+    raise Cveta2Error(f"Ошибка: {path} не содержит имена классов")
 
 
 def _yolo_fields_to_row(  # noqa: PLR0913, PLR0917
@@ -320,7 +365,9 @@ def _resolve_dataset_root(yaml_path: Path, raw_root: object) -> Path:
     """Resolve YOLO's optional ``path`` relative to the dataset YAML."""
     if raw_root in (None, ""):
         return yaml_path.parent.resolve()
-    root = Path(str(raw_root)).expanduser()
+    if not isinstance(raw_root, (str, Path)):
+        raise Cveta2Error(f"Ошибка: path в {yaml_path} должен быть строкой")
+    root = Path(raw_root).expanduser()
     if not root.is_absolute():
         root = yaml_path.parent / root
     return root.resolve()
@@ -397,7 +444,7 @@ def _from_yolo_dataset(
     read_all_sizes: bool,
 ) -> None:
     """Convert YOLO dataset (with dataset.yaml) to CSV."""
-    ds_config = yaml.safe_load(read_text_utf8(yaml_path))
+    ds_config = _load_yaml(yaml_path)
     if not isinstance(ds_config, dict):
         raise Cveta2Error(f"Ошибка: {yaml_path} не содержит YAML-словарь")
 
