@@ -401,13 +401,8 @@ def test_resolve_project_id_not_found(normal_fake: LoadedFixtures) -> None:
         client.resolve_project_id("does-not-exist")
 
 
-def test_resolve_project_id_cached_wins_over_the_api() -> None:
-    """Cached list and API deliberately disagree about the same name.
-
-    Every other cached test names a project that both sources resolve to
-    the same id, so deleting the cached lookup entirely -- or never
-    matching in it -- produced the same answer via the API round-trip.
-    """
+def test_resolve_project_id_live_identity_wins_over_stale_cache() -> None:
+    """A cached name must not authorize a stale project ID on an active client."""
     api = FakeCvatApi.from_tasks([], project_name="shared")
     client = CvatClient(CvatConfig(), api=api)
 
@@ -416,7 +411,7 @@ def test_resolve_project_id_cached_wins_over_the_api() -> None:
         cached=[ProjectInfo(id=99, name="shared")],
     )
 
-    assert resolved == 99
+    assert resolved == 1
 
 
 def test_resolve_project_id_picks_the_named_project_from_the_api() -> None:

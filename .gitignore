@@ -62,4 +62,7 @@ tests/integration/.run-tag
 !.agents/skills/commit
 !.agents/skills/mutation-testing
 !.agents/skills/running-integration-tests
+# Repository-managed Spec Kit skills; personal skills remain ignored.
+!.agents/skills/speckit-*/
+!.agents/skills/speckit-*/**
 .claude/skills/lossless-doc-compress

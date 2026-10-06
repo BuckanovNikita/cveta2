@@ -21,10 +21,8 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 _FAKE_HOME = Path(tempfile.mkdtemp(prefix="cveta2-test-home-"))
 
@@ -32,6 +30,14 @@ os.environ["HOME"] = str(_FAKE_HOME)
 os.environ["USERPROFILE"] = str(_FAKE_HOME)
 os.environ["XDG_CONFIG_HOME"] = str(_FAKE_HOME / ".config")
 os.environ["XDG_CACHE_HOME"] = str(_FAKE_HOME / ".cache")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    """Give each mutation child a root whose cleanup cannot affect siblings."""
+    mutation_root = os.environ.get("PYTEST_DEBUG_TEMPROOT")
+    if mutation_root and os.environ.get("MUTANT_UNDER_TEST"):
+        config.option.basetemp = str(Path(mutation_root) / f"worker-{os.getpid()}")
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:  # noqa: ARG001

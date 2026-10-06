@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 import boto3
+from boto3.exceptions import S3UploadFailedError
 from botocore.config import Config
 from botocore.exceptions import (
     ClientError,
@@ -42,6 +43,7 @@ S3_TRANSFER_ERRORS: Final = (
     ConnectionError,
     KeyError,
     ClientError,
+    S3UploadFailedError,
     BotoConnectionError,
     HTTPClientError,
     IncompleteReadError,

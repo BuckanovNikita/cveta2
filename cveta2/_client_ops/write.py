@@ -16,6 +16,7 @@ from cveta2._client.assembly import (
 from cveta2._client.dtos import LabelPatch, UploadTaskSpec
 from cveta2._client_ops.base import _ClientBase
 from cveta2._concurrency import Workers, run_concurrent
+from cveta2.upload_manifest import validate_upload_boxes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -235,6 +236,24 @@ class _WriteMixin(_ClientBase):
 
         """
         api = self._require_api("upload_task_annotations")
+        validate_upload_boxes(annotations_df)
+        if "instance_shape" in annotations_df:
+            annotations_df = annotations_df[
+                annotations_df["instance_shape"].ne("deleted")
+            ]
+        if "instance_label" in annotations_df:
+            annotations_df = annotations_df[
+                annotations_df["instance_label"]
+                .fillna("")
+                .astype(str)
+                .str.strip()
+                .ne("")
+            ]
+        else:
+            annotations_df = annotations_df.iloc[:0]
+        if annotations_df.empty:
+            logger.info(f"Нет аннотаций для загрузки в задачу {task_id}")
+            return 0
         session = session or self.open_task_session(task_id)
 
         # Frame mapping comes from CVAT data_meta (authoritative source).

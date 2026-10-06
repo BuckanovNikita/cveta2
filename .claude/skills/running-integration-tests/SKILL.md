@@ -9,7 +9,7 @@ The integration tests run against the shared stands of the local Kubernetes
 cluster: CVAT, MinIO and ClearML, all owned by the `k8s-infra` skill. Nothing
 runs on this host, so there are no containers to start and no ports to pick.
 Every run acts as project `cveta2` of the skill's registry under one **run tag**
-(the `## Shared infra` block in `AGENTS.md`, and the skill's
+(the `## Shared infra` block in `.specify/memory/engineering.md`, and the skill's
 `references/run-contract.md`), and the repository's lifecycle scripts do the
 minting, the credential lookup, the seeding and the cleanup. These commands
 mutate shared state: operate only the current run's exact tag, never another
@@ -115,9 +115,9 @@ space so a short tag never matches a longer one), then bucket `<tag>`
 session left (`clearml.py cleanup --prefix`). It releases `.run-tag` only when
 every stand succeeded; on a failure it prints the retry command for that stand
 and the same tag. Never broaden a selector or a prefix. Stop an integration run
-through `integration_stop.sh`, not through the skill's `cvat.py cleanup` line
-of the `## Shared infra` block: that helper removes projects and tasks only and
-would leave the `<tag> minio` cloud storage behind.
+through `integration_stop.sh`. The global skill's `cvat.py cleanup` helper
+removes projects and tasks only and would leave the `<tag> minio` cloud storage
+behind.
 
 `cleanup --stale` is the janitor's: for anyone else it degrades to the
 `--dry-run` listing, which is how orphans of dead runs are inventoried and

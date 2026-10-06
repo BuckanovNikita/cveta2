@@ -26,11 +26,11 @@ from cveta2.services.upload import (
     UploadPlan,
     UploadRequest,
     _stage_images,
+    request_fingerprint,
     upload_dataset,
 )
 from cveta2.task_cache import get_task_cache_dir
 from cveta2.upload_manifest import (
-    compute_fingerprint,
     list_manifests,
     new_manifest,
     save_manifest,
@@ -603,15 +603,14 @@ def _seed_manifest_for(
     mapping = {name: name for name in names}
     manifest = new_manifest(
         dataset_path=request.dataset_path,
-        fingerprint=compute_fingerprint(
-            request.plan.image_names, request.plan.deleted_names, request.labels
-        ),
+        fingerprint=request_fingerprint(request),
         project_id=PROJECT_ID,
         task_name=request.task_name,
         cs_info=cs_info,
         name_to_server_file=mapping,
         task_image_names=[build_s3_key(cs_info.prefix, mapping[n]) for n in names],
         host=client.host,
+        intent_complete=True,
     )
     manifest.task_id = task_id
     save_manifest(manifest)
@@ -714,14 +713,10 @@ class TestResume:
         assert len(pending) == 1
         assert pending[0].task_id is not None
 
-    def test_resume_replaces_a_task_whose_frames_never_attached(
+    def test_resume_stops_when_frame_attachment_is_uncertain(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """An empty task is useless and cannot be repaired in place.
-
-        Re-running without --resume would leave it behind *and* create a
-        second one; the frame count is what tells the two apart.
-        """
+        """An empty read-back cannot prove background attachment did not commit."""
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         names = ["a.jpg", "b.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
@@ -730,12 +725,11 @@ class TestResume:
             upload_dataset(client, make_request(image_names=names))
         stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
-        outcome = upload_dataset(client, _resume_request(names))
-
-        assert _writes_of(client).deleted_tasks == [stranded]
-        assert len(_writes_of(client).created_tasks) == 2
-        assert outcome.images == len(names)
-        assert list_manifests(PROJECT_ID, host=client.host) == []
+        with pytest.raises(Cveta2Error, match="кадры"):
+            upload_dataset(client, _resume_request(names))
+        assert _writes_of(client).deleted_tasks == []
+        assert len(_writes_of(client).created_tasks) == 1
+        assert list_manifests(PROJECT_ID, host=client.host)[0].task_id == stranded
 
     def test_resume_keeps_a_task_whose_frames_did_attach(
         self, monkeypatch: pytest.MonkeyPatch
@@ -769,7 +763,7 @@ class TestResume:
         request = make_request(image_names=["a.jpg"])
         _seed_manifest_for(client, request, outcome.task_id)
 
-        with pytest.raises(Cveta2Error, match=r"task delete"):
+        with pytest.raises(Cveta2Error, match="кадры"):
             upload_dataset(client, _resume_request(["a.jpg"]))
 
     def test_resume_uploads_annotations_the_first_run_never_reached(
@@ -871,6 +865,10 @@ class TestResume:
             "cveta2.image_uploader._assign_month_folder",
             lambda name: f"9999-12/{name}",
         )
+        # Simulate attachment having completed after the interrupted response.
+        assert pinned.task_id is not None
+        spec = _writes_of(client).created_tasks[-1]
+        client.api.attach_task_data(pinned.task_id, spec)
         upload_dataset(
             client,
             make_request(image_names=names, search_dirs=[image_dir], resume=True),
@@ -882,7 +880,7 @@ class TestResume:
 
 
 class TestManifestLifecycle:
-    def test_a_fresh_run_warns_before_forgetting_a_stranded_task(
+    def test_a_fresh_run_refuses_to_forget_a_stranded_task(
         self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
     ) -> None:
         """Overwriting the manifest loses the only record of that task id.
@@ -898,10 +896,11 @@ class TestManifestLifecycle:
             upload_dataset(client, make_request(image_names=names))
         stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
-        upload_dataset(client, make_request(image_names=names))
-
-        assert any(str(stranded) in message for message in capture_logs)
-        assert any("--resume" in message for message in capture_logs)
+        with pytest.raises(Cveta2Error, match="--resume") as caught:
+            upload_dataset(client, make_request(image_names=names))
+        assert str(stranded) in str(caught.value)
+        assert len(_writes_of(client).created_tasks) == 1
+        assert capture_logs
 
     def test_a_first_run_warns_about_nothing(
         self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]

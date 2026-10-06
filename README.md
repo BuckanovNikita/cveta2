@@ -9,12 +9,13 @@ CLI и Python API для работы с аннотациями CVAT-проек�
 - [Быстрый старт](#быстрый-старт)
 - [Команды](#команды) — краткий указатель, полное описание в [docs/cli.md](docs/cli.md)
 - [Python API](#python-api) — краткий пример, полное описание в [docs/python-api.md](docs/python-api.md)
+- [Разработка через Spec Kit](CONTRIBUTING.md#разработка-через-spec-kit) — обязательный процесс изменений для Codex и Claude
 - Справочники:
   - [docs/cli.md](docs/cli.md) — все команды CLI и их флаги
   - [docs/configuration.md](docs/configuration.md) — конфиг, переменные окружения, параллельность, повторы, неинтерактивный режим
   - [docs/images-and-cache.md](docs/images-and-cache.md) — изображения из S3, кэш аннотаций, публикация в ClearML
   - [docs/python-api.md](docs/python-api.md) — Python API
-  - [DATASET_FORMAT.md](DATASET_FORMAT.md) — формат выходных CSV
+  - [Контракт датасета](specs/001-project-documentation/contracts/dataset-format.md) — формат выходных CSV
 
 ## Что умеет
 
@@ -37,6 +38,10 @@ CLI и Python API для работы с аннотациями CVAT-проек�
 - **Удобный интерактив** — текстовые поля запоминают ответы прошлых запусков (стрелка вверх подставляет предыдущее значение), а после интерактивного заполнения команда печатает в stdout полный эквивалент с флагами для повторного запуска
 - Поддерживает фильтр по задачам со статусом `completed`
 - Всё за один вызов — без промежуточных XML/ZIP файлов
+
+## Изменения совместимости
+
+Неоднозначные имена проектов и задач теперь требуют явного ID. Продолжение загрузки требует полного совпадения данных и манифеста схемы v3; старое состояние нужно проверить вручную. Повторный COCO-экспорт заменяет ранее экспортированный датасет, сохраняя посторонние файлы. `s3-sync` отклоняет неканонические и конфликтующие пути до записи. `doctor` возвращает `1` при ошибке обязательной проверки и `0` при одних дополнительных предупреждениях. Подробности — в [командах CLI](docs/cli.md) и [описании кэша](docs/images-and-cache.md).
 
 ## Установка
 
@@ -97,7 +102,7 @@ cveta2 fetch-task -p 123 -t -o output/
 cveta2 fetch-task -p 123 -o output/
 ```
 
-В папке `output/` появятся файлы: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv` (и `raw.csv` с `--raw`). Подробнее — в [DATASET_FORMAT.md](DATASET_FORMAT.md).
+В папке `output/` появятся файлы: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv` (и `raw.csv` с `--raw`). Подробнее — в [Контракт датасета](specs/001-project-documentation/contracts/dataset-format.md).
 
 
 ## Команды

@@ -7,6 +7,8 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from cveta2.commands.convert import run_convert
 from cveta2.commands.doctor import run_doctor
 from cveta2.commands.fetch import run_fetch, run_fetch_task
@@ -697,6 +699,15 @@ class CliApp:
             handler(args)
         except Cveta2Error as e:
             sys.exit(str(e))
+        except ValidationError as error:
+            details = "; ".join(
+                f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+                for item in error.errors(include_input=False, include_url=False)
+            )
+            sys.exit(
+                f"Некорректная конфигурация: {details}. "
+                f"Проверьте YAML и переменные окружения."
+            )
 
     def run(self, argv: list[str] | None = None) -> None:
         """Run the CLI with the given arguments."""

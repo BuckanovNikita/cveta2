@@ -129,21 +129,20 @@ def _should_retry_read(exc: BaseException) -> bool:
 
 
 def _should_retry_write(exc: BaseException) -> bool:
-    """Retry a write only when the server provably never applied it.
-
-    A 429 is a refusal: the request was rejected before it did anything, so
-    repeating it is safe.  A 503 that carries ``Retry-After`` is the same
-    signal spelled differently — a deliberate throttle rather than a crash.
-    Everything else is ambiguous, and repeating it would append a second
-    copy of every shape or issue (``put_task_shapes`` uses the CREATE
-    action).  Those failures abort and are recovered by ``upload --resume``,
-    which reads back what CVAT actually stored.
-    """
+    """Retry only a proven refusal; Retry-After does not prove non-application."""
     if not isinstance(exc, CvatApiError):
         return False
-    if exc.status_code == TOO_MANY_REQUESTS:
-        return True
-    return exc.status_code == SERVICE_UNAVAILABLE and exc.retry_after is not None
+    if exc.status_code == SERVICE_UNAVAILABLE:
+        logger.warning(
+            "CVAT вернул 503: результат записи неизвестен, запрос не повторяется. "
+            "Проверьте состояние в CVAT; продолжайте только после сверки."
+        )
+    return exc.status_code == TOO_MANY_REQUESTS
+
+
+def _should_retry_idempotent_write(exc: BaseException) -> bool:
+    """Retry status failures for explicit replacement of the same values."""
+    return isinstance(exc, CvatApiError) and exc.status_code in _READ_RETRY_STATUS
 
 
 def _translate_transport_errors(func: Callable[_P, _R]) -> Callable[_P, _R]:
@@ -165,6 +164,9 @@ def _translate_transport_errors(func: Callable[_P, _R]) -> Callable[_P, _R]:
 
 _api_retry = network_retry(_should_retry_read, label="CVAT API")
 _write_retry = network_retry(_should_retry_write, label="CVAT write")
+_idempotent_write_retry = network_retry(
+    _should_retry_idempotent_write, label="CVAT idempotent write"
+)
 
 _CONNECT_TIMEOUT = 10.0
 
@@ -509,7 +511,7 @@ class SdkCvatApiAdapter:
         self.client.api_client.issues_api.create(build_issue_request(issue))
 
     @_translate_transport_errors
-    @_write_retry
+    @_idempotent_write_retry
     @_translate_api_errors
     def set_deleted_frames(self, task_id: int, frame_ids: list[int]) -> None:
         """Replace the task's deleted-frames list."""
@@ -537,7 +539,7 @@ class SdkCvatApiAdapter:
         self.client.api_client.tasks_api.destroy(task_id)
 
     @_translate_transport_errors
-    @_write_retry
+    @_idempotent_write_retry
     @_translate_api_errors
     def update_job(
         self,

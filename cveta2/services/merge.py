@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from io import StringIO
 from pathlib import Path
 
 import pandas as pd
 from loguru import logger
 
 from cveta2.exceptions import Cveta2Error
-from cveta2.services.output import read_dataset_csv, read_text_utf8, save_csv
+from cveta2.services.output import (
+    read_dataset_csv,
+    read_text_utf8,
+    save_csv,
+)
 
 # Minimal columns that every dataset CSV must contain.
 _REQUIRED_COLUMNS: set[str] = {
@@ -37,17 +40,17 @@ def _read_deleted_names(path: Path | None) -> set[str]:
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
 
-    text = read_text_utf8(path)
+    try:
+        text = read_text_utf8(path)
+    except (UnicodeError, OSError) as exc:
+        raise Cveta2Error(f"Ошибка: не удалось прочитать {path}: {exc}") from exc
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines or "image_name" not in lines[0]:
         legacy_names = set(lines)
         logger.info(f"Загружен {path}: {len(legacy_names)} удалённых изображений")
         return legacy_names
 
-    try:
-        df = pd.read_csv(StringIO(text))
-    except (pd.errors.ParserError, pd.errors.EmptyDataError) as e:
-        raise Cveta2Error(f"Ошибка: не удалось прочитать CSV {path}: {e}") from e
+    df = read_dataset_csv(path, {"image_name"})
     names = set(df["image_name"].dropna().unique())
     logger.info(f"Загружен {path}: {len(names)} удалённых изображений")
     return names

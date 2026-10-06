@@ -11,19 +11,24 @@ from __future__ import annotations
 import os
 import pwd
 import stat
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from botocore.exceptions import BotoCoreError
 from loguru import logger
+from pydantic import ValidationError
 
 from cveta2.config import (
     CacheConfig,
     CvatConfig,
     ImageCacheConfig,
     get_config_path,
+    is_cache_disabled,
 )
+from cveta2.exceptions import Cveta2Error
 from cveta2.fs_utils import default_cache_base
 from cveta2.services.output import PREVIEW_LIMIT
 
@@ -34,18 +39,30 @@ if TYPE_CHECKING:
 def run_doctor(args: argparse.Namespace | None = None) -> None:
     """Run all doctor checks and log a final summary."""
     fix_cache = args is not None and args.cache
-    ok = True
-    if not check_config():
+    try:
+        ok = check_config()
+    except (Cveta2Error, ValidationError, OSError) as error:
+        logger.error(f"doctor: обязательная проверка конфигурации недоступна: {error}")
         ok = False
-    if not check_aws_credentials():
-        ok = False
-    if not check_cache_permissions(fix=fix_cache):
-        ok = False
-
-    if ok:
-        logger.info("doctor: all checks passed")
+    logger.info("doctor: AWS — необязательная проверка")
+    try:
+        if not check_aws_credentials():
+            logger.warning("doctor: необязательная проверка AWS не пройдена")
+    except (BotoCoreError, OSError) as error:
+        logger.warning(f"doctor: необязательная проверка AWS недоступна: {error}")
+    if is_cache_disabled() and not fix_cache:
+        logger.info("doctor: проверка кэша отключена (CVETA2_DISABLE_CACHE=true)")
     else:
-        logger.warning("doctor: some checks failed (see messages above)")
+        try:
+            if not check_cache_permissions(fix=fix_cache):
+                logger.warning("doctor: необязательная проверка кэша не пройдена")
+        except (Cveta2Error, ValidationError, OSError) as error:
+            logger.warning(f"doctor: необязательная проверка кэша недоступна: {error}")
+    if ok:
+        logger.info("doctor: обязательные проверки пройдены")
+    else:
+        logger.error("doctor: обязательные проверки не пройдены")
+        sys.exit(1)
 
 
 def check_config() -> bool:
@@ -79,14 +96,21 @@ def check_config() -> bool:
     if not has_password:
         problems.append("No credentials: provide CVAT_USERNAME + CVAT_PASSWORD")
 
-    ic_cfg = ImageCacheConfig.load()
+    try:
+        ic_cfg = ImageCacheConfig.load()
+    except (ValidationError, Cveta2Error, OSError) as error:
+        logger.warning(
+            f"doctor: необязательная проверка image_cache недоступна: {error}"
+        )
+        ic_cfg = ImageCacheConfig()
     if not ic_cfg.projects:
         logger.info("image_cache: no projects configured (optional)")
     else:
         for proj_name, proj_dir in ic_cfg.projects.items():
             if not proj_dir.is_dir():
-                problems.append(
-                    f"image_cache.{proj_name}: directory does not exist: {proj_dir}"
+                logger.warning(
+                    f"image_cache.{proj_name}: необязательный каталог "
+                    f"отсутствует: {proj_dir}"
                 )
             else:
                 logger.info(f"image_cache.{proj_name}: {proj_dir} — OK")

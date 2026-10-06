@@ -1621,6 +1621,56 @@ class TestWhatsNewApi:
 
 
 class TestIgnoreApi:
+    def test_remove_name_resolves_remote_identity(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        task = normal_fake.tasks[0]
+        project = normal_fake.project
+        config = write_config_yaml(
+            tmp_path / "ignore.yaml",
+            ignore={project.name: [{"id": task.id, "name": task.name}]},
+        )
+        _api, connection = _scoped(normal_fake, config_path=config)
+        assert (
+            cveta2.ignore(project.id, remove=[task.name], connection=connection) == []
+        )
+        assert IgnoreConfig.load(config).get_ignored_entries(project.name) == []
+
+    def test_unknown_id_requires_remote_resolution(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        config = write_config_yaml(tmp_path / "ignore.yaml", ignore={})
+        _api, connection = _scoped(normal_fake, config_path=config)
+        with pytest.raises(TaskNotFoundError):
+            cveta2.ignore(
+                normal_fake.project.id, remove=[999999], connection=connection
+            )
+
+    @pytest.mark.parametrize("selector", [999999, "999999"])
+    def test_remove_stored_id_without_remote_task(
+        self, normal_fake: LoadedFixtures, tmp_path: Path, selector: int | str
+    ) -> None:
+        config = write_config_yaml(
+            tmp_path / "ignore.yaml",
+            ignore={normal_fake.project.name: [{"id": 999999, "name": "deleted"}]},
+        )
+        _api, connection = _scoped(normal_fake, config_path=config)
+        with patch.object(
+            connection.client,
+            "list_project_tasks",
+            side_effect=AssertionError("remote task lookup"),
+        ):
+            assert (
+                cveta2.ignore(
+                    normal_fake.project.id, remove=[selector], connection=connection
+                )
+                == []
+            )
+        assert (
+            IgnoreConfig.load(config).get_ignored_entries(normal_fake.project.name)
+            == []
+        )
+
     def test_add_list_remove_roundtrip(self, normal_fake: LoadedFixtures) -> None:
         fake = normal_fake
         task = fake.tasks[0]

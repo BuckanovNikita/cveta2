@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, TypedDict
 
 import yaml
 from loguru import logger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from cveta2.exceptions import (
     Cveta2Error,
@@ -215,7 +215,8 @@ class CvatConfig(BaseModel):
     organization: str | None = None
     username: str | None = None
     password: str | None = None
-    request_timeout: float | None = None
+    request_timeout: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    _source_path: Path | None = PrivateAttr(default=None)
 
     @field_validator("host")
     @classmethod
@@ -234,11 +235,9 @@ class CvatConfig(BaseModel):
     @classmethod
     def from_file(cls, path: Path = CONFIG_PATH) -> CvatConfig:
         """Load config from a YAML file.  Returns empty config if file is missing."""
-        if not path.is_file():
-            return cls()
-        logger.trace(f"Loading config from {path}")
-        data = _load_raw_yaml(path)
-        return cls._from_cvat_section(data)
+        cfg = cls._from_cvat_section(_load_raw_yaml(path))
+        cfg._source_path = path  # noqa: SLF001 - this factory owns the model source
+        return cfg
 
     @classmethod
     def from_env(cls) -> CvatConfig:
@@ -256,7 +255,7 @@ class CvatConfig(BaseModel):
 
         Only non-empty / non-None values from *override* win.
         """
-        return CvatConfig(
+        merged = CvatConfig(
             host=override.host or self.host,
             organization=override.organization or self.organization,
             username=override.username or self.username,
@@ -267,6 +266,8 @@ class CvatConfig(BaseModel):
                 else self.request_timeout
             ),
         )
+        merged._source_path = override._source_path or self._source_path
+        return merged
 
     @classmethod
     def load(cls, config_path: Path | None = None) -> CvatConfig:
@@ -316,7 +317,7 @@ class CvatConfig(BaseModel):
         raise MissingCredentialsError(
             f"Учётные данные CVAT не настроены. Задайте CVAT_USERNAME и "
             f"CVAT_PASSWORD или заполните cvat.username/password в "
-            f"{get_config_path()}."
+            f"{self._source_path or get_config_path()}."
         )
 
 
@@ -432,9 +433,21 @@ class CacheConfig(SectionConfig):
 
 
 def cache_dir_for_project(root: Path, project_name: str) -> Path:
-    """Return ``root / sanitized(project_name)``. Replaces path-unsafe chars."""
-    safe = project_name.replace("/", "_").replace("\\", "_").replace("\x00", "_")
-    return root / safe
+    """Return a contained cache component, percent-encoding unsafe characters."""
+    safe = (
+        project_name.replace("%", "%25")
+        .replace("/", "%2F")
+        .replace("\\", "%5C")
+        .replace("\x00", "%00")
+    )
+    if safe in {"", ".", ".."}:
+        safe = "%empty" if not safe else safe.replace(".", "%2E")
+    destination = root / safe
+    if not destination.resolve().is_relative_to(root.resolve()):
+        raise Cveta2Error(
+            f"Путь кэша проекта {project_name!r} выходит за корень {root}"
+        )
+    return destination
 
 
 def images_cache_dir_from(
