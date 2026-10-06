@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v0.7.0 (2026-10-06)
+
+### Bug Fixes
+
+- Resolve reviewed CVAT, dataset and interface failures
+  ([`a6d3d66`](https://github.com/BuckanovNikita/cveta2/commit/a6d3d6672b918649a9a2442527872041a56ac22c))
+
+### Breaking Changes
+
+- Ambiguous names require IDs; legacy upload manifests no longer authorize resume; repeated COCO
+  export replaces metadata-owned output; noncanonical S3 destinations reject; doctor exits nonzero
+  when required configuration checks fail.
+
+
 ## v0.6.0 (2026-09-06)
 
 ### Documentation
