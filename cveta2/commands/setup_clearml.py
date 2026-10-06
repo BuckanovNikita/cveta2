@@ -40,8 +40,10 @@ def run_setup_clearml(args: argparse.Namespace) -> None:
 
     cfg = ClearmlConfig.load(config_path)
 
+    changed = False
     enabled = wizard.prompt_clearml_enabled(current=cfg.enabled)
     if enabled is not None:
+        changed = enabled != cfg.enabled
         cfg = cfg.model_copy(update={"enabled": enabled})
 
     logger.info(
@@ -50,7 +52,6 @@ def run_setup_clearml(args: argparse.Namespace) -> None:
     )
     logger.info("Нажмите Enter, чтобы пропустить проект или принять значение.\n")
 
-    changed = False
     for project in projects:
         existing = cfg.get_mapping(project.name)
         result = _prompt_project_mapping(project.name, project.id, existing)

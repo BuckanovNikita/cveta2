@@ -35,9 +35,8 @@ class CvatApiError(Cveta2Error):
     Wraps SDK-level API exceptions so no ``cvat_sdk`` types leak above
     the ``_client`` layer.  ``status_code`` is the HTTP status (0 when
     unknown).  ``retry_after`` carries the ``Retry-After`` header in
-    seconds when the server sent one: its presence is what distinguishes a
-    deliberate throttle from a crash, which is the difference between a
-    write that is safe to repeat and one that is not.
+    seconds when the server sent one. It is a delay hint, not proof that a
+    failed non-idempotent write had no effect.
     """
 
     def __init__(

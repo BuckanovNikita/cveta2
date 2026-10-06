@@ -276,7 +276,13 @@ class TaskAnnotationCache:
 
     def invalidate_local(self, task_id: int) -> None:
         """Remove the local cache entry for *task_id* if present."""
-        self._local_path(task_id).unlink(missing_ok=True)
+        try:
+            self._local_path(task_id).unlink(missing_ok=True)
+        except OSError as error:
+            logger.warning(
+                f"Не удалось удалить локальный кэш задачи {task_id}: {error} — "
+                f"запись не используется"
+            )
 
     def invalidate(self, task_id: int) -> None:
         """Remove the entry for *task_id* from every layer, S3 included.
@@ -317,7 +323,7 @@ class TaskAnnotationCache:
         except FileNotFoundError:
             return None
         except OSError as e:
-            logger.info(f"Не удалось прочитать локальный кэш задачи {task.id}: {e}")
+            logger.warning(f"Не удалось прочитать локальный кэш задачи {task.id}: {e}")
             return None
         envelope = _validate_envelope(raw, task, source=_SOURCE_LOCAL)
         if envelope is None:
@@ -361,7 +367,7 @@ def _validate_envelope(
     try:
         envelope = CachedTaskEnvelope.model_validate_json(raw)
     except ValidationError as e:
-        logger.info(
+        logger.warning(
             f"{source}: запись задачи {task.id} не прошла валидацию "
             f"({e.error_count()} ошибок) — задача будет загружена заново"
         )

@@ -77,6 +77,14 @@ class TestApplyProjectOrg:
 
 
 class TestResolveProjectSpecWithOrg:
+    def test_disconnected_name_resolution_retains_explicit_cached_identity(
+        self,
+    ) -> None:
+        client = CvatClient(CvatConfig())
+        assert resolve_project_spec(
+            client, "ALPHA", cached=[ProjectInfo(id=77, name="Alpha")]
+        ) == (77, "Alpha")
+
     def test_resolves_name_within_org(self) -> None:
         client, api = _fake_client(project_name="alpha")
         assert resolve_project_spec(client, "acme/alpha") == (1, "alpha")
@@ -136,18 +144,13 @@ class TestResolveProjectSpecWithOrg:
 
         assert resolve_project_spec(client, spec) == (2, "beta")
 
-    def test_name_spec_is_matched_against_the_cache_first(self) -> None:
-        """A cached entry answers the name lookup without a listing request.
-
-        The cache says 77 where the server says 1, and the cached spelling
-        is the one returned, so dropping ``cached=`` on the way to the client
-        is visible in both halves of the result.
-        """
+    def test_name_spec_uses_current_server_identity(self) -> None:
+        """An active client must not authorize a stale cached name match."""
         client, api = _fake_client(project_name="alpha")
         cached = [ProjectInfo(id=77, name="Alpha")]
 
-        assert resolve_project_spec(client, "ALPHA", cached=cached) == (77, "Alpha")
-        assert api.call_counts["list_projects"] == 0
+        assert resolve_project_spec(client, "ALPHA", cached=cached) == (1, "alpha")
+        assert api.call_counts["list_projects"] == 1
 
     def test_numeric_spec_is_named_from_the_cache_before_cvat(self) -> None:
         """A cached entry with the matching id names the project without a request."""

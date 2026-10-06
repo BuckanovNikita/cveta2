@@ -8,7 +8,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from cveta2._client_ops.base import _ClientBase
-from cveta2.exceptions import CvatApiError, ProjectNotFoundError
+from cveta2.exceptions import CvatApiError, Cveta2Error, ProjectNotFoundError
 
 if TYPE_CHECKING:
     from cveta2.image_downloader import CloudStorageInfo
@@ -128,17 +128,29 @@ class _ReadMixin(_ClientBase):
     ) -> ProjectInfo:
         """Find a project by name, case-insensitively.
 
-        Looks in the cached list first, then lists the organization's
-        projects.  Returns the matched project, so callers get CVAT's own
-        spelling of the name rather than the one they searched with.
+        Active clients query the organization's current projects so a stale
+        cache cannot hide duplicate names. Disconnected cached-only queries
+        remain available. Returns CVAT's canonical name spelling.
         """
         search = name.casefold()
-        for p in cached or ():
-            if p.name.casefold() == search:
-                return p
-        for p in self.list_projects():
-            if p.name.casefold() == search:
-                return p
+        candidates = self.list_projects() if self.is_ready or cached is None else cached
+        matches = [
+            project for project in candidates if project.name.casefold() == search
+        ]
+        if not matches and cached is not None and not self.is_ready:
+            matches = [
+                project
+                for project in self.list_projects()
+                if project.name.casefold() == search
+            ]
+        if len(matches) > 1:
+            ids = sorted(project.id for project in matches)
+            raise Cveta2Error(
+                f"Имя проекта {name!r} неоднозначно: id={ids}. "
+                "Укажите числовой ID проекта."
+            )
+        if matches:
+            return matches[0]
         raise ProjectNotFoundError(f"Project not found: {name!r}")
 
     def detect_project_cloud_storage(

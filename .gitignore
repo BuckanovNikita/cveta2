@@ -53,6 +53,7 @@ local/
 
 # Integration test artifacts
 tests/fixtures/data/coco8/images/
+tests/integration/.run-tag
 
 # Claude Code agent worktrees
 .claude/worktrees/
@@ -61,4 +62,7 @@ tests/fixtures/data/coco8/images/
 !.agents/skills/commit
 !.agents/skills/mutation-testing
 !.agents/skills/running-integration-tests
+# Repository-managed Spec Kit skills; personal skills remain ignored.
+!.agents/skills/speckit-*/
+!.agents/skills/speckit-*/**
 .claude/skills/lossless-doc-compress

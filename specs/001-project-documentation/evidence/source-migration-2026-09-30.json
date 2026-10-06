@@ -1,0 +1,45 @@
+{
+  "date": "2026-09-30",
+  "sources": [
+    {
+      "source": "DATASET_FORMAT.md",
+      "destination": "specs/001-project-documentation/contracts/dataset-format.md",
+      "source_sha256": "2f0063f864f4a68928a21b204c73e202dd640419f4994e37180df7994e0aed75",
+      "destination_sha256": "2f0063f864f4a68928a21b204c73e202dd640419f4994e37180df7994e0aed75",
+      "preservation": "byte-identical"
+    },
+    {
+      "source": "BUG_REVIEW.md",
+      "destination": "specs/001-project-documentation/evidence/bug-review-2026-09-04.md",
+      "source_sha256": "32918515f8e1b5d2009ec286d716b51b3e08de73f3084e3a7b1be11083bdef95",
+      "destination_sha256": "32918515f8e1b5d2009ec286d716b51b3e08de73f3084e3a7b1be11083bdef95",
+      "preservation": "byte-identical"
+    },
+    {
+      "source": "ARCHITECTURE.md",
+      "destination": ".specify/memory/architecture.md",
+      "source_sha256": "d7f796f9606066f9c9c2c591047d573c00ce8b24a4f89b3d30bb179d591d9440",
+      "destination_sha256": "5f2ae4eaad7e608562c43b6434c1cd1a4f1fd35ba950dcbd47e8ba0838cbaa53",
+      "preservation": "all module and behavior sections unchanged; introductory ownership references updated"
+    },
+    {
+      "source": "AGENTS.md",
+      "destination": ".specify/memory/engineering.md",
+      "preservation": "listed sections unchanged; project introduction and documentation routing updated; host procedure delegated",
+      "unchanged_sections": [
+        "Preserve the working tree",
+        "Code conventions",
+        "Verification",
+        "Mutation testing",
+        "Integration tests",
+        "Configuration",
+        "Commits, hooks, and releases"
+      ],
+      "reference_only_sections": [
+        "Architecture",
+        "Spec Kit development workflow"
+      ],
+      "shared_infra_authority": "installed global k8s-infra skill and its references/run-contract.md; project lifecycle scripts"
+    }
+  ]
+}

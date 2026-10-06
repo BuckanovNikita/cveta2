@@ -120,10 +120,10 @@ def test_projects_cache_sits_next_to_the_given_config_file(tmp_path: Path) -> No
     ("project_name", "expected_dir"),
     [
         ("plain", "plain"),
-        ("org/project", "org_project"),
-        ("org\\project", "org_project"),
-        ("null\x00byte", "null_byte"),
-        ("a/b\\c\x00d", "a_b_c_d"),
+        ("org/project", "org%2Fproject"),
+        ("org\\project", "org%5Cproject"),
+        ("null\x00byte", "null%00byte"),
+        ("a/b\\c\x00d", "a%2Fb%5Cc%00d"),
     ],
     ids=["plain", "slash", "backslash", "nul", "all_three"],
 )

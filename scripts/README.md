@@ -38,15 +38,15 @@ uv run python scripts/upload_dataset_to_cvat.py --yaml path/to/dataset.yaml --pr
 
 **Назначение:** получить снапшот проекта (задачи, кадры, аннотации) без использования cveta2-клиента, чтобы тесты не зависели от кода библиотеки. Формат JSON совпадает с DTO из `cveta2._client.dtos` (RawTask, RawDataMeta, RawAnnotations и т.д.).
 
-**Зависимости:** только cvat_sdk. cveta2 не импортируется. Учётные данные — только из переменных окружения.
+**Зависимости:** только cvat_sdk. cveta2 не импортируется. Учётные данные — только из переменных окружения; скрипт работает в личном рабочем пространстве пользователя (организацию не задаёт), поэтому проекты интеграционных прогонов на общем стенде ему не видны — их смотрят через `cvat_stand.py ls` (см. [CONTRIBUTING.md](../CONTRIBUTING.md), «Интеграционные тесты»).
 
 **Примеры:**
 
 ```bash
 # Выгрузить проект coco8-dev в каталог по умолчанию tests/fixtures/cvat/coco8-dev/
-export CVAT_HOST="http://localhost:8080"
-export CVAT_USERNAME="admin"
-export CVAT_PASSWORD="your_password"
+export CVAT_HOST="<url сервера CVAT>"
+export CVAT_USERNAME="<пользователь>"
+export CVAT_PASSWORD="<пароль>"
 uv run python scripts/export_cvat_fixtures.py --project coco8-dev
 
 # Другой проект и каталог
@@ -152,3 +152,7 @@ pre-commit, `full` на pre-push. Профили заданы в
 | `mutation_config.py` | Вспомогательный модуль `mutation_test.sh` (профили и сброс `mutants/` при смене охвата) |
 | `check_commit_msg.py` | Хук `commit-msg`, см. «Ветки и релизы» в [CONTRIBUTING.md](../CONTRIBUTING.md) |
 | `check_version_drift.py` | Хук `pre-push`, там же |
+
+## Целостность переноса датасета
+
+`clone_project_to_s3.py` переносит изображения каждой задачи отдельно и сохраняет её порядок кадров, даже когда задачи отличаются длиной или порядком; пустой проект допустим. `upload_dataset_to_cvat.py` сохраняет исходное соответствие ID класса и имени, включая разреженные ID. Некорректные таблицы классов и неизвестные ID отклоняются до создания удалённых объектов.

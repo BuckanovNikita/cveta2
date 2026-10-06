@@ -279,7 +279,9 @@ class TestParseLabelFile:
         p.write_text("\n".join([*bad_lines, "1 0.1 0.2 0.3 0.4"]) + "\n")
 
         assert _parse_label_file(p) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
-        assert [message.rsplit(": ", 1)[-1] for message in capture_logs] == ["2"]
+        assert capture_logs[-1].endswith(": 2")
+        assert f"{p}:1" in capture_logs[0]
+        assert f"{p}:2" in capture_logs[1]
 
     def test_well_formed_file_warns_nothing(
         self, tmp_path: Path, capture_logs: list[str]
@@ -336,12 +338,12 @@ class TestParseLabelFile:
         )
 
         assert len(_parse_label_file(p)) == 2
-        assert [m.split(": ", 1)[0] for m in capture_logs] == [
+        assert [m.split(": ", 1)[0] for m in capture_logs[2:]] == [
             "Пропущено нечитаемых строк в " + str(p),
             f"Строк с полями сверх 6 (сегментация/OBB/keypoints?) в {p}",
         ]
-        assert capture_logs[0].endswith(": 2")
-        assert capture_logs[1].endswith(": 1; учтены только class xc yc w h [conf]")
+        assert capture_logs[2].endswith(": 2")
+        assert capture_logs[3].endswith(": 1; учтены только class xc yc w h [conf]")
 
 
 class TestToYolo:
@@ -1326,25 +1328,27 @@ class TestLoadClassNamesYaml:
         path.write_text(yaml.dump({0: "cat", 1: "dog"}), encoding="utf-8")
         assert _load_class_names_yaml(path) == {0: "cat", 1: "dog"}
 
-    def test_non_mapping_document_yields_no_names(self, tmp_path: Path) -> None:
-        """A YAML file that is not a mapping degrades to an empty map.
+    def test_non_mapping_document_is_rejected(self, tmp_path: Path) -> None:
+        """A YAML file that is not a mapping is rejected with file context.
 
         Both branches guard on ``isinstance(data, dict)``; with only mappings
         ever loaded, weakening the first guard to ``or`` was invisible.
         """
         path = tmp_path / "names.yaml"
         path.write_text("names\n", encoding="utf-8")
-        assert _load_class_names_yaml(path) == {}
+        with pytest.raises(Cveta2Error, match=r"names\.yaml"):
+            _load_class_names_yaml(path)
 
-    def test_list_form_names_are_indexed_and_stringified(self, tmp_path: Path) -> None:
-        """``names: [cat, 7]`` yields ``{0: "cat", 1: "7"}``.
+    def test_list_form_non_string_names_are_rejected(self, tmp_path: Path) -> None:
+        """``names: [cat, 7]`` contains an invalid non-string class name.
 
         Asserted on the function, not through the CSV: ``pd.read_csv`` would
         coerce ``"7"`` back to an int and hide a missing ``str()``.
         """
         path = tmp_path / "names.yaml"
         path.write_text("names: [cat, 7]\n", encoding="utf-8")
-        assert _load_class_names_yaml(path) == {0: "cat", 1: "7"}
+        with pytest.raises(Cveta2Error, match=r"names\.yaml"):
+            _load_class_names_yaml(path)
 
     @pytest.mark.parametrize("document", ["names: 3\n", "names: null\n"])
     def test_scalar_names_value_is_rejected(
@@ -1352,7 +1356,7 @@ class TestLoadClassNamesYaml:
     ) -> None:
         """A mapping whose ``names`` is a scalar aborts, naming the file.
 
-        A bare scalar document still yields ``{}`` (see the test above); the
+        A bare scalar document is also rejected (see the test above); the
         raise is reserved for an explicit ``names`` of the wrong type.
         """
         path = tmp_path / "names.yaml"

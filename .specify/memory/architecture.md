@@ -1,9 +1,9 @@
 # cveta2 architecture
 
-The layer diagram and the rule that governs it live in `CLAUDE.md`; this file
-is the map underneath it — which module owns what, how a command flows through
-the layers, and the two behaviours that are easy to get wrong when touching
-them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
+The layer diagram and its rule live in [engineering.md](engineering.md).
+This living Spec Kit context maps module ownership, command flows, and behavior
+constraints for future feature plans. [CONTRIBUTING.md](../../CONTRIBUTING.md)
+covers the same ground in Russian, at overview depth.
 
 ## Module organization
 
@@ -78,8 +78,9 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
 
 2. **Upload**: `commands/upload.py` (or `api.upload`) → `services/upload.py:upload_dataset()` → `client.create_upload_task()` + `client.upload_task_annotations()`
-   - A manifest is written to `~/.cache/cveta2/uploads/<host-hash>/project_<id>/<fingerprint>.json` before CVAT is touched, and the task id recorded the instant it exists — `create_upload_task` splits the CVAT call in two (`create_task`, then `attach_task_data`) so there is a checkpoint between them. Removed on success. Schema v2 records the normalized host; hostless legacy state cannot authorize a resume.
-   - `--resume` validates the manifest's server/project identity and the task's project ownership, then asks CVAT what that task actually holds: frame count decides reuse / recreate / abort, a non-zero shape count means the annotations already landed (`put_task_shapes` appends, so a second pass would duplicate them), and issues are matched individually by `(frame, initial message, bbox)` with coordinate tolerance. `set_deleted_frames` and `update_job` are idempotent and simply redone.
+   - A manifest is written to `~/.cache/cveta2/uploads/<host-hash>/project_<id>/<fingerprint>.json` before CVAT is touched, and the task id recorded the instant it exists — `create_upload_task` splits the CVAT call in two (`create_task`, then `attach_task_data`) so there is a checkpoint between them. Completion is recorded before cleanup; an unlink failure warns with the successful task and retains safe recovery bookkeeping. Schema v3 binds the normalized host and full upload intent; legacy manifests without that identity cannot authorize resume.
+   - `--resume` validates the manifest's server/project identity and the task's project ownership, then asks CVAT what that task actually holds: frame mapping and complete normalized annotation content decide verified reuse or refusal (`put_task_shapes` appends, so partial or conflicting content must never be appended again), and issues are matched individually by `(frame, initial message, bbox)` with coordinate tolerance. `set_deleted_frames` and `update_job` are idempotent and simply redone.
+   - Validates labelled bounding boxes and full recovery identity before external writes. Mandatory initial/create/task-ID checkpoints fail closed before the next CVAT write. Replacement of a confirmed missing task clears the old ID before recording a pending create, so a lost replacement reply cannot authorize another create. A 503 never authorizes replay of non-idempotent create/append operations, even with `Retry-After`; unknown create outcomes require operator reconciliation. The motivating post-write failure was simulated, not observed on the live stand.
    - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
    - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels); `--labels all` selects every dataset label plus unannotated frames (a literal dataset label named `all` wins over the shortcut)
    - Rows with `issue_state="new"` and non-empty `issue_text` become open CVAT issues **attached to the row's bbox**; rows with issue text but no complete bbox are skipped with a warning (no full-frame issues)
@@ -99,7 +100,7 @@ them. `CONTRIBUTING.md` covers the same ground in Russian, at overview depth.
 - Every project spec (CLI `-p`, API `project=`) accepts an id, a name, or `ORG/PROJECT` (`/PROJECT` = personal workspace). The org prefix calls `client.set_organization()`, switching the session org for all subsequent CVAT calls (`services/resolve.py:split_project_spec` / `apply_project_org`).
 - The interactive picker (`commands/interactive/entities.py:select_project`) pages projects by organization — first page is the config org — and switches the session org on selection. Echoed re-run commands qualify `-p` via `_helpers.project_cli_spec` when the session org differs from the config default.
 - `fetch-task` / `api.fetch_task` infer the project from the first numeric task id when no project is given (`services/resolve.py:infer_project_from_tasks` via the `get_task` port method); name-only task specs still need an explicit project.
-- A numeric project spec is named from the local projects cache when it holds the id, otherwise through the `get_project` port method, never by listing the organization; an id nobody owns falls back to the id as the display name (`services/resolve.py:_project_display_name`). A name spec resolves to CVAT's own spelling of the name (`find_project_by_name`, case-insensitive), so config sections keyed by project name match however the user typed it. `client.detect_project_cloud_storage` is memoized per project for the client's lifetime and dropped on `set_organization`.
+- A numeric project spec is named from the local projects cache when it holds the id, otherwise through the `get_project` port method, never by listing the organization; an id nobody owns falls back to the id as the display name (`services/resolve.py:_project_display_name`). An ambiguous scoped name is rejected with candidate IDs before mutation; numeric ID selection is unchanged. A unique name spec resolves to CVAT's own spelling of the name (`find_project_by_name`, case-insensitive), so config sections keyed by project name match however the user typed it. `client.detect_project_cloud_storage` is memoized per project for the client's lifetime and dropped on `set_organization`.
 
 ## Deleted images handling
 
@@ -144,3 +145,11 @@ That directory is **removed after the merge** unless `--save-tasks` is given, an
 nothing ever reads it back — it is a debugging artefact, not a resume point. The
 only `--resume` in the project belongs to `upload`, and it reads its manifest
 from `~/.cache/cveta2/uploads/`, not from here.
+
+## Remediation contracts
+
+Conversion validates every split before writing; repeated export refreshes image bytes. COCO replacement removes only metadata-owned obsolete output after validating ownership paths, preserving unrelated files. Malformed CSV/YAML becomes contextual domain errors; malformed YOLO lines are skipped with file/line warnings while valid siblings survive.
+
+S3 sync preflights the complete source-to-destination map and rejects noncanonical keys and collisions before writing. Cache hits require regular files; directories are never removed automatically. Unusable read-only annotation caches degrade to uncached reads with warnings. Boto3 upload wrapper failures participate in per-object accounting.
+
+Derived project cache paths encode unsafe components and enforce containment without changing logical names. Configuration rejects negative/nonfinite data timeouts; the CLI catches typed validation errors. Credential hints retain the selected config source. Stored ignore IDs can be removed without remote task lookup. Doctor requires valid CVAT settings, treats S3/cache diagnostics as advisory, and returns 1 only for failed or unavailable required checks.

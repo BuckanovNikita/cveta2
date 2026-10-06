@@ -1,0 +1,35 @@
+# Storage and interface remediation evidence — 2026-10-04
+
+Baseline revision: `875dca9`. Historical observations were reproduced independently by the parent before implementation; reports and reproducers remain unchanged. The storage regression-first run demonstrated upload-wrapper escape, corrupt-cache unlink escape (after correcting a missing TaskInfo fixture field), doubled-separator writes, directory-as-cache counting, and empty/dot/dotdot cache names. The interface regression-first run demonstrated invalid timeout acceptance, wrong selected path, enabled-only state loss, remote stale-ID lookup and doctor exit zero. Parent historical CLI reproduction supplies the typed config traceback observation; the initial new CLI test lacked its required output flag and was corrected before verification.
+
+| ID | Observation and boundary | Implementation | Acceptance evidence | Documentation needs / limits |
+|---|---|---|---|---|
+| STOR-001 | upload_file wraps ClientError in S3UploadFailedError, escaping per-object transfer catch | Catch the actual wrapper in transfer accounting; retry predicate unchanged | wrapper-and-peer test; actual boto3 upload_file with Stubber AccessDenied | S3 failures counted per object; stubbed remote, no live upload claim |
+| STOR-002 | Invalid envelope unlink on read-only cache aborts get/fetch | Warn on read/invalidation failure and return cache miss; repairs remain best effort | mocked unlink denial and real non-root 0555 directory test | read-only cache fallback; real local permissions, remote fetch mocked elsewhere |
+| STOR-003 | stripping doubled slash aliases distinct remote keys; unresolved destinations can collide | Full canonical key/destination preflight, resolved-path and ancestor collisions, before writes | malformed key suite; alias collision with workers 1 and 4 | rejected sync listings write nothing; no live bucket claim |
+| STOR-004 | existing directory counted as cached image | is_file cache eligibility for sync and fetch; atomic replacement fails/counts directory, preserves it | directory destination tests for both sync and ImageDownloader | file-only hit policy; complete existing files accepted without image decoding |
+| UI-001 | dotdot name escapes cache root, dot/empty name selects root | percent-encode %, separators and NUL; reserved-name encoding; resolve containment check | reserved names, distinct encodings, ordinary Cyrillic preservation; updated existing encoding expectations | unsafe names use new components; explicit configured image_cache paths unchanged |
+| UI-002 | typed configuration errors escape CLI domain catch with traceback | Catch ValidationError at CLI dispatch; omit input values from field diagnostics | actual CLI subprocess with invalid selected YAML | field-specific clean failure; domain/public API exceptions preserved |
+| UI-003 | negative/nonfinite timeouts reach SDK transport or are accepted | Pydantic finite nonnegative constraint | invalid direct/env values; None/zero/positive semantics; CLI invalid YAML | invalid numeric values rejected; existing nonnumeric env warning fallback retained |
+| UI-004 | enabled-only selection is not marked changed | Initialize changed from selected enabled state before mapping stage | reload after enabled-only setup; existing setup tests | persistence behavior; interactive wizard simulated |
+| UI-005 | remote task listing cannot find deleted stored ignored ID | Resolve stored numeric IDs locally, retain remote resolution for other selectors | CLI test forbids task listing; parent API parity tests | no task-existence requirement for stored ID; project/connection resolution retained |
+| UI-006 | require_credentials names ambient file after selected file load | Private selected source path survives file load/merge/model copying, excluded from config fields | explicit selected/ambient profile regression; parent API reproduction | hints identify profile; no credentials exposed |
+| UI-007 | doctor logs failure but exits zero; review contract required decision | CVAT configuration required; AWS/image-cache/cache-permission warnings optional; disabled cache explicit; required unavailable/failure exit one | actual CLI subprocess success/fail; optional-failure and unavailable tests | document chosen exit contract; no network CVAT health claim |
+| OPS-003 | unknown mutation profile reaches mutation execution | Parent owns wrapper validation before mutation | Parent task T006 and parent evidence | Parent-owned operational docs/checks |
+
+## Checks performed
+
+- `uv run --no-sync pytest tests/test_review_storage.py tests/test_review_interfaces.py tests/test_task_cache.py tests/test_s3_utils.py tests/test_doctor.py tests/test_doctor_checks.py tests/test_config_helpers.py tests/test_config_sections.py tests/test_ignore_command.py tests/test_config_clearml.py tests/test_image_downloader.py tests/test_image_uploader.py tests/test_setup.py -q -o addopts='-p tests.env_isolation'`: **423 passed** in 2.87 seconds. No non-root test skipped.
+- Focused mypy on eight changed source modules: passed.
+- Ruff on owned changed source and new regression tests: passed after formatting.
+- An intermediate broad run exposed sibling project-cache lookup failures; owner repaired lookup fallback before the passing run. An intermediate run during concurrent upload-manifest editing was blocked by transient syntax; no passing claim was made for it.
+
+Parent owns documentation updates, documentation validation, full regression/import checks, operational wrapper evidence and fresh independent review. No commits, pushes, stand operations, dependency changes, or shared feature.json writes were performed by this agent.
+
+## Follow-up validation and mutation triage
+
+Clean full mutation exposed deterministic directory-identity assertion gaps and missing-cache warning gaps. Added tests that reuse actual existing files at canonical percent/reserved components, and prove invalidating an absent entry produces no warning. Added escaping-component symlink and sync ancestor-collision zero-write checks. No mutation run was performed by this agent; the parent owns rerun/verdicts.
+
+UI-007 additional boundary: injected optional ImageCacheConfig loader ValidationError made the actual CLI subprocess exit 1 before the correction, despite valid CVAT settings. Optional load now catches only ValidationError/Cveta2Error/OSError, logs advisory unavailability and continues; unexpected exceptions remain visible. The ordinary numeric YAML image-cache example already stringifies to a path and exited 0 before the fix; its subprocess test records advisory behavior rather than claiming a previously failing malformed-YAML reproduction. Actual injected-loader CLI now exits 0 without traceback.
+
+Follow-up affected suite: 182 passed (including local non-root permissions and subprocess diagnostics); owned Ruff and focused mypy pass. Exact equivalent candidates and the stale sync-41 justification were delivered to the parent for review; no pyproject edits were made by this agent.

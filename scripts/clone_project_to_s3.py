@@ -30,6 +30,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from cveta2.config import CvatConfig
+from cveta2.exceptions import Cveta2Error
 
 # ---------------------------------------------------------------------------
 # Config
@@ -94,6 +95,30 @@ def download_task_frames(
         stream = task.get_frame(fid, quality="original")
         result[fid] = stream.read()
     return result
+
+
+def clone_task_images(
+    cvat_client: Any,
+    s3_client: Any,
+    storage: CloudStorageInfo,
+    subdirectory: str,
+    *,
+    task_id: int,
+) -> list[str]:
+    """Upload each task's own frames in the source metadata order."""
+    metadata, _ = cvat_client.api_client.tasks_api.retrieve_data_meta(task_id)
+    names = [str(frame.name) for frame in metadata.frames]
+    frames = download_task_frames(cvat_client, task_id, list(range(len(names))))
+    keys: list[str] = []
+    for frame_id, name in enumerate(names):
+        key = "/".join(
+            part
+            for part in (storage.prefix, subdirectory, f"task_{task_id}", name)
+            if part
+        )
+        upload_bytes_to_s3(s3_client, storage.bucket, key, frames[frame_id])
+        keys.append(key)
+    return keys
 
 
 def build_label_id_map(
@@ -232,7 +257,7 @@ def remap_tracks(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:  # noqa: C901, PLR0912, PLR0915
+def main() -> None:  # noqa: C901, PLR0915
     parser = argparse.ArgumentParser(
         description="Clone a CVAT project, moving images to S3 cloud storage."
     )
@@ -281,14 +306,19 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
         # ── Resolve source project ────────────────────────────────────
         projects = cvat.projects.list()
-        src_project = None
-        for p in projects:
-            if (p.name or "").strip().lower() == args.source.strip().lower():
-                src_project = p
-                break
-        if src_project is None:
-            logger.error(f"Source project not found: {args.source!r}")
-            raise SystemExit(1)
+        matches = [
+            project
+            for project in projects
+            if (project.name or "").strip().lower() == args.source.strip().lower()
+        ]
+        if not matches:
+            raise Cveta2Error(f"Ошибка: проект не найден: {args.source!r}")
+        if len(matches) > 1:
+            ids = ", ".join(str(project.id) for project in matches)
+            raise Cveta2Error(
+                f"Ошибка: неоднозначное имя проекта {args.source!r}; ID: {ids}"
+            )
+        src_project = matches[0]
 
         src_project = cvat.projects.retrieve(src_project.id)
         src_labels = src_project.get_labels()
@@ -310,37 +340,7 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         # ── Init S3 client ────────────────────────────────────────────
         s3 = boto3.Session().client("s3", endpoint_url=cs_info.endpoint_url)
 
-        # ── Download images from the first task (all tasks share same images) ─
-        # Pick any task to download the canonical image set
-        ref_task_id = src_tasks[0].id
         tasks_api = cvat.api_client.tasks_api
-        ref_meta, _ = tasks_api.retrieve_data_meta(ref_task_id)
-        frame_names: list[str] = [f.name for f in ref_meta.frames]
-        frame_ids = list(range(len(frame_names)))
-
-        logger.info(f"Downloading {len(frame_ids)} frames from task {ref_task_id}...")
-        frame_bytes = download_task_frames(cvat, ref_task_id, frame_ids)
-
-        # ── Upload images to S3 ──────────────────────────────────────
-        # Files go to: s3://<bucket>/<prefix>/<s3_subdir>/<filename>
-        s3_file_keys: list[str] = []
-        for fid, name in enumerate(frame_names):
-            if cs_info.prefix:
-                key = f"{cs_info.prefix}/{s3_subdir}/{name}"
-            else:
-                key = f"{s3_subdir}/{name}"
-            logger.info(f"Uploading {name} -> s3://{cs_info.bucket}/{key}")
-            upload_bytes_to_s3(s3, cs_info.bucket, key, frame_bytes[fid])
-            s3_file_keys.append(key)
-
-        # server_files paths must include the prefix (full path from bucket root)
-        if cs_info.prefix:
-            server_files = [
-                f"{cs_info.prefix}/{s3_subdir}/{name}" for name in frame_names
-            ]
-        else:
-            server_files = [f"{s3_subdir}/{name}" for name in frame_names]
-        logger.info(f"Uploaded {len(server_files)} files to S3")
 
         # ── Create destination project ────────────────────────────────
         label_specs = []
@@ -360,6 +360,11 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
         # ── Clone each task ───────────────────────────────────────────
         for src_task in src_tasks:
             logger.info(f"Cloning task: {src_task.name} (id={src_task.id})...")
+
+            src_meta, _ = tasks_api.retrieve_data_meta(src_task.id)
+            server_files = clone_task_images(
+                cvat, s3, cs_info, s3_subdir, task_id=src_task.id
+            )
 
             # Create task with source_storage pointing at the cloud storage.
             # Without this, cveta2 fetch cannot auto-detect cloud storage
@@ -382,7 +387,8 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
                 server_files=server_files,
                 cloud_storage_id=cs_info.id,
                 use_cache=True,
-                sorting_method=cvat_models.SortingMethod("natural"),
+                sorting_method=cvat_models.SortingMethod("predefined"),
+                upload_file_order=server_files,
             )
             tasks_api.create_data(dst_task_id, data_request=data_request)
 
@@ -402,7 +408,6 @@ def main() -> None:  # noqa: C901, PLR0912, PLR0915
 
             # Get source annotations
             src_ann, _ = tasks_api.retrieve_annotations(src_task.id)
-            src_meta, _ = tasks_api.retrieve_data_meta(src_task.id)
             deleted_frames = list(src_meta.deleted_frames or [])
 
             # Copy annotations (remap label/attr IDs)

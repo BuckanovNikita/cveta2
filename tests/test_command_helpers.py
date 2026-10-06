@@ -82,17 +82,11 @@ class TestResolveProjectFromArgs:
         """
         assert resolve_project_from_args(_client(), spec) is None
 
-    def test_name_spec_is_resolved_against_the_cache(self) -> None:
-        """The loaded cache must reach the client's name lookup.
-
-        Passing ``cached=None`` (or dropping the keyword) still resolves —
-        by falling through to a live ``list_projects`` call — so the two
-        only differ when the cache and the server disagree. Here the fake
-        server calls this project 1 and the cache calls it 77.
-        """
+    def test_name_spec_uses_current_identity_despite_stale_cache(self) -> None:
+        """An active client's name selection must use current server state."""
         cached = [ProjectInfo(id=77, name="alpha")]
         with patch(_LOAD_CACHE, return_value=cached):
-            assert resolve_project_from_args(_client(), "alpha") == (77, "alpha")
+            assert resolve_project_from_args(_client(), "alpha") == (1, "alpha")
 
     def test_numeric_spec_takes_its_name_from_the_matching_entry(self) -> None:
         """A numeric spec is named by the cache entry with *that* id.
@@ -120,15 +114,11 @@ class TestResolveProjectFromArgs:
         with patch(_LOAD_CACHE, return_value=[]):
             assert resolve_project_from_args(_client(), "5") == (5, "5")
 
-    def test_name_spec_takes_the_cached_spelling(self) -> None:
-        """A differently-cased spec returns the name as the cache spells it.
-
-        Config sections are keyed by the project name, so ``-p ALPHA`` has
-        to come back as ``Alpha`` rather than echoing what was typed.
-        """
+    def test_name_spec_takes_the_current_server_spelling(self) -> None:
+        """Config keys use the server's current spelling, not stale cache data."""
         cached = [ProjectInfo(id=77, name="Alpha")]
         with patch(_LOAD_CACHE, return_value=cached):
-            assert resolve_project_from_args(_client(), "ALPHA") == (77, "Alpha")
+            assert resolve_project_from_args(_client(), "ALPHA") == (1, "alpha")
 
 
 class TestResolveProject:

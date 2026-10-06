@@ -103,9 +103,14 @@ def read_dataset_csv(
     if not path.is_file():
         raise Cveta2Error(f"Ошибка: файл не найден: {path}")
     try:
+        with path.open("rb") as stream:
+            if any(b"\x00" in chunk for chunk in iter(lambda: stream.read(65536), b"")):
+                raise Cveta2Error(f"Ошибка: CSV {path} содержит нулевой байт")
         df = pd.read_csv(path, **CSV_READ_OPTIONS)
     except pd.errors.EmptyDataError as e:
         raise Cveta2Error(f"Ошибка: файл {path} пуст, нет даже строки заголовка") from e
+    except (pd.errors.ParserError, UnicodeError, OSError) as e:
+        raise Cveta2Error(f"Ошибка: не удалось прочитать CSV {path}: {e}") from e
     missing = required_columns - set(df.columns)
     if missing:
         raise Cveta2Error(

@@ -2,6 +2,36 @@
 
 <!-- version list -->
 
+## v0.6.0 (2026-09-06)
+
+### Documentation
+
+- Describe the shared-stand integration topology and the agent-infra block
+  ([`1717184`](https://github.com/BuckanovNikita/cveta2/commit/17171844f1f5daf7c282be16b50a47f0753a5eab))
+
+- Make SSH keepalives the default for gated pushes
+  ([`82b5087`](https://github.com/BuckanovNikita/cveta2/commit/82b5087b9b52154dfe8630e21a35ca18d834f52f))
+
+- Sweep retired infra tokens after the shared-stand migration
+  ([`1a77d1f`](https://github.com/BuckanovNikita/cveta2/commit/1a77d1fe48fe742c186c5e04c982c1afd5ae5da6))
+
+### Features
+
+- **integration**: ClearML tests on the shared stand and the keep slot in the gate
+  ([`141322e`](https://github.com/BuckanovNikita/cveta2/commit/141322ee748ebeceaffe63b1d77835401a942900))
+
+- **integration**: Mint the run tag through the skill and read credentials from the project Secrets
+  ([`3037a2a`](https://github.com/BuckanovNikita/cveta2/commit/3037a2a50727d2b832f01a26f114d9fca84e995d))
+
+- **integration**: Run against the shared MinIO and CVAT stands with no Compose
+  ([`a9b7c56`](https://github.com/BuckanovNikita/cveta2/commit/a9b7c56b0d3d96ae16391396ccad2ae8a767fea1))
+
+### Refactoring
+
+- **integration**: Cvat_stand verifies membership instead of self-registering and drops --stale
+  ([`705586b`](https://github.com/BuckanovNikita/cveta2/commit/705586bed067af909cf973c9e41da429507a1849))
+
+
 ## v0.5.4 (2026-09-05)
 
 ### Bug Fixes

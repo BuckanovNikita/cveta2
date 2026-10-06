@@ -1,6 +1,6 @@
 """Integration tests for upload (S3Uploader, create_upload_task, etc).
 
-Requires a running, seeded CVAT + MinIO (see scripts/integration_up.sh).
+Requires a seeded run on the shared CVAT and MinIO stands (scripts/integration_up.sh).
 Uses coco8-dev project and tests/fixtures/data/coco8/images/.
 """
 
@@ -80,8 +80,14 @@ def _get_project_and_storage() -> tuple[int, str, CloudStorageInfo, CvatConfig]:
 
 
 def _cs_info_for_host(cs_info: CloudStorageInfo) -> CloudStorageInfo:
-    """CloudStorageInfo with host-visible MinIO endpoint (for S3Uploader from host)."""
-    endpoint = _env("MINIO_ENDPOINT", "http://localhost:9000")
+    """CloudStorageInfo with the host-visible MinIO endpoint (S3Uploader runs here).
+
+    The cloud storage itself carries the in-cluster endpoint, which only the
+    CVAT pods can reach; integration_env.sh exports the host-side one.
+    """
+    endpoint = _env("MINIO_ENDPOINT", "")
+    if not endpoint:
+        pytest.fail("MINIO_ENDPOINT is not set; source scripts/integration_env.sh")
     return CloudStorageInfo(
         id=cs_info.id,
         bucket=cs_info.bucket,

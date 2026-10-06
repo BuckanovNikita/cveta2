@@ -280,7 +280,8 @@ def fetch(  # noqa: PLR0913
     ``dataset`` / ``obsolete`` / ``in_progress`` DataFrames plus
     ``deleted_images``.  DataFrame columns follow
     :data:`cveta2.CSV_COLUMNS`; rows are flattened
-    :data:`cveta2.AnnotationRecord` variants (see ``DATASET_FORMAT.md``).
+    :data:`cveta2.AnnotationRecord` variants (see
+    ``specs/001-project-documentation/contracts/dataset-format.md``).
 
     *cache* controls the task-annotation cache: ``"use"`` reads and
     updates it, ``"refresh"`` re-downloads every task and updates it,
@@ -562,12 +563,26 @@ def ignore(  # noqa: PLR0913
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
         if add or remove:
-            tasks = c.list_project_tasks(project_id)
+            stored_ids = set(ignore_cfg.get_ignored_tasks(project_name))
+            local_removals = {
+                int(selector)
+                for selector in remove or []
+                if str(selector).isdigit() and int(selector) in stored_ids
+            }
+            remote_removals = [
+                selector
+                for selector in remove or []
+                if not (str(selector).isdigit() and int(selector) in local_removals)
+            ]
+            tasks = c.list_project_tasks(project_id) if add or remote_removals else []
             for task in c.resolve_task_selectors(tasks, list(add or [])):
                 ignore_cfg.add_task(
                     project_name, task.id, task.name, description, silent=silent
                 )
-            for task in c.resolve_task_selectors(tasks, list(remove or [])):
+            resolved_removals = c.resolve_task_selectors(tasks, remote_removals)
+            for task_id in local_removals:
+                ignore_cfg.remove_task(project_name, task_id)
+            for task in resolved_removals:
                 ignore_cfg.remove_task(project_name, task.id)
             ignore_cfg.save(config_path)
     return ignore_cfg.get_ignored_entries(project_name)

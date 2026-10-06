@@ -1,25 +1,41 @@
 #!/usr/bin/env bash
-# Pre-push gate: run tests/integration against a freshly prepared stack, on
-# the machines that are set up for it.
+# Pre-push gate: run tests/integration against a freshly prepared run on the
+# shared stands, on the machines that are set up for it.
 #
 # The gate arms itself on tests/integration/.env - the same gitignored file every
 # integration script hard-requires, so "this machine has an .env" and "this
 # machine was set up for integration tests" are the same statement. A missing
 # .env is the ONLY silent skip: once armed, the gate passes, fails, or is skipped
-# on purpose. A gate that quietly passes because docker or the CVAT stand is
-# down is worse than no gate, because it teaches everyone to ignore it.
+# on purpose. A gate that quietly passes because a stand is down is worse than
+# no gate, because it teaches everyone to ignore it - so the CVAT stand must
+# answer and `clearml.py --project cveta2 whoami` must authenticate before a
+# run is even prepared.
 #
 #   ./scripts/integration_gate.sh                # what the hook runs
 #   ./scripts/integration_gate.sh -k upload      # extra args go to pytest
-#   ./scripts/integration_gate.sh --keep-stack   # leave the stack up on failure
+#   ./scripts/integration_gate.sh --keep-stack   # leave the run's data on failure
 #
 # What happens to the run's data afterwards depends on the branch:
-#   - main (a push of refs/heads/main, or main checked out): everything stays -
-#     the MinIO/ClearML stack and the "<tag> coco8-dev" project on the stand -
-#     so the last main run can be inspected in the CVAT UI. The next main run
-#     replaces it.
-#   - any other branch: stack and CVAT data are removed.
-#   INTEGRATION_KEEP_DATA=1 / =0 overrides that decision.
+#   - main (a push of refs/heads/main, or main checked out): the run IS the
+#     durable slot `cveta2-main` - project "cveta2-main coco8-dev" on CVAT,
+#     bucket cveta2-main on MinIO - and it stays, so the last main run can be
+#     inspected in the CVAT UI. The slot is a durable name of the registry
+#     (k8s-infra projects.toml): the janitor never sweeps it, and only the next
+#     main run replaces it. The ClearML tests remove their own projects at
+#     session end, so nothing of the run stays on ClearML.
+#   - any other branch: the run is stopped fully - integration_stop.sh removes
+#     its CVAT project and cloud storage, its bucket and its ClearML projects,
+#     and releases tests/integration/.run-tag.
+#   INTEGRATION_KEEP_DATA overrides that decision:
+#   - INTEGRATION_KEEP_DATA=1 keeps the run whatever the branch. A kept branch
+#     run is an ordinary run tag, not a durable name: the janitor sweeps it once
+#     it is older than the registry's stale window ([contract].stale_hours).
+#     Its .run-tag file stays too, so the next gate on this checkout refuses
+#     "a run is active" until ./scripts/integration_stop.sh has run.
+#   - INTEGRATION_KEEP_DATA=0 stops the run whatever the branch - on main this
+#     clears the `cveta2-main` slot until the next main run seeds it again.
+#   --keep-stack keeps a FAILED run for triage (a passing one follows the rules
+#   above); stop it with ./scripts/integration_stop.sh once done.
 #
 # Skip it for one push (mutmut-full still runs):
 #   SKIP=integration-tests git push
@@ -56,20 +72,21 @@ fi
 # shellcheck source=scripts/integration_env.sh
 source "$SCRIPT_DIR/integration_env.sh"
 
-if ! docker info > /dev/null 2>&1; then
+armed_but_down() {
     echo "ERROR: the integration gate is armed (tests/integration/.env exists)" >&2
-    echo "       but the docker daemon is not reachable." >&2
-    echo "       Start docker, or push without this gate:" >&2
+    printf '       %s\n' "$@" >&2
+    echo "       Diagnose the stand with the k8s-infra skill, or push without this gate:" >&2
     echo "           SKIP=integration-tests git push" >&2
     exit 1
-fi
+}
 
 if ! curl -sf "$CVAT_INTEGRATION_HOST/api/server/about" > /dev/null 2>&1; then
-    echo "ERROR: the integration gate is armed (tests/integration/.env exists)" >&2
-    echo "       but the CVAT stand at $CVAT_INTEGRATION_HOST does not answer." >&2
-    echo "       Deploy it (k8s-infra skill: cvat-stand/deploy_cvat.sh), or push without this gate:" >&2
-    echo "           SKIP=integration-tests git push" >&2
-    exit 1
+    armed_but_down "but the CVAT stand at $CVAT_INTEGRATION_HOST does not answer."
+fi
+
+if ! integration_helper clearml whoami; then
+    armed_but_down "but the ClearML stand at $CLEARML_API_HOST does not authenticate the cveta2 identity" \
+        "(clearml.py --project $INTEGRATION_PROJECT whoami failed, see above)."
 fi
 
 keep_data() {
@@ -82,33 +99,44 @@ keep_data() {
 
 cd "$REPO_ROOT"
 
-# Fresh state comes from integration_up.sh: it wipes this tag's previous
-# project on the stand and recreates MinIO/ClearML, so the upload tests never
-# meet their own leftovers ("Duplicate base task name").
+# Fresh state comes from integration_up.sh: it clears this tag's previous
+# bucket and CVAT project, so the upload tests never meet their own leftovers
+# ("Duplicate base task name").
 #
-# The trap is armed only here, past the skip and the preflight, so a run that
-# never prepared a stack cannot tear one down.
+# The trap is armed only here, past the skip, the preflights and the active-run
+# check, so a run that never prepared anything cannot tear another one down:
+# stop would otherwise resolve the other run's tag from tests/integration/.run-tag.
+integration_refuse_active_run || exit 1
+
 teardown() {
     local rc=$?
     if keep_data; then
-        log "keeping the run for inspection (main):"
-        log "    CVAT:  $CVAT_INTEGRATION_HOST  organization $CVAT_INTEGRATION_ORG, project '$CVAT_INTEGRATION_PROJECT'"
-        log "    MinIO/ClearML compose project $COMPOSE_PROJECT stays up"
-        log "    remove both with ./scripts/integration_stop.sh"
+        if integration_on_main; then
+            log "keeping the run for inspection: it is the durable slot '$INTEGRATION_RUN_TAG' (main)"
+        else
+            log "keeping the run for inspection (INTEGRATION_KEEP_DATA=1):"
+            log "    tests/integration/.run-tag still names it; the next gate refuses to start until it is stopped"
+        fi
+        log "    CVAT:    $CVAT_INTEGRATION_HOST  organization $CVAT_INTEGRATION_ORG, project '$CVAT_INTEGRATION_PROJECT'"
+        log "    MinIO:   bucket $MINIO_BUCKET at $MINIO_ENDPOINT"
+        log "    ClearML: nothing is kept - the tests remove their '$INTEGRATION_RUN_TAG ...' projects at session end"
+        log "    remove everything with ./scripts/integration_stop.sh"
         return
     fi
     if [[ $rc -ne 0 && $KEEP_STACK -eq 1 ]]; then
-        log "leaving the stack up for triage (--keep-stack);"
-        log "    stop it with ./scripts/integration_stop.sh"
+        log "leaving the run's data for triage (--keep-stack);"
+        log "    remove it with ./scripts/integration_stop.sh"
         return
     fi
-    log "tearing down the integration stack"
+    log "tearing down the run"
     "$SCRIPT_DIR/integration_stop.sh" || true
 }
 trap teardown EXIT
 
-log "integration gate: preparing the stack (tag '$INTEGRATION_RUN_TAG')"
+log "integration gate: preparing the run"
 "$SCRIPT_DIR/integration_up.sh"
+integration_resolve_run_tag
+log "integration gate: run tag '$INTEGRATION_RUN_TAG'"
 
 # Scoped to tests/integration rather than the whole suite: CVAT_INTEGRATION_HOST
 # also adds a `live-cvat` parameter to the coco8_fixtures session fixture, which
@@ -125,6 +153,7 @@ echo "==> integration gate FAILED. Reproduce and triage with:" >&2
 echo "      ./scripts/integration_up.sh" >&2
 echo "      ./scripts/integration_test.sh tests/integration -x --tb=long" >&2
 echo "      ./scripts/integration_stop.sh" >&2
+echo "==> A stand that misbehaves is diagnosed with the k8s-infra skill; these scripts never deploy one." >&2
 echo "==> To push without this gate (mutmut-full still runs):" >&2
 echo "      SKIP=integration-tests git push" >&2
 exit 1
