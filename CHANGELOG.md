@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.9.0 (2026-10-12)
+
+### Documentation
+
+- Record polygon bounding box verification and release
+  ([`cff0a95`](https://github.com/BuckanovNikita/cveta2/commit/cff0a95ad5af205a572dc53d66fe52869e8278eb))
+
+### Features
+
+- Accept completed annotation jobs before project fetch
+  ([`a1e92b9`](https://github.com/BuckanovNikita/cveta2/commit/a1e92b98f04d7965b79b2ea6b561a17d83aeb50f))
+
+
 ## v0.8.0 (2026-10-12)
 
 ### Features
