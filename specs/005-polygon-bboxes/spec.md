@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-12
 
-**Status**: Approved for implementation
+**Status**: Implemented and verified
 
 **Input**: Convert standalone CVAT polygons to tight axis-aligned bounding
 boxes in `fetch` and `fetch-task`, retaining contextual approximation warnings.
