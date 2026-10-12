@@ -519,6 +519,8 @@ full = []
 "cveta2.task_cache.xǁS3CacheBackendǁget__mutmut_11" = "_disable(None) on the ClientError path; the error only names the cause in the warning"
 "cveta2.task_cache.xǁS3CacheBackendǁget__mutmut_12" = "_disable(None) on the BotoCoreError path; the error only names the cause in the warning"
 "cveta2.task_cache.xǁS3CacheBackendǁput__mutmut_10" = "_disable(None) on the upload path; the error only names the cause in the warning"
+"cveta2.task_cache.xǁS3CacheBackendǁdelete__mutmut_11" = "Cveta2Error(None) changes only strict-delete diagnostic text; the failure still aborts and the promotion service adds the affected task id, retaining the underlying cause"
+"cveta2.services.fetch.x__promote_completed_annotations__mutmut_36" = "desc=None removes only the promotion progress-bar caption, without changing task processing or the completion barrier"
 "cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_local__mutmut_6" = "source=None; the layer label only reaches the rejection log"
 "cveta2.task_cache.xǁTaskAnnotationCacheǁ_get_s3__mutmut_8" = "source=None; the layer label only reaches the rejection log"
 

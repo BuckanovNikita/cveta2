@@ -61,6 +61,7 @@ def run_fetch(args: argparse.Namespace) -> None:
                 "-p": project_cli_spec(client, project_name),
                 "-o": str(output_dir),
                 "--raw": options.raw,
+                "--skip-validation": options.skip_validation,
                 "--no-clearml": args.no_clearml,
             }
             | _common_fetch_echo_args(args),
@@ -136,6 +137,7 @@ def _build_project_fetch_options(
     ignore_set, silent_set = load_ignore_sets(project_name)
     return FetchOptions(
         completed_only=args.completed_only,
+        skip_validation=args.skip_validation,
         ignore_task_ids=ignore_set,
         silent_task_ids=silent_set,
         use_cache=not args.no_cache,

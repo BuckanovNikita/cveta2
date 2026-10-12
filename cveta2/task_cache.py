@@ -3,8 +3,8 @@
 Completed CVAT tasks are immutable in practice, so their fetched
 annotations are cached in ``~/.cache/cveta2/task_annotations`` (and,
 when the project has an attached cloud storage, mirrored to S3 so all
-users share one cache).  A cache problem must never fail the fetch:
-every S3 error self-disables the backend for the rest of the run.
+users share one cache). Ordinary S3 cache errors disable the backend for the
+rest of the run. Mutation preflight can require strict invalidation instead.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 from cveta2.config import CacheConfig, is_cache_disabled
+from cveta2.exceptions import Cveta2Error
 from cveta2.fs_utils import default_cache_base, replace_shared_bytes
 from cveta2.models import TaskAnnotations
 from cveta2.s3_utils import (
@@ -212,13 +213,17 @@ class S3CacheBackend:
         except (ClientError, BotoCoreError, OSError) as e:
             self._disable(e)
 
-    def delete(self, task_id: int) -> None:
-        """Drop the raw cache entry for *task_id* (best effort, idempotent)."""
-        if self._disabled:
+    def delete(self, task_id: int, *, strict: bool = False) -> None:
+        """Drop an entry; strict mutation preflight must succeed or raise."""
+        if self._disabled and not strict:
             return
         try:
             _s3_delete_object(self._s3, self._bucket, self._entry_key(task_id))
         except (ClientError, BotoCoreError, OSError) as e:
+            if strict:
+                raise Cveta2Error(
+                    f"Не удалось удалить S3-кэш задачи {task_id}: {e}"
+                ) from e
             self._disable(e)
 
     def _entry_key(self, task_id: int) -> str:
@@ -276,26 +281,29 @@ class TaskAnnotationCache:
         if self._s3 is not None:
             self._s3.put(task.id, data)
 
-    def invalidate_local(self, task_id: int) -> None:
-        """Remove the local cache entry for *task_id* if present."""
+    def invalidate_local(self, task_id: int, *, strict: bool = False) -> None:
+        """Remove a local entry, optionally requiring deletion before mutation."""
         try:
             self._local_path(task_id).unlink(missing_ok=True)
         except OSError as error:
+            if strict:
+                raise
             logger.warning(
                 f"Не удалось удалить локальный кэш задачи {task_id}: {error} — "
                 f"запись не используется"
             )
 
-    def invalidate(self, task_id: int) -> None:
+    def invalidate(self, task_id: int, *, strict: bool = False) -> None:
         """Remove the entry for *task_id* from every layer, S3 included.
 
         Only a task mutation calls this: :meth:`prune` and a schema
         mismatch drop the local copy alone, since a valid S3 entry
-        written by a newer cveta2 must survive an older one's run.
+        written by a newer cveta2 must survive an older one's run. With
+        ``strict=True``, local and S3 failures abort mutation preflight.
         """
-        self.invalidate_local(task_id)
+        self.invalidate_local(task_id, strict=strict)
         if self._s3 is not None:
-            self._s3.delete(task_id)
+            self._s3.delete(task_id, strict=strict)
 
     def prune(self, live_task_ids: set[int]) -> int:
         """Remove local entries whose task no longer exists; return count.

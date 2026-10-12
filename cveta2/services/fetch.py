@@ -19,6 +19,7 @@ from loguru import logger
 from cveta2._concurrency import Workers, run_concurrent
 from cveta2.config import CacheConfig, IgnoreConfig, is_cache_disabled
 from cveta2.dataset_partition import partition_annotations_df
+from cveta2.exceptions import Cveta2Error
 from cveta2.models import CSV_COLUMNS, TaskAnnotations
 from cveta2.services.output import (
     CSV_WRITE_OPTIONS,
@@ -65,6 +66,7 @@ class FetchOptions:
     """Options for the fetch pipeline (all inputs already resolved)."""
 
     completed_only: bool = False
+    skip_validation: bool = False
     task_selector: list[int | str] | None = None
     ignore_task_ids: set[int] | None = None
     silent_task_ids: set[int] | None = None
@@ -105,6 +107,8 @@ def fetch_project(
     ``options.raw``) into ``target.output_dir`` and returns the partition.
     """
     output_dir = target.output_dir
+    if options.skip_validation:
+        _promote_completed_annotations(client, target, options)
     result = _fetch_core(client, target, options, prune_cache=True)
 
     if options.raw:
@@ -122,6 +126,79 @@ def fetch_project(
         maybe_publish_clearml(target.project_name, output_dir, options.config_path)
 
     return partition
+
+
+def _promote_completed_annotations(
+    client: CvatClient,
+    target: FetchTarget,
+    options: FetchOptions,
+) -> None:
+    """Accept eligible tasks before normal fetch applies completion filtering."""
+    try:
+        tasks = client.list_project_tasks(target.project_id)
+    except Cveta2Error as error:
+        raise Cveta2Error(
+            f"Не удалось получить задачи проекта {target.project_id}: {error}"
+        ) from error
+    tasks = [t for t in tasks if t.id not in (options.ignore_task_ids or set())]
+    settings = CacheConfig.load(options.config_path).for_project(target.project_name)
+    cache = _build_task_cache(client, target.project_id, options, settings)
+    if cache is None:
+        # Disabled caching still leaves old local entries from earlier runs.
+        cache = TaskAnnotationCache(
+            get_task_cache_dir(target.project_id, root=settings.tasks_root)
+        )
+
+    def promote(task: TaskInfo) -> None:
+        _promote_task(client, task, cache)
+
+    # Propagate failures after waiting for in-flight workers; no fetch or output
+    # may start until the entire promotion phase succeeds.
+    run_concurrent(
+        tasks,
+        promote,
+        max_workers=Workers.cvat,
+        catch=(),
+        desc="Accepting completed annotations",
+        unit="task",
+    )
+
+
+def _promote_task(
+    client: CvatClient,
+    task: TaskInfo,
+    cache: TaskAnnotationCache,
+) -> None:
+    """Check every job and invalidate before the first sequential mutation."""
+    try:
+        jobs = client.api.get_task_jobs(task.id)
+    except Cveta2Error as error:
+        raise Cveta2Error(
+            f"Не удалось получить jobs задачи {task.id}: {error}"
+        ) from error
+    if not jobs or any(
+        job.state != "completed" or job.stage not in {"annotation", "acceptance"}
+        for job in jobs
+    ):
+        return
+    pending = [job for job in jobs if job.stage == "annotation"]
+    if not pending:
+        return
+    try:
+        # Strict pre-invalidation keeps a partial PATCH failure retryable even
+        # when CVAT leaves updated_date unchanged. A failed delete precedes writes.
+        cache.invalidate(task.id, strict=True)
+    except (Cveta2Error, OSError) as error:
+        raise Cveta2Error(
+            f"Не удалось очистить кэш задачи {task.id}: {error}"
+        ) from error
+    try:
+        for job in pending:
+            client.api.update_job(job.id, stage="acceptance", state="completed")
+    except Cveta2Error as error:
+        raise Cveta2Error(
+            f"Не удалось принять job {job.id} задачи {task.id}: {error}"
+        ) from error
 
 
 def fetch_selected_tasks(

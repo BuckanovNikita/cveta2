@@ -116,6 +116,26 @@ columns, including deletion rows.
 Anything else lands in `in_progress.csv`. `cveta2 task status --stage acceptance
 --state completed` sets the pair on every job of a task.
 
+Project fetch can explicitly accept finished annotation work before export with
+`--skip-validation` or keyword-only `cveta2.fetch(..., skip_validation=True)`
+(default `False`). A non-ignored task qualifies only when its full job list is
+nonempty and every job is annotation/completed or acceptance/completed,
+including Ground Truth, replica and jobs without exported frames. Only
+annotation/completed jobs are changed in CVAT to acceptance/completed; all
+other positions make the whole task ineligible. Fully accepted tasks need no
+writes. Promotion finishes before fresh task selection, so `--completed-only`
+includes newly accepted tasks in the same run. Row positions and
+`task_completed` reflect server state; schemas, deletion precedence and
+task-id recency are unchanged. `fetch-task` has no such option.
+
+Before updating a task, promotion strictly invalidates its configured local
+cache and, when caching is enabled, its S3 mirror. The fetch configuration and
+project overrides select both locations. Local invalidation applies even when
+caching is disabled; disabled runs do not contact S3 cache. A read,
+invalidation or update failure aborts before annotation retrieval or output
+publication. Successful CVAT changes persist without rollback, and a rerun
+updates only the remaining annotation/completed jobs.
+
 **Which task wins.** When several tasks hold the same image, the one with the
 highest `task_id` decides — ids are handed out in creation order and never move.
 `task_updated_date` is not used for this: editing a project's labels rewrites it
