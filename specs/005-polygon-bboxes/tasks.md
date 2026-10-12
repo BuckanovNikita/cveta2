@@ -37,9 +37,9 @@ and refreshed local/S3 reads preserve the output without replaying warnings.
 ## Phase 6: Documentation, verification and delivery
 
 - [x] T011 [P] Update README.md, docs/cli.md, docs/images-and-cache.md, .specify/memory/architecture.md and specs/001-project-documentation/contracts/dataset-format.md for polygon approximation and cache refresh.
-- [ ] T012 Run affected extractor/SDK/client/fetch/cache/conversion/docs tests and static checks; run configured coverage, typing, architecture and mutation gates; record evidence in specs/005-polygon-bboxes/evidence/verification-2026-10-12.md.
-- [ ] T013 Obtain fresh independent review after integrated parent verification and converge spec/plan/tasks against the final implementation; record evidence in specs/005-polygon-bboxes/evidence/verification-2026-10-12.md.
-- [ ] T014 Commit scoped files through hooks, merge to main, generate version/tag via semantic-release and push through configured gates; record release checks in specs/005-polygon-bboxes/evidence/verification-2026-10-12.md.
+- [x] T012 Run affected extractor/SDK/client/fetch/cache/conversion/docs tests and static checks; run configured coverage, typing, architecture and mutation gates; record evidence in specs/005-polygon-bboxes/evidence/verification-2026-10-12.md.
+- [x] T013 Obtain fresh independent review after integrated parent verification and converge spec/plan/tasks against the final implementation; record evidence in specs/005-polygon-bboxes/evidence/verification-2026-10-12.md.
+- [x] T014 Commit scoped files through hooks, merge to main, generate version/tag via semantic-release and push through configured gates; record release checks in specs/005-polygon-bboxes/evidence/verification-2026-10-12.md.
 
 ## Dependencies and parallel execution
 

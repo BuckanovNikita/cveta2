@@ -56,8 +56,39 @@ changes. Verdict: ship contingent on the completed full rerun. The rerun passed:
 7,495 evaluated, 7,278 killed, 217 justified equivalents, zero unexplained,
 uncovered, unchecked or timed-out mutants.
 
-## Remaining gates
+## Release gates and delivery
 
-Full mutation and independent reviews are complete. Commit hooks, final
-convergence and release/push gates remain in progress. Live integration is armed in the isolated
-checkout; no live test pass is claimed yet.
+The task-scoped feature commit `41c045e` passed all configured commit hooks:
+Ruff format/check, import-linter, mypy, vulture, pytest with coverage, fast
+mutation, build, lockfile and Conventional Commit validation. The feature merged
+into main as `5082db8`. Semantic-release generated version **0.8.0**, release
+commit `12a9545` and annotated Git tag **v0.8.0**; its release commit hooks passed.
+Only the project version changed in the dependency lockfile.
+
+The gated push passed full mutation, version drift and live integration:
+**38 passed**, with 160 third-party deprecation warnings. The live suite covers
+the existing CVAT/MinIO/ClearML workflows; polygon-specific geometry/cache edge
+cases use controlled SDK responses and fake CVAT/S3 ports as described above.
+
+Owned integration tag: `cveta2-codex-20261012-polygon-release-ke05`.
+The gate removed its CVAT project and cloud storage, MinIO bucket and ClearML
+objects. Independent exact-tag listings afterward showed zero projects/tasks/
+storages on CVAT, zero buckets on MinIO and zero projects/tasks on ClearML.
+No unrelated stand or durable run was changed.
+
+Remote readback confirmed main at `12a954573b2ce04de1b0c113e8c7ba777bac1232`
+and annotated tag `v0.8.0` resolving to that same release commit. No GitHub Release,
+package publication or release assets were created. This follow-up documentation
+records already observed results after the release push.
+
+## Convergence
+
+The current implementation satisfies all 7 functional requirements, 4 success
+criteria and 8 story acceptance scenarios. Reviewed the geometry, validation,
+shared mapping, warning, cache-generation and unchanged-interface decisions,
+all 5 constitution principles and all 14 tasks against the actual source and
+verification evidence. No missing, partial, contradictory or unrequested product
+work remains, and no convergence tasks need to be appended.
+
+All checklists remain approved. The original checkout and its unrelated untracked
+work were preserved; implementation and release work used an isolated checkout.
