@@ -40,7 +40,9 @@ failure as well as S3 failure. Ordinary cache behavior remains unchanged.
   exactly three new survivors. The API default-on survivor exposed a missing
   default-off API assertion and was fixed with a behavioral test. The other two
   affect only a progress caption and diagnostic text; their exact equivalents
-  were documented without reducing scope or disabling checks. Targeted rerun killed the default-on mutant. Final full gate passed: 7,596 checked, 7,377 killed, 219 justified equivalents, zero unexplained survivors or stale equivalents.
+  were documented without reducing scope or disabling checks. Targeted rerun
+  killed the default-on mutant. Final full gate passed: 7,596 checked, 7,377
+  killed, 219 justified equivalents, zero unexplained survivors or stale equivalents.
 
 ## Independent review
 
@@ -61,9 +63,27 @@ All seven functional requirements, four success criteria and nine story
 acceptance scenarios are implemented and covered by current code/tests. The four
 research decisions and five constitution principles are satisfied. No missing,
 partial, contradictory or unrequested implementation work was found; no new
-implementation tasks were needed. T013 remains the delivery workflow below.
+implementation tasks were needed. Delivery completed as recorded below; all
+T001–T013 tasks are checked, and no required work remains.
 
-## Pending delivery checks
+## Delivery checks
 
-Commit hooks and Git-tag-only release gates are in progress. Their final outcomes
-will be recorded here before completion is claimed.
+- Feature commit: `a1e92b9` (`feat: accept completed annotation jobs before
+  project fetch`). All configured commit hooks passed: formatting, lint,
+  architecture, typing, dead code, full pytest with coverage, fast mutation,
+  build, lockfile and Conventional Commit validation. This full pytest run also
+  includes the added API default-off regression assertion.
+- Main merge: `136d2b5`. Semantic-release created release commit `0ef6940` and
+  annotated tag `v0.9.0` using `--no-push --no-vcs-release`.
+- Pre-push full mutation and version-drift gates passed. The first live push
+  gate passed all 39 tests and cleaned its `cveta2-main` resources, but an SSH
+  connection reset prevented delivery. Remote refs confirmed nothing had moved.
+- The unchanged retry retained every hook. Full mutation and version checks
+  passed again, as did all 39 live tests. Exact-prefix CVAT, MinIO and ClearML
+  listings confirmed zero `cveta2-main` resources after teardown.
+- Remote verification confirmed `main` and peeled `v0.9.0` both resolve to
+  `0ef69401abbee3166fadfbbd68182dfab49970a7`. No GitHub Release or package
+  publication was created.
+- The original checkout was fast-forwarded to the delivered implementation.
+  Content hashes and symlink targets confirmed all 131 pre-existing unrelated
+  paths were unchanged.
