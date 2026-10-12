@@ -16,6 +16,7 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 
 from cveta2._retry import RetryPolicy, configure_retries
 from cveta2.client import CvatClient
+from cveta2.exceptions import Cveta2Error
 from cveta2.image_downloader import CloudStorageInfo
 from cveta2.models import (
     BBoxAnnotation,
@@ -1170,3 +1171,34 @@ class TestSelectedFetchDoesNotPrune:
         _fetch_task_cached(FakeCvatApi(fake), fake, tmp_path / "out", FetchOptions())
 
         assert (cache_dir / "task_999.json").exists()
+
+
+@pytest.mark.parametrize("disabled_first", [False, True])
+def test_strict_invalidation_reports_s3_failure_and_can_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, disabled_first: bool
+) -> None:
+    """Mutation preflight must not silently accept a failed S3 deletion."""
+    s3 = FakeS3Client()
+    backend = S3CacheBackend(s3, "bucket", "prefix")
+    cache = TaskAnnotationCache(tmp_path, s3=backend)
+    task = make_task(1)
+    cache.put(task, _payload())
+    assert (tmp_path / "task_1.json").exists()
+    key = "bucket/prefix/.cveta2_cache/task_annotations/task_1.json"
+    assert key in s3.objects
+
+    with monkeypatch.context() as failures:
+
+        def fail_delete(**_kwargs: str) -> None:
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject")
+
+        failures.setattr(s3, "delete_object", fail_delete)
+        if disabled_first:
+            backend.delete(1)
+        with pytest.raises(Cveta2Error):
+            cache.invalidate(1, strict=True)
+    assert not (tmp_path / "task_1.json").exists()
+    assert key in s3.objects
+
+    cache.invalidate(1, strict=True)
+    assert key not in s3.objects

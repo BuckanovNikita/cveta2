@@ -8,10 +8,11 @@ from unittest.mock import patch
 import pytest
 
 from cveta2.cli import CliApp
-from tests.helpers import parse_cli_args
+from tests.helpers import parse_cli_args, patch_cli_client
 
 if TYPE_CHECKING:
     import argparse
+    from pathlib import Path
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -27,6 +28,7 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "output_dir": "out",
             "raw": False,
             "completed_only": False,
+            "skip_validation": False,
             "no_images": False,
             "images_dir": None,
             "save_tasks": False,
@@ -44,6 +46,7 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "out",
             "--raw",
             "--completed-only",
+            "--skip-validation",
             "--no-images",
             "--images-dir",
             "imgs",
@@ -58,6 +61,7 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "output_dir": "out",
             "raw": True,
             "completed_only": True,
+            "skip_validation": True,
             "no_images": True,
             "images_dir": "imgs",
             "save_tasks": True,
@@ -338,3 +342,33 @@ def test_task_run_dispatches_to_action(handler: str, argv: list[str]) -> None:
     with patch(f"cveta2.cli.{handler}") as mock_handler:
         CliApp().run(argv)
     mock_handler.assert_called_once()
+
+
+def test_fetch_task_rejects_skip_validation() -> None:
+    with pytest.raises(SystemExit):
+        _parse(["fetch-task", "-p", "p", "-t", "1", "-o", "out", "--skip-validation"])
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.usefixtures("test_config")
+def test_fetch_forwards_and_echoes_skip_validation(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    enabled: bool,
+) -> None:
+    """A resolved rerun command keeps the opt-in alongside service options."""
+    with (
+        patch_cli_client(),
+        patch("cveta2.commands.fetch.fetch_project") as service,
+        patch(
+            "cveta2.commands.fetch._resolve_output_dir",
+            return_value=tmp_path / "chosen",
+        ),
+    ):
+        CliApp().run(
+            ["fetch", "-p", "1", "-o", "out", "--no-images", "--no-clearml"]
+            + (["--skip-validation"] if enabled else [])
+        )
+    assert service.call_args.args[2].skip_validation is enabled
+    assert ("--skip-validation" in capsys.readouterr().out) is enabled

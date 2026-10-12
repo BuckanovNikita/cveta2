@@ -264,6 +264,7 @@ def fetch(  # noqa: PLR0913
     output_dir: str | Path,
     *,
     completed_only: bool = False,
+    skip_validation: bool = False,
     raw: bool = False,
     images_dir: str | Path | None = None,
     download_images: bool = True,
@@ -287,6 +288,10 @@ def fetch(  # noqa: PLR0913
     updates it, ``"refresh"`` re-downloads every task and updates it,
     ``"off"`` disables it entirely.
 
+    *skip_validation* accepts eligible completed annotation jobs in CVAT
+    before fetching fresh task metadata, including for *completed_only*.
+    A promotion failure aborts the export and retains successful changes.
+
     *project* (here and in every function taking a project spec) accepts
     an id, a name, or ``"ORG/PROJECT"`` — the org prefix overrides the
     configured organization (``"/PROJECT"`` selects the personal
@@ -300,6 +305,7 @@ def fetch(  # noqa: PLR0913
         )
         options = FetchOptions(
             completed_only=completed_only,
+            skip_validation=skip_validation,
             ignore_task_ids=ignore_set,
             silent_task_ids=silent_set,
             use_cache=use_cache,

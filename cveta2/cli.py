@@ -132,6 +132,12 @@ def _add_common_fetch_args(parser: argparse.ArgumentParser) -> None:
 def _configure_fetch(parser: argparse.ArgumentParser) -> None:
     _add_project_arg(parser)
     parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Accept completed annotation jobs in eligible tasks in CVAT "
+        "before fetching.",
+    )
+    parser.add_argument(
         "--output-dir",
         "-o",
         required=True,

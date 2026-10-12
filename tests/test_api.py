@@ -2028,3 +2028,20 @@ class TestUploadResumeWiring:
         )
 
         assert seen[0].dataset_path == str(csv)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_fetch_forwards_skip_validation(
+    normal_fake: LoadedFixtures, tmp_path: Path, *, enabled: bool
+) -> None:
+    """The public keyword opts into the service's promotion preflight."""
+    with patch("cveta2.api.fetch_project") as service:
+        cveta2.fetch(
+            normal_fake.project.id,
+            tmp_path,
+            skip_validation=enabled,
+            download_images=False,
+            publish_clearml=False,
+            connection=fake_connection(normal_fake),
+        )
+    assert service.call_args.args[2].skip_validation is enabled
