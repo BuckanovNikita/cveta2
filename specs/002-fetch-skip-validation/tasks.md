@@ -37,7 +37,7 @@ remaining jobs; both cache layers are absent after a failed mutation attempt.
 - [x] T010 [P] Update README.md, docs/cli.md, docs/python-api.md, docs/images-and-cache.md, .specify/memory/architecture.md and specs/001-project-documentation/contracts/dataset-format.md.
 - [x] T011 Run relevant and full unit/docs/static/mutation checks and live lifecycle scenario; record dated evidence under specs/002-fetch-skip-validation/evidence/.
 - [x] T012 Obtain fresh independent review after integration/verification, resolve findings and run converge; reconcile specs/002-fetch-skip-validation/tasks.md.
-- [ ] T013 Complete configured commit/push/release gates and authorized Conventional Commit, main merge and semantic-release Git-tag-only release per CONTRIBUTING.md.
+- [x] T013 Complete configured commit/push/release gates and authorized Conventional Commit, main merge and semantic-release Git-tag-only release per CONTRIBUTING.md.
 
 ## Dependencies and parallel work
 
