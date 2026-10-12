@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from cveta2.models import TaskInfo
     from cveta2.s3_types import S3Client
 
+# v5: standalone polygons contribute bounding boxes; older entries discarded
+# them and can incorrectly report polygon-only frames as unannotated.
 # v4: payload records carry task-wide completion; older per-frame job
 # mappings lost unfinished jobs in overlapping or sparse job layouts.
 # v3: payload records carry ``job_stage``/``job_state`` in place of
@@ -42,7 +44,7 @@ if TYPE_CHECKING:
 # v2: payload records carry ``frame_path`` (nested CVAT frame names); v1
 # entries were saved after basename collapse and would rebuild a wrong
 # ``s3_image_path`` for multilevel S3 hierarchies.
-CACHE_SCHEMA_VERSION = 4
+CACHE_SCHEMA_VERSION = 5
 
 _COMPLETED_STATUS = "completed"
 _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})

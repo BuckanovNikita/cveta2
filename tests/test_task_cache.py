@@ -122,6 +122,15 @@ def _s3_key(task_id: int, prefix: str = "pfx") -> str:
 
 
 class TestLocalCache:
+    def test_schema_four_entry_is_rejected_and_deleted(self, tmp_path: Path) -> None:
+        """Generation four discarded polygons even when the task revision matches."""
+        task = make_task(updated=_UPDATED)
+        entry = tmp_path / "task_1.json"
+        entry.write_bytes(_envelope_bytes(task, _payload(), schema_version=4))
+
+        assert TaskAnnotationCache(tmp_path).get(task) is None
+        assert not entry.exists()
+
     def test_put_then_get_hit(self, tmp_path: Path) -> None:
         cache = TaskAnnotationCache(tmp_path / "cache")
         task = make_task(updated=_UPDATED)
@@ -391,6 +400,22 @@ class _ClientErrorS3Client(FakeS3Client):
 
 
 class TestS3Backend:
+    def test_schema_four_entry_is_rejected_without_local_backfill(
+        self, tmp_path: Path
+    ) -> None:
+        task = make_task(updated=_UPDATED)
+        key = f"bkt/{_s3_key(task.id)}"
+        fake_s3 = FakeS3Client(
+            {key: _envelope_bytes(task, _payload(), schema_version=4)}
+        )
+        cache = TaskAnnotationCache(
+            tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx")
+        )
+
+        assert cache.get(task) is None
+        assert fake_s3.get_calls == [key]
+        assert not (tmp_path / "local" / "task_1.json").exists()
+
     @pytest.fixture(autouse=True)
     def _single_attempt(self) -> Generator[None, None, None]:
         """``_FailingS3Client`` raises a retryable fault; one attempt is enough."""

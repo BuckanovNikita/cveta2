@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from cveta2._client.context import _TaskContext
 from cveta2._client.dtos import RawAttribute, RawFrame
 from cveta2._client.extractors import _collect_shapes
@@ -130,10 +132,10 @@ def test_all_except_first_empty(
 # ---------------------------------------------------------------------------
 
 
-def test_non_rectangle_shape_skipped() -> None:
-    """Non-rectangle shapes are skipped."""
+def test_unsupported_shape_skipped() -> None:
+    """Other unsupported shapes are still skipped."""
     ctx = _make_ctx()
-    polygon = make_raw_shape(type="polygon")
+    polygon = make_raw_shape(type="polyline")
     rect = make_raw_shape(id=2)
     result = _collect_shapes([polygon, rect], ctx)
 
@@ -225,12 +227,165 @@ def test_multiple_shapes_on_same_frame() -> None:
     assert all(r.frame_id == 0 for r in result)
 
 
-def test_non_rectangle_shape_logs_warning(capture_logs: list[str]) -> None:
-    """Non-rectangle shape is skipped and a warning is logged."""
+def test_unsupported_shape_logs_warning(capture_logs: list[str]) -> None:
+    """Unsupported shapes retain their warning."""
     ctx = _make_ctx()
-    polygon = make_raw_shape(type="polygon")
+    polygon = make_raw_shape(type="polyline")
 
     result = _collect_shapes([polygon], ctx)
 
     assert result == []
-    assert any("polygon" in m.lower() for m in capture_logs)
+    assert any("polyline" in m.lower() for m in capture_logs)
+
+
+@pytest.mark.parametrize(
+    ("points", "expected"),
+    [
+        ([12, 30.5, 90.75, 10.25, 40.5, 80], (12, 10.25, 90.75, 80)),
+        ([6, 6, 8, 2, 5, 4, 2, 8, 1, 1], (1, 1, 8, 8)),
+        ([10, 20, 30, 40, 20, 50, 10, 20], (10, 20, 30, 50)),
+        (
+            [-0.125, 700.75, 950.875, -3.25, 20.5, 80.125],
+            (-0.125, -3.25, 950.875, 700.75),
+        ),
+        ([0, 0, 1, 1, 2, 2], (0, 0, 2, 2)),
+    ],
+    ids=[
+        "triangle",
+        "concave-unordered-extrema",
+        "closed",
+        "outside-fractional",
+        "collinear",
+    ],
+)
+def test_polygon_bounds_use_every_vertex_without_clipping(
+    points: list[float],
+    expected: tuple[float, float, float, float],
+    capture_logs: list[str],
+) -> None:
+    result = _collect_shapes(
+        [make_raw_shape(id=73, type="polygon", points=points)], _make_ctx()
+    )
+
+    assert len(result) == 1
+    box = result[0]
+    assert (box.bbox_x_tl, box.bbox_y_tl, box.bbox_x_br, box.bbox_y_br) == expected
+    assert box.instance_shape == "box"
+    assert box.rotation == 0
+    assert len(capture_logs) == 1
+    assert "100" in capture_logs[0]
+    assert "73" in capture_logs[0]
+    assert "приближение" in capture_logs[0].lower()
+    assert "прямоугольник" in capture_logs[0].lower()
+
+
+def test_polygon_preserves_annotation_and_frame_context() -> None:
+    ctx = _make_ctx(
+        frames={1: RawFrame(name="nested/img_1.jpg", width=800, height=600)},
+        attr_names={10: "color"},
+    )
+    ctx.task_completed = True
+    ctx.frame_issues = {1: ("incorrect label; fix bounds", "open")}
+    shape = make_raw_shape(
+        id=73,
+        type="polygon",
+        frame=1,
+        label_id=2,
+        points=[12, 30.5, 90.75, 10.25, 40.5, 80],
+        rotation=45.5,
+        created_by="annotator",
+        source="auto",
+        occluded=True,
+        z_order=4,
+        attributes=[RawAttribute(10, "red"), RawAttribute(77, "matte")],
+    )
+
+    box = _collect_shapes([shape], ctx)[0]
+
+    assert box.image_name == "img_1.jpg"
+    assert box.frame_path == "nested/img_1.jpg"
+    assert (box.image_width, box.image_height) == (800, 600)
+    assert (box.bbox_x_tl, box.bbox_y_tl, box.bbox_x_br, box.bbox_y_br) == (
+        12,
+        10.25,
+        90.75,
+        80,
+    )
+    assert box.rotation == 0
+    assert box.annotation_id == 73
+    assert box.instance_label == "person"
+    assert box.attributes == {"color": "red", "77": "matte"}
+    assert box.created_by_username == "annotator"
+    assert box.source == "auto"
+    assert box.occluded is True
+    assert box.z_order == 4
+    assert (box.task_id, box.task_name) == (100, "test-task")
+    assert box.task_updated_date == "2026-01-01T00:00:00+00:00"
+    assert box.frame_id == 1
+    assert box.subset == "train"
+    assert box.task_completed is True
+    assert (box.job_stage, box.job_state) == ("acceptance", "completed")
+    assert (box.issue_text, box.issue_state) == ("incorrect label; fix bounds", "open")
+
+
+@pytest.mark.parametrize(
+    ("points", "reason"),
+    [
+        ([], "менее трёх"),
+        ([0, 0, 10, 10], "менее трёх"),
+        ([0, 0, 10, 10, 2, 2, 4], "нечётное"),
+        ([0, 0, float("nan"), 10, 2, 2], "нечисловые или бесконечные"),
+        ([0, 0, 10, float("inf"), 2, 2], "нечисловые или бесконечные"),
+        ([0, 0, 10, 10, float("-inf"), 2], "нечисловые или бесконечные"),
+        ([3, 0, 3, 10, 3, 2], "нулевая ширина"),
+        ([0, 3, 10, 3, 2, 3], "нулевая высота"),
+    ],
+)
+def test_malformed_polygon_is_diagnosed_and_counted(
+    points: list[float],
+    reason: str,
+    capture_logs: list[str],
+) -> None:
+    result = _collect_shapes(
+        [make_raw_shape(id=73, type="polygon", points=points)], _make_ctx()
+    )
+
+    assert result == []
+    assert len(capture_logs) == 2
+    assert "100" in capture_logs[0]
+    assert "73" in capture_logs[0]
+    assert reason in capture_logs[0].lower()
+    assert "100" in capture_logs[1]
+    assert "пропущено полигонов: 1" in capture_logs[1].lower()
+
+
+def test_mixed_task_keeps_valid_shapes_and_counts_only_malformed_polygons(
+    capture_logs: list[str],
+) -> None:
+    shapes = [
+        make_raw_shape(id=1, rotation=27.5, points=[5, 6, 7, 8]),
+        make_raw_shape(id=2, type="polygon", points=[12, 30.5, 90.75, 10.25, 40.5, 80]),
+        make_raw_shape(id=3, type="polygon", points=[0, 0, 1, 1]),
+        make_raw_shape(id=4, type="polygon", points=[1, 1, 1, 2, 1, 3]),
+        make_raw_shape(id=5, type="polyline"),
+        make_raw_shape(id=6, type="points"),
+        make_raw_shape(id=7, type="polygon", frame=999, points=[0, 0, 1, 1, 2, 2]),
+    ]
+
+    result = _collect_shapes(shapes, _make_ctx())
+
+    assert [box.annotation_id for box in result] == [1, 2]
+    assert result[0].rotation == 27.5
+    assert (
+        result[0].bbox_x_tl,
+        result[0].bbox_y_tl,
+        result[0].bbox_x_br,
+        result[0].bbox_y_br,
+    ) == (5, 6, 7, 8)
+    summaries = [
+        message for message in capture_logs if "пропущено полигонов" in message.lower()
+    ]
+    assert len(summaries) == 1
+    assert "100" in summaries[0]
+    assert "пропущено полигонов: 2" in summaries[0].lower()
+    assert len(capture_logs) == 6

@@ -292,7 +292,35 @@ class TestConvertAnnotations:
         result = SdkCvatApiAdapter(client).get_task_annotations(17)
 
         assert result == RawAnnotations(shapes=[])
-        assert any("17" in message and "2" in message for message in capture_logs)
+        assert len(capture_logs) == 1
+        warning = capture_logs[0]
+        assert "17" in warning
+        assert "2" in warning
+        assert "rectangle" in warning
+        assert "polygon" in warning
+
+    def test_adapter_retains_standalone_polygon_beside_ignored_tracks(self) -> None:
+        client = MagicMock()
+        client.api_client.tasks_api.retrieve_annotations.return_value = (
+            SimpleNamespace(
+                shapes=[
+                    make_sdk_shape(
+                        id=73,
+                        type=SimpleNamespace(value="polygon"),
+                        points=[12, 30.5, 90.75, 10.25, 40.5, 80],
+                    )
+                ],
+                tracks=[object()],
+            ),
+            None,
+        )
+
+        result = SdkCvatApiAdapter(client).get_task_annotations(17)
+
+        assert len(result.shapes) == 1
+        assert result.shapes[0].id == 73
+        assert result.shapes[0].type == "polygon"
+        assert result.shapes[0].points == [12, 30.5, 90.75, 10.25, 40.5, 80]
 
 
 # ---------------------------------------------------------------------------

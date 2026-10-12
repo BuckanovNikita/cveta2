@@ -6,9 +6,27 @@ Text columns preserve their literal values when read: labels such as `"001"`
 and `"NA"` remain strings. An empty CSV cell represents a missing value;
 numeric and boolean columns retain their inferred types.
 
-Only CVAT shapes of type `rectangle` become `"box"` records. Every other CVAT
-shape type (`polygon`, `polyline`, `points`, …) is skipped with a warning, so a
-segmentation project produces no annotation rows at all.
+Standalone CVAT shapes of type `rectangle` and `polygon` become `"box"` records
+in both `fetch` and `fetch-task`. Rectangles retain their existing coordinates
+and rotation. Polygons become tight axis-aligned boxes using
+`(min_x, min_y, max_x, max_y)` over every vertex, without rounding or clipping
+to image bounds, and with `rotation=0.0`. Labels, attributes, annotation IDs,
+author/source, occlusion, z-order, task/frame metadata and issues are preserved.
+Polygon contours are not retained in this detection format.
+
+Each converted polygon emits a warning identifying its task and annotation and
+explaining the bounding-box approximation. Polygons with fewer than three
+coordinate pairs, odd coordinate counts, nonfinite coordinates, or zero-width
+or zero-height bounds are skipped with contextual reason warnings and a per-task
+skipped-polygon summary. Repeated closing vertices and out-of-image coordinates
+are allowed; no topology or polygon-area validation is added. A frame with only
+rejected shapes keeps the existing unannotated-row behavior. Tracks and other
+shape types (`polyline`, `points`, …) remain unsupported and warn when skipped.
+
+Task cache schema 5 rejects earlier local and S3 payloads, including schema 4,
+so previously discarded polygons are refetched automatically. Refreshed caches
+retain polygon boxes. Conversion warnings occur during parsing and are not
+replayed on cache hits. Deletion precedence and the CSV columns are unchanged.
 
 ## Output files
 
