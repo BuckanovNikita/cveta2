@@ -74,7 +74,15 @@ covers the same ground in Russian, at overview depth.
    - Task selection scales with the request, not the project: `_client_ops/fetch.py:_select_tasks_for_fetch` retrieves each selector through `get_task` when all of them are numeric ids, and only walks the project task list otherwise — for a name selector, an id that turns out to name a task, a task belonging to another project, or an ignored id (all of which the listing path still owns, and all of which end in an error or a skip)
    - Completed tasks are served from `task_cache.py` when an entry exists and its cached `task_updated_date` matches CVAT (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`). Incomplete issue reads are not cached. A task or project-label edit invalidates the rendered payload; a job moved back to annotation also makes it ineligible. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
-   - Annotations converted to `BBoxAnnotation` by `extractors.py`
+   - Annotations converted to `BBoxAnnotation` by `extractors.py`: standalone
+     rectangles retain their existing mapping; polygons use all vertex extrema
+     for tight axis-aligned bounds without rounding or clipping, with zero rotation.
+     The shared mapping preserves annotation metadata and frame issues. Each
+     converted polygon warns with task/annotation identity about approximation;
+     malformed polygons (fewer than three pairs, odd count, nonfinite coordinates,
+     zero-width/height bounds) warn individually and in a per-task skip summary.
+     Cache schema 5 invalidates earlier local/S3 payloads that discarded polygons;
+     cache hits retain existing logging and do not replay parsing warnings.
    - Result partitioned by `dataset_partition.py` into dataset/obsolete/in_progress CSV files
 
 2. **Upload**: `commands/upload.py` (or `api.upload`) → `services/upload.py:upload_dataset()` → `client.create_upload_task()` + `client.upload_task_annotations()`
@@ -131,8 +139,9 @@ the storage root are normalized to relative names; traversal and outside-root
 names are rejected.
 
 CVAT tracks are intentionally outside the extraction model. The SDK adapter
-warns with the task id and count whenever it ignores tracks; only standalone
-rectangle shapes reach `RawAnnotations`.
+warns with the task id and count whenever it ignores tracks. Standalone shapes
+reach `RawAnnotations`; the extractor accepts rectangles and polygons and warns
+when skipping other shape types. Both fetch paths share this extraction behavior.
 
 ## Task-by-task processing
 

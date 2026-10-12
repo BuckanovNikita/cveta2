@@ -318,6 +318,16 @@ full = []
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]
+"cveta2._client.extractors.x__polygon_bounds__mutmut_3" = "Decorates the too-few-coordinates reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_4" = "Uppercases the too-few-coordinates reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_8" = "Decorates the odd-coordinate-count reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_9" = "Uppercases the odd-coordinate-count reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_14" = "Decorates the nonfinite-coordinate reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_15" = "Uppercases the nonfinite-coordinate reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_30" = "Decorates the zero-width reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_31" = "Uppercases the zero-width reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_36" = "Decorates the zero-height reason only; polygon rejection, contextual warning and skip count remain unchanged."
+"cveta2._client.extractors.x__polygon_bounds__mutmut_37" = "Uppercases the zero-height reason only; polygon rejection, contextual warning and skip count remain unchanged."
 "cveta2._client_ops.fetch.xǁ_FetchMixinǁ_resolve_one_task_selector__mutmut_18" = "Only numeric-ID suggestion capitalization/decoration changes; ambiguous rejection, complete matching IDs and absence of writes are preserved."
 "cveta2._client_ops.fetch.xǁ_FetchMixinǁ_resolve_one_task_selector__mutmut_19" = "Only numeric-ID suggestion capitalization/decoration changes; ambiguous rejection, complete matching IDs and absence of writes are preserved."
 "cveta2._client_ops.fetch.xǁ_FetchMixinǁ_resolve_one_task_selector__mutmut_20" = "Only numeric-ID suggestion capitalization/decoration changes; ambiguous rejection, complete matching IDs and absence of writes are preserved."

@@ -315,7 +315,7 @@ class SdkCvatApiAdapter:
         if tracks:
             logger.warning(
                 f"Задача {task_id}: проигнорировано треков CVAT: {len(tracks)}; "
-                f"поддерживаются только отдельные rectangle shapes"
+                f"поддерживаются только отдельные rectangle и polygon shapes"
             )
         return convert_annotations(labeled_data)
 
