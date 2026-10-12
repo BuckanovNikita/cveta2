@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.8.0 (2026-10-12)
+
+### Features
+
+- Convert standalone CVAT polygons to bounding boxes
+  ([`41c045e`](https://github.com/BuckanovNikita/cveta2/commit/41c045e76757b6af65687fe7da49a4e7aa30218d))
+
+
 ## v0.7.0 (2026-10-06)
 
 ### Bug Fixes
