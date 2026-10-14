@@ -7,8 +7,9 @@ bounding-box annotations, partitions them by task completion state, downloads
 images from S3, uploads datasets, and manages project labels. Run Python tools
 through `uv run`.
 
-User documentation and user-facing messages are Russian. Spec Kit memory,
-feature artifacts, and the dataset contract are English. This file owns detailed
+Follow the user's conversation language (English by default); repository language
+conventions do not override it. User documentation and CLI output remain Russian.
+Spec Kit memory, feature artifacts, and the dataset contract are English. This file owns detailed
 operational guidance; [constitution.md](constitution.md) owns governance.
 [AGENTS.md](../../AGENTS.md) is the discovery entry point and `CLAUDE.md` remains
 its symlink. Read [architecture.md](architecture.md) for module ownership and
@@ -20,20 +21,40 @@ for output-format behavior.
 Before editing, inspect `git status --short`, the relevant diff, and the staged
 diff. Treat existing modifications and untracked files as user work. Do not
 stash, reset, broadly stage, commit, or push them. Stage and commit only exact
-task-owned paths when the user asks for a commit; use the project `commit`
-skill for that workflow.
+task-owned paths when authorized; use the project `commit` skill for that
+workflow. Standing user authorization for completion includes required commits,
+release evaluation and commit/tag pushes after applicable gates pass. It satisfies
+the commit and push request gates in that skill; do not request authorization
+again within scope. Explicit no-commit/no-release or other stopping points override
+it. A commit-only request without push authorization still stops before pushing.
 
 ## Spec Kit development workflow
 
 Spec Kit is the primary specification, planning, and task workflow for behavior
 changes, including bug fixes. Read [constitution.md](constitution.md) before
 planning. Codex uses `$speckit-<step>`; Claude uses `/speckit-<step>`.
+Discover the governing process from explicit user selection, these instructions
+and active artifacts before invoking helpers. This project retains Spec Kit; the
+shared `python-project-workflow` skill adds Python contract, checks, documentation
+and packaging evidence inside its native stages, not another lifecycle. Use the
+shared `module-architecture-planning` skill for the architecture gates below.
+If either required shared skill is unavailable, report the missing gate and
+continue independent inspection; do not invent its rules or claim acceptance.
+Inspect current code, configuration, existing diffs and task evidence: artifacts
+record intent, while implementation and executed checks establish behavior.
+
 Both integrations are installed, with Codex as the default. See
 [CONTRIBUTING.md](../../CONTRIBUTING.md) for setup and invocation examples.
 
 For a new capability, run `specify` to create `specs/<number>-<name>/spec.md`.
 Continue through `clarify` -> `plan` -> `checklist` -> `tasks` -> `analyze` ->
 `implement` -> `converge`. Invoke each skill separately and review its output.
+A completion request carries authorized work through that sequence, documentation,
+verification and the project release workflow without separate stage prompts.
+Ask only for material missing decisions or authorization outside existing scope.
+Explicit planning-only, review-only, no-commit/no-release and other stopping points
+take precedence. Host Plan Mode/read-only permits inspection and proposed records
+and checks, not persisted artifacts, implementation, mutating hooks or release.
 Resolve ambiguous requirements, incomplete quality checklists, constitution
 violations, and blocking analysis findings before implementation. The bundled
 four-step `speckit` workflow runner does not include all repository-required
@@ -57,7 +78,10 @@ artifact-writing command. Create development branches manually; the optional
 Git extension is not installed.
 
 Documentation-only corrections and maintenance without behavior changes may
-use the existing lightweight workflow. A behavior-changing bug fix needs a
+use the existing lightweight workflow: a scoped maintenance plan and adjacent
+no-impact architecture record under `docs/plans/<task>/`, documentation checks
+and applicable review/release evaluation, without creating an application feature
+specification. A behavior-changing bug fix needs a
 failing observation, reproduction when feasible, and verification of the
 original failure path in its Spec Kit artifacts.
 
@@ -68,6 +92,24 @@ commit/release authorization still apply. Spec Kit requirements are enforced
 through repository guidance, without an additional CI or hook gate.
 
 ## Architecture
+
+Before implementation, record affected module responsibilities, interfaces,
+allowed/forbidden dependencies and effect ownership in the native `plan.md`, with
+an adjacent task-owned `architecture.json` and dependent checks in `tasks.md`.
+Reuse executable import contracts; add scoped coverage and a meaningful forbidden
+dependency negative case where affected boundaries lack enforcement. Validate the
+record with the shared skill's validator using `--phase plan` and this repository
+as `--repo-root` before implementation. Documentation-only work records inspected
+no-impact reasoning and documentation checks; it does not need unrelated runtime
+suites. Missing, unavailable or failing required documentation/architecture
+checks remain acceptance gaps, not passing verification. Before acceptance
+reconcile the complete task-owned diff, actual checks,
+documentation and applicable review; validate with `--phase acceptance`.
+
+For resumed work, compare current implementation with existing records and append
+missing architecture/check/documentation tasks and amendments without rewriting
+completed history. Do not bulk retrofit inactive feature records. Shared skills
+add evidence to native artifacts; do not edit installed Spec Kit skills/templates.
 
 The contracts in `pyproject.toml` enforce exhaustive inward layers:
 
@@ -132,6 +174,12 @@ uv run mypy <changed package paths>
 uv run lint-imports
 uv run pytest
 ```
+
+Use proportionate collaboration: independent bounded work is useful only when
+ownership and dependencies justify it. Substantive changes need fresh independent
+review after parent integration and verification; reuse the native final review
+for Python and architecture criteria rather than introducing a competing review.
+Small low-risk edits may use direct review and focused checks.
 
 Start with the nearest meaningful tests and expand when shared behavior,
 interfaces, or observed failures justify it. A documentation-only change
@@ -256,5 +304,12 @@ integration skill defines that boundary.
 
 `main` changes only by merge. On `main`, semantic-release derives versions,
 tags, and `CHANGELOG.md`; never hand-edit the project version. Release commands
-and commit semantics live in `CONTRIBUTING.md`. Do not release, push, commit,
-or change remotes unless requested.
+and commit semantics live in `CONTRIBUTING.md`. Complete that workflow within
+existing user/standing authorization after required checks; documentation-only
+changes still evaluate release but may produce no new version tag. Explicit
+stopping points take precedence. Standing authorization satisfies project commit
+skill request gates and covers the configured commit/push hooks; it does not
+authorize changing remotes, deployment or expanding scope. Publish Git version
+tags only: no GitHub Release objects, release assets or registry publication
+without an explicit user override. Report failed/unavailable gates as gaps; never
+bypass them to force completion.
