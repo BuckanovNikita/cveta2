@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.9.1 (2026-10-14)
+
+### Bug Fixes
+
+- **architecture**: Enforce inward dependencies and explicit effects
+  ([`d67a83a`](https://github.com/BuckanovNikita/cveta2/commit/d67a83aed079dbc484c5e57678800e850687a4ed))
+
+### Documentation
+
+- Record fetch skip validation delivery
+  ([`253c5c1`](https://github.com/BuckanovNikita/cveta2/commit/253c5c18ccb483cdf0aa1e575b1a4a42419f0ef5))
+
+
 ## v0.9.0 (2026-10-12)
 
 ### Documentation
