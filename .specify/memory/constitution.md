@@ -22,6 +22,13 @@ external effects through application-owned ports. Composition constructs outgoin
 adapters; incoming interfaces map CLI/API calls. Public facades must not become
 dependencies of canonical modules. Public API functions remain prompt-free. All
 `cvat_sdk` imports stay inside `adapters/cvat/`.
+Before implementation, the shared module-architecture-planning skill MUST record
+module responsibilities, interfaces, dependencies, effect ownership and executable
+contracts in the native plan and adjacent architecture record, with checks in tasks.
+Validate its planning phase before implementation and acceptance phase after diff
+reconciliation, checks and applicable review. Documentation-only work MUST record
+inspected no-impact reasoning and scoped documentation checks. Resumed gaps MUST
+be appended without rewriting completed history; inactive records need no retrofit.
 Public CLI, API, configuration, and dataset compatibility MUST be preserved
 unless the specification explicitly requests and describes a contract change.
 Fetch partitioning MUST preserve deletion precedence for same-task ties and
@@ -57,14 +64,16 @@ stage checks; Spec Kit does not replace them.
 ### V. Preserve ownership, documentation, and release controls
 
 Agents MUST inspect status and diffs before editing, preserve unrelated work,
-and stage only task-owned paths when a commit is requested. Do not automatically
+and stage only task-owned paths when a commit is authorized. Do not automatically
 stash, reset, revert, or bypass hooks. Shared integration resources MUST use the
 existing lifecycle skills, one owned run tag, and exact-tag cleanup on success
 and failure; leave other runs and durable resources intact. Do not store
 credentials or machine-specific setup in tracked project artifacts.
 
-User-facing messages, README files, contributor documentation, and `docs/`
-remain Russian. Agent instructions, architecture and dataset-format documents,
+Conversation MUST follow the user's requested language (English by default).
+CLI output, README files, contributor documentation, and `docs/` human guides
+remain Russian; task planning and evidence remain English. Agent instructions,
+architecture and dataset-format documents,
 Spec Kit artifacts, and skills remain English. CLI and API changes MUST update
 their user documentation. Keep `AGENTS.md` as the shared discovery entry point
 and `CLAUDE.md` as its symlink. Detailed operational rules live in
@@ -95,7 +104,21 @@ Review each stage's artifacts. For an existing capability, select its feature
 directory and update the living spec before running the remaining stages.
 Unresolved behavior ambiguities, constitution violations, incomplete quality
 checklists, and blocking analysis findings MUST be resolved before implementation.
-Supporting skills MUST NOT establish a competing spec/plan workflow.
+Supporting skills MUST NOT establish a competing spec/plan workflow. Discover the
+governing process from explicit selection, instructions and active artifacts. The
+shared python-project-workflow skill supplies Python and architecture evidence
+within native stages; installed Spec Kit skills/templates remain unchanged.
+Unavailable required shared skills or missing/failing documentation/architecture
+checks MUST be reported as acceptance gaps; continue independent inspection
+without inventing the missing contract or claiming acceptance.
+Completion requests MUST progress automatically through authorized stages,
+documentation, verification and release without separate stage prompts. Standing
+user authorization satisfies project commit/push skill request gates after checks;
+explicit stopping points and host Plan Mode/read-only limits take precedence.
+Collaboration and checks MUST be proportionate; substantive changes require fresh
+independent review after integration and verification, using the native final
+review for Python and architecture acceptance. Small low-risk edits need no
+manufactured parallel work or unrelated tests.
 
 The plan's Constitution Check MUST cover these principles before research and
 again after design. Tasks MUST identify acceptance and relevant verification
@@ -133,4 +156,11 @@ Version 1.2.0 expands principle II with explicit ports, inward dependencies and
 effect ownership for the approved reorganization. Supported public behavior and
 storage contracts remain unchanged.
 
-**Version**: 1.2.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-14
+Version 1.3.0 expands architecture planning/acceptance and lifecycle governance:
+shared skills contribute evidence within native Spec Kit stages, authorized work
+progresses without repeated stage/commit/push prompts, explicit stops override
+automation, and review/check scope remains proportionate. Conversation language
+follows the user while Russian human guides/CLI remain intact. This amendment
+changes no application contract; inactive feature history is not rewritten.
+
+**Version**: 1.3.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-14
