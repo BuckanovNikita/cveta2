@@ -71,3 +71,12 @@ recorded in the linked dated evidence. Task 5 remains parent-owned and pending.
 The final worker diff covers only the proposed documentation scope; portable
 usage maintenance, existing feature history, runtime/configuration/checkers and
 installed framework files were preserved.
+
+## Acceptance and initial delivery closure
+
+Task 5 completed: parent integration, fresh independent review and architecture
+acceptance passed; native contributor hooks passed, main integrated by merge,
+Git-only release evaluation required no bump, and the full gated main push
+passed with remote refs verified. Actual results and retained main fixtures are
+recorded in the dated evidence. This ledger/evidence follow-up is documentation
+only and proceeds through the same required hooks and merge-only main policy.
