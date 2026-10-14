@@ -165,6 +165,35 @@ feature evidence, including the preserved
 Documentation checks also cover Spec Kit memory and feature Markdown; upstream
 template examples are excluded.
 
+### Portable usage skill
+
+The canonical portable `cveta2` skill lives in
+[corp-skills/skills/cveta2](https://github.com/BuckanovNikita/corp-skills/tree/main/skills/cveta2).
+It teaches tool usage; this repository owns implementation and public contracts.
+Edit that source package, not an installed agent copy. Keep machine-specific setup
+in global environment guidance.
+
+During planning, inspect the skill for changes to commands, public API, configuration,
+authentication, dataset/conversion formats, defaults, side effects or failure recovery.
+Record affected skill/reference paths in the native plan and add update and validation
+tasks dependent on implementation. Internal-only changes may record a concrete,
+inspected no-change reason. This applies to fixes and resumed features as well as
+new features; preserve completed history when adding tasks.
+
+During the documentation stage, reconcile the skill with the final implementation
+and current user guides. Update examples, prerequisites, warnings and evaluation
+cases together. Verify documented flags/signatures and representative local examples;
+validate frontmatter, packaged links, Markdown and discovery using
+[corp-skills maintenance](https://github.com/BuckanovNikita/corp-skills/blob/main/MAINTENANCE.md).
+Repository documentation tests do not validate this external package.
+
+Before convergence/completion, record the inspected source version/commit, changed
+skill paths, actual checks and remaining limitations in dated feature evidence.
+Reference the companion corp-skills commit when committed. If its checkout or access
+is unavailable, record the required update as an open documentation task; do not mark
+the feature complete. Follow each repository's release policy within authorization;
+do not overwrite unrelated edits or install updated skills as a side effect.
+
 ## Mutation testing
 
 `scripts/mutation_test.sh` gates the current `[tool.mutmut].only_mutate`
