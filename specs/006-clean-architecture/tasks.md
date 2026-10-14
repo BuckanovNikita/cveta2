@@ -33,7 +33,7 @@ T006–T009 depend on T005. Parent assigns exclusive paths; shared port changes 
 - [x] T015 Run serial full live integration through the installed skill, clean exact owned tag and record cleanup evidence.
 - [x] T016 Obtain fresh independent review after integration and parent verification; resolve findings and obtain acceptance.
 - [x] T017 Run convergence, reconcile architecture.json with actual diff and checks, validate acceptance; update architecture/engineering guidance and final task evidence.
-- [ ] T018 Complete authorized scoped Conventional Commits, merge-only main integration and semantic-release Git-tag-only release/push using repository skills and hooks.
+- [x] T018 Complete authorized scoped Conventional Commits, merge-only main integration and semantic-release Git-tag-only release/push using repository skills and hooks.
 
 ## Coverage and checkpoints
 
