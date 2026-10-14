@@ -1,4 +1,4 @@
-"""Tests for the standalone helpers in :mod:`cveta2.config`.
+"""Tests for the standalone helpers in :mod:`cveta2.adapters.config.settings`.
 
 Everything here was previously reached only indirectly (or not at all): the
 env-flag readers, the config-path helpers, the project-name sanitizer, the
@@ -21,7 +21,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cveta2.config import (
+from cveta2.adapters.config.settings import (
     CvatConfig,
     UploadConfig,
     cache_dir_for_project,
@@ -32,7 +32,7 @@ from cveta2.config import (
     resolve_images_cache_dir,
     should_raise_on_fetch_failure,
 )
-from cveta2.exceptions import Cveta2Error, MissingCredentialsError
+from cveta2.domain.errors import Cveta2Error, MissingCredentialsError
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:

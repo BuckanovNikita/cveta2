@@ -5,11 +5,16 @@ from pathlib import Path
 import pytest
 
 import cveta2
-from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawIssue
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
-from cveta2.models import CSV_COLUMNS, LabelInfo, ProjectInfo
-from cveta2.services.output import read_dataset_csv
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.adapters.files.dataset import read_dataset_csv
+from cveta2.application.ports.dtos import (
+    RawAnnotations,
+    RawDataMeta,
+    RawFrame,
+    RawIssue,
+)
+from cveta2.composition.client import CvatClient
+from cveta2.domain.models import CSV_COLUMNS, LabelInfo, ProjectInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.helpers import make_raw_shape, make_task

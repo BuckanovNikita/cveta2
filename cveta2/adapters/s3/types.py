@@ -1,0 +1,42 @@
+"""Type definitions for S3 client interfaces."""
+
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+class Transfer(NamedTuple):
+    """One S3 transfer: display *name*, object *key*, local *path*."""
+
+    name: "str"
+    key: "str"
+    path: "Path"
+
+
+class S3Client(Protocol):
+    """Structural protocol for a boto3 S3 client (subset used by cveta2)."""
+
+    def get_object(self, *, Bucket: "str", Key: "str") -> "dict[str, Any]":  # noqa: N803
+        """Retrieve an object from S3."""
+        ...
+
+    def head_object(self, *, Bucket: "str", Key: "str") -> "dict[str, Any]":  # noqa: N803
+        """Retrieve an object's metadata without its body."""
+        ...
+
+    def list_objects_v2(self, **kwargs: "str") -> "dict[str, Any]":
+        """List objects in a bucket."""
+        ...
+
+    def upload_file(self, filename: "str", bucket: "str", key: "str") -> "None":
+        """Upload a local file to S3."""
+        ...
+
+    def put_object(self, *, Bucket: "str", Key: "str", Body: "bytes") -> "None":  # noqa: N803
+        """Put an object to S3."""
+        ...
+
+    def delete_object(self, *, Bucket: "str", Key: "str") -> "None":  # noqa: N803
+        """Delete an object from S3 (a no-op for a missing key)."""
+        ...

@@ -11,7 +11,11 @@ from unittest.mock import patch
 
 import pytest
 
-from cveta2.fs_utils import ensure_shared_dir, replace_shared_bytes, write_shared_bytes
+from cveta2.adapters.files.shared import (
+    ensure_shared_dir,
+    replace_shared_bytes,
+    write_shared_bytes,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -102,7 +106,9 @@ def test_replace_shared_bytes_writes_through_a_name_unique_to_the_writer(
         written.append(path)
         write_shared_bytes(path, data)
 
-    monkeypatch.setattr("cveta2.fs_utils.write_shared_bytes", record_then_write)
+    monkeypatch.setattr(
+        "cveta2.adapters.files.shared.write_shared_bytes", record_then_write
+    )
     target = tmp_path / "entry.json"
 
     replace_shared_bytes(target, b"payload")
@@ -118,7 +124,9 @@ def test_replace_shared_bytes_removes_the_partial_temp_file_on_failure(
         path.write_bytes(data[:3])
         raise OSError(errno.ENOSPC, "No space left on device")
 
-    monkeypatch.setattr("cveta2.fs_utils.write_shared_bytes", write_a_prefix_then_fail)
+    monkeypatch.setattr(
+        "cveta2.adapters.files.shared.write_shared_bytes", write_a_prefix_then_fail
+    )
     target = tmp_path / "entry.json"
 
     with pytest.raises(OSError, match="No space left"):
@@ -134,7 +142,9 @@ def test_replace_shared_bytes_reraises_when_no_temp_file_was_created(
     def refuse_to_write(_path: Path, _data: bytes) -> None:
         raise OSError(errno.ENOSPC, "No space left on device")
 
-    monkeypatch.setattr("cveta2.fs_utils.write_shared_bytes", refuse_to_write)
+    monkeypatch.setattr(
+        "cveta2.adapters.files.shared.write_shared_bytes", refuse_to_write
+    )
     target = tmp_path / "entry.json"
 
     with pytest.raises(OSError, match="No space left"):

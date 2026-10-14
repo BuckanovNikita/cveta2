@@ -11,27 +11,27 @@ from unittest.mock import MagicMock
 import pytest
 from botocore.exceptions import ClientError
 
-from cveta2.exceptions import Cveta2Error
-from cveta2.image_downloader import (
-    CloudStorageInfo,
-    ImageDownloader,
-    S3Syncer,
-    _canonical_frame_key,
-    _local_name_from_key,
-    _validate_relative_key,
-    parse_cloud_storage,
-)
-from cveta2.models import (
+from cveta2.adapters.cvat.storage import parse_cloud_storage
+from cveta2.adapters.s3.download import ImageDownloader, S3Syncer
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import (
     DeletedImage,
     ImageWithoutAnnotations,
     ProjectAnnotations,
 )
-from cveta2.s3_utils import parse_sync_root
+from cveta2.domain.paths import (
+    _canonical_frame_key,
+    _local_name_from_key,
+    _validate_relative_key,
+    parse_sync_root,
+)
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import make_bbox, make_cs_info, patch_recording_s3
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from cveta2.domain.storage import CloudStorageInfo
 
 
 class _FakeCloudStorage:
@@ -132,7 +132,7 @@ class _UnreadableKeysS3Client(FakeS3Client):
 def _patch_boto(monkeypatch: pytest.MonkeyPatch, fake_s3: FakeS3Client) -> None:
     """Route make_s3_client to the fake S3 client."""
     monkeypatch.setattr(
-        "cveta2.image_downloader.make_s3_client",
+        "cveta2.adapters.s3.download.make_s3_client",
         lambda *_a, **_kw: fake_s3,
     )
 
@@ -475,7 +475,9 @@ def test_failed_write_leaves_no_partial_file_and_is_retried_next_run(
     target = tmp_path / "images"
 
     with monkeypatch.context() as patched:
-        patched.setattr("cveta2.fs_utils.write_shared_bytes", _raise_no_space)
+        patched.setattr(
+            "cveta2.adapters.files.shared.write_shared_bytes", _raise_no_space
+        )
         failed_run = downloader.download(
             annotations, project_cloud_storage=_project_cs()
         )
@@ -717,7 +719,7 @@ def test_download_uses_storage_endpoint_url(
     )
     s3_data = {"test-bucket/images/a.jpg": b"data-a"}
     factory = patch_recording_s3(
-        monkeypatch, "cveta2.image_downloader", FakeS3Client(s3_data)
+        monkeypatch, "cveta2.adapters.s3.download", FakeS3Client(s3_data)
     )
     cs_info = make_cs_info(
         bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000"
@@ -861,7 +863,7 @@ def test_s3_syncer_scopes_to_bucket_and_reports_failures(
         "other-bucket/images/elsewhere.jpg": b"data-elsewhere",
     }
     client = _UnreadableKeysS3Client(s3_data, unreadable={"images/broken.jpg"})
-    factory = patch_recording_s3(monkeypatch, "cveta2.image_downloader", client)
+    factory = patch_recording_s3(monkeypatch, "cveta2.adapters.s3.download", client)
     cs_info = make_cs_info(
         bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000"
     )
@@ -949,7 +951,7 @@ def test_storage_name_map_forwards_bucket_and_prefix(
         calls.append((received_client, bucket, prefix))
         return [("images/a.jpg", "a.jpg")]
 
-    monkeypatch.setattr("cveta2.image_downloader.list_s3_objects", record_listing)
+    monkeypatch.setattr("cveta2.adapters.s3.download.list_s3_objects", record_listing)
 
     result = ImageDownloader(tmp_path)._build_project_storage_name_map(
         client, "bucket", "images"
@@ -1131,7 +1133,7 @@ def test_the_probe_limit_is_inclusive(
         }
     )
     _patch_boto(monkeypatch, fake_s3)
-    monkeypatch.setattr("cveta2.image_downloader._DIRECT_KEY_PROBE_LIMIT", 2)
+    monkeypatch.setattr("cveta2.adapters.s3.download._DIRECT_KEY_PROBE_LIMIT", 2)
 
     stats = ImageDownloader(tmp_path / "images").download(
         annotations, project_cloud_storage=_project_cs()
@@ -1165,7 +1167,7 @@ def test_the_listing_prefers_the_frame_path_over_a_same_named_file(
         }
     )
     _patch_boto(monkeypatch, fake_s3)
-    monkeypatch.setattr("cveta2.image_downloader._DIRECT_KEY_PROBE_LIMIT", 0)
+    monkeypatch.setattr("cveta2.adapters.s3.download._DIRECT_KEY_PROBE_LIMIT", 0)
 
     target = tmp_path / "images"
     stats = ImageDownloader(target).download(
@@ -1194,7 +1196,7 @@ def test_a_batch_past_the_probe_limit_lists_instead(
         }
     )
     _patch_boto(monkeypatch, fake_s3)
-    monkeypatch.setattr("cveta2.image_downloader._DIRECT_KEY_PROBE_LIMIT", 1)
+    monkeypatch.setattr("cveta2.adapters.s3.download._DIRECT_KEY_PROBE_LIMIT", 1)
 
     target = tmp_path / "images"
     stats = ImageDownloader(target).download(

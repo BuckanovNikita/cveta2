@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-from cveta2._client.ports import CvatApiPort
-from cveta2.models import ProjectAnnotations
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.domain.models import ProjectAnnotations
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import client_with_api, make_bbox, make_cs_info
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     import pytest
 
-    from cveta2.client import CvatClient
+    from cveta2.composition.client import CvatClient
 
 _EMPTY_STORAGE = make_cs_info(bucket="other-bucket", prefix="nothing-here")
 
@@ -31,7 +31,7 @@ def _bucket(monkeypatch: pytest.MonkeyPatch, objects: dict[str, bytes]) -> FakeS
     """Serve *objects* (bare S3 keys) to every ``make_s3_client`` caller."""
     s3 = FakeS3Client(objects, keyed_by_bucket=False)
     monkeypatch.setattr(
-        "cveta2.image_downloader.make_s3_client", lambda _endpoint=None: s3
+        "cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3
     )
     return s3
 

@@ -7,15 +7,15 @@ from unittest.mock import patch
 
 import pytest
 
-from cveta2.client import CvatClient
-from cveta2.commands._helpers import resolve_project_from_args
-from cveta2.config import CvatConfig
-from cveta2.exceptions import Cveta2Error
-from cveta2.models import ProjectInfo
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.composition.client import CvatClient
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import ProjectInfo
+from cveta2.interfaces.commands._helpers import resolve_project_from_args
 
 if TYPE_CHECKING:
-    from cveta2.models import TaskInfo
-from cveta2.services.resolve import (
+    from cveta2.domain.models import TaskInfo
+from cveta2.application.use_cases.resolve import (
     apply_project_org,
     infer_project_from_tasks,
     resolve_project_spec,
@@ -171,7 +171,7 @@ class TestResolveProjectFromArgsWithOrg:
     def test_org_spec_switches_session_and_resolves(self) -> None:
         client, api = _fake_client(project_name="alpha", organization="default-org")
         with patch(
-            "cveta2.commands._helpers.load_projects_cache", return_value=[]
+            "cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]
         ) as load_cache:
             assert resolve_project_from_args(client, "acme/alpha") == (1, "alpha")
         assert api.organization == "acme"
@@ -185,7 +185,9 @@ class TestResolveProjectFromArgsWithOrg:
         exactly once and look up ``al/pha``, never org ``al`` / project ``pha``.
         """
         client, api = _fake_client(project_name="al/pha", organization="default-org")
-        with patch("cveta2.commands._helpers.load_projects_cache", return_value=[]):
+        with patch(
+            "cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]
+        ):
             assert resolve_project_from_args(client, "acme/al/pha") == (1, "al/pha")
         assert api.organization_calls == ["acme"]
 

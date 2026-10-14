@@ -24,13 +24,13 @@ from botocore.exceptions import (
 )
 from cvat_sdk.api_client.exceptions import ApiException
 
-from cveta2._client.sdk_adapter import (
+from cveta2.adapters.cvat.sdk_adapter import (
     SdkCvatApiAdapter,
     _should_retry_read,
     _should_retry_write,
     _translate_api_errors,
 )
-from cveta2._retry import (
+from cveta2.adapters.execution.retry import (
     _JITTER,
     DEFAULT_RETRY_ATTEMPTS,
     RetryPolicy,
@@ -38,8 +38,8 @@ from cveta2._retry import (
     configure_retries,
     network_retry,
 )
-from cveta2.exceptions import CvatApiError
-from cveta2.s3_utils import _should_retry_s3
+from cveta2.adapters.s3.utils import _should_retry_s3
+from cveta2.domain.errors import CvatApiError
 
 _AMBIGUOUS_WRITE_STATUS = (500, 502, 504)
 

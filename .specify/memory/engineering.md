@@ -69,24 +69,45 @@ through repository guidance, without an additional CI or hook gate.
 
 ## Architecture
 
-The import-linter contract in `pyproject.toml` enforces:
+The contracts in `pyproject.toml` enforce exhaustive inward layers:
 
 ```text
-cli → commands → api → services → _clearml → client → _client_ops → _client
-      ↓
-   models, exceptions, config
+public facades → interfaces → composition → adapters → application → domain
+                                         application.use_cases → client → ports → settings/results
 ```
 
-Higher layers may import lower ones. `commands/` contains thin CLI adapters
-(prompts, argument mapping, and `sys.exit`); orchestration belongs in
-`services/`, which must not prompt or exit and raises `Cveta2Error`.
-`api.py` exposes prompt-free public functions. Keep every `cvat_sdk` import
-inside `_client/`.
+Composition may also depend directly on inner layers to construct and inject
+production dependencies. Domain owns pure policies and values. Application owns
+typed ports and orchestration; it receives resolved settings/effects explicitly,
+never discovers configuration or creates adapters. Incoming `interfaces/commands/`
+own prompts, argument mapping and `sys.exit`; application workflows remain
+prompt-free and raise `Cveta2Error`. The public API remains prompt-free.
+Supported top-level modules are compatibility facades; canonical modules cannot
+import them. Removed internal package paths are not compatibility promises.
 
-Read [architecture.md](architecture.md) before changing layer flow, `ORG/PROJECT` resolution,
-or fetch/upload/convert behavior. CVAT retains shapes for deleted frames, so
-`dataset_partition.py` concatenates deletion records before annotation records
-to win same-task ties. Recency uses `task_id`, never
+CVAT/S3/config/ClearML adapter groups remain independent, using shared
+file/execution adapters where needed. All `cvat_sdk` imports belong to
+`adapters/cvat/`, `boto3`/`botocore` to `adapters/s3/`, ClearML to
+`adapters/clearml/` and questionary to incoming interactive interfaces. Neutral
+ports must not import implementations. Inner package imports do not eagerly load
+infrastructure. Lexical paths and in-memory pandas are allowed inward; file IO,
+configuration/environment discovery, network/SDK IO, clocks and thread/process
+execution are external effects. Runners, clocks and locks are explicit
+application dependencies. Execution preserves input order, cancels queued work
+on uncaught failures and joins active work before propagating them.
+
+Run `uv run lint-imports`, `uv run python scripts/check_architecture.py` and
+`uv run pytest tests/test_architecture.py` to verify layers, module coverage,
+adapter independence, SDK/prompt ownership, facade exclusion, sibling acyclicity
+and inner effect ownership, including local/type-only imports and aliases.
+Negative acceptance fixtures exercise forbidden dependencies and effects.
+Architecture acceptance reconciles the module record, task-owned diff,
+verification and independent review.
+
+Read [architecture.md](architecture.md) before changing layer flow, `ORG/PROJECT`
+resolution or fetch/upload/convert behavior. CVAT retains shapes for deleted
+frames, so `domain/partition.py` concatenates deletion records before annotation
+records to win same-task ties. Recency uses `task_id`, never
 `task_updated_date`, because label edits update that timestamp across tasks.
 
 ## Code conventions

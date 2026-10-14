@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from cveta2.client import CvatClient
-from cveta2.dataset_partition import completed_task_ids
+from cveta2.composition.client import CvatClient
+from cveta2.domain.partition import completed_task_ids
 from tests.integration.test_upload import IMAGE_NAMES, _get_project_and_storage
 
 if TYPE_CHECKING:
-    from cveta2.models import TaskAnnotations
+    from cveta2.domain.models import TaskAnnotations
 
 pytestmark = pytest.mark.integration
 

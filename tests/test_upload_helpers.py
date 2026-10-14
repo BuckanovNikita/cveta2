@@ -7,18 +7,17 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from cveta2.config import cache_dir_for_project
-from cveta2.exceptions import Cveta2Error
-from cveta2.models import ProjectAnnotations
-from cveta2.services.output import enrich_dataframe_paths, populate_record_paths
-from cveta2.services.upload import (
+from cveta2.adapters.config.settings import cache_dir_for_project
+from cveta2.adapters.files.dataset import enrich_dataframe_paths, populate_record_paths
+from cveta2.application.use_cases.upload import (
     _warn_missing_images,
-    build_search_dirs,
     build_upload_plan,
     filter_frames_by_labels,
-    read_exclude_names,
     split_deleted_rows,
 )
+from cveta2.composition.workflows import build_search_dirs, read_exclude_names
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import ProjectAnnotations
 from tests.helpers import make_bbox, make_cs_info
 
 # ---------------------------------------------------------------------------

@@ -10,11 +10,17 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from cveta2.exceptions import Cveta2Error
-from cveta2.services.convert import convert_from_yolo, convert_to_coco, convert_to_yolo
-from cveta2.services.convert.yolo import _normalize_class_names, _parse_label_file
-from cveta2.services.merge import _read_deleted_names
-from cveta2.services.output import read_dataset_csv
+from cveta2.adapters.files.conversion import LocalConversionFiles
+from cveta2.adapters.files.dataset import read_dataset_csv
+from cveta2.adapters.files.dataset import read_deleted_names as _read_deleted_names
+from cveta2.application.use_cases.convert.yolo import _parse_label_file
+from cveta2.composition.conversion import (
+    convert_from_yolo,
+    convert_to_coco,
+    convert_to_yolo,
+)
+from cveta2.domain.conversion import _normalize_class_names
+from cveta2.domain.errors import Cveta2Error
 from tests.helpers import csv_row, make_image, write_convert_csv
 
 
@@ -167,7 +173,9 @@ def test_yolo_invalid_numeric_rows_preserve_valid_sibling(
 ) -> None:
     path = tmp_path / "a.txt"
     path.write_text(bad + "\n0 .5 .5 .2 .2 .9\n")
-    assert _parse_label_file(path) == [[0, 0.5, 0.5, 0.2, 0.2, 0.9]]
+    assert _parse_label_file(path, files=LocalConversionFiles()) == [
+        [0, 0.5, 0.5, 0.2, 0.2, 0.9]
+    ]
 
 
 def test_clone_uses_each_tasks_frame_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -439,7 +447,7 @@ def test_coco_rejects_corrupt_or_ambiguous_metadata(
 def test_yolo_warning_identifies_line(tmp_path: Path, capture_logs: list[str]) -> None:
     path = tmp_path / "label.txt"
     path.write_text("\n0 nan .5 .2 .2\n0 .5 .5 .2 .2\n")
-    assert len(_parse_label_file(path)) == 1
+    assert len(_parse_label_file(path, files=LocalConversionFiles())) == 1
     assert f"{path}:2" in capture_logs[0]
 
 
@@ -529,7 +537,9 @@ def test_deleted_invalid_utf8_has_source_context(tmp_path: Path) -> None:
 def test_yolo_numeric_endpoints_are_accepted(tmp_path: Path, line: str) -> None:
     path = tmp_path / "endpoints.txt"
     path.write_text(line + "\n")
-    assert _parse_label_file(path) == [[float(value) for value in line.split()]]
+    assert _parse_label_file(path, files=LocalConversionFiles()) == [
+        [float(value) for value in line.split()]
+    ]
 
 
 @pytest.mark.parametrize(
@@ -538,7 +548,9 @@ def test_yolo_numeric_endpoints_are_accepted(tmp_path: Path, line: str) -> None:
 def test_yolo_out_of_domain_siblings_are_skipped(tmp_path: Path, line: str) -> None:
     path = tmp_path / "outside.txt"
     path.write_text(line + "\n0 .5 .5 .5 .5\n")
-    assert _parse_label_file(path) == [[0, 0.5, 0.5, 0.5, 0.5]]
+    assert _parse_label_file(path, files=LocalConversionFiles()) == [
+        [0, 0.5, 0.5, 0.5, 0.5]
+    ]
 
 
 @pytest.mark.parametrize("names", [{0: " "}, {0: "cat", 1: "cat"}])
@@ -550,7 +562,7 @@ def test_names_reject_whitespace_and_duplicate_values(names: object) -> None:
 
 
 def test_flat_names_yaml_bad_key_has_context(tmp_path: Path) -> None:
-    from cveta2.services.convert.yolo import _load_class_names_yaml
+    from cveta2.adapters.files.conversion import _load_class_names_yaml
 
     path = tmp_path / "flat-names.yaml"
     path.write_text("bad: cat\n")

@@ -1,7 +1,7 @@
 """Reusable dict-backed fake S3 client for tests.
 
 Implements the subset of the boto3 S3 client used by cveta2
-(:class:`cveta2.s3_types.S3Client`).  Objects are stored in-memory as
+(:class:`cveta2.adapters.s3.types.S3Client`).  Objects are stored in-memory as
 ``{"bucket/key": bytes}``.  Missing keys raise a proper
 ``botocore.exceptions.ClientError`` with the ``NoSuchKey`` code.
 """
@@ -124,7 +124,7 @@ class PagedFakeS3Client(FakeS3Client):
 
     :class:`FakeS3Client` always answers with a single page and tolerates
     whatever it is handed, which leaves the continuation-token branch of
-    :func:`cveta2.s3_utils.list_s3_objects` untested.  This one behaves
+    :func:`cveta2.adapters.s3.utils.list_s3_objects` untested.  This one behaves
     like a real bucket instead: it refuses parameters S3 does not know,
     refuses a continuation token other than the one it handed out with
     the previous page, and omits ``Contents`` entirely from an empty page.

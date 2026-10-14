@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 
-from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
+from cveta2.domain.models import LabelInfo, ProjectInfo, TaskInfo
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawIssue
+    from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawIssue
 
 
 class LoadedFixtures(NamedTuple):

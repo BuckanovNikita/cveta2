@@ -8,19 +8,19 @@ from unittest.mock import patch
 import pytest
 from prompt_toolkit.history import FileHistory
 
-from cveta2.commands.interactive import Choice, primitives
-from cveta2.commands.interactive._history import history_for
-from cveta2.exceptions import InteractiveModeRequiredError
+from cveta2.domain.errors import InteractiveModeRequiredError
+from cveta2.interfaces.commands.interactive import Choice, primitives
+from cveta2.interfaces.commands.interactive._history import history_for
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 _HINT = "pass a flag instead"
 
-_ASK_TEXT = "cveta2.commands.interactive._questionary.ask_text"
-_ASK_CONFIRM = "cveta2.commands.interactive._questionary.ask_confirm"
-_ASK_SELECT = "cveta2.commands.interactive._questionary.ask_select"
-_ASK_CHECKBOX = "cveta2.commands.interactive._questionary.ask_checkbox"
+_ASK_TEXT = "cveta2.interfaces.commands.interactive._questionary.ask_text"
+_ASK_CONFIRM = "cveta2.interfaces.commands.interactive._questionary.ask_confirm"
+_ASK_SELECT = "cveta2.interfaces.commands.interactive._questionary.ask_select"
+_ASK_CHECKBOX = "cveta2.interfaces.commands.interactive._questionary.ask_checkbox"
 
 
 def _choices() -> list[Choice]:
@@ -75,7 +75,7 @@ class TestText:
     def test_strips_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
         with patch(
-            "cveta2.commands.interactive._questionary.ask_text",
+            "cveta2.interfaces.commands.interactive._questionary.ask_text",
             return_value="  fish  ",
         ):
             assert primitives.text("Имя:", hint=_HINT) == "fish"
@@ -83,14 +83,16 @@ class TestText:
     def test_default_used_on_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
         with patch(
-            "cveta2.commands.interactive._questionary.ask_text", return_value=""
+            "cveta2.interfaces.commands.interactive._questionary.ask_text",
+            return_value="",
         ):
             assert primitives.text("Имя:", hint=_HINT, default="cat") == "cat"
 
     def test_cancel_none_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
         with patch(
-            "cveta2.commands.interactive._questionary.ask_text", return_value=None
+            "cveta2.interfaces.commands.interactive._questionary.ask_text",
+            return_value=None,
         ):
             assert primitives.text("Имя:", hint=_HINT, on_cancel="none") is None
 
@@ -170,7 +172,7 @@ class TestPromptHistory:
 
     def test_history_follows_default_cache_base(self, tmp_path: Path) -> None:
         with patch(
-            "cveta2.commands.interactive._history.default_cache_base",
+            "cveta2.interfaces.commands.interactive._history.default_cache_base",
             return_value=tmp_path / "elsewhere",
         ):
             history = history_for("k")
@@ -182,7 +184,7 @@ class TestPromptHistory:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         with patch(
-            "cveta2.commands.interactive._questionary.ask_text",
+            "cveta2.interfaces.commands.interactive._questionary.ask_text",
             return_value="v",
         ) as ask:
             primitives.text("Имя:", hint=_HINT, history_key="task-name")
@@ -195,7 +197,7 @@ class TestPromptHistory:
     ) -> None:
         monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
         with patch(
-            "cveta2.commands.interactive._questionary.ask_text",
+            "cveta2.interfaces.commands.interactive._questionary.ask_text",
             return_value="v",
         ) as ask:
             primitives.text("Имя:", hint=_HINT)

@@ -16,9 +16,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2._client.ports import CvatApiPort
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.composition.client import CvatClient
 from tests.helpers import client_with_api
 
 if TYPE_CHECKING:

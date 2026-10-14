@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cveta2.commands import setup as setup_cmd
-from cveta2.commands import setup_clearml as setup_clearml_cmd
-from cveta2.commands.interactive import _questionary, primitives, wizard
-from cveta2.commands.setup import run_setup, run_setup_cache
-from cveta2.commands.setup_clearml import run_setup_clearml
-from cveta2.config import CacheConfig, CvatConfig, ImageCacheConfig
-from cveta2.exceptions import InteractiveModeRequiredError
-from cveta2.models import ProjectInfo
+from cveta2.adapters.config.settings import CacheConfig, CvatConfig, ImageCacheConfig
+from cveta2.domain.errors import InteractiveModeRequiredError
+from cveta2.domain.models import ProjectInfo
+from cveta2.interfaces.commands import setup as setup_cmd
+from cveta2.interfaces.commands import setup_clearml as setup_clearml_cmd
+from cveta2.interfaces.commands.interactive import _questionary, primitives, wizard
+from cveta2.interfaces.commands.setup import run_setup, run_setup_cache
+from cveta2.interfaces.commands.setup_clearml import run_setup_clearml
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:

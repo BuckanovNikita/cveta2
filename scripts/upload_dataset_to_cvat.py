@@ -30,13 +30,11 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, ValidationError
 
-from cveta2.config import CvatConfig
-from cveta2.exceptions import Cveta2Error
-from cveta2.services.convert.yolo import (
-    _load_yaml,
-    _normalize_class_names,
-    _parse_label_file,
-)
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.adapters.files.conversion import LocalConversionFiles, _load_yaml
+from cveta2.application.use_cases.convert.yolo import _parse_label_file
+from cveta2.domain.conversion import _normalize_class_names
+from cveta2.domain.errors import Cveta2Error
 
 # ---------------------------------------------------------------------------
 # Dataset YAML schema (coco/ultralytics-style)
@@ -134,7 +132,8 @@ def parse_yolo_label_file(path: Path) -> list[tuple[int, float, float, float, fl
         if not math.isfinite(class_id) or class_id < 0 or not class_id.is_integer():
             raise Cveta2Error(f"Ошибка: некорректный ID класса в {path}:{line_number}")
     return [
-        (int(row[0]), row[1], row[2], row[3], row[4]) for row in _parse_label_file(path)
+        (int(row[0]), row[1], row[2], row[3], row[4])
+        for row in _parse_label_file(path, files=LocalConversionFiles())
     ]
 
 

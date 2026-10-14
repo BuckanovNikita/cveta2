@@ -1,4 +1,4 @@
-"""Unit tests for ClearML config section in cveta2.config."""
+"""Unit tests for ClearML config section in cveta2.adapters.config.settings."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from cveta2.config import ClearmlConfig, ClearmlProjectMapping
+from cveta2.adapters.config.settings import ClearmlConfig, ClearmlProjectMapping
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:

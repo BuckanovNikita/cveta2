@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cveta2._client.dtos import RawAnnotations, RawDataMeta
-from cveta2.models import TaskInfo
+from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta
+from cveta2.domain.models import TaskInfo
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
 
 if TYPE_CHECKING:

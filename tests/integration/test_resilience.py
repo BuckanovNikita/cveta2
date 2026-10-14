@@ -15,18 +15,18 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2._concurrency import Workers, configure_workers
-from cveta2.client import CvatClient
-from cveta2.services.fetch import FetchOptions, FetchTarget, fetch_project
-from cveta2.services.upload import (
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.adapters.execution.concurrency import Workers, configure_workers
+from cveta2.adapters.files.manifests import list_manifests, load_manifest
+from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
+from cveta2.application.use_cases.upload import (
     UploadOptions,
     UploadPlan,
     UploadRequest,
     request_fingerprint,
-    upload_dataset,
 )
-from cveta2.upload_manifest import list_manifests, load_manifest
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import fetch_project, upload_dataset
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import (
     IMAGE_NAMES,
@@ -135,7 +135,7 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
     # the bucket from the host, which cannot resolve it.
     with (
         patch(
-            "cveta2.client.CvatClient.detect_project_cloud_storage",
+            "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
             return_value=_cs_info_for_host(cs_info),
         ),
         CvatClient(cfg) as client,

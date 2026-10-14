@@ -6,15 +6,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cveta2.commands.interactive.entities import (
+from cveta2.adapters.config.projects_cache import OrgProjects
+from cveta2.domain.models import OrganizationInfo, ProjectInfo
+from cveta2.interfaces.commands.interactive.entities import (
     _NEXT_ORG_VALUE,
     _RESCAN_VALUE,
     select_project,
 )
-from cveta2.models import OrganizationInfo, ProjectInfo
-from cveta2.projects_cache import OrgProjects
 
-_ENTITIES = "cveta2.commands.interactive.entities"
+_ENTITIES = "cveta2.interfaces.commands.interactive.entities"
 
 
 def _pages() -> list[OrgProjects]:

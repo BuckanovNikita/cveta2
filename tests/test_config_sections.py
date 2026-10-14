@@ -8,7 +8,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cveta2.config import (
+from cveta2.adapters.config.settings import (
     CacheConfig,
     CacheProjectSettings,
     CvatConfig,
@@ -201,7 +201,7 @@ def test_default_config_path_is_not_the_real_home() -> None:
     (``-p tests.env_isolation`` in addopts), those defaults silently point at the
     developer's real ``~/.config/cveta2/`` and a stray no-path call overwrites it.
     """
-    from cveta2.config import CONFIG_DIR, CONFIG_PATH
+    from cveta2.adapters.config.settings import CONFIG_DIR, CONFIG_PATH
 
     assert "cveta2-test-home-" in str(CONFIG_DIR)
     assert CONFIG_PATH == CONFIG_DIR / "config.yaml"

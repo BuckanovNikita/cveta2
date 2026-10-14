@@ -8,18 +8,14 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2._concurrency import Workers, configure_workers
-from cveta2.client import CvatClient
-from cveta2.exceptions import CvatApiError, Cveta2Error
-from cveta2.image_downloader import S3Syncer
-from cveta2.s3_utils import make_s3_client
-from cveta2.services.upload import (
-    UploadOptions,
-    UploadPlan,
-    UploadRequest,
-    upload_dataset,
-)
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.adapters.execution.concurrency import Workers, configure_workers
+from cveta2.adapters.s3.download import S3Syncer
+from cveta2.adapters.s3.utils import make_s3_client
+from cveta2.application.use_cases.upload import UploadOptions, UploadPlan, UploadRequest
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import upload_dataset
+from cveta2.domain.errors import CvatApiError, Cveta2Error
 from tests.integration.conftest import _make_sdk_client, seeded_project_name
 from tests.integration.test_upload import (
     IMAGE_NAMES,

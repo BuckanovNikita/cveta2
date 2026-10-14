@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cveta2.cli import CliApp
+from cveta2.interfaces.cli import CliApp
 from tests.helpers import parse_cli_args, patch_cli_client
 
 if TYPE_CHECKING:
@@ -303,7 +303,7 @@ _DISPATCH_CASES: list[tuple[str, list[str]]] = [
 
 @pytest.mark.parametrize(("handler", "argv"), _DISPATCH_CASES)
 def test_run_dispatches_to_handler(handler: str, argv: list[str]) -> None:
-    with patch(f"cveta2.cli.{handler}") as mock_handler:
+    with patch(f"cveta2.interfaces.cli.{handler}") as mock_handler:
         CliApp().run(argv)
     mock_handler.assert_called_once()
 
@@ -339,7 +339,7 @@ _TASK_DISPATCH_CASES: list[tuple[str, list[str]]] = [
 
 @pytest.mark.parametrize(("handler", "argv"), _TASK_DISPATCH_CASES)
 def test_task_run_dispatches_to_action(handler: str, argv: list[str]) -> None:
-    with patch(f"cveta2.cli.{handler}") as mock_handler:
+    with patch(f"cveta2.interfaces.cli.{handler}") as mock_handler:
         CliApp().run(argv)
     mock_handler.assert_called_once()
 
@@ -360,9 +360,9 @@ def test_fetch_forwards_and_echoes_skip_validation(
     """A resolved rerun command keeps the opt-in alongside service options."""
     with (
         patch_cli_client(),
-        patch("cveta2.commands.fetch.fetch_project") as service,
+        patch("cveta2.interfaces.commands.fetch.fetch_project") as service,
         patch(
-            "cveta2.commands.fetch._resolve_output_dir",
+            "cveta2.interfaces.commands.fetch._resolve_output_dir",
             return_value=tmp_path / "chosen",
         ),
     ):

@@ -1,0 +1,1 @@
+"""Canonical adapters config package."""

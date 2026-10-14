@@ -6,11 +6,12 @@ from unittest.mock import Mock
 import pytest
 from boto3.exceptions import S3UploadFailedError
 
-from cveta2.config import cache_dir_for_project
-from cveta2.exceptions import Cveta2Error
-from cveta2.image_downloader import CloudStorageInfo, S3Syncer
-from cveta2.s3_utils import run_s3_transfers
-from cveta2.task_cache import TaskAnnotationCache
+from cveta2.adapters.config.settings import cache_dir_for_project
+from cveta2.adapters.s3.download import S3Syncer
+from cveta2.adapters.s3.task_cache import TaskAnnotationCache
+from cveta2.adapters.s3.utils import run_s3_transfers
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.storage import CloudStorageInfo
 
 
 def test_upload_wrapper_accounted_and_peer_finishes() -> None:
@@ -30,7 +31,7 @@ def test_upload_wrapper_accounted_and_peer_finishes() -> None:
 def test_invalid_local_cache_cannot_unlink_is_miss(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cveta2.models import TaskInfo
+    from cveta2.domain.models import TaskInfo
 
     task = TaskInfo(
         id=1, name="task", status="completed", updated_date="today", subset=""
@@ -44,9 +45,9 @@ def test_invalid_local_cache_cannot_unlink_is_miss(
 def test_sync_preflight_rejects_before_any_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, key: str
 ) -> None:
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", Mock())
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", Mock())
     monkeypatch.setattr(
-        "cveta2.image_downloader.list_s3_objects",
+        "cveta2.adapters.s3.download.list_s3_objects",
         lambda *_args: [("root/good.jpg", "good.jpg"), (key, key)],
     )
     with pytest.raises(Cveta2Error):
@@ -63,9 +64,11 @@ def test_directory_not_cached_or_removed(
     directory.mkdir()
     client = Mock()
     client.get_object.return_value = {"Body": Mock(read=lambda: b"image")}
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", lambda *_args: client)
     monkeypatch.setattr(
-        "cveta2.image_downloader.list_s3_objects",
+        "cveta2.adapters.s3.download.make_s3_client", lambda *_args: client
+    )
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.download.list_s3_objects",
         lambda *_args: [("root/a.jpg", "a.jpg")],
     )
     stats = S3Syncer(tmp_path).sync(
@@ -115,7 +118,7 @@ def test_nonroot_corrupt_readonly_cache_falls_back(tmp_path: Path) -> None:
 
     if os.geteuid() == 0:
         pytest.skip("Requires a non-root process to enforce POSIX permissions")
-    from cveta2.models import TaskInfo
+    from cveta2.domain.models import TaskInfo
 
     directory = tmp_path / "readonly"
     directory.mkdir()
@@ -136,13 +139,13 @@ def test_nonroot_corrupt_readonly_cache_falls_back(tmp_path: Path) -> None:
 def test_sync_alias_collision_preflight(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: int
 ) -> None:
-    from cveta2._concurrency import configure_workers
+    from cveta2.adapters.execution.concurrency import configure_workers
 
     configure_workers(s3=workers, cvat=1)
     (tmp_path / "alias").symlink_to(tmp_path, target_is_directory=True)
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", Mock())
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", Mock())
     monkeypatch.setattr(
-        "cveta2.image_downloader.list_s3_objects",
+        "cveta2.adapters.s3.download.list_s3_objects",
         lambda *_args: [("root/a.jpg", "a.jpg"), ("root/alias/a.jpg", "alias/a.jpg")],
     )
     with pytest.raises(Cveta2Error, match="одно назначение"):
@@ -162,15 +165,17 @@ def test_cache_name_encoding_distinct(tmp_path: Path) -> None:
 def test_image_downloader_directory_is_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cveta2.image_downloader import ImageDownloader
-    from cveta2.models import ProjectAnnotations
+    from cveta2.adapters.s3.download import ImageDownloader
+    from cveta2.domain.models import ProjectAnnotations
     from tests.fixtures.fake_s3 import FakeS3Client
     from tests.helpers import make_bbox, make_cs_info
 
     dest = tmp_path / "a.jpg"
     dest.mkdir()
     client = FakeS3Client({"root/a.jpg": b"image"})
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", lambda *_args: client)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.download.make_s3_client", lambda *_args: client
+    )
     annotations = ProjectAnnotations(
         annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
     )
@@ -216,9 +221,9 @@ def test_cache_component_rejects_escaping_existing_symlink(tmp_path: Path) -> No
 def test_sync_ancestor_destination_collision_writes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", Mock())
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", Mock())
     monkeypatch.setattr(
-        "cveta2.image_downloader.list_s3_objects",
+        "cveta2.adapters.s3.download.list_s3_objects",
         lambda *_args: [("root/a", "a"), ("root/a/b.jpg", "a/b.jpg")],
     )
     with pytest.raises(Cveta2Error):
@@ -232,15 +237,17 @@ def test_sync_ancestor_destination_collision_writes_nothing(
 def test_public_download_preserves_path_rejection_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, workers: int
 ) -> None:
-    from cveta2._concurrency import configure_workers
-    from cveta2.image_downloader import ImageDownloader
-    from cveta2.models import ProjectAnnotations
+    from cveta2.adapters.execution.concurrency import configure_workers
+    from cveta2.adapters.s3.download import ImageDownloader
+    from cveta2.domain.models import ProjectAnnotations
     from tests.fixtures.fake_s3 import FakeS3Client
     from tests.helpers import make_bbox, make_cs_info
 
     configure_workers(s3=workers, cvat=1)
     client = FakeS3Client({}, keyed_by_bucket=False)
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", lambda *_args: client)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.download.make_s3_client", lambda *_args: client
+    )
     annotations = ProjectAnnotations(
         annotations=[make_bbox(image_name="escape.jpg", frame_path="../escape.jpg")],
         deleted_images=[],
@@ -259,13 +266,15 @@ def test_public_download_preserves_path_rejection_exception(
 def test_public_download_x_prefix_accepts_rooted_frame_and_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: str
 ) -> None:
-    from cveta2.image_downloader import ImageDownloader
-    from cveta2.models import ProjectAnnotations
+    from cveta2.adapters.s3.download import ImageDownloader
+    from cveta2.domain.models import ProjectAnnotations
     from tests.fixtures.fake_s3 import FakeS3Client
     from tests.helpers import make_bbox, make_cs_info
 
     client = FakeS3Client({f"{prefix}/a.jpg": b"valid image"}, keyed_by_bucket=False)
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", lambda *_args: client)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.download.make_s3_client", lambda *_args: client
+    )
     annotations = ProjectAnnotations(
         annotations=[make_bbox(image_name="a.jpg", frame_path=f"/{prefix}/a.jpg")],
         deleted_images=[],
@@ -284,13 +293,15 @@ def test_public_download_x_prefix_accepts_rooted_frame_and_cache(
 def test_public_download_prefix_ending_x_rejects_outside_cached_frame(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cveta2.image_downloader import ImageDownloader
-    from cveta2.models import ProjectAnnotations
+    from cveta2.adapters.s3.download import ImageDownloader
+    from cveta2.domain.models import ProjectAnnotations
     from tests.fixtures.fake_s3 import FakeS3Client
     from tests.helpers import make_bbox, make_cs_info
 
     client = FakeS3Client({"root": b"outside object"}, keyed_by_bucket=False)
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", lambda *_args: client)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.download.make_s3_client", lambda *_args: client
+    )
     cached = tmp_path / "root"
     cached.write_bytes(b"outside cached object")
     annotations = ProjectAnnotations(
@@ -308,8 +319,8 @@ def test_public_download_cached_rooted_frame_needs_no_storage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Only pending images require storage; rooted cache names still resolve."""
-    from cveta2.image_downloader import ImageDownloader
-    from cveta2.models import ProjectAnnotations
+    from cveta2.adapters.s3.download import ImageDownloader
+    from cveta2.domain.models import ProjectAnnotations
     from tests.helpers import make_bbox
 
     destination = tmp_path / "nested" / "a.jpg"
@@ -318,7 +329,7 @@ def test_public_download_cached_rooted_frame_needs_no_storage(
     factory = Mock(
         side_effect=AssertionError("A complete cache hit needs no S3 client")
     )
-    monkeypatch.setattr("cveta2.image_downloader.make_s3_client", factory)
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", factory)
     annotations = ProjectAnnotations(
         annotations=[make_bbox(image_name="a.jpg", frame_path="/nested/a.jpg")],
         deleted_images=[],

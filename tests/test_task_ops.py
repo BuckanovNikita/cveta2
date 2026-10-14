@@ -11,22 +11,22 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from cveta2._client.dtos import (
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawDataMeta,
     RawFrame,
     RawJob,
     UploadTaskSpec,
 )
-from cveta2._client.ports import CvatApiPort
-from cveta2.client import CvatClient
-from cveta2.commands.task_ops import (
+from cveta2.composition.client import CvatClient
+from cveta2.domain.errors import CvatApiError, Cveta2Error
+from cveta2.domain.models import LabelInfo, TaskInfo
+from cveta2.interfaces.commands.task_ops import (
     STATE_CLI_TO_CVAT,
     run_task_mark_deleted,
     run_task_status,
 )
-from cveta2.exceptions import CvatApiError, Cveta2Error
-from cveta2.models import LabelInfo, TaskInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
     CFG,

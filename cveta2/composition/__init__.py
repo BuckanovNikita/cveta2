@@ -1,0 +1,1 @@
+"""Canonical composition package."""

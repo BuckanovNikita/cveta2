@@ -11,17 +11,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cveta2._client.dtos import (
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.application.client.shared import FetchContext
+from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawAttribute,
     RawDataMeta,
     RawFrame,
 )
-from cveta2._client_ops.shared import FetchContext
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
-from cveta2.exceptions import CvatApiError, Cveta2Error, TaskNotFoundError
-from cveta2.models import (
+from cveta2.composition.client import CvatClient
+from cveta2.domain.errors import CvatApiError, Cveta2Error, TaskNotFoundError
+from cveta2.domain.models import (
     BBoxAnnotation,
     LabelAttributeInfo,
     LabelInfo,

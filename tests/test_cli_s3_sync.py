@@ -14,9 +14,9 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from cveta2.cli import CliApp
-from cveta2.image_downloader import DownloadStats
-from cveta2.models import ProjectInfo
+from cveta2.domain.models import ProjectInfo
+from cveta2.domain.storage import DownloadStats
+from cveta2.interfaces.cli import CliApp
 from tests.helpers import (
     make_cs_info,
     mock_client_ctx,
@@ -138,8 +138,8 @@ def test_s3_sync_uses_canonical_project_settings(
     *,
     explicit_cache: bool,
 ) -> None:
-    from cveta2.client import CvatClient
-    from cveta2.config import CvatConfig
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
     from tests.fixtures.fake_cvat_api import FakeCvatApi
 
     write_config_yaml(

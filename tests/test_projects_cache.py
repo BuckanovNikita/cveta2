@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from cveta2.models import ProjectInfo
-from cveta2.projects_cache import (
+from cveta2.adapters.config.projects_cache import (
     OrgProjects,
     load_orgs_cache,
     load_projects_cache,
     save_orgs_cache,
     update_org_projects,
 )
+from cveta2.domain.models import ProjectInfo
 
 if TYPE_CHECKING:
     from pathlib import Path

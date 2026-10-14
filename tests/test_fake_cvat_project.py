@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cveta2.models import LabelInfo, ProjectInfo
+from cveta2.domain.models import LabelInfo, ProjectInfo
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
     LoadedFixtures,

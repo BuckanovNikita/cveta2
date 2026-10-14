@@ -9,19 +9,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2.image_uploader import (
-    S3Uploader,
-    build_server_file_mapping,
-    resolve_images,
-)
-from cveta2.s3_utils import build_s3_key
+from cveta2.adapters.files.image_search import resolve_images
+from cveta2.adapters.s3.upload import S3Uploader, build_server_file_mapping
+from cveta2.domain.paths import build_s3_key
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import make_cs_info, patch_recording_s3
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cveta2.image_downloader import CloudStorageInfo
+    from cveta2.domain.storage import CloudStorageInfo
 
 _MONTH_PREFIX_RE = re.compile(r"\d{4}-\d{2}/.+")
 
@@ -229,7 +226,7 @@ class TestBuildServerFileMapping:
         frozen clock straddles a month boundary, so both mistakes change
         the answer.
         """
-        monkeypatch.setattr("cveta2.image_uploader.datetime", _FixedClock)
+        monkeypatch.setattr("cveta2.adapters.s3.upload.datetime", _FixedClock)
         cs_info = _make_cs_info()
 
         mapping, _ = build_server_file_mapping(
@@ -260,7 +257,7 @@ class TestBuildServerFileMapping:
                 "other-bucket/project/images/theirs.jpg": b"theirs",
             }
         )
-        factory = patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
+        factory = patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", client)
 
         mapping, existing_keys = build_server_file_mapping(
             cs_info, {"mine.jpg", "theirs.jpg"}
@@ -419,7 +416,7 @@ class TestS3Uploader:
     ) -> None:
         """An empty batch short-circuits before any S3 client is built."""
         factory = patch_recording_s3(
-            monkeypatch, "cveta2.image_uploader", FakeS3Client()
+            monkeypatch, "cveta2.adapters.s3.upload", FakeS3Client()
         )
 
         stats = S3Uploader().upload(_upload_cs_info(), {}, {}, set())
@@ -444,7 +441,7 @@ class TestS3Uploader:
                 "other-bucket/project/images/new.jpg": b"not-mine",
             }
         )
-        factory = patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
+        factory = patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", client)
         images = {
             "new.jpg": _touch(tmp_path / "new.jpg"),
             "old.jpg": _touch(tmp_path / "old.jpg"),
@@ -480,7 +477,7 @@ class TestS3Uploader:
         keys by name or by a single folder produces a different bucket.
         """
         client = FakeS3Client()
-        patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
+        patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", client)
         images = {
             "january.jpg": _touch(tmp_path / "january.jpg"),
             "february.jpg": _touch(tmp_path / "february.jpg"),
@@ -516,7 +513,7 @@ class TestS3Uploader:
         the opposite answer.
         """
         client = FakeS3Client(case.seeded)
-        patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
+        patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", client)
 
         stats = S3Uploader().upload(
             _upload_cs_info(),
@@ -540,7 +537,7 @@ class TestS3Uploader:
         failing transfer the name and the describe callable were free.
         """
         client = _UnwritableKeysS3Client(unwritable={"project/images/bad.jpg"})
-        patch_recording_s3(monkeypatch, "cveta2.image_uploader", client)
+        patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", client)
         images = {
             "good.jpg": _touch(tmp_path / "good.jpg"),
             "bad.jpg": _touch(tmp_path / "bad.jpg"),

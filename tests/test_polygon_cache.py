@@ -6,23 +6,24 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
-from cveta2.client import CvatClient
-from cveta2.image_downloader import CloudStorageInfo
-from cveta2.models import (
+from cveta2.adapters.s3.task_cache import (
+    S3CacheBackend,
+    TaskAnnotationCache,
+    get_task_cache_dir,
+)
+from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawFrame
+from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import fetch_selected_tasks
+from cveta2.domain.cache import CachedTaskEnvelope
+from cveta2.domain.models import (
     BBoxAnnotation,
     ImageWithoutAnnotations,
     LabelInfo,
     ProjectInfo,
     TaskAnnotations,
 )
-from cveta2.services.fetch import FetchOptions, FetchTarget, fetch_selected_tasks
-from cveta2.task_cache import (
-    CachedTaskEnvelope,
-    S3CacheBackend,
-    TaskAnnotationCache,
-    get_task_cache_dir,
-)
+from cveta2.domain.storage import CloudStorageInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
@@ -133,7 +134,7 @@ def test_old_polygon_cache_refetches_and_round_trips_without_warning_replay(
         )
         return pd.read_csv(tmp_path / output / "dataset.csv")
 
-    with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+    with patch("cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3):
         fresh = fetch("fresh")
         assert api.annotation_calls == [task.id]
         assert fresh["instance_shape"].tolist() == ["box"]

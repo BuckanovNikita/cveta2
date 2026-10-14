@@ -17,16 +17,8 @@ from cvat_sdk import Client
 from cvat_sdk.api_client.exceptions import ApiAttributeError, ApiException
 from cvat_sdk.core.exceptions import BackgroundRequestException
 
-from cveta2._client.dtos import (
-    RawAnnotations,
-    RawAttribute,
-    RawDataMeta,
-    RawFrame,
-    RawShape,
-    UploadTaskSpec,
-)
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2._client.sdk_convert import (
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.adapters.cvat.sdk_convert import (
     convert_annotations,
     convert_attributes,
     convert_data_meta,
@@ -37,9 +29,17 @@ from cveta2._client.sdk_convert import (
     extract_creator_username,
     extract_updated_date,
 )
-from cveta2._retry import RetryPolicy, _log_retry, configure_retries
-from cveta2.exceptions import CvatApiError, Cveta2Error
-from cveta2.models import TaskInfo
+from cveta2.adapters.execution.retry import RetryPolicy, _log_retry, configure_retries
+from cveta2.application.ports.dtos import (
+    RawAnnotations,
+    RawAttribute,
+    RawDataMeta,
+    RawFrame,
+    RawShape,
+    UploadTaskSpec,
+)
+from cveta2.domain.errors import CvatApiError, Cveta2Error
+from cveta2.domain.models import TaskInfo
 from tests.helpers import make_sdk_shape
 
 if TYPE_CHECKING:

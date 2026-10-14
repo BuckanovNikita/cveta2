@@ -11,14 +11,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from cveta2._client.dtos import (
+from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawAttribute,
     RawDataMeta,
     RawFrame,
     RawShape,
 )
-from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
+from cveta2.domain.models import LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 

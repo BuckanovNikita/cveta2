@@ -13,15 +13,12 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig, IgnoreConfig
-from cveta2.image_downloader import CloudStorageInfo
-from cveta2.image_uploader import (
-    S3Uploader,
-    build_server_file_mapping,
-    resolve_images,
-)
+from cveta2.adapters.config.settings import CvatConfig, IgnoreConfig
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.adapters.files.image_search import resolve_images
+from cveta2.adapters.s3.upload import S3Uploader, build_server_file_mapping
+from cveta2.composition.client import CvatClient
+from cveta2.domain.storage import CloudStorageInfo
 from tests.integration.conftest import (
     _env,
     _make_sdk_client,
@@ -307,7 +304,7 @@ class TestUploadThenFetchTaskIntegration:
     """Upload a task, run cveta2 fetch-task, compare results are equal."""
 
     def test_upload_task_then_fetch_task_results_equal(self, tmp_path: Path) -> None:
-        from cveta2.commands.fetch import run_fetch_task
+        from cveta2.interfaces.commands.fetch import run_fetch_task
 
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         task_name = "upload-then-fetch-test"
@@ -356,15 +353,21 @@ class TestUploadThenFetchTaskIntegration:
             force=False,
         )
         with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
-            patch("cveta2.commands._bootstrap.require_host"),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.config.IgnoreConfig.load",
+                "cveta2.interfaces.commands._bootstrap.CvatConfig.load",
+                return_value=cfg,
+            ),
+            patch("cveta2.interfaces.commands._bootstrap.require_host"),
+            patch(
+                "cveta2.interfaces.commands._helpers.load_projects_cache",
+                return_value=[],
+            ),
+            patch(
+                "cveta2.adapters.config.settings.IgnoreConfig.load",
                 return_value=IgnoreConfig(),
             ),
             patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=cs_info,
             ),
         ):
@@ -413,8 +416,8 @@ class TestUploadDeletedFromCsvIntegration:
     def test_upload_csv_with_deleted_rows(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from cveta2.commands.fetch import run_fetch_task
-        from cveta2.commands.upload import run_upload
+        from cveta2.interfaces.commands.fetch import run_fetch_task
+        from cveta2.interfaces.commands.upload import run_upload
 
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         task_name = "integration-deleted-csv-upload-test"
@@ -465,14 +468,20 @@ class TestUploadDeletedFromCsvIntegration:
             resume=False,
         )
         with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
             patch(
-                "cveta2.commands.upload._select_labels",
+                "cveta2.interfaces.commands._bootstrap.CvatConfig.load",
+                return_value=cfg,
+            ),
+            patch(
+                "cveta2.interfaces.commands.upload._select_labels",
                 return_value=["person", "car"],
             ),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.interfaces.commands._helpers.load_projects_cache",
+                return_value=[],
+            ),
+            patch(
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=_cs_info_for_host(cs_info),
             ),
         ):
@@ -505,15 +514,21 @@ class TestUploadDeletedFromCsvIntegration:
             force=False,
         )
         with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
-            patch("cveta2.commands._bootstrap.require_host"),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.config.IgnoreConfig.load",
+                "cveta2.interfaces.commands._bootstrap.CvatConfig.load",
+                return_value=cfg,
+            ),
+            patch("cveta2.interfaces.commands._bootstrap.require_host"),
+            patch(
+                "cveta2.interfaces.commands._helpers.load_projects_cache",
+                return_value=[],
+            ),
+            patch(
+                "cveta2.adapters.config.settings.IgnoreConfig.load",
                 return_value=IgnoreConfig(),
             ),
             patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=cs_info,
             ),
         ):

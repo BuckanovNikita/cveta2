@@ -8,16 +8,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2._client.dtos import (
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.application.ports.dtos import (
     LabelPatch,
     RawAnnotations,
     RawDataMeta,
     RawFrame,
 )
-from cveta2._client.ports import CvatApiPort
-from cveta2.cli import CliApp
-from cveta2.client import CvatClient
-from cveta2.commands.labels import (
+from cveta2.composition.client import CvatClient
+from cveta2.domain.models import LabelAttributeInfo, LabelInfo, ProjectInfo
+from cveta2.interfaces.cli import CliApp
+from cveta2.interfaces.commands.labels import (
     _interactive_add,
     _interactive_delete,
     _interactive_recolor,
@@ -25,8 +27,6 @@ from cveta2.commands.labels import (
     _print_labels,
     _validate_hex_color,
 )
-from cveta2.config import CvatConfig
-from cveta2.models import LabelAttributeInfo, LabelInfo, ProjectInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.helpers import (
@@ -80,11 +80,11 @@ def _client_with_api_mock() -> tuple[CvatClient, MagicMock]:
 
 @contextmanager
 def _patch_prompts(**returns: object) -> Iterator[None]:
-    """Patch ``cveta2.commands.labels.interactive.<name>`` to fixed return values."""
+    """Patch interactive label prompts to fixed return values."""
     with pytest.MonkeyPatch.context() as mp:
         for name, value in returns.items():
             mp.setattr(
-                f"cveta2.commands.labels.interactive.{name}",
+                f"cveta2.interfaces.commands.labels.interactive.{name}",
                 lambda *_a, _v=value, **_kw: _v,
             )
         yield

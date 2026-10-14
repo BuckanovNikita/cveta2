@@ -9,9 +9,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2.client import CvatClient
-from cveta2.exceptions import Cveta2Error
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.composition.client import CvatClient
+from cveta2.domain.errors import Cveta2Error
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import IMAGE_NAMES, _get_project_and_storage
 
