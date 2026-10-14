@@ -12,29 +12,29 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from cveta2._client.dtos import (
+from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawDataMeta,
     RawFrame,
     RawIssue,
     RawShape,
 )
-from cveta2.exceptions import CvatApiError
-from cveta2.models import OrganizationInfo, ProjectInfo, TaskInfo
+from cveta2.domain.errors import CvatApiError
+from cveta2.domain.models import OrganizationInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping, Sequence
 
-    from cveta2._client.dtos import (
+    from cveta2.application.ports.dtos import (
         LabelPatch,
         NewIssue,
         NewShape,
         RawJob,
         UploadTaskSpec,
     )
-    from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import LabelInfo
+    from cveta2.domain.models import LabelInfo
+    from cveta2.domain.storage import CloudStorageInfo
 
 _DEFAULT_FAIL_METHODS = ("get_task_data_meta", "get_task_annotations")
 
@@ -268,7 +268,7 @@ class FakeCvatApi:
         into the task's seeded status, so a fixture that asks for a
         completed task gets jobs that read as completed.
         """
-        from cveta2._client.dtos import RawJob
+        from cveta2.application.ports.dtos import RawJob
 
         self._raise_if_failing("get_task_jobs", task_id)
         data_meta, _annotations = self._task_data[task_id]

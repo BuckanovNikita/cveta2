@@ -10,17 +10,22 @@ import pytest
 from botocore.exceptions import ClientError
 
 import cveta2
-from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
-from cveta2._concurrency import configure_workers
-from cveta2.exceptions import CvatApiError, Cveta2Error
-from cveta2.models import (
+from cveta2.adapters.execution.concurrency import configure_workers
+from cveta2.adapters.s3.task_cache import (
+    S3CacheBackend,
+    TaskAnnotationCache,
+    get_task_cache_dir,
+)
+from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
+from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
+from cveta2.composition.workflows import fetch_project
+from cveta2.domain.errors import CvatApiError, Cveta2Error
+from cveta2.domain.models import (
     ImageWithoutAnnotations,
     ProjectInfo,
     TaskAnnotations,
     TaskInfo,
 )
-from cveta2.services.fetch import FetchOptions, FetchTarget, fetch_project
-from cveta2.task_cache import S3CacheBackend, TaskAnnotationCache, get_task_cache_dir
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
@@ -29,7 +34,7 @@ from tests.helpers import client_with_api, write_config_yaml
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from cveta2.dataset_partition import PartitionResult
+    from cveta2.domain.partition import PartitionResult
 
 
 class PromotionApi(FakeCvatApi):
@@ -405,8 +410,12 @@ def test_partial_update_failure_preserves_changes_aborts_outputs_and_can_retry(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("failed promotion must not download or publish")
 
-    monkeypatch.setattr("cveta2.client.CvatClient.download_images", forbidden)
-    monkeypatch.setattr("cveta2._clearml.maybe_publish_clearml", forbidden)
+    monkeypatch.setattr(
+        "cveta2.composition.client.CvatClient.download_images", forbidden
+    )
+    monkeypatch.setattr(
+        "cveta2.composition.publishing.maybe_publish_clearml", forbidden
+    )
     with pytest.raises(Cveta2Error) as caught:
         _run(
             api,
@@ -495,7 +504,9 @@ def test_promotion_invalidates_custom_local_and_s3_caches_before_first_patch(
     unrelated = root / "project_1" / "task_999.json"
     unrelated.write_text("other task", encoding="utf-8")
     s3.objects["other-bucket/other-key"] = b"unrelated"
-    monkeypatch.setattr("cveta2.task_cache.make_s3_client", lambda _endpoint: s3)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3
+    )
 
     def before_update(_job_id: int) -> None:
         assert not stale_path.exists()
@@ -529,9 +540,9 @@ def test_disabled_cache_still_invalidates_local_without_contacting_s3(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("cache-disabled promotion must not contact S3")
 
-    monkeypatch.setattr("cveta2.task_cache.make_s3_client", forbidden)
+    monkeypatch.setattr("cveta2.adapters.s3.task_cache.make_s3_client", forbidden)
     monkeypatch.setattr(
-        "cveta2.client.CvatClient.detect_project_cloud_storage", forbidden
+        "cveta2.composition.client.CvatClient.detect_project_cloud_storage", forbidden
     )
 
     def before_update(_job_id: int) -> None:
@@ -555,7 +566,9 @@ def test_partial_mutation_failure_leaves_both_cache_layers_invalidated(
     config, root = _custom_config(tmp_path)
     s3 = FakeS3Client()
     stale_path, stale_key = _seed_stale_cache(api, root, s3)
-    monkeypatch.setattr("cveta2.task_cache.make_s3_client", lambda _endpoint: s3)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3
+    )
     with pytest.raises(Cveta2Error):
         _run(api, tmp_path / "output", use_cache=True, config_path=config)
     assert not stale_path.exists()
@@ -585,7 +598,9 @@ def test_invalidation_failure_aborts_before_task_mutation(
     config, root = _custom_config(tmp_path)
     s3 = FailingDeleteS3() if layer == "s3" else FakeS3Client()
     stale_path, _key = _seed_stale_cache(api, root, s3)
-    monkeypatch.setattr("cveta2.task_cache.make_s3_client", lambda _endpoint: s3)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3
+    )
     if layer == "local":
         original_unlink = Path.unlink
 

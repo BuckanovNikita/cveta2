@@ -11,20 +11,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cveta2.commands.doctor import (
-    _check_one,
-    _log_broken_summary,
-    _scan_permissions,
-    check_aws_credentials,
-    check_cache_permissions,
-    check_config,
-    collect_cache_roots,
-)
-from cveta2.config import (
+from cveta2.adapters.config.settings import (
     CacheConfig,
     CacheProjectSettings,
     CvatConfig,
     ImageCacheConfig,
+)
+from cveta2.adapters.s3.diagnostics import check_aws_credentials
+from cveta2.interfaces.commands.doctor import (
+    _check_one,
+    _log_broken_summary,
+    _scan_permissions,
+    check_cache_permissions,
+    check_config,
+    collect_cache_roots,
 )
 
 # ---------------------------------------------------------------------------
@@ -36,12 +36,14 @@ def test_check_config_missing_file_falls_back_to_env() -> None:
     cfg = CvatConfig(host="https://cvat.ai", username="u", password="p")
     with (
         patch(
-            "cveta2.commands.doctor.get_config_path",
+            "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.config.ImageCacheConfig.load",
+            "cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg
+        ),
+        patch(
+            "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ImageCacheConfig(),
         ),
     ):
@@ -52,12 +54,14 @@ def test_check_config_empty_host_returns_false() -> None:
     cfg = CvatConfig(host="", username="u", password="p")
     with (
         patch(
-            "cveta2.commands.doctor.get_config_path",
+            "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.config.ImageCacheConfig.load",
+            "cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg
+        ),
+        patch(
+            "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ImageCacheConfig(),
         ),
     ):
@@ -68,12 +72,14 @@ def test_check_config_no_credentials_returns_false() -> None:
     cfg = CvatConfig(host="https://cvat.ai")
     with (
         patch(
-            "cveta2.commands.doctor.get_config_path",
+            "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.config.ImageCacheConfig.load",
+            "cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg
+        ),
+        patch(
+            "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ImageCacheConfig(),
         ),
     ):
@@ -85,12 +91,14 @@ def test_check_config_bad_image_cache_dir(tmp_path: Path) -> None:
     ic_cfg = ImageCacheConfig(projects={"proj": tmp_path / "nope"})
     with (
         patch(
-            "cveta2.commands.doctor.get_config_path",
+            "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.config.ImageCacheConfig.load",
+            "cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg
+        ),
+        patch(
+            "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ic_cfg,
         ),
     ):
@@ -104,12 +112,14 @@ def test_check_config_valid_image_cache_dir(tmp_path: Path) -> None:
     ic_cfg = ImageCacheConfig(projects={"proj": cache_dir})
     with (
         patch(
-            "cveta2.commands.doctor.get_config_path",
+            "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch("cveta2.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
-            "cveta2.config.ImageCacheConfig.load",
+            "cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg
+        ),
+        patch(
+            "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ic_cfg,
         ),
     ):
@@ -255,11 +265,11 @@ def test_collect_cache_roots_covers_every_configured_location(tmp_path: Path) ->
 
     with (
         patch(
-            "cveta2.commands.doctor.ImageCacheConfig.load",
+            "cveta2.interfaces.commands.doctor.ImageCacheConfig.load",
             return_value=ImageCacheConfig(projects={"proj": explicit}),
         ),
         patch(
-            "cveta2.commands.doctor.CacheConfig.load",
+            "cveta2.interfaces.commands.doctor.CacheConfig.load",
             return_value=CacheConfig(
                 images_root=images,
                 tasks_root=tasks,
@@ -267,7 +277,7 @@ def test_collect_cache_roots_covers_every_configured_location(tmp_path: Path) ->
             ),
         ),
         patch(
-            "cveta2.commands.doctor.default_cache_base",
+            "cveta2.interfaces.commands.doctor.default_cache_base",
             return_value=default_base,
         ),
     ):
@@ -283,17 +293,17 @@ def test_collect_cache_roots_skips_missing_and_nested(tmp_path: Path) -> None:
 
     with (
         patch(
-            "cveta2.commands.doctor.ImageCacheConfig.load",
+            "cveta2.interfaces.commands.doctor.ImageCacheConfig.load",
             return_value=ImageCacheConfig(
                 projects={"proj": nested, "gone": tmp_path / "nope"}
             ),
         ),
         patch(
-            "cveta2.commands.doctor.CacheConfig.load",
+            "cveta2.interfaces.commands.doctor.CacheConfig.load",
             return_value=CacheConfig(images_root=images),
         ),
         patch(
-            "cveta2.commands.doctor.default_cache_base",
+            "cveta2.interfaces.commands.doctor.default_cache_base",
             return_value=tmp_path / "missing-base",
         ),
     ):
@@ -308,7 +318,9 @@ def test_collect_cache_roots_skips_missing_and_nested(tmp_path: Path) -> None:
 
 
 def test_check_cache_permissions_no_roots_is_ok() -> None:
-    with patch("cveta2.commands.doctor.collect_cache_roots", return_value={}):
+    with patch(
+        "cveta2.interfaces.commands.doctor.collect_cache_roots", return_value={}
+    ):
         assert check_cache_permissions() is True
 
 
@@ -319,7 +331,7 @@ def test_check_cache_permissions_fixes_owned_paths(tmp_path: Path) -> None:
     tmp_path.chmod(0o770)
 
     with patch(
-        "cveta2.commands.doctor.collect_cache_roots",
+        "cveta2.interfaces.commands.doctor.collect_cache_roots",
         return_value={"cache.images_root": tmp_path},
     ):
         assert check_cache_permissions(fix=True) is True
@@ -343,10 +355,12 @@ def test_check_cache_permissions_lists_users_that_must_run_doctor(
 
     with (
         patch(
-            "cveta2.commands.doctor.collect_cache_roots",
+            "cveta2.interfaces.commands.doctor.collect_cache_roots",
             return_value={"cache.images_root": tmp_path},
         ),
-        patch("cveta2.commands.doctor.os.getuid", return_value=os.getuid() + 1),
+        patch(
+            "cveta2.interfaces.commands.doctor.os.getuid", return_value=os.getuid() + 1
+        ),
     ):
         assert check_cache_permissions(fix=True) is False
 
@@ -365,7 +379,7 @@ def test_check_cache_permissions_reports_own_unfixable_paths(
 
     with (
         patch(
-            "cveta2.commands.doctor.collect_cache_roots",
+            "cveta2.interfaces.commands.doctor.collect_cache_roots",
             return_value={"cache.images_root": tmp_path},
         ),
         patch.object(Path, "chmod", side_effect=OSError("read-only file system")),
@@ -461,3 +475,16 @@ def test_log_broken_summary_truncates(tmp_path: Path, capture_logs: list[str]) -
 
     _log_broken_summary("proj", tmp_path, [], items)
     assert any("… and 5 more" in m for m in capture_logs)
+
+
+def test_aws_sdk_failure_is_translated_at_adapter_boundary() -> None:
+    from botocore.exceptions import NoCredentialsError
+
+    from cveta2.adapters.s3.diagnostics import check_aws_credentials
+    from cveta2.domain.errors import Cveta2Error
+
+    with (
+        patch("boto3.Session", side_effect=NoCredentialsError()),
+        pytest.raises(Cveta2Error, match="Unable to locate credentials"),
+    ):
+        check_aws_credentials()

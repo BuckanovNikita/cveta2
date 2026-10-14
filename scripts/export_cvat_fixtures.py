@@ -2,7 +2,7 @@
 r"""Export CVAT project/task data to JSON fixtures for tests.
 
 Uses only cvat_sdk (no cveta2 client). Credentials via env: CVAT_HOST,
-CVAT_USERNAME, CVAT_PASSWORD. Output mirrors cveta2._client.dtos shape.
+CVAT_USERNAME, CVAT_PASSWORD. Output mirrors cveta2.application.ports.dtos shape.
 
 Example:
   CVAT_HOST=http://localhost:8080 CVAT_USERNAME=admin CVAT_PASSWORD=... \\

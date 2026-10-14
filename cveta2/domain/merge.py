@@ -1,0 +1,160 @@
+"""Pure dataset merge and task-ID/split precedence policies."""
+
+import pandas as pd
+from loguru import logger
+
+_TASK_ID_COLUMN = "task_id"
+
+
+def _propagate_splits(
+    merged: pd.DataFrame,
+    old: pd.DataFrame,
+    new: pd.DataFrame,
+    common_images: set[str],
+) -> pd.DataFrame:
+    """Return *merged* with ``split`` values filled in from *old* where absent.
+
+    For images present in both datasets where **new** won the merge, the
+    ``split`` from *old* is copied over when the merged row has no split.
+    *merged* itself is not modified.
+
+    Warnings are emitted when:
+    - *old* has no ``split`` data at all (column missing or all NaN).
+    - Both *old* and *new* have non-null ``split`` for the same common images.
+    """
+    if "split" not in old.columns or old["split"].isna().all():
+        logger.warning("В old-датасете нет данных split — пропагация split невозможна")
+        return merged
+
+    old_splits: dict[str, str] = {
+        str(image_name): str(split)
+        for image_name, split in old[old["split"].notna()]
+        .drop_duplicates("image_name")
+        .set_index("image_name")["split"]
+        .items()
+    }
+
+    if "split" in new.columns:
+        new_split_images = set(
+            new.loc[
+                new["split"].notna() & new["image_name"].isin(common_images),
+                "image_name",
+            ]
+        )
+        conflict_images = new_split_images & set(old_splits.keys())
+        if conflict_images:
+            logger.warning(
+                f"split задан в обоих датасетах для {len(conflict_images)} "
+                f"изображений — используется значение из победившей стороны"
+            )
+
+    if "split" not in merged.columns:
+        return merged
+
+    merged = merged.copy()
+    mask = merged["split"].isna() & merged["image_name"].isin(old_splits.keys())
+    merged.loc[mask, "split"] = merged.loc[mask, "image_name"].map(old_splits)
+
+    if mask.any():
+        logger.info(
+            f"Пропагация split: заполнено {int(mask.sum())} строк из old-датасета"
+        )
+
+    return merged
+
+
+def _split_winners(
+    old: pd.DataFrame,
+    new: pd.DataFrame,
+    common_images: set[str],
+    *,
+    by_task: bool,
+) -> tuple[set[str], set[str]]:
+    """Return ``(keep_from_new, keep_from_old)`` for the conflicting images.
+
+    By default **new** wins every conflict; in *by_task* mode each image
+    goes to the side that annotated it in the later CVAT task.
+    """
+    if by_task and common_images:
+        keep_from_new = _resolve_by_task(old, new, common_images)
+        return keep_from_new, common_images - keep_from_new
+    return common_images, set()
+
+
+def _merge_datasets(
+    old: pd.DataFrame,
+    new: pd.DataFrame,
+    deleted: set[str],
+    *,
+    by_task: bool = False,
+) -> pd.DataFrame:
+    """Merge *old* and *new* datasets, removing images from *deleted*.
+
+    Default behaviour (``by_task=False``):
+        For images present in both datasets keep only **new** annotations.
+
+    ``--by-task`` mode (``by_task=True``):
+        For images present in both datasets keep annotations from whichever
+        dataset holds the higher ``task_id`` for that image.
+    """
+    old_images: set[str] = set(old["image_name"].dropna().unique())
+    new_images: set[str] = set(new["image_name"].dropna().unique())
+    common_images = old_images & new_images
+
+    keep_from_new, keep_from_old = _split_winners(
+        old, new, common_images, by_task=by_task
+    )
+
+    old_keep_mask = old["image_name"].isin(
+        (old_images - common_images - deleted) | (keep_from_old - deleted)
+    )
+    new_keep_mask = new["image_name"].isin((new_images - deleted) - keep_from_old)
+    merged: pd.DataFrame = pd.concat(
+        [old[old_keep_mask], new[new_keep_mask]], ignore_index=True
+    )
+    merged = _propagate_splits(merged, old, new, common_images)
+
+    logger.info(
+        f"Результат слияния: "
+        f"только в old={len(old_images - new_images - deleted)}, "
+        f"только в new={len(new_images - old_images - deleted)}, "
+        f"конфликт→new={len(keep_from_new - deleted)}, "
+        f"конфликт→old={len(keep_from_old - deleted)}, "
+        f"удалено={len((old_images | new_images) & deleted)}, "
+        f"итого строк={len(merged)}"
+    )
+    return merged
+
+
+def _max_task_id_per_image(df: pd.DataFrame, images: set[str]) -> "pd.Series[float]":
+    """Return the max ``task_id`` per image within *images*."""
+    subset = df[df["image_name"].isin(images)]
+    parsed = pd.to_numeric(subset[_TASK_ID_COLUMN], errors="coerce")
+    latest: pd.Series[float] = parsed.groupby(subset["image_name"]).max()
+    return latest
+
+
+def _resolve_by_task(
+    old: pd.DataFrame,
+    new: pd.DataFrame,
+    common_images: set[str],
+) -> set[str]:
+    """Return the subset of *common_images* where **new** should win.
+
+    For each image present in both datasets, compare the maximum
+    ``task_id``.  If new >= old the image goes to the "keep from new"
+    set, otherwise it stays with old.  Ids are used rather than
+    ``task_updated_date`` because a project-wide label edit rewrites
+    every task's date at once.
+    """
+    old_max = _max_task_id_per_image(old, common_images)
+    new_max = _max_task_id_per_image(new, common_images)
+
+    keep_from_new: set[str] = set()
+    for img in sorted(common_images):
+        old_id = old_max.get(img)
+        new_id = new_max.get(img)
+        # If either side has no usable task id, fall back to new-wins.
+        if pd.isna(old_id) or pd.isna(new_id) or new_id >= old_id:
+            keep_from_new.add(img)
+    return keep_from_new

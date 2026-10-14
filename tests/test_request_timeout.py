@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import yaml
 
-from cveta2._client.connection import configure_data_timeout, configure_network
-from cveta2._concurrency import Workers, configure_workers
-from cveta2._retry import RetryPolicy, configure_retries
-from cveta2.config import CvatConfig, NetworkConfig
-from cveta2.s3_utils import make_s3_client, set_default_data_timeout
+from cveta2.adapters.config.settings import CvatConfig, NetworkConfig
+from cveta2.adapters.execution.concurrency import Workers, configure_workers
+from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
+from cveta2.adapters.s3.utils import make_s3_client, set_default_data_timeout
+from cveta2.composition.runtime import configure_data_timeout, configure_network
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -184,12 +184,12 @@ def test_configure_data_timeout_installs_global_backstop(
     second in-process connection without one kept the previous run's read
     timeout on every CVAT request while S3 correctly went back to none.
     """
-    from cveta2._client import connection
+    from cveta2.composition import runtime
 
     calls: list[float | None] = []
     expected_calls = [timeout]
-    monkeypatch.setattr(connection, "install_global_request_timeout", calls.append)
-    connection.configure_data_timeout(timeout)
+    monkeypatch.setattr(runtime, "install_global_request_timeout", calls.append)
+    runtime.configure_data_timeout(timeout)
     assert calls == expected_calls
 
     # The S3 half of the same call. Asserting only the SDK backstop above left
@@ -213,7 +213,7 @@ def test_build_client_kwargs_sends_credentials_only_when_both_are_set() -> None:
     mutant sends ``(username, None)`` to the SDK, and dropping the guard opens
     an unauthenticated CVAT session that fails much later and confusingly.
     """
-    from cveta2._client.connection import _build_client_kwargs
+    from cveta2.adapters.cvat.connection import _build_client_kwargs
 
     both = CvatConfig(host="https://cvat.example.com", username="u", password="p")
     assert _build_client_kwargs(both) == {
@@ -230,7 +230,7 @@ def test_build_client_kwargs_sends_credentials_only_when_both_are_set() -> None:
 
 def test_build_client_kwargs_maps_a_missing_host_to_empty_string() -> None:
     """``cfg.host or ""`` — make_client rejects None but accepts an empty host."""
-    from cveta2._client.connection import _build_client_kwargs
+    from cveta2.adapters.cvat.connection import _build_client_kwargs
 
     assert _build_client_kwargs(CvatConfig()) == {"host": ""}
 
@@ -240,7 +240,7 @@ def test_install_global_request_timeout_covers_new_rest_clients(
 ) -> None:
     from cvat_sdk.api_client.rest import RESTClientObject
 
-    from cveta2._client import sdk_adapter
+    from cveta2.adapters.cvat import sdk_adapter
 
     recorded: dict[str, object] = {}
 
@@ -277,7 +277,7 @@ def test_install_global_request_timeout_can_be_switched_off_again(
     """
     from cvat_sdk.api_client.rest import RESTClientObject
 
-    from cveta2._client import sdk_adapter
+    from cveta2.adapters.cvat import sdk_adapter
 
     recorded: dict[str, object] = {}
 

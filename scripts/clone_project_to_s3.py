@@ -29,8 +29,8 @@ from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from loguru import logger
 from pydantic import BaseModel
 
-from cveta2.config import CvatConfig
-from cveta2.exceptions import Cveta2Error
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.domain.errors import Cveta2Error
 
 # ---------------------------------------------------------------------------
 # Config

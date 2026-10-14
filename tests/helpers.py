@@ -18,12 +18,10 @@ import pandas as pd
 import yaml
 
 import cveta2
-from cveta2._client.dtos import RawShape
-from cveta2.cli import CliApp
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
-from cveta2.image_downloader import CloudStorageInfo
-from cveta2.models import (
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.application.ports.dtos import RawShape
+from cveta2.composition.client import CvatClient
+from cveta2.domain.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
     DeletedImage,
@@ -33,6 +31,8 @@ from cveta2.models import (
     TaskAnnotations,
     TaskInfo,
 )
+from cveta2.domain.storage import CloudStorageInfo
+from cveta2.interfaces.cli import CliApp
 from tests.fixtures.fake_cvat_api import FakeCvatApi, job_position_for_status
 from tests.fixtures.fake_cvat_project import (
     FakeProjectConfig,
@@ -111,23 +111,34 @@ def patch_cli_client(
     with ExitStack() as stack:
         if factory is not None:
             stack.enter_context(
-                patch("cveta2.commands._bootstrap.CvatClient", side_effect=factory)
+                patch(
+                    "cveta2.interfaces.commands._bootstrap.CvatClient",
+                    side_effect=factory,
+                )
             )
         else:
             stack.enter_context(
-                patch("cveta2.commands._bootstrap.CvatClient", return_value=client)
+                patch(
+                    "cveta2.interfaces.commands._bootstrap.CvatClient",
+                    return_value=client,
+                )
             )
         stack.enter_context(
             patch(
-                "cveta2.commands._helpers.load_projects_cache",
+                "cveta2.interfaces.commands._helpers.load_projects_cache",
                 return_value=list(cached_projects),
             )
         )
         if config is not None:
             stack.enter_context(
-                patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=config)
+                patch(
+                    "cveta2.interfaces.commands._bootstrap.CvatConfig.load",
+                    return_value=config,
+                )
             )
-            stack.enter_context(patch("cveta2.commands._bootstrap.require_host"))
+            stack.enter_context(
+                patch("cveta2.interfaces.commands._bootstrap.require_host")
+            )
         yield client
 
 

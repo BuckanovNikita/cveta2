@@ -7,23 +7,24 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from cveta2._client.dtos import RawAnnotations, RawShape
-from cveta2._client.ports import CvatApiPort
-from cveta2._client.sdk_adapter import _should_retry_write
-from cveta2._client_ops.session import TaskWriteSession
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
-from cveta2.exceptions import CvatApiError, Cveta2Error
-from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
-from cveta2.services.upload import (
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.adapters.cvat.sdk_adapter import _should_retry_write
+from cveta2.adapters.files.manifests import delete_manifest
+from cveta2.application.client.session import TaskWriteSession
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.application.ports.dtos import RawAnnotations, RawShape
+from cveta2.application.use_cases.upload import (
     UploadOptions,
     UploadPlan,
     UploadRequest,
     _ensure_annotations,
     _StagedUpload,
-    upload_dataset,
 )
-from cveta2.upload_manifest import compute_fingerprint, delete_manifest
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import upload_dataset, upload_dependencies
+from cveta2.domain.errors import CvatApiError, Cveta2Error
+from cveta2.domain.models import LabelInfo, ProjectInfo, TaskInfo
+from cveta2.domain.upload import compute_fingerprint
 from tests.helpers import make_cs_info
 
 
@@ -218,7 +219,7 @@ def test_changed_options_reject_resume_before_external_calls(
         with pytest.raises(CvatApiError):
             upload_dataset(client, request)
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.services.upload._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
     changed = replace(
         request,
         resume=True,
@@ -237,7 +238,7 @@ def test_changed_options_reject_resume_before_external_calls(
 def test_cleanup_failure_preserves_success_and_prevents_future_writes(
     monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
 ) -> None:
-    from cveta2.upload_manifest import list_manifests
+    from cveta2.adapters.files.manifests import list_manifests
     from tests.test_upload_service import (
         make_client,
         make_request,
@@ -265,7 +266,7 @@ def test_cleanup_failure_preserves_success_and_prevents_future_writes(
         for message in capture_logs
     )
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.services.upload._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
     assert (
         upload_dataset(client, make_request(image_names=["a.jpg"], resume=True))
         == first
@@ -275,7 +276,7 @@ def test_cleanup_failure_preserves_success_and_prevents_future_writes(
 
 
 def test_applied_then_503_has_exactly_one_effect() -> None:
-    from cveta2._retry import network_retry
+    from cveta2.adapters.execution.retry import network_retry
 
     effects: list[int] = []
 
@@ -291,8 +292,8 @@ def test_applied_then_503_has_exactly_one_effect() -> None:
 
 @pytest.mark.parametrize("with_columns", [False, True])
 def test_empty_shape_recovery_accepts_no_annotations(*, with_columns: bool) -> None:
-    from cveta2.models import CSV_COLUMNS
-    from cveta2.services.upload import _verify_existing_shapes
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
+    from cveta2.domain.models import CSV_COLUMNS
 
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations()
@@ -304,7 +305,7 @@ def test_empty_shape_recovery_accepts_no_annotations(*, with_columns: bool) -> N
 def test_changed_remote_directory_with_same_basename_rejects_before_staging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cveta2._client.dtos import RawDataMeta, RawFrame
+    from cveta2.application.ports.dtos import RawDataMeta, RawFrame
     from tests.test_upload_service import (
         _seed_manifest_for,
         make_client,
@@ -323,7 +324,7 @@ def test_changed_remote_directory_with_same_basename_rejects_before_staging(
     remote = RawDataMeta(frames=[RawFrame("different/a.jpg", 640, 480)])
     monkeypatch.setattr(client.api, "get_task_data_meta", lambda _task_id: remote)
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.services.upload._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
     with pytest.raises(Cveta2Error, match="кадры"):
         upload_dataset(client, replace(request, resume=True))
     stage.assert_not_called()
@@ -369,7 +370,7 @@ def test_frame_paths_preserve_available_directory_identity(
     *,
     matches: bool,
 ) -> None:
-    from cveta2.services.upload import _frames_match
+    from cveta2.application.use_cases.upload import _frames_match
 
     assert _frames_match(actual, expected, "/images/") == matches
 
@@ -404,8 +405,8 @@ def test_required_manifest_checkpoints_fail_closed(
 ) -> None:
     import json
 
-    from cveta2 import upload_manifest
-    from cveta2.upload_manifest import list_manifests
+    from cveta2.adapters.files import manifests as upload_manifest
+    from cveta2.adapters.files.manifests import list_manifests
     from tests.fixtures.fake_cvat_api import FakeCvatApi
     from tests.test_upload_service import (
         make_client,
@@ -418,7 +419,7 @@ def test_required_manifest_checkpoints_fail_closed(
         cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
     )
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
-    from cveta2.fs_utils import replace_shared_bytes
+    from cveta2.adapters.files.shared import replace_shared_bytes
 
     original = replace_shared_bytes
 
@@ -469,8 +470,8 @@ def _stored_box() -> RawShape:
 
 @pytest.mark.parametrize("label", [None, "", "   "])
 def test_empty_labels_without_box_columns_are_valid(label: str | None) -> None:
-    from cveta2.services.upload import _verify_existing_shapes
-    from cveta2.upload_manifest import validate_upload_boxes
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
+    from cveta2.domain.upload import validate_upload_boxes
 
     empty = pd.DataFrame([{"image_name": "a.jpg", "instance_label": label}])
     validate_upload_boxes(empty)
@@ -484,8 +485,8 @@ def test_empty_labels_without_box_columns_are_valid(label: str | None) -> None:
 
 @pytest.mark.parametrize("complete_box", [False, True])
 def test_deleted_labelled_rows_never_create_shapes(*, complete_box: bool) -> None:
-    from cveta2.services.upload import _verify_existing_shapes
-    from cveta2.upload_manifest import validate_upload_boxes
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
+    from cveta2.domain.upload import validate_upload_boxes
 
     deleted = rows()
     deleted["instance_shape"] = "deleted"
@@ -529,7 +530,7 @@ def test_bad_box_values_produce_a_domain_diagnostic_before_calls(
     ],
 )
 def test_shape_recovery_rejects_each_conflicting_property(shape: RawShape) -> None:
-    from cveta2.services.upload import _verify_existing_shapes
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
 
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations(shapes=[shape])
@@ -542,8 +543,8 @@ def test_shape_recovery_rejects_each_conflicting_property(shape: RawShape) -> No
 
 
 def test_shape_attributes_conflict_with_default_upload_intent() -> None:
-    from cveta2._client.dtos import RawAttribute
-    from cveta2.services.upload import _verify_existing_shapes
+    from cveta2.application.ports.dtos import RawAttribute
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
 
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations(
@@ -562,7 +563,7 @@ def test_shape_attributes_conflict_with_default_upload_intent() -> None:
 def test_shape_recovery_preserves_duplicate_multiplicity(
     input_count: int, remote_count: int
 ) -> None:
-    from cveta2.services.upload import _verify_existing_shapes
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
 
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations(
@@ -585,7 +586,7 @@ def test_shape_recovery_preserves_duplicate_multiplicity(
 
 @pytest.mark.parametrize("unknown", ["image", "label"])
 def test_shape_recovery_rejects_a_single_unknown_mapping(unknown: str) -> None:
-    from cveta2.services.upload import _verify_existing_shapes
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
 
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations()
@@ -602,7 +603,7 @@ def test_shape_recovery_rejects_a_single_unknown_mapping(unknown: str) -> None:
 
 @pytest.mark.parametrize("change", ["box", "task", "image_order", "deletion", "labels"])
 def test_request_identity_binds_every_input_component(change: str) -> None:
-    from cveta2.services.upload import request_fingerprint
+    from cveta2.application.use_cases.upload import request_fingerprint
     from tests.test_upload_service import make_request
 
     first = make_request(image_names=["a.jpg", "b.jpg"])
@@ -654,7 +655,7 @@ def test_fingerprint_accepts_semantic_timestamp_scalars() -> None:
 
 
 def test_mapping_identity_is_complete_and_order_independent() -> None:
-    from cveta2.upload_manifest import compute_mapping_identity
+    from cveta2.domain.upload import compute_mapping_identity
     from tests.test_upload_manifest import _manifest
 
     manifest = _manifest()
@@ -685,8 +686,8 @@ def test_mapping_identity_is_complete_and_order_independent() -> None:
 def test_insufficient_or_tampered_recovery_rejects_before_client_calls(
     tamper: str,
 ) -> None:
-    from cveta2.services.upload import request_fingerprint
-    from cveta2.upload_manifest import save_manifest
+    from cveta2.adapters.files.manifests import save_manifest
+    from cveta2.application.use_cases.upload import request_fingerprint
     from tests.test_upload_manifest import HOST, _manifest
     from tests.test_upload_service import make_request
 
@@ -706,7 +707,7 @@ def test_insufficient_or_tampered_recovery_rejects_before_client_calls(
 
 @pytest.mark.parametrize("missing", ["task_id", "completed_counts"])
 def test_incomplete_completed_outcome_is_a_domain_error(missing: str) -> None:
-    from cveta2.services.upload import _completed_outcome
+    from cveta2.application.use_cases.upload import _completed_outcome
     from tests.test_upload_manifest import _manifest
     from tests.test_upload_service import make_request
 
@@ -719,7 +720,7 @@ def test_incomplete_completed_outcome_is_a_domain_error(missing: str) -> None:
 def test_basename_fallback_reports_its_verification_limit(
     capture_logs: list[str],
 ) -> None:
-    from cveta2.services.upload import _frames_match
+    from cveta2.application.use_cases.upload import _frames_match
 
     assert _frames_match(["a.jpg"], ["images/old/a.jpg"], "images")
     assert any("подтвердить невозможно" in message for message in capture_logs)
@@ -727,7 +728,7 @@ def test_basename_fallback_reports_its_verification_limit(
 
 @pytest.mark.parametrize("prefix", ["", "/", "/imagesX/"])
 def test_frame_prefix_normalization_and_empty_prefix(prefix: str) -> None:
-    from cveta2.services.upload import _frames_match
+    from cveta2.application.use_cases.upload import _frames_match
 
     expected = ["imagesX/old/a.jpg"] if prefix == "/imagesX/" else ["old/a.jpg"]
     assert _frames_match(["old/a.jpg"], expected, prefix)
@@ -738,7 +739,7 @@ def test_frame_prefix_normalization_and_empty_prefix(prefix: str) -> None:
 def test_ambiguous_replacement_create_cannot_reuse_the_old_missing_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cveta2.upload_manifest import list_manifests
+    from cveta2.adapters.files.manifests import list_manifests
     from tests.fixtures.fake_cvat_api import FakeCvatApi
     from tests.test_upload_service import (
         _dies_attaching_frames,
@@ -762,7 +763,7 @@ def test_ambiguous_replacement_create_cannot_reuse_the_old_missing_id(
     original = client.api.create_task
 
     def applied_then_unavailable(spec: object) -> int:
-        from cveta2._client.dtos import UploadTaskSpec
+        from cveta2.application.ports.dtos import UploadTaskSpec
 
         assert isinstance(spec, UploadTaskSpec)
         original(spec)
@@ -785,8 +786,8 @@ def test_ambiguous_replacement_create_cannot_reuse_the_old_missing_id(
 
 @pytest.mark.parametrize("state", ["pending", "project", "frames", "empty", "partial"])
 def test_ensure_task_guard_reports_known_identity_and_never_replays(state: str) -> None:
-    from cveta2._client.dtos import RawDataMeta, RawFrame
-    from cveta2.services.upload import _ensure_task
+    from cveta2.application.ports.dtos import RawDataMeta, RawFrame
+    from cveta2.application.use_cases.upload import _ensure_task
     from tests.test_upload_manifest import _manifest
     from tests.test_upload_service import make_request
 
@@ -820,7 +821,11 @@ def test_ensure_task_guard_reports_known_identity_and_never_replays(state: str) 
     }[state]
     with pytest.raises(Cveta2Error, match=pattern):
         _ensure_task(
-            client, make_request(image_names=["a.jpg", "b.jpg"]), staged, manifest
+            client,
+            make_request(image_names=["a.jpg", "b.jpg"]),
+            staged,
+            manifest,
+            deps=upload_dependencies(),
         )
     client.create_upload_task.assert_not_called()
     client.delete_task.assert_not_called()
@@ -832,7 +837,7 @@ def test_completed_recovery_cleans_the_exact_stale_manifest(
     *,
     resuming: bool,
 ) -> None:
-    from cveta2.upload_manifest import list_manifests
+    from cveta2.adapters.files.manifests import list_manifests
     from tests.test_upload_service import (
         make_client,
         make_request,
@@ -856,7 +861,7 @@ def test_completed_recovery_cleans_the_exact_stale_manifest(
         first = upload_dataset(client, make_request(image_names=["a.jpg"]))
     assert len(list_manifests(7, host=client.host)) == 1
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.services.upload._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
     assert (
         upload_dataset(client, make_request(image_names=["a.jpg"], resume=resuming))
         == first
@@ -927,7 +932,7 @@ def test_changed_cloud_storage_rejects_before_staging(
         lambda _project: make_cs_info(bucket="different"),
     )
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.services.upload._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
     with pytest.raises(Cveta2Error, match="Cloud storage"):
         upload_dataset(client, replace(request, resume=True))
     stage.assert_not_called()
@@ -939,8 +944,8 @@ def test_fresh_manifest_preserves_pending_false_identity_state(
     *,
     known_task: bool,
 ) -> None:
-    from cveta2.services.upload import request_fingerprint
-    from cveta2.upload_manifest import save_manifest
+    from cveta2.adapters.files.manifests import save_manifest
+    from cveta2.application.use_cases.upload import request_fingerprint
     from tests.fixtures.fake_cvat_api import FakeCvatApi
     from tests.test_upload_manifest import _manifest
     from tests.test_upload_service import (
@@ -1000,8 +1005,8 @@ def test_disconnected_cache_miss_uses_filtered_fallback(
 
 
 def test_missing_label_column_means_no_annotation_writes() -> None:
-    from cveta2.services.upload import _verify_existing_shapes
-    from cveta2.upload_manifest import validate_upload_boxes
+    from cveta2.application.use_cases.upload import _verify_existing_shapes
+    from cveta2.domain.upload import validate_upload_boxes
 
     frame_only = pd.DataFrame([{"image_name": "a.jpg"}])
     validate_upload_boxes(pd.DataFrame())
@@ -1020,7 +1025,7 @@ def test_missing_label_column_means_no_annotation_writes() -> None:
 def test_blank_labels_are_ignored_during_image_staging(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cveta2.services.upload import _stage_images
+    from cveta2.application.use_cases.upload import _stage_images
     from tests.test_upload_service import make_client, make_s3, seeded_bucket
 
     client = make_client(
@@ -1038,15 +1043,15 @@ def test_blank_labels_are_ignored_during_image_staging(
         ),
         UploadOptions(),
     )
-    staged = _stage_images(client, request)
+    staged = _stage_images(client, request, deps=upload_dependencies())
     assert staged.task_image_names == ["images/a.jpg"]
 
 
 def test_completion_save_failure_warns_without_reclassifying_success(
     monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
 ) -> None:
-    from cveta2 import upload_manifest
-    from cveta2.upload_manifest import new_manifest, save_manifest
+    from cveta2.adapters.files import manifests as upload_manifest
+    from cveta2.adapters.files.manifests import new_manifest, save_manifest
 
     manifest = new_manifest(
         "", "identity", 7, "task", make_cs_info(), {}, [], host="http://cvat.invalid"
@@ -1062,7 +1067,7 @@ def test_completion_save_failure_warns_without_reclassifying_success(
 
 @pytest.mark.parametrize("prefix", [" ", "XXX"])
 def test_cloud_prefix_characters_are_not_strip_sets(prefix: str) -> None:
-    from cveta2.services.upload import _frames_match
+    from cveta2.application.use_cases.upload import _frames_match
 
     assert _frames_match(["dir/a.jpg"], [f"{prefix}/dir/a.jpg"], prefix)
     assert not _frames_match(["dir/a.jpg"], ["XXXX/dir/a.jpg"], "")
@@ -1071,15 +1076,15 @@ def test_cloud_prefix_characters_are_not_strip_sets(prefix: str) -> None:
 def test_full_frame_paths_do_not_report_basename_uncertainty(
     capture_logs: list[str],
 ) -> None:
-    from cveta2.services.upload import _frames_match
+    from cveta2.application.use_cases.upload import _frames_match
 
     assert _frames_match(["images/dir/a.jpg"], ["images/dir/a.jpg"], "images")
     assert not any("подтвердить невозможно" in message for message in capture_logs)
 
 
 def test_preflight_unknown_task_identity_is_actionable_before_reads() -> None:
-    from cveta2.services.upload import _preflight_resume_target
-    from cveta2.upload_manifest import new_manifest
+    from cveta2.adapters.files.manifests import new_manifest
+    from cveta2.application.use_cases.upload import _preflight_resume_target
     from tests.test_upload_service import make_request
 
     client = MagicMock()

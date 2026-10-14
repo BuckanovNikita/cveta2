@@ -11,29 +11,30 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from cveta2.commands import upload as upload_command
-from cveta2.commands._helpers import echo_cli_command
-from cveta2.commands.upload import (
+from cveta2.application.use_cases.upload import (
+    UploadOptions,
+    UploadPlan,
+    UploadRequest,
+    _stage_images,
+)
+from cveta2.composition.workflows import upload_dependencies
+from cveta2.domain.errors import Cveta2Error
+from cveta2.interfaces.commands import upload as upload_command
+from cveta2.interfaces.commands._helpers import echo_cli_command
+from cveta2.interfaces.commands.upload import (
     _NO_ANNOTATION_LABEL,
     _resolve_labels,
     _resolve_task_name,
     _select_labels,
     run_upload,
 )
-from cveta2.exceptions import Cveta2Error
-from cveta2.services.upload import (
-    UploadOptions,
-    UploadPlan,
-    UploadRequest,
-    _stage_images,
-)
 from tests.helpers import make_cs_info, write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_SELECT_MANY = "cveta2.commands.interactive.select_many"
-_ASK_TASK_NAME = "cveta2.commands.interactive.text"
+_SELECT_MANY = "cveta2.interfaces.commands.interactive.select_many"
+_ASK_TASK_NAME = "cveta2.interfaces.commands.interactive.text"
 
 
 def _write_dataset(tmp_path: Path) -> Path:
@@ -305,18 +306,20 @@ def test_run_upload_prompts_project_then_name_then_labels(tmp_path: Path) -> Non
         return ["car"]
 
     with (
-        patch("cveta2.commands.upload.open_client") as open_client,
+        patch("cveta2.interfaces.commands.upload.open_client") as open_client,
         patch(
-            "cveta2.commands.upload.resolve_project",
+            "cveta2.interfaces.commands.upload.resolve_project",
             side_effect=fake_resolve_project,
         ),
         patch(
-            "cveta2.commands.upload._resolve_task_name",
+            "cveta2.interfaces.commands.upload._resolve_task_name",
             side_effect=fake_task_name,
         ),
-        patch("cveta2.commands.upload._select_labels", side_effect=fake_labels),
-        patch("cveta2.commands.upload.build_search_dirs", return_value=[]),
-        patch("cveta2.commands.upload.upload_dataset"),
+        patch(
+            "cveta2.interfaces.commands.upload._select_labels", side_effect=fake_labels
+        ),
+        patch("cveta2.interfaces.commands.upload.build_search_dirs", return_value=[]),
+        patch("cveta2.interfaces.commands.upload.upload_dataset"),
     ):
         open_client.return_value.__enter__.return_value = MagicMock()
         run_upload(_upload_args(csv))
@@ -330,15 +333,17 @@ def test_run_upload_echoes_full_command_after_prompts(
 ) -> None:
     csv = _write_dataset(tmp_path)
     with (
-        patch("cveta2.commands.upload.open_client") as open_client,
+        patch("cveta2.interfaces.commands.upload.open_client") as open_client,
         patch(
-            "cveta2.commands.upload.resolve_project",
+            "cveta2.interfaces.commands.upload.resolve_project",
             return_value=(1, "proj"),
         ),
-        patch("cveta2.commands.upload._resolve_task_name", return_value="t1"),
-        patch("cveta2.commands.upload._select_labels", return_value=["car"]),
-        patch("cveta2.commands.upload.build_search_dirs", return_value=[]),
-        patch("cveta2.commands.upload.upload_dataset"),
+        patch(
+            "cveta2.interfaces.commands.upload._resolve_task_name", return_value="t1"
+        ),
+        patch("cveta2.interfaces.commands.upload._select_labels", return_value=["car"]),
+        patch("cveta2.interfaces.commands.upload.build_search_dirs", return_value=[]),
+        patch("cveta2.interfaces.commands.upload.upload_dataset"),
     ):
         client = MagicMock()
         client.organization = None
@@ -357,13 +362,13 @@ def test_run_upload_no_echo_when_all_args_given(
     csv = _write_dataset(tmp_path)
     args = _upload_args(csv, project="proj", name="t1", labels=["car"])
     with (
-        patch("cveta2.commands.upload.open_client") as open_client,
+        patch("cveta2.interfaces.commands.upload.open_client") as open_client,
         patch(
-            "cveta2.commands.upload.resolve_project",
+            "cveta2.interfaces.commands.upload.resolve_project",
             return_value=(1, "proj"),
         ),
-        patch("cveta2.commands.upload.build_search_dirs", return_value=[]),
-        patch("cveta2.commands.upload.upload_dataset"),
+        patch("cveta2.interfaces.commands.upload.build_search_dirs", return_value=[]),
+        patch("cveta2.interfaces.commands.upload.upload_dataset"),
     ):
         open_client.return_value.__enter__.return_value = MagicMock()
         run_upload(args)
@@ -376,9 +381,9 @@ def test_run_upload_rejects_unknown_cli_labels(tmp_path: Path) -> None:
     csv = _write_dataset(tmp_path)
     args = _upload_args(csv, project="proj", name="t1", labels=["bicycle"])
     with (
-        patch("cveta2.commands.upload.open_client") as open_client,
+        patch("cveta2.interfaces.commands.upload.open_client") as open_client,
         patch(
-            "cveta2.commands.upload.resolve_project",
+            "cveta2.interfaces.commands.upload.resolve_project",
             return_value=(1, "proj"),
         ),
     ):
@@ -429,11 +434,15 @@ def _run_upload_capturing(
         run.request = request
 
     with (
-        patch("cveta2.commands.upload.open_client") as open_client,
+        patch("cveta2.interfaces.commands.upload.open_client") as open_client,
         patch(
-            "cveta2.commands.upload.resolve_project", side_effect=fake_resolve_project
+            "cveta2.interfaces.commands.upload.resolve_project",
+            side_effect=fake_resolve_project,
         ),
-        patch("cveta2.commands.upload.upload_dataset", side_effect=fake_upload_dataset),
+        patch(
+            "cveta2.interfaces.commands.upload.upload_dataset",
+            side_effect=fake_upload_dataset,
+        ),
     ):
         client = MagicMock()
         client.organization = None
@@ -647,8 +656,13 @@ class TestRunUploadPromptedPredicate:
         """
         args = _upload_args(csv, project=project, name=name, labels=labels)
         with (
-            patch("cveta2.commands.upload._select_labels", return_value=["car"]),
-            patch("cveta2.commands.upload._resolve_task_name", return_value="t1"),
+            patch(
+                "cveta2.interfaces.commands.upload._select_labels", return_value=["car"]
+            ),
+            patch(
+                "cveta2.interfaces.commands.upload._resolve_task_name",
+                return_value="t1",
+            ),
         ):
             _run_upload_capturing(args, project_spec=project, project=(1, "proj"))
 
@@ -696,15 +710,15 @@ def test_stage_images_keeps_plan_order() -> None:
     mapping = {n: n for n in ["b.jpg", "a.jpg", "c.jpg", "z.jpg"]}
     with (
         patch(
-            "cveta2.services.upload.resolve_images",
+            "cveta2.adapters.files.task_output.LocalWorkflowFiles.resolve_images",
             return_value=({}, ["b.jpg", "a.jpg", "c.jpg", "z.jpg"]),
         ),
         patch(
-            "cveta2.services.upload.build_server_file_mapping",
+            "cveta2.adapters.s3.upload.S3UploadStorage.mapping",
             return_value=(mapping, {f"images/{n}" for n in mapping}),
         ),
     ):
-        staged = _stage_images(client, request)
+        staged = _stage_images(client, request, deps=upload_dependencies())
 
     assert staged.task_image_names == [
         "images/b.jpg",

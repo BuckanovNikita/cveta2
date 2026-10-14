@@ -10,20 +10,17 @@ import pandas as pd
 import pytest
 import yaml
 
-from cveta2.exceptions import Cveta2Error
-from cveta2.services.convert import common as convert
-from cveta2.services.convert import (
-    convert_from_yolo,
-    convert_to_yolo,
-)
-from cveta2.services.convert.yolo import (
+from cveta2.adapters.files.conversion import (
+    LocalConversionFiles,
     _images_from_split_source,
-    _label_path_for_image,
     _load_class_names_yaml,
-    _parse_label_file,
     _resolve_dataset_root,
     _resolve_listed_image,
 )
+from cveta2.application.use_cases.convert.yolo import _parse_label_file
+from cveta2.composition.conversion import convert_from_yolo, convert_to_yolo
+from cveta2.domain.conversion import _label_path_for_image
+from cveta2.domain.errors import Cveta2Error
 from tests.helpers import (
     csv_row,
     make_image,
@@ -69,7 +66,14 @@ class TestConversionRegressions:
 
         convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
 
-        assert len(_parse_label_file(output / "labels/train/a.txt")) == 1
+        assert (
+            len(
+                _parse_label_file(
+                    output / "labels/train/a.txt", files=LocalConversionFiles()
+                )
+            )
+            == 1
+        )
 
     @pytest.mark.parametrize("source", ["directory", "image", "list", "link-dir"])
     def test_symlink_images_keep_dataset_labels(
@@ -209,26 +213,28 @@ class TestParseLabelFile:
     def test_standard_5_fields(self, tmp_path: Path) -> None:
         p = tmp_path / "label.txt"
         p.write_text("0 0.5 0.5 0.3 0.4\n1 0.1 0.2 0.3 0.4\n")
-        result = _parse_label_file(p)
+        result = _parse_label_file(p, files=LocalConversionFiles())
         assert len(result) == 2
         assert result[0] == [0.0, 0.5, 0.5, 0.3, 0.4]
 
     def test_6_fields_with_conf(self, tmp_path: Path) -> None:
         p = tmp_path / "label.txt"
         p.write_text("0 0.5 0.5 0.3 0.4 0.95\n")
-        result = _parse_label_file(p)
+        result = _parse_label_file(p, files=LocalConversionFiles())
         assert len(result) == 1
         assert len(result[0]) == 6
         assert result[0][5] == pytest.approx(0.95)
 
     def test_missing_file(self, tmp_path: Path) -> None:
-        result = _parse_label_file(tmp_path / "nonexistent.txt")
+        result = _parse_label_file(
+            tmp_path / "nonexistent.txt", files=LocalConversionFiles()
+        )
         assert result == []
 
     def test_empty_file(self, tmp_path: Path) -> None:
         p = tmp_path / "label.txt"
         p.write_text("")
-        result = _parse_label_file(p)
+        result = _parse_label_file(p, files=LocalConversionFiles())
         assert result == []
 
     def test_short_line_is_skipped_not_terminal(self, tmp_path: Path) -> None:
@@ -239,13 +245,17 @@ class TestParseLabelFile:
         """
         p = tmp_path / "label.txt"
         p.write_text("0 0.5 0.5 0.3\n1 0.1 0.2 0.3 0.4\n")
-        assert _parse_label_file(p) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
+        assert _parse_label_file(p, files=LocalConversionFiles()) == [
+            [1.0, 0.1, 0.2, 0.3, 0.4]
+        ]
 
     def test_blank_lines_and_trailing_whitespace(self, tmp_path: Path) -> None:
         """Blank lines and padding around a line are tolerated."""
         p = tmp_path / "label.txt"
         p.write_text("\n  0 0.5 0.5 0.3 0.4   \n\n")
-        assert _parse_label_file(p) == [[0.0, 0.5, 0.5, 0.3, 0.4]]
+        assert _parse_label_file(p, files=LocalConversionFiles()) == [
+            [0.0, 0.5, 0.5, 0.3, 0.4]
+        ]
 
     def test_non_numeric_line_is_skipped_not_terminal(self, tmp_path: Path) -> None:
         """A line of the right length but the wrong type skips only itself.
@@ -256,7 +266,9 @@ class TestParseLabelFile:
         """
         p = tmp_path / "label.txt"
         p.write_text("class xc yc w h\n1 0.1 0.2 0.3 0.4\n")
-        assert _parse_label_file(p) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
+        assert _parse_label_file(p, files=LocalConversionFiles()) == [
+            [1.0, 0.1, 0.2, 0.3, 0.4]
+        ]
 
     @pytest.mark.parametrize(
         "bad_lines",
@@ -278,7 +290,9 @@ class TestParseLabelFile:
         p = tmp_path / "label.txt"
         p.write_text("\n".join([*bad_lines, "1 0.1 0.2 0.3 0.4"]) + "\n")
 
-        assert _parse_label_file(p) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
+        assert _parse_label_file(p, files=LocalConversionFiles()) == [
+            [1.0, 0.1, 0.2, 0.3, 0.4]
+        ]
         assert capture_logs[-1].endswith(": 2")
         assert f"{p}:1" in capture_logs[0]
         assert f"{p}:2" in capture_logs[1]
@@ -294,7 +308,7 @@ class TestParseLabelFile:
         """
         p = tmp_path / "label.txt"
         p.write_text("0 0.5 0.5 0.3 0.4\n1 0.5 0.5 0.3 0.4 0.95\n")
-        assert len(_parse_label_file(p)) == 2
+        assert len(_parse_label_file(p, files=LocalConversionFiles())) == 2
         assert capture_logs == []
 
     def test_extra_fields_are_kept_but_counted_in_a_warning(
@@ -312,7 +326,7 @@ class TestParseLabelFile:
         obb = "0 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9"
         p.write_text(f"{obb}\n1 0.5 0.5 0.3 0.4\n{obb}\n")
 
-        rows = _parse_label_file(p)
+        rows = _parse_label_file(p, files=LocalConversionFiles())
 
         assert [len(row) for row in rows] == [9, 5, 9]
         assert rows[0] == [0.0, 0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9]
@@ -337,7 +351,7 @@ class TestParseLabelFile:
             "1 0.5 0.5 0.3 0.4\n"
         )
 
-        assert len(_parse_label_file(p)) == 2
+        assert len(_parse_label_file(p, files=LocalConversionFiles())) == 2
         assert [m.split(": ", 1)[0] for m in capture_logs[2:]] == [
             "Пропущено нечитаемых строк в " + str(p),
             f"Строк с полями сверх 6 (сегментация/OBB/keypoints?) в {p}",
@@ -890,7 +904,9 @@ class TestFromYoloDatasetRows:
         make_image(root / "images" / "train" / "flat.jpg")
         _write_yolo_label(root, "train", "flat", "0 0.5 0.5 0.2 0.2\n")
         _write_yolo_yaml(root, {0: "cat"}, ["train"])
-        monkeypatch.setattr(convert, "_get_image_size", lambda _path: (0, 10))
+        monkeypatch.setattr(
+            LocalConversionFiles, "image_size", staticmethod(lambda _path: (0, 10))
+        )
 
         with pytest.raises(Cveta2Error, match=r"'flat\.jpg' \(0x10\)"):
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
@@ -1298,7 +1314,9 @@ class TestFromYoloPredictions:
         pred_dir = tmp_path / "preds"
         make_image(pred_dir / "images" / "flat.jpg")
         (pred_dir / "flat.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
-        monkeypatch.setattr(convert, "_get_image_size", lambda _path: (0, 10))
+        monkeypatch.setattr(
+            LocalConversionFiles, "image_size", staticmethod(lambda _path: (0, 10))
+        )
 
         with pytest.raises(Cveta2Error, match=r"'flat\.jpg' \(0x10\)"):
             convert_from_yolo(pred_dir, tmp_path / "out.csv", read_all_sizes=False)

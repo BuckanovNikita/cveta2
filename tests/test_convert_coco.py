@@ -7,9 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cveta2.services.convert import (
-    convert_to_coco,
-)
+from cveta2.composition.conversion import convert_to_coco
 from tests.helpers import (
     csv_row,
     make_image,

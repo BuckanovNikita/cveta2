@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pandas as pd
 
-from cveta2._client.assembly import (
+from cveta2.application.client.assembly import (
     build_name_to_frame,
     build_task_issues,
     build_upload_shapes,
     find_job_for_frame,
     task_to_records,
 )
-from cveta2._client.dtos import (
+from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawAttribute,
     RawDataMeta,
@@ -19,7 +19,7 @@ from cveta2._client.dtos import (
     RawIssue,
     RawJob,
 )
-from cveta2.models import BBoxAnnotation, DeletedImage, ImageWithoutAnnotations
+from cveta2.domain.models import BBoxAnnotation, DeletedImage, ImageWithoutAnnotations
 from tests.helpers import make_raw_shape, make_task
 
 

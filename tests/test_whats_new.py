@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from cveta2.client import CvatClient
-from cveta2.commands.whats_new import run_whats_new
-from cveta2.config import CvatConfig
-from cveta2.exceptions import Cveta2Error
-from cveta2.services.whats_new import compute_baseline, compute_cutoff
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.composition.client import CvatClient
+from cveta2.composition.conversion import compute_baseline
+from cveta2.domain.baseline import compute_cutoff
+from cveta2.domain.errors import Cveta2Error
+from cveta2.interfaces.commands.whats_new import run_whats_new
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
     CFG,
@@ -24,7 +25,7 @@ from tests.helpers import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cveta2.models import TaskInfo
+    from cveta2.domain.models import TaskInfo
 
 
 def _client_with_tasks(tasks: list[TaskInfo]) -> CvatClient:

@@ -1,4 +1,4 @@
-"""Tests for the public workflow API (cveta2.api).
+"""Tests for the public workflow API (cveta2.interfaces.api).
 
 Beyond the happy paths, most of what lives here pins **argument wiring**:
 ``api.py`` is a 1:1 mirror of the CLI whose whole job is to translate
@@ -17,10 +17,10 @@ import pandas as pd
 import pytest
 
 import cveta2
-from cveta2._client.dtos import LabelPatch
-from cveta2.api import _open, _resolve_images_dir
-from cveta2.config import IgnoreConfig, IgnoredTask
-from cveta2.exceptions import (
+from cveta2.adapters.config.settings import IgnoreConfig, IgnoredTask
+from cveta2.application.ports.dtos import LabelPatch
+from cveta2.application.use_cases.upload import UploadOutcome, UploadRequest
+from cveta2.domain.errors import (
     CvatApiError,
     Cveta2Error,
     LabelsMismatchError,
@@ -28,10 +28,10 @@ from cveta2.exceptions import (
     MissingHostError,
     TaskNotFoundError,
 )
-from cveta2.image_uploader import UploadStats
-from cveta2.models import CSV_COLUMNS
-from cveta2.s3_utils import build_s3_key
-from cveta2.services.upload import UploadOutcome, UploadRequest
+from cveta2.domain.models import CSV_COLUMNS
+from cveta2.domain.paths import build_s3_key
+from cveta2.domain.storage import UploadStats
+from cveta2.interfaces.api import _open, _resolve_images_dir
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import (
@@ -49,9 +49,9 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
-    from cveta2._client.dtos import RawShape
-    from cveta2.image_downloader import CloudStorageInfo
-    from cveta2.models import LabelInfo, TaskInfo
+    from cveta2.application.ports.dtos import RawShape
+    from cveta2.domain.models import LabelInfo, TaskInfo
+    from cveta2.domain.storage import CloudStorageInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
@@ -158,7 +158,8 @@ class TestOpenConnection:
 
     def test_missing_host_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "cveta2.api.CvatConfig.load", lambda *_a, **_k: cveta2.CvatConfig()
+            "cveta2.interfaces.api.CvatConfig.load",
+            lambda *_a, **_k: cveta2.CvatConfig(),
         )
         with (
             pytest.raises(MissingHostError, match="CVAT_HOST"),
@@ -168,7 +169,8 @@ class TestOpenConnection:
 
     def test_missing_credentials_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "cveta2.api.CvatConfig.load", lambda *_a, **_k: cveta2.CvatConfig()
+            "cveta2.interfaces.api.CvatConfig.load",
+            lambda *_a, **_k: cveta2.CvatConfig(),
         )
         with (
             pytest.raises(MissingCredentialsError, match="CVAT_USERNAME"),
@@ -180,7 +182,7 @@ class TestOpenConnection:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "cveta2.api.CvatConfig.load",
+            "cveta2.interfaces.api.CvatConfig.load",
             lambda *_a, **_k: cveta2.CvatConfig(host="http://from-config"),
         )
         captured: dict[str, str] = {}
@@ -196,7 +198,7 @@ class TestOpenConnection:
             def __exit__(self, *_exc: object) -> None:
                 return None
 
-        monkeypatch.setattr("cveta2.api.CvatClient", _FakeClient)
+        monkeypatch.setattr("cveta2.interfaces.api.CvatClient", _FakeClient)
         connection = cveta2.Connection(
             host="http://explicit", username="user", password="pass"
         )
@@ -209,7 +211,7 @@ class TestOpenConnection:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
-            "cveta2.api.CvatConfig.load",
+            "cveta2.interfaces.api.CvatConfig.load",
             lambda *_a, **_k: cveta2.CvatConfig(
                 host="http://from-config", organization="team"
             ),
@@ -226,7 +228,7 @@ class TestOpenConnection:
             def __exit__(self, *_exc: object) -> None:
                 return None
 
-        monkeypatch.setattr("cveta2.api.CvatClient", _FakeClient)
+        monkeypatch.setattr("cveta2.interfaces.api.CvatClient", _FakeClient)
 
         with _open(cveta2.Connection(organization="")):
             pass
@@ -330,7 +332,7 @@ class TestFetchApi:
         fake = normal_fake
         out = tmp_path / "out"
 
-        with patch("cveta2._clearml.maybe_publish_clearml") as publish:
+        with patch("cveta2.composition.workflows.maybe_publish_clearml") as publish:
             cveta2.fetch(
                 fake.project.id,
                 out,
@@ -364,8 +366,10 @@ class TestFetchApi:
         _api, connection = _scoped(fake, config_path=config)
 
         with (
-            patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2._clearml._dataset.publish_to_clearml") as publish,
+            patch(
+                "cveta2.composition.publishing.is_clearml_available", return_value=True
+            ),
+            patch("cveta2.adapters.clearml._dataset.publish_to_clearml") as publish,
         ):
             cveta2.fetch(
                 fake.project.id, out, download_images=False, connection=connection
@@ -410,7 +414,7 @@ class TestFetchApi:
         """
         fake = normal_fake
 
-        with patch("cveta2._clearml.maybe_publish_clearml") as publish:
+        with patch("cveta2.composition.workflows.maybe_publish_clearml") as publish:
             cveta2.fetch(
                 fake.project.id,
                 tmp_path / "out",
@@ -1129,10 +1133,13 @@ class TestUploadApi:
             }
 
         monkeypatch.setattr(
-            "cveta2.services.upload.build_server_file_mapping",
-            mapping_with_every_image_on_s3,
+            "cveta2.adapters.s3.upload.S3UploadStorage.mapping",
+            staticmethod(mapping_with_every_image_on_s3),
         )
-        monkeypatch.setattr("cveta2.services.upload.S3Uploader", _RecordingUploader)
+        monkeypatch.setattr(
+            "cveta2.adapters.s3.upload.S3UploadStorage.upload",
+            staticmethod(_RecordingUploader().upload),
+        )
 
     def test_unknown_labels_raise_mismatch_end_to_end(
         self, normal_fake: LoadedFixtures, tmp_path: Path
@@ -1440,7 +1447,7 @@ class TestS3SyncApi:
             {"raw/a.jpg": b"A", "synced/sub/b.jpg": b"B"}, keyed_by_bucket=False
         )
         monkeypatch.setattr(
-            "cveta2.image_downloader.make_s3_client", lambda _endpoint=None: s3
+            "cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3
         )
         return s3
 
@@ -1961,7 +1968,7 @@ class TestUploadResumeWiring:
                 jobs=0,
             )
 
-        monkeypatch.setattr("cveta2.api.upload_dataset", record)
+        monkeypatch.setattr("cveta2.interfaces.api.upload_dataset", record)
         cveta2.upload(
             pd.DataFrame([csv_row("a.jpg", label="cat")]),
             project=fake.project.id,
@@ -2019,7 +2026,7 @@ class TestUploadResumeWiring:
                 jobs=0,
             )
 
-        monkeypatch.setattr("cveta2.api.upload_dataset", record)
+        monkeypatch.setattr("cveta2.interfaces.api.upload_dataset", record)
         cveta2.upload(
             csv,
             project=normal_fake.project.id,
@@ -2035,7 +2042,7 @@ def test_fetch_forwards_skip_validation(
     normal_fake: LoadedFixtures, tmp_path: Path, *, enabled: bool
 ) -> None:
     """The public keyword opts into the service's promotion preflight."""
-    with patch("cveta2.api.fetch_project") as service:
+    with patch("cveta2.interfaces.api.fetch_project") as service:
         cveta2.fetch(
             normal_fake.project.id,
             tmp_path,

@@ -1,4 +1,4 @@
-"""Tests for cveta2.services.output: CSV validation, previews and writers."""
+"""Tests for cveta2.adapters.files.dataset: CSV validation, previews and writers."""
 
 from __future__ import annotations
 
@@ -8,17 +8,16 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from cveta2.dataset_partition import PartitionResult, partition_annotations_df
-from cveta2.exceptions import Cveta2Error
-from cveta2.models import CSV_COLUMNS, ProjectAnnotations
-from cveta2.services.output import (
-    PREVIEW_LIMIT,
-    preview_names,
+from cveta2.adapters.files.dataset import (
     read_dataset_csv,
     write_dataset_and_deleted,
     write_partition_csvs,
     write_raw_csv,
 )
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import CSV_COLUMNS, ProjectAnnotations
+from cveta2.domain.output import PREVIEW_LIMIT, preview_names
+from cveta2.domain.partition import PartitionResult, partition_annotations_df
 from tests.helpers import csv_row, make_bbox, make_deleted, make_df, write_dataset_csv
 
 if TYPE_CHECKING:

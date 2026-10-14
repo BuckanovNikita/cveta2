@@ -7,8 +7,8 @@ import pandas as pd
 import pytest
 
 import cveta2
-from cveta2.client import CvatClient
-from cveta2.config import IgnoreConfig, IgnoredTask
+from cveta2.adapters.config.settings import IgnoreConfig, IgnoredTask
+from cveta2.composition.client import CvatClient
 from tests.integration.test_upload import IMAGE_NAMES, _get_project_and_storage
 
 pytestmark = pytest.mark.integration
@@ -71,7 +71,10 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
             )
             connection = cveta2.Connection(client=client)
             with (
-                patch("cveta2.config.IgnoreConfig.load", return_value=ignored),
+                patch(
+                    "cveta2.adapters.config.settings.IgnoreConfig.load",
+                    return_value=ignored,
+                ),
                 patch.object(
                     client.api, "update_job", wraps=client.api.update_job
                 ) as updates,

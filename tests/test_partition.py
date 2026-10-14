@@ -5,8 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from cveta2.dataset_partition import partition_annotations_df
-from cveta2.models import CSV_COLUMNS
+from cveta2.domain.models import CSV_COLUMNS
+from cveta2.domain.partition import partition_annotations_df
 from tests.helpers import csv_row, make_deleted, make_df
 
 # ---------------------------------------------------------------------------

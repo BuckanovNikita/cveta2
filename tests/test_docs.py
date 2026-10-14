@@ -22,8 +22,8 @@ from pydantic import BaseModel
 
 import cveta2
 from cveta2 import config as config_module
-from cveta2.cli import CliApp
-from cveta2.client import CvatClient
+from cveta2.composition.client import CvatClient
+from cveta2.interfaces.cli import CliApp
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

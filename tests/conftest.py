@@ -11,8 +11,8 @@ import pytest
 from loguru import logger
 from tqdm import tqdm
 
-from cveta2._client.mapping import _build_label_maps
-from cveta2._concurrency import configure_workers
+from cveta2.adapters.execution.concurrency import configure_workers
+from cveta2.application.client.mapping import _build_label_maps
 from tests.fixtures.load_cvat_fixtures import load_cvat_fixtures
 from tests.helpers import build_fake, write_test_config
 
@@ -21,8 +21,8 @@ if TYPE_CHECKING:
 
     from _pytest.mark.structures import ParameterSet
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
-    from cveta2.models import TaskInfo
+    from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta
+    from cveta2.domain.models import TaskInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 COCO8_DIR = Path(__file__).resolve().parent / "fixtures" / "cvat" / "coco8-dev"

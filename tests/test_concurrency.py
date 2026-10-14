@@ -15,7 +15,11 @@ from typing import NoReturn
 
 import pytest
 
-from cveta2._concurrency import Workers, configure_workers, run_concurrent
+from cveta2.adapters.execution.concurrency import (
+    Workers,
+    configure_workers,
+    run_concurrent,
+)
 
 _BARRIER_TIMEOUT = 5.0
 _HOLD_A_WORKER = 0.25
@@ -153,7 +157,10 @@ class TestFailurePolicy:
         def interrupt_while_waiting(_pending: object) -> NoReturn:
             raise _Interrupt
 
-        monkeypatch.setattr("cveta2._concurrency.as_completed", interrupt_while_waiting)
+        monkeypatch.setattr(
+            "cveta2.adapters.execution.concurrency.as_completed",
+            interrupt_while_waiting,
+        )
 
         with pytest.raises(_Interrupt):
             run_concurrent(items, work, max_workers=2, catch=(), desc="t", unit="item")

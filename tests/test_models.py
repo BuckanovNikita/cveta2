@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cveta2.models import (
+from cveta2.domain.models import (
     CSV_COLUMNS,
     DeletedImage,
     ImageWithoutAnnotations,

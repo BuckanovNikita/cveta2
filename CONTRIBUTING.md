@@ -287,31 +287,37 @@ uv run mypy .
 
 ```bash
 uv run lint-imports
+uv run python scripts/check_architecture.py
+uv run pytest tests/test_architecture.py
 ```
 
-Четыре контракта, определённых в `pyproject.toml`:
+Контракты в `pyproject.toml` проверяют полный набор модулей и направление импортов:
 
-**1. Слои архитектуры** (тип `layers`):
-
-```
-cli → commands → api → services → _clearml → client → _client_ops → _client
+```text
+публичные фасады → interfaces → composition → adapters → application → domain
 ```
 
-Импорты допускаются только сверху вниз. Нижние слои не могут импортировать верхние. Доменные типы (`TaskInfo`, `LabelInfo`, `ProjectInfo`) живут в `models.py` (фундаментный слой) и импортируются всеми слоями без нарушений.
+`composition` также использует внутренние слои напрямую, чтобы собрать
+зависимости. В `application` порядок такой: `use_cases` → `client` → `ports` →
+`settings`/`results`. Доменные модели и чистые алгоритмы находятся в `domain`.
+Приложение получает настройки и эффекты через явные аргументы и собственные
+типизированные порты; загрузка конфигурации и создание адаптеров относятся к
+`composition` и внешним адаптерам.
 
-**2. Изоляция фундаментных модулей** (тип `forbidden`):
+Проверки также запрещают зависимости между группами адаптеров
+CVAT/S3/config/ClearML, разрешая общий слой `files`/`execution`, циклы между
+внутренними пакетами и импорты публичных фасадов из канонических модулей.
+`cvat_sdk` импортируется только в `adapters/cvat/`, `boto3`/`botocore` — в
+`adapters/s3/`, ClearML — в `adapters/clearml/`, questionary — в
+`interfaces/commands/interactive/`. Учитываются локальные импорты и импорты
+в `TYPE_CHECKING`.
 
-Модули `models` и `exceptions` **не могут** импортировать из: `client`, `api`, `services`, `commands`, `cli`, `_client`.
-
-**3. Изоляция конфигурации** (тип `forbidden`):
-
-Модуль `config` **не может** импортировать из: `client`, `api`, `services`, `commands`, `cli`, `_client`, `models`. Может зависеть только от `exceptions`.
-
-**4. Изоляция слоя ClearML** (тип `forbidden`):
-
-Пакет `_clearml` **не может** импортировать из: `client`, `commands`, `cli`, `_client`, `models`.
-
-При добавлении новых модулей или кросс-модульных импортов запускайте `uv run lint-imports`.
+`scripts/check_architecture.py` дополняет import-linter: проверяет вызовы внешних
+эффектов в `domain`/`application`, включая импорты с псевдонимами. Лексические
+операции с путями, pandas в памяти, Pydantic и Loguru допустимы; файловый ввод-вывод,
+загрузка конфигурации/окружения, SDK/сеть, часы, потоки и процессы находятся за
+портами. Отрицательные примеры в `tests/test_architecture.py` проверяют, что
+нарушения действительно отклоняются. Запускайте весь набор при изменении границ.
 
 ### vulture (мёртвый код)
 
@@ -400,7 +406,7 @@ uv run mutmut browse                             # интерактивный р
 
 ### Фикстуры CVAT
 
-Фикстуры лежат в `tests/fixtures/cvat/<project_name>/` (`project.json` и `tasks/*.json`). JSON-структура соответствует `_client/dtos.py`.
+Фикстуры лежат в `tests/fixtures/cvat/<project_name>/` (`project.json` и `tasks/*.json`). JSON-структура соответствует `application/ports/dtos.py`.
 
 Чтобы пересоздать фикстуры из реального CVAT:
 
@@ -647,16 +653,39 @@ git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
 
 ## Архитектура
 
-- **API-абстракция** — весь доступ к CVAT через протокол `CvatApiPort`.
-  В продакшне — `SdkCvatApiAdapter` (обёртка над `cvat_sdk`),
-  в тестах — `FakeCvatApi` (JSON-фикстуры).
-- **DTO** (`_client/dtos.py`) — frozen dataclasses для CVAT API. Модели
-  (`models.py`) — Pydantic. Конфиги (`config.py`) — тоже Pydantic.
-- **CLI** (`cli.py`) — тонкий argparse; логика в `commands/` (по модулю на команду).
-- **Слои и фундамент** — см. контракты import-linter выше.
+- **Предметная область** (`domain/`) — модели, ошибки и чистые правила:
+  партиционирование, merge, координаты/валидация/форматирование конвертации,
+  идентичность путей и сравнение данных для восстановления upload.
+- **Приложение** (`application/client/`, `application/use_cases/`) — операции
+  CVAT и сценарии fetch/upload/convert/merge. Эффекты передаются через
+  `application/ports/`; настройки и результаты не загружают конфигурацию.
+- **API-абстракция** (`application/ports/cvat.py`) — весь доступ к CVAT через
+  `CvatApiPort`. В продакшне используется `adapters/cvat/sdk_adapter.py`,
+  в тестах — `FakeCvatApi` с JSON-фикстурами.
+- **DTO** (`application/ports/dtos.py`) — frozen dataclasses для CVAT API.
+  Модели (`domain/models.py`) и настройки — Pydantic; YAML/env/preset загрузка
+  находится в `adapters/config/`.
+- **Внешние адаптеры** (`adapters/`) — CVAT/S3/ClearML, файлы, конфигурация,
+  исполнение и повторы. Файловые адаптеры владеют CSV, размерами изображений,
+  reflink/link/copy, проверкой путей, очисткой экспорта и манифестами.
+- **Сборка зависимостей** (`composition/`) — выбирает настройки и передаёт
+  сценариям адаптеры, runner, часы и блокировки. Runner сохраняет порядок входа;
+  необработанная ошибка отменяет очередь, дожидается активных работ и передаётся
+  вызывающему коду. Кэш можно отключить для чтения, сохранив локальную инвалидацию.
+- **Входные интерфейсы** (`interfaces/cli.py`, `interfaces/commands/`,
+  `interfaces/api.py`) — argparse, диалоги, преобразование аргументов и ошибок.
+  Публичный Python API не задаёт вопросов.
+- **Совместимость** — публичные модули верхнего уровня (`cveta2.api`,
+  `cveta2.client`, `cveta2.config`, `cveta2.models` и остальные поддерживаемые
+  фасады) сохраняют сигнатуры и идентичность типов. `CvatClient` собирается в
+  `composition/client.py`; переданный API остаётся под управлением вызывающего
+  кода, созданная клиентом сессия закрывается при выходе. Старые внутренние пакеты
+  `services`, `commands`, `_client`, `_client_ops`, `_clearml` удалены;
+  внутренние импорты и monkeypatch в тестах направляйте к владельцу реализации.
 
 Подробная карта модулей и потоки данных (fetch / upload / convert, разрешение
-`ORG/PROJECT`, обработка удалённых кадров) — в [архитектурном контексте Spec Kit](.specify/memory/architecture.md).
+`ORG/PROJECT`, обработка удалённых кадров) — в
+[архитектурном контексте Spec Kit](.specify/memory/architecture.md).
 
 ## Документация
 

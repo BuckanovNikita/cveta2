@@ -1,12 +1,12 @@
-"""Unit tests for cveta2._clearml (mocked — no real ClearML needed)."""
+"""Unit tests for cveta2.adapters.clearml (mocked — no real ClearML needed)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
-from cveta2.config import ClearmlConfig, ClearmlProjectMapping
-from cveta2.exceptions import ClearmlPublishError
+from cveta2.adapters.config.settings import ClearmlConfig, ClearmlProjectMapping
+from cveta2.domain.errors import ClearmlPublishError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -30,7 +30,7 @@ class TestPublishToClearml:
         mock_clearml.Dataset = mock_dataset_cls
 
         with patch.dict("sys.modules", {"clearml": mock_clearml}):
-            from cveta2._clearml._dataset import publish_to_clearml
+            from cveta2.adapters.clearml._dataset import publish_to_clearml
 
             mapping = ClearmlProjectMapping(
                 clearml_project="team/ds", clearml_dataset="annot"
@@ -51,7 +51,7 @@ class TestPublishToClearml:
         mock_clearml.Dataset = mock_dataset_cls
 
         with patch.dict("sys.modules", {"clearml": mock_clearml}):
-            from cveta2._clearml._dataset import publish_to_clearml
+            from cveta2.adapters.clearml._dataset import publish_to_clearml
 
             mapping = ClearmlProjectMapping(clearml_project="p", clearml_dataset="d")
             publish_to_clearml(mapping, tmp_path)
@@ -75,8 +75,8 @@ class TestMaybePublishClearml:
         monkeypatch.setenv("CVETA2_CLEARML", "false")
         mock_publish = MagicMock()
 
-        with patch("cveta2._clearml._dataset.publish_to_clearml", mock_publish):
-            from cveta2._clearml import maybe_publish_clearml
+        with patch("cveta2.adapters.clearml._dataset.publish_to_clearml", mock_publish):
+            from cveta2.composition.publishing import maybe_publish_clearml
 
             maybe_publish_clearml("proj", tmp_path)
 
@@ -90,11 +90,16 @@ class TestMaybePublishClearml:
         mock_publish = MagicMock()
 
         with (
-            patch("cveta2._clearml.is_clearml_available", return_value=False),
-            patch("cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG),
-            patch("cveta2._clearml._dataset.publish_to_clearml", mock_publish),
+            patch(
+                "cveta2.composition.publishing.is_clearml_available", return_value=False
+            ),
+            patch(
+                "cveta2.adapters.config.settings.ClearmlConfig.load",
+                return_value=_MAPPED_CONFIG,
+            ),
+            patch("cveta2.adapters.clearml._dataset.publish_to_clearml", mock_publish),
         ):
-            from cveta2._clearml import maybe_publish_clearml
+            from cveta2.composition.publishing import maybe_publish_clearml
 
             maybe_publish_clearml("proj", tmp_path)
 
@@ -109,11 +114,15 @@ class TestMaybePublishClearml:
         mock_publish = MagicMock()
 
         with (
-            patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2.config.ClearmlConfig.load", return_value=cfg),
-            patch("cveta2._clearml._dataset.publish_to_clearml", mock_publish),
+            patch(
+                "cveta2.composition.publishing.is_clearml_available", return_value=True
+            ),
+            patch(
+                "cveta2.adapters.config.settings.ClearmlConfig.load", return_value=cfg
+            ),
+            patch("cveta2.adapters.clearml._dataset.publish_to_clearml", mock_publish),
         ):
-            from cveta2._clearml import maybe_publish_clearml
+            from cveta2.composition.publishing import maybe_publish_clearml
 
             maybe_publish_clearml("proj", tmp_path)
 
@@ -124,11 +133,16 @@ class TestMaybePublishClearml:
         mock_publish = MagicMock()
 
         with (
-            patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG),
-            patch("cveta2._clearml._dataset.publish_to_clearml", mock_publish),
+            patch(
+                "cveta2.composition.publishing.is_clearml_available", return_value=True
+            ),
+            patch(
+                "cveta2.adapters.config.settings.ClearmlConfig.load",
+                return_value=_MAPPED_CONFIG,
+            ),
+            patch("cveta2.adapters.clearml._dataset.publish_to_clearml", mock_publish),
         ):
-            from cveta2._clearml import maybe_publish_clearml
+            from cveta2.composition.publishing import maybe_publish_clearml
 
             maybe_publish_clearml("unmapped-project", tmp_path)
 
@@ -142,13 +156,18 @@ class TestMaybePublishClearml:
         config_path = tmp_path / "team.yaml"
 
         with (
-            patch("cveta2._clearml.is_clearml_available", return_value=True),
             patch(
-                "cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG
+                "cveta2.composition.publishing.is_clearml_available", return_value=True
+            ),
+            patch(
+                "cveta2.adapters.config.settings.ClearmlConfig.load",
+                return_value=_MAPPED_CONFIG,
             ) as load,
-            patch("cveta2._clearml._dataset.publish_to_clearml") as mock_publish,
+            patch(
+                "cveta2.adapters.clearml._dataset.publish_to_clearml"
+            ) as mock_publish,
         ):
-            from cveta2._clearml import maybe_publish_clearml
+            from cveta2.composition.publishing import maybe_publish_clearml
 
             maybe_publish_clearml("proj", tmp_path, config_path)
 
@@ -164,14 +183,19 @@ class TestMaybePublishClearml:
         monkeypatch.delenv("CVETA2_CLEARML", raising=False)
 
         with (
-            patch("cveta2._clearml.is_clearml_available", return_value=True),
-            patch("cveta2.config.ClearmlConfig.load", return_value=_MAPPED_CONFIG),
             patch(
-                "cveta2._clearml._dataset.publish_to_clearml",
+                "cveta2.composition.publishing.is_clearml_available", return_value=True
+            ),
+            patch(
+                "cveta2.adapters.config.settings.ClearmlConfig.load",
+                return_value=_MAPPED_CONFIG,
+            ),
+            patch(
+                "cveta2.adapters.clearml._dataset.publish_to_clearml",
                 side_effect=ClearmlPublishError("ClearML server unreachable"),
             ),
         ):
-            from cveta2._clearml import maybe_publish_clearml
+            from cveta2.composition.publishing import maybe_publish_clearml
 
             # Should not raise — exception is caught
             maybe_publish_clearml("proj", tmp_path)

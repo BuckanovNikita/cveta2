@@ -12,18 +12,20 @@ from botocore.exceptions import (
     IncompleteReadError,
 )
 
-from cveta2._concurrency import Workers, configure_workers
-from cveta2._retry import RetryPolicy, configure_retries
-from cveta2.s3_utils import (
-    build_s3_key,
+from cveta2.adapters.execution.concurrency import Workers, configure_workers
+from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
+from cveta2.adapters.s3.utils import (
     list_s3_objects,
     make_s3_client,
-    names_with_basename_fallback,
-    parse_sync_root,
-    pick_latest_duplicate,
     run_s3_transfers,
     s3_get_bytes,
     set_default_data_timeout,
+)
+from cveta2.domain.paths import (
+    build_s3_key,
+    names_with_basename_fallback,
+    parse_sync_root,
+    pick_latest_duplicate,
     strip_key_prefix,
 )
 from tests.fixtures.fake_s3 import FakeS3Client, PagedFakeS3Client

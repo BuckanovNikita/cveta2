@@ -72,8 +72,8 @@ class TestPublishToClearml:
         """Create CSV files and publish them as a ClearML dataset."""
         from clearml import Dataset
 
-        from cveta2._clearml._dataset import publish_to_clearml
-        from cveta2.config import ClearmlProjectMapping
+        from cveta2.adapters.clearml._dataset import publish_to_clearml
+        from cveta2.adapters.config.settings import ClearmlProjectMapping
 
         (tmp_path / "dataset.csv").write_text(
             "image_name,label\nimg1.jpg,cat\n", encoding="utf-8"
@@ -105,8 +105,8 @@ class TestPublishToClearml:
         """Verify the published dataset contains all CSV files."""
         from clearml import Dataset
 
-        from cveta2._clearml._dataset import publish_to_clearml
-        from cveta2.config import ClearmlProjectMapping
+        from cveta2.adapters.clearml._dataset import publish_to_clearml
+        from cveta2.adapters.config.settings import ClearmlProjectMapping
 
         csv_names = [
             "dataset.csv",
@@ -149,11 +149,11 @@ class TestMaybePublishSkipPaths:
         """Verify no dataset is created when CVETA2_CLEARML=false."""
         from clearml import Dataset
 
-        from cveta2._clearml import maybe_publish_clearml
-        from cveta2.config import (
+        from cveta2.adapters.config.settings import (
             ClearmlConfig,
             ClearmlProjectMapping,
         )
+        from cveta2.composition.publishing import maybe_publish_clearml
 
         (tmp_path / "dataset.csv").write_text("col\nval\n", encoding="utf-8")
 
@@ -189,8 +189,8 @@ class TestMaybePublishSkipPaths:
         clearml_run: RunSettings,
     ) -> None:
         """Verify no dataset is created when project has no mapping."""
-        from cveta2._clearml import maybe_publish_clearml
-        from cveta2.config import ClearmlConfig
+        from cveta2.adapters.config.settings import ClearmlConfig
+        from cveta2.composition.publishing import maybe_publish_clearml
 
         (tmp_path / "dataset.csv").write_text("col\nval\n", encoding="utf-8")
         config_path = tmp_path / "config.yaml"

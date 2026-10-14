@@ -10,14 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from cveta2._client.dtos import (
-    LabelPatch,
-    NewIssue,
-    NewShape,
-    RawShape,
-    UploadTaskSpec,
-)
-from cveta2._client.sdk_requests import (
+from cveta2.adapters.cvat.sdk_requests import (
     _build_label_patch_request,
     build_data_request,
     build_delete_shapes_payload,
@@ -27,6 +20,13 @@ from cveta2._client.sdk_requests import (
     build_labels_patch_request,
     build_new_shapes_payload,
     build_task_write_request,
+)
+from cveta2.application.ports.dtos import (
+    LabelPatch,
+    NewIssue,
+    NewShape,
+    RawShape,
+    UploadTaskSpec,
 )
 
 

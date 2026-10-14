@@ -9,12 +9,18 @@ import pandas as pd
 import pytest
 
 import cveta2
-from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame, RawIssue, RawJob
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
-from cveta2.dataset_partition import completed_task_ids, partition_annotations_df
-from cveta2.exceptions import CvatApiError
-from cveta2.models import ProjectInfo
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.application.ports.dtos import (
+    RawAnnotations,
+    RawDataMeta,
+    RawFrame,
+    RawIssue,
+    RawJob,
+)
+from cveta2.composition.client import CvatClient
+from cveta2.domain.errors import CvatApiError
+from cveta2.domain.models import ProjectInfo
+from cveta2.domain.partition import completed_task_ids, partition_annotations_df
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
@@ -23,7 +29,7 @@ from tests.helpers import make_cs_info, make_raw_shape, make_task
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cveta2.models import TaskInfo
+    from cveta2.domain.models import TaskInfo
 
 
 def _connection(
@@ -248,7 +254,7 @@ def test_downloaded_paths_survive_csv_and_cache_hit(
     s3 = FakeS3Client({"bucket/images/nested/a.jpg": b"image"})
     with (
         patch.object(api, "get_project_cloud_storage", return_value=storage),
-        patch("cveta2.image_downloader.make_s3_client", return_value=s3),
+        patch("cveta2.adapters.s3.download.make_s3_client", return_value=s3),
     ):
         for run in range(2):
             result = cveta2.fetch(

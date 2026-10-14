@@ -10,8 +10,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
-from cveta2.cli import CliApp
-from cveta2.client import FetchContext
+from cveta2.composition.client import FetchContext
+from cveta2.interfaces.cli import CliApp
 from tests.helpers import mock_client_ctx, patch_cli_client, write_test_config
 
 if TYPE_CHECKING:

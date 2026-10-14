@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cveta2.exceptions import LabelsMismatchError
-from cveta2.models import LabelInfo
-from cveta2.services.upload import validate_labels
+from cveta2.application.use_cases.upload import validate_labels
+from cveta2.domain.errors import LabelsMismatchError
+from cveta2.domain.models import LabelInfo
 
 
 class TestLabelsMismatchError:

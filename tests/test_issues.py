@@ -9,9 +9,13 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from cveta2._client.assembly import task_to_records
-from cveta2._client.context import _build_frame_issues, _TaskContext
-from cveta2._client.dtos import (
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.application.client.assembly import task_to_records
+from cveta2.application.client.context import _build_frame_issues, _TaskContext
+from cveta2.application.client.extractors import _collect_shapes
+from cveta2.application.client.write import _issues_not_yet_on_task
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.application.ports.dtos import (
     NewIssue,
     RawAnnotations,
     RawDataMeta,
@@ -20,13 +24,9 @@ from cveta2._client.dtos import (
     RawJob,
     RawShape,
 )
-from cveta2._client.extractors import _collect_shapes
-from cveta2._client.ports import CvatApiPort
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2._client_ops.write import _issues_not_yet_on_task
-from cveta2.client import CvatClient, FetchContext
-from cveta2.exceptions import CvatApiError
-from cveta2.models import (
+from cveta2.composition.client import CvatClient, FetchContext
+from cveta2.domain.errors import CvatApiError
+from cveta2.domain.models import (
     BBoxAnnotation,
     ImageWithoutAnnotations,
     LabelInfo,

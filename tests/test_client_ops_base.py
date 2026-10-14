@@ -18,12 +18,12 @@ import urllib3
 import urllib3.exceptions
 from cvat_sdk.api_client.exceptions import ApiException
 
-from cveta2._client.dtos import RawDataMeta, RawFrame, RawJob
-from cveta2._client.ports import CvatApiPort
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2.client import CvatClient
-from cveta2.exceptions import CvatApiError
-from cveta2.models import LabelInfo
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.application.ports.dtos import RawDataMeta, RawFrame, RawJob
+from cveta2.composition.client import CvatClient
+from cveta2.domain.errors import CvatApiError
+from cveta2.domain.models import LabelInfo
 from tests.helpers import CFG, client_with_api, csv_row, make_df
 
 if TYPE_CHECKING:
@@ -83,7 +83,7 @@ def _forbid_the_real_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
         msg = "the injected client_factory must be the one used"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("cveta2._client.connection.make_client", _explode)
+    monkeypatch.setattr("cveta2.adapters.cvat.connection.make_client", _explode)
 
 
 def _client() -> tuple[CvatClient, _RecordingFactory]:
@@ -137,7 +137,7 @@ class TestConnectionLifecycle:
         factory = _RecordingFactory()
         installs: list[tuple[float | None, int]] = []
         monkeypatch.setattr(
-            "cveta2._client.connection.install_global_request_timeout",
+            "cveta2.adapters.cvat.connection.install_global_request_timeout",
             lambda value: installs.append((value, len(factory.calls))),
         )
         cfg = CFG.model_copy(update={"request_timeout": timeout})

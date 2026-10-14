@@ -13,18 +13,20 @@ from pathlib import Path
 
 import pytest
 
-from cveta2.image_downloader import CloudStorageInfo
-from cveta2.upload_manifest import (
-    MANIFEST_SCHEMA_VERSION,
-    UploadManifest,
-    compute_fingerprint,
+from cveta2.adapters.files.manifests import (
     delete_manifest,
     get_upload_manifest_dir,
     list_manifests,
     load_manifest,
     new_manifest,
-    normalize_upload_host,
     save_manifest,
+)
+from cveta2.domain.storage import CloudStorageInfo
+from cveta2.domain.upload import (
+    MANIFEST_SCHEMA_VERSION,
+    UploadManifest,
+    compute_fingerprint,
+    normalize_upload_host,
 )
 
 PROJECT_ID = 7

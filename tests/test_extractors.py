@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cveta2._client.context import _TaskContext
-from cveta2._client.dtos import RawAttribute, RawFrame
-from cveta2._client.extractors import _collect_shapes
+from cveta2.application.client.context import _TaskContext
+from cveta2.application.client.extractors import _collect_shapes
+from cveta2.application.ports.dtos import RawAttribute, RawFrame
 from tests.helpers import make_raw_shape
 
 if TYPE_CHECKING:
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
-    from cveta2.models import TaskInfo
+    from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta
+    from cveta2.domain.models import TaskInfo
 
 # ---------------------------------------------------------------------------
 # Helpers

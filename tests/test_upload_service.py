@@ -18,23 +18,23 @@ import pandas as pd
 import pytest
 from botocore.exceptions import ClientError
 
-from cveta2.exceptions import CvatApiError, Cveta2Error, LabelsMismatchError
-from cveta2.models import CSV_COLUMNS, LabelInfo, ProjectInfo
-from cveta2.s3_utils import build_s3_key
-from cveta2.services.upload import (
+from cveta2.adapters.files.manifests import (
+    list_manifests,
+    new_manifest,
+    save_manifest,
+)
+from cveta2.adapters.s3.task_cache import get_task_cache_dir
+from cveta2.application.use_cases.upload import (
     UploadOptions,
     UploadPlan,
     UploadRequest,
     _stage_images,
     request_fingerprint,
-    upload_dataset,
 )
-from cveta2.task_cache import get_task_cache_dir
-from cveta2.upload_manifest import (
-    list_manifests,
-    new_manifest,
-    save_manifest,
-)
+from cveta2.composition.workflows import upload_dataset, upload_dependencies
+from cveta2.domain.errors import CvatApiError, Cveta2Error, LabelsMismatchError
+from cveta2.domain.models import CSV_COLUMNS, LabelInfo, ProjectInfo
+from cveta2.domain.paths import build_s3_key
 from tests.fixtures.fake_cvat_api import FakeCvatApi, RecordedWrites
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
@@ -43,9 +43,9 @@ from tests.helpers import client_with_api, make_cs_info
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from cveta2._client.dtos import NewIssue, RawDataMeta
-    from cveta2.client import CvatClient
-    from cveta2.image_downloader import CloudStorageInfo
+    from cveta2.application.ports.dtos import NewIssue, RawDataMeta
+    from cveta2.composition.client import CvatClient
+    from cveta2.domain.storage import CloudStorageInfo
 
 PROJECT_ID = 7
 PROJECT_NAME = "proj"
@@ -73,7 +73,7 @@ class _ProjectScopedFake(FakeCvatApi):
     ``get_project_cloud_storage`` identically for every id, so a call that
     passed the wrong project — or ``None`` — was indistinguishable from a
     correct one.  It also counts ``get_task_data_meta`` calls: reusing one
-    :class:`~cveta2._client_ops.session.TaskWriteSession` across the write
+    :class:`~cveta2.application.client.session.TaskWriteSession` across the write
     chain is only observable as the number of metadata fetches.
     """
 
@@ -161,7 +161,9 @@ def make_client(
 
 def make_s3(monkeypatch: pytest.MonkeyPatch, s3: _ListCountingS3) -> None:
     """Route every ``make_s3_client`` call in the uploader at *s3*."""
-    monkeypatch.setattr("cveta2.image_uploader.make_s3_client", lambda _url=None: s3)
+    monkeypatch.setattr(
+        "cveta2.adapters.s3.upload.make_s3_client", lambda _url=None: s3
+    )
 
 
 def seeded_bucket(names: list[str]) -> _ListCountingS3:
@@ -269,7 +271,7 @@ class TestStageImages:
             search_dirs=[image_dir],
         )
 
-        staged = _stage_images(client, request)
+        staged = _stage_images(client, request, deps=upload_dependencies())
 
         assert staged.cs_info == cs_info
         assert staged.task_image_names == [SEEDED_KEY, current_month_key("b.jpg")]
@@ -297,7 +299,7 @@ class TestStageImages:
         )
 
         with pytest.raises(Cveta2Error, match=PROJECT_NAME):
-            _stage_images(client, request)
+            _stage_images(client, request, deps=upload_dependencies())
 
     def test_unknown_label_error_names_the_project(
         self, monkeypatch: pytest.MonkeyPatch
@@ -312,7 +314,7 @@ class TestStageImages:
         request = make_request(image_names=["a.jpg"])
 
         with pytest.raises(LabelsMismatchError) as exc_info:
-            _stage_images(client, request)
+            _stage_images(client, request, deps=upload_dependencies())
 
         assert PROJECT_NAME in str(exc_info.value)
 
@@ -848,7 +850,7 @@ class TestResume:
         names = ["a.jpg", "b.jpg"]
         image_dir = make_local_images(tmp_path, names)
         monkeypatch.setattr(
-            "cveta2.image_uploader._assign_month_folder",
+            "cveta2.adapters.s3.upload._assign_month_folder",
             lambda name: f"2026-01/{name}",
         )
 
@@ -862,7 +864,7 @@ class TestResume:
         # there, so a recomputed mapping would send every image somewhere new.
         make_s3(monkeypatch, _ListCountingS3())
         monkeypatch.setattr(
-            "cveta2.image_uploader._assign_month_folder",
+            "cveta2.adapters.s3.upload._assign_month_folder",
             lambda name: f"9999-12/{name}",
         )
         # Simulate attachment having completed after the interrupted response.

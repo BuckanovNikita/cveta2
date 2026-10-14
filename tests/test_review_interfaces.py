@@ -11,8 +11,8 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
-from cveta2.config import ClearmlConfig, CvatConfig, IgnoreConfig
-from cveta2.exceptions import MissingCredentialsError
+from cveta2.adapters.config.settings import ClearmlConfig, CvatConfig, IgnoreConfig
+from cveta2.domain.errors import MissingCredentialsError
 
 
 @pytest.mark.parametrize("value", [-1, float("inf"), float("-inf"), float("nan")])
@@ -60,9 +60,9 @@ def test_cli_typed_config_has_no_traceback(tmp_path: Path) -> None:
 def test_clearml_enabled_only_saved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from cveta2.commands import setup_clearml
-    from cveta2.commands.interactive import wizard
-    from cveta2.models import ProjectInfo
+    from cveta2.domain.models import ProjectInfo
+    from cveta2.interfaces.commands import setup_clearml
+    from cveta2.interfaces.commands.interactive import wizard
 
     path = tmp_path / "config.yaml"
     monkeypatch.setattr(
@@ -83,7 +83,7 @@ def test_stale_ignore_cli_removes_without_task_listing(
 ) -> None:
     from contextlib import contextmanager
 
-    from cveta2.commands import ignore
+    from cveta2.interfaces.commands import ignore
 
     cfg = IgnoreConfig()
     cfg.add_task("project", 99, "deleted")
@@ -104,7 +104,7 @@ def test_stale_ignore_cli_removes_without_task_listing(
 
 
 def test_doctor_required_failure_exits(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cveta2.commands import doctor
+    from cveta2.interfaces.commands import doctor
 
     monkeypatch.setattr(doctor, "check_config", lambda: False)
     monkeypatch.setattr(doctor, "check_aws_credentials", lambda: True)
@@ -115,7 +115,7 @@ def test_doctor_required_failure_exits(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_doctor_optional_failure_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cveta2.commands import doctor
+    from cveta2.interfaces.commands import doctor
 
     monkeypatch.setattr(doctor, "check_config", lambda: True)
     monkeypatch.setattr(doctor, "check_aws_credentials", lambda: False)
@@ -161,15 +161,16 @@ def test_doctor_subprocess_exit_contract(
 def test_doctor_required_unavailable_and_optional_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from botocore.exceptions import NoCredentialsError
-
-    from cveta2.commands import doctor
+    from cveta2.domain.errors import Cveta2Error
+    from cveta2.interfaces.commands import doctor
 
     monkeypatch.setattr(
         doctor, "check_config", Mock(side_effect=PermissionError("denied"))
     )
     monkeypatch.setattr(
-        doctor, "check_aws_credentials", Mock(side_effect=NoCredentialsError())
+        doctor,
+        "check_aws_credentials",
+        Mock(side_effect=Cveta2Error("Unable to locate credentials")),
     )
     monkeypatch.setattr(doctor, "check_cache_permissions", Mock(return_value=True))
     with pytest.raises(SystemExit) as error:
@@ -226,8 +227,8 @@ def test_doctor_optional_validation_failure_subprocess(tmp_path: Path) -> None:
         "cvat:\n  host: https://cvat.example\n  username: user\n  password: pass\n"
     )
     script = """
-from cveta2.config import ImageCacheConfig
-from cveta2.cli import main
+from cveta2.adapters.config.settings import ImageCacheConfig
+from cveta2.interfaces.cli import main
 
 def invalid_optional_loader(cls, config_path=None):
     return cls.model_validate({'projects': []})

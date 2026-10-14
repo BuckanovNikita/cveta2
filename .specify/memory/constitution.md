@@ -16,9 +16,12 @@ later changes reconcile the relevant spec, plan, and tasks together.
 
 Changes MUST follow the import-linter contracts in `pyproject.toml` and the
 flows in [architecture.md](architecture.md). CLI adapters remain thin;
-orchestration belongs in
-services, which never prompt or exit and raise `Cveta2Error`. Public API
-functions remain prompt-free. All `cvat_sdk` imports stay inside `_client/`.
+orchestration belongs in application use cases, which never prompt or exit and
+raise `Cveta2Error`. Domain and application depend only inward and receive
+external effects through application-owned ports. Composition constructs outgoing
+adapters; incoming interfaces map CLI/API calls. Public facades must not become
+dependencies of canonical modules. Public API functions remain prompt-free. All
+`cvat_sdk` imports stay inside `adapters/cvat/`.
 Public CLI, API, configuration, and dataset compatibility MUST be preserved
 unless the specification explicitly requests and describes a contract change.
 Fetch partitioning MUST preserve deletion precedence for same-task ties and
@@ -126,4 +129,8 @@ existing application behavior is not retroactively specified. Version 1.1.0
 expands documentation ownership to migrated engineering context, architecture,
 dataset contracts, and dated review evidence; it changes no application contract.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-09-30
+Version 1.2.0 expands principle II with explicit ports, inward dependencies and
+effect ownership for the approved reorganization. Supported public behavior and
+storage contracts remain unchanged.
+
+**Version**: 1.2.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-14

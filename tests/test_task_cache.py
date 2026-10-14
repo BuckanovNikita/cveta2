@@ -14,32 +14,30 @@ import pandas as pd
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
-from cveta2._retry import RetryPolicy, configure_retries
-from cveta2.client import CvatClient
-from cveta2.exceptions import Cveta2Error
-from cveta2.image_downloader import CloudStorageInfo
-from cveta2.models import (
+from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
+from cveta2.adapters.s3.task_cache import (
+    S3CacheBackend,
+    TaskAnnotationCache,
+    get_task_cache_dir,
+)
+from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import (
+    fetch_project,
+    fetch_selected_tasks,
+    invalidate_local_entry,
+    resolved_task,
+)
+from cveta2.domain.cache import CACHE_SCHEMA_VERSION, CachedTaskEnvelope
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import (
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
     TaskAnnotations,
     TaskInfo,
 )
-from cveta2.services.fetch import (
-    FetchOptions,
-    FetchTarget,
-    fetch_project,
-    fetch_selected_tasks,
-)
-from cveta2.services.task_ops import resolved_task
-from cveta2.task_cache import (
-    CACHE_SCHEMA_VERSION,
-    CachedTaskEnvelope,
-    S3CacheBackend,
-    TaskAnnotationCache,
-    get_task_cache_dir,
-    invalidate_local_entry,
-)
+from cveta2.domain.storage import CloudStorageInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import CFG, build_fake, make_bbox, make_task, write_config_yaml
@@ -671,7 +669,7 @@ class TestS3Backend:
         fake_s3 = FakeS3Client()
 
         with patch(
-            "cveta2.task_cache.make_s3_client", return_value=fake_s3
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
         ) as make_client:
             backend = S3CacheBackend.from_cloud_storage(cs_info)
 
@@ -858,7 +856,9 @@ class TestCacheSettings:
         key = f"bkt/{_s3_key(1)}"
         fake_s3 = FakeS3Client({key: b"stale"})
 
-        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+        with patch(
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
+        ):
             invalidate_local_entry(5, 1, "", _PROJECT_STORAGE)
 
         assert not (cache_dir / "task_1.json").exists()
@@ -883,7 +883,9 @@ class TestCacheSettings:
         default_key = f"bkt/{_s3_key(1)}"
         fake_s3 = FakeS3Client({explicit_key: b"stale", default_key: b"other"})
 
-        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+        with patch(
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
+        ):
             invalidate_local_entry(5, 1, "proj", _PROJECT_STORAGE)
 
         assert fake_s3.delete_calls == [explicit_key]
@@ -902,7 +904,7 @@ class TestCacheSettings:
         fake_s3 = FakeS3Client({key: b"stale"})
 
         with patch(
-            "cveta2.task_cache.make_s3_client", return_value=fake_s3
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
         ) as make_client:
             invalidate_local_entry(5, 1, "", _PROJECT_STORAGE)
 
@@ -927,7 +929,9 @@ class TestCacheSettings:
     ) -> None:
         fake_s3 = FakeS3Client()
         cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
-        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+        with patch(
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
+        ):
             backend = S3CacheBackend.from_cloud_storage(
                 cs_info, task_cache_s3="s3://ml-cache/proj"
             )
@@ -943,7 +947,9 @@ class TestCacheSettings:
     ) -> None:
         fake_s3 = FakeS3Client()
         cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
-        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+        with patch(
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
+        ):
             backend = S3CacheBackend.from_cloud_storage(
                 cs_info, task_cache_s3="_cveta2_cache"
             )
@@ -970,7 +976,7 @@ class TestCacheSettings:
         """
         fake_s3 = FakeS3Client()
         with patch(
-            "cveta2.task_cache.make_s3_client", return_value=fake_s3
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
         ) as make_client:
             backend = S3CacheBackend.from_cloud_storage(
                 None, task_cache_s3="s3://ml-cache/proj"
@@ -994,7 +1000,7 @@ class TestCacheSettings:
             id=1, bucket="bkt", prefix="pfx", endpoint_url="http://minio:9000"
         )
         with patch(
-            "cveta2.task_cache.make_s3_client", return_value=FakeS3Client()
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=FakeS3Client()
         ) as make_client:
             S3CacheBackend.from_cloud_storage(cs_info, task_cache_s3="s3://ml-cache/p")
 
@@ -1005,7 +1011,9 @@ class TestCacheSettings:
     ) -> None:
         fake_s3 = FakeS3Client()
         cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
-        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+        with patch(
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
+        ):
             backend = S3CacheBackend.from_cloud_storage(cs_info)
         assert backend is not None
         cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
@@ -1051,7 +1059,9 @@ class TestFetchBuildsTheS3CacheBackend:
         fake_s3: FakeS3Client,
         config_path: Path | None = None,
     ) -> None:
-        with patch("cveta2.task_cache.make_s3_client", return_value=fake_s3):
+        with patch(
+            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
+        ):
             fetch_selected_tasks(
                 CvatClient(CFG, api=api),
                 FetchTarget(fake.project.id, fake.project.name, output_dir, None),
@@ -1142,7 +1152,7 @@ class TestTaskMutationDropsTheS3Entry:
         client = CvatClient(CFG, api=_FakeApiWithStorage(fake, _PROJECT_STORAGE))
 
         with (
-            patch("cveta2.task_cache.make_s3_client", return_value=fake_s3),
+            patch("cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3),
             client,
             resolved_task(client, fake.project.id, fake.project.name, task.id),
         ):

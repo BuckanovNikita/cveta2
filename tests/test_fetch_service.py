@@ -8,18 +8,31 @@ through the fetch service and :class:`CvatClient`.
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
+from pathlib import Path
+from threading import Lock
 from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
 
-from cveta2._client.dtos import RawAnnotations
-from cveta2._concurrency import configure_workers
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
-from cveta2.dataset_partition import PartitionResult, partition_annotations_df
-from cveta2.exceptions import CvatApiError
-from cveta2.models import (
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.adapters.execution.concurrency import configure_workers
+from cveta2.adapters.files.dataset import read_dataset_csv
+from cveta2.adapters.s3.task_cache import TaskAnnotationCache
+from cveta2.application.ports.dtos import RawAnnotations
+from cveta2.application.use_cases.fetch import (
+    FetchDependencies,
+    FetchOptions,
+    FetchTarget,
+    _CachePolicy,
+    _FetchStats,
+    _retrieve_task,
+)
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import fetch_dependencies, fetch_project
+from cveta2.domain.errors import CvatApiError
+from cveta2.domain.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
     DeletedImage,
@@ -28,17 +41,7 @@ from cveta2.models import (
     TaskAnnotations,
     TaskInfo,
 )
-from cveta2.services import fetch as fetch_service
-from cveta2.services.fetch import (
-    FetchOptions,
-    FetchTarget,
-    _CachePolicy,
-    _FetchStats,
-    _retrieve_task,
-    fetch_project,
-)
-from cveta2.services.output import read_dataset_csv
-from cveta2.task_cache import TaskAnnotationCache
+from cveta2.domain.partition import PartitionResult, partition_annotations_df
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import (
@@ -51,10 +54,8 @@ from tests.helpers import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from cveta2.client import FetchContext
-    from cveta2.image_downloader import CloudStorageInfo
+    from cveta2.composition.client import FetchContext
+    from cveta2.domain.storage import CloudStorageInfo
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 # ---------------------------------------------------------------------------
@@ -393,7 +394,7 @@ def test_resolve_project_id_not_found(normal_fake: LoadedFixtures) -> None:
     The message is the only place the rejected spec appears; replacing it
     wholesale left the raise indistinguishable from a bare one.
     """
-    from cveta2.exceptions import ProjectNotFoundError
+    from cveta2.domain.errors import ProjectNotFoundError
 
     client = make_fake_client(normal_fake)
 
@@ -427,7 +428,7 @@ def test_resolve_project_id_picks_the_named_project_from_the_api() -> None:
 
 def test_count_images_unique_and_empty() -> None:
     """count_images counts unique image names; empty/columnless frames give 0."""
-    from cveta2.services.output import count_images
+    from cveta2.domain.output import count_images
 
     df = pd.DataFrame(
         {"image_name": ["a.jpg", "a.jpg", "b.jpg"], "instance_label": ["x", "y", "x"]}
@@ -449,7 +450,7 @@ def test_raw_csv_includes_deleted_images(
     )
     result = fetch_all_annotations(make_fake_client(fake), fake.project.id)
 
-    from cveta2.services.output import write_raw_csv
+    from cveta2.adapters.files.dataset import write_raw_csv
 
     write_raw_csv(result, tmp_path / "out")
 
@@ -469,8 +470,8 @@ def test_raw_csv_includes_deleted_images(
 
 def test_task_to_records_unknown_deleted_frame_id() -> None:
     """Deleted frame_id not in frames produces '<unknown>' image_name."""
-    from cveta2._client.assembly import task_to_records
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta, RawFrame
+    from cveta2.application.client.assembly import task_to_records
+    from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawFrame
 
     task = TaskInfo(
         id=99,
@@ -524,6 +525,12 @@ def _fetched(client: CvatClient, task: TaskInfo, ctx: FetchContext) -> TaskAnnot
     return result
 
 
+def _accounting_dependencies(fake: LoadedFixtures) -> FetchDependencies:
+    return fetch_dependencies(
+        FetchTarget(fake.project.id, fake.project.name, Path("unused")), FetchOptions()
+    )
+
+
 class TestRetrieveTaskAccounting:
     """``_FetchStats`` is what tells the user how much of a fetch was cached."""
 
@@ -531,7 +538,6 @@ class TestRetrieveTaskAccounting:
         self,
         normal_fake: LoadedFixtures,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Two hits report two hits and the *sum* of their durations."""
         fake = normal_fake
@@ -542,13 +548,14 @@ class TestRetrieveTaskAccounting:
         cache = TaskAnnotationCache(tmp_path / "cache")
         cache.put(task, _fetched(client, task, ctx))
         policy = _CachePolicy(cache=cache)
-        stats = _FetchStats()
+        stats = _FetchStats(lock=Lock())
 
-        monkeypatch.setattr(
-            fetch_service, "time", _ScriptedClock([100.0, 101.5, 200.0, 203.0])
+        deps = replace(
+            _accounting_dependencies(fake),
+            clock=_ScriptedClock([100.0, 101.5, 200.0, 203.0]).monotonic,
         )
-        assert _retrieve_task(client, task, ctx, policy, stats) is not None
-        assert _retrieve_task(client, task, ctx, policy, stats) is not None
+        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
+        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
 
         assert stats.cache_hits == 2
         assert stats.hit_seconds == pytest.approx(4.5)
@@ -558,7 +565,6 @@ class TestRetrieveTaskAccounting:
     def test_live_fetches_and_their_elapsed_time_accumulate(
         self,
         normal_fake: LoadedFixtures,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Without a cache every task is a live fetch, counted the same way."""
         fake = normal_fake
@@ -566,13 +572,14 @@ class TestRetrieveTaskAccounting:
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
         policy = _CachePolicy()
-        stats = _FetchStats()
+        stats = _FetchStats(lock=Lock())
 
-        monkeypatch.setattr(
-            fetch_service, "time", _ScriptedClock([10.0, 12.0, 30.0, 34.0])
+        deps = replace(
+            _accounting_dependencies(fake),
+            clock=_ScriptedClock([10.0, 12.0, 30.0, 34.0]).monotonic,
         )
-        assert _retrieve_task(client, task, ctx, policy, stats) is not None
-        assert _retrieve_task(client, task, ctx, policy, stats) is not None
+        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
+        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
 
         assert stats.fetched == 2
         assert stats.fetch_seconds == pytest.approx(6.0)
@@ -587,9 +594,19 @@ class TestRetrieveTaskAccounting:
         api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id})
         client = CvatClient(CvatConfig(), api=api)
         ctx = _fetch_context(client, fake)
-        stats = _FetchStats()
+        stats = _FetchStats(lock=Lock())
 
-        assert _retrieve_task(client, ctx.tasks[0], ctx, _CachePolicy(), stats) is None
+        assert (
+            _retrieve_task(
+                client,
+                ctx.tasks[0],
+                ctx,
+                _CachePolicy(),
+                stats,
+                deps=_accounting_dependencies(fake),
+            )
+            is None
+        )
 
         assert (stats.fetched, stats.fetch_seconds) == (0, 0.0)
         assert (stats.cache_hits, stats.hit_seconds) == (0, 0.0)
@@ -604,9 +621,16 @@ class TestRetrieveTaskAccounting:
         task = ctx.tasks[0]
         cache = TaskAnnotationCache(tmp_path / "cache")
         cache.put(task, _fetched(client, task, ctx))
-        stats = _FetchStats()
+        stats = _FetchStats(lock=Lock())
 
-        _retrieve_task(client, task, ctx, _CachePolicy(cache=cache, force=True), stats)
+        _retrieve_task(
+            client,
+            task,
+            ctx,
+            _CachePolicy(cache=cache, force=True),
+            stats,
+            deps=_accounting_dependencies(fake),
+        )
 
         assert (stats.cache_hits, stats.fetched) == (0, 1)
 
@@ -806,7 +830,7 @@ class TestFetchCoreImageForwarding:
         objects = {f"data/proj/{name}": b"IMG" for name in _IMAGE_NAMES}
         s3 = FakeS3Client(objects, keyed_by_bucket=False)
         monkeypatch.setattr(
-            "cveta2.image_downloader.make_s3_client", lambda _endpoint=None: s3
+            "cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3
         )
 
     def test_the_given_storage_is_what_gets_downloaded_from(

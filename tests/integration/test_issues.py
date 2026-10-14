@@ -15,8 +15,8 @@ import pytest
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.core.helpers import get_paginated_collection
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2.client import CvatClient
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.composition.client import CvatClient
 from tests.helpers import fetch_all_annotations
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import (
@@ -28,8 +28,8 @@ from tests.integration.test_upload import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from cveta2.config import CvatConfig
-    from cveta2.models import AnnotationRecord
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.domain.models import AnnotationRecord
 
 pytestmark = pytest.mark.integration
 
@@ -119,7 +119,7 @@ class TestUploadIssuesFromCsvIntegration:
     def test_upload_csv_with_new_issue_creates_open_issue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from cveta2.commands.upload import run_upload
+        from cveta2.interfaces.commands.upload import run_upload
 
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         task_name = "integration-issues-upload-test"
@@ -164,14 +164,20 @@ class TestUploadIssuesFromCsvIntegration:
             resume=False,
         )
         with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
             patch(
-                "cveta2.commands.upload._select_labels",
+                "cveta2.interfaces.commands._bootstrap.CvatConfig.load",
+                return_value=cfg,
+            ),
+            patch(
+                "cveta2.interfaces.commands.upload._select_labels",
                 return_value=["person", "car"],
             ),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.interfaces.commands._helpers.load_projects_cache",
+                return_value=[],
+            ),
+            patch(
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=_cs_info_for_host(cs_info),
             ),
         ):
@@ -192,7 +198,7 @@ class TestUploadIssuesFromCsvIntegration:
     def test_same_text_on_two_bboxes_creates_two_issues(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from cveta2.commands.upload import run_upload
+        from cveta2.interfaces.commands.upload import run_upload
 
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         task_name = "integration-issues-multibbox-test"
@@ -236,14 +242,20 @@ class TestUploadIssuesFromCsvIntegration:
             resume=False,
         )
         with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
             patch(
-                "cveta2.commands.upload._select_labels",
+                "cveta2.interfaces.commands._bootstrap.CvatConfig.load",
+                return_value=cfg,
+            ),
+            patch(
+                "cveta2.interfaces.commands.upload._select_labels",
                 return_value=["person"],
             ),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.interfaces.commands._helpers.load_projects_cache",
+                return_value=[],
+            ),
+            patch(
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=_cs_info_for_host(cs_info),
             ),
         ):

@@ -13,9 +13,9 @@ from unittest.mock import patch
 
 import pytest
 
-from cveta2.commands.ignore import run_ignore
-from cveta2.config import IgnoreConfig
-from cveta2.exceptions import TaskNotFoundError
+from cveta2.adapters.config.settings import IgnoreConfig
+from cveta2.domain.errors import TaskNotFoundError
+from cveta2.interfaces.commands.ignore import run_ignore
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
     CFG,
@@ -26,8 +26,8 @@ from tests.helpers import (
 )
 
 if TYPE_CHECKING:
-    from cveta2.client import CvatClient
-    from cveta2.config import CvatConfig
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 _LIST_PROJECT = "coco8-dev"
@@ -138,7 +138,7 @@ class TestList:
         cfg.save()
 
         args = parse_cli_args("ignore", "--list")
-        with patch("cveta2.commands._bootstrap.CvatClient") as client_cls:
+        with patch("cveta2.interfaces.commands._bootstrap.CvatClient") as client_cls:
             run_ignore(args)
 
         client_cls.assert_not_called()

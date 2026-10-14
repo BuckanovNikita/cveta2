@@ -15,32 +15,35 @@ import pandas as pd
 import pytest
 import yaml
 
-from cveta2.commands.convert import run_convert
-from cveta2.exceptions import Cveta2Error
-from cveta2.models import CSV_COLUMNS
-from cveta2.services.convert import common as convert
-from cveta2.services.convert import (
+from cveta2.adapters.files import materialization as convert
+from cveta2.adapters.files.conversion import (
+    LocalConversionFiles,
+    _find_image_by_stem,
+    _write_csv,
+)
+from cveta2.adapters.files.dataset import read_text_utf8, write_text_utf8
+from cveta2.adapters.files.materialization import _link_or_copy
+from cveta2.application.use_cases.convert.common import _SizeCache
+from cveta2.composition.conversion import (
+    _build_search_dirs,
     convert_to_coco,
     convert_to_yolo,
 )
-from cveta2.services.convert.common import (
+from cveta2.domain.conversion import (
     CocoBox,
     PixelBox,
     YoloBox,
-    _build_search_dirs,
-    _find_image_by_stem,
-    _link_or_copy,
     _make_csv_row_base,
     _make_csv_row_box,
     _pixel_to_coco,
     _pixel_to_yolo,
     _require_positive_dimensions,
-    _SizeCache,
     _validate_splits,
-    _write_csv,
     _yolo_to_pixel,
 )
-from cveta2.services.output import read_text_utf8, write_text_utf8
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import CSV_COLUMNS
+from cveta2.interfaces.commands.convert import run_convert
 from tests.helpers import (
     csv_row,
     make_image,
@@ -249,7 +252,7 @@ class TestSizeCache:
         img1 = make_image(tmp_path / "a.jpg", 640, 480)
         img2 = make_image(tmp_path / "b.jpg", 320, 240)
 
-        cache = _SizeCache(read_all=False)
+        cache = _SizeCache(read_all=False, files=LocalConversionFiles())
         assert cache.get(img1) == (640, 480)
         assert cache.get(img2) == (640, 480)
 
@@ -262,7 +265,7 @@ class TestSizeCache:
         img1 = make_image(tmp_path / "a.jpg", 640, 480)
         img2 = make_image(tmp_path / "b.jpg", 320, 240)
 
-        cache = _SizeCache()
+        cache = _SizeCache(files=LocalConversionFiles())
         assert cache.get(img1) == (640, 480)
         assert cache.get(img2) == (640, 480)
 
@@ -271,7 +274,7 @@ class TestSizeCache:
         img1 = make_image(tmp_path / "a.jpg", 640, 480)
         img2 = make_image(tmp_path / "b.jpg", 320, 240)
 
-        cache = _SizeCache(read_all=True)
+        cache = _SizeCache(read_all=True, files=LocalConversionFiles())
         assert cache.get(img1) == (640, 480)
         assert cache.get(img2) == (320, 240)
 

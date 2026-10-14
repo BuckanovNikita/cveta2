@@ -11,36 +11,36 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from cveta2._client_ops.fetch import (
-    _filter_tasks_for_fetch,
-    _select_tasks_for_fetch,
-)
-from cveta2._client_ops.shared import _FetchAnnotationsOptions
-from cveta2.client import CvatClient
-from cveta2.commands.fetch import (
-    _resolve_images_dir,
-    _resolve_task_selector,
-    run_fetch_task,
-)
-from cveta2.config import (
+from cveta2.adapters.config.settings import (
     CvatConfig,
     IgnoreConfig,
     IgnoredTask,
     ImageCacheConfig,
     _parse_ignore_entry,
 )
-from cveta2.exceptions import (
+from cveta2.adapters.execution.concurrency import run_concurrent
+from cveta2.application.client.fetch import (
+    _filter_tasks_for_fetch,
+    _select_tasks_for_fetch,
+)
+from cveta2.application.client.shared import _FetchAnnotationsOptions
+from cveta2.application.use_cases.fetch import (
+    FetchOptions,
+    FetchTarget,
+)
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import fetch_selected_tasks, load_ignore_sets
+from cveta2.domain.errors import (
     CvatApiError,
     Cveta2Error,
     InteractiveModeRequiredError,
     TaskNotFoundError,
 )
-from cveta2.models import CSV_COLUMNS, TaskInfo
-from cveta2.services.fetch import (
-    FetchOptions,
-    FetchTarget,
-    fetch_selected_tasks,
-    load_ignore_sets,
+from cveta2.domain.models import CSV_COLUMNS, TaskInfo
+from cveta2.interfaces.commands.fetch import (
+    _resolve_images_dir,
+    _resolve_task_selector,
+    run_fetch_task,
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_MODULE = "cveta2.commands.fetch"
+_MODULE = "cveta2.interfaces.commands.fetch"
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ class TestResolveTaskSelector:
 
         with (
             patch(
-                "cveta2.commands.interactive.primitives.require_interactive",
+                "cveta2.interfaces.commands.interactive.primitives.require_interactive",
                 side_effect=InteractiveModeRequiredError("non-interactive"),
             ),
             pytest.raises(InteractiveModeRequiredError),
@@ -132,7 +132,7 @@ class TestWarnIgnoredTasks:
     def test_no_ignored_tasks(self) -> None:
         """Returns (None, None) when ignore config is empty for the project."""
         with patch(
-            "cveta2.config.IgnoreConfig.load",
+            "cveta2.adapters.config.settings.IgnoreConfig.load",
             return_value=IgnoreConfig(),
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -152,7 +152,7 @@ class TestWarnIgnoredTasks:
             },
         )
         with patch(
-            "cveta2.config.IgnoreConfig.load",
+            "cveta2.adapters.config.settings.IgnoreConfig.load",
             return_value=ignore_cfg,
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -166,7 +166,7 @@ class TestWarnIgnoredTasks:
             projects={"other-project": [IgnoredTask(id=10, name="t10")]},
         )
         with patch(
-            "cveta2.config.IgnoreConfig.load",
+            "cveta2.adapters.config.settings.IgnoreConfig.load",
             return_value=ignore_cfg,
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -186,7 +186,7 @@ class TestWarnIgnoredTasks:
             },
         )
         with patch(
-            "cveta2.config.IgnoreConfig.load",
+            "cveta2.adapters.config.settings.IgnoreConfig.load",
             return_value=ignore_cfg,
         ):
             ignore_set, silent_set = load_ignore_sets("my-project")
@@ -221,7 +221,9 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2), make_task(3)])
         options = _FetchAnnotationsOptions(task_selector=["2", 3])
 
-        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+        result = _select_tasks_for_fetch(
+            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+        )
 
         assert [t.id for t in result] == [2, 3]
         assert api.call_counts["get_project_tasks"] == 0
@@ -232,7 +234,9 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=[2, "2"])
 
-        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+        result = _select_tasks_for_fetch(
+            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+        )
 
         assert [t.id for t in result] == [2]
         assert api.call_counts["get_task"] == 1
@@ -244,7 +248,9 @@ class TestSelectTasksForFetch:
         )
         options = _FetchAnnotationsOptions(task_selector=[1, 2], completed_only=True)
 
-        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+        result = _select_tasks_for_fetch(
+            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+        )
 
         assert [t.id for t in result] == [1]
 
@@ -252,7 +258,13 @@ class TestSelectTasksForFetch:
         """A whole-project fetch still asks for every task."""
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
 
-        result = _select_tasks_for_fetch(api, _PROJECT_ID, _FetchAnnotationsOptions())
+        result = _select_tasks_for_fetch(
+            api,
+            _PROJECT_ID,
+            _FetchAnnotationsOptions(),
+            runner=run_concurrent,
+            max_workers=1,
+        )
 
         assert [t.id for t in result] == [1, 2]
         assert api.call_counts["get_project_tasks"] == 1
@@ -262,7 +274,9 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=["alpha"])
 
-        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+        result = _select_tasks_for_fetch(
+            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+        )
 
         assert [t.id for t in result] == [1]
         assert api.call_counts["get_project_tasks"] == 1
@@ -273,7 +287,9 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=[2, "alpha"])
 
-        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+        result = _select_tasks_for_fetch(
+            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+        )
 
         assert {t.id for t in result} == {1, 2}
         assert api.call_counts["get_project_tasks"] == 1
@@ -289,7 +305,9 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(7, name="12345")])
         options = _FetchAnnotationsOptions(task_selector=["12345"])
 
-        result = _select_tasks_for_fetch(api, _PROJECT_ID, options)
+        result = _select_tasks_for_fetch(
+            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+        )
 
         assert [t.id for t in result] == [7]
         assert api.call_counts["get_project_tasks"] == 1
@@ -305,7 +323,9 @@ class TestSelectTasksForFetch:
         options = _FetchAnnotationsOptions(task_selector=[1])
 
         with pytest.raises(CvatApiError) as excinfo:
-            _select_tasks_for_fetch(api, _PROJECT_ID, options)
+            _select_tasks_for_fetch(
+                api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+            )
 
         assert excinfo.value.status_code == 500
         assert api.call_counts["get_project_tasks"] == 0
@@ -316,7 +336,9 @@ class TestSelectTasksForFetch:
         options = _FetchAnnotationsOptions(task_selector=[1])
 
         with pytest.raises(TaskNotFoundError):
-            _select_tasks_for_fetch(api, _PROJECT_ID + 1, options)
+            _select_tasks_for_fetch(
+                api, _PROJECT_ID + 1, options, runner=run_concurrent, max_workers=1
+            )
 
         assert api.call_counts["get_project_tasks"] == 1
 
@@ -331,7 +353,9 @@ class TestSelectTasksForFetch:
         options = _FetchAnnotationsOptions(task_selector=[2], ignore_task_ids={2})
 
         with pytest.raises(TaskNotFoundError):
-            _select_tasks_for_fetch(api, _PROJECT_ID, options)
+            _select_tasks_for_fetch(
+                api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
+            )
 
         assert api.call_counts["get_project_tasks"] == 1
 
@@ -863,9 +887,12 @@ def _patched_fetch_task_cli(fake: LoadedFixtures) -> Iterator[None]:
 
     with (
         patch_cli_client(factory=make_client, config=CFG),
-        patch("cveta2.config.IgnoreConfig.load", return_value=IgnoreConfig()),
         patch(
-            "cveta2.client.CvatClient.detect_project_cloud_storage",
+            "cveta2.adapters.config.settings.IgnoreConfig.load",
+            return_value=IgnoreConfig(),
+        ),
+        patch(
+            "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
             return_value=None,
         ),
     ):
@@ -916,7 +943,7 @@ class TestRunFetchTaskTaskArgument:
         with (
             _patched_fetch_task_cli(fake),
             patch(
-                "cveta2.commands.interactive.primitives.require_interactive",
+                "cveta2.interfaces.commands.interactive.primitives.require_interactive",
                 side_effect=InteractiveModeRequiredError("non-interactive"),
             ),
             pytest.raises(InteractiveModeRequiredError),

@@ -1,0 +1,1 @@
+"""Canonical adapters cvat package."""

@@ -17,16 +17,17 @@ import pytest
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.core.helpers import get_paginated_collection
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2.client import CvatClient
-from cveta2.config import CvatConfig
-from cveta2.models import (
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.adapters.s3.task_cache import get_task_cache_dir
+from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
+from cveta2.composition.client import CvatClient
+from cveta2.composition.workflows import fetch_selected_tasks
+from cveta2.domain.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
     ImageWithoutAnnotations,
 )
-from cveta2.services.fetch import FetchOptions, FetchTarget, fetch_selected_tasks
-from cveta2.task_cache import get_task_cache_dir
 from tests.helpers import fetch_all_annotations
 from tests.integration.conftest import (
     _env,
@@ -215,7 +216,7 @@ class TestFetchTaskCacheLive:
             client = CvatClient(cfg, api=adapter)
             options = FetchOptions(task_selector=[task_name])
             with patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=_cs_info_for_host(cs_info),
             ):
                 fetch_selected_tasks(
@@ -273,7 +274,7 @@ class TestFetchTaskCacheLive:
             client = CvatClient(cfg, api=adapter)
             options = FetchOptions(task_selector=[task_name])
             with patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=_cs_info_for_host(cs_info),
             ):
                 fetch_selected_tasks(
@@ -331,8 +332,8 @@ class TestRealCliFetchTask:
     def test_fetch_task_produces_csv(self, tmp_path: Path) -> None:
         import argparse
 
-        from cveta2.commands.fetch import run_fetch_task
-        from cveta2.config import IgnoreConfig
+        from cveta2.adapters.config.settings import IgnoreConfig
+        from cveta2.interfaces.commands.fetch import run_fetch_task
 
         sdk_client = _make_sdk_client()
         try:
@@ -361,15 +362,21 @@ class TestRealCliFetchTask:
         from unittest.mock import patch
 
         with (
-            patch("cveta2.commands._bootstrap.CvatConfig.load", return_value=cfg),
-            patch("cveta2.commands._bootstrap.require_host"),
-            patch("cveta2.commands._helpers.load_projects_cache", return_value=[]),
             patch(
-                "cveta2.config.IgnoreConfig.load",
+                "cveta2.interfaces.commands._bootstrap.CvatConfig.load",
+                return_value=cfg,
+            ),
+            patch("cveta2.interfaces.commands._bootstrap.require_host"),
+            patch(
+                "cveta2.interfaces.commands._helpers.load_projects_cache",
+                return_value=[],
+            ),
+            patch(
+                "cveta2.adapters.config.settings.IgnoreConfig.load",
                 return_value=IgnoreConfig(),
             ),
             patch(
-                "cveta2.client.CvatClient.detect_project_cloud_storage",
+                "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
                 return_value=None,
             ),
         ):

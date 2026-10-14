@@ -12,16 +12,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from cveta2._client.sdk_adapter import SdkCvatApiAdapter
-from cveta2.config import CvatConfig
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 if TYPE_CHECKING:
     from cvat_sdk import Client as CvatSdkClient
 
-    from cveta2._client.dtos import RawAnnotations, RawDataMeta
-    from cveta2._client.ports import CvatApiPort
-    from cveta2.models import LabelInfo, ProjectInfo, TaskInfo
+    from cveta2.application.ports.cvat import CvatApiPort
+    from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta
+    from cveta2.domain.models import LabelInfo, ProjectInfo, TaskInfo
 
 pytestmark = pytest.mark.integration
 

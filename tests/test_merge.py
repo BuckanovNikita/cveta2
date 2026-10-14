@@ -8,14 +8,10 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from cveta2.exceptions import Cveta2Error
-from cveta2.services.merge import (
-    _merge_datasets,
-    _propagate_splits,
-    _read_deleted_names,
-    _resolve_by_task,
-    merge_datasets,
-)
+from cveta2.adapters.files.dataset import read_deleted_names as _read_deleted_names
+from cveta2.composition.conversion import merge_datasets
+from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.merge import _merge_datasets, _propagate_splits, _resolve_by_task
 from tests.helpers import csv_row, make_args, make_df, write_dataset_csv
 
 if TYPE_CHECKING:
@@ -752,7 +748,7 @@ class TestMergeDatasetsIO:
 
 def test_run_merge_by_task_missing_column_exits(tmp_path: Path) -> None:
     """A merge-logic error propagates to the CLI boundary."""
-    from cveta2.commands.merge import run_merge
+    from cveta2.interfaces.commands.merge import run_merge
 
     old_path = tmp_path / "old.csv"
     new_path = tmp_path / "new.csv"

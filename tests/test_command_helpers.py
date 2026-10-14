@@ -1,4 +1,4 @@
-"""Tests for :mod:`cveta2.commands._helpers` — the shared CLI adapters."""
+"""Tests for :mod:`cveta2.interfaces.commands._helpers` — the shared CLI adapters."""
 
 from __future__ import annotations
 
@@ -9,8 +9,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cveta2.client import CvatClient
-from cveta2.commands._helpers import (
+from cveta2.adapters.config.settings import CvatConfig
+from cveta2.composition.client import CvatClient
+from cveta2.domain.errors import MissingHostError
+from cveta2.domain.models import ProjectInfo
+from cveta2.interfaces.commands._helpers import (
     config_path_from_args,
     project_cli_spec,
     require_host,
@@ -18,16 +21,13 @@ from cveta2.commands._helpers import (
     resolve_project_and_cloud_storage,
     resolve_project_from_args,
 )
-from cveta2.config import CvatConfig
-from cveta2.exceptions import MissingHostError
-from cveta2.models import ProjectInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import make_cs_info, make_task
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-_LOAD_CACHE = "cveta2.commands._helpers.load_projects_cache"
+_LOAD_CACHE = "cveta2.interfaces.commands._helpers.load_projects_cache"
 
 
 def _client(organization: str | None = None) -> CvatClient:
@@ -133,13 +133,15 @@ class TestResolveProject:
         def _pick(picker_client: CvatClient) -> tuple[int, str]:
             return (9, "picked") if picker_client is client else (0, "wrong")
 
-        with patch("cveta2.commands._helpers.select_project", side_effect=_pick):
+        with patch(
+            "cveta2.interfaces.commands._helpers.select_project", side_effect=_pick
+        ):
             assert resolve_project(client, None) == (9, "picked")
 
     def test_explicit_spec_skips_the_picker(self) -> None:
         with (
             patch(_LOAD_CACHE, return_value=[]),
-            patch("cveta2.commands._helpers.select_project") as picker,
+            patch("cveta2.interfaces.commands._helpers.select_project") as picker,
         ):
             assert resolve_project(_client(), "alpha") == (1, "alpha")
         picker.assert_not_called()
@@ -158,7 +160,8 @@ class TestResolveProjectAndCloudStorage:
             make_cs_info(bucket="right") if project_id == 7 else make_cs_info()
         )
         with patch(
-            "cveta2.commands._helpers.resolve_project", return_value=(7, "proj")
+            "cveta2.interfaces.commands._helpers.resolve_project",
+            return_value=(7, "proj"),
         ):
             project_id, name, cs_info = resolve_project_and_cloud_storage(
                 client, "proj"
