@@ -111,3 +111,65 @@ Architecture acceptance validator runs after this reconciliation. Native deliver
 is now authorized; exact-path commit/hooks, canonical-main merge, semantic release
 and branch/specific-tag push follow. Earlier pending/stop statements above describe
 the initial bounded handoff, superseded by this integrated acceptance stage.
+
+## Native delivery — 2026-10-15
+
+- Contributor `7f91109ddd36e85ff7912fddafb7136d6700959b`,
+  `feat!: support only Python 3.12 and 3.13`, passed all configured commit hooks:
+  Ruff format/lint, import-linter, effect checker, mypy, Vulture, coverage pytest,
+  fast mutation, build, lock and Conventional Commit validation.
+- Canonical-main merge `9ba6016` used the required native merge route.
+- Native semantic-release selected 0.10.0 for the intentional compatibility break;
+  generated diff contained CHANGELOG.md and only project/lock version updates.
+  No dependency pin/source change occurred during release generation.
+- The initial canonical release commit failed mypy because preserved, unrelated
+  untracked bugs/ reproduction scripts have duplicate module names. No tag or
+  release commit resulted from that failed attempt. No check was bypassed.
+- A clean task-owned clone at the same merged commit ran the unmodified native
+  semantic-release command with all normal hooks. Release commit
+  `7b23114ed28da9bcd8a450452bc21ccc2fcbf546`, `chore(release): 0.10.0`, and
+  annotated Git tag v0.10.0 were created successfully with
+  `semantic-release version --no-push --no-vcs-release`.
+- Fetched the exact release branch/tag into the canonical checkout. Verified
+  CHANGELOG.md, pyproject.toml and uv.lock worktree and index bytes exactly matched
+  the release tree, then merged v0.10.0 with --ff-only. This reconciled the staged
+  generated files without reset, restore, revert, stash or unrelated file edits.
+- Canonical frozen sync explicitly retained the ClearML extra. Installed metadata
+  reports cveta2 0.10.0 and ClearML 2.1.3; version drift check passed.
+- Atomic `git push --atomic origin main refs/tags/v0.10.0` passed full mutation,
+  version drift and armed live integration gates. Live tests/integration:
+  39 passed, 160 third-party deprecation warnings, 224.60 s.
+- Remote main verified as `7b23114ed28da9bcd8a450452bc21ccc2fcbf546`; annotated
+  v0.10.0 object `63903c212ebdd582b6039a1ce5770b61f07dff97` peels to that commit.
+  No GitHub Release, package publication or uploaded release asset was created.
+
+The live gate retained its designated durable cveta2-main CVAT project/cloud
+storage and MinIO bucket for inspection, as native policy requires. ClearML test
+projects were removed by teardown. No other run or shared service was changed.
+Canonical unrelated untracked .claude skill links and bugs/ remain untouched.
+The clean release clone, temporary test environments and build artifacts were
+removed after importing/validating the release. Transient task logs are cleaned
+once final delivery verification is complete.
+
+A supplementary optional-SDK import smoke read pre-existing localhost ClearML
+configuration and retried authentication; only that task-owned smoke process was
+stopped. Installation was then verified through importlib.metadata. This did not
+change user configuration or services; the successful live gate used the normal
+Secret-derived stand environment.
+
+## Documentation-only closure
+
+T012 delivery is complete. This follow-up closes the feature status and task
+ledger and records the actual checks and publication. The architecture scope now
+includes semantic-release-owned CHANGELOG.md alongside configuration/version
+updates; runtime import/effect boundaries remain unchanged. No new application
+behavior or executable contracts change, so existing independent review and
+negative architecture evidence remain applicable. Documentation and architecture
+acceptance checks run before committing the closure. The subsequent docs-only
+merge evaluates release normally and does not force another version.
+
+Parent prepared and validated companion corp-skills v0.2.2; its publication follows
+the verified application refs and is reported by the parent.
+
+Closure validation: documentation pytest 209 passed in 0.19 s; architecture
+acceptance validator and git diff --check exited 0.

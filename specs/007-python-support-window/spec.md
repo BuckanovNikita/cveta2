@@ -1,7 +1,7 @@
 # Feature Specification: Python support window
 
 **Created**: 2026-10-15
-**Status**: In progress
+**Status**: Completed
 **Input**: Support Python >=3.12,<3.14 for the user's projects worked on this week.
 
 ## Clarifications

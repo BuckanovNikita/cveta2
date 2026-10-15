@@ -4,6 +4,7 @@
   "scope": [
     "pyproject.toml",
     "uv.lock",
+    "CHANGELOG.md",
     "AGENTS.md",
     ".specify/memory/engineering.md",
     ".specify/memory/constitution.md",
@@ -103,6 +104,6 @@
     "status": "accepted",
     "reviewer": "/root/python_window_review \u2014 GPT-6.1 Sol/high; parent integration verification",
     "evidence": "specs/007-python-support-window/verification-2026-10-15.md",
-    "reconciliation": "Inspected final seven maintained tracked paths and all feature artifacts, including added documents; no application/test/checker modules changed and no new locked dependency versions or sources introduced. Canonical root unrelated untracked skill links and bugs/ are excluded. Parent full offline suite and fresh independent review accepted Python/architecture scope; companion source validation passed with parent publication pending."
+    "reconciliation": "Inspected final seven maintained tracked paths and all feature artifacts, including added documents; no application/test/checker modules changed and no new locked dependency versions or sources introduced. Canonical root unrelated untracked skill links and bugs/ are excluded. Parent full offline suite and fresh independent review accepted Python/architecture scope; companion source validation passed with parent publication pending. Native semantic-release added only CHANGELOG.md and project/lock version updates; release diff inspected and refs verified. Documentation-only delivery closure records those results with no new runtime or executable-contract impact."
   }
 }
