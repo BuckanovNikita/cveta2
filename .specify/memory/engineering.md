@@ -2,7 +2,7 @@
 
 ## Project
 
-cveta2 is a Python 3.10+ CLI and API for CVAT annotation projects. It fetches
+cveta2 is a Python >=3.12,<3.14 CLI and API for CVAT annotation projects. It fetches
 bounding-box annotations, partitions them by task completion state, downloads
 images from S3, uploads datasets, and manages project labels. Run Python tools
 through `uv run`.

@@ -89,7 +89,7 @@ applicable user authorization.
 
 ## Project Constraints
 
-cveta2 remains a Python 3.10+ CVAT CLI and API using the existing `uv`, Ruff,
+cveta2 remains a Python >=3.12,<3.14 CVAT CLI and API using the existing `uv`, Ruff,
 mypy, pytest, import-linter, and release configuration. Spec Kit is development
 tooling, not an application dependency. Follow maintained configuration for
 changing values; do not duplicate machine paths, credentials, capacities, or
@@ -163,4 +163,8 @@ automation, and review/check scope remains proportionate. Conversation language
 follows the user while Russian human guides/CLI remain intact. This amendment
 changes no application contract; inactive feature history is not rewritten.
 
-**Version**: 1.3.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-14
+Version 1.4.0 narrows the supported interpreter window to Python >=3.12,<3.14,
+explicitly removing Python 3.10 and 3.11 support at the user's request.
+Development remains on Python 3.12; application interfaces stay unchanged.
+
+**Version**: 1.4.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-15
