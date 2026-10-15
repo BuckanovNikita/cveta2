@@ -2,6 +2,32 @@
 
 <!-- version list -->
 
+## v0.10.0 (2026-10-15)
+
+### Documentation
+
+- Align Python lifecycle within native Spec Kit
+  ([`9f100d0`](https://github.com/BuckanovNikita/cveta2/commit/9f100d030dc8ab4fc5ff89d8310ac6fd68c3fe92))
+
+- Keep portable usage skill current
+  ([`00a6063`](https://github.com/BuckanovNikita/cveta2/commit/00a6063f3a4eef2a817b9d75ed1ebe084fc208a9))
+
+- Record clean architecture delivery
+  ([`6cb911b`](https://github.com/BuckanovNikita/cveta2/commit/6cb911b49b7b55fdd9679084624f5fa03f567047))
+
+- Record Python workflow delivery evidence
+  ([`d93cb81`](https://github.com/BuckanovNikita/cveta2/commit/d93cb8124b13bc0a581432ac6d1bd79cea09ce73))
+
+### Features
+
+- Support only Python 3.12 and 3.13
+  ([`7f91109`](https://github.com/BuckanovNikita/cveta2/commit/7f91109ddd36e85ff7912fddafb7136d6700959b))
+
+### Breaking Changes
+
+- Python 3.10 and 3.11 are no longer supported. Python 3.14 and later are excluded.
+
+
 ## v0.9.1 (2026-10-14)
 
 ### Bug Fixes
