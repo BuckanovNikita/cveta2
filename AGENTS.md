@@ -1,6 +1,6 @@
 # cveta2 agent entry point
 
-cveta2 is a Python 3.10+ CVAT CLI and API. Run Python tools through `uv run`.
+cveta2 is a Python >=3.12,<3.14 CVAT CLI and API. Run Python tools through `uv run`.
 Follow the user's conversation language (English by default). Human guides and
 CLI output remain Russian; Spec Kit artifacts are English.
 This file is the shared discovery entry point; `CLAUDE.md` is its symlink.

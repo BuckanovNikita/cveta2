@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "task": "Python 3.12 and 3.13 support window",
+  "scope": [
+    "pyproject.toml",
+    "uv.lock",
+    "AGENTS.md",
+    ".specify/memory/engineering.md",
+    ".specify/memory/constitution.md",
+    "README.md",
+    "CONTRIBUTING.md",
+    "specs/007-python-support-window"
+  ],
+  "impact": "modules",
+  "rules": "Existing pyproject import-linter inward layers, SDK adapter ownership and scripts/check_architecture.py effect contracts remain unchanged. Packaging owns interpreter constraints; runtime modules keep their interfaces.",
+  "modules": [
+    {
+      "id": "package-configuration",
+      "path": "pyproject.toml",
+      "change": "modify",
+      "responsibility": "Declare installable interpreter range, dependency requirements and analysis configuration.",
+      "interface": "Installers permit Python >=3.12,<3.14; mypy analyzes Python 3.12 and Ruff retains its existing conservative py310 lint baseline; public entrypoint and dependencies remain compatible.",
+      "layer": "Packaging and development tooling",
+      "allowed_dependencies": [
+        "Existing project runtime/development dependencies",
+        "Existing import-linter contracts"
+      ],
+      "forbidden_dependencies": [
+        "Unsupported Python interpreter versions",
+        "Unrequested dependency upgrades"
+      ],
+      "effects": "No runtime effects added; uv owns lock resolution and installers own environment writes.",
+      "contracts": [
+        "inward-layers",
+        "effect-ownership"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "inward-layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Inner layers cannot depend on adapters, composition or public facades; SDK dependencies remain adapter-owned.",
+      "check": "architecture"
+    },
+    {
+      "id": "effect-ownership",
+      "path": "tests/test_architecture.py",
+      "status": "existing",
+      "rules": "Source effect guard and negative fixtures reject inner external effects and forbidden dependency edges.",
+      "check": "architecture"
+    }
+  ],
+  "checks": [
+    {
+      "id": "architecture",
+      "kind": "imports",
+      "command": "uv run --frozen lint-imports; uv run --frozen python scripts/check_architecture.py; uv run --frozen pytest tests/test_architecture.py",
+      "expectation": "Existing production layers/effects and forbidden-edge regression fixtures pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/007-python-support-window/verification-2026-10-15.md"
+      }
+    },
+    {
+      "id": "python-matrix",
+      "kind": "behavior",
+      "command": "uv run --frozen --python 3.12 pytest -n 4; isolated Python 3.13 frozen pytest -n 4",
+      "expectation": "Offline tests pass on both supported minor versions; live tests remain excluded.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/007-python-support-window/verification-2026-10-15.md"
+      }
+    },
+    {
+      "id": "package",
+      "kind": "behavior",
+      "command": "uv lock --check; uv run --frozen ruff check .; uv run --frozen mypy .; uv build; isolated wheel installs",
+      "expectation": "Lock/static checks/build succeed; wheel runs on 3.12/3.13 and excludes 3.11/3.14.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/007-python-support-window/verification-2026-10-15.md"
+      }
+    },
+    {
+      "id": "docs",
+      "kind": "documentation",
+      "command": "uv run --frozen pytest tests/test_docs.py -n 0; git diff --check",
+      "expectation": "Documentation signatures/local links and whitespace pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/007-python-support-window/verification-2026-10-15.md"
+      }
+    }
+  ],
+  "documentation": "Update README, contributor and current agent/Spec Kit compatibility guidance; parent updates corp-skills/cveta2 usage prerequisites.",
+  "review": {
+    "status": "accepted",
+    "reviewer": "/root/python_window_review \u2014 GPT-6.1 Sol/high; parent integration verification",
+    "evidence": "specs/007-python-support-window/verification-2026-10-15.md",
+    "reconciliation": "Inspected final seven maintained tracked paths and all feature artifacts, including added documents; no application/test/checker modules changed and no new locked dependency versions or sources introduced. Canonical root unrelated untracked skill links and bugs/ are excluded. Parent full offline suite and fresh independent review accepted Python/architecture scope; companion source validation passed with parent publication pending."
+  }
+}
