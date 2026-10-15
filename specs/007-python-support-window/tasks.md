@@ -19,17 +19,27 @@
 
 - [x] T010 Parent: update/validate portable cveta2 skill companion documentation.
 - [x] T011 Parent: obtain fresh independent review after integration/checks and validate architecture acceptance.
-- [ ] T012 Parent: commit with native hooks, merge to main and perform authorized Git-tag-only release/push.
+- [x] T012 Parent: commit with native hooks, merge to main and perform authorized Git-tag-only release/push.
 
-No further delegation by this bounded agent. Commits/releases are intentionally
-reserved for the parent; task completion does not imply those gates have passed.
+Initial handoff reserved commits/releases for the parent. The parent subsequently
+authorized this bounded agent to execute delivery; no further delegation occurred.
 
 ## Phase 4: Convergence
 
 - [x] T013 Parent: after companion docs and final independent review, reconcile
-  evidence/review in architecture.json and validate acceptance. T010–T012 remain
-  pending; source compatibility work and bounded verification are complete.
+  evidence/review in architecture.json and validate acceptance. T010–T012 were
+  pending at initial handoff; their completed delivery evidence is recorded below.
 
 Integrated acceptance and companion-source validation are recorded in
 verification-2026-10-15.md; companion publication and native delivery are tracked
 by the parent after app release. Earlier handoff limitations remain historical.
+
+## Phase 5: Delivery evidence closure
+
+- [x] T014 Record completed contributor/merge/release refs, native gate outcomes,
+  safe canonical-root reconciliation and initial verified atomic publication.
+- [x] T015 Reconcile architecture scope with generated CHANGELOG/version output;
+  validate documentation and acceptance before the documentation-only delivery commit.
+
+Companion publication remains the parent's collection release; repository delivery
+and documentation closure use normal hooks and no forced version bump.
