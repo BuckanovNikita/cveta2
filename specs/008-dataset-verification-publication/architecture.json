@@ -11,7 +11,8 @@
     "docs",
     ".specify/memory",
     "specs/001-project-documentation/contracts/dataset-format.md",
-    "specs/008-dataset-verification-publication"
+    "specs/008-dataset-verification-publication",
+    "CHANGELOG.md"
   ],
   "impact": "modules",
   "rules": "Existing exhaustive inward layers in pyproject.toml and effect ownership in scripts/check_architecture.py; ports hide all infrastructure; no canonical imports of public root.",
@@ -554,6 +555,6 @@
     "status": "accepted",
     "reviewer": "Fresh independent acceptance reviewer /root/acceptance_review; gpt-6.1-sol high requested",
     "evidence": "specs/008-dataset-verification-publication/evidence/review-2026-10-20.md",
-    "reconciliation": "Inspected all 108 task-owned staged paths including added policies/ports/adapters/composition/interfaces/tests/spec artifacts, removed legacy publisher/config/command surfaces and affected CVAT callers. Existing 10 import contracts and effect checks retained, meaningful negative fixtures extended. Original checkout untracked work and unrelated companion changes excluded. Full suite, live evidence, documentation, packaging and independent review reconciled."
+    "reconciliation": "Inspected all 108 task-owned staged paths including added policies/ports/adapters/composition/interfaces/tests/spec artifacts, removed legacy publisher/config/command surfaces and affected CVAT callers. Existing 10 import contracts and effect checks retained, meaningful negative fixtures extended. Original checkout untracked work and unrelated companion changes excluded. Full suite, live evidence, documentation, packaging and independent review reconciled. Final delivery reconciliation includes semantic-release CHANGELOG/version/lock changes and evidence-only delivery records. Runtime interfaces and effect boundaries are unchanged after the accepted review."
   }
 }
