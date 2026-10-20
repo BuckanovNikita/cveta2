@@ -52,7 +52,7 @@ Independent acceptance: fetch cannot construct a publisher; removed controls rej
 - [x] T025 Run quality, full local regression, coverage, docs and package checks; record dated evidence in specs/008-dataset-verification-publication/evidence/.
 - [x] T026 Obtain fresh independent final review, resolve findings and reconcile architecture.json with the complete diff.
 - [x] T027 Run architecture acceptance and Spec Kit convergence; append any remaining work to this tasks.md.
-- [ ] T028 Complete authorized task-owned commit, main merge, semantic-release evaluation and Git-only tag/commit pushes; record delivery evidence.
+- [x] T028 Complete authorized task-owned commit, main merge, semantic-release evaluation and Git-only tag/commit pushes; record delivery evidence.
 
 ## Dependencies and parallel execution
 
@@ -66,4 +66,4 @@ precede release. No worker delegates further or commits independently.
 
 ## Phase 1: Convergence
 
-- [ ] T029 Finish and record tool and companion Git-only delivery, replace unreleased portable guidance with the actual tool version, and reconcile T028 evidence per FR-017/SC-005 (partial). Runtime implementation, policy and architecture acceptance have no remaining gaps.
+- [x] T029 Finish and record tool and companion Git-only delivery, replace unreleased portable guidance with the actual tool version, and reconcile T028 evidence per FR-017/SC-005 (partial). Runtime implementation, policy and architecture acceptance have no remaining gaps.
