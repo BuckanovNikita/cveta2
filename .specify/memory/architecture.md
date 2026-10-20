@@ -29,7 +29,7 @@ remain compatibility facades; canonical packages never import those facades.
   - `images.py` / `storage.py` - Image download/sync and upload/server mapping with typed outcomes.
   - `dataset.py` / `conversion.py` / `workflow_files.py` - Narrow CSV, path
     enrichment, image discovery/dimensions/materialization and owned-output lifecycle operations.
-  - `manifests.py` - Recovery-record persistence; `publisher.py` - Optional dataset publication.
+  - `manifests.py` - Recovery-record persistence.
   - `execution.py` - Ordered bounded execution with explicit worker and exception policies.
 - **`cveta2/application/settings.py` / `results.py`** - Validated settings and
   neutral results without configuration loading or environment discovery.
@@ -45,7 +45,7 @@ remain compatibility facades; canonical packages never import those facades.
     rectangle/polygon extraction and annotation metadata handling.
 - **`cveta2/application/use_cases/`** - Prompt-free orchestration; raises `Cveta2Error`:
   - `fetch.py` - `fetch_project()` / `fetch_selected_tasks()`, cache use, promotion
-    barrier, partitioning and output/publication ordering.
+    barrier, partitioning and local output ordering.
   - `upload.py` - `upload_dataset()`, frame/label selection, recovery and write checkpoints.
   - `convert/{common,yolo,coco}.py` - Conversion preparation, dimension caching
     and YOLO/COCO orchestration over supplied file ports and search-directory values.
@@ -70,20 +70,24 @@ remain compatibility facades; canonical packages never import those facades.
   - `execution/{concurrency,retry}.py` - Thread fan-out, context-local `Workers`
     propagation, retry attempts/backoff/logging. Retry predicates remain beside
     protected calls in the CVAT/S3 adapters.
-  - `clearml/{_dataset,availability}.py` - Optional publishing and SDK availability.
-    The SDK boundary translates `Exception` to `ClearmlPublishError`, preserving
-    the cause: ClearML/storage backends have no one common failure type. The
-    composition callback logs this error without aborting successful fetch output.
-    Broad translation is confined to this optional SDK boundary.
+  - `clearml/bundle.py` - Optional exact-parent lookup and explicit three-file
+    child publication and ClearML StorageManager S3-root access; SDK errors retain
+    a known child ID and never imply finalization.
+  - `class_api/` - Public HTTP class-registry reads and validated class identities.
+  - `files/{verification,media,bundle,bundle_paths}.py` - Lexical CSV and diagnostics,
+    canonical media inspection, independent local-root containment, source/payload
+    snapshots, strict metadata and staging. S3 root access for bundle publication
+    is injected through its own port and owned by the ClearML SDK adapter.
 - **`cveta2/composition/`** - Production dependency construction:
   - `client.py` - Supported `CvatClient` facade around `ApplicationClient`,
     resolved configuration, production session/image/execution adapters and
     invocation-time worker/failure policies.
   - `workflows.py` / `conversion.py` - Resolve workflow settings/search roots and
-    inject cache, storage, files, manifests, publication, clocks, locks and runners.
+    inject cache, storage, files, manifests, clocks, locks and runners.
   - `configuration.py` / `files.py` / `runtime.py` / `diagnostics.py` - Incoming
     access to configuration/files, network worker/timeout setup and diagnostics.
-  - `publishing.py` - Resolve optional ClearML mapping/availability and handle publication failure.
+  - `verification.py` / `dataset_bundle.py` - Construct verification and explicit
+    preparation/publication effects; automatic fetch publication is removed.
 - **`cveta2/interfaces/`** - Incoming adapters:
   - `cli.py` - Argparse command construction/dispatch.
   - `commands/` - Thin per-command adapters for fetch, upload, conversion,
@@ -94,7 +98,7 @@ remain compatibility facades; canonical packages never import those facades.
   - `commands/interactive/` - Project/task pickers, credentials, wizards,
     confirmations, questionary primitives/history. Other command helpers live in `_helpers.py`.
   - `api.py` - Public workflow mapping for every data command; never prompts.
-    Interactive-only setup/setup-cache/setup-clearml/doctor have no API counterpart.
+    Interactive-only setup/setup-cache/doctor have no API counterpart.
     Missing settings raise `MissingHostError` / `MissingCredentialsError`.
 - **Public top-level facades** - `api.py`, `cli.py`, `client.py`, `config.py`,
   `exceptions.py`, `models.py`, `dataset_partition.py`, `task_cache.py`,
@@ -161,7 +165,7 @@ record to reconcile affected modules, actual changes, executed checks and review
 
 1. **Fetch**: `interfaces/cli.py`/`interfaces/api.py` → `composition/workflows.py` → `application/use_cases/fetch.py:fetch_project()` → `ApplicationClient.fetch_one_task()` per task → `adapters/cvat/sdk_adapter.py` → CVAT API
    - Opt-in `--skip-validation` / keyword-only `api.fetch(..., skip_validation=False)` runs an application promotion barrier before normal task selection. Every non-ignored project task is inspected using its full, nonempty job list, irrespective of job type or frame coverage. Only tasks whose jobs are all annotation/completed or acceptance/completed qualify; only annotation/completed jobs are updated in CVAT to acceptance/completed. Fully accepted tasks need no writes. Tasks run under the explicitly supplied CVAT worker limit, with sequential updates inside each task; all workers finish before fresh metadata and `completed_only` selection.
-   - Promotion strictly invalidates each affected task's configured local cache and enabled S3 mirror before its first update, using the fetch config path and per-project `tasks_root` / `task_cache_s3`. Local invalidation still applies with caching disabled; S3 is not contacted in that mode. Read, invalidation or update errors abort before annotation fetching, image downloads, CSV writing or ClearML publication. Successful CVAT writes persist without rollback; retry rechecks jobs and skips accepted ones. `fetch-task` / `api.fetch_task` have no promotion option.
+   - Promotion strictly invalidates each affected task's configured local cache and enabled S3 mirror before its first update, using the fetch config path and per-project `tasks_root` / `task_cache_s3`. Local invalidation still applies with caching disabled; S3 is not contacted in that mode. Read, invalidation or update errors abort before annotation fetching, image downloads, CSV writing. Successful CVAT writes persist without rollback; retry rechecks jobs and skips accepted ones. `fetch-task` / `api.fetch_task` have no promotion option.
    - Task selection scales with the request, not the project: `application/client/fetch.py:_select_tasks_for_fetch` retrieves each selector through `get_task` when all of them are numeric ids, and only walks the project task list otherwise — for a name selector, an id that turns out to name a task, a task belonging to another project, or an ignored id (all of which the listing path still owns, and all of which end in an error or a skip)
    - Completed tasks are served from `adapters/s3/task_cache.py` when an entry exists and its cached `task_updated_date` matches CVAT (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`). Incomplete issue reads are not cached. A task or project-label edit invalidates the rendered payload; a job moved back to annotation also makes it ineligible. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
@@ -253,3 +257,27 @@ Conversion validates every split before writing; repeated export refreshes image
 S3 sync preflights the complete source-to-destination map and rejects noncanonical keys and collisions before writing. Cache hits require regular files; directories are never removed automatically. Unusable read-only annotation caches degrade to uncached reads with warnings. Boto3 upload wrapper failures participate in per-object accounting.
 
 Derived project cache paths encode unsafe components and enforce containment without changing logical names. Configuration rejects negative/nonfinite data timeouts; the CLI catches typed validation errors. Credential hints retain the selected config source. Stored ignore IDs can be removed without remote task lookup. Doctor requires valid CVAT settings, treats S3/cache diagnostics as advisory, and returns 1 only for failed or unavailable required checks.
+
+## Explicit verification and reviewed publication
+
+`domain/verification/` owns schema, geometry, positional findings, whole-image
+quarantine and proposed cleanup. `domain/bundle/` owns API number/prod_id identity,
+class aliases/empty decisions, task supersession, training constraints and local
+preparation records. Both consume facts without filesystem/network/SDK effects.
+
+`application/ports/verification.py` and `dataset_bundle.py` define external reads,
+media inspection, roots, stable file snapshots, class API and dataset storage.
+`use_cases/verify.py` orchestrates report-only checking or explicit cleanup;
+`use_cases/dataset_bundle.py` prepares a new review directory, then separately
+revalidates and publishes stable checked bytes. CLI owns decisions and exit codes;
+public APIs never prompt and return structured missing decisions.
+
+The prepared snapshot binds all four source CSVs, three payload hashes, options,
+class decisions, roots and parent; preparation.sha256 binds the exact preparation.json
+bytes against accidental record edits. Upload repeats media/data/root/class/parent
+checks, refuses drift and publishes exactly dataset.csv, dataset.yaml and tasks.yaml.
+Source copies, reports and images remain local. A newer exact finalized parent
+requires preparation again. CSV-only legacy parents without metadata block.
+Fetch no longer receives a publisher effect, reads ClearML mappings or initializes
+ClearML; its export, partition, CVAT and S3 effects retain their established owners.
+Executable layer, adapter-independence and effect checks apply to the new modules.

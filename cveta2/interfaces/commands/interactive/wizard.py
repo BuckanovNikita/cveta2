@@ -1,4 +1,4 @@
-"""Setup-wizard prompts for ``setup``, ``setup-cache`` and ``setup-clearml``.
+"""Setup-wizard prompts for ``setup`` and ``setup-cache``.
 
 These keep the bespoke formatting the wizards rely on (bracketed defaults,
 the organization retry loop, per-project loops, RU/EN yes-no parsing) while
@@ -14,9 +14,6 @@ from cveta2.interfaces.commands.interactive import primitives
 if TYPE_CHECKING:
     from pathlib import Path
 
-_YES_TOKENS = {"да", "yes", "y", "true", "1"}
-_NO_TOKENS = {"нет", "no", "n", "false", "0"}
-
 SETUP_HINT = (
     "The 'setup' command is fully interactive. "
     "Configure via env vars (CVAT_HOST, CVAT_USERNAME, CVAT_PASSWORD) "
@@ -25,10 +22,6 @@ SETUP_HINT = (
 CACHE_HINT = (
     "The 'setup-cache' command is fully interactive. "
     "Edit the config file directly to set image_cache paths."
-)
-CLEARML_HINT = (
-    "The 'setup-clearml' command is fully interactive. "
-    "Edit the config file directly to set the ClearML mapping."
 )
 
 
@@ -160,50 +153,4 @@ def prompt_project_cache_dir(label: str, default_path: "Path | None") -> "Path |
     shown = str(default_path) if default_path is not None else "не задан"
     return primitives.path(
         f"{label} [{shown}]: ", hint=CACHE_HINT, history_key="project-cache-dir"
-    )
-
-
-def prompt_clearml_enabled(*, current: bool) -> bool | None:
-    """Ask whether to enable ClearML.  ``None`` leaves the value unchanged."""
-    default = "да" if current else "нет"
-    answer = primitives.text(
-        f"Включить ClearML интеграцию? [{default}]: ",
-        hint=CLEARML_HINT,
-        allow_empty=True,
-    )
-    token = (answer or "").lower()
-    if token in _YES_TOKENS:
-        return True
-    if token in _NO_TOKENS:
-        return False
-    return None
-
-
-def prompt_clearml_project(label: str, default_proj: str) -> str:
-    """Ask for a ClearML project name for one CVAT project."""
-    suffix = f" [{default_proj}]" if default_proj else " [пропустить]"
-    return (
-        primitives.text(
-            f"{label} clearml_project{suffix}: ",
-            hint=CLEARML_HINT,
-            default=default_proj,
-            allow_empty=True,
-            history_key="clearml-project",
-        )
-        or default_proj
-    )
-
-
-def prompt_clearml_dataset(default_ds: str, fallback: str) -> str:
-    """Ask for a ClearML dataset name, defaulting to *default_ds* or *fallback*."""
-    shown = default_ds or fallback
-    return (
-        primitives.text(
-            f"    clearml_dataset [{shown}]: ",
-            hint=CLEARML_HINT,
-            allow_empty=True,
-            history_key="clearml-dataset",
-        )
-        or default_ds
-        or fallback
     )

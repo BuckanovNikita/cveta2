@@ -2,7 +2,7 @@
 
 ## Функции-команды (рекомендуемый способ)
 
-Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`setup-clearml`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [контракт датасета](../specs/001-project-documentation/contracts/dataset-format.md)).
+Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [контракт датасета](../specs/001-project-documentation/contracts/dataset-format.md)).
 
 ```python
 import cveta2
@@ -290,3 +290,92 @@ with CvatClient() as client:
 Выбор неоднозначного имени проекта или задачи вызывает `Cveta2Error` с подходящими ID; используйте числовой ID в нужной организации. `ignore(..., remove=[ID])` удаляет сохранённую запись без поиска удалённой задачи. Ошибки учётных данных учитывают `Connection.config_path`.
 
 `upload(..., resume=True)` требует полного совпадения намерения и современного манифеста; частичные или отличающиеся удалённые аннотации не дополняются автоматически. Повторный `convert_to_coco` заменяет только файлы, принадлежащие предыдущему экспорту по его метаданным. Подробности перехода описаны в [CLI](cli.md).
+
+## Проверка CSV и явная публикация
+
+Эти операции не используют подключение к CVAT. `verify` проверяет путь к CSV;
+`verify_dataframe` проверяет DataFrame без изменения исходного объекта.
+`schema_for(profile)` возвращает схему для `cveta2` или `clearml-yolo`.
+`ValidationOptions` содержит `iou_threshold=0.99`, `check_images=False`,
+`image_root=None`, `base_dir=None`, `emit_warnings=True`. Относительные пути
+image_path разрешаются относительно входного CSV (для DataFrame — base_dir
+или текущей директории); image_root дополняет только пустой image_path.
+
+```python
+import cveta2
+
+options = cveta2.ValidationOptions(check_images=True, iou_threshold=0.99)
+report = cveta2.verify(
+    "export/dataset.csv",
+    profile="cveta2",
+    options=options,
+    output_dir="inspection",
+    clean=False,
+)
+print(report.is_valid, report.requires_cleanup)
+print(report.broken_row_positions, report.issues)
+schema = cveta2.schema_for("clearml-yolo")
+# frame — уже загруженный DataFrame; индекс не заменяет позицию строки
+report = cveta2.verify_dataframe(frame, profile="cveta2", options=options)
+```
+
+`ValidationResult` содержит предлагаемые `clean`, исходные отклонённые `broken`,
+позиции `clean_row_positions`/`broken_row_positions` с нуля, все `issues`,
+`checked_checks`, `skipped_checks`, `structural_errors` и счётчики строк/изображений.
+`is_valid` описывает исходный ввод; `requires_cleanup` отдельно отмечает отклонения
+или предлагаемые исправления. `reasons_for(position)` возвращает причины для
+позиции, `warnings` — предупреждения. Ни результат проверки, ни наличие `clean`
+не означают согласия на очистку. Только `clean=True` разрешает записать `clean.csv`;
+для этого нужен новый `output_dir`. Структурные ошибки очистить нельзя.
+
+```python
+import cveta2
+
+options = cveta2.PrepareOptions(
+    project="CV/datasets",
+    dataset_name="reviewed",
+    api_url="https://classes.example.org/api/classes",
+    local_roots=("/data/images",),
+    s3_roots=("s3://images/project",),
+    class_empty={17: True},
+    accept_default_classes=True,
+    accept_class_changes=True,
+    clean=False,
+)
+try:
+    prepared = cveta2.prepare_dataset(
+        "export",
+        output_dir="prepared",
+        options=options,
+    )
+except cveta2.MissingDecisions as error:
+    for decision in error.decisions:
+        print(decision.kind, decision.message, decision.choices)
+```
+
+`prepare_dataset` принимает директорию полной выгрузки с четырьмя исходными CSV.
+`PrepareOptions` явно задаёт destination project, dataset name, публичный API
+классов, независимые корни, решения empty и принятие изменений; по умолчанию оба
+`accept_*` и `clean` равны `False`. API никогда не спрашивает пользователя:
+отсутствующие решения возвращаются в `MissingDecisions.decisions`.
+Разбиение назначается снаружи, медиа проверяются всегда. `PreparedDataset` содержит
+`directory`, `ready`, `validation`, `metadata`, `tasks`; только `ready=True`
+разрешает последующую загрузку. При замечаниях изучите отчёт, исправьте вход или
+явно разрешите очистку и подготовьте новую директорию.
+
+После отдельного просмотра подготовленной директории выполните:
+
+```python
+import cveta2
+
+publication = cveta2.upload_dataset("prepared")
+print(publication.dataset_id, publication.version)
+```
+
+`upload_dataset(prepared_dir)` повторяет полную проверку неизменности и доступности
+и возвращает `Publication` только после финализации. Он не выполняет очистку.
+Публикуются ровно три payload-файла; CVAT-функция `cveta2.upload` остаётся отдельной.
+Ошибки операций относятся к `Cveta2Error`; известный ID созданной дочерней версии
+сохраняется в сообщении при последующем сбое. Точный порядок, состав пакета и
+действия при несовпадении описаны в [CLI](cli.md#опубликовать-подготовленный-пакет-cveta2-upload-dataset)
+и [контракте](../specs/001-project-documentation/contracts/dataset-format.md#verification-and-prepared-bundles).

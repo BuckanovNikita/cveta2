@@ -77,7 +77,6 @@ def test_overlapping_jobs_never_promote_unfinished_task(
             tmp_path / "output",
             connection=connection,
             download_images=False,
-            publish_clearml=False,
             cache="off",
         )
     assert result.dataset.empty
@@ -99,7 +98,6 @@ def test_job_without_exported_frames_still_prevents_completion(tmp_path: Path) -
             tmp_path / "output",
             connection=connection,
             download_images=False,
-            publish_clearml=False,
             cache="off",
         )
     assert result.dataset.empty
@@ -127,7 +125,6 @@ def test_annotated_frames_preserve_unfinished_ground_truth_job(tmp_path: Path) -
             tmp_path / "output",
             connection=connection,
             download_images=False,
-            publish_clearml=False,
             cache="off",
         )
     assert result.dataset.empty
@@ -155,7 +152,6 @@ def test_deleted_frames_preserve_unfinished_ground_truth_job(tmp_path: Path) -> 
             tmp_path / "output",
             connection=connection,
             download_images=False,
-            publish_clearml=False,
             cache="off",
         )
     assert len(result.deleted_images) == 1
@@ -216,7 +212,6 @@ def test_issue_failure_is_retried_next_fetch_before_caching(
             tmp_path / "first",
             connection=connection,
             download_images=False,
-            publish_clearml=False,
         )
         assert first.dataset.loc[0, "issue_text"] == ""
         assert not list((tmp_path / "cache").rglob("task_*.json"))
@@ -225,14 +220,12 @@ def test_issue_failure_is_retried_next_fetch_before_caching(
             tmp_path / "second",
             connection=connection,
             download_images=False,
-            publish_clearml=False,
         )
         third = cveta2.fetch(
             "audit-project",
             tmp_path / "third",
             connection=connection,
             download_images=False,
-            publish_clearml=False,
         )
     assert (
         second.dataset.loc[0, "issue_text"]
@@ -262,7 +255,6 @@ def test_downloaded_paths_survive_csv_and_cache_hit(
                 tmp_path / f"out-{run}",
                 connection=connection,
                 images_dir=tmp_path / "images",
-                publish_clearml=False,
                 cache="off",
             )
             row = result.dataset.iloc[0]

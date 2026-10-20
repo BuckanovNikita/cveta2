@@ -2,7 +2,7 @@
 
 Every data command (fetch, upload, convert, merge, labels, task ops,
 whats-new, ignore, s3-sync) has a counterpart here; the interactive-only
-commands (``setup``, ``setup-cache``, ``setup-clearml``, ``doctor``) do not.
+commands (``setup``, ``setup-cache``, ``doctor``) do not.
 
 Every remote function accepts an optional ``connection=`` argument (a
 :class:`Connection`); when omitted or partially filled, configuration is
@@ -66,7 +66,7 @@ from cveta2.composition.workflows import (
     project_cloud_storage,
     read_exclude_names,
     resolved_task,
-    upload_dataset,
+    upload_cvat_dataset,
 )
 from cveta2.domain.baseline import REQUIRED_COLUMNS
 from cveta2.domain.errors import Cveta2Error, MissingHostError
@@ -268,7 +268,6 @@ def fetch(  # noqa: PLR0913
     download_images: bool = True,
     cache: "CacheMode" = "use",
     save_tasks: bool = False,
-    publish_clearml: bool = True,
     connection: "Connection | None" = None,
 ) -> "PartitionResult":
     """Fetch a whole project like ``cveta2 fetch``.
@@ -313,7 +312,6 @@ def fetch(  # noqa: PLR0913
                 images_dir, download_images, resolved.project_name, config_path
             ),
             raw=raw,
-            publish_clearml=publish_clearml,
             config_path=config_path,
         )
         return fetch_project(c, resolved, options)
@@ -436,7 +434,7 @@ def upload(  # noqa: PLR0913
             labels=tuple(labels),
             resume=resume,
         )
-        outcome = upload_dataset(c, request)
+        outcome = upload_cvat_dataset(c, request)
         return UploadResult(
             task_id=outcome.task_id,
             task_name=outcome.task_name,

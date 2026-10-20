@@ -141,7 +141,6 @@ def _run(  # noqa: PLR0913
     use_cache: bool = False,
     config_path: Path | None = None,
     images_dir: Path | None = None,
-    publish_clearml: bool = False,
     save_tasks: bool = False,
     raw: bool = False,
 ) -> "PartitionResult":
@@ -156,7 +155,6 @@ def _run(  # noqa: PLR0913
             use_cache=use_cache,
             config_path=config_path,
             images_dir=images_dir,
-            publish_clearml=publish_clearml,
             save_tasks=save_tasks,
             raw=raw,
         ),
@@ -181,7 +179,7 @@ def test_accepts_finished_annotation_and_exports_fresh_completion(
     partition = fetch_project(
         client_with_api(api),
         FetchTarget(1, "promotion", tmp_path),
-        FetchOptions(skip_validation=True, use_cache=False, publish_clearml=False),
+        FetchOptions(skip_validation=True, use_cache=False),
     )
     assert api.writes.job_updates == [(101, "acceptance", "completed")]
     assert set(partition.dataset["task_id"]) == {11}
@@ -282,7 +280,7 @@ def test_option_default_preserves_normal_reads_and_leaves_jobs_unchanged(
     partition = fetch_project(
         client_with_api(api),
         FetchTarget(1, "promotion", tmp_path),
-        FetchOptions(use_cache=False, publish_clearml=False),
+        FetchOptions(use_cache=False),
     )
     assert api.update_attempts == []
     assert api.job_reads == [11]
@@ -300,7 +298,6 @@ def test_public_api_default_leaves_completed_annotation_jobs_unchanged(
         tmp_path,
         download_images=False,
         cache="off",
-        publish_clearml=False,
         connection=cveta2.Connection(client=client_with_api(api)),
     )
     assert api.update_attempts == []
@@ -408,20 +405,16 @@ def test_partial_update_failure_preserves_changes_aborts_outputs_and_can_retry(
     previous.write_text("previous export", encoding="utf-8")
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("failed promotion must not download or publish")
+        pytest.fail("failed promotion must not download")
 
     monkeypatch.setattr(
         "cveta2.composition.client.CvatClient.download_images", forbidden
-    )
-    monkeypatch.setattr(
-        "cveta2.composition.publishing.maybe_publish_clearml", forbidden
     )
     with pytest.raises(Cveta2Error) as caught:
         _run(
             api,
             output,
             images_dir=tmp_path / "images",
-            publish_clearml=True,
             save_tasks=True,
             raw=True,
         )

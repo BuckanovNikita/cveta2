@@ -34,7 +34,6 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "save_tasks": False,
             "no_cache": False,
             "force": False,
-            "no_clearml": False,
         },
     ),
     (
@@ -53,7 +52,6 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "--save-tasks",
             "--no-cache",
             "--force",
-            "--no-clearml",
         ],
         {
             "command": "fetch",
@@ -67,7 +65,6 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
             "save_tasks": True,
             "no_cache": True,
             "force": True,
-            "no_clearml": True,
         },
     ),
     (
@@ -367,7 +364,7 @@ def test_fetch_forwards_and_echoes_skip_validation(
         ),
     ):
         CliApp().run(
-            ["fetch", "-p", "1", "-o", "out", "--no-images", "--no-clearml"]
+            ["fetch", "-p", "1", "-o", "out", "--no-images"]
             + (["--skip-validation"] if enabled else [])
         )
     assert service.call_args.args[2].skip_validation is enabled

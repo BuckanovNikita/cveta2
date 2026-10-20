@@ -20,7 +20,6 @@ from cveta2.adapters.s3.task_cache import AnnotationCacheFactory
 from cveta2.adapters.s3.upload import S3UploadStorage
 from cveta2.application.client import ApplicationClient
 from cveta2.application.use_cases import fetch, resolve, task_ops, upload
-from cveta2.composition.publishing import maybe_publish_clearml
 from cveta2.domain.models import ProjectAnnotations, TaskInfo
 from cveta2.domain.partition import PartitionResult
 from cveta2.domain.storage import CloudStorageInfo
@@ -41,9 +40,6 @@ def fetch_dependencies(
         ),
         cache_enabled=not is_cache_disabled(),
         cvat_workers=Workers.cvat,
-        publisher=lambda project_name, output_dir: maybe_publish_clearml(
-            project_name, output_dir, options.config_path
-        ),
     )
 
 
@@ -101,7 +97,7 @@ def upload_dependencies() -> upload.UploadDependencies:
     )
 
 
-def upload_dataset(
+def upload_cvat_dataset(
     client: ApplicationClient, request: upload.UploadRequest
 ) -> upload.UploadOutcome:
     """Run an upload using configured production adapters."""

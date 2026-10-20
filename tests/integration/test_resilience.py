@@ -26,7 +26,7 @@ from cveta2.application.use_cases.upload import (
     request_fingerprint,
 )
 from cveta2.composition.client import CvatClient
-from cveta2.composition.workflows import fetch_project, upload_dataset
+from cveta2.composition.workflows import fetch_project, upload_cvat_dataset
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import (
     IMAGE_NAMES,
@@ -66,7 +66,7 @@ def test_a_parallel_fetch_survives_rate_limiting(tmp_path: Path) -> None:
     can stand in for it — the fake never rate-limits.
     """
     project_id, project_name, _cs_info, cfg = _get_project_and_storage()
-    options = FetchOptions(publish_clearml=False, use_cache=False)
+    options = FetchOptions(use_cache=False)
 
     with CvatClient(cfg) as client:
         serial_ctx = client.prepare_fetch(project_id, project_name=project_name)
@@ -149,7 +149,7 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
         client.api.attach_task_data = die  # type: ignore[assignment]
         try:
             with pytest.raises(_KilledRunError):
-                upload_dataset(
+                upload_cvat_dataset(
                     client,
                     _upload_request(project_id, project_name, names, resume=False),
                 )
@@ -163,7 +163,7 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
         assert stranded is not None
         assert stranded.task_id is not None
 
-        outcome = upload_dataset(
+        outcome = upload_cvat_dataset(
             client, _upload_request(project_id, project_name, names, resume=True)
         )
 

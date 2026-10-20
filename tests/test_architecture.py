@@ -129,6 +129,14 @@ def _synthetic_graph() -> ImportGraph:
     ("importer", "imported"),
     [
         ("cveta2.domain.models", "cveta2.adapters.s3.utils"),
+        ("cveta2.domain.verification.validation", "cveta2.adapters.files.media"),
+        ("cveta2.domain.bundle.validation", "cveta2.adapters.files.bundle"),
+        (
+            "cveta2.application.use_cases.dataset_bundle",
+            "cveta2.adapters.clearml.bundle",
+        ),
+        ("cveta2.application.use_cases.dataset_bundle", "questionary"),
+        ("cveta2.adapters.class_api.http", "clearml"),
         ("cveta2.application.ports.cvat", "cveta2.composition.client"),
         ("cveta2.application.client.base", "cveta2.client"),
         ("cveta2.adapters.cvat.sdk_adapter", "cveta2.adapters.s3.utils"),
@@ -211,6 +219,9 @@ import cveta2.application.client
 import cveta2.application.use_cases.fetch
 import cveta2.application.use_cases.upload
 import cveta2.application.use_cases.convert
+import cveta2.domain.verification.validation
+import cveta2.domain.bundle.validation
+import cveta2.application.use_cases.dataset_bundle
 """
     # The isolated interpreter executes only the fixed source fixture above.
     result = subprocess.run(  # noqa: S603

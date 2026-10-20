@@ -156,6 +156,24 @@ class TestDocumentedExamplesMatchTheCode:
         assert not problems, "\n".join(problems)
 
 
+def test_shell_examples_do_not_use_retired_automatic_publication() -> None:
+    """Migration prose may name removed controls; executable examples must not."""
+    problems: list[str] = []
+    for doc in USER_DOCS:
+        for block in re.findall(
+            r"```(?:bash|sh)\n(.*?)```", doc.read_text(), re.DOTALL
+        ):
+            commands = block.replace("\\\n", " ")
+            for line in commands.splitlines():
+                if line.lstrip().startswith("#"):
+                    continue
+                if re.search(r"\bcveta2\s+setup-clearml\b", line) or (
+                    re.search(r"\bcveta2\s+fetch\b", line) and "--no-clearml" in line
+                ):
+                    problems.append(f"{doc.name}: {line.strip()}")
+    assert not problems, "\n".join(problems)
+
+
 class TestTheDocsCoverTheWholeSurface:
     """A command, flag, env var or config key nobody documented is a gap."""
 

@@ -59,7 +59,6 @@ def run_fetch(args: "argparse.Namespace") -> None:
                 "-o": str(output_dir),
                 "--raw": options.raw,
                 "--skip-validation": options.skip_validation,
-                "--no-clearml": args.no_clearml,
             }
             | _common_fetch_echo_args(args),
             prompted=prompted,
@@ -142,7 +141,6 @@ def _build_project_fetch_options(
         save_tasks=args.save_tasks,
         images_dir=_resolve_images_dir(args, project_name),
         raw=args.raw,
-        publish_clearml=not args.no_clearml,
     )
 
 

@@ -1,6 +1,6 @@
 """End-to-end tests for the upload service against the recording fakes.
 
-``_stage_images``, ``_push_to_cvat`` and ``upload_dataset`` used to appear
+``_stage_images``, ``_push_to_cvat`` and ``upload_cvat_dataset`` used to appear
 in the suite only as patch targets, so no assertion covered the chain they
 drive.  These tests run the real pipeline over :class:`FakeCvatApi` and an
 in-memory S3, which is what makes the argument-level behaviour of each step
@@ -31,7 +31,7 @@ from cveta2.application.use_cases.upload import (
     _stage_images,
     request_fingerprint,
 )
-from cveta2.composition.workflows import upload_dataset, upload_dependencies
+from cveta2.composition.workflows import upload_cvat_dataset, upload_dependencies
 from cveta2.domain.errors import CvatApiError, Cveta2Error, LabelsMismatchError
 from cveta2.domain.models import CSV_COLUMNS, LabelInfo, ProjectInfo
 from cveta2.domain.paths import build_s3_key
@@ -320,7 +320,7 @@ class TestStageImages:
 
 
 # ---------------------------------------------------------------------------
-# _push_to_cvat / upload_dataset
+# _push_to_cvat / upload_cvat_dataset
 # ---------------------------------------------------------------------------
 
 
@@ -356,7 +356,7 @@ class TestUploadDataset:
             complete=True,
         )
 
-        outcome = upload_dataset(client, request)
+        outcome = upload_cvat_dataset(client, request)
 
         api = client.api
         assert isinstance(api, _ProjectScopedFake)
@@ -397,7 +397,7 @@ class TestUploadDataset:
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         request = make_request(image_names=["a.jpg"], search_dirs=[image_dir])
 
-        outcome = upload_dataset(client, request)
+        outcome = upload_cvat_dataset(client, request)
 
         api = client.api
         assert isinstance(api, _ProjectScopedFake)
@@ -430,7 +430,7 @@ class TestUploadDataset:
             options=UploadOptions(search_dirs=[image_dir]),
         )
 
-        outcome = upload_dataset(client, request)
+        outcome = upload_cvat_dataset(client, request)
 
         api = client.api
         assert isinstance(api, _ProjectScopedFake)
@@ -476,7 +476,7 @@ class TestUploadDataset:
             mark_all_deleted=mark_all_deleted,
         )
 
-        upload_dataset(client, request)
+        upload_cvat_dataset(client, request)
 
         api = client.api
         assert isinstance(api, _ProjectScopedFake)
@@ -513,7 +513,7 @@ class TestUploadDataset:
             segment_size=segment_size,
         )
 
-        outcome = upload_dataset(client, request)
+        outcome = upload_cvat_dataset(client, request)
 
         assert outcome.jobs == expected_jobs
 
@@ -548,7 +548,7 @@ class TestUploadDataset:
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         request = make_request(image_names=["a.jpg"], search_dirs=[image_dir])
 
-        upload_dataset(client, request)
+        upload_cvat_dataset(client, request)
 
         assert not entry.exists()
 
@@ -654,11 +654,11 @@ class TestResume:
         second._cfg = second._cfg.model_copy(update={"host": "http://other-cvat"})
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
         with _dies_attaching_frames(first), pytest.raises(_InterruptedRunError):
-            upload_dataset(first, make_request(image_names=["a.jpg"]))
+            upload_cvat_dataset(first, make_request(image_names=["a.jpg"]))
         unrelated_id = second.create_upload_task(PROJECT_ID, "unrelated", [], 1)
 
         with pytest.raises(Cveta2Error):
-            upload_dataset(second, _resume_request(["a.jpg"]))
+            upload_cvat_dataset(second, _resume_request(["a.jpg"]))
 
         assert second.get_task(unrelated_id).name == "unrelated"
         assert _writes_of(second).deleted_tasks == []
@@ -676,7 +676,7 @@ class TestResume:
         _seed_manifest_for(client, make_request(image_names=["a.jpg"]), task_id)
 
         with pytest.raises(Cveta2Error) as caught:
-            upload_dataset(client, _resume_request(["a.jpg"]))
+            upload_cvat_dataset(client, _resume_request(["a.jpg"]))
 
         assert "999" in str(caught.value)
         assert str(PROJECT_ID) in str(caught.value)
@@ -693,7 +693,7 @@ class TestResume:
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
-        upload_dataset(client, make_request(image_names=["a.jpg"]))
+        upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
 
         assert list_manifests(PROJECT_ID, host=client.host) == []
 
@@ -709,7 +709,7 @@ class TestResume:
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=["a.jpg"]))
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
 
         pending = list_manifests(PROJECT_ID, host=client.host)
         assert len(pending) == 1
@@ -724,11 +724,11 @@ class TestResume:
         make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=names))
+            upload_cvat_dataset(client, make_request(image_names=names))
         stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
         with pytest.raises(Cveta2Error, match="кадры"):
-            upload_dataset(client, _resume_request(names))
+            upload_cvat_dataset(client, _resume_request(names))
         assert _writes_of(client).deleted_tasks == []
         assert len(_writes_of(client).created_tasks) == 1
         assert list_manifests(PROJECT_ID, host=client.host)[0].task_id == stranded
@@ -745,10 +745,10 @@ class TestResume:
         names = ["a.jpg", "b.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
 
-        outcome = upload_dataset(client, make_request(image_names=names))
+        outcome = upload_cvat_dataset(client, make_request(image_names=names))
         _seed_manifest_for(client, make_request(image_names=names), outcome.task_id)
 
-        resumed = upload_dataset(client, _resume_request(names))
+        resumed = upload_cvat_dataset(client, _resume_request(names))
 
         assert resumed.task_id == outcome.task_id
         assert _writes_of(client).deleted_tasks == []
@@ -761,12 +761,14 @@ class TestResume:
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         make_s3(monkeypatch, seeded_bucket(["a.jpg", "b.jpg"]))
 
-        outcome = upload_dataset(client, make_request(image_names=["a.jpg", "b.jpg"]))
+        outcome = upload_cvat_dataset(
+            client, make_request(image_names=["a.jpg", "b.jpg"])
+        )
         request = make_request(image_names=["a.jpg"])
         _seed_manifest_for(client, request, outcome.task_id)
 
         with pytest.raises(Cveta2Error, match="кадры"):
-            upload_dataset(client, _resume_request(["a.jpg"]))
+            upload_cvat_dataset(client, _resume_request(["a.jpg"]))
 
     def test_resume_uploads_annotations_the_first_run_never_reached(
         self, monkeypatch: pytest.MonkeyPatch
@@ -781,10 +783,10 @@ class TestResume:
         make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_uploading_annotations(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=names))
+            upload_cvat_dataset(client, make_request(image_names=names))
         stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
-        outcome = upload_dataset(client, _resume_request(names))
+        outcome = upload_cvat_dataset(client, _resume_request(names))
 
         assert outcome.task_id == stranded
         assert outcome.annotations == len(names)
@@ -802,11 +804,11 @@ class TestResume:
         names = ["a.jpg", "b.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
 
-        outcome = upload_dataset(client, make_request(image_names=names))
+        outcome = upload_cvat_dataset(client, make_request(image_names=names))
         before = len(_writes_of(client).shapes[outcome.task_id])
         _seed_manifest_for(client, make_request(image_names=names), outcome.task_id)
 
-        resumed = upload_dataset(client, _resume_request(names))
+        resumed = upload_cvat_dataset(client, _resume_request(names))
 
         assert resumed.task_id == outcome.task_id
         assert len(_writes_of(client).shapes[outcome.task_id]) == before
@@ -820,10 +822,10 @@ class TestResume:
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=["a.jpg"]))
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
 
         with pytest.raises(Cveta2Error, match=r"dataset\.csv") as caught:
-            upload_dataset(client, _resume_request(["other.jpg"]))
+            upload_cvat_dataset(client, _resume_request(["other.jpg"]))
 
         assert "--resume" in str(caught.value)
 
@@ -834,7 +836,7 @@ class TestResume:
         make_s3(monkeypatch, _ListCountingS3())
 
         with pytest.raises(Cveta2Error, match="нечего продолжать"):
-            upload_dataset(client, _resume_request(["a.jpg"]))
+            upload_cvat_dataset(client, _resume_request(["a.jpg"]))
 
     def test_resume_keeps_the_server_paths_the_first_run_chose(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -855,7 +857,7 @@ class TestResume:
         )
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(
+            upload_cvat_dataset(
                 client, make_request(image_names=names, search_dirs=[image_dir])
             )
         pinned = list_manifests(PROJECT_ID, host=client.host)[0]
@@ -871,7 +873,7 @@ class TestResume:
         assert pinned.task_id is not None
         spec = _writes_of(client).created_tasks[-1]
         client.api.attach_task_data(pinned.task_id, spec)
-        upload_dataset(
+        upload_cvat_dataset(
             client,
             make_request(image_names=names, search_dirs=[image_dir], resume=True),
         )
@@ -895,11 +897,11 @@ class TestManifestLifecycle:
         make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=names))
+            upload_cvat_dataset(client, make_request(image_names=names))
         stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
 
         with pytest.raises(Cveta2Error, match="--resume") as caught:
-            upload_dataset(client, make_request(image_names=names))
+            upload_cvat_dataset(client, make_request(image_names=names))
         assert str(stranded) in str(caught.value)
         assert len(_writes_of(client).created_tasks) == 1
         assert capture_logs
@@ -911,7 +913,7 @@ class TestManifestLifecycle:
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
-        upload_dataset(client, make_request(image_names=["a.jpg"]))
+        upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
 
         assert not any("--resume" in message for message in capture_logs)
 
@@ -927,7 +929,7 @@ class TestManifestLifecycle:
         client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
         make_s3(monkeypatch, seeded_bucket(["a.jpg", "b.jpg", "c.jpg"]))
 
-        upload_dataset(
+        upload_cvat_dataset(
             client,
             make_request(image_names=["a.jpg", "b.jpg"], deleted_names=["c.jpg"]),
         )
@@ -962,7 +964,7 @@ class TestS3FailureAbortsBeforeTaskCreation:
         image_dir = make_local_images(tmp_path, ["a.jpg"])
 
         with pytest.raises(Cveta2Error, match="S3"):
-            upload_dataset(
+            upload_cvat_dataset(
                 client,
                 make_request(image_names=["a.jpg"], search_dirs=[image_dir]),
             )
@@ -984,7 +986,7 @@ class TestS3FailureAbortsBeforeTaskCreation:
         image_dir = make_local_images(tmp_path, ["a.jpg"])
 
         with pytest.raises(Cveta2Error, match=r"c\.jpg") as caught:
-            upload_dataset(
+            upload_cvat_dataset(
                 client,
                 make_request(image_names=["a.jpg", "c.jpg"], search_dirs=[image_dir]),
             )
@@ -1020,10 +1022,12 @@ class TestResumeWithIssues:
         with monkeypatch.context() as interrupted:
             interrupted.setattr(client.api, "create_issue", interrupt_second)
             with pytest.raises(CvatApiError):
-                upload_dataset(client, make_request(image_names=["a.jpg"], rows=rows))
+                upload_cvat_dataset(
+                    client, make_request(image_names=["a.jpg"], rows=rows)
+                )
 
         assert len(_writes_of(client).issues) == 1
-        outcome = upload_dataset(
+        outcome = upload_cvat_dataset(
             client, make_request(image_names=["a.jpg"], rows=rows, resume=True)
         )
         assert outcome.issues == 1
@@ -1048,11 +1052,11 @@ class TestResumeWithIssues:
         ]
         request = make_request(image_names=["a.jpg"], rows=rows)
 
-        outcome = upload_dataset(client, request)
+        outcome = upload_cvat_dataset(client, request)
         created = len(_writes_of(client).issues)
         _seed_manifest_for(client, request, outcome.task_id)
 
-        upload_dataset(
+        upload_cvat_dataset(
             client, make_request(image_names=["a.jpg"], rows=rows, resume=True)
         )
 
@@ -1075,12 +1079,12 @@ class TestResumeAfterManualDeletion:
         make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=names))
+            upload_cvat_dataset(client, make_request(image_names=names))
         stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
         assert stranded is not None
         client.delete_task(stranded)
 
-        outcome = upload_dataset(client, _resume_request(names))
+        outcome = upload_cvat_dataset(client, _resume_request(names))
 
         assert outcome.images == len(names)
         assert list_manifests(PROJECT_ID, host=client.host) == []
@@ -1094,7 +1098,7 @@ class TestResumeAfterManualDeletion:
         make_s3(monkeypatch, seeded_bucket(names))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
-            upload_dataset(client, make_request(image_names=names))
+            upload_cvat_dataset(client, make_request(image_names=names))
 
         def boom(_task_id: int) -> int:
             raise CvatApiError("server error", status_code=500)
@@ -1102,4 +1106,4 @@ class TestResumeAfterManualDeletion:
         monkeypatch.setattr(client.api, "get_task_size", boom)
 
         with pytest.raises(CvatApiError):
-            upload_dataset(client, _resume_request(names))
+            upload_cvat_dataset(client, _resume_request(names))

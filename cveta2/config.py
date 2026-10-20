@@ -4,7 +4,6 @@ from cveta2.adapters.config.settings import (
     CONFIG_DIR,
     CONFIG_PATH,
     CacheConfig,
-    ClearmlConfig,
     CvatConfig,
     IgnoreConfig,
     ImageCacheConfig,
@@ -17,7 +16,6 @@ from cveta2.adapters.config.settings import (
     get_projects_cache_path,
     images_cache_dir_from,
     is_cache_disabled,
-    is_clearml_disabled,
     is_interactive_disabled,
     require_interactive,
     resolve_images_cache_dir,
@@ -25,7 +23,6 @@ from cveta2.adapters.config.settings import (
 )
 from cveta2.application.settings import (
     CacheProjectSettings,
-    ClearmlProjectMapping,
     IgnoredTask,
 )
 
@@ -34,8 +31,6 @@ __all__ = [
     "CONFIG_PATH",
     "CacheConfig",
     "CacheProjectSettings",
-    "ClearmlConfig",
-    "ClearmlProjectMapping",
     "CvatConfig",
     "IgnoreConfig",
     "IgnoredTask",
@@ -49,7 +44,6 @@ __all__ = [
     "get_projects_cache_path",
     "images_cache_dir_from",
     "is_cache_disabled",
-    "is_clearml_disabled",
     "is_interactive_disabled",
     "require_interactive",
     "resolve_images_cache_dir",

@@ -130,7 +130,7 @@ def test_old_polygon_cache_refetches_and_round_trips_without_warning_replay(
         fetch_selected_tasks(
             CvatClient(CFG, api=api),
             FetchTarget(fake.project.id, fake.project.name, tmp_path / output),
-            FetchOptions(task_selector=[task.id], publish_clearml=False),
+            FetchOptions(task_selector=[task.id]),
         )
         return pd.read_csv(tmp_path / output / "dataset.csv")
 

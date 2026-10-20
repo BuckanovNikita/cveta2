@@ -74,7 +74,6 @@ def test_polygon_box_survives_fetch_with_existing_deletion_semantics(
             tmp_path,
             connection=connection,
             download_images=False,
-            publish_clearml=False,
             cache="off",
         )
 
@@ -129,7 +128,6 @@ def test_rejected_polygon_retains_unannotated_frame(
             tmp_path,
             connection=connection,
             download_images=False,
-            publish_clearml=False,
             cache="off",
         )
     dataset = read_dataset_csv(tmp_path / "dataset.csv", set(CSV_COLUMNS))
