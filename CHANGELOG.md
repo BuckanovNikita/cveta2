@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v0.11.0 (2026-10-20)
+
+### Documentation
+
+- Record Python compatibility release delivery
+  ([`0509c7f`](https://github.com/BuckanovNikita/cveta2/commit/0509c7fdb3e7a7c4d7c59f48bb29af675277b2ec))
+
+### Features
+
+- Add dataset verification and reviewed ClearML publication
+  ([`78138b8`](https://github.com/BuckanovNikita/cveta2/commit/78138b80af33e2651711b399cd428aad646b431c))
+
+### Breaking Changes
+
+- Fetch no longer publishes to ClearML. Remove --no-clearml, publish_clearml, setup-clearml and
+  automatic publication configuration; prepare with verify --bundle and publish separately with
+  upload-dataset.
+
+
 ## v0.10.0 (2026-10-15)
 
 ### Documentation
