@@ -27,7 +27,6 @@ from cveta2.adapters.config.settings import (
     cache_dir_for_project,
     get_projects_cache_path,
     is_cache_disabled,
-    is_clearml_disabled,
     is_interactive_disabled,
     resolve_images_cache_dir,
     should_raise_on_fetch_failure,
@@ -48,7 +47,6 @@ _ENV_FLAG_READERS: list[tuple[str, str, Callable[[], bool]]] = [
     ("CVETA2_NO_INTERACTIVE", "true", is_interactive_disabled),
     ("CVETA2_DISABLE_CACHE", "true", is_cache_disabled),
     ("CVETA2_RAISE_ON_FAILURE", "true", should_raise_on_fetch_failure),
-    ("CVETA2_CLEARML", "false", is_clearml_disabled),
 ]
 
 # (how to derive the env value from the trigger token, expected reader answer);

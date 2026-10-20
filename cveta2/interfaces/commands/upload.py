@@ -21,7 +21,7 @@ from cveta2.composition.files import read_dataset_csv
 from cveta2.composition.workflows import (
     build_search_dirs,
     read_exclude_names,
-    upload_dataset,
+    upload_cvat_dataset,
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces.commands import interactive
@@ -209,4 +209,4 @@ def run_upload(args: "argparse.Namespace") -> None:
             labels=tuple(selected),
             resume=args.resume,
         )
-        upload_dataset(client, request)
+        upload_cvat_dataset(client, request)

@@ -307,7 +307,6 @@ class TestFetchApi:
             fake.project.id,
             out,
             download_images=False,
-            publish_clearml=False,
             connection=fake_connection(fake),
         )
 
@@ -320,65 +319,57 @@ class TestFetchApi:
         assert len(result.obsolete) > 0
         assert len(pd.read_csv(out / "obsolete.csv")) == len(result.obsolete)
 
-    def test_default_flags_skip_raw_task_csvs_and_publish_clearml(
+    def test_default_flags_skip_raw_task_csvs(
         self, normal_fake: LoadedFixtures, tmp_path: Path
     ) -> None:
-        """Pins the three keyword defaults that no other test exercises.
-
-        ``raw``/``save_tasks`` default to False and ``publish_clearml``
-        to True; flipping any default is invisible unless a call that
-        passes none of them asserts the resulting side effects.
-        """
+        """Default fetch writes partition CSVs without raw or task diagnostics."""
         fake = normal_fake
         out = tmp_path / "out"
 
-        with patch("cveta2.composition.workflows.maybe_publish_clearml") as publish:
-            cveta2.fetch(
-                fake.project.id,
-                out,
-                download_images=False,
-                connection=fake_connection(fake),
-            )
+        cveta2.fetch(
+            fake.project.id,
+            out,
+            download_images=False,
+            connection=fake_connection(fake),
+        )
 
         assert not (out / "raw.csv").exists()
         assert not (out / ".tasks").exists()
-        publish.assert_called_once_with(fake.project.name, out, None)
 
-    def test_clearml_mapping_is_read_from_the_connection_config(
-        self, normal_fake: LoadedFixtures, tmp_path: Path
+    @pytest.mark.parametrize("legacy_switch", ["true", "false"])
+    def test_legacy_configuration_cannot_publish_during_fetch(
+        self,
+        normal_fake: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        legacy_switch: str,
     ) -> None:
-        """The ``clearml`` section must come from ``Connection.config_path``.
-
-        The mapping exists only in that file; the ambient config is
-        empty, so the publish happens only if the path reaches
-        ``ClearmlConfig.load`` through ``FetchOptions``.
-        """
+        """Old configuration and environment never initialize the ClearML SDK."""
         fake = normal_fake
-        out = tmp_path / "out"
         config = write_config_yaml(
             tmp_path / "team.yaml",
             clearml={
+                "enabled": True,
                 "projects": {
                     fake.project.name: {"clearml_project": "p", "clearml_dataset": "d"}
-                }
+                },
             },
         )
+        original = config.read_bytes()
         _api, connection = _scoped(fake, config_path=config)
-
-        with (
-            patch(
-                "cveta2.composition.publishing.is_clearml_available", return_value=True
-            ),
-            patch("cveta2.adapters.clearml._dataset.publish_to_clearml") as publish,
+        monkeypatch.setenv("CVETA2_CLEARML", legacy_switch)
+        with patch(
+            "cveta2.adapters.clearml.availability.is_clearml_available",
+            side_effect=AssertionError("fetch must not inspect ClearML"),
         ):
             cveta2.fetch(
-                fake.project.id, out, download_images=False, connection=connection
+                fake.project.id,
+                tmp_path / "out",
+                download_images=False,
+                connection=connection,
             )
-
-        publish.assert_called_once()
-        mapping, published_dir = publish.call_args.args
-        assert (mapping.clearml_project, mapping.clearml_dataset) == ("p", "d")
-        assert published_dir == out
+        assert config.read_bytes() == original
+        assert (tmp_path / "out" / "dataset.csv").is_file()
 
     def test_raw_and_save_tasks_reach_the_pipeline(
         self, normal_fake: LoadedFixtures, tmp_path: Path
@@ -397,33 +388,11 @@ class TestFetchApi:
             raw=True,
             save_tasks=True,
             download_images=False,
-            publish_clearml=False,
             connection=fake_connection(fake),
         )
 
         assert (out / "raw.csv").exists()
         assert (out / ".tasks" / f"task_{fake.tasks[0].id}.csv").exists()
-
-    def test_publish_clearml_false_suppresses_the_publish(
-        self, normal_fake: LoadedFixtures, tmp_path: Path
-    ) -> None:
-        """``publish_clearml`` defaults to True in FetchOptions too.
-
-        Only an explicit False can show that the keyword is forwarded
-        rather than dropped.
-        """
-        fake = normal_fake
-
-        with patch("cveta2.composition.workflows.maybe_publish_clearml") as publish:
-            cveta2.fetch(
-                fake.project.id,
-                tmp_path / "out",
-                download_images=False,
-                publish_clearml=False,
-                connection=fake_connection(fake),
-            )
-
-        publish.assert_not_called()
 
     def test_completed_only_filters_the_task_list(
         self, coco8_fixtures: LoadedFixtures, tmp_path: Path
@@ -440,7 +409,6 @@ class TestFetchApi:
             fake.project.id,
             tmp_path / "all",
             download_images=False,
-            publish_clearml=False,
             connection=fake_connection(fake),
         )
         only_done = cveta2.fetch(
@@ -448,7 +416,6 @@ class TestFetchApi:
             tmp_path / "done",
             completed_only=True,
             download_images=False,
-            publish_clearml=False,
             connection=fake_connection(fake),
         )
 
@@ -483,7 +450,6 @@ class TestFetchApi:
             fake.project.id,
             tmp_path / "out",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -512,7 +478,6 @@ class TestFetchApi:
             fake.project.id,
             tmp_path / "out",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -545,7 +510,6 @@ class TestFetchApi:
             fake.project.id,
             tmp_path / "out",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -568,7 +532,6 @@ class TestFetchApi:
             fake.project.id,
             tmp_path / "out",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -597,7 +560,6 @@ class TestFetchApi:
         result = cveta2.fetch(
             fake.project.id,
             tmp_path / "out",
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -880,7 +842,6 @@ class TestFetchApi:
             fake.project.name,
             tmp_path / "out",
             download_images=False,
-            publish_clearml=False,
             connection=fake_connection(fake),
         )
 
@@ -919,7 +880,6 @@ class TestFetchApi:
             cveta2.fetch(
                 fake.project.id,
                 tmp_path / "out",
-                publish_clearml=False,
                 connection=fake_connection(fake),
             )
 
@@ -966,7 +926,6 @@ class TestFetchCacheModes:
             fake.project.id,
             tmp_path / "out",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -986,7 +945,6 @@ class TestFetchCacheModes:
             tmp_path / "out",
             cache="off",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -1005,7 +963,6 @@ class TestFetchCacheModes:
             fake.project.id,
             tmp_path / "first",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
         after_first = list(api.annotation_calls)
@@ -1013,7 +970,6 @@ class TestFetchCacheModes:
             fake.project.id,
             tmp_path / "second",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -1033,7 +989,6 @@ class TestFetchCacheModes:
             fake.project.id,
             tmp_path / "first",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
         after_first = list(api.annotation_calls)
@@ -1042,7 +997,6 @@ class TestFetchCacheModes:
             tmp_path / "second",
             cache="refresh",
             download_images=False,
-            publish_clearml=False,
             connection=connection,
         )
 
@@ -1968,7 +1922,7 @@ class TestUploadResumeWiring:
                 jobs=0,
             )
 
-        monkeypatch.setattr("cveta2.interfaces.api.upload_dataset", record)
+        monkeypatch.setattr("cveta2.interfaces.api.upload_cvat_dataset", record)
         cveta2.upload(
             pd.DataFrame([csv_row("a.jpg", label="cat")]),
             project=fake.project.id,
@@ -2026,7 +1980,7 @@ class TestUploadResumeWiring:
                 jobs=0,
             )
 
-        monkeypatch.setattr("cveta2.interfaces.api.upload_dataset", record)
+        monkeypatch.setattr("cveta2.interfaces.api.upload_cvat_dataset", record)
         cveta2.upload(
             csv,
             project=normal_fake.project.id,
@@ -2048,7 +2002,6 @@ def test_fetch_forwards_skip_validation(
             tmp_path,
             skip_validation=enabled,
             download_images=False,
-            publish_clearml=False,
             connection=fake_connection(normal_fake),
         )
     assert service.call_args.args[2].skip_validation is enabled

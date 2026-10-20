@@ -34,7 +34,8 @@ CLI и Python API для работы с аннотациями CVAT-проек�
 - **Что нового** (`whats-new`) — список задач, завершённых после уже выгруженного `dataset.csv`
 - **Кэш аннотаций задач** — завершённые задачи кэшируются локально и в S3-бакете проекта, повторный `fetch` не перекачивает их с CVAT
 - **Выгрузка без валидации** — `fetch --skip-validation` принимает завершённую разметку в CVAT перед выгрузкой; по умолчанию отключено
-- **Публикация в ClearML** (`setup-clearml`) — опционально: после полного `fetch` CSV-файлы публикуются как новая версия ClearML Dataset
+- **Проверка и подготовка** (`verify`) — отчёт по CSV и явная подготовка проверяемого пакета; очистка только по запросу
+- **Публикация в ClearML** (`upload-dataset`) — отдельная загрузка подготовленного пакета после просмотра
 - **Issues** — выгрузка issues CVAT в CSV (`issue_text` / `issue_state`) и создание новых issues при `upload`
 - **Удобный интерактив** — текстовые поля запоминают ответы прошлых запусков (стрелка вверх подставляет предыдущее значение), а после интерактивного заполнения команда печатает в stdout полный эквивалент с флагами для повторного запуска
 - Поддерживает фильтр по задачам со статусом `completed`
@@ -118,7 +119,8 @@ cveta2 fetch-task -p 123 -o output/
 |---|---|
 | [`setup`](docs/cli.md#настроить-подключение-к-cvat-cveta2-setup) | Настроить подключение к CVAT |
 | [`setup-cache`](docs/cli.md#настроить-кэш-изображений-cveta2-setup-cache) | Настроить пути кэша изображений |
-| [`setup-clearml`](docs/cli.md#настроить-публикацию-в-clearml-cveta2-setup-clearml) | Настроить публикацию датасетов в ClearML |
+| [`verify`](docs/cli.md#проверить-csv-и-подготовить-пакет-cveta2-verify) | Проверить CSV или подготовить пакет |
+| [`upload-dataset`](docs/cli.md#опубликовать-подготовленный-пакет-cveta2-upload-dataset) | Опубликовать проверенный пакет в ClearML |
 | [`fetch`](docs/cli.md#выгрузить-все-аннотации-проекта-cveta2-fetch) | Выгрузить все аннотации проекта |
 | [`fetch-task`](docs/cli.md#выгрузить-конкретные-задачи-cveta2-fetch-task) | Выгрузить конкретные задачи |
 | [`whats-new`](docs/cli.md#что-нового-в-проекте-cveta2-whats-new) | Задачи, завершённые после выгруженного CSV |
@@ -146,3 +148,30 @@ print(result.dataset)
 ```
 
 Полное описание — в [docs/python-api.md](docs/python-api.md).
+
+## Проверка и публикация датасета
+
+`fetch` больше не публикует данные автоматически в ClearML. Сначала назначьте
+split вне cveta2, затем проверьте CSV или подготовьте полную выгрузку:
+
+```bash
+cveta2 verify output/dataset.csv --profile cveta2 --output-dir inspection
+cveta2 verify output --bundle --output-dir prepared \
+  --project CV/datasets --dataset-name reviewed \
+  --api-url https://classes.example.org/api/classes \
+  --local-root /data/images --s3-root s3://images/project \
+  --accept-default-classes --accept-class-changes --non-interactive
+# После просмотра подготовленной директории, отдельным действием:
+cveta2 upload-dataset prepared
+```
+
+Проверка по умолчанию только сообщает замечания; `--clean` явно разрешает очистку
+без изменения входных файлов. Пакет содержит payload, копии четырёх исходных CSV,
+отчёты и запись подготовки. Публикация повторно проверяет файлы, изображения,
+корни, классы и последнего родителя; изменения требуют подготовки заново.
+В ClearML попадают ровно `dataset.csv`, `dataset.yaml`, `tasks.yaml`.
+Для работы с ClearML нужен extra `clearml`; локальная проверка доступна без него.
+Старые `setup-clearml`, `--no-clearml`, `publish_clearml` и автоматические mappings
+удалены без переходного периода; пользовательский конфиг не переписывается.
+Подробности и коды выхода — в [CLI](docs/cli.md#проверить-csv-и-подготовить-пакет-cveta2-verify),
+типы и prompt-free вызовы — в [Python API](docs/python-api.md#проверка-csv-и-явная-публикация).

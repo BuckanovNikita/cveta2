@@ -25,7 +25,8 @@ dependencies = [
     "boto3>=1.42.49",
     "cvat-sdk>=2.59.1",
     "loguru>=0.7.3",
-    "pandas>=2.0.0",
+    "pandas>=2.1.1",
+    "pandera[pandas]>=0.34.1,<0.35",
     "pydantic>=2.12.5",
     "pyyaml>=6.0.0",
     "questionary>=2.0.0",
@@ -36,7 +37,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-clearml = ["clearml>=1.16.0"]
+clearml = ["clearml[s3]>=2.1.12,<3"]
 
 [project.urls]
 Homepage = "https://github.com/BuckanovNikita/cveta2"
@@ -773,7 +774,7 @@ name = "Outgoing adapters remain independent"
 type = "layers"
 containers = ["cveta2.adapters"]
 exhaustive = true
-layers = ["cvat | s3 | config | clearml", "files | execution"]
+layers = ["cvat | s3 | config | clearml | class_api", "files | execution"]
 
 [[tool.importlinter.contracts]]
 name = "Adapters implement contracts without application orchestration"

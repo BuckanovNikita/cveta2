@@ -17,7 +17,6 @@ from cveta2.interfaces.commands.labels import run_labels
 from cveta2.interfaces.commands.merge import run_merge
 from cveta2.interfaces.commands.s3_sync import run_s3_sync
 from cveta2.interfaces.commands.setup import run_setup, run_setup_cache
-from cveta2.interfaces.commands.setup_clearml import run_setup_clearml
 from cveta2.interfaces.commands.task_ops import (
     STATE_CLI_TO_CVAT,
     run_task_delete,
@@ -26,6 +25,12 @@ from cveta2.interfaces.commands.task_ops import (
     run_task_status,
 )
 from cveta2.interfaces.commands.upload import run_upload
+from cveta2.interfaces.commands.verification import (
+    configure_upload_dataset,
+    configure_verify,
+    run_upload_dataset,
+    run_verify,
+)
 from cveta2.interfaces.commands.whats_new import run_whats_new
 
 if TYPE_CHECKING:
@@ -146,11 +151,6 @@ def _configure_fetch(parser: argparse.ArgumentParser) -> None:
         "--raw",
         action="store_true",
         help="Save all records (including deletions) as raw.csv without partitioning.",
-    )
-    parser.add_argument(
-        "--no-clearml",
-        action="store_true",
-        help="Skip publishing the fetched dataset to ClearML.",
     )
     _add_common_fetch_args(parser)
 
@@ -510,11 +510,6 @@ def _configure_task_status(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _configure_setup_clearml(parser: argparse.ArgumentParser) -> None:
-    _add_config_arg(parser)
-    _add_list_arg(parser, "List current ClearML project mappings and exit.")
-
-
 def _configure_doctor(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--cache",
@@ -544,6 +539,18 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
     patching ``cveta2.interfaces.cli.run_*`` see their mocks captured.
     """
     return (
+        CommandSpec(
+            "verify",
+            "Проверить CSV или подготовить набор.",
+            run_verify,
+            configure_verify,
+        ),
+        CommandSpec(
+            "upload-dataset",
+            "Опубликовать проверенный набор в ClearML.",
+            run_upload_dataset,
+            configure_upload_dataset,
+        ),
         CommandSpec(
             "fetch",
             "Fetch all project bbox annotations and deleted images.",
@@ -643,12 +650,6 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
             "Check configuration and cache health.",
             run_doctor,
             _configure_doctor,
-        ),
-        CommandSpec(
-            "setup-clearml",
-            "Interactively configure ClearML project mappings for dataset publishing.",
-            run_setup_clearml,
-            _configure_setup_clearml,
         ),
         CommandSpec(
             "whats-new",

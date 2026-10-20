@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from cveta2.application.settings import (
     CacheProjectSettings,
-    ClearmlProjectMapping,
     IgnoredTask,
     _none_if_falsy,
 )
@@ -661,56 +660,4 @@ def _parse_int_env(name: str, minimum: int = 1) -> int | None:
     return value
 
 
-def is_clearml_disabled() -> bool:
-    """Return True when ``CVETA2_CLEARML`` is ``'false'``."""
-    return _env_flag("CVETA2_CLEARML", "false")
-
-
-class ClearmlConfig(SectionConfig):
-    """ClearML integration settings.
-
-    A present ``clearml:`` section without a boolean ``enabled`` key is
-    treated as enabled; a missing section keeps the ``False`` default.
-    """
-
-    section_key: ClassVar[str] = "clearml"
-    save_log: ClassVar[str] = "ClearML config saved to {path}"
-
-    enabled: bool = False
-    projects: dict[str, ClearmlProjectMapping] = Field(default_factory=dict)
-
-    @classmethod
-    def _wrap_raw(cls, raw: dict[str, object]) -> dict[str, object]:
-        enabled = raw.get("enabled")
-        return {**raw, "enabled": enabled if isinstance(enabled, bool) else True}
-
-    @field_validator("projects", mode="before")
-    @classmethod
-    def _drop_invalid_mappings(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return {}
-        return {
-            str(name): mapping
-            for name, mapping in value.items()
-            if isinstance(mapping, ClearmlProjectMapping)
-            or (
-                isinstance(mapping, dict)
-                and isinstance(mapping.get("clearml_project"), str)
-                and isinstance(mapping.get("clearml_dataset"), str)
-            )
-        }
-
-    def _to_raw(self) -> object | None:
-        if not self.projects and not self.enabled:
-            return None
-        result: dict[str, object] = {"enabled": self.enabled}
-        if self.projects:
-            result["projects"] = self._dump()["projects"]
-        return result
-
-    def get_mapping(self, project_name: str) -> ClearmlProjectMapping | None:
-        """Return the ClearML mapping for *project_name*, or None if not configured."""
-        return self.projects.get(project_name)
-
-
-__all__ = ["CacheProjectSettings", "ClearmlProjectMapping", "IgnoredTask"]
+__all__ = ["CacheProjectSettings", "IgnoredTask"]

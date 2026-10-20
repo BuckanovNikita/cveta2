@@ -666,9 +666,7 @@ class TestTaskCsvDirectory:
         out = tmp_path / "out"
         (out / ".tasks").mkdir(parents=True)
 
-        partition = _fetch_project(
-            FakeCvatApi(fake), fake, out, FetchOptions(publish_clearml=False)
-        )
+        partition = _fetch_project(FakeCvatApi(fake), fake, out, FetchOptions())
 
         assert len(partition.dataset) > 0
 
@@ -697,9 +695,7 @@ class TestTaskCsvDirectory:
         fake = normal_fake
         out = tmp_path / "out"
 
-        partition = _fetch_project(
-            FakeCvatApi(fake), fake, out, FetchOptions(publish_clearml=False)
-        )
+        partition = _fetch_project(FakeCvatApi(fake), fake, out, FetchOptions())
 
         assert removals == [out / ".tasks"]
         assert len(partition.dataset) > 0
@@ -719,9 +715,7 @@ class TestTaskCsvDirectory:
         )
         api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id})
 
-        partition = _fetch_project(
-            api, fake, tmp_path / "out", FetchOptions(publish_clearml=False)
-        )
+        partition = _fetch_project(api, fake, tmp_path / "out", FetchOptions())
 
         assert set(partition.dataset["task_id"].unique()) == {fake.tasks[1].id}
 
@@ -741,7 +735,7 @@ class TestTaskCsvDirectory:
             FakeCvatApi(fake),
             fake,
             out,
-            FetchOptions(completed_only=True, publish_clearml=False),
+            FetchOptions(completed_only=True),
         )
 
         assert partition.dataset.empty
@@ -769,7 +763,7 @@ class TestTaskCsvDirectory:
         out = tmp_path / "out"
 
         partition = _fetch_project(
-            FakeCvatApi(shapeless), shapeless, out, FetchOptions(publish_clearml=False)
+            FakeCvatApi(shapeless), shapeless, out, FetchOptions()
         )
 
         assert {d.image_name for d in partition.deleted_images} == set(_IMAGE_NAMES)
@@ -792,7 +786,7 @@ class TestTaskCsvDirectory:
             FakeCvatApi(fake),
             fake,
             out,
-            FetchOptions(save_tasks=True, publish_clearml=False),
+            FetchOptions(save_tasks=True),
         )
 
         task_df = pd.read_csv(out / ".tasks" / f"task_{fake.tasks[0].id}.csv")
@@ -854,7 +848,7 @@ class TestFetchCoreImageForwarding:
             FetchTarget(
                 fake.project.id, fake.project.name, tmp_path / "out", self._STORAGE
             ),
-            FetchOptions(images_dir=images, publish_clearml=False),
+            FetchOptions(images_dir=images),
         )
 
         assert (images / _IMAGE_NAMES[0]).read_bytes() == b"IMG"
@@ -873,7 +867,7 @@ class TestFetchCoreImageForwarding:
         fetch_project(
             CvatClient(CvatConfig(), api=_FakeApiWithStorage(fake, self._STORAGE)),
             FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
-            FetchOptions(images_dir=images, publish_clearml=False),
+            FetchOptions(images_dir=images),
         )
 
         assert (images / _IMAGE_NAMES[0]).read_bytes() == b"IMG"
@@ -907,7 +901,6 @@ class TestFetchCoreImageForwarding:
             ),
             FetchOptions(
                 images_dir=images,
-                publish_clearml=False,
                 config_path=config_path,
             ),
         )
@@ -940,7 +933,7 @@ def test_concurrent_fetch_produces_the_same_dataset_as_a_serial_one(
         ["normal", "all-empty", "all-bboxes-moved", "frames-1-2-removed"],
         statuses=["completed"] * 4,
     )
-    options = FetchOptions(publish_clearml=False)
+    options = FetchOptions()
 
     configure_workers(s3=1, cvat=1)
     serial = _fetch_project(FakeCvatApi(fake), fake, tmp_path / "serial", options)
@@ -964,7 +957,7 @@ def test_every_task_is_fetched_exactly_once_under_concurrency(
     api = FakeCvatApi(fake)
     configure_workers(s3=1, cvat=8)
 
-    _fetch_project(api, fake, tmp_path / "out", FetchOptions(publish_clearml=False))
+    _fetch_project(api, fake, tmp_path / "out", FetchOptions())
 
     assert sorted(api.annotation_calls) == sorted(task.id for task in fake.tasks)
 
@@ -982,4 +975,4 @@ def test_a_failing_task_still_aborts_the_whole_fetch(
     configure_workers(s3=1, cvat=8)
 
     with pytest.raises(CvatApiError):
-        _fetch_project(api, fake, tmp_path / "out", FetchOptions(publish_clearml=False))
+        _fetch_project(api, fake, tmp_path / "out", FetchOptions())

@@ -17,7 +17,6 @@ from cveta2.application.client import ApplicationClient as CvatClient
 from cveta2.application.client.shared import FetchContext
 from cveta2.application.ports.cache import CacheFactory, TaskCache
 from cveta2.application.ports.execution import ConcurrentRunner
-from cveta2.application.ports.publisher import DatasetPublisher
 from cveta2.application.ports.workflow_files import FetchFiles
 from cveta2.application.settings import CacheProjectSettings
 from cveta2.domain.errors import Cveta2Error
@@ -41,7 +40,6 @@ class FetchDependencies:
     clock: Callable[[], float]
     lock_factory: Callable[[], AbstractContextManager[object]]
     cache_settings: CacheProjectSettings
-    publisher: DatasetPublisher | None = None
     cache_enabled: bool = True
     cvat_workers: int = 1
 
@@ -76,7 +74,6 @@ class FetchOptions:
     save_tasks: bool = False
     images_dir: Path | None = None
     raw: bool = False
-    publish_clearml: bool = True
     config_path: Path | None = None
 
 
@@ -87,7 +84,7 @@ def fetch_project(
     *,
     deps: FetchDependencies,
 ) -> PartitionResult:
-    """Full-project fetch: partition outputs, optional raw.csv, ClearML publish.
+    """Full-project fetch: partition outputs and optional raw.csv.
 
     Writes dataset/obsolete/in_progress/deleted CSVs (plus raw.csv when
     ``options.raw``) into ``target.output_dir`` and returns the partition.
@@ -105,9 +102,6 @@ def fetch_project(
     partition = partition_annotations_df(df, result.deleted_images)
     deps.files.write_partition_csvs(partition, output_dir)
     logger.info(f"Партиционирование и запись CSV: {deps.clock() - started:.1f} с")
-
-    if options.publish_clearml and deps.publisher is not None:
-        deps.publisher(target.project_name, output_dir)
 
     return partition
 

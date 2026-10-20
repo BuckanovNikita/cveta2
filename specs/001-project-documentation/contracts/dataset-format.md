@@ -245,3 +245,62 @@ Every exported row must have `split` equal to `train`, `val`, or `test`; missing
 YOLO class IDs are nonnegative integers; centers are finite values in `[0, 1]`, sizes in `(0, 1]`, and optional confidence in `[0, 1]`. Invalid lines produce file-and-line warnings and are skipped independently of valid sibling rows. Class mappings preserve original IDs and require valid names; upload helpers reject unknown class IDs.
 
 Labelled upload rows require all four finite bbox coordinates before external writes; valid empty and deleted rows remain supported. Recovery binds the complete normalized upload intent and reconciles existing annotation content; legacy manifests or changed intent cannot authorize automatic resume.
+
+## Verification and prepared bundles
+
+`verify` reads UTF-8 CSV lexically: literal cells such as `NA` and `001` retain
+text identity. Empty/duplicate headers and mismatched record widths are input
+errors. Profiles are `cveta2` and `clearml-yolo`; findings use zero-based original
+row positions rather than DataFrame index labels. Broken rows retain original
+values, including every original row of an affected image. Cleanup is opt-in,
+never overwrites input, and cannot remove structural failures. `is_valid`
+describes original rejection/structure; `requires_cleanup` separately identifies
+rejected rows or proposed repairs. Eligible small overflow strictly below ten
+pixels may be clipped only with trustworthy dimensions.
+
+Preparation takes all four full-fetch CSVs, including valid header-only files.
+Split assignment remains external. Every retained image has one supported split;
+train and val must both be nonempty, and train must contain at least one training
+box; val may contain only background images. Images require absolute readable
+supported local paths with decoded, EXIF-aware sides at least ten pixels. Training
+box sides and area must exceed two. Class identity is the public class API's
+`number` persisted as `prod_id`; canonical name changes retain aliases and empty
+policy. Ambiguous identities and disappeared parent IDs block. Unknown/empty
+classes quarantine the entire image. Roots are independent local/S3 lists,
+validated for access and source coverage before filtering; symlink escape is
+rejected. S3 accepts approved URIs and bucket-relative keys only when the bucket
+is unambiguous, without requiring individual object probes.
+
+A new prepared directory contains:
+
+| Path | Contract |
+| --- | --- |
+| `dataset.csv` | Retained, explicitly accepted rows using canonical classes |
+| `dataset.yaml` | Public api_url, classes (prod_id, empty, alt_names), images (local_root, s3_root) |
+| `tasks.yaml` | Sorted unique nonnegative included and obsolete task IDs |
+| `sources/{dataset,obsolete,in_progress,deleted}.csv` | Exact source bytes captured before parsing |
+| `report.json`, `broken-images.csv` | Local diagnostics and original rows of rejected images |
+| `preparation.json` | Versioned local binding of options, parent identity/version and source/payload SHA-256 hashes |
+| `preparation.sha256` | Checksum of exact preparation.json bytes; detects accidental record edits and stays local |
+
+Included task IDs derive from retained rows. Obsolete IDs require completed tasks
+fully superseded according to all four source tables, preserving task-id recency,
+explicit completion and deletion precedence. Preparation with unresolved findings
+writes diagnostic evidence but is not uploadable; successful preparation requires
+review before a separate upload on the same machine.
+
+Publication accepts only a prepared directory and never cleans. It checks all
+bound bytes, derives and compares payload/tasks again, rechecks images and roots,
+current classes and latest exact finalized nonarchived parent, then uploads a
+stable checked snapshot. Any mismatch requires preparation again. CSV-only parents
+without metadata block; select a new dataset name. The parent remains unchanged;
+inherited child files/links are removed. Exactly dataset.csv, dataset.yaml and
+tasks.yaml are synchronously uploaded and finalized; no images, sources or reports
+are published. A post-creation failure reports the known child identity without
+claiming finalization. This is local accidental-edit protection, not a signature
+against a machine owner deliberately rewriting both payload and record.
+
+Automatic fetch publication and its mappings/config/environment controls are
+removed. Fetch still exports locally with its existing CVAT/S3 behavior, and
+CVAT upload remains a separate supported operation. User configuration is never
+automatically migrated or rewritten.

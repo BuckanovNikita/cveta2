@@ -1,4 +1,4 @@
-"""Tests for the interactive ``setup``, ``setup-cache``, ``setup-clearml`` commands."""
+"""Tests for the interactive ``setup`` and ``setup-cache`` commands."""
 
 from __future__ import annotations
 
@@ -11,10 +11,8 @@ from cveta2.adapters.config.settings import CacheConfig, CvatConfig, ImageCacheC
 from cveta2.domain.errors import InteractiveModeRequiredError
 from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands import setup as setup_cmd
-from cveta2.interfaces.commands import setup_clearml as setup_clearml_cmd
 from cveta2.interfaces.commands.interactive import _questionary, primitives, wizard
 from cveta2.interfaces.commands.setup import run_setup, run_setup_cache
-from cveta2.interfaces.commands.setup_clearml import run_setup_clearml
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
@@ -69,7 +67,6 @@ def feed_inputs(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str
     [
         (run_setup, wizard.SETUP_HINT),
         (run_setup_cache, wizard.CACHE_HINT),
-        (run_setup_clearml, wizard.CLEARML_HINT),
     ],
 )
 def test_setup_commands_refuse_non_interactive_with_wizard_hint(
@@ -100,23 +97,6 @@ def test_setup_cache_reads_projects_beside_custom_config(
     feed_inputs(monkeypatch, ["", "", "", ""])
 
     run_setup_cache(_args(config_path))
-
-    assert seen == [config_path.parent / "projects.yaml"]
-
-
-def test_setup_clearml_reads_projects_beside_custom_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config_path = tmp_path / "profile" / "config.yaml"
-    seen: list[Path] = []
-
-    def load_projects(path: Path) -> list[ProjectInfo]:
-        seen.append(path)
-        return []
-
-    monkeypatch.setattr(setup_clearml_cmd, "load_projects_cache", load_projects)
-
-    run_setup_clearml(_args(config_path))
 
     assert seen == [config_path.parent / "projects.yaml"]
 

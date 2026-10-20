@@ -11,7 +11,7 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
-from cveta2.adapters.config.settings import ClearmlConfig, CvatConfig, IgnoreConfig
+from cveta2.adapters.config.settings import CvatConfig, IgnoreConfig
 from cveta2.domain.errors import MissingCredentialsError
 
 
@@ -55,27 +55,6 @@ def test_cli_typed_config_has_no_traceback(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "Traceback" not in result.stderr
     assert "request_timeout" in result.stderr
-
-
-def test_clearml_enabled_only_saved(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from cveta2.domain.models import ProjectInfo
-    from cveta2.interfaces.commands import setup_clearml
-    from cveta2.interfaces.commands.interactive import wizard
-
-    path = tmp_path / "config.yaml"
-    monkeypatch.setattr(
-        setup_clearml,
-        "load_projects_cache",
-        lambda *_args: [ProjectInfo(id=1, name="project")],
-    )
-    monkeypatch.setattr(wizard, "prompt_clearml_enabled", lambda **_kwargs: True)
-    monkeypatch.setattr(setup_clearml, "_prompt_project_mapping", lambda *_args: None)
-    setup_clearml.run_setup_clearml(
-        argparse.Namespace(config=str(path), list_only=False)
-    )
-    assert ClearmlConfig.load(path).enabled
 
 
 def test_stale_ignore_cli_removes_without_task_listing(

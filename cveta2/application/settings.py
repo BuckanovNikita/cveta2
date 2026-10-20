@@ -37,10 +37,3 @@ class IgnoredTask(BaseModel):
     name: str
     description: str = ""
     silent: bool = False
-
-
-class ClearmlProjectMapping(BaseModel):
-    """Mapping of a single CVAT project to a ClearML project/dataset pair."""
-
-    clearml_project: str
-    clearml_dataset: str

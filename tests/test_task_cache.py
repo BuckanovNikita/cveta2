@@ -786,7 +786,7 @@ class TestFullFetchPrunesCache:
         fetch_project(
             CvatClient(CFG, api=api),
             FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
-            FetchOptions(use_cache=True, publish_clearml=False),
+            FetchOptions(use_cache=True),
         )
 
         assert not (cache_dir / "task_999.json").exists()

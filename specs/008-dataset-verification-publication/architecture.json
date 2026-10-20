@@ -1,0 +1,559 @@
+{
+  "schema_version": 1,
+  "task": "008 dataset verification and reviewed publication",
+  "scope": [
+    "cveta2",
+    "pyproject.toml",
+    "uv.lock",
+    "tests",
+    "scripts",
+    "README.md",
+    "docs",
+    ".specify/memory",
+    "specs/001-project-documentation/contracts/dataset-format.md",
+    "specs/008-dataset-verification-publication"
+  ],
+  "impact": "modules",
+  "rules": "Existing exhaustive inward layers in pyproject.toml and effect ownership in scripts/check_architecture.py; ports hide all infrastructure; no canonical imports of public root.",
+  "modules": [
+    {
+      "id": "verification-policy",
+      "path": "cveta2/domain/verification",
+      "change": "add",
+      "responsibility": "Pure schema, geometry, identity, quarantine and validation results",
+      "interface": "ValidationOptions, MediaInspection, ValidationResult; original row provenance",
+      "layer": "domain",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "No effects; receives inspection facts",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "verification-use-case",
+      "path": "cveta2/application/use_cases/verify.py",
+      "change": "add",
+      "responsibility": "Coordinate CSV and DataFrame validation",
+      "interface": "verify_dataframe/verify with injected file/media ports",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Effects only through ports",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "verification-ports",
+      "path": "cveta2/application/ports/verification.py",
+      "change": "add",
+      "responsibility": "Describe file/media inspection boundaries",
+      "interface": "Typed protocols and validation contracts",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "None; protocols only",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "verification-files",
+      "path": "cveta2/adapters/files/verification.py",
+      "change": "add",
+      "responsibility": "Strict CSV and diagnostics persistence",
+      "interface": "Read lexical table and write new reports",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Local file IO",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "verification-media",
+      "path": "cveta2/adapters/files/media.py",
+      "change": "add",
+      "responsibility": "Canonical path resolution and one-time decoding",
+      "interface": "MediaInspection facts for supplied rows",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Filesystem and Pillow",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "bundle-policy",
+      "path": "cveta2/domain/bundle",
+      "change": "add",
+      "responsibility": "Class identity, task supersession, trainability and prepared state",
+      "interface": "DatasetMetadata, FetchTables, TaskManifest, PreparedRecord",
+      "layer": "domain",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "None; pure transformations",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "bundle-ports",
+      "path": "cveta2/application/ports/dataset_bundle.py",
+      "change": "add",
+      "responsibility": "Declare snapshot, root, class and store operations",
+      "interface": "Typed service contracts; no concrete SDK types",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "None; explicit effect interfaces",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "bundle-workflow",
+      "path": "cveta2/application/use_cases/dataset_bundle.py",
+      "change": "add",
+      "responsibility": "Prepare and fully revalidate before exact publication",
+      "interface": "prepare_dataset/upload_dataset; structured missing decisions",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Injected effects only",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "bundle-files",
+      "path": "cveta2/adapters/files/bundle.py",
+      "change": "add",
+      "responsibility": "Copy evidence, hash, serialize YAML/JSON and stage stable payload",
+      "interface": "Read/create prepared snapshot without overwriting existing paths",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Local file IO and context-managed staging",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "bundle-paths",
+      "path": "cveta2/adapters/files/bundle_paths.py",
+      "change": "add",
+      "responsibility": "Independent local/S3 containment and unique key resolution",
+      "interface": "RootChecks; rejects ambiguous or uncovered paths",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Filesystem canonicalization",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "class-api",
+      "path": "cveta2/adapters/class_api",
+      "change": "add",
+      "responsibility": "Validate public HTTP class response",
+      "interface": "ClassApi.fetch returns domain records",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "HTTP with bounded timeout, typed errors",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "clearml",
+      "path": "cveta2/adapters/clearml",
+      "change": "modify",
+      "responsibility": "Latest exact finalized parent and exact-three-file publication",
+      "interface": "DatasetStore and S3Storage; known child IDs on failure",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Optional SDK and S3 storage probes",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "composition",
+      "path": "cveta2/composition",
+      "change": "modify",
+      "responsibility": "Construct workflow services, remove automatic publisher",
+      "interface": "Factories for verification and bundle workflows",
+      "layer": "composition",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Explicit dependency construction",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "interfaces",
+      "path": "cveta2/interfaces",
+      "change": "modify",
+      "responsibility": "Map new CLI/API and remove obsolete publishing controls",
+      "interface": "Russian CLI, prompt-free API, explicit exit mapping",
+      "layer": "interfaces",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "CLI interaction",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "public-api",
+      "path": "cveta2/api.py",
+      "change": "modify",
+      "responsibility": "Expose new prompt-free functions",
+      "interface": "Public facade exports",
+      "layer": "facade",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "No new effects",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "public-root",
+      "path": "cveta2/__init__.py",
+      "change": "modify",
+      "responsibility": "Expose new functions and typed models lazily",
+      "interface": "Public lazy export map",
+      "layer": "facade",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "No eager effects",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "legacy-fetch",
+      "path": "cveta2/application/use_cases/fetch.py",
+      "change": "modify",
+      "responsibility": "Remove automatic ClearML publication",
+      "interface": "fetch retains local/CVAT/S3 contracts",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Existing ports only",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "legacy-publisher",
+      "path": "cveta2/application/ports/publisher.py",
+      "change": "remove",
+      "responsibility": "Retire automatic publisher callback",
+      "interface": "Removed, explicitly breaking",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "None after removal",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "legacy-settings",
+      "path": "cveta2/application/settings.py",
+      "change": "modify",
+      "responsibility": "Remove automatic publication settings",
+      "interface": "Existing CVAT/cache settings preserved",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "None",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "legacy-config",
+      "path": "cveta2/adapters/config",
+      "change": "modify",
+      "responsibility": "Ignore obsolete ClearML section without rewriting user files",
+      "interface": "Existing config IO",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "Config read/write remains explicit",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    },
+    {
+      "id": "config-facade",
+      "path": "cveta2/config.py",
+      "change": "modify",
+      "responsibility": "Remove obsolete publication exports",
+      "interface": "Existing supported config exports",
+      "layer": "facade",
+      "allowed_dependencies": [
+        "Inward layers and declared ports per pyproject.toml"
+      ],
+      "forbidden_dependencies": [
+        "Outward layer imports",
+        "Canonical public-root imports"
+      ],
+      "effects": "No new effects",
+      "contracts": [
+        "layers",
+        "effects",
+        "negative-boundaries"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Inward exhaustive layers, protected SDKs, prompt ownership and acyclic canonical siblings",
+      "check": "architecture"
+    },
+    {
+      "id": "effects",
+      "path": "scripts/check_architecture.py",
+      "status": "existing",
+      "rules": "Domain/application cannot import or invoke filesystem/network/process/time effects",
+      "check": "architecture"
+    },
+    {
+      "id": "negative-boundaries",
+      "path": "tests/test_architecture.py",
+      "status": "existing",
+      "rules": "Injected forbidden SDK/import/effect edges must fail; extend affected boundary cases",
+      "check": "architecture"
+    }
+  ],
+  "checks": [
+    {
+      "id": "architecture",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run python scripts/check_architecture.py && uv run pytest tests/test_architecture.py",
+      "expectation": "All contracts pass, including meaningful negative dependency/effect tests",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/008-dataset-verification-publication/evidence/verification-2026-10-20.md"
+      }
+    },
+    {
+      "id": "behavior",
+      "kind": "behavior",
+      "command": "uv run --no-sync pytest -n 6 --cov --cov-report=term-missing",
+      "expectation": "Existing and new local behavior regressions pass with required coverage",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/008-dataset-verification-publication/evidence/review-2026-10-20.md"
+      }
+    },
+    {
+      "id": "quality",
+      "kind": "behavior",
+      "command": "uv run ruff check . && uv run mypy . && uv run vulture",
+      "expectation": "No lint/type/dead-code violations",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/008-dataset-verification-publication/evidence/verification-2026-10-20.md"
+      }
+    },
+    {
+      "id": "live",
+      "kind": "behavior",
+      "command": "INFRA_HARNESS=codex ./scripts/integration_up.sh && INFRA_HARNESS=codex ./scripts/integration_test.sh tests/integration && INFRA_HARNESS=codex ./scripts/integration_stop.sh",
+      "expectation": "Owned live CVAT/S3/ClearML tests and exact-tag cleanup pass",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/008-dataset-verification-publication/evidence/verification-2026-10-20.md"
+      }
+    },
+    {
+      "id": "docs",
+      "kind": "documentation",
+      "command": "uv run pytest tests/test_docs.py",
+      "expectation": "Russian guides, public API/CLI/config contracts and links pass",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/008-dataset-verification-publication/evidence/verification-2026-10-20.md"
+      }
+    },
+    {
+      "id": "packaging",
+      "kind": "behavior",
+      "command": "uv build && uv lock --check",
+      "expectation": "Installable wheel/sdist and consistent optional dependency lock",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/008-dataset-verification-publication/evidence/verification-2026-10-20.md"
+      }
+    }
+  ],
+  "documentation": "README, docs CLI/API/config/images; architecture memory, dataset contract, native feature artifacts and companion portable cveta2 usage skill.",
+  "review": {
+    "status": "accepted",
+    "reviewer": "Fresh independent acceptance reviewer /root/acceptance_review; gpt-6.1-sol high requested",
+    "evidence": "specs/008-dataset-verification-publication/evidence/review-2026-10-20.md",
+    "reconciliation": "Inspected all 108 task-owned staged paths including added policies/ports/adapters/composition/interfaces/tests/spec artifacts, removed legacy publisher/config/command surfaces and affected CVAT callers. Existing 10 import contracts and effect checks retained, meaningful negative fixtures extended. Original checkout untracked work and unrelated companion changes excluded. Full suite, live evidence, documentation, packaging and independent review reconciled."
+  }
+}

@@ -86,7 +86,6 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
                     completed_only=True,
                     download_images=False,
                     cache="off",
-                    publish_clearml=False,
                     connection=connection,
                 )
                 updates.assert_not_called()
@@ -102,7 +101,6 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
                     completed_only=True,
                     download_images=False,
                     cache="off",
-                    publish_clearml=False,
                     connection=connection,
                 )
                 expected_jobs = {
@@ -140,7 +138,6 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
                     completed_only=True,
                     download_images=False,
                     cache="off",
-                    publish_clearml=False,
                     connection=connection,
                 )
                 updates.assert_not_called()

@@ -319,7 +319,7 @@ def test_run_upload_prompts_project_then_name_then_labels(tmp_path: Path) -> Non
             "cveta2.interfaces.commands.upload._select_labels", side_effect=fake_labels
         ),
         patch("cveta2.interfaces.commands.upload.build_search_dirs", return_value=[]),
-        patch("cveta2.interfaces.commands.upload.upload_dataset"),
+        patch("cveta2.interfaces.commands.upload.upload_cvat_dataset"),
     ):
         open_client.return_value.__enter__.return_value = MagicMock()
         run_upload(_upload_args(csv))
@@ -343,7 +343,7 @@ def test_run_upload_echoes_full_command_after_prompts(
         ),
         patch("cveta2.interfaces.commands.upload._select_labels", return_value=["car"]),
         patch("cveta2.interfaces.commands.upload.build_search_dirs", return_value=[]),
-        patch("cveta2.interfaces.commands.upload.upload_dataset"),
+        patch("cveta2.interfaces.commands.upload.upload_cvat_dataset"),
     ):
         client = MagicMock()
         client.organization = None
@@ -368,7 +368,7 @@ def test_run_upload_no_echo_when_all_args_given(
             return_value=(1, "proj"),
         ),
         patch("cveta2.interfaces.commands.upload.build_search_dirs", return_value=[]),
-        patch("cveta2.interfaces.commands.upload.upload_dataset"),
+        patch("cveta2.interfaces.commands.upload.upload_cvat_dataset"),
     ):
         open_client.return_value.__enter__.return_value = MagicMock()
         run_upload(args)
@@ -429,7 +429,7 @@ def _run_upload_capturing(
         run.resolve_client = client
         return project if spec == project_spec else (0, "unresolved")
 
-    def fake_upload_dataset(client: object, request: UploadRequest) -> None:
+    def fake_upload_cvat_dataset(client: object, request: UploadRequest) -> None:
         run.client = client
         run.request = request
 
@@ -440,8 +440,8 @@ def _run_upload_capturing(
             side_effect=fake_resolve_project,
         ),
         patch(
-            "cveta2.interfaces.commands.upload.upload_dataset",
-            side_effect=fake_upload_dataset,
+            "cveta2.interfaces.commands.upload.upload_cvat_dataset",
+            side_effect=fake_upload_cvat_dataset,
         ),
     ):
         client = MagicMock()
@@ -478,7 +478,7 @@ def test_run_upload_uploads_a_dataset_of_only_deleted_rows(tmp_path: Path) -> No
 
 
 class TestRunUploadRequest:
-    """Everything ``run_upload`` assembles for :func:`upload_dataset`."""
+    """Everything ``run_upload`` assembles for :func:`upload_cvat_dataset`."""
 
     @pytest.fixture
     def paths(self, tmp_path: Path, isolated_config_path: Path) -> dict[str, Path]:

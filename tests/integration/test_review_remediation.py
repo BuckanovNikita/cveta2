@@ -14,7 +14,7 @@ from cveta2.adapters.s3.download import S3Syncer
 from cveta2.adapters.s3.utils import make_s3_client
 from cveta2.application.use_cases.upload import UploadOptions, UploadPlan, UploadRequest
 from cveta2.composition.client import CvatClient
-from cveta2.composition.workflows import upload_dataset
+from cveta2.composition.workflows import upload_cvat_dataset
 from cveta2.domain.errors import CvatApiError, Cveta2Error
 from tests.integration.conftest import _make_sdk_client, seeded_project_name
 from tests.integration.test_upload import (
@@ -120,13 +120,13 @@ def test_resume_after_injected_post_write_failure() -> None:
                 ),
                 pytest.raises(CvatApiError, match="injected"),
             ):
-                upload_dataset(client, request)
+                upload_cvat_dataset(client, request)
             with patch.object(
                 client,
                 "upload_task_annotations",
                 side_effect=AssertionError("duplicate append"),
             ):
-                outcome = upload_dataset(client, replace(request, resume=True))
+                outcome = upload_cvat_dataset(client, replace(request, resume=True))
         session = client.open_task_session(outcome.task_id)
         assert len(session.api.get_task_annotations(outcome.task_id).shapes) == 2
         assert outcome.annotations == 2
