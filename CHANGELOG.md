@@ -2,6 +2,31 @@
 
 <!-- version list -->
 
+## v0.11.1 (2026-10-21)
+
+### Documentation
+
+- Checkpoint specification and review history before consolidation
+  ([`af0073e`](https://github.com/BuckanovNikita/cveta2/commit/af0073e5bd8a8799f0cfd322cfb27c8efd7b747d))
+
+- Consolidate current specification into a recoverable baseline
+  ([`e690227`](https://github.com/BuckanovNikita/cveta2/commit/e69022727a73747bbd5723e34fa96b093f42c34c))
+
+- Prepare explicit cleanup patch release
+  ([`313d4c8`](https://github.com/BuckanovNikita/cveta2/commit/313d4c82ffd0ee4f8f0f04b5e893bfa5c2e48005))
+
+- Record cleanup verification and completed delivery
+  ([`456463b`](https://github.com/BuckanovNikita/cveta2/commit/456463b937f5264ca238f309a8b4d2da95a07303))
+
+- Record dataset publication acceptance and releases
+  ([`6af3e18`](https://github.com/BuckanovNikita/cveta2/commit/6af3e18aa7db27049a94005c0e736669893076fa))
+
+### Refactoring
+
+- Separate upload, transport and interface responsibilities
+  ([`db4514c`](https://github.com/BuckanovNikita/cveta2/commit/db4514c05f6652b4ed96020d7b1e4d7feb43db0d))
+
+
 ## v0.11.0 (2026-10-20)
 
 ### Documentation
