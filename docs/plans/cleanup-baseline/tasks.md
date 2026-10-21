@@ -14,4 +14,4 @@
 - [x] T012 Run integrated static, behavior, coverage, documentation, build/install and fast/full mutation checks.
 - [x] T013 Run required live integration and prove exact-tag cleanup.
 - [x] T014 Obtain fresh independent review after T012-T013; resolve findings, reconcile diff and pass architecture acceptance.
-- [ ] T015 Complete native commits, merge, release evaluation, commit/tag pushes and delivery evidence.
+- [x] T015 Complete native commits, merge, release evaluation, commit/tag pushes and delivery evidence.

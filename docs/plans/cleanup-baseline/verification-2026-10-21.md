@@ -203,3 +203,46 @@ links and corpus edits are excluded. No runtime modifications followed verificat
 or review. Architecture acceptance is recorded in architecture.json and validated
 before the runtime commit. Final publication and original-checkout retirement are
 recorded in the delivery section when complete.
+
+## Delivery
+
+Runtime commit `db4514c05f6652b4ed96020d7b1e4d7feb43db0d` passed every configured
+commit hook, including ordinary coverage tests, fast mutation and package build.
+Main received the task branch through merge
+`b9d93f30e5feccf06b8117005d465b7ff457b8de`. On main,
+`uv run semantic-release version --no-push --no-vcs-release` exited successfully:
+0.11.0 was already released and these compatible maintenance changes produced no
+new version or tag.
+
+The main push passed full mutation, version drift and live integration gates;
+37 live tests passed in 224.85 seconds, with 380 upstream deprecation warnings.
+Remote main was independently confirmed at the merge SHA above. The configured
+main gate intentionally retains the durable `cveta2-main` fixture: CVAT project
+`cveta2-main coco8-dev` and MinIO bucket `cveta2-main`. ClearML test projects are
+removed at session end. The earlier isolated branch run was separately cleaned
+and verified as recorded above.
+
+Before retiring the original checkout's untracked bugs tree, all 129 paths,
+SHA-256 digests and modes were rechecked against the committed archive manifest;
+the exact inventory contained no additional file. Only those preserved files and
+their empty directories were removed. The ignored active-feature pointer was
+removed only after confirming it named the archived
+`specs/008-dataset-verification-publication` feature. Both unrelated skill links
+were preserved. A post-merge `create-new-feature.sh --json --dry-run` returned
+`001-next-feature` without creating a feature or branch.
+
+The companion collection's documentation patch was published atomically as main
+commit `f6148927336d83cac3cdc59dec68a44b6064a32b` and annotated tag `v0.4.2`;
+remote main and the peeled tag both resolve to that commit. Before publication,
+the GitHub contents API confirmed this repository's published baseline and its
+dataset heading at the exact main merge. Collection Markdown lint checked 59
+files with zero issues, architecture acceptance passed, and whitespace checks
+passed after the final evidence update. GitHub reported the collection's new
+location as `BuckanovNikita/custom-opencode-skills`; the configured `corp-skills`
+remote continued to work and was not rewritten. The original collection checkout
+and its unrelated edits remain untouched. No installed skill copy was changed.
+
+All task items are complete. This delivery-only update records already-verified
+results and changes no runtime module or contract. It follows the same configured
+commit and push gates; no hooks are bypassed. No GitHub Release, release asset or
+package publication was created.
