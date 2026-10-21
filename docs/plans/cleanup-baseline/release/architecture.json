@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "task": "Publish cleanup as v0.11.1",
+  "scope": [
+    "pyproject.toml",
+    "uv.lock",
+    "CHANGELOG.md",
+    "docs/plans/cleanup-baseline/release"
+  ],
+  "impact": "none",
+  "rationale": "Inspected the accepted cleanup at bed6d837de71e144aacaa8d69e2814b7ee1f7043 and semantic-release configuration. This follow-up changes only generated project version/changelog/lock metadata and release documentation. Runtime modules, public interfaces, dependency versions, composition, effect ownership and executable architecture checks remain unchanged. Verify the generated diff before publication."
+}
