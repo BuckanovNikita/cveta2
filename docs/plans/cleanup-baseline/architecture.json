@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "task": "cleanup-baseline",
+  "scope": [
+    "cveta2",
+    "tests",
+    "scripts",
+    "pyproject.toml",
+    ".specify/memory",
+    "specs",
+    "docs",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "archive"
+  ],
+  "impact": "modules",
+  "rules": "Constitution II and .specify/memory/architecture.md require inward layers, application-owned ports, adapter-owned effects, SDK isolation, acyclic siblings, facade exclusion and preserved public/data/recovery contracts.",
+  "modules": [
+    {
+      "id": "upload_policy",
+      "path": "cveta2/domain/upload.py",
+      "change": "modify",
+      "responsibility": "Pure upload row selection, validation and identity policy",
+      "interface": "Eligible-row selection and ordered bbox columns; unchanged validation/fingerprint semantics",
+      "layer": "domain",
+      "allowed_dependencies": [
+        "domain"
+      ],
+      "forbidden_dependencies": [
+        "application",
+        "adapters",
+        "composition",
+        "interfaces",
+        "public facades"
+      ],
+      "effects": "No external effects",
+      "contracts": [
+        "imports",
+        "effects"
+      ]
+    },
+    {
+      "id": "client_transforms",
+      "path": "cveta2/application/client",
+      "change": "modify",
+      "responsibility": "Frame mapping, pure shape/issue DTO construction and client operations",
+      "interface": "Existing client method contracts and TaskWriteSession; preserve row mapping, tolerance and one-to-one matching",
+      "layer": "application client",
+      "allowed_dependencies": [
+        "ports",
+        "settings",
+        "results",
+        "domain"
+      ],
+      "forbidden_dependencies": [
+        "use_cases",
+        "adapters",
+        "composition",
+        "interfaces",
+        "public facades"
+      ],
+      "effects": "External operations only through supplied ports; mapping is pure",
+      "contracts": [
+        "imports",
+        "effects"
+      ]
+    },
+    {
+      "id": "upload_workflow",
+      "path": "cveta2/application/use_cases/upload",
+      "change": "move",
+      "responsibility": "Typed upload planning, staging, recovery and orchestration",
+      "interface": "Existing upload module exports, request/outcome types and manifest state machine",
+      "layer": "application use cases",
+      "allowed_dependencies": [
+        "client",
+        "ports",
+        "settings",
+        "results",
+        "domain"
+      ],
+      "forbidden_dependencies": [
+        "adapters",
+        "composition",
+        "interfaces",
+        "public facades"
+      ],
+      "effects": "Supplied storage, file, manifest, clock and runner ports; never discover effects",
+      "contracts": [
+        "imports",
+        "effects"
+      ],
+      "previous_path": "cveta2/application/use_cases/upload.py"
+    },
+    {
+      "id": "cvat_transport",
+      "path": "cveta2/adapters/cvat",
+      "change": "modify",
+      "responsibility": "CVAT SDK request policies, timeout installation, translation and endpoint DTO mapping",
+      "interface": "CvatApiPort; preserve read/write/idempotent policies, wrapper order and SDK errors",
+      "layer": "adapters",
+      "allowed_dependencies": [
+        "application ports/settings/results",
+        "domain",
+        "shared execution adapters"
+      ],
+      "forbidden_dependencies": [
+        "application orchestration",
+        "other adapter groups",
+        "composition",
+        "interfaces",
+        "public facades"
+      ],
+      "effects": "Own CVAT SDK/network calls and context-local timeout patch",
+      "contracts": [
+        "imports",
+        "effects"
+      ]
+    },
+    {
+      "id": "incoming_api",
+      "path": "cveta2/interfaces/api",
+      "change": "move",
+      "responsibility": "Prompt-free API mapping by capability and connection lifetime",
+      "interface": "Preserve every supported export, signature, result/type identity and serialization contract",
+      "layer": "interfaces",
+      "allowed_dependencies": [
+        "composition",
+        "application",
+        "domain"
+      ],
+      "forbidden_dependencies": [
+        "public facades",
+        "cyclic interface siblings"
+      ],
+      "effects": "Own explicit connection context and boundary mapping; never prompt or exit",
+      "contracts": [
+        "imports",
+        "effects"
+      ],
+      "previous_path": "cveta2/interfaces/api.py"
+    },
+    {
+      "id": "cli",
+      "path": "cveta2/interfaces/cli.py",
+      "change": "modify",
+      "responsibility": "Late-bound CLI registry, dispatch and exit/error boundary",
+      "interface": "Unchanged commands, order, help, defaults, choices and exit behavior",
+      "layer": "interfaces",
+      "allowed_dependencies": [
+        "commands",
+        "composition",
+        "application",
+        "domain"
+      ],
+      "forbidden_dependencies": [
+        "public facades",
+        "cyclic interface siblings"
+      ],
+      "effects": "Own CLI dispatch/error presentation only",
+      "contracts": [
+        "imports",
+        "effects"
+      ]
+    },
+    {
+      "id": "command_parsers",
+      "path": "cveta2/interfaces/commands",
+      "change": "modify",
+      "responsibility": "Per-command parser configuration and incoming command mapping",
+      "interface": "Existing argparse namespaces and command handlers with shared parser helpers",
+      "layer": "interfaces",
+      "allowed_dependencies": [
+        "composition",
+        "application",
+        "domain",
+        "acyclic local helpers"
+      ],
+      "forbidden_dependencies": [
+        "interfaces.cli",
+        "public facades",
+        "cyclic interface siblings"
+      ],
+      "effects": "Prompts and exits remain incoming; parsers configure arguments only",
+      "contracts": [
+        "imports",
+        "effects"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "imports",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Exhaustive inward layers, application sublayers, adapter independence, SDK/prompt ownership, facade exclusion and acyclic siblings",
+      "check": "imports"
+    },
+    {
+      "id": "effects",
+      "path": "scripts/check_architecture.py",
+      "status": "existing",
+      "rules": "Domain/application are free of IO, environment, SDK, process and execution effects, including alias/local/type-only paths",
+      "check": "imports"
+    }
+  ],
+  "checks": [
+    {
+      "id": "imports",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run python scripts/check_architecture.py && uv run pytest -n 0 tests/test_architecture.py",
+      "expectation": "Existing inward/SDK/facade/acyclic/effect rules pass, including forbidden-edge/effect negative tests."
+    },
+    {
+      "id": "behavior",
+      "kind": "behavior",
+      "command": "uv run pytest -n auto --cov --cov-report=term-missing",
+      "expectation": "Full non-live suite passes with configured coverage; public identity, API/CLI, upload recovery and retry behavior remain compatible."
+    },
+    {
+      "id": "mutation",
+      "kind": "behavior",
+      "command": "./scripts/mutation_test.sh --profile fast && ./scripts/mutation_test.sh --profile full",
+      "expectation": "Moved scope is preserved with zero unexplained survivors and zero stale equivalence entries."
+    },
+    {
+      "id": "integration",
+      "kind": "behavior",
+      "command": "./scripts/integration_test.sh tests/integration",
+      "expectation": "Serial live suite passes under an owned tag; lifecycle setup and exact-tag cleanup separately recorded."
+    },
+    {
+      "id": "documentation",
+      "kind": "documentation",
+      "command": "uv run pytest -n 0 tests/test_docs.py && git diff --check",
+      "expectation": "Maintained local links/anchors, API/CLI/configuration documentation and baseline recovery/numbering/packaging assertions pass."
+    }
+  ],
+  "documentation": "specs/baseline.md absorbs current contracts; immutable archive manifest/source links preserve history. .specify/memory/architecture.md and governance map final ownership and baseline-based feature workflow. Russian guides, AGENTS, API docstring, docs checks and sdist include point to the baseline. Companion corp-skills/skills/cveta2/references/usage.md contract link is updated and validated in its repository.",
+  "review": {
+    "status": "pending"
+  }
+}
