@@ -2,7 +2,7 @@
 
 ## Функции-команды (рекомендуемый способ)
 
-Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [контракт датасета](../specs/001-project-documentation/contracts/dataset-format.md)).
+Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [контракт датасета](../specs/baseline.md)).
 
 ```python
 import cveta2
@@ -378,4 +378,4 @@ print(publication.dataset_id, publication.version)
 Ошибки операций относятся к `Cveta2Error`; известный ID созданной дочерней версии
 сохраняется в сообщении при последующем сбое. Точный порядок, состав пакета и
 действия при несовпадении описаны в [CLI](cli.md#опубликовать-подготовленный-пакет-cveta2-upload-dataset)
-и [контракте](../specs/001-project-documentation/contracts/dataset-format.md#verification-and-prepared-bundles).
+и [контракте](../specs/baseline.md#verification-and-prepared-bundles).

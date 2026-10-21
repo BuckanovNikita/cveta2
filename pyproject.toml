@@ -58,7 +58,7 @@ include = [
     "cveta2",
     "README.md",
     "CHANGELOG.md",
-    "specs/001-project-documentation/contracts/dataset-format.md",
+    "specs/baseline.md",
     "LICENSE",
     "pyproject.toml",
 ]

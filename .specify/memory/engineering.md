@@ -13,7 +13,7 @@ Spec Kit memory, feature artifacts, and the dataset contract are English. This f
 operational guidance; [constitution.md](constitution.md) owns governance.
 [AGENTS.md](../../AGENTS.md) is the discovery entry point and `CLAUDE.md` remains
 its symlink. Read [architecture.md](architecture.md) for module ownership and
-[the dataset contract](../../specs/001-project-documentation/contracts/dataset-format.md)
+[the dataset contract](../../specs/baseline.md)
 for output-format behavior.
 
 ## Preserve the working tree
@@ -60,10 +60,12 @@ violations, and blocking analysis findings before implementation. The bundled
 four-step `speckit` workflow runner does not include all repository-required
 steps; do not use it as a substitute for this sequence.
 
-Completed specifications are living contracts. For a change to an existing
-capability, select its feature directory, update `spec.md` with the intended
-behavior, and run the remaining sequence. Reconcile the plan and task list with
-the revised spec; mark completed work only when verified. Keep acceptance
+The [baseline](../../specs/baseline.md) owns consolidated product/data contracts;
+its immutable sources preserve historical decisions and evidence. For a change to
+a consolidated capability, create a feature describing the delta from the baseline.
+For an existing active feature, select its directory, update `spec.md` and run the
+remaining sequence. Reconcile the plan and task list with the revised spec and
+update the baseline on acceptance; mark completed work only when verified. Keep acceptance
 criteria and relevant verification commands in the artifacts. Record dated
 check results and limitations with the feature, and repeat implementation and
 convergence until no required work remains. Unrelated capabilities get separate
@@ -79,9 +81,10 @@ Git extension is not installed.
 
 Documentation-only corrections and maintenance without behavior changes may
 use the existing lightweight workflow: a scoped maintenance plan and adjacent
-no-impact architecture record under `docs/plans/<task>/`, documentation checks
-and applicable review/release evaluation, without creating an application feature
-specification. A behavior-changing bug fix needs a
+architecture record under `docs/plans/<task>/`, appropriate checks and applicable
+review/release evaluation, without creating an application feature specification.
+Runtime maintenance uses module impact and behavioral checks; only inspected
+documentation-only work uses no-impact reasoning. A behavior-changing bug fix needs a
 failing observation, reproduction when feasible, and verification of the
 original failure path in its Spec Kit artifacts.
 
@@ -206,10 +209,10 @@ variables, config fields, and relative links/anchors. Update the Russian
 `docs/configuration.md` owns configuration details; `docs/cli.md` owns
 commands and flags; `docs/images-and-cache.md` owns S3, cache, and ClearML
 behavior. Maintain [architecture.md](architecture.md) and the
-[living dataset contract](../../specs/001-project-documentation/contracts/dataset-format.md)
+[living dataset contract](../../specs/baseline.md)
 when a feature changes their documented behavior. Keep dated findings in
-feature evidence, including the preserved
-[2026-09-04 review](../../specs/001-project-documentation/evidence/bug-review-2026-09-04.md).
+feature evidence or immutable archive sources, including the preserved
+[2026-09-04 review](https://github.com/BuckanovNikita/cveta2/blob/af0073e5bd8a8799f0cfd322cfb27c8efd7b747d/specs/001-project-documentation/evidence/bug-review-2026-09-04.md).
 Documentation checks also cover Spec Kit memory and feature Markdown; upstream
 template examples are excluded.
 

@@ -3,8 +3,8 @@
 - [x] T001 Inspect instructions, source, public contracts, history and existing changes; approve plan.
 - [x] T002 Record architecture scope and pass planning validation.
 - [x] T003 Establish isolated-checkout baseline and verify archive content/manifest.
-- [ ] T004 Commit ordinary reachable history checkpoint with configured hooks; verify full SHA and every archived object.
-- [ ] T005 Write baseline and source/status crosswalk; validate reference transformations before cutover.
+- [x] T004 Commit ordinary reachable history checkpoint with configured hooks; verify full SHA and every archived object.
+- [x] T005 Write baseline and source/status crosswalk; validate reference transformations before cutover.
 - [ ] T006 Cut over docs, governance, packaging and feature selection; verify docs/recovery/numbering and commit.
 - [ ] T007 Consolidate upload selection/client transformations and split upload orchestration; focused checks.
 - [ ] T008 Extract CVAT transport and consolidate explicit retry decorators; focused checks (parallel with T007/T009).

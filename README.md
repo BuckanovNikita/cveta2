@@ -15,7 +15,7 @@ CLI и Python API для работы с аннотациями CVAT-проек�
   - [docs/configuration.md](docs/configuration.md) — конфиг, переменные окружения, параллельность, повторы, неинтерактивный режим
   - [docs/images-and-cache.md](docs/images-and-cache.md) — изображения из S3, кэш аннотаций, публикация в ClearML
   - [docs/python-api.md](docs/python-api.md) — Python API
-  - [Контракт датасета](specs/001-project-documentation/contracts/dataset-format.md) — формат выходных CSV
+  - [Контракт датасета](specs/baseline.md) — формат выходных CSV
 
 ## Что умеет
 
@@ -107,7 +107,7 @@ cveta2 fetch-task -p 123 -t -o output/
 cveta2 fetch-task -p 123 -o output/
 ```
 
-В папке `output/` появятся файлы: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv` (и `raw.csv` с `--raw`). Подробнее — в [Контракт датасета](specs/001-project-documentation/contracts/dataset-format.md).
+В папке `output/` появятся файлы: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv` (и `raw.csv` с `--raw`). Подробнее — в [Контракт датасета](specs/baseline.md).
 
 
 ## Команды
