@@ -47,24 +47,32 @@ class UploadManifest(BaseModel):
         )
 
 
-_BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
+BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
+
+
+def upload_annotation_mask(annotations: pd.DataFrame) -> pd.Series:
+    """Select labelled, nondeleted rows without changing values or row identity."""
+    if "instance_label" not in annotations:
+        return pd.Series(data=False, index=annotations.index)
+    labelled = annotations["instance_label"].notna() & annotations[
+        "instance_label"
+    ].astype(str).str.strip().ne("")
+    if "instance_shape" in annotations:
+        labelled &= annotations["instance_shape"].ne("deleted")
+    return labelled
 
 
 def validate_upload_boxes(annotations: pd.DataFrame) -> None:
     """Reject incomplete labelled boxes before any upload side effect."""
     if annotations.empty or "instance_label" not in annotations:
         return
-    labelled = annotations["instance_label"].notna() & annotations[
-        "instance_label"
-    ].astype(str).str.strip().ne("")
-    if "instance_shape" in annotations:
-        labelled &= annotations["instance_shape"].ne("deleted")
-    missing = [column for column in _BBOX_COLUMNS if column not in annotations]
+    labelled = upload_annotation_mask(annotations)
+    missing = [column for column in BBOX_COLUMNS if column not in annotations]
     invalid = (
         labelled.copy()
         if missing
         else labelled
-        & ~annotations[list(_BBOX_COLUMNS)]
+        & ~annotations[list(BBOX_COLUMNS)]
         .apply(pd.to_numeric, errors="coerce")
         .map(lambda value: pd.notna(value) and math.isfinite(float(value)))
         .all(axis=1)
@@ -112,7 +120,7 @@ def compute_fingerprint(  # noqa: PLR0913
                 column: None
                 if pd.isna(value)
                 else float(value)
-                if column in _BBOX_COLUMNS
+                if column in BBOX_COLUMNS
                 else value
                 for column, value in row.items()
             }

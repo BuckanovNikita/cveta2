@@ -4,7 +4,10 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from cveta2.domain.paths import names_with_basename_fallback
+
 if TYPE_CHECKING:
+    from cveta2.application.ports.dtos import RawDataMeta
     from cveta2.domain.models import LabelInfo
 
 
@@ -21,3 +24,10 @@ def _build_label_maps(
             logger.trace(f"Label attribute: id={attr.id} name={attr.name}")
             attr_names[attr.id] = attr.name
     return label_names, attr_names
+
+
+def build_name_to_frame(data_meta: "RawDataMeta") -> dict[str, int]:
+    """Build frame-name -> frame-index mapping (with basename fallback)."""
+    return names_with_basename_fallback(
+        (frame.name, idx) for idx, frame in enumerate(data_meta.frames)
+    )

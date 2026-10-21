@@ -4,13 +4,9 @@ SDK interaction stays within the CVAT adapter package. This boundary
 converts opaque SDK objects into application-owned typed DTOs.
 """
 
-import functools
 import json
-import threading
-from contextvars import ContextVar
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
-import urllib3.exceptions
 from loguru import logger
 
 from cveta2.adapters.cvat.sdk_convert import (
@@ -31,7 +27,11 @@ from cveta2.adapters.cvat.sdk_requests import (
     build_task_write_request,
 )
 from cveta2.adapters.cvat.storage import parse_cloud_storage
-from cveta2.adapters.execution.retry import network_retry
+from cveta2.adapters.cvat.transport import (
+    cvat_idempotent_write,
+    cvat_non_idempotent_write,
+    cvat_read,
+)
 from cveta2.application.ports.dtos import (
     RawIssue,
     RawJob,
@@ -40,8 +40,6 @@ from cveta2.domain.errors import CvatApiError
 from cveta2.domain.models import OrganizationInfo, ProjectInfo
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from cvat_sdk import Client as CvatSdkClient
 
     from cveta2.application.ports.dtos import (
@@ -56,162 +54,16 @@ if TYPE_CHECKING:
     from cveta2.domain.models import LabelInfo, TaskInfo
     from cveta2.domain.storage import CloudStorageInfo
 
-from typing import ParamSpec, TypeVar
-
 from cvat_sdk.api_client.exceptions import (
     ApiAttributeError,
-    ApiException,
     ApiTypeError,
 )
 from cvat_sdk.core.exceptions import BackgroundRequestException
 from cvat_sdk.core.helpers import get_paginated_collection
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
-
 _DATA_CHECK_PERIOD = 5
 """Seconds between status checks during data processing."""
-
-
-def _parse_retry_after(exc: ApiException) -> float | None:
-    """Read the ``Retry-After`` header off an SDK exception, in seconds.
-
-    ``ApiException`` is an opaque generated type whose ``headers`` is
-    ``None`` unless the failure carried an HTTP response, so the attributes
-    are read defensively.  Only the delta-seconds form is understood; the
-    HTTP-date spelling falls back to the normal backoff.
-    """
-    headers = getattr(exc, "headers", None)
-    if headers is None:
-        return None
-    raw = headers.get("Retry-After")
-    if raw is None:
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        logger.debug(f"Retry-After не распознан: {raw!r}")
-        return None
-
-
-def _translate_api_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
-    """Convert SDK ``ApiException`` into :class:`CvatApiError`."""
-
-    @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        try:
-            return func(*args, **kwargs)
-        except ApiException as e:
-            status = int(getattr(e, "status", 0) or 0)
-            raise CvatApiError(
-                str(e), status_code=status, retry_after=_parse_retry_after(e)
-            ) from e
-
-    return wrapper
-
-
-TOO_MANY_REQUESTS: Final = 429
-SERVICE_UNAVAILABLE: Final = 503
-_READ_RETRY_STATUS: Final = frozenset({TOO_MANY_REQUESTS, 500, 502, 503, 504})
-
-# urllib3 timeout errors are not OSError, hence urllib3.exceptions.HTTPError.
-_TRANSPORT_ERRORS: Final = (OSError, ConnectionError, urllib3.exceptions.HTTPError)
-
-
-def _should_retry_read(exc: BaseException) -> bool:
-    """Retry anything transient: a read is always safe to repeat."""
-    if isinstance(exc, _TRANSPORT_ERRORS):
-        return True
-    return isinstance(exc, CvatApiError) and exc.status_code in _READ_RETRY_STATUS
-
-
-def _should_retry_write(exc: BaseException) -> bool:
-    """Retry only a proven refusal; Retry-After does not prove non-application."""
-    if not isinstance(exc, CvatApiError):
-        return False
-    if exc.status_code == SERVICE_UNAVAILABLE:
-        logger.warning(
-            "CVAT вернул 503: результат записи неизвестен, запрос не повторяется. "
-            "Проверьте состояние в CVAT; продолжайте только после сверки."
-        )
-    return exc.status_code == TOO_MANY_REQUESTS
-
-
-def _should_retry_idempotent_write(exc: BaseException) -> bool:
-    """Retry status failures for explicit replacement of the same values."""
-    return isinstance(exc, CvatApiError) and exc.status_code in _READ_RETRY_STATUS
-
-
-def _translate_transport_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
-    """Convert a transport failure that outlived the retry budget into ``CvatApiError``.
-
-    Sits *outside* the retry decorator: ``_should_retry_read`` must still see
-    the raw urllib3 types, and only what escapes the budget is translated.
-    """
-
-    @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        try:
-            return func(*args, **kwargs)
-        except _TRANSPORT_ERRORS as e:
-            raise CvatApiError(f"Сетевая ошибка при обращении к CVAT: {e}") from e
-
-    return wrapper
-
-
-_api_retry = network_retry(_should_retry_read, label="CVAT API")
-_write_retry = network_retry(_should_retry_write, label="CVAT write")
-_idempotent_write_retry = network_retry(
-    _should_retry_idempotent_write, label="CVAT idempotent write"
-)
-
-_CONNECT_TIMEOUT = 10.0
-
-
-class _GlobalTimeout:
-    """One-time SDK patch state; timeout values themselves are context-local."""
-
-    installed: bool = False
-    lock = threading.Lock()
-
-
-_REQUEST_TIMEOUT: ContextVar[float | None] = ContextVar(
-    "cveta2_cvat_request_timeout", default=None
-)
-
-
-def install_global_request_timeout(timeout: float | None) -> None:
-    """Install the SDK hook and set this context's request timeout.
-
-    ``make_client`` performs requests (server version check, login) before
-    it returns a client that could be wrapped; a black-holed host hangs
-    there forever. Patching ``RESTClientObject.request`` at class level
-    covers that window too. The class hook is process-wide and idempotent;
-    its timeout value is context-local. ``None`` or ``0`` switches injection
-    off for the caller without unpatching the SDK.
-    """
-    from cvat_sdk.api_client.rest import RESTClientObject  # noqa: PLC0415
-
-    _REQUEST_TIMEOUT.set(timeout)
-    if _GlobalTimeout.installed:
-        return
-    with _GlobalTimeout.lock:
-        if _GlobalTimeout.installed:
-            return
-        original_request = RESTClientObject.request
-
-        @functools.wraps(original_request)
-        def request_with_timeout(
-            self: RESTClientObject, *args: object, **kwargs: object
-        ) -> object:
-            request_timeout = _REQUEST_TIMEOUT.get()
-            if kwargs.get("_request_timeout") is None and request_timeout:
-                kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, request_timeout)
-            return original_request(self, *args, **kwargs)
-
-        RESTClientObject.request = request_with_timeout
-        _GlobalTimeout.installed = True
 
 
 class SdkCvatApiAdapter:
@@ -219,16 +71,14 @@ class SdkCvatApiAdapter:
 
     The caller is responsible for opening and closing the SDK client.
     This adapter is a thin stateless converter: SDK objects in, DTOs out.
-    Every SDK call is wrapped with retry logic for transient errors.
+    Network calls use explicit retry policies for reads and each kind of write.
     """
 
     def __init__(self, client: "CvatSdkClient") -> None:
         """Wrap an already-opened ``cvat_sdk`` client."""
         self.client = client
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def list_organizations(self) -> list[OrganizationInfo]:
         """Return all organizations the user is a member of."""
         raw = get_paginated_collection(
@@ -243,43 +93,33 @@ class SdkCvatApiAdapter:
         self.client.organization_slug = "" if org is None else org
         logger.trace(f"Switched organization to: {org!r}")
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def list_projects(self) -> list[ProjectInfo]:
         """Return all accessible projects."""
         raw = self.client.projects.list()
         return [ProjectInfo(id=p.id, name=p.name or "") for p in raw]
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_project(self, project_id: int) -> ProjectInfo:
         """Return one project by id."""
         project = self.client.projects.retrieve(project_id)
         return ProjectInfo(id=project.id, name=project.name or "")
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_project_tasks(self, project_id: int) -> "list[TaskInfo]":
         """Return tasks belonging to a project."""
         project = self.client.projects.retrieve(project_id)
         tasks = project.get_tasks()
         return [convert_task(t) for t in tasks]
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_project_labels(self, project_id: int) -> "list[LabelInfo]":
         """Return label definitions for a project."""
         project = self.client.projects.retrieve(project_id)
         labels = project.get_labels()
         return [convert_label(lbl) for lbl in labels]
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_task_data_meta(self, task_id: int) -> "RawDataMeta":
         """Return frame metadata and deleted frame IDs for a task."""
         tasks_api = self.client.api_client.tasks_api
@@ -302,9 +142,7 @@ class SdkCvatApiAdapter:
             data = json.loads(body.decode("utf-8"))
             return data_meta_from_dict(data)
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_task_annotations(self, task_id: int) -> "RawAnnotations":
         """Return shapes for a task."""
         tasks_api = self.client.api_client.tasks_api
@@ -317,9 +155,7 @@ class SdkCvatApiAdapter:
             )
         return convert_annotations(labeled_data)
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_task_issues(self, task_id: int) -> list[RawIssue]:
         """Return review issues for a task, each with its comment texts."""
         api_client = self.client.api_client
@@ -344,9 +180,7 @@ class SdkCvatApiAdapter:
             )
         return result
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_project_cloud_storage(self, project_id: int) -> "CloudStorageInfo | None":
         """Return the project's source cloud storage, or None.
 
@@ -368,24 +202,18 @@ class SdkCvatApiAdapter:
         cs_raw, _ = self.client.api_client.cloudstorages_api.retrieve(cs_id)
         return parse_cloud_storage(cs_raw)
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_task(self, task_id: int) -> "TaskInfo":
         """Return one task by id (with its ``project_id``)."""
         return convert_task(self.client.tasks.retrieve(task_id))
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_task_labels(self, task_id: int) -> "list[LabelInfo]":
         """Return label definitions available in a task."""
         task_obj = self.client.tasks.retrieve(task_id)
         return [convert_label(lbl) for lbl in task_obj.get_labels()]
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_task_jobs(self, task_id: int) -> list[RawJob]:
         """Return jobs (with frame ranges) of a task."""
         jobs = get_paginated_collection(
@@ -404,9 +232,7 @@ class SdkCvatApiAdapter:
             for job in jobs
         ]
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def get_task_size(self, task_id: int) -> int:
         """Return the number of frames in a task.
 
@@ -422,9 +248,7 @@ class SdkCvatApiAdapter:
         except ApiAttributeError:
             return 0
 
-    @_translate_transport_errors
-    @_write_retry
-    @_translate_api_errors
+    @cvat_non_idempotent_write
     def create_task(self, spec: "UploadTaskSpec") -> int:
         """Create an empty task and return its id.
 
@@ -465,9 +289,7 @@ class SdkCvatApiAdapter:
             f"segment_size={spec.segment_size}, size={size})"
         )
 
-    @_translate_transport_errors
-    @_write_retry
-    @_translate_api_errors
+    @cvat_non_idempotent_write
     def _start_data_processing(self, task_id: int, spec: "UploadTaskSpec") -> str:
         """Issue the data POST and return the id of CVAT's background request."""
         result, _ = self.client.api_client.tasks_api.create_data(
@@ -476,9 +298,7 @@ class SdkCvatApiAdapter:
         )
         return str(result.rq_id)
 
-    @_translate_transport_errors
-    @_api_retry
-    @_translate_api_errors
+    @cvat_read
     def _wait_for_data_processing(self, task_id: int, rq_id: str) -> None:
         """Poll background request *rq_id* until CVAT has processed the data."""
         try:
@@ -490,9 +310,7 @@ class SdkCvatApiAdapter:
             msg = f"Задача {task_id}: обработка данных не удалась — {exc}"
             raise CvatApiError(msg) from exc
 
-    @_translate_transport_errors
-    @_write_retry
-    @_translate_api_errors
+    @cvat_non_idempotent_write
     def put_task_shapes(self, task_id: int, shapes: "list[NewShape]") -> None:
         """Add annotation shapes to a task."""
         task_obj = self.client.tasks.retrieve(task_id)
@@ -501,16 +319,12 @@ class SdkCvatApiAdapter:
             action=AnnotationUpdateAction.CREATE,
         )
 
-    @_translate_transport_errors
-    @_write_retry
-    @_translate_api_errors
+    @cvat_non_idempotent_write
     def create_issue(self, issue: "NewIssue") -> None:
         """Open a review issue on a job frame."""
         self.client.api_client.issues_api.create(build_issue_request(issue))
 
-    @_translate_transport_errors
-    @_idempotent_write_retry
-    @_translate_api_errors
+    @cvat_idempotent_write
     def set_deleted_frames(self, task_id: int, frame_ids: list[int]) -> None:
         """Replace the task's deleted-frames list."""
         self.client.api_client.tasks_api.partial_update_data_meta(
@@ -518,9 +332,7 @@ class SdkCvatApiAdapter:
             patched_data_meta_write_request=build_deleted_frames_request(frame_ids),
         )
 
-    @_translate_transport_errors
-    @_write_retry
-    @_translate_api_errors
+    @cvat_non_idempotent_write
     def delete_shapes(self, task_id: int, shapes: "list[RawShape]") -> None:
         """Delete the given existing shapes from a task."""
         self.client.api_client.tasks_api.partial_update_annotations(
@@ -529,16 +341,12 @@ class SdkCvatApiAdapter:
             patched_labeled_data_request=build_delete_shapes_payload(shapes),
         )
 
-    @_translate_transport_errors
-    @_write_retry
-    @_translate_api_errors
+    @cvat_non_idempotent_write
     def delete_task(self, task_id: int) -> None:
         """Delete a task permanently."""
         self.client.api_client.tasks_api.destroy(task_id)
 
-    @_translate_transport_errors
-    @_idempotent_write_retry
-    @_translate_api_errors
+    @cvat_idempotent_write
     def update_job(
         self,
         job_id: int,
@@ -552,9 +360,7 @@ class SdkCvatApiAdapter:
             patched_job_write_request=build_job_patch_request(stage=stage, state=state),
         )
 
-    @_translate_transport_errors
-    @_write_retry
-    @_translate_api_errors
+    @cvat_non_idempotent_write
     def patch_project_labels(
         self,
         project_id: int,

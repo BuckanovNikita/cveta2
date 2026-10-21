@@ -13,12 +13,13 @@ Before planning or editing, read:
    workflow, verification, working-tree ownership, integration, and release rules.
 3. [Architecture context](.specify/memory/architecture.md) when changing module
    flow, project resolution, fetch/upload, or conversion behavior.
-4. [Dataset contract](specs/001-project-documentation/contracts/dataset-format.md)
-   when changing exported data or conversion behavior.
+4. [Current specification and dataset contract](specs/baseline.md) for preserved
+   behavior, acceptance criteria and immutable historical decisions.
 
 Use `$speckit-<step>` in Codex and `/speckit-<step>` in Claude. Follow the full
 sequence in engineering guidance; select the active feature explicitly before
-writing artifacts. Executable commit, mutation, and integration skills remain
+writing artifacts. New features describe deltas from the baseline; archived
+features are historical evidence. Executable commit, mutation, and integration skills remain
 applicable within that workflow. Human setup and invocation examples are in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 

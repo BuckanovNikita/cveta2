@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from cveta2.adapters.config.settings import CvatConfig
-from cveta2.adapters.cvat.sdk_adapter import _should_retry_write
+from cveta2.adapters.cvat.transport import _should_retry_write
 from cveta2.adapters.files.manifests import delete_manifest
 from cveta2.application.client.session import TaskWriteSession
 from cveta2.application.ports.cvat import CvatApiPort
@@ -219,7 +219,12 @@ def test_changed_options_reject_resume_before_external_calls(
         with pytest.raises(CvatApiError):
             upload_cvat_dataset(client, request)
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
+    )
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.recovery._stage_images", stage
+    )
     changed = replace(
         request,
         resume=True,
@@ -266,7 +271,12 @@ def test_cleanup_failure_preserves_success_and_prevents_future_writes(
         for message in capture_logs
     )
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
+    )
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.recovery._stage_images", stage
+    )
     assert (
         upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=True))
         == first
@@ -324,7 +334,12 @@ def test_changed_remote_directory_with_same_basename_rejects_before_staging(
     remote = RawDataMeta(frames=[RawFrame("different/a.jpg", 640, 480)])
     monkeypatch.setattr(client.api, "get_task_data_meta", lambda _task_id: remote)
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
+    )
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.recovery._stage_images", stage
+    )
     with pytest.raises(Cveta2Error, match="кадры"):
         upload_cvat_dataset(client, replace(request, resume=True))
     stage.assert_not_called()
@@ -863,7 +878,12 @@ def test_completed_recovery_cleans_the_exact_stale_manifest(
         first = upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
     assert len(list_manifests(7, host=client.host)) == 1
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
+    )
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.recovery._stage_images", stage
+    )
     assert (
         upload_cvat_dataset(
             client, make_request(image_names=["a.jpg"], resume=resuming)
@@ -938,7 +958,12 @@ def test_changed_cloud_storage_rejects_before_staging(
         lambda _project: make_cs_info(bucket="different"),
     )
     stage = MagicMock()
-    monkeypatch.setattr("cveta2.application.use_cases.upload._stage_images", stage)
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
+    )
+    monkeypatch.setattr(
+        "cveta2.application.use_cases.upload.recovery._stage_images", stage
+    )
     with pytest.raises(Cveta2Error, match="Cloud storage"):
         upload_cvat_dataset(client, replace(request, resume=True))
     stage.assert_not_called()

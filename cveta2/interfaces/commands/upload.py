@@ -31,6 +31,7 @@ from cveta2.interfaces.commands._helpers import (
     project_cli_spec,
     resolve_project,
 )
+from cveta2.interfaces.commands._parsers import add_project_arg
 
 if TYPE_CHECKING:
     import argparse
@@ -51,6 +52,69 @@ _TASK_NAME_PROMPT = "Имя задачи: "
 _TASK_NAME_HINT = "Pass --name to specify the task name."
 _TASK_NAME_EMPTY_MESSAGE = "Имя задачи не указано — отмена."
 _TASK_NAME_HISTORY_KEY = "task-name"
+
+
+def configure_upload(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``upload`` command arguments."""
+    add_project_arg(parser)
+    parser.add_argument(
+        "--dataset",
+        "-d",
+        required=True,
+        help="Path to dataset.csv produced by the fetch command.",
+    )
+    parser.add_argument(
+        "--labels",
+        nargs="+",
+        type=str,
+        default=None,
+        metavar="LABEL",
+        help=(
+            "Instance labels selecting frames to upload "
+            "(use __no_annotation__ for frames without annotations; "
+            "'--labels all' selects every label). "
+            "If omitted, interactive selection is shown."
+        ),
+    )
+    parser.add_argument(
+        "--in-progress",
+        type=str,
+        default=None,
+        help=(
+            "Path to in_progress.csv — images listed there "
+            "will be excluded from the upload."
+        ),
+    )
+    parser.add_argument(
+        "--image-dir",
+        type=str,
+        default=None,
+        help="Additional directory to search for image files.",
+    )
+    parser.add_argument(
+        "--name",
+        type=str,
+        default=None,
+        help="Task name. If omitted, prompted interactively.",
+    )
+    parser.add_argument(
+        "--complete",
+        action="store_true",
+        help="Mark the task as completed after upload.",
+    )
+    parser.add_argument(
+        "--mark-all-deleted",
+        action="store_true",
+        help="Mark every uploaded image as deleted after task creation.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Continue the last unfinished upload of this dataset instead of "
+            "creating a second task. Pass the same --dataset and --labels."
+        ),
+    )
 
 
 def _available_labels(df: "pd.DataFrame") -> tuple[list[str], bool]:

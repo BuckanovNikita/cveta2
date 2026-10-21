@@ -42,6 +42,7 @@ USER_DOCS = [REPO_ROOT / "README.md", *sorted((REPO_ROOT / "docs").glob("*.md"))
 ALL_DOCS = [
     *sorted(REPO_ROOT.glob("*.md")),
     *sorted((REPO_ROOT / "docs").glob("*.md")),
+    *sorted((REPO_ROOT / "docs" / "plans").rglob("*.md")),
     REPO_ROOT / "scripts" / "README.md",
     *sorted((REPO_ROOT / ".specify" / "memory").glob("*.md")),
     *sorted((REPO_ROOT / "specs").rglob("*.md")),
@@ -304,7 +305,7 @@ class TestTheAgentInstructionsDelegateToSpecKit:
             ".specify/memory/constitution.md",
             ".specify/memory/engineering.md",
             ".specify/memory/architecture.md",
-            "specs/001-project-documentation/contracts/dataset-format.md",
+            "specs/baseline.md",
         ):
             assert f"]({target})" in text
             assert (REPO_ROOT / target).is_file()
@@ -320,6 +321,14 @@ class TestTheAgentInstructionsDelegateToSpecKit:
     def test_migrated_documents_have_no_standalone_copies(self) -> None:
         for retired in ("ARCHITECTURE.md", "DATASET_FORMAT.md", "BUG_REVIEW.md"):
             assert not (REPO_ROOT / retired).exists()
+
+
+def test_baseline_preserves_the_ordered_dataset_schema() -> None:
+    """The single contract must describe every serialized column in its order."""
+    baseline = (REPO_ROOT / "specs" / "baseline.md").read_text(encoding="utf-8")
+    table = baseline.split("| Column, in order |", 1)[1].split("\n\n", 1)[0]
+    columns = re.findall(r"(?m)^\| `([^`]+)` \|", table)
+    assert columns == list(cveta2.CSV_COLUMNS)
 
 
 @pytest.mark.parametrize(

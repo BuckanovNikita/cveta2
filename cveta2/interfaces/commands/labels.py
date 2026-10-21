@@ -13,6 +13,7 @@ from cveta2.interfaces.commands._helpers import (
     project_cli_spec,
     resolve_project,
 )
+from cveta2.interfaces.commands._parsers import add_list_arg, add_project_arg
 
 if TYPE_CHECKING:
     import argparse
@@ -27,6 +28,12 @@ _ACTION_DELETE = "delete"
 _ACTION_EXIT = "exit"
 
 _HEX_COLOR_RE = r"^#[0-9a-fA-F]{6}$"
+
+
+def configure_labels(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``labels`` command arguments."""
+    add_project_arg(parser)
+    add_list_arg(parser, "List project labels and exit.")
 
 
 def run_labels(args: "argparse.Namespace") -> None:

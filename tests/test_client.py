@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pandas as pd
 
-from cveta2.application.client.assembly import (
-    build_name_to_frame,
+from cveta2.application.client.assembly import task_to_records
+from cveta2.application.client.mapping import build_name_to_frame
+from cveta2.application.client.upload_mapping import (
     build_task_issues,
     build_upload_shapes,
     find_job_for_frame,
-    task_to_records,
 )
 from cveta2.application.ports.dtos import (
     RawAnnotations,

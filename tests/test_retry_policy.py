@@ -10,6 +10,7 @@ repeats a request the server might already have applied.
 
 from __future__ import annotations
 
+from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
@@ -24,8 +25,8 @@ from botocore.exceptions import (
 )
 from cvat_sdk.api_client.exceptions import ApiException
 
-from cveta2.adapters.cvat.sdk_adapter import (
-    SdkCvatApiAdapter,
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.adapters.cvat.transport import (
     _should_retry_read,
     _should_retry_write,
     _translate_api_errors,
@@ -75,8 +76,8 @@ class TestWritePredicate:
         """A 429 is a refusal, so the write provably never landed."""
         assert _should_retry_write(CvatApiError("slow down", status_code=429))
 
-    def test_unavailable_is_retried_only_when_it_asks_to_be(self) -> None:
-        """``Retry-After`` is what separates a throttle from a crash."""
+    def test_unavailable_is_never_retried_even_with_retry_after(self) -> None:
+        """``Retry-After`` cannot prove that an ambiguous write was refused."""
         throttled = CvatApiError("busy", status_code=503, retry_after=2.0)
         crashed = CvatApiError("busy", status_code=503)
 
@@ -249,6 +250,45 @@ class TestTransportErrorsLeaveTheAdapterTranslated:
         assert caught.value.status_code == 404
 
 
+@pytest.mark.parametrize("operation", ["deleted_frames", "job"])
+@pytest.mark.parametrize(
+    ("error", "expected_attempts"),
+    [
+        (ApiException(status=429), 3),
+        (ApiException(status=500), 3),
+        (ApiException(status=502), 3),
+        (ApiException(status=503), 3),
+        (ApiException(status=504), 3),
+        (ApiException(status=404), 1),
+        (ConnectionError("lost reply"), 1),
+    ],
+    ids=["429", "500", "502", "503", "504", "404", "transport"],
+)
+def test_idempotent_replacements_repeat_only_retryable_status_failures(
+    operation: str, error: BaseException, expected_attempts: int
+) -> None:
+    """Replacement writes keep their values and their narrower transport policy."""
+    configure_retries(attempts=3, max_wait=0.01)
+    client = MagicMock()
+    adapter = SdkCvatApiAdapter(client)
+    if operation == "deleted_frames":
+        request = client.api_client.tasks_api.partial_update_data_meta
+        call = partial(adapter.set_deleted_frames, 7, [2, 3])
+    else:
+        request = client.api_client.jobs_api.partial_update
+        call = partial(adapter.update_job, 7, stage="acceptance", state="completed")
+    request.side_effect = error
+
+    with pytest.raises(CvatApiError) as caught:
+        call()
+
+    assert request.call_count == expected_attempts
+    assert request.call_args_list == [request.call_args] * expected_attempts
+    assert caught.value.__cause__ is error
+    if isinstance(error, ApiException):
+        assert caught.value.status_code == error.status
+
+
 class _FakeOutcome:
     """Stand-in for the tenacity outcome that only carries the exception."""
 
@@ -351,11 +391,7 @@ class TestRetryAfterParsing:
         assert caught.value.retry_after is None
 
     def test_a_503_without_the_header_is_not_retried_as_a_write(self) -> None:
-        """The header is the entire difference for an ambiguous write.
-
-        Ties the parsing above to the decision it exists to feed: a bare
-        503 stays unretryable, so a half-applied write is never repeated.
-        """
+        """A bare 503 must not repeat a potentially applied write."""
 
         @_translate_api_errors
         def failed() -> None:
@@ -364,3 +400,23 @@ class TestRetryAfterParsing:
         with pytest.raises(CvatApiError) as caught:
             failed()
         assert not _should_retry_write(caught.value)
+
+
+def test_an_ambiguous_sdk_write_with_retry_after_is_not_replayed(
+    capture_logs: list[str],
+) -> None:
+    """API translation must not turn a 503 delay into permission to append again."""
+    configure_retries(attempts=3, max_wait=0.01)
+    error = ApiException(http_resp=_FakeHttpResponse(503, {"Retry-After": "0"}))
+    client = MagicMock()
+    request = client.tasks.retrieve.return_value.update_annotations
+    request.side_effect = error
+
+    with pytest.raises(CvatApiError) as caught:
+        SdkCvatApiAdapter(client).put_task_shapes(7, [])
+
+    request.assert_called_once()
+    assert caught.value.status_code == 503
+    assert caught.value.retry_after == 0
+    assert caught.value.__cause__ is error
+    assert any("результат записи неизвестен" in message for message in capture_logs)

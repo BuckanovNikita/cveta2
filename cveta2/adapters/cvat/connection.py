@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Protocol
 from cvat_sdk import make_client
 from loguru import logger
 
-from cveta2.adapters.cvat.sdk_adapter import (
+from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
+from cveta2.adapters.cvat.transport import (
     _TRANSPORT_ERRORS,
-    SdkCvatApiAdapter,
     _translate_api_errors,
     install_global_request_timeout,
 )

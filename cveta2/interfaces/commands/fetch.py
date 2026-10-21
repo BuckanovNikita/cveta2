@@ -43,6 +43,109 @@ if TYPE_CHECKING:
     from cveta2.domain.storage import CloudStorageInfo
 
 
+from cveta2.interfaces.commands._parsers import add_project_arg
+
+
+def _add_common_fetch_args(parser: "argparse.ArgumentParser") -> None:
+    """Add arguments shared between ``fetch`` and ``fetch-task``."""
+    parser.add_argument(
+        "--completed-only",
+        action="store_true",
+        help="Process only tasks with status 'completed'.",
+    )
+    parser.add_argument(
+        "--no-images",
+        action="store_true",
+        help="Skip downloading images from S3 cloud storage.",
+    )
+    parser.add_argument(
+        "--images-dir",
+        type=str,
+        default=None,
+        help=(
+            "Override image cache directory for this run "
+            "(takes precedence over config mapping)."
+        ),
+    )
+    parser.add_argument(
+        "--save-tasks",
+        action="store_true",
+        help=(
+            "Keep per-task CSV files in .tasks/ subdirectory. "
+            "By default they are removed after merging."
+        ),
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=("Disable the task annotation cache entirely (no reads, no writes)."),
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Re-download annotations from CVAT even for cached tasks "
+            "and refresh the cache."
+        ),
+    )
+
+
+def configure_fetch(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``fetch`` command arguments."""
+    add_project_arg(parser)
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Accept completed annotation jobs in eligible tasks in CVAT "
+        "before fetching.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        "-o",
+        required=True,
+        help="Directory to save partitioned CSV files "
+        "(dataset, obsolete, in_progress, deleted).",
+    )
+    parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="Save all records (including deletions) as raw.csv without partitioning.",
+    )
+    _add_common_fetch_args(parser)
+
+
+def configure_fetch_task(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``fetch-task`` command arguments."""
+    add_project_arg(
+        parser,
+        help_text=(
+            "Project ID or name (see fetch --help for the ORG/PROJECT form). "
+            "If omitted, the project is inferred from the first numeric task "
+            "ID; otherwise interactive selection is shown."
+        ),
+    )
+    parser.add_argument(
+        "--task",
+        "-t",
+        type=str,
+        nargs="*",
+        default=None,
+        metavar="TASK",
+        help=(
+            "Task ID(s) or name(s) to fetch: -t 42 43. "
+            "If passed without values (-t), interactive "
+            "multi-select is shown."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        "-o",
+        required=True,
+        help="Directory to save dataset.csv and deleted.csv.",
+    )
+    _add_common_fetch_args(parser)
+
+
 def run_fetch(args: "argparse.Namespace") -> None:
     """Run the ``fetch`` command (all project tasks)."""
     output_dir = _resolve_output_dir(Path(args.output_dir))

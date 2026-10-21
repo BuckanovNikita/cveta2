@@ -28,6 +28,23 @@ if TYPE_CHECKING:
     from cveta2.domain.models import ProjectInfo
 
 
+from cveta2.interfaces.commands._parsers import add_config_arg, add_list_arg
+
+
+def configure_setup_cache(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``setup-cache`` command arguments."""
+    add_config_arg(parser)
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help=(
+            "Re-ask path for every project using cache_root/project_name "
+            "as default (ignore existing paths)."
+        ),
+    )
+    add_list_arg(parser, "List current image cache paths and exit.")
+
+
 def run_setup(args: "argparse.Namespace") -> None:
     """Interactively ask user for CVAT credentials and core settings."""
     config_path = config_path_from_args(args)

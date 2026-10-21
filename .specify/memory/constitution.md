@@ -9,8 +9,14 @@ Every behavior change, including a bug fix, MUST have a current `spec.md`,
 primary development workflow. Requirements MUST describe the intended outcome,
 compatibility boundaries, and verifiable acceptance criteria. Existing code and
 documentation are evidence for planning, not an inferred specification of the
-entire application. Completed specifications MUST remain living contracts:
-later changes reconcile the relevant spec, plan, and tasks together.
+entire application. The current consolidated product contract is
+[specs/baseline.md](../../specs/baseline.md). An explicitly authorized consolidation
+MUST retain current requirements, deliberate limitations and outstanding obligations,
+with immutable decision sources and a verified reachable checkpoint before retiring
+historical records. Archived specifications are evidence, not competing contracts.
+Subsequent behavior changes MUST use a new or active feature's spec, plan and tasks,
+describe their delta from the baseline and reconcile the baseline on acceptance.
+Completed feature history MUST remain recoverable rather than being rewritten.
 
 ### II. Preserve architecture and compatibility
 
@@ -79,7 +85,7 @@ their user documentation. Keep `AGENTS.md` as the shared discovery entry point
 and `CLAUDE.md` as its symlink. Detailed operational rules live in
 [engineering.md](engineering.md), architecture in
 [architecture.md](architecture.md), and output contracts in
-[the living dataset reference](../../specs/001-project-documentation/contracts/dataset-format.md).
+[the living dataset reference](../../specs/baseline.md).
 Retain dated reviews as historical feature evidence, preserving dispositions
 without treating old suggestions as a current work queue.
 Use Conventional Commits when authorized; `main`
@@ -100,8 +106,9 @@ quality gates and the commit, mutation, and integration skill contracts.
 
 For each new capability, use the Spec Kit sequence `specify` -> `clarify` ->
 `plan` -> `checklist` -> `tasks` -> `analyze` -> `implement` -> `converge`.
-Review each stage's artifacts. For an existing capability, select its feature
-directory and update the living spec before running the remaining stages.
+Review each stage's artifacts. For an existing active feature, select its directory
+and update the living spec before running the remaining stages. For a capability
+consolidated into the baseline, create a feature describing only the intended delta.
 Unresolved behavior ambiguities, constitution violations, incomplete quality
 checklists, and blocking analysis findings MUST be resolved before implementation.
 Supporting skills MUST NOT establish a competing spec/plan workflow. Discover the
@@ -167,4 +174,9 @@ Version 1.4.0 narrows the supported interpreter window to Python >=3.12,<3.14,
 explicitly removing Python 3.10 and 3.11 support at the user's request.
 Development remains on Python 3.12; application interfaces stay unchanged.
 
-**Version**: 1.4.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-15
+Version 1.5.0 expands contract maintenance with explicitly authorized, recoverable
+history consolidation and one current baseline. New Spec Kit features describe
+deltas from that baseline; application behavior, quality gates and installed
+workflow tooling remain unchanged.
+
+**Version**: 1.5.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-21

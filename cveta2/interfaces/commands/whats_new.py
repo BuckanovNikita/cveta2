@@ -19,6 +19,20 @@ if TYPE_CHECKING:
     import argparse
 
 
+from cveta2.interfaces.commands._parsers import add_project_arg
+
+
+def configure_whats_new(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``whats-new`` command arguments."""
+    add_project_arg(parser)
+    parser.add_argument(
+        "--dataset",
+        "-d",
+        required=True,
+        help="Path to dataset.csv produced by the fetch command.",
+    )
+
+
 def run_whats_new(args: "argparse.Namespace") -> None:
     """Run the ``whats-new`` command: list tasks completed after a fetched CSV."""
     dataset_path = Path(args.dataset)

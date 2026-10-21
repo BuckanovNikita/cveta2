@@ -23,6 +23,31 @@ if TYPE_CHECKING:
     from cveta2.domain.storage import CloudStorageInfo
 
 
+from cveta2.interfaces.commands._parsers import add_project_arg
+
+
+def configure_s3_sync(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``s3-sync`` command arguments."""
+    add_project_arg(
+        parser,
+        help_text=(
+            "Sync only this project (name from image_cache config). "
+            "If omitted, syncs every configured project."
+        ),
+    )
+    parser.add_argument(
+        "--root",
+        type=str,
+        default=None,
+        help=(
+            "One-run override of the S3 sync root "
+            "(s3://bucket/prefix or a bare prefix). "
+            "Takes priority over the sync_roots config section. "
+            "Requires --project."
+        ),
+    )
+
+
 class SyncTarget(NamedTuple):
     """Where one project's images live locally, and how to lay them out."""
 

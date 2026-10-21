@@ -17,6 +17,7 @@ from cveta2.interfaces.commands._helpers import (
     project_cli_spec,
     resolve_project_from_args,
 )
+from cveta2.interfaces.commands._parsers import add_project_arg
 
 if TYPE_CHECKING:
     import argparse
@@ -26,6 +27,54 @@ if TYPE_CHECKING:
 _ACTION_ADD = "add"
 _ACTION_REMOVE = "remove"
 _ACTION_EXIT = "exit"
+
+
+def configure_ignore(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``ignore`` command arguments."""
+    add_project_arg(
+        parser,
+        help_text=(
+            "Project name (as used in config). "
+            "If omitted, interactive project selection is shown."
+        ),
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--add",
+        nargs="+",
+        type=str,
+        metavar="TASK",
+        help="Add task(s) to the ignore list (ID or name).",
+    )
+    group.add_argument(
+        "--remove",
+        nargs="+",
+        type=str,
+        metavar="TASK",
+        help="Remove task(s) from the ignore list (ID or name).",
+    )
+    group.add_argument(
+        "--list",
+        action="store_true",
+        default=False,
+        dest="list_only",
+        help=(
+            "List ignored tasks for all projects. Does not require a CVAT connection."
+        ),
+    )
+    parser.add_argument(
+        "--description",
+        "-d",
+        type=str,
+        default=None,
+        help="Description / reason for ignoring (used with --add).",
+    )
+    parser.add_argument(
+        "--silent",
+        action="store_true",
+        default=False,
+        help="Suppress per-task warning during fetch (used with --add).",
+    )
 
 
 def run_ignore_list() -> None:
