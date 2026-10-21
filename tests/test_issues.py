@@ -13,7 +13,7 @@ from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from cveta2.application.client.assembly import task_to_records
 from cveta2.application.client.context import _build_frame_issues, _TaskContext
 from cveta2.application.client.extractors import _collect_shapes
-from cveta2.application.client.write import _issues_not_yet_on_task
+from cveta2.application.client.upload_mapping import _issues_not_yet_on_task
 from cveta2.application.ports.cvat import CvatApiPort
 from cveta2.application.ports.dtos import (
     NewIssue,

@@ -1,90 +1,28 @@
 """Write operations: labels, task creation, annotation and issue upload."""
 
-import math
 from typing import TYPE_CHECKING
 
 import pandas as pd
 from loguru import logger
 
-from cveta2.application.client.assembly import (
-    BBOX_COLUMNS,
+from cveta2.application.client.base import _ClientBase
+from cveta2.application.client.upload_mapping import (
+    _issues_not_yet_on_task,
+    _select_new_issue_rows,
     build_task_issues,
     build_upload_shapes,
 )
-from cveta2.application.client.base import _ClientBase
 from cveta2.application.ports.dtos import LabelPatch, UploadTaskSpec
-from cveta2.domain.upload import validate_upload_boxes
+from cveta2.domain.upload import upload_annotation_mask, validate_upload_boxes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from cveta2.application.client.session import TaskWriteSession
-    from cveta2.application.ports.dtos import NewIssue, RawIssue
-
-# Both columns must exist for a row to become an issue, and both are
-# normalized the same way, so one constant drives the guard and the loop.
-_ISSUE_COLUMNS = frozenset({"issue_state", "issue_text"})
 
 _SKIP_UNKNOWN_IMAGES = "изображения не найдены"
 _SKIP_MISSING_BBOX = "у строк нет полного bbox"
 _SKIP_UNMAPPED_FRAMES = "не найден job для кадров изображений"
-
-
-def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
-    """Return deduplicated rows with ``issue_state == "new"`` and non-empty text.
-
-    Issues are attached per-bbox, so the dedup key includes the bbox
-    coordinates: distinct boxes on one image with the same text each keep
-    their row; only fully identical duplicates collapse.
-    """
-    if not _ISSUE_COLUMNS.issubset(annotations_df.columns):
-        return pd.DataFrame()
-    df = annotations_df.copy()
-    for column in _ISSUE_COLUMNS:
-        df[column] = df[column].fillna("").astype(str).str.strip()
-    new_rows: pd.DataFrame = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
-    dedup_key = ["image_name", "issue_text"] + [
-        col for col in BBOX_COLUMNS if col in new_rows.columns
-    ]
-    deduped: pd.DataFrame = new_rows.drop_duplicates(subset=dedup_key)
-    return deduped
-
-
-def _issues_not_yet_on_task(
-    existing: "list[RawIssue]",
-    built: "list[NewIssue]",
-) -> "list[NewIssue]":
-    """Drop the built issues a previous run already opened on the task.
-
-    Match the frame, initial message and bbox. Coordinates tolerate a small
-    round-trip error; each existing issue satisfies only one requested issue.
-    """
-    positions: dict[tuple[int, str], list[list[float]]] = {}
-    for stored in existing:
-        if stored.comments:
-            positions.setdefault((stored.frame, stored.comments[0]), []).append(
-                stored.position
-            )
-    pending: list[NewIssue] = []
-    for issue in built:
-        candidates = positions.get((issue.frame, issue.message), [])
-        match = next(
-            (
-                index
-                for index, position in enumerate(candidates)
-                if len(position) == len(issue.position)
-                and all(
-                    math.isclose(a, b, rel_tol=0, abs_tol=1e-5)
-                    for a, b in zip(position, issue.position, strict=True)
-                )
-            ),
-            None,
-        )
-        if match is None:
-            pending.append(issue)
-        else:
-            candidates.pop(match)
-    return pending
 
 
 class _WriteMixin(_ClientBase):
@@ -234,20 +172,7 @@ class _WriteMixin(_ClientBase):
         """
         api = self._require_api("upload_task_annotations")
         validate_upload_boxes(annotations_df)
-        if "instance_shape" in annotations_df:
-            annotations_df = annotations_df[
-                annotations_df["instance_shape"].ne("deleted")
-            ]
-        if "instance_label" in annotations_df:
-            annotations_df = annotations_df[
-                annotations_df["instance_label"]
-                .fillna("")
-                .astype(str)
-                .str.strip()
-                .ne("")
-            ]
-        else:
-            annotations_df = annotations_df.iloc[:0]
+        annotations_df = annotations_df[upload_annotation_mask(annotations_df)]
         if annotations_df.empty:
             logger.info(f"Нет аннотаций для загрузки в задачу {task_id}")
             return 0

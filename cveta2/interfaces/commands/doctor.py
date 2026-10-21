@@ -34,6 +34,19 @@ if TYPE_CHECKING:
     import argparse
 
 
+def configure_doctor(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``doctor`` command arguments."""
+    parser.add_argument(
+        "--cache",
+        action="store_true",
+        help=(
+            "Fix cache permissions: grant the group rwx on every cache path "
+            "owned by the current user, and list the users who must run this "
+            "themselves for the rest."
+        ),
+    )
+
+
 def run_doctor(args: "argparse.Namespace | None" = None) -> None:
     """Run all doctor checks and log a final summary."""
     fix_cache = args is not None and args.cache

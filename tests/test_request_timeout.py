@@ -240,7 +240,7 @@ def test_install_global_request_timeout_covers_new_rest_clients(
 ) -> None:
     from cvat_sdk.api_client.rest import RESTClientObject
 
-    from cveta2.adapters.cvat import sdk_adapter
+    from cveta2.adapters.cvat import transport
 
     recorded: dict[str, object] = {}
 
@@ -248,10 +248,10 @@ def test_install_global_request_timeout_covers_new_rest_clients(
         recorded.update(kwargs)
 
     monkeypatch.setattr(RESTClientObject, "request", fake_request)
-    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "installed", False)
+    monkeypatch.setattr(transport._GlobalTimeout, "installed", False)
 
-    sdk_adapter.install_global_request_timeout(7.0)
-    sdk_adapter.install_global_request_timeout(9.0)
+    transport.install_global_request_timeout(7.0)
+    transport.install_global_request_timeout(9.0)
 
     instance = object.__new__(RESTClientObject)
     RESTClientObject.request(instance, "GET", "http://x")
@@ -262,6 +262,39 @@ def test_install_global_request_timeout_covers_new_rest_clients(
     RESTClientObject.request(instance, "GET", "http://x", _request_timeout=5)
     caller_timeout = recorded["_request_timeout"]
     assert caller_timeout == 5
+
+
+def test_parallel_sdk_requests_keep_independent_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from cvat_sdk.api_client.rest import RESTClientObject
+
+    from cveta2.adapters.cvat import transport
+
+    def fake_request(_self: object, *_args: object, **kwargs: object) -> object:
+        return kwargs.get("_request_timeout")
+
+    monkeypatch.setattr(RESTClientObject, "request", fake_request)
+    monkeypatch.setattr(transport._GlobalTimeout, "installed", False)
+    barrier = threading.Barrier(2)
+
+    def configure_and_request(timeout: float) -> object:
+        transport.install_global_request_timeout(timeout)
+        barrier.wait(timeout=5)
+        instance = object.__new__(RESTClientObject)
+        return RESTClientObject.request(instance, "GET", "http://x")
+
+    try:
+        transport.install_global_request_timeout(19.0)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(configure_and_request, 7.0)
+            second = pool.submit(configure_and_request, 11.0)
+        assert first.result() == (10.0, 7.0)
+        assert second.result() == (10.0, 11.0)
+        instance = object.__new__(RESTClientObject)
+        assert RESTClientObject.request(instance, "GET", "http://x") == (10.0, 19.0)
+    finally:
+        transport.install_global_request_timeout(None)
 
 
 @pytest.mark.parametrize("cleared", [None, 0.0], ids=["none", "zero"])
@@ -277,7 +310,7 @@ def test_install_global_request_timeout_can_be_switched_off_again(
     """
     from cvat_sdk.api_client.rest import RESTClientObject
 
-    from cveta2.adapters.cvat import sdk_adapter
+    from cveta2.adapters.cvat import transport
 
     recorded: dict[str, object] = {}
 
@@ -286,14 +319,14 @@ def test_install_global_request_timeout_can_be_switched_off_again(
         recorded.update(kwargs)
 
     monkeypatch.setattr(RESTClientObject, "request", fake_request)
-    monkeypatch.setattr(sdk_adapter._GlobalTimeout, "installed", False)
+    monkeypatch.setattr(transport._GlobalTimeout, "installed", False)
     instance = object.__new__(RESTClientObject)
 
-    sdk_adapter.install_global_request_timeout(5.0)
+    transport.install_global_request_timeout(5.0)
     RESTClientObject.request(instance, "GET", "http://x")
     assert recorded["_request_timeout"] == (10.0, 5.0)
 
-    sdk_adapter.install_global_request_timeout(cleared)
+    transport.install_global_request_timeout(cleared)
     RESTClientObject.request(instance, "GET", "http://x")
     assert "_request_timeout" not in recorded
 
@@ -301,7 +334,7 @@ def test_install_global_request_timeout_can_be_switched_off_again(
     caller_timeout: object = recorded["_request_timeout"]
     assert caller_timeout == 5
 
-    sdk_adapter.install_global_request_timeout(9.0)
+    transport.install_global_request_timeout(9.0)
     RESTClientObject.request(instance, "GET", "http://x")
     assert recorded["_request_timeout"] == (10.0, 9.0)
 

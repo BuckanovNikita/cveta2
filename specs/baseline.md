@@ -102,6 +102,9 @@ CVAT network health. Stored ignored numeric task IDs can be removed by CLI/API
 without requiring that remote task to exist; names/unknown IDs still resolve
 remotely and project resolution remains required.
 
+Task mark-deleted counts only requested frames not already deleted. An entirely
+redundant request returns zero without a CVAT metadata PATCH.
+
 ## Dataset format and fetch
 
 Full-fetch and fetch-task tables use the ordered 30-column `CSV_COLUMNS`
@@ -271,6 +274,8 @@ checkpoints fail closed; completed outcome persists before cleanup, whose failur
 warns with successful task/stale path rather than losing success or duplicating it.
 Resume preserves initial S3 mapping, reuses exact shapes, adds only missing issues,
 and may repeat idempotent deletion/completion. Failed S3 uploads prevent creation.
+When upload prompts resolve missing arguments, the echoed command retains a
+requested `--resume` so copying it preserves recovery intent.
 
 `UploadResult` fields are `task_id: int`, `task_name: str`, `url: str`, and integer
 `images`, `deleted`, `annotations`, `issues`. `DownloadStats` has integer
@@ -541,6 +546,10 @@ ordering, Unicode handling, effects and mutation scope during internal cleanup.
 The maintained architecture reference and executable contracts own detailed module
 assignments rather than this snapshot freezing implementation file layouts.
 
+The mutation wrapper rejects unknown or explicitly empty profile names with a
+nonzero exit before scope synchronization or mutation execution. The named `full`
+profile intentionally has an empty glob list and covers the complete scope.
+
 Current acceptance requires the behavior above and the applicable repository
 gates, with positive and negative architecture checks. Changes need current
 documentation, task-owned architecture evidence, appropriate regression/mutation
@@ -570,7 +579,7 @@ tested. Cleanup/cutover verification is recorded separately with its own task.
 
 | Retired work | Reconciled disposition and decision source |
 | --- | --- |
-| `001-project-documentation` | Completed documentation/governance migration; this baseline supersedes its dataset-contract location. [Original contract and evidence](https://github.com/BuckanovNikita/cveta2/tree/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/001-project-documentation) |
+| `001-project-documentation` | Completed documentation/governance migration; this baseline supersedes its dataset-contract location. [Original contract and evidence](https://github.com/BuckanovNikita/cveta2/tree/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/001-project-documentation); [September fixes](https://github.com/BuckanovNikita/cveta2/blob/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/001-project-documentation/evidence/bug-review-2026-09-04.md) |
 | `002-cvat-write-safety`, `003-dataset-correctness`, `004-storage-interfaces` | Implemented, verified and released in v0.7.0; all 26 October findings reconciled, including three clarified contracts and the simulated retry risk. [Remediation](https://github.com/BuckanovNikita/cveta2/commit/a6d3d6672b918649a9a2442527872041a56ac22c), [ledger and integrated evidence](https://github.com/BuckanovNikita/cveta2/blob/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/004-storage-interfaces/evidence/remediation-ledger.md) |
 | `005-polygon-bboxes` | Implemented, verified, released v0.8.0. [Implementation](https://github.com/BuckanovNikita/cveta2/commit/41c045e76757b6af65687fe7da49a4e7aa30218d) |
 | `002-fetch-skip-validation` | Implemented, verified, released v0.9.0. [Implementation](https://github.com/BuckanovNikita/cveta2/commit/a1e92b98f04d7965b79b2ea6b561a17d83aeb50f) |

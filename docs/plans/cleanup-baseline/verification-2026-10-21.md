@@ -20,11 +20,8 @@ Planning inspection also passed Vulture, the effect checker, all ten import
 contracts and 290 documentation/architecture tests in the original checkout.
 These pre-change outcomes do not establish final implementation acceptance.
 
-## Remaining acceptance
-
-Checkpoint commit, baseline cutover, code changes, integrated checks, live tests,
-fresh independent review, architecture acceptance and release delivery are pending.
-Actual outcomes will be appended here; task status lives in [tasks.md](tasks.md).
+Task status lives in [tasks.md](tasks.md). Results below distinguish the
+starting state, intermediate checks and final acceptance.
 
 ## Checkpoint and baseline cutover
 
@@ -62,3 +59,147 @@ no-impact work.
 
 These are cutover checks. Final runtime, mutation/live, independent-review and
 release acceptance remain pending.
+
+## Runtime refactoring and compatibility
+
+Baseline cutover commit `e69022727a73747bbd5723e34fa96b093f42c34c` passed
+all configured commit hooks before runtime work began.
+
+Three bounded workstreams were integrated without overlapping write ownership.
+Upload/client checks preserved ten transformation ASTs and the workflow ASTs
+except shared row selection and one corrected nested docstring. All existing
+upload tests remain; eight cases add mixed rows, duplicate indices, diagnostics
+and dataclass identity coverage. Focused checks: 391 passed.
+
+CVAT extraction preserves all 23 endpoint signatures/bodies and decorator orders:
+14 read, seven non-idempotent write and two idempotent write policies. Added checks
+cover status versus transport errors, ambiguous append failures and concurrent
+context-local timeouts. Focused checks: 157 passed, plus 50 architecture cases.
+
+API/CLI comparison matches all 65 captured public exports (signatures, module and
+qualified names), all 20 parser help/action snapshots and a Connection pickle
+created before the split. The existing 90 API test functions and 124 assertion
+expressions were preserved; 26 serialization/identity cases were added. Focused
+checks: 393 passed. These temporary snapshots verify this move; lasting tests
+cover behavior and serialization without freezing every help string.
+
+The parent migrated timeout composition to the transport owner and added negative
+import/cycle checks for moved upload, API, mapping and parser modules. The first
+integrated suite passed 2625 tests with 93.36% branch-aware coverage (90% required).
+Ruff, formatting, strict mypy, all ten import contracts and effect checks passed.
+Vulture initially reported quoted Self imports after the API test split removed
+the last evaluated reference; evaluating the test annotation with its imported
+Self restored detection without adding exclusions. Scoped lint/type/Vulture checks
+then passed. Final post-triage verification follows below.
+
+## Installed artifacts and live services
+
+`uv build` produced wheel/sdist for 0.11.0. Isolated installs outside the checkout
+on CPython 3.12.13 and 3.13.14, constrained by the unchanged frozen lock, passed
+public/API imports, serialization, all 14 new module imports and root/verify/
+upload-dataset CLI help. Both environments passed `uv pip check`. Default installs
+had no ClearML and did not import it eagerly. Installing the extra on 3.12 loaded
+locked ClearML 2.1.12 explicitly; provider construction and local validation passed
+with service connections prohibited. Both task-owned environments were removed.
+
+Wheel and sdist contain all 174 current Python modules with byte-identical contents.
+The sdist's specification inventory is exactly `specs/baseline.md`, with no archive,
+bug-review or historical maintenance members. No artifact was published.
+
+The shared-infra capacity preflight returned GO. The armed branch integration gate
+ran all 37 live tests serially under `cveta2-codex-20261021-integration-kek5`:
+37 passed in 241.70 seconds, with 380 upstream warnings and no skips. The suite
+covered real fetch/cache/status, upload, issues, rate limiting, interrupted-upload
+recovery and explicit bundle publication. Teardown removed the owned CVAT project
+and storage, MinIO bucket and residual ClearML objects. Independent exact-tag
+listings afterward returned zero projects/tasks/storages, zero buckets and zero
+ClearML projects/tasks. The run-tag file was released. Shared stands were unchanged.
+
+## Mutation scope and final ordinary verification
+
+The scope follows every previously gated moved function and preserves the former
+fast-profile assembly functions at their new owners. Transport remains outside
+scope because the original SDK adapter was outside it; connection remains gated.
+No runtime function was excluded to obtain a pass.
+
+A complete first run exposed seven stale diagnostic IDs and real assertion gaps
+in resume-flag parsing, missing-label index alignment and empty StringDtype frames.
+Eleven new cases cover these behaviors. The empty-frame early guard is necessary:
+its `or` to `and` mutation triggers pandas' unsupported string reduction instead
+of accepting the empty table. The regenerated run kills all seven functional
+mutants identified by this triage.
+
+The 57 moved/renumbered equivalence entries were checked against exact diffs:
+56 match their original mutation expressions. One original cached whats-new
+mutant was unavailable; the current cutoff-to-None mutation was re-inspected
+against the client, where cutoff is diagnostic-only and returned cutoff and task
+membership remain unchanged. All existing equivalences still name live survivors.
+
+Moving upload parser declarations into a gated module also admits new mutants.
+Narrow `help=`/`metavar=` patterns exclude display literals. Line-based matching
+cannot exclude every keyword deletion or multiline literal without suppressing
+behavioral options on the same call. The remaining 51 entries were individually
+reviewed: 37 help and two metavar display mutations, eight identity conversions
+of already-string argv values and four redundant argparse None defaults. AST
+comparison confirmed no other keyword changes; nine argv/exit scenarios for each
+matched the unchanged parser contract. Existing policy treats presentation as
+outside behavioral mutation acceptance; no entire parser/function was excluded.
+
+The regenerated full run executed 8026 mutants: 7743 killed, 283 justified,
+zero no-tests, timeouts or unchecked mutants. The gate over these results passes
+with zero unexplained survivors and zero stale justifications. Configured full
+and fast wrapper outcomes are recorded after their replay completes.
+
+Post-triage ordinary verification: 2636 tests passed, 93.36% coverage; Ruff check,
+format check (351 files), strict mypy (303 source files), Vulture, ten import
+contracts, effect checks and diff whitespace checks passed. Python dependency
+pins and runtime behavior remain unchanged.
+
+## Companion usage source
+
+The isolated latest-origin corpus checkout contains commit `4475ebe`, updating
+only the cveta2 dataset-contract link plus task/release records for 0.4.2. The
+original corpus checkout and its unrelated work remain untouched. Discovery found
+all four skills; collection Markdown lint checked 59 files with zero issues;
+strict frontmatter/duplicate-key checks, all package-local links and the baseline
+heading passed. Architecture no-impact acceptance and bounded independent review
+passed. New behavior/model evaluations are unnecessary for this link-only change;
+none are claimed. Publication follows cveta2 delivery so the destination is live.
+
+## Final gates and fresh independent review
+
+Configured full wrapper replay passed: 8026 executed mutants, 7743 killed and
+283 individually justified survivors; zero unexplained survivors, stale entries,
+no-tests, timeouts or unchecked mutants. The fast wrapper passed its selected
+749 mutants: 728 killed and 21 justified. Scope grew from 58 to 68 files through
+moves/admission; all 440 previously scoped function/method definitions remain
+covered. No threshold, hook or behavioral scope was weakened.
+
+Fresh read-only reviewer `runtime_review` accepted the integrated runtime and
+architecture diff with no actionable findings. Independently checked all 65 public
+metadata snapshots, 20 parser snapshots, historical Connection serialization,
+runtime-resolvable annotation parity, 168 eligibility combinations, 23 endpoint
+AST/policy comparisons, all 90 prior API tests/124 assertion expressions and all
+440 previously mutation-scoped definitions. It inspected all 51 new equivalent
+mutations, reran the ten import contracts without cache, and passed effect and
+staged whitespace checks. It did not rerun full/live/mutation suites.
+
+Fresh read-only reviewer `baseline_review` independently verified all 239 archive
+hashes, 129 archive modes/current bug files, 110 native original documents,
+historical 115/13 checksum reconciliation, immutable source resolution, exact
+retirement inventory, 45 documentation checks and the next feature number 001.
+It found one P2 completeness issue: missing explicit unknown/empty mutation-profile
+preflight, newly-deleted-only/no-op task-mark counts, and preservation of --resume
+in echoed prompted commands. These three current contracts and the immutable
+September evidence link were added to the baseline; 45 documentation checks passed
+again. Focused reviewer reinspection accepted the fix with no remaining findings.
+This correction changes documentation only; implementation/regressions already
+preserved all three behaviors.
+
+The parent reconciled added packages/modules/tests, moved/deleted owners, runtime
+composition, mutation configuration, baseline/governance, packaging references and
+archival retirement against the complete task-owned diff. Original unrelated skill
+links and corpus edits are excluded. No runtime modifications followed verification
+or review. Architecture acceptance is recorded in architecture.json and validated
+before the runtime commit. Final publication and original-checkout retirement are
+recorded in the delivery section when complete.

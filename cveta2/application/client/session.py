@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from cveta2.application.client.assembly import build_name_to_frame
+from cveta2.application.client.mapping import build_name_to_frame
 
 if TYPE_CHECKING:
     from cveta2.application.ports.cvat import CvatApiPort

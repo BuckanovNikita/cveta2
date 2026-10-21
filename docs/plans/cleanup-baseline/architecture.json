@@ -187,6 +187,28 @@
         "imports",
         "effects"
       ]
+    },
+    {
+      "id": "timeout_composition",
+      "path": "cveta2/composition/runtime.py",
+      "change": "modify",
+      "responsibility": "Wire invocation-time network worker and timeout settings to production adapters",
+      "interface": "configure_data_timeout(float | None) and configure_network(NetworkConfig); unchanged timeout/worker contexts with the transport owner imported directly",
+      "layer": "composition",
+      "allowed_dependencies": [
+        "adapters",
+        "application settings",
+        "domain"
+      ],
+      "forbidden_dependencies": [
+        "interfaces",
+        "public facades"
+      ],
+      "effects": "Calls adapter timeout installation at the existing boundary; owns no SDK requests",
+      "contracts": [
+        "imports",
+        "effects"
+      ]
     }
   ],
   "contracts": [
@@ -210,35 +232,63 @@
       "id": "imports",
       "kind": "imports",
       "command": "uv run lint-imports && uv run python scripts/check_architecture.py && uv run pytest -n 0 tests/test_architecture.py",
-      "expectation": "Existing inward/SDK/facade/acyclic/effect rules pass, including forbidden-edge/effect negative tests."
+      "expectation": "Existing inward/SDK/facade/acyclic/effect rules pass, including forbidden-edge/effect negative tests.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/cleanup-baseline/verification-2026-10-21.md"
+      }
     },
     {
       "id": "behavior",
       "kind": "behavior",
-      "command": "uv run pytest -n auto --cov --cov-report=term-missing",
-      "expectation": "Full non-live suite passes with configured coverage; public identity, API/CLI, upload recovery and retry behavior remain compatible."
+      "command": "uv run --frozen pytest -n 4 -q --cov --cov-report=term-missing",
+      "expectation": "Full non-live suite passes with configured coverage; public identity, API/CLI, upload recovery and retry behavior remain compatible.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/cleanup-baseline/verification-2026-10-21.md"
+      }
     },
     {
       "id": "mutation",
       "kind": "behavior",
       "command": "./scripts/mutation_test.sh --profile fast && ./scripts/mutation_test.sh --profile full",
-      "expectation": "Moved scope is preserved with zero unexplained survivors and zero stale equivalence entries."
+      "expectation": "Moved scope is preserved with zero unexplained survivors and zero stale equivalence entries.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/cleanup-baseline/verification-2026-10-21.md"
+      }
     },
     {
       "id": "integration",
       "kind": "behavior",
-      "command": "./scripts/integration_test.sh tests/integration",
-      "expectation": "Serial live suite passes under an owned tag; lifecycle setup and exact-tag cleanup separately recorded."
+      "command": "INFRA_HARNESS=codex ./scripts/integration_gate.sh",
+      "expectation": "Serial live suite passes under an owned tag; lifecycle setup and exact-tag cleanup separately recorded.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/cleanup-baseline/verification-2026-10-21.md"
+      }
     },
     {
       "id": "documentation",
       "kind": "documentation",
       "command": "uv run pytest -n 0 tests/test_docs.py && git diff --check",
-      "expectation": "Maintained local links/anchors, API/CLI/configuration documentation and baseline recovery/numbering/packaging assertions pass."
+      "expectation": "Maintained local links/anchors, API/CLI/configuration documentation and baseline recovery/numbering/packaging assertions pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/cleanup-baseline/verification-2026-10-21.md"
+      }
     }
   ],
   "documentation": "specs/baseline.md absorbs current contracts; immutable archive manifest/source links preserve history. .specify/memory/architecture.md and governance map final ownership and baseline-based feature workflow. Russian guides, AGENTS, API docstring, docs checks and sdist include point to the baseline. Companion corp-skills/skills/cveta2/references/usage.md contract link is updated and validated in its repository.",
   "review": {
-    "status": "pending"
+    "status": "accepted",
+    "reviewer": "Fresh read-only runtime_review and baseline_review; parent integration reconciliation",
+    "evidence": "docs/plans/cleanup-baseline/verification-2026-10-21.md",
+    "reconciliation": "Compared complete changes from f6717f0211169f8f94c78da2bfa8dee86bfab602 plus staged runtime additions/moves/deletions. Runtime reviewer accepted ownership, interfaces, inward dependencies, effects and retained mutation scope; documentation reviewer accepted baseline/archive/governance after three missing contracts were restored. Includes composition timeout wiring and new negative boundary fixtures. Unrelated original-checkout skill links and corpus edits remain excluded; archive checkpoint preserves every retired file."
   }
 }

@@ -1,23 +1,12 @@
-"""Pure assembly helpers: DTOs -> domain records and frame/job lookups.
+"""Assemble fetched CVAT facts into annotation and deleted-frame records."""
 
-Moved out of ``client.py`` so the client holds only orchestration; these
-functions are deterministic transformations over DTOs and models.
-"""
-
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-import pandas as pd
+from typing import TYPE_CHECKING
 
 from cveta2.application.client.context import _TaskContext
 from cveta2.application.client.extractors import _collect_shapes
-from cveta2.application.ports.dtos import NewIssue, NewShape
 from cveta2.domain.models import DeletedImage, ImageWithoutAnnotations
-from cveta2.domain.paths import names_with_basename_fallback
 
 if TYPE_CHECKING:
-    from collections.abc import Hashable, Mapping
-
     from cveta2.application.ports.dtos import (
         RawAnnotations,
         RawDataMeta,
@@ -25,34 +14,6 @@ if TYPE_CHECKING:
         RawJob,
     )
     from cveta2.domain.models import AnnotationRecord, TaskInfo
-
-BBOX_COLUMNS = ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
-
-
-def build_name_to_frame(data_meta: "RawDataMeta") -> dict[str, int]:
-    """Build frame-name -> frame-index mapping (with basename fallback)."""
-    return names_with_basename_fallback(
-        (frame.name, idx) for idx, frame in enumerate(data_meta.frames)
-    )
-
-
-def find_job_for_frame(jobs: "list[RawJob]", frame: int) -> int | None:
-    """Return the job ID whose [start_frame, stop_frame] range contains *frame*."""
-    for job in jobs:
-        if job.start_frame <= frame <= job.stop_frame:
-            return job.id
-    return None
-
-
-def issue_position_from_row(row: "Mapping[Hashable, Any]") -> list[float] | None:
-    """Return the row's bbox as an issue rectangle, or None without full bbox."""
-    coords: list[float] = []
-    for col in BBOX_COLUMNS:
-        value = row.get(col)
-        if value is None or pd.isna(value):
-            return None
-        coords.append(float(value))
-    return coords
 
 
 def task_to_records(  # noqa: PLR0913, PLR0917
@@ -109,92 +70,3 @@ def task_to_records(  # noqa: PLR0913, PLR0917
         list(task_annotations) + task_without,
         task_deleted,
     )
-
-
-@dataclass
-class ShapeBuildResult:
-    """Shapes to upload plus per-reason skip diagnostics."""
-
-    shapes: list[NewShape] = field(default_factory=list)
-    unknown_images: int = 0
-    unknown_labels: list[str] = field(default_factory=list)
-
-
-def build_upload_shapes(
-    annotations_df: pd.DataFrame,
-    name_to_frame: dict[str, int],
-    label_name_to_id: dict[str, int],
-) -> ShapeBuildResult:
-    """Translate annotated rows into ``NewShape`` DTOs (pure).
-
-    Rows whose image is absent from *name_to_frame* or whose label is
-    unknown are counted/collected in the returned result instead of being
-    uploaded.
-    """
-    has_annotation = annotations_df["instance_label"].notna() & annotations_df[
-        list(BBOX_COLUMNS)
-    ].notna().all(axis=1)
-    result = ShapeBuildResult()
-    for row in annotations_df[has_annotation].to_dict("records"):
-        img_name = str(row["image_name"])
-        label_name = str(row["instance_label"])
-        if img_name not in name_to_frame:
-            result.unknown_images += 1
-            continue
-        if label_name not in label_name_to_id:
-            result.unknown_labels.append(label_name)
-            continue
-        result.shapes.append(
-            NewShape(
-                frame=name_to_frame[img_name],
-                label_id=label_name_to_id[label_name],
-                points=[float(row[col]) for col in BBOX_COLUMNS],
-            ),
-        )
-    return result
-
-
-@dataclass
-class IssueBuildResult:
-    """Issues to open plus per-reason skip diagnostics (image names)."""
-
-    issues: list[NewIssue] = field(default_factory=list)
-    unknown_images: list[str] = field(default_factory=list)
-    unmapped_frames: list[str] = field(default_factory=list)
-    missing_bbox: list[str] = field(default_factory=list)
-
-
-def build_task_issues(
-    new_rows: pd.DataFrame,
-    name_to_frame: dict[str, int],
-    jobs: "list[RawJob]",
-) -> IssueBuildResult:
-    """Translate ``issue_state == "new"`` rows into ``NewIssue`` DTOs (pure).
-
-    Rows with an unknown image, no job for the frame, or an incomplete
-    bbox are recorded in the returned result rather than opened.
-    """
-    result = IssueBuildResult()
-    for row in new_rows.to_dict("records"):
-        image_name = str(row["image_name"])
-        frame = name_to_frame.get(image_name)
-        if frame is None:
-            result.unknown_images.append(image_name)
-            continue
-        position = issue_position_from_row(row)
-        if position is None:
-            result.missing_bbox.append(image_name)
-            continue
-        job_id = find_job_for_frame(jobs, frame)
-        if job_id is None:
-            result.unmapped_frames.append(image_name)
-            continue
-        result.issues.append(
-            NewIssue(
-                job_id=job_id,
-                frame=frame,
-                position=position,
-                message=str(row["issue_text"]),
-            ),
-        )
-    return result

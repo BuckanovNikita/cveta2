@@ -1,7 +1,7 @@
 """Configure shared execution policies before constructing external clients."""
 
 from cveta2.adapters.config.settings import NetworkConfig
-from cveta2.adapters.cvat.sdk_adapter import install_global_request_timeout
+from cveta2.adapters.cvat.transport import install_global_request_timeout
 from cveta2.adapters.execution.concurrency import configure_workers
 from cveta2.adapters.execution.retry import configure_retries
 from cveta2.adapters.s3.utils import set_default_data_timeout

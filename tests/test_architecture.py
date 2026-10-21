@@ -141,7 +141,16 @@ def _synthetic_graph() -> ImportGraph:
         ("cveta2.application.client.base", "cveta2.client"),
         ("cveta2.adapters.cvat.sdk_adapter", "cveta2.adapters.s3.utils"),
         ("cveta2.application.use_cases.fetch", "cvat_sdk"),
-        ("cveta2.interfaces.api", "boto3"),
+        ("cveta2.interfaces.api.fetch", "boto3"),
+        (
+            "cveta2.application.use_cases.upload.recovery",
+            "cveta2.adapters.cvat.transport",
+        ),
+        (
+            "cveta2.application.client.upload_mapping",
+            "cveta2.application.use_cases.upload.planning",
+        ),
+        ("cveta2.adapters.cvat.transport", "cveta2.interfaces.api.connection"),
         ("cveta2.adapters.s3.upload", "cveta2.application.use_cases.upload"),
         ("cveta2.composition.client", "clearml"),
         ("cveta2.application.use_cases.fetch", "questionary"),
@@ -158,7 +167,7 @@ def test_import_contracts_reject_outward_or_sdk_edges(
 def test_import_contracts_accept_inward_edges() -> None:
     graph = _synthetic_graph()
     for importer, imported in [
-        ("cveta2.interfaces.api", "cveta2.composition.client"),
+        ("cveta2.interfaces.api.connection", "cveta2.composition.client"),
         ("cveta2.composition.client", "cveta2.adapters.cvat.connection"),
         ("cveta2.application.client.base", "cveta2.application.ports.cvat"),
         ("cveta2.adapters.cvat.sdk_adapter", "cvat_sdk"),
@@ -185,14 +194,22 @@ def test_import_contracts_reject_unclassified_runtime_module() -> None:
     assert not _check_contract(_contracts()[0], graph)
 
 
-def test_import_contracts_reject_sibling_cycle() -> None:
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("cveta2.domain.models", "cveta2.domain.partition"),
+        ("cveta2.interfaces.api.fetch", "cveta2.interfaces.api.connection"),
+        (
+            "cveta2.application.use_cases.upload.orchestration",
+            "cveta2.application.use_cases.upload.recovery",
+        ),
+        ("cveta2.interfaces.cli", "cveta2.interfaces.commands._parsers"),
+    ],
+)
+def test_import_contracts_reject_sibling_cycle(first: str, second: str) -> None:
     graph = _synthetic_graph()
-    graph.add_import(
-        importer="cveta2.domain.models", imported="cveta2.domain.partition"
-    )
-    graph.add_import(
-        importer="cveta2.domain.partition", imported="cveta2.domain.models"
-    )
+    graph.add_import(importer=first, imported=second)
+    graph.add_import(importer=second, imported=first)
     config = next(c for c in _contracts() if c["type"] == "acyclic_siblings")
     assert not _check_contract(config, graph)
 

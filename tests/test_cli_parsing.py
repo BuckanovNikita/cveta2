@@ -284,6 +284,84 @@ def test_parser_rejects_invalid_argv(argv: list[str]) -> None:
         _parse(argv)
 
 
+@pytest.mark.parametrize("dataset_flag", ["--dataset", "-d"])
+def test_upload_parser_preserves_optional_defaults(dataset_flag: str) -> None:
+    args = _parse(["upload", dataset_flag, "dataset.csv"])
+
+    assert args.dataset == "dataset.csv"
+    assert args.project is None
+    assert args.labels is None
+    assert args.in_progress is None
+    assert args.image_dir is None
+    assert args.name is None
+    assert args.complete is False
+    assert args.mark_all_deleted is False
+    assert args.resume is False
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        [],
+        ["--dataset"],
+        ["-d", "dataset.csv", "--labels"],
+        ["-d", "dataset.csv", "--labels", "--resume"],
+        ["-d", "dataset.csv", "--resume", "false"],
+    ],
+    ids=[
+        "missing-dataset",
+        "missing-path",
+        "missing-label",
+        "label-before-flag",
+        "flag-value",
+    ],
+)
+def test_upload_parser_rejects_missing_values_and_boolean_arguments(
+    options: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as caught:
+        _parse(["upload", *options])
+
+    assert caught.value.code == 2
+
+
+def test_upload_dispatch_forwards_selected_values_and_flags() -> None:
+    with patch("cveta2.interfaces.cli.run_upload") as handler:
+        CliApp().run(
+            [
+                "upload",
+                "--project",
+                "team/17",
+                "--dataset",
+                "dataset.csv",
+                "--labels",
+                "001",
+                "red fox",
+                "--in-progress",
+                "pending.csv",
+                "--image-dir",
+                "image files",
+                "--name",
+                "batch 01",
+                "--complete",
+                "--mark-all-deleted",
+                "--resume",
+            ]
+        )
+
+    handler.assert_called_once()
+    args = handler.call_args.args[0]
+    assert args.project == "team/17"
+    assert args.dataset == "dataset.csv"
+    assert args.labels == ["001", "red fox"]
+    assert args.in_progress == "pending.csv"
+    assert args.image_dir == "image files"
+    assert args.name == "batch 01"
+    assert args.complete is True
+    assert args.mark_all_deleted is True
+    assert args.resume is True
+
+
 _DISPATCH_CASES: list[tuple[str, list[str]]] = [
     ("run_fetch", ["fetch", "-p", "1", "-o", "out"]),
     ("run_fetch_task", ["fetch-task", "-p", "1", "-t", "1", "-o", "out"]),

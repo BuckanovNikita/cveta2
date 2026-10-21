@@ -10,6 +10,7 @@ from loguru import logger
 
 from cveta2.composition.workflows import resolved_task
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import JOB_STAGES
 from cveta2.interfaces.commands import interactive
 from cveta2.interfaces.commands._bootstrap import open_client
 from cveta2.interfaces.commands._helpers import (
@@ -17,6 +18,7 @@ from cveta2.interfaces.commands._helpers import (
     project_cli_spec,
     resolve_project,
 )
+from cveta2.interfaces.commands._parsers import add_project_arg
 
 if TYPE_CHECKING:
     import argparse
@@ -35,6 +37,83 @@ STATE_CLI_TO_CVAT: "dict[str, JobState]" = {
 
 
 _CONFIRM_HINT = "Запустите команду с флагом --yes."
+
+
+def _add_task_common_args(parser: "argparse.ArgumentParser") -> None:
+    """Add ``--project`` / ``--task`` arguments shared by task actions."""
+    add_project_arg(parser)
+    parser.add_argument(
+        "--task",
+        "-t",
+        type=str,
+        required=True,
+        help="Task ID or name.",
+    )
+
+
+def configure_task_mark_deleted(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``task-mark-deleted`` command arguments."""
+    _add_task_common_args(parser)
+    parser.add_argument(
+        "--frame",
+        nargs="+",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Frame ID(s) to mark as deleted: --frame 1 2.",
+    )
+    parser.add_argument(
+        "--image",
+        nargs="+",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Image name(s) to mark as deleted: --image a.jpg b.jpg.",
+    )
+
+
+def configure_task_drop_label(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``task-drop-label`` command arguments."""
+    _add_task_common_args(parser)
+    parser.add_argument(
+        "--label",
+        required=True,
+        help="Label name whose annotations will be deleted.",
+    )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip the confirmation prompt.",
+    )
+
+
+def configure_task_delete(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``task-delete`` command arguments."""
+    _add_task_common_args(parser)
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip the confirmation prompt.",
+    )
+
+
+def configure_task_status(parser: "argparse.ArgumentParser") -> None:
+    """Declare the ``task-status`` command arguments."""
+    _add_task_common_args(parser)
+    parser.add_argument(
+        "--stage",
+        choices=JOB_STAGES,
+        default=None,
+        help="Job stage to set on every job of the task.",
+    )
+    parser.add_argument(
+        "--state",
+        choices=sorted(STATE_CLI_TO_CVAT),
+        default=None,
+        help="Job state to set on every job of the task.",
+    )
 
 
 @contextmanager
