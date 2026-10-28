@@ -59,14 +59,14 @@ remain compatibility facades; canonical packages never import those facades.
   - `resolve.py` - `ORG/PROJECT` parsing, organization switching and project-from-task inference.
   - `task_ops.py` - Task-operation orchestration and supplied invalidation.
 - **`cveta2/adapters/`** - Outgoing effects:
-  - `cvat/{sdk_adapter,sdk_requests,sdk_convert,connection,transport,storage}.py` - CVAT SDK
+  - `cvat/{sdk_adapter,sdk_requests,sdk_convert,connection,transport,diagnostics,storage}.py` - CVAT SDK
     client construction, requests, opaque SDK objects to DTOs, cloud-storage values
     and translation to `CvatApiError`. `transport.py` owns context-local timeouts
     and the explicit read, non-idempotent-write and idempotent-write decorators;
     endpoint methods select one policy without changing wrapper order. All
     `cvat_sdk` imports stay here.
   - `s3/{download,upload,images,task_cache,types,utils,diagnostics}.py` - Boto3/S3
-    construction, key probing/listing, upload/download/sync, shared annotation-cache
+    construction, direct-key downloads/listing fallback, upload/download/sync, shared annotation-cache
     mirrors, per-object transfer/retry outcomes and credential diagnostics.
     `boto3`/`botocore` imports stay inside `adapters/s3/`.
   - `config/{settings,projects_cache}.py` - YAML/environment/preset loading and
@@ -258,11 +258,30 @@ when skipping other shape types. Both fetch paths share this extraction behavior
 run concurrently through the supplied `ConcurrentRunner` with the resolved CVAT worker limit; results
 are merged positionally so the output does not depend on completion order.
 
-The file port writes each task's rows to `output/.tasks/task_{id}.csv` as they arrive.
-That directory is **removed after the merge** unless `--save-tasks` is given, and
-nothing ever reads it back — it is a debugging artefact, not a resume point. The
-only `--resume` in the project belongs to `upload`, and it reads its manifest
-from `~/.cache/cveta2/uploads/`, not from here.
+The file port writes each task's rows to `output/.tasks/task_{id}.csv` only
+when `save_tasks=True`. Ordinary fetch neither creates nor removes this directory.
+It remains a debug artifact, never a resume point. FetchContext retains a complete
+unfiltered task-ID snapshot separately from selected tasks; pruning consumes it
+without another listing. Promotion joins before fresh inventory. Later deletions
+reconcile next run. Stage wall times use the injected clock; worker-time sums and
+cached/fetched/skipped/degraded totals are labelled separately.
+
+Small image batches (up to 2,000 uncached images) GET canonical keys directly;
+only missing-key responses enter prefix/basename fallback. Larger batches list
+first; images cached at their expected canonical destinations make no S3 request.
+Request auth/configuration/exhausted connection failures abort; body/write
+failures count with atomic recovery. File
+path enrichment memoizes confinement/resolution per unique destination per pass,
+while retaining lexical validation and symlink escape rejection.
+
+Domain errors own immutable request diagnostics exposed through the exceptions
+facade. CVAT adapters capture actual failed HTTP calls, including nested pages and
+comments, sanitize allowlisted context and preserve causes. A per-pool request
+wrapper copies the effective retry policy and changes only raise_on_status; shared
+pool settings and retry method/budget restrictions remain intact. Bootstrap and
+already-used injected clients are covered; SDK version checks remain advisory.
+Context-local state is reset after each operation/request. Final 502/503/504 statuses
+reach established task-level 5xx policy, and required-read 429 still aborts.
 
 ## Remediation contracts
 

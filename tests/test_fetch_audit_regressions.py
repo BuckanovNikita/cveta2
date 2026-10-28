@@ -260,4 +260,11 @@ def test_downloaded_paths_survive_csv_and_cache_hit(
             row = result.dataset.iloc[0]
             assert row["s3_image_path"] == "images/nested/a.jpg"
             assert row["image_path"] == str(tmp_path / "images" / "nested" / "a.jpg")
-    assert s3.get_calls == ["bucket/images/nested/a.jpg"]
+    expected = ["bucket/images/nested/a.jpg"]
+    if frame_name in {"a.jpg", "stale/a.jpg"}:
+        # Each pass first tries the canonical key. The fallback destination is
+        # cached on pass two, so its bytes are downloaded only once.
+        missing_key = f"bucket/images/{frame_name}"
+        expected = [missing_key, *expected, missing_key]
+    assert s3.get_calls == expected
+    assert s3.head_calls == []

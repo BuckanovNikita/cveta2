@@ -8,18 +8,22 @@ pending images are counted as failed. Already-cached files are skipped.
 
 from typing import TYPE_CHECKING, NamedTuple
 
+from botocore.exceptions import ClientError
 from loguru import logger
 
 from cveta2.adapters.execution.concurrency import Workers, run_concurrent
+from cveta2.adapters.execution.retry import network_retry
 from cveta2.adapters.files.materialization import _confined_destination
 from cveta2.adapters.files.shared import ensure_shared_dir, replace_shared_bytes
 from cveta2.adapters.s3.types import Transfer
 from cveta2.adapters.s3.utils import (
+    _NOT_FOUND_CODES,
+    S3_TRANSFER_ERRORS,
+    _should_retry_s3,
     list_s3_objects,
     make_s3_client,
     run_s3_transfers,
     s3_get_bytes,
-    s3_object_exists,
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.paths import (
@@ -52,13 +56,10 @@ _MISSING_PREVIEW_LIMIT = 10
 """How many not-found image names the warning lists before collapsing the rest."""
 
 _DIRECT_KEY_PROBE_LIMIT = 2000
-"""Above this many pending images, list the prefix instead of probing keys.
+"""Above this many pending images, list the prefix before downloading.
 
-Probing costs one HEAD per image; listing costs one round-trip per thousand
-keys under the whole project prefix — every task's images, not just the
-fetched one's.  Probing therefore wins by orders of magnitude when a fetch
-wants a few images out of a large project, and loses when it wants nearly
-all of them, which is what a whole-project fetch does.
+Small batches download their canonical key immediately; only a missing response
+pays for the whole-prefix listing and basename fallback.
 """
 
 
@@ -212,6 +213,23 @@ class ImageDownloader:
                 )
             return {}
         s3_client = make_s3_client(project_cloud_storage.endpoint_url or None)
+        resolved: dict[str, str] = {}
+        if len(pending) <= _DIRECT_KEY_PROBE_LIMIT:
+            direct = [
+                Transfer(
+                    name=name,
+                    key=_canonical_frame_key(project_cloud_storage.prefix, frame),
+                    path=self._dest_path(frame, project_cloud_storage),
+                )
+                for name, frame in pending.items()
+            ]
+            absent = _download_image_batch(
+                s3_client, project_cloud_storage.bucket, direct, stats
+            )
+            resolved = {t.name: t.key for t in direct if t.name not in absent}
+            pending = {name: pending[name] for name in absent}
+            if not pending:
+                return resolved
         name_to_key = self._resolve_s3_keys(s3_client, project_cloud_storage, pending)
         to_download: list[Transfer] = []
         missing: list[str] = []
@@ -232,14 +250,16 @@ class ImageDownloader:
                 f"{', '.join(missing[:_MISSING_PREVIEW_LIMIT])}"
                 f"{'...' if len(missing) > _MISSING_PREVIEW_LIMIT else ''}"
             )
-        _download_pending(
-            s3_client,
-            project_cloud_storage.bucket,
-            to_download,
-            stats,
-            _PROJECT_STORAGE_PROGRESS,
+        vanished = _download_image_batch(
+            s3_client, project_cloud_storage.bucket, to_download, stats
         )
-        return name_to_key
+        if vanished:
+            stats.failed += len(vanished)
+            logger.warning(
+                "Объекты исчезли с S3 после listing: "
+                f"{', '.join(vanished[:_MISSING_PREVIEW_LIMIT])}"
+            )
+        return resolved | name_to_key
 
     def _resolve_s3_keys(
         self,
@@ -247,31 +267,14 @@ class ImageDownloader:
         project_cloud_storage: "CloudStorageInfo",
         pending: "dict[str, str]",
     ) -> "dict[str, str]":
-        """Return ``{image_name: s3_key}`` for the pending images found on S3.
-
-        The frame name CVAT reports is normally the object key below the
-        storage prefix, so a small batch can confirm each key with one
-        HEAD.  The alternative — and the fallback — is walking the whole
-        project prefix, which holds every task's images and is a serial
-        chain of round-trips per thousand keys; a fetch of one task used
-        to pay for all of it.  Names no direct probe confirms go through
-        that listing, which is also what resolves a bare file name
-        against a nested key.
-        """
+        """Resolve pending images by listing, retaining full-key precedence."""
         resolved: dict[str, str] = {}
-        unresolved = pending
-        if len(pending) <= _DIRECT_KEY_PROBE_LIMIT:
-            resolved, unresolved = self._probe_expected_keys(
-                s3_client, project_cloud_storage, pending
-            )
-            if not unresolved:
-                return resolved
         name_to_key = self._build_project_storage_name_map(
             s3_client,
             project_cloud_storage.bucket,
             project_cloud_storage.prefix,
         )
-        for image_name, frame_ref in unresolved.items():
+        for image_name, frame_ref in pending.items():
             canonical = _canonical_frame_key(project_cloud_storage.prefix, frame_ref)
             relative = strip_key_prefix(canonical, project_cloud_storage.prefix)
             s3_key = (
@@ -282,40 +285,6 @@ class ImageDownloader:
             if s3_key is not None:
                 resolved[image_name] = s3_key
         return resolved
-
-    @staticmethod
-    def _probe_expected_keys(
-        s3_client: "S3Client",
-        project_cloud_storage: "CloudStorageInfo",
-        pending: "dict[str, str]",
-    ) -> "tuple[dict[str, str], dict[str, str]]":
-        """Split *pending* into images found at their expected key, and the rest.
-
-        Returns ``({image_name: s3_key}, {image_name: frame_ref})``.
-        """
-        entries = list(pending.items())
-        keys = [
-            _canonical_frame_key(project_cloud_storage.prefix, frame_ref)
-            for _, frame_ref in entries
-        ]
-        found = run_concurrent(
-            keys,
-            lambda key: s3_object_exists(s3_client, project_cloud_storage.bucket, key),
-            max_workers=Workers.s3,
-            catch=(),
-            desc="Locating images on S3",
-            unit="img",
-        )
-        resolved: dict[str, str] = {}
-        unresolved: dict[str, str] = {}
-        for (image_name, frame_ref), key, exists in zip(
-            entries, keys, found, strict=True
-        ):
-            if exists is True:
-                resolved[image_name] = key
-            else:
-                unresolved[image_name] = frame_ref
-        return resolved, unresolved
 
     @staticmethod
     def _build_project_storage_name_map(
@@ -332,6 +301,75 @@ class ImageDownloader:
         """
         pairs = list_s3_objects(s3_client, bucket, prefix)
         return names_with_basename_fallback((name, key) for key, name in pairs)
+
+
+class _ImageTransferError(Exception):
+    """A response body or local write failed after the request succeeded."""
+
+
+def _retry_image_read(error: BaseException) -> bool:
+    """Preserve S3 retries while retaining the phase of a body failure."""
+    if isinstance(error, _ImageTransferError):
+        return error.__cause__ is not None and _should_retry_s3(error.__cause__)
+    return _should_retry_s3(error)
+
+
+@network_retry(_retry_image_read, label="S3")
+def _image_bytes(s3_client: "S3Client", bucket: str, key: str) -> bytes:
+    """Read one object per active worker; request failures keep their identity."""
+    response = s3_client.get_object(Bucket=bucket, Key=key)
+    try:
+        # The opaque boto3 response owns its streaming-body type. Reading happens
+        # inside the retry boundary; no batch of response bodies is retained.
+        data: bytes = response["Body"].read()
+    except S3_TRANSFER_ERRORS as error:
+        raise _ImageTransferError(f"Чтение тела S3 {key}: {error}") from error
+    return data
+
+
+def _download_image(s3_client: "S3Client", bucket: str, transfer: Transfer) -> bool:
+    """Return False only for a missing key; abort on other request failures."""
+    try:
+        data = _image_bytes(s3_client, bucket, transfer.key)
+    except ClientError as error:
+        if str(error.response.get("Error", {}).get("Code")) in _NOT_FOUND_CODES:
+            return False
+        raise
+    except KeyError as error:
+        # Malformed response fixtures/SDK payloads are counted as transfer
+        # failures, as before; they never trigger a missing-key lookup.
+        raise _ImageTransferError(f"Некорректный ответ S3 {transfer.key}") from error
+    try:
+        replace_shared_bytes(transfer.path, data)
+    except OSError as error:
+        raise _ImageTransferError(f"Запись {transfer.path}: {error}") from error
+    return True
+
+
+def _download_image_batch(
+    s3_client: "S3Client", bucket: str, transfers: list[Transfer], stats: DownloadStats
+) -> list[str]:
+    """Count successes/body/write failures and return missing names in order."""
+    outcomes = run_concurrent(
+        transfers,
+        lambda transfer: _download_image(s3_client, bucket, transfer),
+        max_workers=Workers.s3,
+        catch=(_ImageTransferError,),
+        desc=_PROJECT_STORAGE_PROGRESS.desc,
+        unit=_PROJECT_STORAGE_PROGRESS.unit,
+    )
+    missing: list[str] = []
+    for transfer, outcome in zip(transfers, outcomes, strict=True):
+        if isinstance(outcome, _ImageTransferError):
+            stats.failed += 1
+            logger.error(
+                f"Не удалось загрузить {transfer.name} (key={transfer.key}): {outcome}"
+            )
+        elif outcome is False:
+            missing.append(transfer.name)
+        else:
+            stats.downloaded += 1
+    return missing
 
 
 def _download_one_s3(

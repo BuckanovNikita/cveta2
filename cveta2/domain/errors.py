@@ -4,6 +4,27 @@ All library-specific exceptions inherit from ``Cveta2Error`` so consumers
 can catch ``except Cveta2Error`` to handle any cveta2 failure.
 """
 
+from dataclasses import dataclass
+from datetime import datetime
+
+
+@dataclass(frozen=True)
+class CvatRequestDiagnostics:
+    """Sanitized facts about one failed CVAT HTTP request.
+
+    The adapter supplies the UTC timestamp and bounds/redacts text. Tuples keep
+    resource and correlation identifiers immutable without exposing SDK types.
+    """
+
+    operation: str
+    method: str
+    endpoint: str
+    resource_ids: tuple[tuple[str, int], ...]
+    timestamp_utc: datetime
+    status_code: int
+    request_ids: tuple[tuple[str, str], ...] = ()
+    response_summary: str = ""
+
 
 class Cveta2Error(Exception):
     """Base exception for all cveta2 errors."""
@@ -44,11 +65,14 @@ class CvatApiError(Cveta2Error):
         message: str,
         status_code: int = 0,
         retry_after: float | None = None,
+        *,
+        diagnostics: CvatRequestDiagnostics | None = None,
     ) -> None:
         """Store the HTTP status code and throttle hint alongside the message."""
         super().__init__(message)
         self.status_code = status_code
         self.retry_after = retry_after
+        self.diagnostics = diagnostics
 
 
 class ClearmlPublishError(Cveta2Error):

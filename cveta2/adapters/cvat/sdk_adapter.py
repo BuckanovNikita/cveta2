@@ -31,6 +31,7 @@ from cveta2.adapters.cvat.transport import (
     cvat_idempotent_write,
     cvat_non_idempotent_write,
     cvat_read,
+    install_request_capture,
 )
 from cveta2.application.ports.dtos import (
     RawIssue,
@@ -77,6 +78,7 @@ class SdkCvatApiAdapter:
     def __init__(self, client: "CvatSdkClient") -> None:
         """Wrap an already-opened ``cvat_sdk`` client."""
         self.client = client
+        install_request_capture()
 
     @cvat_read
     def list_organizations(self) -> list[OrganizationInfo]:

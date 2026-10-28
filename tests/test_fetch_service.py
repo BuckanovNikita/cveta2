@@ -670,20 +670,13 @@ class TestTaskCsvDirectory:
 
         assert len(partition.dataset) > 0
 
-    def test_a_cleanup_failure_does_not_fail_the_fetch(
+    def test_ordinary_fetch_never_attempts_task_directory_cleanup(
         self,
         normal_fake: LoadedFixtures,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Removing ``.tasks/`` is best effort — the annotations are the point.
-
-        The stand-in mirrors ``shutil.rmtree``'s own contract (``ignore_errors``
-        swallows the failure, its absence re-raises), so the assertion is that
-        the call site passes it — reached through the real call, not by
-        inspecting arguments. A shared output directory owned by another user
-        is the case that provokes this for real.
-        """
+        """An ordinary fetch never removes a possibly unrelated debug directory."""
         removals: list[Path] = []
 
         def rmtree(path: Path, *, ignore_errors: bool = False) -> None:
@@ -697,7 +690,7 @@ class TestTaskCsvDirectory:
 
         partition = _fetch_project(FakeCvatApi(fake), fake, out, FetchOptions())
 
-        assert removals == [out / ".tasks"]
+        assert removals == []
         assert len(partition.dataset) > 0
 
     def test_a_skipped_task_does_not_end_the_loop(

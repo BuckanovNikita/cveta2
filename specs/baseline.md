@@ -92,7 +92,14 @@ ones carrying `Retry-After`. Idempotent deletion/job-state replacement retains
 its retry policy. Exhausted 429 errors abort fetch; ordinary per-task 5xx failures
 warn, identify skipped tasks and continue unless `CVETA2_RAISE_ON_FAILURE` is
 enabled. S3 authorization/not-found failures are not indiscriminately retried.
-Configured retry budgets, SDK interaction and worker settings remain documented
+Exhausted SDK 502/503/504 responses retain their final status and follow this
+task policy, rather than becoming unidentified transport failures. Optional
+issue-read failures remain degraded results. `CvatApiError` accepts optional
+keyword-only `diagnostics`, with neutral `CvatRequestDiagnostics` exported from
+the exceptions facade. Actual failing HTTP context, UTC time, status, resource
+IDs, allowlisted correlation IDs and bounded sanitized summaries are available;
+credentials/cookies/raw HTML are excluded. Retry logs count cveta2 attempts,
+not all underlying HTTP attempts. Configured retry budgets, SDK interaction and worker settings remain documented
 in the configuration guide.
 
 `doctor` returns 0 when required CVAT configuration checks succeed and 1 when
@@ -198,6 +205,23 @@ siblings are skipped; legacy siblings lacking state columns retain ID membership
 The displayed cutoff is the highest completed task ID, falling back to the highest
 usable ID, and is informational. Required baseline stage/state/task columns and
 at least one usable task ID must exist; obsolete `task_status` CSVs need refetching.
+
+Ordinary fetch does not create, write or remove `.tasks`; `save_tasks=True`
+retains per-task debug CSVs. Full fetch prunes from its complete unfiltered task-ID
+snapshot, obtained after any promotion, without a second inventory. Deletions after
+the snapshot reconcile next run. Stage wall time is distinct from summed worker
+time; cached/fetched/skipped/degraded totals explicitly report incomplete output.
+
+For at most 2,000 uncached images, canonical S3 keys download with GET and no HEAD;
+only missing-key replies enter listing/basename fallback. Larger batches list first;
+images cached at their expected canonical destinations need zero S3 requests.
+Stale frame names requiring basename fallback rediscover the alternate key each
+run before checking its local file; cached alternate bytes are not downloaded again.
+Request authorization/configuration and
+exhausted connection failures abort; interrupted body/local writes count as failed
+transfers, retaining retries, bounded worker memory and atomic writes. Filesystem
+confinement/resolution is once per unique destination per enrichment pass; lexical
+validation and symlink rejection remain.
 
 ### Geometry, identity and issues
 

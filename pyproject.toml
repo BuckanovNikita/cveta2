@@ -564,9 +564,15 @@ full = []
 # Image IO. Bar captions are now excluded by the `desc=`/`unit=` line
 # patterns above. The rest are counters assigned rather than incremented
 # where the counter is provably still zero at that point.
+"cveta2.adapters.s3.download.x__download_pending__mutmut_24" = "stats.failed = failed; only S3Syncer calls this helper, once per fresh stats object before any failure writer"
+"cveta2.adapters.s3.download.x__download_image__mutmut_22" = "only malformed-response exception prose changes; the counted failure type and original cause remain intact"
+"cveta2.adapters.s3.download.x__download_image__mutmut_27" = "only local-write exception prose changes; the counted failure type and original cause remain intact"
+"cveta2.adapters.s3.download.x__download_image_batch__mutmut_6" = "desc=None removes only the transfer progress caption"
+"cveta2.adapters.s3.download.x__download_image_batch__mutmut_24" = "zip strict=None; ordered run_concurrent returns exactly one outcome per transfer"
+"cveta2.adapters.s3.download.x__download_image_batch__mutmut_27" = "zip strict omitted; ordered run_concurrent returns exactly one outcome per transfer"
+"cveta2.adapters.s3.download.x__download_image_batch__mutmut_28" = "zip strict=False; ordered run_concurrent returns exactly one outcome per transfer"
 "cveta2.adapters.s3.download.x__download_pending__mutmut_22" = "stats.downloaded = ok; _download_pending is the only writer of `downloaded` and runs once per stats object"
 "cveta2.adapters.s3.download.xǁImageDownloaderǁ_download_all__mutmut_2" = "stats.failed = len(pending); the no-storage branch returns before any transfer, so failed is still 0"
-"cveta2.adapters.s3.download.xǁImageDownloaderǁ_download_all__mutmut_37" = "stats.failed = len(missing); the misses are counted before any transfer runs, so failed is still 0"
 "cveta2.adapters.cvat.storage.x_parse_cloud_storage__mutmut_11" = "or \"XXXX\"; parse_qs of a string with no \"=\" yields {} exactly as for \"\""
 
 # Bar captions, second half. The `desc=`/`unit=` line patterns kill the
@@ -579,9 +585,8 @@ full = []
 "cveta2.adapters.s3.download.xǁImageDownloaderǁ_filter_cached__mutmut_8" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.adapters.s3.upload.xǁS3Uploaderǁupload__mutmut_31" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.adapters.s3.utils.x_list_s3_objects__mutmut_29" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
-"cveta2.application.use_cases.fetch.x__fetch_and_save_tasks__mutmut_32" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
+"cveta2.application.use_cases.fetch.x__fetch_and_save_tasks__mutmut_37" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 "cveta2.application.client.task_ops.xǁ_TaskOpsMixinǁset_task_jobs_status__mutmut_15" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
-"cveta2.adapters.s3.download.xǁImageDownloaderǁ_probe_expected_keys__mutmut_13" = "desc=None; tqdm renders the bar with no caption, nothing else changes"
 
 # run_concurrent returns exactly one outcome per item — that is its documented
 # contract and TestOrdering pins it — so the zip that pairs them back up can
@@ -593,25 +598,12 @@ full = []
 "cveta2.adapters.s3.download.xǁImageDownloaderǁ_filter_cached__mutmut_25" = "zip strict=None; lengths are equal by construction"
 "cveta2.adapters.s3.download.xǁImageDownloaderǁ_filter_cached__mutmut_28" = "zip strict dropped; lengths are equal by construction"
 "cveta2.adapters.s3.download.xǁImageDownloaderǁ_filter_cached__mutmut_29" = "zip strict=False; lengths are equal by construction"
-"cveta2.adapters.s3.download.xǁImageDownloaderǁ_probe_expected_keys__mutmut_33" = "zip strict=None; lengths are equal by construction"
-"cveta2.adapters.s3.download.xǁImageDownloaderǁ_probe_expected_keys__mutmut_37" = "zip strict dropped; lengths are equal by construction"
-"cveta2.adapters.s3.download.xǁImageDownloaderǁ_probe_expected_keys__mutmut_38" = "zip strict=False; lengths are equal by construction"
-
-# _probe_expected_keys: the value it records for an unresolved image is the
-# frame name the fallback listing looks up first. A listing name IS its key
-# with the storage prefix stripped, and the probe checked exactly
-# build_s3_key(prefix, frame_ref) - so a frame name the listing could resolve
-# by full path is one the probe already found, and this lookup is dead on the
-# probe path. The lookup itself is load-bearing on the over-limit path, where
-# unresolved is `pending` itself, and is killed there by
-# test_the_listing_prefers_the_frame_path_over_a_same_named_file.
 
 # Path-safety helpers: the `original` keyword changes diagnostic prose only;
 # validation and destination selection do not read it.
 "cveta2.domain.paths.x__canonical_frame_key__mutmut_25" = "original=None changes only the validation error prose"
 "cveta2.adapters.s3.download.xǁImageDownloaderǁ_dest_path__mutmut_13" = "original=None changes only the validation error prose"
 "cveta2.adapters.s3.download.xǁImageDownloaderǁ_dest_path__mutmut_19" = "original=None changes only the confinement error prose"
-"cveta2.adapters.s3.download.xǁImageDownloaderǁ_resolve_s3_keys__mutmut_33" = "the listed map contains prefix-relative names and basenames; its full canonical-key lookup is redundant"
 "cveta2.adapters.s3.download.xǁS3Syncerǁsync__mutmut_21" = "original=None changes only the validation error prose"
 "cveta2.adapters.s3.download.xǁS3Syncerǁsync__mutmut_34" = "original=None changes only the confinement error prose"
 "cveta2.adapters.files.conversion.x__resolve_dataset_root__mutmut_2" = "Path('') resolves through yaml_path.parent to the same directory as the explicit empty-root branch"
@@ -651,12 +643,7 @@ full = []
 
 # fetch_selected_tasks: prune_cache is read as `cache is not None and
 # prune_cache`, so None and False take the same branch.
-"cveta2.application.use_cases.fetch.x_fetch_selected_tasks__mutmut_5" = "prune_cache=None is falsy, exactly like the False it replaces; prune_cache=True IS observable and is killed by test_a_selected_fetch_keeps_entries_for_the_tasks_it_skipped"
-
-# _fetch_and_save_tasks: the guard decides only whether the cache summary is
-# printed at all. Both branches return the same annotations, and the summary's
-# own numbers are pinned on _FetchStats by TestRetrieveTaskAccounting.
-"cveta2.application.use_cases.fetch.x__fetch_and_save_tasks__mutmut_43" = "inverts the guard around stats.log_summary(); nothing but whether one info line is emitted"
+"cveta2.application.use_cases.fetch.x_fetch_selected_tasks__mutmut_6" = "prune_cache=None is falsy, exactly like the False it replaces; prune_cache=True IS observable and is killed by test_a_selected_fetch_keeps_entries_for_the_tasks_it_skipped"
 
 # _fetch_core -> prepare_fetch(project_name=): FetchContext.project_name has a
 # single reader, the 5xx skip hint in _client_ops.shared, which falls back to a

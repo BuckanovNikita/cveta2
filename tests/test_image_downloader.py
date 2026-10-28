@@ -52,17 +52,17 @@ class _BareCloudStorage:
     """A CVAT cloud-storage object exposing none of the expected attributes."""
 
 
-class _DenyingHeadS3Client(FakeS3Client):
-    """Fake S3 that refuses every HEAD, the way a denied bucket does.
+class _DenyingGetS3Client(FakeS3Client):
+    """Fake S3 that refuses every GET, the way a denied bucket does.
 
     S3 answers 403 rather than 404 for a caller without ListBucket, so
     "denied" and "absent" are only told apart by the error code.
     """
 
-    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
         raise ClientError(
             {"Error": {"Code": "AccessDenied", "Message": f"{Bucket}/{Key}"}},
-            "HeadObject",
+            "GetObject",
         )
 
 
@@ -972,15 +972,12 @@ def test_listing_fallback_still_validates_absolute_frame_root(
         listed_prefixes.append(prefix)
         return {"a.jpg": "images/a.jpg"}
 
-    monkeypatch.setattr(
-        downloader,
-        "_probe_expected_keys",
-        lambda *_args: ({}, {"a.jpg": "/outside/a.jpg"}),
-    )
     monkeypatch.setattr(downloader, "_build_project_storage_name_map", storage_map)
 
     with pytest.raises(Cveta2Error, match="вне"):
-        downloader._resolve_s3_keys(FakeS3Client({}), storage, {"a.jpg": "unused"})
+        downloader._resolve_s3_keys(
+            FakeS3Client({}), storage, {"a.jpg": "/outside/a.jpg"}
+        )
     assert listed_prefixes == ["images"]
 
 
@@ -1018,7 +1015,7 @@ def test_s3_sync_rejects_traversal_key(
 
 
 # ---------------------------------------------------------------------------
-# S3 key resolution: probe the expected key before walking the whole prefix
+# S3 key resolution: download the expected key before walking the whole prefix
 # ---------------------------------------------------------------------------
 
 
@@ -1051,8 +1048,13 @@ def test_expected_keys_skip_the_whole_prefix_listing(
     )
 
     assert stats.downloaded == 2
+    assert [record.s3_image_path for record in annotations.annotations] == [
+        "images/a.jpg",
+        "images/b.jpg",
+    ]
     assert fake_s3.list_requests == []
-    assert fake_s3.head_calls == [
+    assert fake_s3.head_calls == []
+    assert fake_s3.get_calls == [
         "test-bucket/images/a.jpg",
         "test-bucket/images/b.jpg",
     ]
@@ -1066,7 +1068,7 @@ def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
 ) -> None:
     """A bare name stored under a subfolder still resolves, via the listing.
 
-    Only the listing carries the basename fallback, so a probe that comes
+    Only the listing carries the basename fallback, so a GET that comes
     back empty must hand the name over to it rather than report the image
     as missing from S3.  The listing stays scoped to the project prefix:
     the decoy sorts before the real key, so a listing widened to the whole
@@ -1097,7 +1099,7 @@ def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
     assert (target / "2026-02" / "nested.jpg").read_bytes() == b"data-nested"
 
 
-def test_a_denied_head_is_raised_rather_than_read_as_absent(
+def test_a_denied_get_is_raised_rather_than_read_as_absent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1109,7 +1111,7 @@ def test_a_denied_head_is_raised_rather_than_read_as_absent(
     annotations = ProjectAnnotations(
         annotations=[_ann(10, 0, "a.jpg")], deleted_images=[]
     )
-    _patch_boto(monkeypatch, _DenyingHeadS3Client())
+    _patch_boto(monkeypatch, _DenyingGetS3Client())
 
     with pytest.raises(ClientError):
         ImageDownloader(tmp_path / "images").download(
@@ -1121,7 +1123,7 @@ def test_the_probe_limit_is_inclusive(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A batch exactly at the limit still probes; one past it lists."""
+    """A batch exactly at the limit downloads directly; one past it lists."""
     annotations = ProjectAnnotations(
         annotations=[_ann(10, 0, "a.jpg"), _ann(10, 1, "b.jpg")],
         deleted_images=[],
@@ -1140,7 +1142,8 @@ def test_the_probe_limit_is_inclusive(
     )
 
     assert stats.downloaded == 2
-    assert fake_s3.head_calls != []
+    assert fake_s3.head_calls == []
+    assert len(fake_s3.get_calls) == 2
     assert fake_s3.list_requests == []
 
 
@@ -1267,7 +1270,13 @@ def test_fallback_cache_hits_accumulate_and_do_not_stop_later_images(
     assert stats.total == 5
     assert stats.cached == 3
     assert stats.downloaded == stats.failed == 1
-    assert fake_s3.get_calls == ["test-bucket/images/new.jpg"]
+    assert fake_s3.get_calls == [
+        "test-bucket/images/a.jpg",
+        "test-bucket/images/b.jpg",
+        "test-bucket/images/new.jpg",
+        "test-bucket/images/missing.jpg",
+    ]
+    assert fake_s3.head_calls == []
     assert (target / "new.jpg").read_bytes() == b"new-image"
     assert (target / "month" / "a.jpg").read_bytes() == b"cache-a"
     assert (target / "month" / "b.jpg").read_bytes() == b"cache-b"
