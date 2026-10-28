@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.12.0 (2026-10-29)
+
+### Features
+
+- Speed up fetches and expose safe CVAT request diagnostics
+  ([`bc03d40`](https://github.com/BuckanovNikita/cveta2/commit/bc03d408ed4685852a1280a6458af141d33a123d))
+
+
 ## v0.11.1 (2026-10-21)
 
 ### Documentation
