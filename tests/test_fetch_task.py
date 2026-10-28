@@ -221,11 +221,12 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2), make_task(3)])
         options = _FetchAnnotationsOptions(task_selector=["2", 3])
 
-        result = _select_tasks_for_fetch(
+        result, all_task_ids = _select_tasks_for_fetch(
             api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
         )
 
         assert [t.id for t in result] == [2, 3]
+        assert all_task_ids is None
         assert api.call_counts["get_project_tasks"] == 0
         assert api.call_counts["get_task"] == 2
 
@@ -234,11 +235,12 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=[2, "2"])
 
-        result = _select_tasks_for_fetch(
+        result, all_task_ids = _select_tasks_for_fetch(
             api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
         )
 
         assert [t.id for t in result] == [2]
+        assert all_task_ids is None
         assert api.call_counts["get_task"] == 1
 
     def test_completed_only_still_applies(self) -> None:
@@ -248,17 +250,18 @@ class TestSelectTasksForFetch:
         )
         options = _FetchAnnotationsOptions(task_selector=[1, 2], completed_only=True)
 
-        result = _select_tasks_for_fetch(
+        result, all_task_ids = _select_tasks_for_fetch(
             api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
         )
 
         assert [t.id for t in result] == [1]
+        assert all_task_ids is None
 
     def test_no_selector_lists_the_project(self) -> None:
         """A whole-project fetch still asks for every task."""
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
 
-        result = _select_tasks_for_fetch(
+        result, all_task_ids = _select_tasks_for_fetch(
             api,
             _PROJECT_ID,
             _FetchAnnotationsOptions(),
@@ -267,6 +270,7 @@ class TestSelectTasksForFetch:
         )
 
         assert [t.id for t in result] == [1, 2]
+        assert all_task_ids == frozenset({1, 2})
         assert api.call_counts["get_project_tasks"] == 1
 
     def test_name_selector_lists_the_project(self) -> None:
@@ -274,11 +278,12 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=["alpha"])
 
-        result = _select_tasks_for_fetch(
+        result, all_task_ids = _select_tasks_for_fetch(
             api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
         )
 
         assert [t.id for t in result] == [1]
+        assert all_task_ids == frozenset({1, 2})
         assert api.call_counts["get_project_tasks"] == 1
         assert api.call_counts["get_task"] == 0
 
@@ -287,11 +292,12 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=[2, "alpha"])
 
-        result = _select_tasks_for_fetch(
+        result, all_task_ids = _select_tasks_for_fetch(
             api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
         )
 
         assert {t.id for t in result} == {1, 2}
+        assert all_task_ids == frozenset({1, 2})
         assert api.call_counts["get_project_tasks"] == 1
         assert api.call_counts["get_task"] == 0
 
@@ -305,11 +311,12 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(7, name="12345")])
         options = _FetchAnnotationsOptions(task_selector=["12345"])
 
-        result = _select_tasks_for_fetch(
+        result, all_task_ids = _select_tasks_for_fetch(
             api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
         )
 
         assert [t.id for t in result] == [7]
+        assert all_task_ids == frozenset({7})
         assert api.call_counts["get_project_tasks"] == 1
 
     def test_a_server_error_on_the_id_lookup_is_not_a_fallback(self) -> None:

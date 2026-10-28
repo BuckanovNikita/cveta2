@@ -92,7 +92,7 @@ def populate_record_paths(
     memoized per path instead: on a shared network cache each of those is a
     round-trip.
     """
-    resolved: dict[Path, str | None] = {}
+    resolved: dict[str, str | None] = {}
     for record in (*result.annotations, *result.deleted_images):
         frame_ref = record.frame_path or record.image_name
         prefix = cs_info.prefix if cs_info is not None else ""
@@ -103,10 +103,10 @@ def populate_record_paths(
             local_rel = _local_name_from_key(
                 key, ignored_prefix or prefix, original=frame_ref
             )
-            local = _confined_destination(images_dir, local_rel, original=frame_ref)
-            if local not in resolved:
-                resolved[local] = str(local.resolve()) if local.exists() else None
-            found = resolved[local]
+            if local_rel not in resolved:
+                local = _confined_destination(images_dir, local_rel, original=frame_ref)
+                resolved[local_rel] = str(local.resolve()) if local.exists() else None
+            found = resolved[local_rel]
             if found is not None:
                 record.image_path = found
 
@@ -127,8 +127,9 @@ def enrich_dataframe_paths(
             else name,
         )
     )
+    resolved = {path: str(path.resolve()) for path in set(found_images.values())}
     df["image_path"] = df["image_name"].map(
-        lambda name: str(found_images[name].resolve()) if name in found_images else None
+        lambda name: resolved[found_images[name]] if name in found_images else None
     )
     return df
 

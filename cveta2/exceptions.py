@@ -3,6 +3,7 @@
 from cveta2.domain.errors import (
     ClearmlPublishError,
     CvatApiError,
+    CvatRequestDiagnostics,
     Cveta2Error,
     InteractiveModeRequiredError,
     LabelsMismatchError,
@@ -15,6 +16,7 @@ from cveta2.domain.errors import (
 __all__ = [
     "ClearmlPublishError",
     "CvatApiError",
+    "CvatRequestDiagnostics",
     "Cveta2Error",
     "InteractiveModeRequiredError",
     "LabelsMismatchError",

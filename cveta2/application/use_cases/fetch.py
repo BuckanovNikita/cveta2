@@ -89,19 +89,29 @@ def fetch_project(
     Writes dataset/obsolete/in_progress/deleted CSVs (plus raw.csv when
     ``options.raw``) into ``target.output_dir`` and returns the partition.
     """
+    fetch_started = deps.clock()
     output_dir = target.output_dir
     if options.skip_validation:
+        started = deps.clock()
         _promote_completed_annotations(client, target, options, deps=deps)
+        logger.info(
+            f"Принятие завершённой разметки: прошло {deps.clock() - started:.1f} с"
+        )
     result = _fetch_core(client, target, options, prune_cache=True, deps=deps)
 
     if options.raw:
+        started = deps.clock()
         deps.files.write_raw_csv(result, output_dir)
+        logger.info(f"Запись raw.csv: прошло {deps.clock() - started:.1f} с")
 
     started = deps.clock()
     df = pd.DataFrame(result.to_csv_rows(), columns=list(CSV_COLUMNS))
     partition = partition_annotations_df(df, result.deleted_images)
     deps.files.write_partition_csvs(partition, output_dir)
-    logger.info(f"Партиционирование и запись CSV: {deps.clock() - started:.1f} с")
+    logger.info(
+        f"Партиционирование и запись CSV: прошло {deps.clock() - started:.1f} с"
+    )
+    logger.info(f"Выгрузка завершена: прошло {deps.clock() - fetch_started:.1f} с")
 
     return partition
 
@@ -188,8 +198,12 @@ def fetch_selected_tasks(
     deps: FetchDependencies,
 ) -> ProjectAnnotations:
     """Selected-tasks fetch: writes dataset.csv + deleted.csv, returns result."""
+    fetch_started = deps.clock()
     result = _fetch_core(client, target, options, prune_cache=False, deps=deps)
+    started = deps.clock()
     deps.files.write_dataset_and_deleted(result, target.output_dir)
+    logger.info(f"Запись CSV: прошло {deps.clock() - started:.1f} с")
+    logger.info(f"Выгрузка завершена: прошло {deps.clock() - fetch_started:.1f} с")
     return result
 
 
@@ -212,13 +226,16 @@ def _fetch_core(
         task_selector=options.task_selector,
         project_name=project_name,
     )
-    logger.debug(
-        f"Отбор задач: {len(ctx.tasks)} к загрузке ({deps.clock() - started:.1f} с)"
+    logger.info(
+        f"Отбор задач: {len(ctx.tasks)} к загрузке; "
+        f"прошло {deps.clock() - started:.1f} с"
     )
 
+    started = deps.clock()
     cache_settings = deps.cache_settings
     cache = _build_task_cache(client, project_id, options, cache_settings, deps=deps)
     policy = _CachePolicy(cache=cache, force=options.force)
+    logger.info(f"Подготовка кэша аннотаций: прошло {deps.clock() - started:.1f} с")
 
     result = _fetch_and_save_tasks(
         client,
@@ -229,11 +246,12 @@ def _fetch_core(
         deps=deps,
     )
 
-    if cache is not None and prune_cache:
-        live_ids = {t.id for t in client.list_project_tasks(project_id)}
-        pruned = cache.prune(live_ids)
+    if cache is not None and prune_cache and ctx.all_task_ids is not None:
+        started = deps.clock()
+        pruned = cache.prune(set(ctx.all_task_ids))
         if pruned:
             logger.info(f"Кэш аннотаций: удалено устаревших записей: {pruned}")
+        logger.info(f"Очистка кэша аннотаций: прошло {deps.clock() - started:.1f} с")
 
     if options.images_dir is not None:
         started = deps.clock()
@@ -244,13 +262,17 @@ def _fetch_core(
             project_cloud_storage=target.cs_info,
             ignored_prefix=cache_settings.ignored_prefix,
         )
-        logger.info(f"Изображения: {stats.summary()} ({deps.clock() - started:.1f} с)")
+        logger.info(
+            f"Изображения: {stats.summary()}; прошло {deps.clock() - started:.1f} с"
+        )
+    started = deps.clock()
     deps.files.populate_record_paths(
         result,
         target.cs_info,
         options.images_dir,
         ignored_prefix=cache_settings.ignored_prefix,
     )
+    logger.info(f"Пути изображений: прошло {deps.clock() - started:.1f} с")
 
     return result
 
@@ -311,6 +333,9 @@ class _FetchStats:
     fetched: int = 0
     hit_seconds: float = 0.0
     fetch_seconds: float = 0.0
+    skipped_seconds: float = 0.0
+    skipped_task_ids: list[int] = field(default_factory=list)
+    degraded_task_ids: list[int] = field(default_factory=list)
 
     def record_hit(self, seconds: float) -> None:
         """Perform the declared workflow operation."""
@@ -324,12 +349,38 @@ class _FetchStats:
             self.fetched += 1
             self.fetch_seconds += seconds
 
-    def log_summary(self) -> None:
-        """Perform the declared workflow operation."""
+    def record_skip(self, task_id: int, seconds: float) -> None:
+        """Record an unsuccessful task separately from completed live fetches."""
+        with self.lock:
+            self.skipped_task_ids.append(task_id)
+            self.skipped_seconds += seconds
+
+    def record_degraded(self, task_id: int) -> None:
+        """Record incomplete issues without double-counting the fetched task."""
+        with self.lock:
+            self.degraded_task_ids.append(task_id)
+
+    def log_summary(self, elapsed: float) -> None:
+        """Distinguish stage wall time from overlapping worker-duration sums."""
         logger.info(
-            f"Задач из кэша: {self.cache_hits} ({self.hit_seconds:.1f} с), "
-            f"загружено с CVAT: {self.fetched} ({self.fetch_seconds:.1f} с)"
+            f"Обработка задач: прошло {elapsed:.1f} с; "
+            f"из кэша: {self.cache_hits}, загружено с CVAT: {self.fetched}, "
+            f"пропущено: {len(self.skipped_task_ids)}, "
+            f"неполные issues: {len(self.degraded_task_ids)}. "
+            f"Суммы времени работников: кэш {self.hit_seconds:.1f} с, "
+            f"CVAT {self.fetch_seconds:.1f} с, пропуски {self.skipped_seconds:.1f} с "
+            "(суммарное время работников, не длительность этапа)"
         )
+        if self.skipped_task_ids:
+            logger.warning(
+                f"Пропущены задачи ({len(self.skipped_task_ids)}): "
+                f"{sorted(self.skipped_task_ids)}; выгрузка неполная"
+            )
+        if self.degraded_task_ids:
+            logger.warning(
+                f"Неполные issues в задачах ({len(self.degraded_task_ids)}): "
+                f"{sorted(self.degraded_task_ids)}; сведения об issues отсутствуют"
+            )
 
 
 def _retrieve_task(  # noqa: PLR0913
@@ -351,13 +402,18 @@ def _retrieve_task(  # noqa: PLR0913
     cached = policy.read(task)
     if cached is not None:
         stats.record_hit(deps.clock() - started)
+        if not cached.issues_complete:
+            stats.record_degraded(task.id)
         return cached
 
     fetched = client.fetch_one_task(client.api, task, ctx)
     if fetched is None:
+        stats.record_skip(task.id, deps.clock() - started)
         return None
     policy.write(task, fetched)
     stats.record_fetch(deps.clock() - started)
+    if not fetched.issues_complete:
+        stats.record_degraded(task.id)
     return fetched
 
 
@@ -370,32 +426,32 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
     deps: FetchDependencies,
     save_tasks: bool,
 ) -> ProjectAnnotations:
-    """Fetch tasks in parallel, saving per-task CSVs into ``output_dir/.tasks/``.
+    """Fetch tasks in parallel, optionally saving CSVs into ``output_dir/.tasks/``.
 
     Up to ``deps.cvat_workers`` tasks are in flight at once; each is a handful
     of CVAT round-trips that spend nearly all their time waiting.  Results are
     returned in task order regardless of completion order, so the merged
     output does not depend on which task happened to finish first.
 
-    Completed tasks are served from *policy*'s cache when possible.  Unless
-    *save_tasks* is set, the ``.tasks/`` directory is removed after merging —
-    best effort, since a leftover tree from an earlier run may belong to
-    another user of a shared output directory.
+    Completed tasks are served from *policy*'s cache when possible. Only
+    *save_tasks* accesses ``.tasks/``: an ordinary fetch leaves a pre-existing
+    directory untouched, including files belonging to previous runs.
 
     Returns the merged :class:`ProjectAnnotations` from all fetched tasks.
     """
+    started = deps.clock()
+    stats = _FetchStats(lock=deps.lock_factory())
     if not ctx.tasks:
-        logger.warning("No tasks in this project.")
+        logger.warning("Нет задач для выгрузки.")
+        stats.log_summary(deps.clock() - started)
         return TaskAnnotations.merge([])
 
-    tasks_dir = deps.files.prepare_tasks(output_dir)
-
-    stats = _FetchStats(lock=deps.lock_factory())
+    tasks_dir = deps.files.prepare_tasks(output_dir) if save_tasks else None
 
     def process(task: TaskInfo) -> TaskAnnotations | None:
         """Perform the declared workflow operation."""
         result = _retrieve_task(client, task, ctx, policy, stats, deps=deps)
-        if result is not None:
+        if result is not None and tasks_dir is not None:
             deps.files.write_task_csv(task, result, tasks_dir)
         return result
 
@@ -410,11 +466,6 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
         unit="task",
     )
     task_results = [r for r in outcomes if isinstance(r, TaskAnnotations)]
-
-    if not save_tasks:
-        deps.files.cleanup_tasks(tasks_dir)
-
-    if policy.cache is not None:
-        stats.log_summary()
-
-    return TaskAnnotations.merge(task_results)
+    result = TaskAnnotations.merge(task_results)
+    stats.log_summary(deps.clock() - started)
+    return result

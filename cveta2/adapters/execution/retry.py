@@ -80,16 +80,26 @@ def _backoff(retry_state: RetryCallState) -> float:
     return jittered(retry_state)
 
 
-def _log_retry(label: str, retry_state: RetryCallState) -> None:
+def _log_retry(
+    label: str,
+    retry_state: RetryCallState,
+    *,
+    describe: Callable[[BaseException], str] | None = None,
+) -> None:
     exc = retry_state.outcome.exception() if retry_state.outcome else None
+    detail = describe(exc) if describe is not None and exc is not None else repr(exc)
+    wait = float(retry_state.next_action.sleep) if retry_state.next_action else 0.0
     logger.warning(
-        f"{label} call failed (attempt {retry_state.attempt_number}), retrying: {exc!r}"
+        f"{label}: попытка cveta2 {retry_state.attempt_number}/{RetryPolicy.attempts} "
+        f"не удалась; повтор через {wait:.2f} с: {detail}"
     )
 
 
 def network_retry(
     should_retry: Callable[[BaseException], bool],
     label: str,
+    *,
+    describe: Callable[[BaseException], str] | None = None,
 ) -> Callable[[WrappedFn], WrappedFn]:
     """Build a retry decorator that fires whenever *should_retry* says so.
 
@@ -101,6 +111,6 @@ def network_retry(
         retry=retry_if_exception(should_retry),
         stop=_budget_exhausted,
         wait=_backoff,
-        before_sleep=functools.partial(_log_retry, label),
+        before_sleep=functools.partial(_log_retry, label, describe=describe),
         reraise=True,
     )

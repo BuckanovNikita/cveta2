@@ -37,6 +37,9 @@ class FetchContext:
 
     Returned by :meth:`CvatClient.prepare_fetch`; passed to
     :meth:`CvatClient.fetch_one_task` for each task in the loop.
+    ``all_task_ids`` is the unfiltered inventory snapshot, or ``None`` when
+    only individually selected tasks were retrieved. An empty snapshot is
+    complete and can safely prune every orphaned cache entry.
     """
 
     tasks: "list[TaskInfo]"
@@ -45,6 +48,7 @@ class FetchContext:
     host: str = ""
     project_name: str = ""
     raise_on_failure: bool = False
+    all_task_ids: frozenset[int] | None = None
 
 
 def _is_rate_limited(e: "CvatApiError") -> bool:
@@ -64,12 +68,12 @@ def _log_task_5xx_skip(
     e: "CvatApiError",
 ) -> None:
     """Log 5xx error and ignore-command hint for a skipped task."""
-    task_link = (
-        f"{ctx.host.rstrip('/')}/tasks/{task.id}"
-        if ctx.host
-        else f"task_id={task.id} {task.name!r}"
+    # Transport diagnostics already contain the sanitized endpoint. Rebuilding
+    # a link from the configured host could expose URL credentials or queries.
+    logger.error(
+        f"Ошибка CVAT (HTTP {e.status_code}), "
+        f"задача #{task.id} {task.name!r} пропущена: {e}"
     )
-    logger.error(f"CVAT server error (HTTP {e.status_code}) for task {task_link}: {e}")
     if ctx.project_name:
         logger.info(
             f"Чтобы пропустить задачу при следующем запуске: "

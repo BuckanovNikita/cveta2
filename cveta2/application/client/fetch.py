@@ -131,8 +131,8 @@ def _select_tasks_for_fetch(
     *,
     runner: ConcurrentRunner,
     max_workers: int,
-) -> list[TaskInfo]:
-    """Return the tasks to fetch, listing the project only when needed.
+) -> tuple[list[TaskInfo], frozenset[int] | None]:
+    """Return selected tasks and the complete inventory, when one was read.
 
     The filters run over the shortlist exactly as they run over the full
     list: resolving the selectors against tasks that *are* the selection
@@ -142,9 +142,11 @@ def _select_tasks_for_fetch(
     selected = _resolve_selected_tasks_by_id(
         api, project_id, options, runner=runner, max_workers=max_workers
     )
+    all_task_ids = None
     if selected is None:
         selected = api.get_project_tasks(project_id)
-    return _filter_tasks_for_fetch(selected, options)
+        all_task_ids = frozenset(task.id for task in selected)
+    return _filter_tasks_for_fetch(selected, options), all_task_ids
 
 
 class _FetchMixin(_ClientBase):
@@ -174,7 +176,7 @@ class _FetchMixin(_ClientBase):
             project_name=project_name,
         )
         api = self._require_api("prepare_fetch")
-        tasks = _select_tasks_for_fetch(
+        tasks, all_task_ids = _select_tasks_for_fetch(
             api,
             project_id,
             options,
@@ -189,6 +191,7 @@ class _FetchMixin(_ClientBase):
             host=options.host,
             project_name=options.project_name,
             raise_on_failure=self._settings.raise_on_failure,
+            all_task_ids=all_task_ids,
         )
 
     @staticmethod
@@ -268,7 +271,7 @@ class _FetchMixin(_ClientBase):
                     f"CVAT ограничивает частоту запросов (HTTP {e.status_code}) "
                     f"на задаче {task.id}, повторы исчерпаны. Задача НЕ пропущена, "
                     f"чтобы датасет не потерял её молча — уменьшите "
-                    f"network.cvat_workers и повторите запуск."
+                    f"network.cvat_workers и повторите запуск. Причина: {e}"
                 )
                 raise Cveta2Error(msg) from e
             if _HTTP_5XX_MIN <= e.status_code < _HTTP_5XX_MAX:

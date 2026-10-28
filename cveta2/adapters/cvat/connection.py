@@ -6,6 +6,12 @@ from typing import TYPE_CHECKING, Protocol
 from cvat_sdk import make_client
 from loguru import logger
 
+from cveta2.adapters.cvat.diagnostics import (
+    _safe_endpoint,
+    describe_error,
+    exception_diagnostics,
+    operation_context,
+)
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from cveta2.adapters.cvat.transport import (
     _TRANSPORT_ERRORS,
@@ -69,10 +75,13 @@ def open_sdk_api(
     factory = client_factory or make_client
     kwargs = _build_client_kwargs(cfg)
     try:
-        sdk_cm = _translate_api_errors(factory)(**kwargs)
+        sdk_cm = operation_context(_translate_api_errors(factory))(**kwargs)
     except _TRANSPORT_ERRORS as e:
-        msg = f"Не удалось подключиться к CVAT ({cfg.host}): {e}"
-        raise CvatApiError(msg) from e
+        msg = (
+            f"Не удалось подключиться к CVAT ({_safe_endpoint(cfg.host)}): "
+            f"{describe_error(e)}"
+        )
+        raise CvatApiError(msg, diagnostics=exception_diagnostics(e)) from e
     with sdk_cm as sdk_client:
         if cfg.organization:
             sdk_client.organization_slug = cfg.organization

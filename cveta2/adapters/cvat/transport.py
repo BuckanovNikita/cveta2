@@ -16,6 +16,13 @@ import urllib3.exceptions
 from cvat_sdk.api_client.exceptions import ApiException
 from loguru import logger
 
+from cveta2.adapters.cvat.diagnostics import (
+    capture_rest_call,
+    describe_error,
+    exception_diagnostics,
+    install_pool_capture,
+    operation_context,
+)
 from cveta2.adapters.execution.retry import network_retry
 from cveta2.domain.errors import CvatApiError
 
@@ -40,7 +47,7 @@ def _parse_retry_after(exc: ApiException) -> float | None:
     try:
         return float(raw)
     except ValueError:
-        logger.debug(f"Retry-After не распознан: {raw!r}")
+        logger.debug("Retry-After не распознан; используется стандартная задержка")
         return None
 
 
@@ -54,7 +61,10 @@ def _translate_api_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
         except ApiException as e:
             status = int(getattr(e, "status", 0) or 0)
             raise CvatApiError(
-                str(e), status_code=status, retry_after=_parse_retry_after(e)
+                describe_error(e),
+                status_code=status,
+                retry_after=_parse_retry_after(e),
+                diagnostics=exception_diagnostics(e),
             ) from e
 
     return wrapper
@@ -104,15 +114,24 @@ def _translate_transport_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
         try:
             return func(*args, **kwargs)
         except _TRANSPORT_ERRORS as e:
-            raise CvatApiError(f"Сетевая ошибка при обращении к CVAT: {e}") from e
+            raise CvatApiError(
+                f"Сетевая ошибка при обращении к CVAT: {describe_error(e)}",
+                diagnostics=exception_diagnostics(e),
+            ) from e
 
     return wrapper
 
 
-_api_retry = network_retry(_should_retry_read, label="CVAT API")
-_write_retry = network_retry(_should_retry_write, label="CVAT write")
+_api_retry = network_retry(
+    _should_retry_read, label="CVAT API", describe=describe_error
+)
+_write_retry = network_retry(
+    _should_retry_write, label="CVAT write", describe=describe_error
+)
 _idempotent_write_retry = network_retry(
-    _should_retry_idempotent_write, label="CVAT idempotent write"
+    _should_retry_idempotent_write,
+    label="CVAT idempotent write",
+    describe=describe_error,
 )
 
 _CONNECT_TIMEOUT = 10.0
@@ -140,9 +159,14 @@ def install_global_request_timeout(timeout: float | None) -> None:
     its timeout value is context-local. ``None`` or ``0`` switches injection
     off for the caller without unpatching the SDK.
     """
+    _REQUEST_TIMEOUT.set(timeout)
+    install_request_capture()
+
+
+def install_request_capture() -> None:
+    """Install capture without changing this context's configured timeout."""
     from cvat_sdk.api_client.rest import RESTClientObject  # noqa: PLC0415
 
-    _REQUEST_TIMEOUT.set(timeout)
     if _GlobalTimeout.installed:
         return
     with _GlobalTimeout.lock:
@@ -157,7 +181,12 @@ def install_global_request_timeout(timeout: float | None) -> None:
             request_timeout = _REQUEST_TIMEOUT.get()
             if kwargs.get("_request_timeout") is None and request_timeout:
                 kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, request_timeout)
-            return original_request(self, *args, **kwargs)
+            # The SDK type is opaque; narrow to real pool managers, leaving
+            # custom SDK substitutes and test doubles usable without guessing.
+            manager = getattr(self, "pool_manager", None)
+            if isinstance(manager, urllib3.PoolManager):
+                install_pool_capture(manager)
+            return capture_rest_call(lambda: original_request(self, *args, **kwargs))
 
         RESTClientObject.request = request_with_timeout
         _GlobalTimeout.installed = True
@@ -165,16 +194,22 @@ def install_global_request_timeout(timeout: float | None) -> None:
 
 def cvat_read(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Retry transient reads, translating exhausted transport failures last."""
-    return _translate_transport_errors(_api_retry(_translate_api_errors(func)))
+    return operation_context(
+        _translate_transport_errors(_api_retry(_translate_api_errors(func)))
+    )
 
 
 def cvat_non_idempotent_write(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Retry writes only after a proven refusal, never after an ambiguous result."""
-    return _translate_transport_errors(_write_retry(_translate_api_errors(func)))
+    return operation_context(
+        _translate_transport_errors(_write_retry(_translate_api_errors(func)))
+    )
 
 
 def cvat_idempotent_write(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Retry transient status failures while replacing the same explicit values."""
-    return _translate_transport_errors(
-        _idempotent_write_retry(_translate_api_errors(func))
+    return operation_context(
+        _translate_transport_errors(
+            _idempotent_write_retry(_translate_api_errors(func))
+        )
     )

@@ -77,9 +77,9 @@ def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
 
     assert result == TaskAnnotations.merge([annotations])
     client.fetch_one_task.assert_not_called()
-    files.prepare_tasks.assert_called_once_with(output)
-    files.write_task_csv.assert_called_once_with(task, annotations, output / ".tasks")
-    files.cleanup_tasks.assert_called_once_with(output / ".tasks")
+    files.prepare_tasks.assert_not_called()
+    files.write_task_csv.assert_not_called()
+    files.cleanup_tasks.assert_not_called()
     files.write_dataset_and_deleted.assert_called_once_with(result, output)
     cache.put.assert_not_called()
     cache.prune.assert_not_called()

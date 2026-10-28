@@ -379,3 +379,29 @@ print(publication.dataset_id, publication.version)
 сохраняется в сообщении при последующем сбое. Точный порядок, состав пакета и
 действия при несовпадении описаны в [CLI](cli.md#опубликовать-подготовленный-пакет-cveta2-upload-dataset)
 и [контракте](../specs/baseline.md#verification-and-prepared-bundles).
+
+## Диагностика ошибок CVAT
+
+`CvatApiError(message, status_code=0, retry_after=None, *, diagnostics=None)`
+сохраняет прежние позиционные аргументы и тип исключения. Необязательное поле
+`diagnostics` содержит `CvatRequestDiagnostics` из `cveta2.exceptions`:
+`operation`, `method`, `endpoint`, `resource_ids`, `timestamp_utc`, `status_code`,
+`request_ids`, `response_summary`. Время имеет часовой пояс UTC; пары ID неизменяемы,
+текст ответа ограничен и очищен. Для ошибок без HTTP-контекста поле может быть `None`.
+
+```python
+from cveta2.exceptions import CvatApiError
+
+try:
+    result = cveta2.fetch(project=123, output_dir="export")
+except CvatApiError as error:
+    print(error.status_code, error.retry_after)
+    if error.diagnostics is not None:
+        print(error.diagnostics.method, error.diagnostics.endpoint)
+        print(error.diagnostics.timestamp_utc, error.diagnostics.request_ids)
+    raise
+```
+
+Исходная причина сохраняется в цепочке исключений. Правила пропуска задач, строгого
+режима, исчерпанных повторов и необязательных issues описаны в
+[конфигурации](configuration.md#ошибки-сервера-cvat-5xx).
