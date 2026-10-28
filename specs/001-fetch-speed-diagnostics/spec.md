@@ -2,7 +2,7 @@
 
 **Feature Branch**: `feat/fetch-speed-diagnostics`
 **Created**: 2026-10-28
-**Status**: Specified
+**Status**: Accepted; released as v0.12.0
 **Input**: Implement the supplied faster-fetch and CVAT-diagnostics plan.
 
 ## User Scenarios & Testing
