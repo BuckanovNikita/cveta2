@@ -2,7 +2,7 @@
 
 - [x] T001 Revalidate source/remote state and existing release instructions; calculate prospective version in a disposable merge.
 - [x] T002 Verify release generation, wheel/sdist and isolated installation in the disposable checkout; record dated evidence.
-- [ ] T003 Resolve the mandatory external integration prerequisite within explicit authorization; run live verification and exact-tag cleanup.
+- [x] T003 Resolve the mandatory external integration prerequisite within explicit authorization; run live verification and exact-tag cleanup.
 - [ ] T004 Reconcile native task/status records, final verification/review and architecture acceptance; commit scoped evidence normally.
 - [ ] T005 Merge into main and run the maintained semantic-release workflow without pushing or VCS release creation.
 - [ ] T006 Verify generated metadata, version tag and configured gates; push main and its Git tag together and verify remote refs.

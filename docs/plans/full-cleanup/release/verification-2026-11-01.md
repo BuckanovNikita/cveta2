@@ -57,3 +57,66 @@ authorization has arrived; the same external prerequisite remains. Preparation
 records are being saved in a documentation-only commit through normal hooks;
 actual live acceptance, main merge, version/tag creation and remote delivery stay
 open. This preserves concrete verified preparation without narrowing the goal.
+
+## Authorized environment restoration
+
+The user explicitly approved restoring the Kubernetes stand after the earlier
+authorization blocker. The release goal is active again. Restore only the named
+integration prerequisites and CVAT/MinIO/ClearML through the maintained private
+infrastructure scripts; preserve unrelated source edits, old data and workloads.
+The restored shared services are intended to remain available after verification;
+only per-run integration objects and temporary probes are cleanup targets.
+
+Before apply, admission returned GO, host ingress ports were unoccupied, and
+storage/ingress checks confirmed missing prerequisites. The maintained storage
+installer completed successfully: it proved host/VM disk identity, installed and
+verified the provisioner/class and removed its owned probe. Infrastructure source
+and registry were not changed by this project task. Subsequent restoration/live
+results will be appended after execution.
+
+Ingress and in-pod DNS restoration passed. MinIO initially failed its host-side
+self-check because this host resolver did not implement wildcard localhost
+resolution. The maintained host-entry fallback was applied only to the six
+restored service names, preserving existing entries and a backup. The original
+MinIO deployment path then completed successfully on retry, including its identity
+self-check; cveta2 separately authenticated and listed its empty namespace. No
+project pins or infrastructure source/registry changes were needed. The host
+fallback follows existing WSL hosts-regeneration behavior; permanent machine DNS
+migration is outside this release. CVAT and ClearML restore checks passed before
+applying either stand.
+
+CVAT restoration completed and the cveta2 identity authenticated against the
+restored organization. ClearML's server restored successfully; the glue step
+initially found no local Docker socket in this distro. The existing configured
+image was verified through Docker Desktop's working CLI, and a task-scoped CLI
+bridge let the unchanged maintained script finish. All service-user credentials
+and the glue's restricted ServiceAccount were verified. The bridge was temporary;
+no daemon or infrastructure source/registry settings were changed.
+
+## Live acceptance closure
+
+`integration_gate.sh` completed successfully on the cleanup branch with
+`INTEGRATION_KEEP_DATA=0`: **37 passed**, 380 dependency deprecation warnings,
+234.25 seconds. Owned tag: `cveta2-codex-20261101-integration-yb0u`.
+This covered real CVAT fetch/promotion/cache, issues, upload/recovery/task changes,
+S3 transfer/sync safety and explicit ClearML publication/parent/tamper behavior.
+The gate removed the tagged project/cloud storage, bucket and ClearML objects.
+Separate exact-tag listings then proved 0 CVAT projects/tasks/storages, 0 MinIO
+buckets and 0 ClearML projects/tasks; `.run-tag` was absent. The earlier missing
+live prerequisite is resolved. Restored shared services remain intentionally up.
+
+## Fresh parent verification after restoration
+
+The ordinary suite passed **2666 tests in 11.96 seconds** with configured coverage
+above its 90% gate. Ruff check/format, strict mypy (309 source files), Vulture,
+10/10 import contracts and the canonical effect checker passed. Runtime, tests,
+dependency pins and hooks are unchanged from the previously reviewed source;
+only dated release evidence/status is being updated. The final required full
+mutation and live gate will also execute through the actual main/tag push hooks.
+A fresh independent release-readiness reviewer is checking this integrated state
+and evidence before main merge/version generation.
+
+Fresh independent release-readiness review returned **ship**, with no findings;
+173 focused/docs checks, 10 import contracts, effects and all four architecture
+validators passed independently. See [review](review-2026-11-01.md). Native source
+acceptance is now closed; main/version/tag/remote delivery steps remain open.

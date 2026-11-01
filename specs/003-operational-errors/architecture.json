@@ -115,8 +115,8 @@
   "documentation": "Update specs/baseline.md and relevant error guidance; no public API/schema changes. Published portable usage skill inspected at 13766a1ecb36fdc584cc7588f39ba713155753bc; no usage change required.",
   "review": {
     "status": "accepted",
-    "reviewer": "/root/final_review (fresh independent native reviewer)",
-    "evidence": "docs/plans/full-cleanup/review-2026-11-01.md",
-    "reconciliation": "Parent and independent reviewer reconciled every task-owned runtime, test, hook, guide, baseline and new artifact addition against the three records. The two pre-existing untracked skill links are excluded and preserved. No removals or renames. This accepts architecture/local checks only; required live integration and release remain open in native tasks and dated evidence."
+    "reviewer": "/root/release_review (fresh independent release-readiness review)",
+    "evidence": "docs/plans/full-cleanup/release/review-2026-11-01.md",
+    "reconciliation": "Complete owned runtime/test/hook/documentation/feature/release-evidence scope reconciled against unchanged reviewed code, fresh local checks and successful 37-test live gate with exact-tag cleanup. Two original untracked skill links and the unrelated private infrastructure skill edit remain excluded. Release metadata is separately covered by the no-impact release record; publication is still pending."
   }
 }

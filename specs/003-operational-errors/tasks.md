@@ -19,7 +19,7 @@
 ## Phase 4: Acceptance and delivery
 
 - [x] T008 Reconcile specs/baseline.md, docs/configuration.md and dated evidence; document portable-skill no-change reason.
-- [ ] T009 Run integrated architecture/static/coverage and fast/full mutation plus configured live gates; fresh final review and architecture.json acceptance.
+- [x] T009 Run integrated architecture/static/coverage and fast/full mutation plus configured live gates; fresh final review and architecture.json acceptance.
 - [ ] T010 Converge spec.md, plan.md and tasks.md; authorized main merge, release evaluation and Git commit/tag delivery.
 
 ## Dependencies and implementation strategy

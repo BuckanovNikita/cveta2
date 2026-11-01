@@ -14,7 +14,7 @@
 ## Phase 3: Acceptance and delivery
 
 - [x] T006 Update specs/baseline.md and dated evidence/verification-2026-11-01.md; document portable-skill no-change reason.
-- [ ] T007 Run integrated architecture/static/coverage and fast/full mutation plus configured live gates; obtain fresh final review and validate architecture.json acceptance.
+- [x] T007 Run integrated architecture/static/coverage and fast/full mutation plus configured live gates; obtain fresh final review and validate architecture.json acceptance.
 - [ ] T008 Converge spec.md, plan.md and tasks.md; complete authorized main merge, release evaluation and Git commit/tag delivery.
 
 ## Dependencies and implementation strategy

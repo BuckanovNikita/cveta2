@@ -2,7 +2,7 @@
 
 **Feature Branch**: `cleanup/contracts-and-release`
 **Created**: 2026-11-01
-**Status**: Implemented; acceptance and release pending
+**Status**: Accepted; release pending
 **Input**: Fix reproduced operational-error bugs from the compatibility-preserving
 cleanup. Delta from [baseline](../baseline.md#configuration-and-failures).
 
