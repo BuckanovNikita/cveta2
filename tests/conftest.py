@@ -47,13 +47,17 @@ collect_ignore_glob: list[str] = (
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Check reader termination before tests that could hang on a broken reader.
+    """Check isolation and termination before tests relying on those invariants.
 
-    The bounded stream fails immediately if CSV scanning reads beyond EOF.
-    Running it first makes nontermination diagnosable even when a runner
-    supplies selected tests in arbitrary order. Every selected test remains.
+    Invalid worker floors break the sequential-transfer fixture. The bounded
+    stream rejects CSV scanning beyond EOF. Check both before dependent tests,
+    even when a runner supplies selected tests in arbitrary order.
     """
-    items.sort(key=lambda item: item.name != "test_csv_reader_stops_after_first_eof")
+    guards = {
+        "test_counts_below_one_are_floored": 0,
+        "test_csv_reader_stops_after_first_eof": 1,
+    }
+    items.sort(key=lambda item: guards.get(item.name, len(guards)))
 
 
 def _coco8_params() -> list[ParameterSet]:

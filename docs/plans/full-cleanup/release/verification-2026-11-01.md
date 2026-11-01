@@ -120,3 +120,31 @@ Fresh independent release-readiness review returned **ship**, with no findings;
 173 focused/docs checks, 10 import contracts, effects and all four architecture
 validators passed independently. See [review](review-2026-11-01.md). Native source
 acceptance is now closed; main/version/tag/remote delivery steps remain open.
+
+## Authoritative local release generation
+
+Acceptance evidence was committed as `fd82293` through normal hooks and merged
+to main as `66619af`. The maintained semantic-release command generated
+`3475496b8ec10f8de7e535ff4c6cc90b9c8d2c60` (`chore(release): 0.12.1`) and annotated
+v0.12.1, tag object `9135dc69009e3b759b23a1acc15311525b71b5fb`. Only CHANGELOG.md,
+the pyproject project version and root cveta2 lock version changed. A deep TOML
+comparison proved all dependency pins and other configuration unchanged.
+Version drift passed; runtime/tests/hooks matched accepted source exactly.
+
+The actual wheel has the same SHA-256 as the wheel installed and smoke-tested
+outside the checkout on both supported interpreters above. Actual sdist SHA-256:
+`9701aabae92423d753e8ae86bff368175db75c123bae68b7c3f31814f5fc8fc1`.
+Its inventory matches the rehearsal: two pre-existing fixture LICENSE/README
+members remain, with no executable tests, credentials or Git metadata. An initial
+overbroad inventory assertion rejected any tests/ path; the corrected check
+distinguishes those documentation members. No packaging code changed.
+
+The first actual atomic push passed version drift but was interrupted as a whole
+on two mutation cases; no refs were delivered. The bounded
+[worker-guard record](worker-guard/verification-2026-11-01.md) retains diagnosis,
+real targeted/full mutation results, cache-reuse proof and architecture-review
+correction. This maintenance changes collection order and exact personal-skill
+ignore paths; its rebuilt wheel is byte-identical to the immutable release tag.
+Final commit/main merge, semantic-release reevaluation and normal gated
+publication remain required. The earlier dated preparation/blocked observations
+are superseded by the live/local-release evidence, not deleted.

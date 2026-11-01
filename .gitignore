@@ -66,3 +66,5 @@ tests/integration/.run-tag
 !.agents/skills/speckit-*/
 !.agents/skills/speckit-*/**
 .claude/skills/lossless-doc-compress
+.claude/skills/ai-stage-gate
+.claude/skills/ml-system-design-review
