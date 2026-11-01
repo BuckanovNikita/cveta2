@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "task": "Nullable completion evidence",
+  "scope": [
+    "cveta2/domain/partition.py",
+    "tests/test_partition.py",
+    "specs/002-nullable-completion",
+    "specs/baseline.md"
+  ],
+  "impact": "modules",
+  "rules": "Constitution principle II and engineering.md: exhaustive inward layers, independent adapters, canonical facade exclusion, SDK/prompt/effect ownership and acyclic siblings.",
+  "modules": [
+    {
+      "id": "completion",
+      "path": "cveta2/domain/partition.py",
+      "change": "modify",
+      "responsibility": "Pure row/task completion masks and partition policy",
+      "interface": "DataFrame inputs produce boolean masks/completed task IDs/partitions; unknown legacy evidence is false, explicit true/false precedence and public signatures remain unchanged.",
+      "layer": "domain",
+      "allowed_dependencies": [
+        "pandas",
+        "cveta2.domain"
+      ],
+      "forbidden_dependencies": [
+        "cveta2.application",
+        "cveta2.adapters",
+        "filesystem, environment and network effects"
+      ],
+      "effects": "No effects; caller supplies in-memory values.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Exhaustive inward layers, adapter independence and protected SDK imports cover every changed runtime module.",
+      "check": "imports"
+    },
+    {
+      "id": "effects",
+      "path": "tests/test_architecture.py",
+      "status": "existing",
+      "rules": "Production effect ownership and forbidden import/effect negative fixtures; canonical facade exclusion and no eager SDK loading.",
+      "check": "imports"
+    }
+  ],
+  "checks": [
+    {
+      "id": "imports",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run python scripts/check_architecture.py && uv run pytest tests/test_architecture.py",
+      "expectation": "Production graph/effects pass; existing forbidden dependency/effect negative fixtures reject violations.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/full-cleanup/verification-2026-11-01.md"
+      }
+    },
+    {
+      "id": "behavior",
+      "kind": "behavior",
+      "command": "uv run pytest tests/test_partition.py tests/test_whats_new.py",
+      "expectation": "Original failure regressions and existing preserved boundary tests pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/full-cleanup/verification-2026-11-01.md"
+      }
+    },
+    {
+      "id": "docs",
+      "kind": "documentation",
+      "command": "uv run pytest tests/test_docs.py",
+      "expectation": "Maintained documentation signatures, configuration, commands and local links/anchors pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/full-cleanup/verification-2026-11-01.md"
+      }
+    }
+  ],
+  "documentation": "Update specs/baseline.md and relevant error guidance; no public API/schema changes. Published portable usage skill inspected at 13766a1ecb36fdc584cc7588f39ba713155753bc; no usage change required.",
+  "review": {
+    "status": "accepted",
+    "reviewer": "/root/final_review (fresh independent native reviewer)",
+    "evidence": "docs/plans/full-cleanup/review-2026-11-01.md",
+    "reconciliation": "Parent and independent reviewer reconciled every task-owned runtime, test, hook, guide, baseline and new artifact addition against the three records. The two pre-existing untracked skill links are excluded and preserved. No removals or renames. This accepts architecture/local checks only; required live integration and release remain open in native tasks and dated evidence."
+  }
+}

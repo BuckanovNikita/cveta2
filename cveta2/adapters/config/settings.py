@@ -99,7 +99,12 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
     try:
         data = yaml.safe_load(path.read_bytes()) or {}
     except yaml.YAMLError as e:
-        raise Cveta2Error(f"Ошибка чтения YAML-конфигурации {path}: {e}") from e
+        details = type(e).__name__
+        if isinstance(e, yaml.MarkedYAMLError):
+            mark = e.problem_mark or e.context_mark
+            if mark is not None:
+                details += f", строка {mark.line + 1}, столбец {mark.column + 1}"
+        raise Cveta2Error(f"Ошибка чтения YAML-конфигурации {path}: {details}.") from e
     if not isinstance(data, dict):
         logger.warning(f"Invalid config format in {path}; expected mapping.")
         return {}

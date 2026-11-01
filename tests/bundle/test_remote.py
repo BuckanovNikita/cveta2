@@ -51,7 +51,9 @@ def http_api() -> Iterator[str]:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    worker = threading.Thread(target=server.serve_forever)
+    worker = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.01}
+    )
     worker.start()
     try:
         yield f"http://127.0.0.1:{server.server_port}"

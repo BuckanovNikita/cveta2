@@ -9,10 +9,12 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import yaml
 from pydantic import ValidationError
+from yaml.error import Mark
 
 from cveta2.adapters.config.settings import CvatConfig, IgnoreConfig
-from cveta2.domain.errors import MissingCredentialsError
+from cveta2.domain.errors import Cveta2Error, MissingCredentialsError
 
 
 @pytest.mark.parametrize("value", [-1, float("inf"), float("-inf"), float("nan")])
@@ -55,6 +57,90 @@ def test_cli_typed_config_has_no_traceback(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "Traceback" not in result.stderr
     assert "request_timeout" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("document", "category", "line", "column"),
+    [
+        ("cvat:\n  password: [DO_NOT_LOG_SECRET\n", "ParserError", 3, 1),
+        ('cvat:\n  password: "\\qDO_NOT_LOG_SECRET"\n', "ScannerError", 2, 15),
+        ("cvat:\n  password: !DO_NOT_LOG_SECRET value\n", "ConstructorError", 2, 13),
+    ],
+)
+def test_malformed_yaml_reports_location_without_credential_values(
+    tmp_path: Path, document: str, category: str, line: int, column: int
+) -> None:
+    config = tmp_path / "private.yaml"
+    config.write_text(document, encoding="utf-8")
+
+    with pytest.raises(Cveta2Error) as caught:
+        CvatConfig.from_file(config)
+
+    message = str(caught.value)
+    assert str(config) in message
+    assert category in message
+    assert f"строка {line}, столбец {column}" in message
+    assert "DO_NOT_LOG_SECRET" not in message
+    assert "password" not in message
+    assert isinstance(caught.value.__cause__, yaml.YAMLError)
+    assert "DO_NOT_LOG_SECRET" in str(caught.value.__cause__)
+
+
+@pytest.mark.parametrize(
+    ("error", "location"),
+    [
+        (yaml.YAMLError("DO_NOT_LOG_SECRET"), ""),
+        (yaml.MarkedYAMLError(problem="DO_NOT_LOG_SECRET"), ""),
+        (
+            yaml.MarkedYAMLError(
+                context="DO_NOT_LOG_SECRET",
+                context_mark=Mark("DO_NOT_LOG_SECRET", 0, 4, 6, None, 0),
+            ),
+            ", строка 5, столбец 7",
+        ),
+    ],
+    ids=["unmarked", "missing-marks", "context-mark-only"],
+)
+def test_yaml_diagnostic_uses_only_category_and_available_location(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: yaml.YAMLError,
+    location: str,
+) -> None:
+    config = tmp_path / "private.yaml"
+    config.write_text("cvat: {}", encoding="utf-8")
+    monkeypatch.setattr(yaml, "safe_load", Mock(side_effect=error))
+
+    with pytest.raises(Cveta2Error) as caught:
+        CvatConfig.from_file(config)
+
+    assert str(caught.value) == (
+        f"Ошибка чтения YAML-конфигурации {config}: {type(error).__name__}{location}."
+    )
+    assert caught.value.__cause__ is error
+
+
+def test_cli_malformed_config_omits_credential_values(tmp_path: Path) -> None:
+    config = tmp_path / "private.yaml"
+    config.write_text("cvat:\n  password: [DO_NOT_LOG_SECRET\n", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-m", "cveta2.cli", "fetch", "-p", "1", "-o", "unused"],
+        env={
+            **os.environ,
+            "CVETA2_CONFIG": str(config),
+            "CVETA2_NO_INTERACTIVE": "true",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode != 0
+    assert str(config) in result.stderr
+    assert "строка 3, столбец 1" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "DO_NOT_LOG_SECRET" not in result.stdout + result.stderr
 
 
 def test_stale_ignore_cli_removes_without_task_listing(
