@@ -2,6 +2,28 @@
 
 <!-- version list -->
 
+## v0.12.1 (2026-11-01)
+
+### Bug Fixes
+
+- Preserve incomplete tasks and operational error handling
+  ([`bce719b`](https://github.com/BuckanovNikita/cveta2/commit/bce719b4de51dde7bdb656690790f2f50c292346))
+
+### Documentation
+
+- Accept cleanup and live release verification
+  ([`fd82293`](https://github.com/BuckanovNikita/cveta2/commit/fd82293e54ca60b19cc56440f4d690ef416d5a38))
+
+- Prepare verified cleanup patch release
+  ([`c66e7c1`](https://github.com/BuckanovNikita/cveta2/commit/c66e7c1ee62940314ed30eefe6876c2f1974fb8e))
+
+- Record cleanup verification and live release blocker
+  ([`24d1045`](https://github.com/BuckanovNikita/cveta2/commit/24d1045fe77605d8ed6b092b054c1c2a283d23ac))
+
+- Record fetch diagnostics acceptance and release receipts
+  ([`d1a40ac`](https://github.com/BuckanovNikita/cveta2/commit/d1a40ac3f325f13b25345318b799d66c1f185310))
+
+
 ## v0.12.0 (2026-10-29)
 
 ### Features
