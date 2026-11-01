@@ -2,7 +2,7 @@
 
 **Feature Branch**: `cleanup/contracts-and-release`
 **Created**: 2026-11-01
-**Status**: Accepted; release pending
+**Status**: Released in v0.12.1
 **Input**: Full cleanup, preserving supported behavior; repair the completion bug
 found during the audit. Delta from [baseline](../baseline.md#output-and-partition-rules).
 

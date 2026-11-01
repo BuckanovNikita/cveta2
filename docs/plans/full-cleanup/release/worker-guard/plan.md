@@ -62,7 +62,7 @@ The installed runner already excludes `.gitignore` itself from invalidation.
   full mutation profile; require zero unexplained results or stale equivalents.
 - [x] W004 Run ordinary/static/import/effect/architecture and documentation checks;
   reconcile diff, independent review and architecture acceptance.
-- [ ] W005 Commit with normal hooks, merge to main, evaluate semantic-release and
+- [x] W005 Commit with normal hooks, merge to main, evaluate semantic-release and
   publish main plus the generated Git version tag through all required gates.
 - [x] W006 Apply the existing personal-skill ignore policy to the two links;
   prove files preserved and ordinary full-profile cache reuse.

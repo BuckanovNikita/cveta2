@@ -20,7 +20,7 @@
 
 - [x] T008 Reconcile specs/baseline.md, docs/configuration.md and dated evidence; document portable-skill no-change reason.
 - [x] T009 Run integrated architecture/static/coverage and fast/full mutation plus configured live gates; fresh final review and architecture.json acceptance.
-- [ ] T010 Converge spec.md, plan.md and tasks.md; authorized main merge, release evaluation and Git commit/tag delivery.
+- [x] T010 Converge spec.md, plan.md and tasks.md; authorized main merge, release evaluation and Git commit/tag delivery.
 
 ## Dependencies and implementation strategy
 
@@ -31,4 +31,4 @@ Other streams have disjoint runtime/test ownership; parent owns shared docs.
 
 ## Phase 5: Convergence
 
-- [ ] T011 Complete the required live integration evidence and Git delivery in T009/T010 after the external stand prerequisite is restored; retain results in evidence/verification-2026-11-01.md (plan: Acceptance and Documentation; partial).
+- [x] T011 Complete the required live integration evidence and Git delivery in T009/T010 after the external stand prerequisite is restored; retain results in evidence/verification-2026-11-01.md (plan: Acceptance and Documentation; partial).

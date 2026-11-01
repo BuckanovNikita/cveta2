@@ -8,7 +8,7 @@
 - [x] T006 Correct help/config/ignore contradictions in interfaces, docs and shared baseline; inspect portable guidance.
 - [x] T007 Integrate separately specified fixes; run static, architecture, docs, full coverage/duration, mutation and live gates.
 - [x] T008 Obtain fresh independent review, reconcile complete diff and validate architecture acceptance.
-- [ ] T009 Complete authorized commits, main merge, semantic-release evaluation and commit/tag delivery; retain dated evidence.
+- [x] T009 Complete authorized commits, main merge, semantic-release evaluation and commit/tag delivery; retain dated evidence.
 
 T003-T006 depend on T002; T007 depends on T003-T006 and both bug tracks.
 T008 follows parent verification; T009 follows acceptance. This maintenance

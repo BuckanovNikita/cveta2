@@ -15,7 +15,7 @@
 
 - [x] T006 Update specs/baseline.md and dated evidence/verification-2026-11-01.md; document portable-skill no-change reason.
 - [x] T007 Run integrated architecture/static/coverage and fast/full mutation plus configured live gates; obtain fresh final review and validate architecture.json acceptance.
-- [ ] T008 Converge spec.md, plan.md and tasks.md; complete authorized main merge, release evaluation and Git commit/tag delivery.
+- [x] T008 Converge spec.md, plan.md and tasks.md; complete authorized main merge, release evaluation and Git commit/tag delivery.
 
 ## Dependencies and implementation strategy
 
@@ -26,4 +26,4 @@ cveta2/domain/partition.py and tests/test_partition.py. Parent owns shared artif
 
 ## Phase 4: Convergence
 
-- [ ] T009 Complete the required live integration evidence and Git delivery in T007/T008 after the external stand prerequisite is restored; retain results in evidence/verification-2026-11-01.md (plan: Acceptance and Documentation; partial).
+- [x] T009 Complete the required live integration evidence and Git delivery in T007/T008 after the external stand prerequisite is restored; retain results in evidence/verification-2026-11-01.md (plan: Acceptance and Documentation; partial).
