@@ -140,3 +140,34 @@ independent review. Declared local import/behavior/documentation/hook checks all
 have passing evidence. Additional exact parent acceptance commands passed:
 56 architecture tests (plus import-linter/effects), and 397 maintenance tests.
 This structural/architectural acceptance does not close the live/release gap.
+
+## Local commit and final mutation refresh
+
+Source commit: `bce719b` — `fix: preserve incomplete tasks and operational error handling`.
+All normal commit hooks passed without skips: lock, formatting/lint, import/effect
+contracts, strict mypy, Vulture, pytest/coverage, fast mutation, build and
+Conventional Commit validation. Only the two original untracked skill links
+remained afterward; version stayed 0.12.0.
+
+The final full mutation refresh against that committed source completed with exit 0:
+8118 total, 7835 killed, 283 existing justified equivalents; no unexplained or
+stale entries, no-tests, not-checked, skips or timeouts. Throughput observation was
+60.16 mutations/second; this is not an end-to-end release benchmark. Scope,
+profiles, cache policy and the equivalence table were unchanged. Final docs check
+passed 14 tests; actual version-drift check confirms 0.12.0 matches v0.12.0.
+
+The final run still reported two existing untracked agent-skill links and the
+new spec architecture JSON as non-Python changes, forcing a full rerun. Installed
+mutmut supports `cache_invalidation_exclude`. A future bounded investigation can
+prove exact agent/spec artifact exclusions never affect mutation tests and retain
+negative tests showing runtime/config/test changes still invalidate results;
+only then apply exclusions. This is an actionable release-cost opportunity, not
+an implemented cache relaxation or a measured successful-release saving.
+
+Local source and architecture work is accepted. Native live/release tasks remain
+unchecked, and convergence follow-ups remain open. Main, version tags and remote
+refs were not changed; semantic-release cannot complete the native delivery while
+the configured live gate lacks its external prerequisites. Restoring the shared
+stands requires separate authorization; no such deployment was performed. The
+handoff preserves all logs and the untracked user links, with no task-owned live
+run or background test process left running.
