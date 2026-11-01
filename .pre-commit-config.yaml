@@ -10,6 +10,16 @@ default_install_hook_types: [pre-commit, commit-msg, pre-push]
 repos:
   - repo: local
     hooks:
+      # A rewritten lockfile needs restaging before the expensive checks.
+      - id: uv-lock
+        name: uv lock
+        entry: uv lock
+        language: system
+        pass_filenames: false
+        always_run: true
+        fail_fast: true
+        stages: [pre-commit]
+
       - id: ruff-format
         name: ruff format (all files)
         entry: uv run ruff format .
@@ -74,6 +84,16 @@ repos:
         always_run: true
         stages: [pre-commit]
 
+      # Reject version drift before paying for mutation or live checks.
+      - id: version-drift
+        name: version matches the nearest tag
+        entry: uv run python scripts/check_version_drift.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        fail_fast: true
+        stages: [pre-push]
+
       # The whole gated scope, kept off the commit path because any edit under
       # tests/ invalidates every cached verdict (cache_invalidation_files +
       # on_dependency_change = "rerun"), so a commit that touches a test pays
@@ -81,16 +101,6 @@ repos:
       - id: mutmut-full
         name: mutmut (mutation testing, full scope)
         entry: ./scripts/mutation_test.sh --profile full
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-
-      # Cheap, so it goes before the integration gate: a version nobody released
-      # should stop the push in a second, not after a stack bring-up.
-      - id: version-drift
-        name: version matches the nearest tag
-        entry: uv run python scripts/check_version_drift.py
         language: system
         pass_filenames: false
         always_run: true
@@ -137,14 +147,6 @@ repos:
       - id: uv-build
         name: uv build (check project is buildable)
         entry: bash -c 'uv build --quiet && rm -rf dist'
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
-
-      - id: uv-lock
-        name: uv lock
-        entry: uv lock
         language: system
         pass_filenames: false
         always_run: true

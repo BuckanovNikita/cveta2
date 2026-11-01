@@ -80,6 +80,10 @@ cache state and appears in credential diagnostics. CLI YAML/type/value errors
 are actionable, omit credential values and do not produce incidental tracebacks;
 API callers retain typed errors.
 
+Malformed YAML diagnostics name the file, error category and available one-based
+line/column without including source excerpts or scalar values. The original
+parser exception remains available as the cause for explicit API debugging.
+
 Unset/zero data timeout means no timeout; positive values set the read timeout
 with a ten-second connect timeout. Negative/nonfinite values fail validation.
 Noninteractive operation replaces missing choices with errors and follows the
@@ -92,6 +96,8 @@ ones carrying `Retry-After`. Idempotent deletion/job-state replacement retains
 its retry policy. Exhausted 429 errors abort fetch; ordinary per-task 5xx failures
 warn, identify skipped tasks and continue unless `CVETA2_RAISE_ON_FAILURE` is
 enabled. S3 authorization/not-found failures are not indiscriminately retried.
+Only finite nonnegative `Retry-After` delta-seconds are accepted; negative,
+nonfinite, missing, unparseable and HTTP-date values use ordinary backoff.
 Exhausted SDK 502/503/504 responses retain their final status and follow this
 task policy, rather than becoming unidentified transport failures. Optional
 issue-read failures remain degraded results. `CvatApiError` accepts optional
@@ -190,6 +196,8 @@ replica and jobs without exported frames. An explicit false `task_completed`
 excludes the task even when exported rows look finished. Missing/null legacy
 completion falls back to row stage/state, including deletion rows; unfinished
 evidence wins over finished evidence.
+Missing legacy stage/state is unfinished evidence for nullable pandas columns as
+well as ordinary object columns; explicit completion precedence is unchanged.
 
 Row stage/state comes from the regular annotation job owning its frame; uncovered
 frames get empty strings. Ground Truth/replica jobs do not overwrite row ownership.

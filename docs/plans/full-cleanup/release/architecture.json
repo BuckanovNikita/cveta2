@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "task": "Verify and deliver the cleanup patch release",
+  "scope": [
+    "pyproject.toml",
+    "uv.lock",
+    "CHANGELOG.md",
+    "docs/plans/full-cleanup",
+    "specs/002-nullable-completion",
+    "specs/003-operational-errors"
+  ],
+  "impact": "none",
+  "rationale": "Inspected release configuration and existing accepted module records. This release continuation changes only semantic-release-owned version/changelog/root-lock metadata plus task status and dated evidence. No runtime modules, interfaces, dependency pins, composition, architecture enforcement or hooks are changed. Infrastructure restoration requires separate authorization and is owned by its existing authoritative repository/scripts; its machine details are excluded from this project plan."
+}

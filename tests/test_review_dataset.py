@@ -19,7 +19,7 @@ from cveta2.composition.conversion import (
     convert_to_coco,
     convert_to_yolo,
 )
-from cveta2.domain.conversion import _normalize_class_names
+from cveta2.domain.conversion import _normalize_class_names, _validate_export_rows
 from cveta2.domain.errors import Cveta2Error
 from tests.helpers import csv_row, make_image, write_convert_csv
 
@@ -606,16 +606,29 @@ def test_export_missing_columns_rejected_before_output(
     assert not output.exists()
 
 
-@pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
 @pytest.mark.parametrize("shape", ["none", "box"])
 @pytest.mark.parametrize("column", ["image_width", "image_height"])
 @pytest.mark.parametrize("value", [0, -1, 0.5, "bad", "inf", "nan"])
-def test_export_dimensions_are_validated_before_output(
-    tmp_path: Path, export: Any, shape: str, column: str, value: Any
+def test_export_row_dimensions_are_validated(
+    shape: str, column: str, value: Any
 ) -> None:
     row = csv_row("dimension.jpg", shape=shape, split="train")
     row[column] = value
-    csv = write_convert_csv(tmp_path, [row])
+    csv = Path("dimension-source.csv")
+    with pytest.raises(Cveta2Error) as error:
+        _validate_export_rows(pd.DataFrame([row]), csv)
+    assert "dimension.jpg" in str(error.value)
+    assert str(csv) in str(error.value)
+
+
+@pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
+def test_export_dimensions_are_validated_before_output(
+    tmp_path: Path, export: Any
+) -> None:
+    csv = write_convert_csv(
+        tmp_path,
+        [csv_row("dimension.jpg", shape="none", split="train", image_width=0)],
+    )
     output = tmp_path / "out"
     with pytest.raises(Cveta2Error) as error:
         export(csv, output)

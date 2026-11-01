@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from cveta2.domain.models import CSV_COLUMNS
-from cveta2.domain.partition import partition_annotations_df
+from cveta2.domain.partition import completed_task_ids, partition_annotations_df
 from tests.helpers import csv_row, make_deleted, make_df
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,61 @@ def test_deleted_record_carries_unfinished_task_into_legacy_annotation_rows() ->
 
     assert result.dataset.empty
     assert result.in_progress["image_name"].tolist() == ["kept.jpg"]
+
+
+def test_unknown_legacy_completion_is_independent_of_nullable_dtype() -> None:
+    """Missing stage, state or both disqualify their task, including finished rows."""
+    source = pd.DataFrame(
+        [
+            ("a.jpg", 1, "acceptance", "completed"),
+            ("b.jpg", 1, pd.NA, "completed"),
+            ("c.jpg", 2, "acceptance", "completed"),
+            ("d.jpg", 2, "acceptance", pd.NA),
+            ("e.jpg", 3, "acceptance", "completed"),
+            ("f.jpg", 3, pd.NA, pd.NA),
+            ("g.jpg", 4, "acceptance", "completed"),
+        ],
+        columns=["image_name", "task_id", "job_stage", "job_state"],
+    )
+    for dtype in ("object", "string"):
+        frame = source.astype({"job_stage": dtype, "job_state": dtype})
+
+        assert completed_task_ids(frame) == {4}
+        result = partition_annotations_df(frame, [])
+        assert result.dataset["image_name"].tolist() == ["g.jpg"]
+        assert result.in_progress["image_name"].tolist() == [
+            "a.jpg",
+            "b.jpg",
+            "c.jpg",
+            "d.jpg",
+            "e.jpg",
+            "f.jpg",
+        ]
+        assert result.obsolete.empty
+
+
+def test_nullable_explicit_completion_keeps_overrides_and_legacy_fallback() -> None:
+    frame = pd.DataFrame(
+        {
+            "image_name": ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"],
+            "task_id": [1, 1, 2, 3, 4],
+            "job_stage": pd.Series(
+                ["acceptance", pd.NA, pd.NA, "acceptance", "acceptance"], dtype="string"
+            ),
+            "job_state": pd.Series(
+                ["completed", pd.NA, pd.NA, "completed", "completed"], dtype="string"
+            ),
+            "task_completed": pd.Series(
+                [pd.NA, pd.NA, True, False, pd.NA], dtype="boolean"
+            ),
+        }
+    )
+
+    assert completed_task_ids(frame) == {2, 4}
+    result = partition_annotations_df(frame, [])
+    assert result.dataset["image_name"].tolist() == ["c.jpg", "e.jpg"]
+    assert result.in_progress["image_name"].tolist() == ["a.jpg", "b.jpg", "d.jpg"]
+    assert result.obsolete.empty
 
 
 def test_empty_dataframe_keeps_deletions() -> None:

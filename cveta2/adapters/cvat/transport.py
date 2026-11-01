@@ -7,6 +7,7 @@ login or translating exceptions raised inside a caller's connection block.
 """
 
 import functools
+import math
 import threading
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -36,7 +37,7 @@ def _parse_retry_after(exc: ApiException) -> float | None:
     ``ApiException`` is an opaque generated type whose ``headers`` is
     ``None`` unless the failure carried an HTTP response, so the attributes
     are read defensively.  Only the delta-seconds form is understood; the
-    HTTP-date spelling falls back to the normal backoff.
+    HTTP-date spelling and invalid delays fall back to the normal backoff.
     """
     headers = getattr(exc, "headers", None)
     if headers is None:
@@ -45,10 +46,11 @@ def _parse_retry_after(exc: ApiException) -> float | None:
     if raw is None:
         return None
     try:
-        return float(raw)
+        delay = float(raw)
     except ValueError:
         logger.debug("Retry-After не распознан; используется стандартная задержка")
         return None
+    return delay if math.isfinite(delay) and delay >= 0 else None
 
 
 def _translate_api_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":

@@ -11,6 +11,7 @@ repeats a request the server might already have applied.
 from __future__ import annotations
 
 from functools import partial
+from math import isfinite
 from unittest.mock import MagicMock
 
 import pytest
@@ -360,16 +361,17 @@ class _FakeHttpResponse:
 
 
 class TestRetryAfterParsing:
-    def test_a_delta_seconds_header_reaches_the_exception(self) -> None:
+    @pytest.mark.parametrize("delay", ["0", "12"])
+    def test_a_delta_seconds_header_reaches_the_exception(self, delay: str) -> None:
         """The backoff prefers this value over its own curve."""
 
         @_translate_api_errors
         def throttled() -> None:
-            raise ApiException(http_resp=_FakeHttpResponse(429, {"Retry-After": "12"}))
+            raise ApiException(http_resp=_FakeHttpResponse(429, {"Retry-After": delay}))
 
         with pytest.raises(CvatApiError) as caught:
             throttled()
-        assert caught.value.retry_after == 12.0
+        assert caught.value.retry_after == float(delay)
         assert caught.value.status_code == 429
 
     @pytest.mark.parametrize(
@@ -400,6 +402,43 @@ class TestRetryAfterParsing:
         with pytest.raises(CvatApiError) as caught:
             failed()
         assert not _should_retry_write(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("delay", "expected_retry_after"),
+    [
+        ("-1", None),
+        ("nan", None),
+        ("inf", None),
+        ("-inf", None),
+        ("invalid", None),
+        ("0", 0.0),
+        ("12", 12.0),
+    ],
+)
+def test_retry_delay_preserves_read_budget_and_wait_policy(
+    monkeypatch: pytest.MonkeyPatch, delay: str, expected_retry_after: float | None
+) -> None:
+    configure_retries(attempts=3, max_wait=0.01)
+    waits: list[float] = []
+    monkeypatch.setattr("tenacity.nap.time.sleep", waits.append)
+    error = ApiException(http_resp=_FakeHttpResponse(503, {"Retry-After": delay}))
+    client = MagicMock()
+    request = client.api_client.tasks_api.retrieve_annotations
+    request.side_effect = error
+
+    with pytest.raises(CvatApiError) as caught:
+        SdkCvatApiAdapter(client).get_task_annotations(7)
+
+    assert request.call_count == 3
+    assert caught.value.status_code == 503
+    assert caught.value.retry_after == expected_retry_after
+    assert caught.value.__cause__ is error
+    assert len(waits) == 2
+    if expected_retry_after is None:
+        assert all(isfinite(wait) and 0 < wait <= 0.01 for wait in waits)
+    else:
+        assert waits == [min(expected_retry_after, 0.01)] * 2
 
 
 def test_an_ambiguous_sdk_write_with_retry_after_is_not_replayed(

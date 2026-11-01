@@ -72,7 +72,7 @@ def _add_common_fetch_args(parser: "argparse.ArgumentParser") -> None:
         action="store_true",
         help=(
             "Keep per-task CSV files in .tasks/ subdirectory. "
-            "By default they are removed after merging."
+            "By default .tasks is left untouched."
         ),
     )
     parser.add_argument(

@@ -31,7 +31,9 @@ def _rows_are_finished(frame: "pd.DataFrame") -> "pd.Series[bool]":
         finished = finished.where(
             frame["task_completed"].isna(), frame["task_completed"].eq(other=True)
         )
-    return finished
+    # Nullable pandas columns propagate unknown comparisons as pd.NA. An
+    # unknown legacy position is unfinished evidence, not an ignorable row.
+    return finished.fillna(value=False)
 
 
 def completed_task_ids(

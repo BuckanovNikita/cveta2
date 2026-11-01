@@ -125,8 +125,7 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
         ),
         CommandSpec(
             "ignore",
-            "Manage the per-project ignore list of tasks "
-            "(always treated as in-progress during fetch).",
+            "Manage the per-project ignore list of tasks (excluded from fetch output).",
             run_ignore,
             configure_ignore,
         ),

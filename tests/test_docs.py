@@ -276,17 +276,17 @@ class TestEveryDocumentedLinkResolves:
         assert not broken, "\n".join(broken)
 
 
-@pytest.mark.parametrize(
-    "doc",
-    [p for p in ALL_DOCS if p.exists() and p.name != "README.md"],
-    ids=lambda p: str(p.relative_to(REPO_ROOT)),
-)
-def test_only_readme_files_and_user_docs_are_russian(doc: Path) -> None:
+def test_only_readme_files_and_user_docs_are_russian() -> None:
     """CONTRIBUTING.md and docs/ are user-facing Russian; the rest is English."""
-    russian_is_allowed = doc.name == "CONTRIBUTING.md" or doc.parent.name == "docs"
-    if russian_is_allowed:
-        return
-    assert not re.search(r"[А-Яа-я]", doc.read_text(encoding="utf-8"))
+    unexpected = [
+        str(doc.relative_to(REPO_ROOT))
+        for doc in ALL_DOCS
+        if doc.exists()
+        and doc.name not in {"README.md", "CONTRIBUTING.md"}
+        and doc.parent.name != "docs"
+        and re.search(r"[А-Яа-я]", doc.read_text(encoding="utf-8"))
+    ]
+    assert not unexpected, "Russian text outside user guides: " + ", ".join(unexpected)
 
 
 class TestTheAgentInstructionsDelegateToSpecKit:
@@ -331,13 +331,14 @@ def test_baseline_preserves_the_ordered_dataset_schema() -> None:
     assert columns == list(cveta2.CSV_COLUMNS)
 
 
-@pytest.mark.parametrize(
-    "doc",
-    [p for p in [*ALL_DOCS, *SKILL_DOCS] if p.exists() and p.name != "CHANGELOG.md"],
-    ids=lambda p: str(p.relative_to(REPO_ROOT)),
-)
-def test_no_doc_describes_the_retired_compose_stack(doc: Path) -> None:
+def test_no_doc_describes_the_retired_compose_stack() -> None:
     """CHANGELOG.md is release history and may name what was retired."""
-    text = doc.read_text(encoding="utf-8")
-    found = [token for token in RETIRED_STACK_TOKENS if token in text]
-    assert found == [], f"{doc.name} still names the retired per-run stack: {found}"
+    problems: list[str] = []
+    for doc in [*ALL_DOCS, *SKILL_DOCS]:
+        if not doc.exists() or doc.name == "CHANGELOG.md":
+            continue
+        text = doc.read_text(encoding="utf-8")
+        found = [token for token in RETIRED_STACK_TOKENS if token in text]
+        if found:
+            problems.append(f"{doc.relative_to(REPO_ROOT)}: {found}")
+    assert not problems, "Retired per-run stack references:\n" + "\n".join(problems)

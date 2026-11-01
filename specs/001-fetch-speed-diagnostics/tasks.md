@@ -36,11 +36,11 @@ Independent checks use injected clocks and mixed task outcomes.
 
 - [x] T015 Integrate and run focused regressions, import/effect/negative architecture and documentation checks; record specs/001-fetch-speed-diagnostics/evidence/verification.md.
 - [x] T016 Update specs/baseline.md, .specify/memory/architecture.md, README.md and affected Russian docs/ guides for final behavior and diagnostics.
-- [ ] T017 Update companion corp-skills/skills/cveta2 usage/evaluation material and validate its package/examples per MAINTENANCE.md; record source version/checks/commit in feature evidence.
-- [ ] T018 Run required Ruff/mypy/Vulture/full coverage/fast and full mutation/packaging/lock gates and serial owned live integration; record actual results and cleanup in feature evidence.
+- [x] T017 Update companion corp-skills/skills/cveta2 usage/evaluation material and validate its package/examples per MAINTENANCE.md; record source version/checks/commit in feature evidence.
+- [x] T018 Run required Ruff/mypy/Vulture/full coverage/fast and full mutation/packaging/lock gates and serial owned live integration; record actual results and cleanup in feature evidence.
 - [x] T019 Obtain fresh independent read-only review of final integrated diff and Python/architecture evidence; fix findings and reverify before acceptance.
 - [x] T020 Run convergence; reconcile complete task-owned diff/checks/review and validate architecture.json acceptance; append gaps rather than rewriting completed history.
-- [ ] T021 Commit exact owned paths, merge to main, evaluate semantic-release with Git tags only, push authorized commit/tag refs and verify; record companion commit and release outcome.
+- [x] T021 Commit exact owned paths, merge to main, evaluate semantic-release with Git tags only, push authorized commit/tag refs and verify; record companion commit and release outcome.
 
 ## Dependencies and execution
 

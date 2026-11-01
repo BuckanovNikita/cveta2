@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "task": "Full cleanup maintenance",
+  "scope": [
+    ".pre-commit-config.yaml",
+    "cveta2/interfaces/commands/fetch.py",
+    "cveta2/interfaces/cli.py",
+    "tests/test_output.py",
+    "tests/test_review_dataset.py",
+    "tests/test_cvat_diagnostics.py",
+    "tests/bundle/test_remote.py",
+    "tests/integration/test_clearml.py",
+    "docs/plans/full-cleanup",
+    "docs/configuration.md",
+    "docs/cli.md",
+    "CONTRIBUTING.md",
+    "tests/test_docs.py"
+  ],
+  "impact": "modules",
+  "rules": "Constitution principle II and engineering.md: exhaustive inward layers, independent adapters, canonical facade exclusion, SDK/prompt/effect ownership and acyclic siblings.",
+  "modules": [
+    {
+      "id": "fetch-help",
+      "path": "cveta2/interfaces/commands/fetch.py",
+      "change": "modify",
+      "responsibility": "Map fetch command arguments and describe opt-in per-task debug output truthfully.",
+      "interface": "Supported options, defaults and dispatch remain unchanged; only explanatory help text changes.",
+      "layer": "incoming interface",
+      "allowed_dependencies": [
+        "composition",
+        "application/domain values",
+        "shared incoming helpers"
+      ],
+      "forbidden_dependencies": [
+        "third-party SDK access",
+        "business policy duplicated in parser"
+      ],
+      "effects": "Existing incoming command owns prompts/arguments; no effect or behavior changes.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "ignore-help",
+      "path": "cveta2/interfaces/cli.py",
+      "change": "modify",
+      "responsibility": "Command registry/dispatch and top-level error boundary.",
+      "interface": "Registry and public command/exit behavior remain unchanged; ignore help says excluded rather than in-progress.",
+      "layer": "incoming interface",
+      "allowed_dependencies": [
+        "incoming command modules",
+        "composition",
+        "domain errors"
+      ],
+      "forbidden_dependencies": [
+        "SDK access",
+        "business policy duplicated in dispatcher"
+      ],
+      "effects": "No new effects; existing incoming dispatch/error rendering remains.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Exhaustive inward layers, adapter independence and protected SDK imports cover every changed runtime module.",
+      "check": "imports"
+    },
+    {
+      "id": "effects",
+      "path": "tests/test_architecture.py",
+      "status": "existing",
+      "rules": "Production effect ownership and forbidden import/effect negative fixtures; canonical facade exclusion and no eager SDK loading.",
+      "check": "imports"
+    }
+  ],
+  "checks": [
+    {
+      "id": "imports",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run python scripts/check_architecture.py && uv run pytest tests/test_architecture.py",
+      "expectation": "Production graph/effects pass; existing forbidden dependency/effect negative fixtures reject violations.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/full-cleanup/verification-2026-11-01.md"
+      }
+    },
+    {
+      "id": "behavior",
+      "kind": "behavior",
+      "command": "uv run pytest tests/test_output.py tests/test_review_dataset.py tests/test_cvat_diagnostics.py tests/bundle/test_remote.py tests/test_cli_parsing.py tests/test_fetch_task.py",
+      "expectation": "All lexical/dimension combinations remain covered; public prewrite probes and HTTP lifecycle scenarios pass; no supported CLI behavior changes.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/full-cleanup/verification-2026-11-01.md"
+      }
+    },
+    {
+      "id": "docs",
+      "kind": "documentation",
+      "command": "uv run pytest tests/test_docs.py",
+      "expectation": "Maintained documentation signatures, configuration, commands and local links/anchors pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/full-cleanup/verification-2026-11-01.md"
+      }
+    },
+    {
+      "id": "hooks",
+      "kind": "behavior",
+      "command": "uv run python /tmp/cveta2-cleanup-hook-probes.py",
+      "expectation": "Real pre-commit in disposable Git repositories stops before mutation on version failure/lock rewrite and executes all hooks on valid prerequisites.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/full-cleanup/verification-2026-11-01.md"
+      }
+    }
+  ],
+  "documentation": "Correct docs/configuration.md and docs/cli.md; update CONTRIBUTING.md prerequisite hook order if applicable. Portable published usage needs no changes; retain dated evidence and separate bug records.",
+  "review": {
+    "status": "accepted",
+    "reviewer": "/root/final_review (fresh independent native reviewer)",
+    "evidence": "docs/plans/full-cleanup/review-2026-11-01.md",
+    "reconciliation": "Parent and independent reviewer reconciled every task-owned runtime, test, hook, guide, baseline and new artifact addition against the three records. The two pre-existing untracked skill links are excluded and preserved. No removals or renames. This accepts architecture/local checks only; required live integration and release remain open in native tasks and dated evidence."
+  }
+}
