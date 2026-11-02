@@ -12,7 +12,7 @@ conventions do not override it. User documentation and CLI output remain Russian
 Spec Kit memory, feature artifacts, and the dataset contract are English. This file owns detailed
 operational guidance; [constitution.md](constitution.md) owns governance.
 [AGENTS.md](../../AGENTS.md) is the discovery entry point and `CLAUDE.md` remains
-its symlink. Read [architecture.md](architecture.md) for module ownership and
+a regular file containing `@AGENTS.md`. Read [architecture.md](architecture.md) for module ownership and
 [the dataset contract](../../specs/baseline.md)
 for output-format behavior.
 

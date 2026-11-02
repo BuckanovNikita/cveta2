@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "task": "Standardize Claude and Codex instruction discovery",
+  "scope": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".specify/memory/constitution.md",
+    ".specify/memory/engineering.md",
+    "CONTRIBUTING.md",
+    "tests/test_docs.py",
+    "docs/plans/claude-codex-organization-20261102"
+  ],
+  "impact": "none",
+  "rationale": "Inspected root instructions, existing host entrypoints, project workflow guidance and tracked instruction inventory. This change replaces instruction aliases with regular import adapters and updates their prose/documentation assertion only; it changes no product runtime module, dependency contract, composition target or architecture enforcement tool. Generated workflow skills, user settings and unrelated changes remain outside this task."
+}

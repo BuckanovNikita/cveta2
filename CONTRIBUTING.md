@@ -66,7 +66,7 @@ uvx --from git+https://github.com/github/spec-kit.git@v1.0.13 specify integratio
 
 `init --force` может перезаписать управляемые файлы: используйте его только при
 первоначальной настройке после проверки дерева и конфликтующих путей.
-Существующий `CLAUDE.md` должен оставаться симлинком на `AGENTS.md`.
+`CLAUDE.md` — обычный файл с импортом `@AGENTS.md`; общие инструкции меняют в `AGENTS.md`.
 
 ### Последовательность изменения
 
@@ -747,7 +747,7 @@ git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
 | [.specify/memory/engineering.md](.specify/memory/engineering.md) | Подробные правила работы агентов | Английский |
 | [.specify/memory/constitution.md](.specify/memory/constitution.md) | Принципы и управление процессом Spec Kit | Английский |
 | [Архив прежних спецификаций](https://github.com/BuckanovNikita/cveta2/tree/af0073e5bd8a8799f0cfd322cfb27c8efd7b747d/specs) | Исторические решения и датированные свидетельства | Английский |
-| `AGENTS.md` (`CLAUDE.md` — симлинк на него) | Точка входа к источникам Spec Kit | Английский |
+| `AGENTS.md` (`CLAUDE.md` импортирует его через `@AGENTS.md`) | Точка входа к источникам Spec Kit | Английский |
 
 Правило: пользовательская и контрибьюторская документация (`README.md`,
 `CONTRIBUTING.md`, `docs/`) — на русском; документация для разработчиков и

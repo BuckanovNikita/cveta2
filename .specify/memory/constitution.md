@@ -82,7 +82,7 @@ remain Russian; task planning and evidence remain English. Agent instructions,
 architecture and dataset-format documents,
 Spec Kit artifacts, and skills remain English. CLI and API changes MUST update
 their user documentation. Keep `AGENTS.md` as the shared discovery entry point
-and `CLAUDE.md` as its symlink. Detailed operational rules live in
+and `CLAUDE.md` as a regular file importing it with `@AGENTS.md`. Detailed operational rules live in
 [engineering.md](engineering.md), architecture in
 [architecture.md](architecture.md), and output contracts in
 [the living dataset reference](../../specs/baseline.md).
@@ -179,4 +179,8 @@ history consolidation and one current baseline. New Spec Kit features describe
 deltas from that baseline; application behavior, quality gates and installed
 workflow tooling remain unchanged.
 
-**Version**: 1.5.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-10-21
+Version 1.5.1 clarifies cross-host instruction discovery: a regular Claude import
+adapter replaces the symlink so the same shared policy works in regular-file
+checkouts. Project workflow, review gates and application contracts are unchanged.
+
+**Version**: 1.5.1 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-02
