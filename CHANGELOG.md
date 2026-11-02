@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.13.1 (2026-11-02)
+
+### Bug Fixes
+
+- Normalize shared personal-workspace identities
+  ([`962fad5`](https://github.com/BuckanovNikita/cveta2/commit/962fad53b279c4a57f0460c6e9de8dd2f11bb772))
+
+
 ## v0.13.0 (2026-11-02)
 
 ### Documentation
