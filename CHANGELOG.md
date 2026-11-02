@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v0.13.0 (2026-11-02)
+
+### Documentation
+
+- Close cleanup release delivery and convergence
+  ([`9d64379`](https://github.com/BuckanovNikita/cveta2/commit/9d643792cfcb0abfbef00658a797fcce43b0d628))
+
+- Standardize cross-host instruction imports
+  ([`039efac`](https://github.com/BuckanovNikita/cveta2/commit/039efacc2f1dadb892cef6bbc46b00372987ae79))
+
+### Features
+
+- Manage datasets with authoritative shared project configuration
+  ([`57c751f`](https://github.com/BuckanovNikita/cveta2/commit/57c751f1cceeb6e546c86e30e7c2937835e8c7b1))
+
+### Testing
+
+- Run worker isolation guard before dependent cases
+  ([`cd0ead5`](https://github.com/BuckanovNikita/cveta2/commit/cd0ead51efe9e12b43b15d965285c3cfe220b97d))
+
+### Breaking Changes
+
+- Project identities and dataset policy belong exclusively to the shared configuration. Mixed legacy
+  settings require a reviewed migration; personal settings and environment identity overrides cannot
+  shadow selected shared mappings.
+
+
 ## v0.12.1 (2026-11-01)
 
 ### Bug Fixes
