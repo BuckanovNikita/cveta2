@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cveta2.composition.client import CvatClient
-from cveta2.composition.configuration import CvatConfig, NetworkConfig
+from cveta2.composition.configuration import (
+    CvatConfig,
+    NetworkConfig,
+    optional_project_config,
+)
 from cveta2.composition.runtime import configure_data_timeout, configure_network
 from cveta2.domain.errors import Cveta2Error, MissingHostError
 from cveta2.interfaces.api.types import Connection
@@ -22,6 +26,22 @@ def _open(connection: "Connection | None") -> "Iterator[CvatClient]":
     preset.  Never prompts.
     """
     conn = connection or Connection()
+    shared = optional_project_config(conn.config_path)
+    if shared is not None:
+        if conn.host is not None and conn.host.rstrip("/") != shared.cvat.host:
+            raise Cveta2Error("Explicit host cannot override shared CVAT identity")
+        if (
+            conn.organization is not None
+            and (conn.organization or None) != shared.cvat.organization
+        ):
+            raise Cveta2Error(
+                "Explicit organization cannot override shared CVAT identity"
+            )
+        if conn.client is not None and (
+            conn.client.host.rstrip("/") != shared.cvat.host
+            or conn.client.organization != shared.cvat.organization
+        ):
+            raise Cveta2Error("Injected client conflicts with shared CVAT identity")
     if conn.client is not None:
         if not conn.client.is_ready:
             raise Cveta2Error(

@@ -21,8 +21,8 @@ from tests.helpers import (
     csv_row,
     fake_connection,
     make_cs_info,
-    write_config_yaml,
     write_dataset_csv,
+    write_split_config_yaml,
 )
 
 if TYPE_CHECKING:
@@ -91,8 +91,9 @@ class TestS3SyncApi:
         """
         self._fake_bucket(monkeypatch)
         target = tmp_path / "images"
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "sync.yaml",
+            project_ids={normal_fake.project.name: normal_fake.project.id},
             sync_roots={normal_fake.project.name: "synced"},
             cache={
                 "projects": {normal_fake.project.name: {"ignored_prefix": "synced/sub"}}
@@ -228,8 +229,9 @@ class TestIgnoreApi:
     ) -> None:
         task = normal_fake.tasks[0]
         project = normal_fake.project
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={project.name: project.id},
             ignore={project.name: [{"id": task.id, "name": task.name}]},
         )
         _api, connection = _scoped(normal_fake, config_path=config)
@@ -241,7 +243,11 @@ class TestIgnoreApi:
     def test_unknown_id_requires_remote_resolution(
         self, normal_fake: "LoadedFixtures", tmp_path: "Path"
     ) -> None:
-        config = write_config_yaml(tmp_path / "ignore.yaml", ignore={})
+        config = write_split_config_yaml(
+            tmp_path / "ignore.yaml",
+            project_ids={normal_fake.project.name: normal_fake.project.id},
+            ignore={},
+        )
         _api, connection = _scoped(normal_fake, config_path=config)
         with pytest.raises(TaskNotFoundError):
             cveta2.ignore(
@@ -252,8 +258,9 @@ class TestIgnoreApi:
     def test_remove_stored_id_without_remote_task(
         self, normal_fake: "LoadedFixtures", tmp_path: "Path", selector: int | str
     ) -> None:
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={normal_fake.project.name: normal_fake.project.id},
             ignore={normal_fake.project.name: [{"id": 999999, "name": "deleted"}]},
         )
         _api, connection = _scoped(normal_fake, config_path=config)
@@ -273,10 +280,15 @@ class TestIgnoreApi:
             == []
         )
 
-    def test_add_list_remove_roundtrip(self, normal_fake: "LoadedFixtures") -> None:
+    def test_add_list_remove_roundtrip(
+        self, normal_fake: "LoadedFixtures", test_config: "Path"
+    ) -> None:
         fake = normal_fake
         task = fake.tasks[0]
-        connection = fake_connection(fake)
+        config = write_split_config_yaml(
+            test_config, project_ids={fake.project.name: fake.project.id}
+        )
+        _api, connection = _scoped(fake, config_path=config)
 
         added = cveta2.ignore(
             fake.project.id,
@@ -308,8 +320,12 @@ class TestIgnoreApi:
         """
         fake = normal_fake
         task = fake.tasks[0]
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={
+                fake.project.name: fake.project.id,
+                "other-project": fake.project.id + 1,
+            },
             ignore={"other-project": [{"id": 99, "name": "keep-me"}]},
         )
         _api, connection = _scoped(fake, config_path=config)

@@ -34,6 +34,7 @@ CLI и Python API для работы с аннотациями CVAT-проек�
 - **Что нового** (`whats-new`) — список задач, завершённых после уже выгруженного `dataset.csv`
 - **Кэш аннотаций задач** — завершённые задачи кэшируются локально и в S3-бакете проекта, повторный `fetch` не перекачивает их с CVAT
 - **Выгрузка без валидации** — `fetch --skip-validation` принимает завершённую разметку в CVAT перед выгрузкой; по умолчанию отключено
+- **Управляемые датасеты** (`dataset`) — общие соответствия нескольких CVAT-проектов и S3 CSV одному набору ClearML; повторное использование исходных задач, внешний скрипт, устойчивые доли 60/20/20, проверка, issues в CVAT и отдельная публикация
 - **Проверка и подготовка** (`verify`) — отчёт по CSV и явная подготовка проверяемого пакета; очистка только по запросу
 - **Публикация в ClearML** (`upload-dataset`) — отдельная загрузка подготовленного пакета после просмотра
 - **Issues** — выгрузка issues CVAT в CSV (`issue_text` / `issue_state`) и создание новых issues при `upload`
@@ -48,6 +49,13 @@ CSV отдельных задач записываются только с `--sa
 не изменяет ранее существовавший `.tasks`.
 
 ## Изменения совместимости
+
+Проектные правила отделены от личных настроек. Общий файл выбирается через
+`CVETA2_PROJECT_CONFIG` или `cveta2 setup --project-config PATH`; личные значения
+не переопределяют соответствия. Старые смешанные настройки разделяются командой
+`cveta2 setup --migrate-config` только после просмотра и подтверждения.
+[Формат и миграция](docs/configuration.md).
+
 
 Неоднозначные имена проектов и задач теперь требуют явного ID. Продолжение загрузки требует полного совпадения данных и манифеста схемы v3; старое состояние нужно проверить вручную. Повторный COCO-экспорт заменяет ранее экспортированный датасет, сохраняя посторонние файлы. `s3-sync` отклоняет неканонические и конфликтующие пути до записи. `doctor` возвращает `1` при ошибке обязательной проверки и `0` при одних дополнительных предупреждениях. Подробности — в [командах CLI](docs/cli.md) и [описании кэша](docs/images-and-cache.md).
 
@@ -125,6 +133,7 @@ cveta2 fetch-task -p 123 -o output/
 |---|---|
 | [`setup`](docs/cli.md#настроить-подключение-к-cvat-cveta2-setup) | Настроить подключение к CVAT |
 | [`setup-cache`](docs/cli.md#настроить-кэш-изображений-cveta2-setup-cache) | Настроить пути кэша изображений |
+| [`dataset`](docs/cli.md#управляемый-датасет-cveta2-dataset) | Общие источники, подготовка, CVAT issues и публикация |
 | [`verify`](docs/cli.md#проверить-csv-и-подготовить-пакет-cveta2-verify) | Проверить CSV или подготовить пакет |
 | [`upload-dataset`](docs/cli.md#опубликовать-подготовленный-пакет-cveta2-upload-dataset) | Опубликовать проверенный пакет в ClearML |
 | [`fetch`](docs/cli.md#выгрузить-все-аннотации-проекта-cveta2-fetch) | Выгрузить все аннотации проекта |
@@ -181,3 +190,42 @@ cveta2 upload-dataset prepared
 удалены без переходного периода; пользовательский конфиг не переписывается.
 Подробности и коды выхода — в [CLI](docs/cli.md#проверить-csv-и-подготовить-пакет-cveta2-verify),
 типы и prompt-free вызовы — в [Python API](docs/python-api.md#проверка-csv-и-явная-публикация).
+
+## Управляемый набор из нескольких источников
+
+```bash
+cveta2 setup --project-config /shared/cveta2/project-config.yaml
+cveta2 dataset fetch construction --output-dir fetched
+# Выполните свой скрипт: вход fetched, результат transformed.csv
+cveta2 dataset prepare construction transformed.csv \
+  --source fetched --output-dir prepared --clean
+cveta2 dataset report-errors prepared
+cveta2 dataset publish prepared
+```
+
+`--clean` явно принимает исправления и исключение отклонённых строк; сначала
+можно подготовить отдельный отчёт без этого флага. S3 CSV уже должен иметь формат
+аннотаций, а его изображения — быть доступны локально. Исходные записи сохраняются
+независимо от преобразований. Подробный сценарий — в
+[CLI](docs/cli.md#управляемый-датасет-cveta2-dataset).
+
+
+```python
+from pathlib import Path
+import cveta2
+
+cveta2.fetch_dataset("construction", output_dir=Path("fetched"))
+# Выполните внешний скрипт, создающий transformed.csv.
+prepared = cveta2.prepare_managed_dataset(
+    "construction",
+    Path("transformed.csv"),
+    source=Path("fetched"),
+    output_dir=Path("prepared"),
+    clean=True,
+)
+# После просмотра отчёта и явного решения опубликовать:
+if prepared.ready:
+    feedback = cveta2.report_dataset_errors(Path("prepared"))
+    if not feedback.failed:
+        publication = cveta2.publish_dataset(Path("prepared"))
+```

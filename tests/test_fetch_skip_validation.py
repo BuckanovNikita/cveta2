@@ -29,7 +29,7 @@ from cveta2.domain.models import (
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import client_with_api, write_config_yaml
+from tests.helpers import client_with_api, write_split_config_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -468,10 +468,11 @@ def _seed_stale_cache(
     )
 
 
-def _custom_config(tmp_path: Path) -> tuple[Path, Path]:
+def _custom_config(tmp_path: Path, project: ProjectInfo) -> tuple[Path, Path]:
     root = tmp_path / "configured-tasks"
-    config = write_config_yaml(
+    config = write_split_config_yaml(
         tmp_path / "fetch-config.yaml",
+        project_ids={project.name: project.id},
         cache={
             "tasks_root": str(tmp_path / "global-tasks"),
             "projects": {
@@ -491,7 +492,7 @@ def test_promotion_invalidates_custom_local_and_s3_caches_before_first_patch(
 ) -> None:
     monkeypatch.setenv("CVETA2_DISABLE_CACHE", "false")
     api = PromotionApi({11: [_job(101), _job(102)]})
-    config, root = _custom_config(tmp_path)
+    config, root = _custom_config(tmp_path, api.get_project(1))
     s3 = FakeS3Client()
     stale_path, stale_key = _seed_stale_cache(api, root, s3)
     unrelated = root / "project_1" / "task_999.json"
@@ -527,7 +528,7 @@ def test_disabled_cache_still_invalidates_local_without_contacting_s3(
         "CVETA2_DISABLE_CACHE", "true" if disabled_by == "environment" else "false"
     )
     api = PromotionApi({11: [_job(101)]})
-    config, root = _custom_config(tmp_path)
+    config, root = _custom_config(tmp_path, api.get_project(1))
     stale_path, _key = _seed_stale_cache(api, root)
 
     def forbidden(*_args: object, **_kwargs: object) -> None:
@@ -556,7 +557,7 @@ def test_partial_mutation_failure_leaves_both_cache_layers_invalidated(
     monkeypatch.setenv("CVETA2_DISABLE_CACHE", "false")
     api = PromotionApi({11: [_job(101), _job(102)]})
     api.fail_updates = {102}
-    config, root = _custom_config(tmp_path)
+    config, root = _custom_config(tmp_path, api.get_project(1))
     s3 = FakeS3Client()
     stale_path, stale_key = _seed_stale_cache(api, root, s3)
     monkeypatch.setattr(
@@ -588,7 +589,7 @@ def test_invalidation_failure_aborts_before_task_mutation(
 ) -> None:
     monkeypatch.setenv("CVETA2_DISABLE_CACHE", "false")
     api = PromotionApi({11: [_job(101)]})
-    config, root = _custom_config(tmp_path)
+    config, root = _custom_config(tmp_path, api.get_project(1))
     s3 = FailingDeleteS3() if layer == "s3" else FakeS3Client()
     stale_path, _key = _seed_stale_cache(api, root, s3)
     monkeypatch.setattr(

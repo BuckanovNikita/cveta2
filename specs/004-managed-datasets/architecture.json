@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "task": "Managed datasets",
+  "scope": [
+    "cveta2",
+    "tests",
+    "pyproject.toml",
+    "scripts/check_architecture.py",
+    "specs",
+    "docs",
+    "README.md",
+    ".specify/memory"
+  ],
+  "impact": "modules",
+  "rules": "Constitution II and engineering architecture: inward layers, independent adapters, SDK and IO ownership, no canonical facade dependencies.",
+  "modules": [
+    {
+      "id": "domain",
+      "path": "cveta2/domain",
+      "change": "modify",
+      "responsibility": "Pure validated values and policies; no IO.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "domain",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Pure validated values and policies; no IO.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "application",
+      "path": "cveta2/application",
+      "change": "modify",
+      "responsibility": "Orchestration calls supplied typed ports, no effect discovery.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "application",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Orchestration calls supplied typed ports, no effect discovery.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "config",
+      "path": "cveta2/adapters/config",
+      "change": "modify",
+      "responsibility": "Owns config IO, environment discovery and reviewed recoverable migration activation.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "adapters/config",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Owns config IO, environment discovery and reviewed recoverable migration activation.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "files",
+      "path": "cveta2/adapters/files",
+      "change": "modify",
+      "responsibility": "Owns source/preparation snapshots, stable publication staging and media hashing IO.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "adapters/files",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Owns source/preparation snapshots, stable publication staging and media hashing IO.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "s3",
+      "path": "cveta2/adapters/s3",
+      "change": "modify",
+      "responsibility": "Owns boto3 reads and object metadata.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "adapters/s3",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Owns boto3 reads and object metadata.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "cvat",
+      "path": "cveta2/adapters/cvat",
+      "change": "modify",
+      "responsibility": "Owns CVAT metadata and issue API effects.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "adapters/cvat",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Owns CVAT metadata and issue API effects.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "clearml",
+      "path": "cveta2/adapters/clearml",
+      "change": "modify",
+      "responsibility": "Owns parent/snapshot downloads and exact child publication.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "adapters/clearml",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Owns parent/snapshot downloads and exact child publication.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "composition",
+      "path": "cveta2/composition",
+      "change": "modify",
+      "responsibility": "Constructs adapters and injects dependencies.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "composition",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Constructs adapters and injects dependencies.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    },
+    {
+      "id": "interfaces",
+      "path": "cveta2/interfaces",
+      "change": "modify",
+      "responsibility": "Owns prompts/CLI exits and public API argument mapping.",
+      "interface": "Versioned managed dataset and strict config contracts in contracts/managed.md; legacy facades remain supported.",
+      "layer": "interfaces",
+      "allowed_dependencies": [
+        "Inner layers and existing explicit contracts"
+      ],
+      "forbidden_dependencies": [
+        "Outer-layer dependencies and independent adapter siblings"
+      ],
+      "effects": "Owns prompts/CLI exits and public API argument mapping.",
+      "contracts": [
+        "layers",
+        "effects"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Exhaustive inward layers and adapter independence cover all new modules.",
+      "check": "imports"
+    },
+    {
+      "id": "effects",
+      "path": "tests/test_architecture.py",
+      "status": "existing",
+      "rules": "Effect ownership and forbidden imports/effects negative fixtures remain enforced.",
+      "check": "imports"
+    }
+  ],
+  "checks": [
+    {
+      "id": "imports",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run python scripts/check_architecture.py && uv run pytest tests/test_architecture.py",
+      "expectation": "Inward graph/effects pass and forbidden dependency fixtures fail as intended.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/004-managed-datasets/evidence/verification-2026-11-02.md"
+      }
+    },
+    {
+      "id": "behavior",
+      "kind": "behavior",
+      "command": "uv run pytest tests/test_managed_config.py tests/test_managed_sources.py tests/test_managed_policies.py tests/test_managed_workflow.py",
+      "expectation": "Configuration migration, source reuse, stable splits, feedback and publication regressions pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/004-managed-datasets/evidence/verification-2026-11-02.md"
+      }
+    },
+    {
+      "id": "docs",
+      "kind": "documentation",
+      "command": "uv run pytest tests/test_docs.py",
+      "expectation": "Commands, config examples and local links pass.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/004-managed-datasets/evidence/verification-2026-11-02.md"
+      }
+    }
+  ],
+  "documentation": "Update Russian user guides, baseline, architecture and canonical corp-skills cveta2 usage/evaluations; record companion commit and package checks.",
+  "review": {
+    "status": "accepted",
+    "reviewer": "/root/final_acceptance_review (fresh independent final review)",
+    "evidence": "specs/004-managed-datasets/evidence/review-2026-11-02.md",
+    "reconciliation": "Reconciled all task-owned tracked/untracked runtime, tests, docs, metadata and feature artifacts with actual passing local, architecture, mutation and owned live feedback/cold-start checks. Native adapter graph remains inward; configuration adapter owns migration activation. Concurrent instruction-release plan/follow-up and companion clearml-yolo changes remain excluded. Companion source commit670b0be and clean remote-based package review/checks recorded; tag publication follows tool release."
+  }
+}

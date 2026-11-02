@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from cveta2.domain.managed.models import MigrationRequired
 from cveta2.interfaces.api import fetch
 from tests.helpers import parse_cli_args
 
@@ -37,8 +38,8 @@ def test_removed_cli_interfaces_are_rejected(arguments: list[str]) -> None:
     assert error.value.code == 2
 
 
-def test_legacy_config_is_ignored_without_rewriting(tmp_path: Path) -> None:
-    """Loading supported settings leaves legacy configuration bytes untouched."""
+def test_legacy_config_requires_review_without_rewriting(tmp_path: Path) -> None:
+    """Retired publication mappings require reviewed migration, never effects."""
     from cveta2.adapters.config.settings import CacheConfig
 
     config = tmp_path / "config.yaml"
@@ -47,5 +48,6 @@ def test_legacy_config_is_ignored_without_rewriting(tmp_path: Path) -> None:
         b"    P: {clearml_project: p, clearml_dataset: d}\n"
     )
     config.write_bytes(original)
-    CacheConfig.load(config)
+    with pytest.raises(MigrationRequired, match="setup --migrate-config"):
+        CacheConfig.load(config)
     assert config.read_bytes() == original

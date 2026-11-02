@@ -9,6 +9,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.managed.models import ManagedMetadata, ManagedSnapshot
 from cveta2.domain.verification.models import ValidationResult
 
 
@@ -65,6 +66,9 @@ class DatasetMetadata(BaseModel):
     api_url: str
     classes: dict[str, ClassInfo]
     images: ImageRoots = Field(default_factory=ImageRoots)
+    managed: ManagedMetadata | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("api_url")
     @staticmethod
@@ -92,6 +96,9 @@ class TaskManifest(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
     included: list[int]
     obsolete: list[int]
+    managed: ManagedSnapshot | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 @dataclass(frozen=True)

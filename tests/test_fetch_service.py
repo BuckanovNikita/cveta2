@@ -50,7 +50,7 @@ from tests.helpers import (
     make_cs_info,
     make_fake_client,
     split_records,
-    write_config_yaml,
+    write_split_config_yaml,
 )
 
 if TYPE_CHECKING:
@@ -882,8 +882,9 @@ class TestFetchCoreImageForwarding:
         self._bucket(monkeypatch)
         fake = normal_fake
         images = tmp_path / "images"
-        config_path = write_config_yaml(
+        config_path = write_split_config_yaml(
             tmp_path / "cfg.yaml",
+            project_ids={fake.project.name: fake.project.id},
             cache={"projects": {fake.project.name: {"ignored_prefix": "data"}}},
         )
 

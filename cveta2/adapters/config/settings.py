@@ -9,6 +9,11 @@ import yaml
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
+from cveta2.adapters.config.project import (
+    optional_project_config,
+    shared_projects_by_name,
+    write_shared_project_fields,
+)
 from cveta2.application.settings import (
     CacheProjectSettings,
     IgnoredTask,
@@ -19,6 +24,7 @@ from cveta2.domain.errors import (
     InteractiveModeRequiredError,
     MissingCredentialsError,
 )
+from cveta2.domain.managed.models import ManagedError, MigrationRequired, ProjectConfig
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -138,6 +144,111 @@ def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
     path.write_bytes(yaml.safe_dump(data, **_YAML_DUMP))
 
 
+def _project_alias(project_key: str, shared: ProjectConfig) -> str:
+    return shared.projects[project_key].name or project_key
+
+
+def _shared_section(section: str, personal: object, shared: ProjectConfig) -> object:
+    """Supply policy exclusively from shared data while keeping local paths."""
+    aliases = shared_projects_by_name(shared)
+    if section == "image_cache" and isinstance(personal, dict):
+        return {
+            aliases[name].name or name if name in aliases else name: value
+            for name, value in personal.items()
+        }
+    if section == "sync_roots":
+        return {
+            _project_alias(key, shared): value.sync_root
+            for key, value in shared.projects.items()
+            if value.sync_root is not None
+        }
+    if section == "ignore":
+        return {
+            _project_alias(key, shared): value.ignore
+            for key, value in shared.projects.items()
+            if value.ignore
+        }
+    if section == "cache":
+        result = dict(personal) if isinstance(personal, dict) else {}
+        projects = dict(result.get("projects", {}))
+        for key, value in shared.projects.items():
+            name = _project_alias(key, shared)
+            local_value = projects.get(name, projects.get(key, {}))
+            local = dict(local_value) if isinstance(local_value, dict) else {}
+            if key != name:
+                projects.pop(key, None)
+            if value.ignored_prefix is not None:
+                local["ignored_prefix"] = value.ignored_prefix
+            if value.task_cache_s3 is not None:
+                local["task_cache_s3"] = value.task_cache_s3
+            if local:
+                projects[name] = local
+        result["projects"] = projects
+        return result
+    return personal
+
+
+def _split_cache_policy(
+    values: dict[str, object], shared: ProjectConfig
+) -> dict[str, dict[str, object]]:
+    """Remove shared fields from serialized local cache values."""
+    changes: dict[str, dict[str, object]] = {}
+    projects = values.get("projects", {})
+    if isinstance(projects, dict):
+        aliases = shared_projects_by_name(shared)
+        for name, fields in projects.items():
+            if not isinstance(fields, dict):
+                continue
+            policy = {
+                key: fields.pop(key)
+                for key in ("ignored_prefix", "task_cache_s3")
+                if key in fields
+            }
+            if policy:
+                selected_project = aliases.get(name)
+                if selected_project is None:
+                    raise ManagedError(f"Unknown shared project: {name}")
+                changed = {
+                    key: value
+                    for key, value in policy.items()
+                    if value != getattr(selected_project, key)
+                }
+                if changed:
+                    changes[name] = changed
+    values["projects"] = (
+        {name: fields for name, fields in projects.items() if fields}
+        if isinstance(projects, dict)
+        else {}
+    )
+    return changes
+
+
+def _save_shared_section(
+    path: Path, section: str, serialized: object, shared: ProjectConfig
+) -> object:
+    """Route explicit policy edits to shared storage; local saves do not shadow it."""
+    changes: dict[str, dict[str, object]] = {}
+    values = dict(serialized) if isinstance(serialized, dict) else {}
+    if section in {"sync_roots", "ignore"}:
+        field = "sync_root" if section == "sync_roots" else "ignore"
+        aliases = shared_projects_by_name(shared)
+        unknown = set(values) - set(aliases)
+        if unknown:
+            raise ManagedError(f"Unknown shared projects: {sorted(unknown)}")
+        for key, project in shared.projects.items():
+            name = _project_alias(key, shared)
+            value = values.get(
+                name, values.get(key, None if field == "sync_root" else [])
+            )
+            if value != getattr(project, field):
+                changes[name] = {field: value}
+    elif section == "cache":
+        changes = _split_cache_policy(values, shared)
+    if changes:
+        write_shared_project_fields(path, changes)
+    return values or None
+
+
 class SectionConfig(BaseModel):
     """Base for config-YAML sections: generic ``load``/``save`` via pydantic.
 
@@ -170,9 +281,16 @@ class SectionConfig(BaseModel):
         return self._dump() or None
 
     @classmethod
-    def load(cls, config_path: Path | None = None) -> "Self":
+    def load(
+        cls, config_path: Path | None = None, *, project_path: Path | None = None
+    ) -> "Self":
         """Load this section from the config YAML (defaults when absent)."""
-        raw = _load_raw_yaml(get_config_path(config_path)).get(cls.section_key)
+        path = get_config_path(config_path)
+        personal = _load_raw_yaml(path)
+        shared = optional_project_config(path, project_path)
+        raw = personal.get(cls.section_key)
+        if shared is not None:
+            raw = _shared_section(cls.section_key, raw, shared)
         if not isinstance(raw, dict):
             return cls()
         return cls.model_validate(cls._wrap_raw(raw))
@@ -182,6 +300,28 @@ class SectionConfig(BaseModel):
         path = get_config_path(config_path)
         existing = _load_raw_yaml(path)
         serialized = self._to_raw()
+        shared = optional_project_config(path)
+        if shared is not None:
+            serialized = _save_shared_section(
+                path, self.section_key, serialized, shared
+            )
+            if self.section_key in {"sync_roots", "ignore"}:
+                return path
+        elif self.section_key in {"sync_roots", "ignore"} and serialized:
+            raise MigrationRequired(
+                "Project policy requires shared configuration; "
+                "attach it with setup --project-config"
+            )
+        elif self.section_key == "cache" and isinstance(serialized, dict):
+            projects = serialized.get("projects", {})
+            if isinstance(projects, dict) and any(
+                isinstance(fields, dict)
+                and set(fields) & {"ignored_prefix", "task_cache_s3"}
+                for fields in projects.values()
+            ):
+                raise MigrationRequired(
+                    "Shared cache policy requires a shared project configuration"
+                )
         if serialized is None:
             existing.pop(self.section_key, None)
         else:
@@ -279,21 +419,48 @@ class CvatConfig(BaseModel):
         return merged
 
     @classmethod
-    def load(cls, config_path: Path | None = None) -> "CvatConfig":
+    def load(
+        cls, config_path: Path | None = None, *, project_path: Path | None = None
+    ) -> "CvatConfig":
         """Merge preset, file, and env: preset < file < env."""
         preset_data = _load_preset_data()
         preset_cfg = cls._from_cvat_section(preset_data)
         path = get_config_path(config_path)
         file_cfg = cls.from_file(path)
         env_cfg = cls.from_env()
+        shared = optional_project_config(path, project_path)
+        if shared is not None:
+            identity = shared.cvat
+            if (env_cfg.host and env_cfg.host != identity.host) or (
+                env_cfg.organization is not None
+                and env_cfg.organization != identity.organization
+            ):
+                raise ManagedError(
+                    "CVAT identity environment overrides conflict "
+                    "with shared project configuration"
+                )
+            file_cfg = file_cfg.model_copy(
+                update={"host": identity.host, "organization": identity.organization}
+            )
+            env_cfg = env_cfg.model_copy(update={"host": "", "organization": None})
         return preset_cfg.merge(file_cfg).merge(env_cfg)
 
     def save_to_file(self, path: Path = CONFIG_PATH) -> Path:
         """Write config to a YAML file, preserving all non-``cvat`` sections."""
         existing_data = _load_raw_yaml(path)
 
-        cvat_data: dict[str, str | float] = {"host": self.host}
-        if self.organization:
+        shared = optional_project_config(path)
+        if shared is not None and (
+            self.host != shared.cvat.host
+            or self.organization != shared.cvat.organization
+        ):
+            raise ManagedError(
+                "CVAT identity must be changed in shared project configuration"
+            )
+        cvat_data: dict[str, str | float] = (
+            {} if shared is not None else {"host": self.host}
+        )
+        if self.organization and shared is None:
             cvat_data["organization"] = self.organization
         if self.username:
             cvat_data["username"] = self.username
@@ -623,14 +790,16 @@ class NetworkConfig(SectionConfig):
     retry_max_wait: float = Field(default=30.0, gt=0)
 
     @classmethod
-    def resolve(cls, config_path: Path | None = None) -> "NetworkConfig":
+    def resolve(
+        cls, config_path: Path | None = None, *, project_path: Path | None = None
+    ) -> "NetworkConfig":
         """Load the section, then let environment variables override it.
 
         ``SectionConfig.load`` reads the config file only; these knobs are
         the ones an operator wants to change for a single run on a slow or
         rate-limited link, so they get an env override too.
         """
-        base = cls.load(config_path)
+        base = cls.load(config_path, project_path=project_path)
         return cls(
             s3_workers=_parse_int_env("CVETA2_S3_WORKERS") or base.s3_workers,
             cvat_workers=_parse_int_env("CVETA2_CVAT_WORKERS") or base.cvat_workers,

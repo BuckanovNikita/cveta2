@@ -8,6 +8,11 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from cveta2.adapters.config.project import (
+    activate_migration,
+    load_project_config,
+    migration_proposal,
+)
 from cveta2.adapters.config.settings import (
     CacheConfig,
     CacheProjectSettings,
@@ -18,7 +23,38 @@ from cveta2.adapters.config.settings import (
     SyncRootsConfig,
     _parse_int_env,
 )
+from cveta2.domain.managed.models import MigrationRequired
 from tests.helpers import write_config_yaml
+
+
+def _attach_shared_fixture(path: Path, names: tuple[str, ...] = ()) -> None:
+    """Upgrade fixture policy through a real reviewed migration proposal."""
+    data = yaml.safe_load(path.read_bytes())
+    cvat = data.setdefault("cvat", {})
+    cvat.setdefault("host", "http://localhost:8080")
+    projects = (
+        set(names)
+        | set(data.get("sync_roots", {}))
+        | set(data.get("ignore", {}))
+        | set(data.get("image_cache", {}))
+        | set(data.get("cache", {}).get("projects", {}))
+    )
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    cache = {
+        "organizations": [
+            {
+                "slug": cvat.get("organization", ""),
+                "projects": [
+                    {"id": index, "name": name}
+                    for index, name in enumerate(sorted(projects), start=1)
+                ],
+            }
+        ]
+    }
+    (path.parent / "projects.yaml").write_text(yaml.safe_dump(cache), encoding="utf-8")
+    activate_migration(
+        migration_proposal(path, path.with_name(path.stem + "-shared.yaml"))
+    )
 
 
 def test_load_config_with_image_cache(tmp_path: Path) -> None:
@@ -99,6 +135,7 @@ def test_load_config_with_sync_roots(tmp_path: Path) -> None:
             "other-project": "bare/prefix",
         },
     )
+    _attach_shared_fixture(cfg_path)
     cfg = SyncRootsConfig.load(cfg_path)
     assert cfg.get_root("coco8-dev") == "s3://bucket/images/my_favourite"
     assert cfg.get_root("other-project") == "bare/prefix"
@@ -121,8 +158,8 @@ def test_load_config_invalid_section(tmp_path: Path) -> None:
     cfg_path = write_config_yaml(
         tmp_path / "config.yaml", sync_roots=["not", "a", "dict"]
     )
-    cfg = SyncRootsConfig.load(cfg_path)
-    assert cfg.projects == {}
+    with pytest.raises(MigrationRequired):
+        SyncRootsConfig.load(cfg_path)
 
 
 def test_empty_project_entries_mean_not_configured(tmp_path: Path) -> None:
@@ -139,6 +176,7 @@ def test_empty_project_entries_mean_not_configured(tmp_path: Path) -> None:
         sync_roots={"a": None, "c": "pre"},
     )
 
+    _attach_shared_fixture(cfg_path)
     assert ImageCacheConfig.load(cfg_path).projects == {"c": Path("/x")}
     assert SyncRootsConfig.load(cfg_path).projects == {"c": "pre"}
 
@@ -150,6 +188,7 @@ def test_save_load_round_trip_preserves_other_sections(tmp_path: Path) -> None:
         image_cache={"proj-a": "/data/a"},
     )
 
+    _attach_shared_fixture(cfg_path)
     SyncRootsConfig(projects={"proj-a": "s3://custom/images"}).save(cfg_path)
 
     reloaded = SyncRootsConfig.load(cfg_path)
@@ -157,9 +196,13 @@ def test_save_load_round_trip_preserves_other_sections(tmp_path: Path) -> None:
 
     with cfg_path.open("r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
-    assert data["cvat"]["host"] == "http://localhost:8080"
+    assert CvatConfig.load(cfg_path).host == "http://localhost:8080"
     assert data["image_cache"]["proj-a"] == "/data/a"
-    assert data["sync_roots"]["proj-a"] == "s3://custom/images"
+    assert "sync_roots" not in data
+    assert (
+        load_project_config(cfg_path).projects["proj-a"].sync_root
+        == "s3://custom/images"
+    )
 
 
 def test_save_empty_config_removes_section(tmp_path: Path) -> None:
@@ -167,6 +210,7 @@ def test_save_empty_config_removes_section(tmp_path: Path) -> None:
         tmp_path / "config.yaml", sync_roots={"proj": "old/root"}
     )
 
+    _attach_shared_fixture(cfg_path)
     SyncRootsConfig().save(cfg_path)
 
     with cfg_path.open("r", encoding="utf-8") as fh:
@@ -294,6 +338,7 @@ def _write_cache_yaml(cfg_path: Path) -> None:
             },
         },
     )
+    _attach_shared_fixture(cfg_path)
 
 
 def test_load_cache_config_resolves_overrides(tmp_path: Path) -> None:
@@ -339,7 +384,8 @@ def test_save_cache_config_round_trip(tmp_path: Path) -> None:
     reloaded = CacheConfig.load(cfg_path)
     assert reloaded == cache
     data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-    assert data["cvat"]["host"] == "http://localhost:8080"
+    assert "host" not in data["cvat"]
+    assert CvatConfig.load(cfg_path).host == "http://localhost:8080"
 
 
 def test_setup_save_preserves_cache_section(tmp_path: Path) -> None:
@@ -347,12 +393,15 @@ def test_setup_save_preserves_cache_section(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     _write_cache_yaml(cfg_path)
 
-    CvatConfig(host="http://new-host:8080").save_to_file(cfg_path)
+    CvatConfig(host="http://localhost:8080", username="updated-user").save_to_file(
+        cfg_path
+    )
 
     reloaded = CacheConfig.load(cfg_path)
     assert reloaded.images_root == Path("/mnt/datasets")
     assert reloaded.for_project("projA").ignored_prefix == "data/projA"
-    assert CvatConfig.from_file(cfg_path).host == "http://new-host:8080"
+    assert CvatConfig.from_file(cfg_path).username == "updated-user"
+    assert CvatConfig.load(cfg_path).host == "http://localhost:8080"
 
 
 def test_save_cache_config_drops_all_default_project_entries(tmp_path: Path) -> None:
@@ -362,7 +411,8 @@ def test_save_cache_config_drops_all_default_project_entries(tmp_path: Path) -> 
     not see the pruning at all: an unpruned ``{"empty": {}}`` reloads into an
     equal-looking ``CacheProjectSettings()``.
     """
-    cfg_path = tmp_path / "custom.yaml"
+    cfg_path = write_config_yaml(tmp_path / "custom.yaml")
+    _attach_shared_fixture(cfg_path, ("real", "empty"))
     CacheConfig(
         images_root=Path("/root"),
         projects={
@@ -467,11 +517,13 @@ def test_section_load_and_save_prefer_an_explicit_path(
 ) -> None:
     """The same argument-over-env rule for the generic section load/save."""
     env_path = write_config_yaml(tmp_path / "env.yaml", sync_roots={"p": "env/root"})
+    _attach_shared_fixture(env_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(env_path))
     explicit = write_config_yaml(
         tmp_path / "explicit.yaml", sync_roots={"p": "explicit/root"}
     )
 
+    _attach_shared_fixture(explicit)
     assert SyncRootsConfig.load(explicit).get_root("p") == "explicit/root"
 
     SyncRootsConfig(projects={"p": "written/root"}).save(explicit)
@@ -493,9 +545,9 @@ def test_section_save_creates_missing_directories(tmp_path: Path) -> None:
     """
     target = tmp_path / "nested" / "deeper" / "custom.yaml"
 
-    SyncRootsConfig(projects={"p": "root"}).save(target)
+    ImageCacheConfig(projects={"p": Path("/local/root")}).save(target)
 
-    assert SyncRootsConfig.load(target).get_root("p") == "root"
+    assert ImageCacheConfig.load(target).get_cache_dir("p") == Path("/local/root")
 
 
 def test_section_save_keeps_cyrillic_unescaped(tmp_path: Path) -> None:
@@ -506,13 +558,15 @@ def test_section_save_keeps_cyrillic_unescaped(tmp_path: Path) -> None:
     invisible to every other assertion here — and ``cveta2 ignore --add``
     writes Russian task names into a file people open and edit.
     """
-    cfg_path = tmp_path / "custom.yaml"
+    cfg_path = write_config_yaml(tmp_path / "custom.yaml")
+    _attach_shared_fixture(cfg_path, ("proj",))
     cfg = IgnoreConfig()
     cfg.add_task("proj", 456, "Партия 3", description="Дубликаты")
 
     cfg.save(cfg_path)
 
-    text = cfg_path.read_text(encoding="utf-8")
+    reference = yaml.safe_load(cfg_path.read_bytes())["project_config"]
+    text = Path(reference).read_text(encoding="utf-8")
     assert "Партия 3" in text
     assert "Дубликаты" in text
 
@@ -526,12 +580,12 @@ def test_section_save_keeps_the_existing_section_order(tmp_path: Path) -> None:
     cfg_path = tmp_path / "custom.yaml"
     cfg_path.write_bytes(b"cvat:\n  host: http://localhost:8080\ncache:\n  x: 1\n")
 
-    SyncRootsConfig(projects={"p": "root"}).save(cfg_path)
+    ImageCacheConfig(projects={"p": Path("/local/root")}).save(cfg_path)
 
     assert list(yaml.safe_load(cfg_path.read_bytes())) == [
         "cvat",
         "cache",
-        "sync_roots",
+        "image_cache",
     ]
 
 

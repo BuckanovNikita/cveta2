@@ -23,19 +23,28 @@ from tests.helpers import (
     client_with_api,
     parse_cli_args,
     patch_cli_client,
+    write_split_config_yaml,
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from cveta2.adapters.config.settings import CvatConfig
     from cveta2.composition.client import CvatClient
     from tests.fixtures.fake_cvat_project import LoadedFixtures
-
-_LIST_PROJECT = "coco8-dev"
 
 
 @pytest.fixture
 def fake(coco8_fixtures: LoadedFixtures) -> LoadedFixtures:
     return build_fake(coco8_fixtures, ["normal"], statuses=["completed"])
+
+
+@pytest.fixture(autouse=True)
+def shared_ignore_config(test_config: Path, fake: LoadedFixtures) -> None:
+    """Policy-command tests attach an explicit shared project definition."""
+    write_split_config_yaml(
+        test_config, project_ids={fake.project.name: fake.project.id}
+    )
 
 
 def _run(fake: LoadedFixtures, *argv: str) -> None:
@@ -131,10 +140,10 @@ class TestRemove:
 
 class TestList:
     def test_list_reports_entries_without_opening_a_client(
-        self, capture_info_logs: list[str]
+        self, capture_info_logs: list[str], fake: LoadedFixtures
     ) -> None:
         cfg = IgnoreConfig.load()
-        cfg.add_task(_LIST_PROJECT, 7, "Партия 3", "дубликаты")
+        cfg.add_task(fake.project.name, 7, "Партия 3", "дубликаты")
         cfg.save()
 
         args = parse_cli_args("ignore", "--list")

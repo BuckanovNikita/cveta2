@@ -460,7 +460,7 @@ contains no authentication secrets.
 
 `prepare_dataset(source, *, output_dir, options)` requires all four exact full-fetch
 files: `dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv`, including
-valid header-only files. Capture their bytes before parsing. Split assignment is
+valid header-only files. Capture their bytes before parsing. For standalone preparation, split assignment is
 external; every retained image has one supported split, train and val are
 nonempty, and train contains a training box. Val may contain only backgrounds.
 All input `dataset.csv` rows need valid splits; cleanup cannot supply missing choices.
@@ -543,8 +543,9 @@ Parents match exact project/name, are finalized and nonarchived, and must contai
 metadata; a CSV-only legacy parent blocks and requires a new dataset name. A newer
 parent also requires preparation again. Do not modify parents. Remove inherited
 child files/links, synchronously upload exactly `dataset.csv`, `dataset.yaml`,
-`tasks.yaml`, finalize and verify success. Never publish images, source snapshots,
-local checksums/records or diagnostics. A failure after creation reports the known
+`tasks.yaml`, finalize and verify success. Never publish images, local checksums/records or diagnostics. Standalone
+publication excludes source snapshots; managed publication embeds source evidence
+in its versioned tasks.yaml extension. A failure after creation reports the known
 child ID without claiming finalization; inspect remote state before retrying.
 `Publication` returns `dataset_id: str`, `version: str | None` after success.
 
@@ -661,3 +662,117 @@ assert that current reproducers are identical to their original capture. A
 historical reproducer's exit 0 meant it observed the old defect, not that current
 behavior passed. Original implementation SHAs above remain distinct from the
 checkpoint SHA that proves archive contents.
+
+
+## Managed dataset configuration and lifecycle
+
+### Strict configuration ownership
+
+Personal and shared files are separately versioned with schema_version=1. Personal
+configuration owns credentials/auth references, local image/task-cache paths,
+network/runtime settings and the project_config reference. Shared configuration
+owns CVAT host/organization, stable project IDs, source interpretation/S3 roots,
+task exclusions, dataset source memberships, exact ClearML destination, class
+registry/exclusion policy, split policy and overlap decisions. Personal fields do
+not overlay shared policy, including values equal to shared values.
+
+Resolve personal selection explicit --config > CVETA2_CONFIG > the existing
+default. Resolve exactly one shared file explicit --project-config/API argument >
+CVETA2_PROJECT_CONFIG > saved personal reference. Saved relative references are
+anchored to the personal file directory; explicit/environment relative paths use
+the working directory. Invalid selected files fail without fallback. Environment
+credential/runtime settings remain supported; conflicting CVAT identity overrides
+are rejected. Standalone legacy authentication-only configuration remains readable.
+
+setup --project-config validates and attaches without rewriting the shared file
+or asking for credentials. Ordinary setup offers attachment. setup --migrate-config
+previews a redacted field split and requires verification before activation. Move
+mixed-section fields individually; keep unknown values in the original backup and
+report unresolved fields/identities. Never invent project IDs from names, silently
+restore retired automatic mappings or overwrite an existing differing shared file.
+Preserve a private original backup and recover an interrupted approved shared-first
+activation from its journal. Cancellation is a no-op; repeated migration is
+idempotent. Noninteractive callers cannot auto-approve migration. Explicit policy
+writers update shared storage or fail if read-only; local-path writers stay personal.
+
+### Managed sources and transformation
+
+A named dataset combines one or more cvat or s3-csv sources. Source aliases and
+references are unique inside a definition; exact ClearML destination pairs are
+unique across definitions. CVAT sources reference the shared project registry.
+The first managed implementation uses one configured CVAT server/organization.
+
+Pin the latest finalized, nonarchived parent. Check live task completion and
+updated_date before reusing published unchanged completed task evidence without
+annotation downloads. Refresh changed/new/reopened tasks, account for deleted
+ones, and invalidate project reuse after CVAT label changes. Registry changes
+conservatively invalidate CVAT reuse across the dataset. --refresh bypasses reuse.
+Preserve original per-task evidence, including empty tasks and rows lost during
+project partitioning; task-ID recency and same-task deletion precedence remain
+source-project local. Missing mandatory sources fail assembly.
+
+S3 sources are exact s3://bucket/key.csv annotation objects, captured with SHA-256
+of bytes and available opaque ETag/version metadata. Required annotation fields
+are image_name, image_path, instance_label and four bbox coordinates; split may be
+absent. Retain extra fields and explicit source lineage without manufacturing CVAT
+task IDs. Each fetch captures the CSV; changed objects replace their entire source
+contribution. Referenced images are not downloaded and must be locally available
+before verification.
+
+Fetch emits separate source evidence and combined annotations in a new directory.
+The user runs any transformation script externally. Preparation accepts its CSV
+without restricting operations or requiring one-to-one source/output rows. Raw
+source evidence remains independent. Untraceable output lineage is reported as
+unmapped rather than guessed from filenames or row positions.
+
+### Splits, preparation and feedback
+
+Managed preparation assigns train/val/test before validation, default targets
+0.6/0.2/0.2 and seed 42. Preserve published assignments by image-content SHA-256;
+new images use deterministic seeded hashing. Targets do not guarantee exact
+counts. Identical content never crosses splits. Replace/report script-provided
+splits. Do not silently rebalance; split policy changes require a new lineage.
+Keep existing nonempty train/val and training-box viability constraints.
+
+Content overlaps require explicit source selection or exclusion, bound to the
+participating source names. Changed membership requires renewed resolution.
+Different content sharing an image filename blocks preparation. Apply existing
+training/image/class validation and quarantine. Explicit --clean accepts proposed
+repairs and removal; structural failures remain blocking.
+
+Create review issues only for findings with unambiguous original CVAT
+project/task/frame lineage. Group reasons by frame and use original coordinates
+only when reliably traced. Preserve annotations/job status/human issues. Stable
+markers and existing-issue reads make retries deduplicated. Record created,
+already-present, failed and unmapped findings; mapped delivery failures block
+publication, unmapped/S3-only findings remain local. Never accept arbitrary
+S3 task-like cells as permission for feedback. Own issue-only metadata changes
+must not create a false stale-annotation loop.
+
+### Managed persistence and public operations
+
+Payload inventory is exactly dataset.csv, dataset.yaml and tasks.yaml. The CSV
+contains accepted transformed training rows and managed splits. Existing strict
+metadata models accept optional typed versioned managed extensions; old files
+remain readable. dataset.yaml embeds resolved mapping/split/image policy.
+tasks.yaml embeds complete CVAT/S3 source evidence: tasks, label definitions,
+all four original partitions, empty-task facts, object hashes and registry
+snapshot. No ZIP or images are published. Raw evidence is retained even when
+transformation or validation discards training rows.
+
+A format_version=2 local preparation binds captured sources, transformed CSV,
+payload hashes, media, relevant resolved shared definition and exact parent.
+Only relevant definition changes invalidate it; unrelated shared entries do not.
+Recheck parent, source facts, S3 content, registry, roots, images and prepared
+bytes before publishing a stable checked copy. Legacy adoption performs one full
+source refresh and preserves prior splits only where identity is unambiguous.
+Parents are never modified.
+
+The dataset CLI group exposes list/show/versions/fetch/prepare/diff/report-errors/
+publish. APIs are prompt-free: list_datasets, show_dataset, dataset_versions,
+fetch_dataset, prepare_managed_dataset, compare_datasets, report_dataset_errors
+and publish_dataset. Shared selection accepts an explicit independent API argument.
+Outputs include JSON inspection; prepare ready=false exits 1 and operational/
+configuration failures exit 2. The standalone verify/prepare/upload interfaces
+retain their existing contracts apart from the explicit configuration-ownership
+migration.

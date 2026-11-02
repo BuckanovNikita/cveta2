@@ -21,7 +21,7 @@ from tests.helpers import (
     make_cs_info,
     mock_client_ctx,
     patch_cli_client,
-    write_config_yaml,
+    write_split_config_yaml,
     write_test_config,
 )
 
@@ -81,8 +81,9 @@ def test_s3_sync_falls_back_to_cache_images_root(
     ``s3-sync`` shares the resolution with ``fetch``/``upload``; an explicit
     ``image_cache`` entry still wins over the per-project root.
     """
-    write_config_yaml(
+    write_split_config_yaml(
         test_config,
+        project_ids={"project-a": 1, "project-b": 2, "project-c": 3},
         cvat={"host": "http://localhost:8080", "username": "u", "password": "p"},
         image_cache={"project-a": str(tmp_path / "explicit-a")},
         cache={
@@ -142,8 +143,9 @@ def test_s3_sync_uses_canonical_project_settings(
     from cveta2.composition.client import CvatClient
     from tests.fixtures.fake_cvat_api import FakeCvatApi
 
-    write_config_yaml(
+    write_split_config_yaml(
         test_config,
+        project_ids={"Dataset": 1},
         cvat={"host": "http://localhost:8080", "username": "u", "password": "p"},
         image_cache={"Dataset": str(tmp_path / "explicit")} if explicit_cache else {},
         cache={
