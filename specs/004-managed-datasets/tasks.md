@@ -31,7 +31,7 @@
 - [x] T016 Obtain fresh independent final review after parent verification, fix findings, rerun affected checks.
 - [x] T017 Run speckit-converge, append gaps without rewriting completed history, implement until no required work remains.
 - [x] T018 Reconcile final owned diff/checks/docs/review in architecture.json and validate acceptance.
-- [ ] T019 Commit through project skill/hooks, merge-only main, semantic-release Git tag, authorized push verification; no GitHub Release/assets.
+- [x] T019 Commit through project skill/hooks, merge-only main, semantic-release Git tag, authorized push verification; no GitHub Release/assets.
 
 ## Dependencies and ownership
 T003 blocks T004; T004 blocks T005/T007/T008. T006 follows T005. T009 joins Wave 1. T010/T011/T013 run independently after T009 with exact exclusive file lists; parent T012 owns shared models/ports, composition, CLI registry, common fixtures and artifacts. T014–T019 are acceptance/release gates. Parent plus at most three children; bounded children never delegate, preserve other changes and return path/check evidence. Parent inspects every result. Read-only final reviewer has fresh context and no write ownership.
