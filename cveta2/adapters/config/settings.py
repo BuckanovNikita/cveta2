@@ -366,6 +366,12 @@ class CvatConfig(BaseModel):
     request_timeout: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     _source_path: Path | None = PrivateAttr(default=None)
 
+    @field_validator("organization")
+    @classmethod
+    def personal_workspace(cls, value: str | None) -> str | None:
+        """Normalize the existing empty-organization personal-workspace alias."""
+        return value or None
+
     @field_validator("host")
     @classmethod
     def _strip_host_trailing_slash(cls, value: str) -> str:

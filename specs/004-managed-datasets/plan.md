@@ -27,3 +27,7 @@ Update baseline, architecture context, README/docs in Russian and portable usage
 ## Accepted cold-start amendment
 
 FR-021/SC-007 explicitly cover configured mappings with no ClearML project/dataset. Successful absence proof yields a null parent; only publish creates the first version. Unit and owned live scenarios verify first publication and subsequent reuse. See T020 and dated verification.
+
+## Release acceptance amendment — empty organization
+
+A direct reproduction showed shared organization empty string loaded as personal-workspace null but failed credential-save equality. Normalize both neutral CvatIdentity and CvatConfig organization values at their validation boundaries, retaining strict nonempty shared-identity refusal. Add focused schema/file/environment tests and independent review. No new effects/import edges; reuse the existing architecture record and gates. Preserve the already created local v0.13.0 tag and issue a patch after merge rather than rewriting a tag.

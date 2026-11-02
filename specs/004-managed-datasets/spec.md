@@ -72,3 +72,7 @@ All material choices were resolved in the conversation: one CVAT server, combine
 
 - **FR-021**: Configured mappings must fetch/prepare with no ClearML dataset or destination project yet. Parent identity remains null; setup/fetch/prepare create no remote dataset. Publication creates the first finalized version without parent IDs; a later fetch reuses that version.
 - **SC-007**: Unit and owned live mixed-source scenarios demonstrate absent-parent preparation, first publication, then unchanged-task reuse.
+
+## Release acceptance clarification — personal workspace
+
+FR-001/FR-002 preserve the existing empty-organization personal-workspace convention: empty string and null normalize to the same identity in shared files, environment settings and credential saving. This never permits changing a nonempty shared organization personally.

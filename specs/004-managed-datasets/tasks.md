@@ -53,3 +53,7 @@ T010 preparation is assigned to policy agent C after T008 and parent inspection:
 ## Phase 10: Final live feedback acceptance
 
 - [x] T024 [US4] Exercise actual mapped CVAT review issue creation/marker/deduplication, excluded-image clean publication and unchanged-task reuse under a new owned run; restore job states and prove exact-tag cleanup. Required before T019.
+
+## Phase 11: Release acceptance identity regression
+
+- [x] T025 [US1] Normalize empty organization to the personal workspace in shared identity and resolved CVAT settings; reproduce credential-save refusal for an otherwise valid shared organization empty string, verify YAML/environment aliases and unchanged shared bytes, rerun scoped/full checks and fresh independent review before publication. The initial v0.13.0 tag is local only; preserve immutable tags and release a patch after correction.
