@@ -292,12 +292,13 @@ def test_only_readme_files_and_user_docs_are_russian() -> None:
 class TestTheAgentInstructionsDelegateToSpecKit:
     """Both agents discover the same canonical Spec Kit rules and contracts."""
 
-    def test_claude_md_is_a_symlink_to_agents_md(self) -> None:
+    def test_claude_md_imports_canonical_agents_md(self) -> None:
         claude = REPO_ROOT / "CLAUDE.md"
         assert AGENT_INSTRUCTIONS.is_file()
         assert not AGENT_INSTRUCTIONS.is_symlink()
-        assert claude.is_symlink()
-        assert claude.readlink() == Path("AGENTS.md")
+        assert claude.is_file()
+        assert not claude.is_symlink()
+        assert claude.read_text(encoding="utf-8").strip() == "@AGENTS.md"
 
     def test_agents_md_links_to_canonical_spec_kit_guidance(self) -> None:
         text = AGENT_INSTRUCTIONS.read_text(encoding="utf-8")

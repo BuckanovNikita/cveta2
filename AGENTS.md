@@ -3,7 +3,7 @@
 cveta2 is a Python >=3.12,<3.14 CVAT CLI and API. Run Python tools through `uv run`.
 Follow the user's conversation language (English by default). Human guides and
 CLI output remain Russian; Spec Kit artifacts are English.
-This file is the shared discovery entry point; `CLAUDE.md` is its symlink.
+This file is the shared discovery entry point; `CLAUDE.md` is a regular file importing it with `@AGENTS.md`.
 Edit canonical sources below rather than duplicating their rules here.
 
 Before planning or editing, read:
