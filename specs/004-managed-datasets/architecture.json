@@ -9,7 +9,9 @@
     "specs",
     "docs",
     "README.md",
-    ".specify/memory"
+    ".specify/memory",
+    "uv.lock",
+    "CHANGELOG.md"
   ],
   "impact": "modules",
   "rules": "Constitution II and engineering architecture: inward layers, independent adapters, SDK and IO ownership, no canonical facade dependencies.",
@@ -240,8 +242,8 @@
   "documentation": "Update Russian user guides, baseline, architecture and canonical corp-skills cveta2 usage/evaluations; record companion commit and package checks.",
   "review": {
     "status": "accepted",
-    "reviewer": "/root/final_acceptance_review (fresh independent final review)",
+    "reviewer": "/root/final_acceptance_review and /root/workspace_identity_review (fresh independent reviews)",
     "evidence": "specs/004-managed-datasets/evidence/review-2026-11-02.md",
-    "reconciliation": "Reconciled all task-owned tracked/untracked runtime, tests, docs, metadata and feature artifacts with actual passing local, architecture, mutation and owned live feedback/cold-start checks. Native adapter graph remains inward; configuration adapter owns migration activation. Concurrent instruction-release plan/follow-up and companion clearml-yolo changes remain excluded. Companion source commit670b0be and clean remote-based package review/checks recorded; tag publication follows tool release."
+    "reconciliation": "Reconciled all task-owned tracked/untracked runtime, tests, docs, metadata and feature artifacts with actual passing local, architecture, mutation and owned live feedback/cold-start checks. Native adapter graph remains inward; configuration adapter owns migration activation. Concurrent instruction-release plan/follow-up and companion clearml-yolo changes remain excluded. Companion source commit670b0be and clean remote-based package review/checks recorded; tag publication follows tool release. The empty-organization correction reuses covered domain/config boundaries; new regression tests and 2778-test full run plus independent78-test review pass. Semantic-release-owned version/changelog/lock metadata are in scope and introduce no dependency/effect changes."
   }
 }

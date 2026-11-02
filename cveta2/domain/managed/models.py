@@ -40,6 +40,12 @@ class CvatIdentity(StrictModel):
     host: str = Field(min_length=1)
     organization: str | None = None
 
+    @field_validator("organization")
+    @classmethod
+    def personal_workspace(cls, value: str | None) -> str | None:
+        """Treat empty CVAT organization slugs and null as the personal workspace."""
+        return value or None
+
     @field_validator("host")
     @classmethod
     def public_host(cls, value: str) -> str:
