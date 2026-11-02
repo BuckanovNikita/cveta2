@@ -88,9 +88,9 @@ Ground Truth, реплики и jobs без выгружаемых кадров 
 оставшиеся jobs. Подробнее о сбросе при `cache="off"` — в
 [документации кэша](images-and-cache.md#кэш-аннотаций-задач).
 
-Спецификация проекта во всех функциях — ID, имя или строка `"org/имя"` (`"/имя"` — личное пространство): префикс организации переопределяет организацию из конфига, как и в CLI.
+Спецификация проекта самостоятельных функций — ID, имя или строка `"org/имя"` (`"/имя"` — личное пространство), как и в CLI. Для управляемого набора проектные идентичности и состав источников задаются только общим YAML.
 
-Все функции, обращающиеся к CVAT, принимают необязательный параметр `connection=` — объект `cveta2.Connection` с полями `host`, `username`, `password`, `organization`, `config_path`. Не заданные поля берутся в порядке: переменные окружения → `~/.config/cveta2/config.yaml` → встроенный пресет. **API никогда не спрашивает интерактивно** — при отсутствии настроек поднимается `MissingHostError` / `MissingCredentialsError`. Чтобы переиспользовать одно соединение для нескольких вызовов, передайте `Connection(client=...)` с уже открытым `CvatClient` (вне контекстного менеджера клиент отклоняется с понятной ошибкой).
+Все функции, обращающиеся к CVAT, принимают необязательный параметр `connection=` — объект `cveta2.Connection` с полями `host`, `username`, `password`, `organization`, `config_path`. Без общего файла не заданные поля берутся в порядке: переменные окружения → `~/.config/cveta2/config.yaml` → встроенный пресет. При подключённом общем файле сервер и организация определяются им; конфликтующие значения `Connection` или окружения отклоняются. Учётные данные и личные сетевые параметры остаются независимыми. **API никогда не спрашивает интерактивно** — при отсутствии настроек поднимается `MissingHostError` / `MissingCredentialsError`. Чтобы переиспользовать одно соединение для нескольких вызовов, передайте `Connection(client=...)` с уже открытым `CvatClient` (вне контекстного менеджера клиент отклоняется с понятной ошибкой).
 
 ```python
 import cveta2
@@ -405,3 +405,59 @@ except CvatApiError as error:
 Исходная причина сохраняется в цепочке исключений. Правила пропуска задач, строгого
 режима, исчерпанных повторов и необязательных issues описаны в
 [конфигурации](configuration.md#ошибки-сервера-cvat-5xx).
+
+
+## Управляемые датасеты
+
+Настройки проектов и соответствий читаются только из общего YAML. Личный файл
+содержит учётные данные и локальные пути; он не переопределяет общие правила.
+Каждая операция ниже принимает независимые `config_path` и `project_config`
+типа `Path | None`; при отсутствии явного общего пути используется
+`CVETA2_PROJECT_CONFIG`, затем сохранённая личная ссылка. API не запрашивает
+подтверждений и сообщает о необходимой миграции ошибкой.
+
+```python
+from pathlib import Path
+import cveta2
+
+options = {
+    "config_path": Path("personal.yaml"),
+    "project_config": Path("project-config.yaml"),
+}
+definitions = cveta2.list_datasets(**options)
+resolved = cveta2.show_dataset("combined", **options)
+versions = cveta2.dataset_versions("combined", **options)
+fetched = cveta2.fetch_dataset(
+    "combined", output_dir=Path("fetched"), refresh=False, **options
+)
+# Пользователь сам выполняет внешний скрипт и создаёт transformed.csv.
+prepared = cveta2.prepare_managed_dataset(
+    "combined",
+    Path("transformed.csv"),
+    source=Path("fetched"),
+    output_dir=Path("prepared"),
+    clean=True,
+    **options,
+)
+changes = cveta2.compare_datasets(
+    "fetched/dataset.csv", "prepared/dataset.csv", **options
+)
+# Только после проверки и разрешения на оба внешних действия:
+if prepared.ready:
+    feedback = cveta2.report_dataset_errors(Path("prepared"), **options)
+    if not feedback.failed:
+        publication = cveta2.publish_dataset(Path("prepared"), **options)
+```
+
+`fetch_dataset` возвращает сводку исходного снимка. `prepare_managed_dataset`
+возвращает готовность, блокировки, количество ошибок и путь подготовки.
+`compare_datasets` принимает CSV/каталог или ID ClearML. `report_dataset_errors`
+создаёт только доказуемо адресуемые CVAT issues и возвращает исходы доставки;
+повтор не дублирует issues. `publish_dataset` может продолжить доставку ошибок,
+проверяет актуальность и возвращает финализированный ID/версию.
+
+Исходные CVAT/S3 записи сохраняются независимо от внешнего скрипта. Для S3 CSV
+изображения предоставляет пользователь; назначение train/val/test выполняет
+подготовка с устойчивыми целями 60/20/20. Отсутствующее происхождение строки не
+угадывается: соответствующие ошибки остаются локальными. Публикуются только
+`dataset.csv`, `dataset.yaml`, `tasks.yaml`, с исходными снимками внутри последнего.

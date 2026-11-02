@@ -29,6 +29,7 @@ from cveta2.composition.workflows import apply_sync_root_override, resolved_task
 from cveta2.domain.models import TaskInfo
 from cveta2.domain.storage import CloudStorageInfo
 from cveta2.domain.upload import new_manifest
+from tests.helpers import write_split_config_yaml
 
 
 def test_sync_root_composition_uses_selected_config_and_preserves_storage(
@@ -36,13 +37,18 @@ def test_sync_root_composition_uses_selected_config_and_preserves_storage(
 ) -> None:
     """The chosen config and project resolve the root before pure application."""
     default_config = tmp_path / "default.yaml"
-    default_config.write_text("sync_roots:\n  chosen: wrong/prefix\n", encoding="utf-8")
+    write_split_config_yaml(
+        default_config, project_ids={"chosen": 1}, sync_roots={"chosen": "wrong/prefix"}
+    )
     monkeypatch.setenv("CVETA2_CONFIG", str(default_config))
     selected_config = tmp_path / "selected.yaml"
-    selected_config.write_text(
-        "sync_roots:\n  chosen: s3://new-bucket/nested/images\n"
-        "  other: wrong/project\n",
-        encoding="utf-8",
+    write_split_config_yaml(
+        selected_config,
+        project_ids={"chosen": 1, "other": 2},
+        sync_roots={
+            "chosen": "s3://new-bucket/nested/images",
+            "other": "wrong/project",
+        },
     )
     storage = CloudStorageInfo(
         id=7, bucket="original-bucket", prefix="old", endpoint_url="https://s3.test"

@@ -12,6 +12,7 @@ from cveta2.domain.errors import (
     Cveta2Error,
     TaskNotFoundError,
 )
+from cveta2.domain.managed.models import MigrationRequired
 from cveta2.domain.models import CSV_COLUMNS
 from cveta2.interfaces.api.fetch import _resolve_images_dir
 from tests.helpers import (
@@ -19,6 +20,7 @@ from tests.helpers import (
     fake_connection,
     make_cs_info,
     write_config_yaml,
+    write_split_config_yaml,
 )
 
 if TYPE_CHECKING:
@@ -152,9 +154,12 @@ class TestFetchApi:
         original = config.read_bytes()
         _api, connection = _scoped(fake, config_path=config)
         monkeypatch.setenv("CVETA2_CLEARML", legacy_switch)
-        with patch(
-            "cveta2.adapters.clearml.availability.is_clearml_available",
-            side_effect=AssertionError("fetch must not inspect ClearML"),
+        with (
+            patch(
+                "cveta2.adapters.clearml.availability.is_clearml_available",
+                side_effect=AssertionError("fetch must not inspect ClearML"),
+            ),
+            pytest.raises(MigrationRequired, match="migrate-config"),
         ):
             cveta2.fetch(
                 fake.project.id,
@@ -163,7 +168,7 @@ class TestFetchApi:
                 connection=connection,
             )
         assert config.read_bytes() == original
-        assert (tmp_path / "out" / "dataset.csv").is_file()
+        assert not (tmp_path / "out").exists()
 
     def test_raw_and_save_tasks_reach_the_pipeline(
         self, normal_fake: "LoadedFixtures", tmp_path: "Path"
@@ -230,8 +235,9 @@ class TestFetchApi:
         supply the override.
         """
         fake = normal_fake
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "sync.yaml",
+            project_ids={fake.project.name: fake.project.id},
             sync_roots={fake.project.name: "s3://other-bucket/synced"},
         )
         _api, connection = _scoped(
@@ -262,8 +268,9 @@ class TestFetchApi:
             coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"]
         )
         kept, ignored = fake.tasks
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={fake.project.name: fake.project.id},
             ignore={fake.project.name: [{"id": ignored.id, "name": ignored.name}]},
         )
         _api, connection = _scoped(fake, config_path=config)
@@ -293,8 +300,9 @@ class TestFetchApi:
             coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"]
         )
         ignored = fake.tasks[1]
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={fake.project.name: fake.project.id},
             ignore={
                 fake.project.name: [
                     {"id": ignored.id, "name": ignored.name, "silent": True}
@@ -322,8 +330,9 @@ class TestFetchApi:
             coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"]
         )
         ignored = fake.tasks[1]
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={fake.project.name: fake.project.id},
             ignore={fake.project.name: [{"id": ignored.id, "name": ignored.name}]},
         )
         _api, connection = _scoped(fake, config_path=config)
@@ -521,8 +530,9 @@ class TestFetchApi:
     ) -> None:
         """The ``fetch_task`` twin of the ``fetch`` cs_info wiring test."""
         fake = normal_fake
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "sync.yaml",
+            project_ids={fake.project.name: fake.project.id},
             sync_roots={fake.project.name: "s3://other-bucket/synced"},
         )
         _api, connection = _scoped(
@@ -552,8 +562,9 @@ class TestFetchApi:
         """
         fake = normal_fake
         ignored = fake.tasks[0]
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={fake.project.name: fake.project.id},
             ignore={fake.project.name: [{"id": ignored.id, "name": ignored.name}]},
         )
         _api, connection = _scoped(fake, config_path=config)
@@ -574,8 +585,9 @@ class TestFetchApi:
     ) -> None:
         fake = normal_fake
         ignored = fake.tasks[0]
-        config = write_config_yaml(
+        config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
+            project_ids={fake.project.name: fake.project.id},
             ignore={
                 fake.project.name: [
                     {"id": ignored.id, "name": ignored.name, "silent": True}

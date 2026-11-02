@@ -194,6 +194,54 @@ def write_config_yaml(path: Path, **sections: object) -> Path:
     return path
 
 
+def write_split_config_yaml(
+    path: Path,
+    *,
+    project_ids: dict[str, int],
+    **sections: Any,
+) -> Path:
+    """Build explicit shared/personal fixtures without weakening legacy loaders.
+
+    Tests supply actual fake project IDs; this helper never discovers or invents
+    identities. Legacy-input regression tests must continue using write_config_yaml.
+    """
+    import copy
+
+    personal = copy.deepcopy(sections)
+    cvat = personal.pop("cvat", {})
+    host = cvat.pop("host", CFG.host)
+    organization = cvat.pop("organization", None)
+    sync = personal.pop("sync_roots", {})
+    ignored = personal.pop("ignore", {})
+    cache = personal.get("cache", {})
+    cache_projects = cache.get("projects", {})
+    projects = {}
+    for name, project_id in project_ids.items():
+        fields = cache_projects.get(name, {})
+        entries = ignored.get(name, [])
+        projects[f"project-{project_id}"] = {
+            "id": project_id,
+            "name": name,
+            "sync_root": sync.get(name),
+            "ignored_prefix": fields.pop("ignored_prefix", None),
+            "task_cache_s3": fields.pop("task_cache_s3", None),
+            "ignore": [
+                {"id": entry, "name": ""} if isinstance(entry, int) else entry
+                for entry in entries
+            ],
+        }
+    shared_path = path.with_name(path.stem + "-projects.yaml")
+    write_config_yaml(
+        shared_path,
+        schema_version=1,
+        cvat={"host": host, "organization": organization},
+        projects=projects,
+        datasets={},
+    )
+    personal.update(schema_version=1, project_config=str(shared_path), cvat=cvat)
+    return write_config_yaml(path, **personal)
+
+
 def make_image(path: Path, width: int = 640, height: int = 480) -> Path:
     """Create a real RGB image file for conversion tests."""
     from PIL import Image

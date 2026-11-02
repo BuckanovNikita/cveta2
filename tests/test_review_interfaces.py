@@ -15,6 +15,7 @@ from yaml.error import Mark
 
 from cveta2.adapters.config.settings import CvatConfig, IgnoreConfig
 from cveta2.domain.errors import Cveta2Error, MissingCredentialsError
+from tests.helpers import write_split_config_yaml
 
 
 @pytest.mark.parametrize("value", [-1, float("inf"), float("-inf"), float("nan")])
@@ -144,12 +145,16 @@ def test_cli_malformed_config_omits_credential_values(tmp_path: Path) -> None:
 
 
 def test_stale_ignore_cli_removes_without_task_listing(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from contextlib import contextmanager
 
     from cveta2.interfaces.commands import ignore
 
+    config = tmp_path / "personal.yaml"
+    write_split_config_yaml(config, project_ids={"project": 1})
+    monkeypatch.setenv("CVETA2_CONFIG", str(config))
     cfg = IgnoreConfig()
     cfg.add_task("project", 99, "deleted")
     cfg.save()

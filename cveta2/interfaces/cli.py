@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from cveta2.domain.errors import Cveta2Error
-from cveta2.interfaces.commands._parsers import add_config_arg
 from cveta2.interfaces.commands.convert import configure_convert, run_convert
 from cveta2.interfaces.commands.doctor import configure_doctor, run_doctor
 from cveta2.interfaces.commands.fetch import (
@@ -19,9 +18,11 @@ from cveta2.interfaces.commands.fetch import (
 )
 from cveta2.interfaces.commands.ignore import configure_ignore, run_ignore
 from cveta2.interfaces.commands.labels import configure_labels, run_labels
+from cveta2.interfaces.commands.managed import configure_managed, run_managed
 from cveta2.interfaces.commands.merge import configure_merge, run_merge
 from cveta2.interfaces.commands.s3_sync import configure_s3_sync, run_s3_sync
 from cveta2.interfaces.commands.setup import (
+    configure_setup,
     configure_setup_cache,
     run_setup,
     run_setup_cache,
@@ -68,6 +69,12 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
     """
     return (
         CommandSpec(
+            "dataset",
+            "Управление наборами CVAT/S3 и версиями ClearML.",
+            run_managed,
+            configure_managed,
+        ),
+        CommandSpec(
             "verify",
             "Проверить CSV или подготовить набор.",
             run_verify,
@@ -95,7 +102,7 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
             "setup",
             "Interactively configure CVAT connection settings.",
             run_setup,
-            add_config_arg,
+            configure_setup,
         ),
         CommandSpec(
             "setup-cache",

@@ -314,3 +314,35 @@ requires preparation again. CSV-only legacy parents without metadata block.
 Fetch no longer receives a publisher effect, reads ClearML mappings or initializes
 ClearML; its export, partition, CVAT and S3 effects retain their established owners.
 Executable layer, adapter-independence and effect checks apply to the new modules.
+
+
+## Managed datasets and shared configuration
+
+`domain/managed/` owns versioned project/source/snapshot/preparation values and
+pure split, overlap and comparison policies. It receives content hashes rather
+than reading image files. `application/ports/managed_sources.py` and managed
+preparation/feedback ports declare task metadata, CSV capture, media, snapshot and
+issue effects. Managed use cases orchestrate assembly, preparation, delivery and
+publication without discovering environment settings or constructing SDK clients.
+
+`adapters/config/project.py` owns strict personal/shared selection and reviewed
+legacy migration. Shared policy is authoritative; personal storage contains
+credentials, local paths and runtime preferences only. The migration journal
+supports shared-first recoverable activation, not a claimed two-file atomic write.
+Existing section readers/writers route shared policy and local paths to their
+respective files. `setup` owns preview and approval; API loading never prompts.
+
+CVAT adapters own live metadata/label reads and review-issue creation. S3 adapters
+own exact annotation-object capture and opaque object metadata. File adapters own
+image hashes, source snapshots, reports and immutable preparations. ClearML
+adapters own latest-parent/snapshot retrieval and synchronous exact three-file
+publication. Adapter groups do not import each other; composition injects typed
+ports and constructs production effects.
+
+`composition/managed.py` joins these services; `interfaces/managed_datasets.py`
+and `interfaces/commands/managed.py` expose prompt-free API and Russian CLI
+presentation. Public facades expose the supported operations without becoming
+inner dependencies. Managed source evidence is embedded in tasks.yaml; no archive
+or image payload is added. Configuration fingerprints bind only the relevant
+resolved definition. Feedback resumes separately and must not confuse own issue
+writes with annotation freshness changes.

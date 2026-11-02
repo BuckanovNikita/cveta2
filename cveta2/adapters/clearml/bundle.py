@@ -144,6 +144,26 @@ class ClearMLStore:
                 {name for row in rows if isinstance(name := row.get("name"), str)}
             )
 
+    def versions(self, project: str, name: str) -> list[dict[str, str | None]]:
+        """List immutable finalized identities for an exact project and name."""
+        with _sdk_errors("Cannot list ClearML dataset versions"):
+            rows = self._listing(_sdk().Dataset, project)
+            return [
+                {
+                    "id": str(row["id"]),
+                    "project": project,
+                    "name": name,
+                    "version": str(row["version"])
+                    if row.get("version") is not None
+                    else None,
+                    "created": str(row["created"])
+                    if row.get("created") is not None
+                    else None,
+                }
+                for row in rows
+                if row.get("name") == name and row.get("id")
+            ]
+
     def latest(self, project: str, name: str) -> DatasetParent | None:
         """Retrieve the latest finalized exact parent and its metadata."""
         with _sdk_errors("Cannot retrieve the latest finalized ClearML dataset"):

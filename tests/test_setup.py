@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from cveta2.adapters.config.project import activate_migration, migration_proposal
 from cveta2.adapters.config.settings import CacheConfig, CvatConfig, ImageCacheConfig
 from cveta2.domain.errors import InteractiveModeRequiredError
 from cveta2.domain.models import ProjectInfo
@@ -107,7 +108,7 @@ def run_setup_with_inputs(
     answers: list[str],
 ) -> list[str]:
     """Run run_setup with scripted input answers; return prompt log."""
-    prompts = feed_inputs(monkeypatch, answers)
+    prompts = feed_inputs(monkeypatch, [*answers, ""])
     monkeypatch.setattr(primitives, "prompt_password", lambda _prompt: "secret")
     run_setup(_args(config_path))
     return prompts
@@ -205,6 +206,16 @@ def write_cache_config(config_path: Path, image_cache: dict[str, str]) -> None:
         cvat={"host": "http://localhost:8080"},
         image_cache=image_cache,
     )
+    write_config_yaml(
+        config_path.parent / "projects.yaml",
+        organizations=[
+            {
+                "slug": "",
+                "projects": [{"id": 1, "name": "alpha"}, {"id": 2, "name": "beta"}],
+            }
+        ],
+    )
+    activate_migration(migration_proposal(config_path))
 
 
 @pytest.mark.usefixtures("two_projects")

@@ -1,93 +1,158 @@
 # Конфигурация
 
-## Файл конфигурации
+## Личный и общий файлы
 
-По умолчанию используется `~/.config/cveta2/config.yaml`. Создать его проще всего через `cveta2 setup` (креды) и `cveta2 setup-cache` (пути к изображениям).
+Настройки разделены по владельцу. Личный `~/.config/cveta2/config.yaml`
+хранит учётные данные, локальные пути, таймауты и параллельность. Общий YAML
+хранит сервер и организацию CVAT, проекты, источники, соответствия ClearML
+и правила формирования датасетов. Личный файл не переопределяет общий.
 
-Минимальный пример:
-
-```yaml
-cvat:
-  host: "https://app.cvat.ai"
-  organization: "my-team"
-  username: "your-username"
-  password: "your-password"
-```
-
-Полный пример конфига со всеми секциями:
+Личный файл:
 
 ```yaml
+schema_version: 1
+project_config: /shared/cveta2/project-config.yaml
 cvat:
-  host: "https://app.cvat.ai"
-  organization: "my-team"
-  username: "your-username"
-  password: "your-password"
-  request_timeout: 300  # таймаут чтения HTTP-запросов в секундах; не задан или 0 — без таймаута
-
+  username: your-username
+  password: your-password
+  request_timeout: 300
 image_cache:
-  coco8-dev: /mnt/disk01/data/project_coco_8_dev
-  my-other-project: /home/user/datasets/other
-
-sync_roots:
-  coco8-dev: s3://other-bucket/mirrors/coco8   # или просто "some/prefix" в бакете проекта
-  my-other-project: some/other/prefix
-
+  main: /data/images/main
 cache:
-  images_root: /home/user/datasets             # корень кэша изображений для проектов без записи в image_cache
-  tasks_root: /mnt/disk01/task-cache           # локальный корень кэша аннотаций задач
-  projects:
-    coco8-dev:
-      images_root: /mnt/disk02/coco8           # переопределяет cache.images_root для этого проекта
-      tasks_root: /mnt/disk02/coco8-tasks      # переопределяет cache.tasks_root для этого проекта
-      ignored_prefix: data                     # часть S3-ключа, отбрасываемая при локальном сохранении
-      task_cache_s3: s3://ml-cache/coco8-dev   # явное место S3-кэша задач (или голый префикс в бакете проекта)
-
-upload:
-  images_per_job: 100                          # изображений на job в создаваемой задаче
-  image_quality: 100                           # качество изображений в CVAT
-
+  images_root: /data/images
+  tasks_root: /data/task-cache
 network:
-  s3_workers: 16                               # параллельных передач файлов на S3
-  cvat_workers: 4                              # параллельных запросов к CVAT
-  retry_attempts: 5                            # попыток cveta2, включая первую; SDK может повторять внутри
-  retry_max_wait: 30                           # максимальная пауза между попытками, секунды
+  s3_workers: 16
+  cvat_workers: 4
+  retry_attempts: 5
+  retry_max_wait: 30.0
+upload:
+  images_per_job: 100
+  image_quality: 100
 ```
 
-Поле `cvat.request_timeout` (или переменная `CVETA2_DATA_TIMEOUT`, у неё приоритет) включает таймауты для всех HTTP-запросов к CVAT (включая создание клиента) и операций с S3: таймаут соединения — 10 секунд, таймаут чтения — заданное значение. По умолчанию (не задано или `0`) таймаутов нет — запрос может ждать сколько угодно.
+Общий файл, который можно использовать нескольким пользователям:
 
-Отрицательные и неконечные (`NaN`, `inf`) таймауты отклоняются при проверке конфигурации. Ошибки типов и значений CLI сообщает без traceback; подсказка об учётных данных указывает фактически выбранный файл конфигурации.
+```yaml
+schema_version: 1
+cvat:
+  host: https://cvat.example.org
+  organization: team
+projects:
+  main:
+    id: 12
+    name: Main project
+    sync_root: s3://images/main
+    ignored_prefix: images/
+    task_cache_s3: s3://cache/main
+    ignore: []
+  supplemental:
+    id: 27
+    name: Supplemental project
+datasets:
+  construction:
+    sources:
+      - name: main
+        type: cvat
+        project: main
+      - name: supplemental
+        type: cvat
+        project: supplemental
+      - name: imported
+        type: s3-csv
+        uri: s3://datasets/imports/annotations.csv
+    clearml:
+      project: CV/construction
+      dataset: annotations
+    api_url: https://classes.example.org/api/classes
+    s3_roots:
+      - s3://images/main
+    empty_classes: []
+    splits:
+      train: 0.6
+      val: 0.2
+      test: 0.2
+      seed: 42
+    overlaps: {}
+```
+
+Имена `main`, `supplemental`, `construction` и имена источников — устойчивые
+безопасные ключи. CVAT-источник ссылается на ключ из `projects`, где хранится
+реальный ID. Несколько проектов могут входить в один датасет. Имена источников
+внутри датасета, ссылки на источники и пары ClearML project/dataset не дублируются.
+В общем файле нет паролей, токенов или локальных каталогов.
+
+`sync_root`, `ignored_prefix`, `task_cache_s3`, исключения задач `ignore`,
+`empty_classes`, `splits` и `overlaps` принадлежат общему файлу. Локальные
+`images_root`/`tasks_root` и `image_cache` остаются личными. Явная команда
+изменения общей политики записывает общий файл; при отсутствии прав она
+завершается ошибкой, а не создаёт личное переопределение.
+
+## Подключение и миграция
+
+```bash
+# Подключить существующий общий файл без повторного ввода учётных данных
+cveta2 setup --project-config /shared/cveta2/project-config.yaml
+
+# Или выбрать общий файл через окружение
+export CVETA2_PROJECT_CONFIG=/shared/cveta2/project-config.yaml
+
+# Проверить и разделить прежний смешанный конфиг
+cveta2 setup --migrate-config
+```
+
+Подключение проверяет файл и сохраняет абсолютную ссылку в личных настройках;
+общий файл не копируется и не редактируется. Обычный `cveta2 setup` настраивает
+личные учётные данные и предлагает общий путь.
+
+Старая конфигурация с проектными правилами требует миграции. Сначала показываются
+пути, переносимые поля, соответствия и неоднозначности без секретов. Только после
+подтверждения создаются защищённая резервная копия, общий файл и новый личный
+файл. Существующий общий файл автоматически не перезаписывается. Отмена сохраняет
+исходные данные; повторный запуск завершает прерванную подтверждённую активацию.
+Имена проектов преобразуются в ID только по однозначным данным кэша обнаружения.
+Неизвестные поля и неоднозначности требуют проверки; старые автоматические
+настройки ClearML не превращаются в новые соответствия молча.
+
+Неинтерактивный вызов не подтверждает миграцию автоматически: выполните её
+отдельно. Простая старая конфигурация только подключения остаётся читаемой
+для самостоятельных команд, пока не подключён общий файл.
 
 ## Пресет по умолчанию
 
-cveta2 содержит встроенный пресет (`cveta2/presets/default.yaml`), который задаёт `host: http://localhost:8080`. Если вы работаете с локальным CVAT — достаточно добавить только креды.
+Встроенный пресет задаёт исходные значения самостоятельных команд. Он не заменяет
+выбранный общий файл и не переопределяет его проекты или правила.
 
 ## Приоритет источников
 
-1. **Переменные окружения** — переопределяют файл и пресет
-1. **Файл конфигурации** (`~/.config/cveta2/config.yaml`)
-1. **Встроенный пресет** — базовые значения по умолчанию
-1. **Интерактивный ввод** — если не указаны логин/пароль
+Личный файл: явный `--config` там, где он поддерживается → `CVETA2_CONFIG` →
+`~/.config/cveta2/config.yaml`.
 
-При синтаксической ошибке YAML сообщение содержит путь, тип ошибки и доступные
-номер строки/столбца, но не исходные строки или значения конфигурации. Python API
-сохраняет исходное исключение парсера как причину для явной диагностики.
+Общий файл: явный `--project-config` или аргумент Python API →
+`CVETA2_PROJECT_CONFIG` → ссылка `project_config` в личном файле. Относительная
+сохранённая ссылка разрешается от каталога личного файла; явный путь и переменная
+окружения — от текущего каталога. Загружается ровно один общий файл.
+Отсутствующий, недоступный или некорректный выбранный файл даёт ошибку без
+скрытого отката к другому источнику.
+
+Учётные данные и личные сетевые параметры сохраняют свои переопределения
+окружением. Значения сервера/организации, конфликтующие с общим файлом, отклоняются.
+Изменять проектные правила через личный файл нельзя, даже если значения совпадают.
 
 ## Переменные окружения
 
-| Переменная | Описание |
+| Переменная | Назначение |
 |---|---|
-| `CVAT_HOST` | URL сервера CVAT |
-| `CVAT_ORGANIZATION` | Slug организации CVAT |
-| `CVAT_USERNAME` | Имя пользователя |
-| `CVAT_PASSWORD` | Пароль |
-| `CVETA2_CONFIG` | Путь к файлу конфигурации (по умолчанию `~/.config/cveta2/config.yaml`) |
-| `CVETA2_NO_INTERACTIVE` | Установите `true`, чтобы отключить все интерактивные промпты (см. ниже) |
-| `CVETA2_DATA_TIMEOUT` | Таймаут чтения (в секундах) для всех HTTP-запросов к CVAT и операций с S3; таймаут соединения — 10 секунд. Не задан или `0` — без таймаутов (поведение по умолчанию). Переопределяет `cvat.request_timeout` из конфига |
-| `CVETA2_DISABLE_CACHE` | При `true` — полностью отключить кэш аннотаций задач: ни чтения, ни записи, ни синхронизации с S3. Эквивалент постоянного `--no-cache` (см. [Кэш аннотаций задач](images-and-cache.md#кэш-аннотаций-задач)) |
-| `CVETA2_RAISE_ON_FAILURE` | При `true` — при первой ошибке CVAT 5xx по задаче вызов `fetch`/`fetch-task` сразу падает (исключение пробрасывается). По умолчанию такие задачи пропускаются, ошибка и контекст запроса пишутся в лог |
-| `CVETA2_S3_WORKERS` | Число параллельных передач файлов на S3 на этот запуск; переопределяет `network.s3_workers` |
-| `CVETA2_CVAT_WORKERS` | Число параллельных запросов к CVAT на этот запуск; переопределяет `network.cvat_workers` |
-| `CVETA2_RETRY_ATTEMPTS` | Число попыток cveta2 (включая первую), без учёта внутренних повторов SDK; переопределяет `network.retry_attempts` |
+| `CVETA2_CONFIG` | Выбор личного файла |
+| `CVETA2_PROJECT_CONFIG` | Выбор единственного общего файла проектов и соответствий |
+| `CVAT_USERNAME`, `CVAT_PASSWORD` | Личные учётные данные CVAT |
+| `CVAT_HOST`, `CVAT_ORGANIZATION` | Подключение самостоятельных команд; конфликт с общей идентичностью запрещён |
+| `CVETA2_DATA_TIMEOUT` | Личный таймаут HTTP-чтения |
+| `CVETA2_S3_WORKERS`, `CVETA2_CVAT_WORKERS` | Параллельность S3 и CVAT |
+| `CVETA2_RETRY_ATTEMPTS` | Число попыток сетевого запроса |
+| `CVETA2_NO_INTERACTIVE` | Ошибка вместо недостающего интерактивного решения |
+| `CVETA2_DISABLE_CACHE` | Отключение кэша аннотаций |
+| `CVETA2_RAISE_ON_FAILURE` | Завершать выгрузку при первой ошибке задачи |
 
 ## Ошибки сервера CVAT (5xx)
 
@@ -170,7 +235,7 @@ issues отдельно предупреждают о неполных данн�
 
 ```bash
 # Пример CI-использования
-export CVAT_HOST="https://app.cvat.ai"
+export CVETA2_PROJECT_CONFIG="/shared/cveta2/project-config.yaml"
 export CVAT_USERNAME="ci-bot"
 export CVAT_PASSWORD="your-password"
 export CVETA2_NO_INTERACTIVE=true

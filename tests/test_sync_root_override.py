@@ -6,12 +6,11 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-import yaml
 
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands._helpers import resolve_project_and_cloud_storage
-from tests.helpers import make_cs_info
+from tests.helpers import make_cs_info, write_split_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,11 +39,13 @@ def _write_config(
     monkeypatch: pytest.MonkeyPatch,
     sync_roots: dict[str, str] | None = None,
 ) -> None:
-    data: dict[str, object] = {"cvat": {"host": "http://localhost:8080"}}
-    if sync_roots:
-        data["sync_roots"] = sync_roots
     cfg_path = path / "config.yaml"
-    cfg_path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    write_split_config_yaml(
+        cfg_path,
+        project_ids={"my-project": 1, "other-project": 2},
+        cvat={"host": "http://localhost:8080"},
+        sync_roots=sync_roots or {},
+    )
     monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
 
 

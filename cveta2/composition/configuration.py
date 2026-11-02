@@ -1,5 +1,14 @@
 """Configuration and selection services exposed at entry boundaries."""
 
+from cveta2.adapters.config.project import (
+    MigrationProposal,
+    activate_migration,
+    attach_project_config,
+    load_project_config,
+    migration_proposal,
+    optional_project_config,
+    recover_migration,
+)
 from cveta2.adapters.config.projects_cache import (
     PERSONAL_WORKSPACE_SLUG,
     PERSONAL_WORKSPACE_TITLE,
@@ -46,11 +55,14 @@ __all__ = [
     "IgnoreConfig",
     "IgnoredTask",
     "ImageCacheConfig",
+    "MigrationProposal",
     "NetworkConfig",
     "OrgProjects",
     "SectionConfig",
     "SyncRootsConfig",
     "UploadConfig",
+    "activate_migration",
+    "attach_project_config",
     "cache_dir_for_project",
     "get_config_path",
     "get_projects_cache_path",
@@ -58,7 +70,11 @@ __all__ = [
     "is_cache_disabled",
     "is_interactive_disabled",
     "load_orgs_cache",
+    "load_project_config",
     "load_projects_cache",
+    "migration_proposal",
+    "optional_project_config",
+    "recover_migration",
     "require_interactive",
     "resolve_images_cache_dir",
     "save_orgs_cache",

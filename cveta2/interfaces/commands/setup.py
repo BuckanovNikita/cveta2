@@ -1,5 +1,7 @@
 """Implementation of the ``cveta2 setup`` and ``cveta2 setup-cache`` commands."""
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -10,25 +12,42 @@ from cveta2.composition.configuration import (
     CacheProjectSettings,
     CvatConfig,
     ImageCacheConfig,
+    activate_migration,
+    attach_project_config,
     cache_dir_for_project,
     get_projects_cache_path,
     load_projects_cache,
+    migration_proposal,
+    optional_project_config,
+    recover_migration,
     require_interactive,
     update_org_projects,
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces.commands._bootstrap import open_client
 from cveta2.interfaces.commands._helpers import config_path_from_args
-from cveta2.interfaces.commands.interactive import wizard
+from cveta2.interfaces.commands.interactive import primitives, wizard
 
 if TYPE_CHECKING:
     import argparse
-    from pathlib import Path
 
     from cveta2.domain.models import ProjectInfo
 
 
 from cveta2.interfaces.commands._parsers import add_config_arg, add_list_arg
+
+
+def configure_setup(parser: "argparse.ArgumentParser") -> None:
+    """Declare personal setup and attach-only shared configuration options."""
+    add_config_arg(parser)
+    parser.add_argument(
+        "--project-config", type=Path, help="Общий YAML проектов и соответствий."
+    )
+    parser.add_argument(
+        "--migrate-config",
+        action="store_true",
+        help="Проверить и разделить прежнюю конфигурацию.",
+    )
 
 
 def configure_setup_cache(parser: "argparse.ArgumentParser") -> None:
@@ -45,15 +64,54 @@ def configure_setup_cache(parser: "argparse.ArgumentParser") -> None:
     add_list_arg(parser, "List current image cache paths and exit.")
 
 
+def _run_migration(config_path: Path, project_path: Path | None) -> None:
+    """Review the exact migration proposal before activation."""
+    require_interactive(wizard.SETUP_HINT)
+    if recover_migration(config_path):
+        logger.info("Прерванное подтверждённое разделение конфигурации завершено.")
+        return
+    proposal = migration_proposal(config_path, project_path)
+    logger.info(json.dumps(proposal.preview(), ensure_ascii=False, indent=2))
+    if proposal.unresolved:
+        raise Cveta2Error(
+            "Сначала устраните неоднозначные настройки из отчёта миграции."
+        )
+    if primitives.confirm(
+        "Подтвердить показанное разделение конфигурации?",
+        hint=wizard.SETUP_HINT,
+        default=False,
+    ):
+        activate_migration(proposal)
+        logger.info("Разделение конфигурации завершено.")
+    else:
+        logger.info("Разделение отменено; конфигурация не изменена.")
+
+
 def run_setup(args: "argparse.Namespace") -> None:
     """Interactively ask user for CVAT credentials and core settings."""
     config_path = config_path_from_args(args)
+    project_path = getattr(args, "project_config", None)
+    if getattr(args, "migrate_config", False):
+        _run_migration(config_path, project_path)
+        return
+    if project_path is not None:
+        selected = attach_project_config(config_path, project_path)
+        logger.info(f"Общая конфигурация подключена: {selected}")
+        return
     require_interactive(wizard.SETUP_HINT)
-    existing = CvatConfig.from_file(config_path)
+    shared = optional_project_config(config_path)
+    existing = (
+        CvatConfig.load(config_path)
+        if shared is not None
+        else CvatConfig.from_file(config_path)
+    )
 
-    host_default = existing.host or "https://app.cvat.ai"
-    host = wizard.prompt_host(host_default)
-    organization = wizard.prompt_organization(existing.organization)
+    if shared is None:
+        host_default = existing.host or "https://app.cvat.ai"
+        host = wizard.prompt_host(host_default)
+        organization = wizard.prompt_organization(existing.organization)
+    else:
+        host, organization = shared.cvat.host, shared.cvat.organization
 
     username = wizard.prompt_username(existing.username or "")
     password = wizard.prompt_password()
@@ -71,6 +129,30 @@ def run_setup(args: "argparse.Namespace") -> None:
 
     saved_path = cfg.save_to_file(config_path)
     logger.info(f"Готово! Конфигурация сохранена в {saved_path}")
+    if shared is None:
+        _offer_shared_attachment(config_path)
+
+
+def _offer_shared_attachment(config_path: Path) -> None:
+    """Offer a shared path without silently moving newly saved identity fields."""
+    project_path = primitives.path(
+        "Общий YAML проектов (пусто — пропустить): ", hint=wizard.SETUP_HINT
+    )
+    if project_path is not None:
+        # Legacy host/org must first move through the reviewed migration.
+        proposal = migration_proposal(config_path, project_path)
+        logger.info(json.dumps(proposal.preview(), ensure_ascii=False, indent=2))
+        if proposal.unresolved:
+            raise Cveta2Error(
+                "Общая конфигурация отличается; выполните "
+                "setup --migrate-config после согласования."
+            )
+        if primitives.confirm(
+            "Подтвердить разделение и подключение?",
+            hint=wizard.SETUP_HINT,
+            default=False,
+        ):
+            activate_migration(proposal)
 
 
 def run_setup_cache(args: "argparse.Namespace") -> None:

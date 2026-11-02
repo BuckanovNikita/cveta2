@@ -40,7 +40,7 @@ from cveta2.domain.models import (
 from cveta2.domain.storage import CloudStorageInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import CFG, build_fake, make_bbox, make_task, write_config_yaml
+from tests.helpers import CFG, build_fake, make_bbox, make_task, write_split_config_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -873,8 +873,9 @@ class TestCacheSettings:
         Losing the ``task_cache_s3`` pass-through would delete a key nobody
         wrote and leave the team's shared entry to be served again.
         """
-        config_path = write_config_yaml(
+        config_path = write_split_config_yaml(
             tmp_path / "cfg.yaml",
+            project_ids={"proj": 5},
             cache={"projects": {"proj": {"task_cache_s3": "s3://ml-cache/proj"}}},
         )
         monkeypatch.setenv("CVETA2_CONFIG", str(config_path))
@@ -1115,8 +1116,9 @@ class TestFetchBuildsTheS3CacheBackend:
         """
         fake = normal_fake
         fake_s3 = FakeS3Client()
-        config_path = write_config_yaml(
+        config_path = write_split_config_yaml(
             tmp_path / "cfg.yaml",
+            project_ids={fake.project.name: fake.project.id},
             cache={
                 "projects": {fake.project.name: {"task_cache_s3": "s3://ml-cache/proj"}}
             },
