@@ -38,6 +38,9 @@ from cvat_sdk.api_client.exceptions import ApiException
 from cvat_sdk.core.client import Client
 from loguru import logger
 from pydantic import BaseModel
+from urllib3.exceptions import HTTPError as Urllib3Error
+
+from tests.integration.stand_tls import tls_failure_message
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -118,6 +121,12 @@ def _login(settings: StandSettings) -> Client:
             f"login as '{settings.username}' at {settings.host} failed: "
             f"{exc.status} {exc.body}; {SECRET_HINT}"
         ) from exc
+    except (OSError, Urllib3Error) as exc:
+        client.close()
+        tls = tls_failure_message(exc, settings.host)
+        if tls is not None:
+            raise StandError(tls) from exc
+        raise
     return client
 
 

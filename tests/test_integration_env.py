@@ -92,6 +92,17 @@ rm -f tests/integration/.run-tag
 """,
 }
 FAKE_TOOL = "#!/usr/bin/env bash\nexit 0\n"
+# The gate's curl preflight: FAKE_CURL_STATUS is the exit status it reports
+# (60 is curl's "peer certificate cannot be authenticated", 7 "connection refused").
+FAKE_CURL = '#!/usr/bin/env bash\nexit "${FAKE_CURL_STATUS:-0}"\n'
+# What every k8s-infra helper's `env` adds next to the Secret keys once the
+# local CA is installed; the stands' https names are trusted through them.
+CA_EXPORTS = """
+SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/k8s-infra-local-ca.crt
+"""
 # `uv run ...` from the real stop and test scripts: recorded, never executed.
 FAKE_UV = """#!/usr/bin/env bash
 echo "uv $*" >> "$FAKE_TOOL_CALLS"
@@ -100,16 +111,16 @@ echo "uv $*" >> "$FAKE_TOOL_CALLS"
 
 SECRET_EXPORTS = {
     "cvat": """
-CVAT_URL=http://cvat.k8s.localhost/
+CVAT_URL=https://cvat.k8s.docker.internal/
 CVAT_ORG=agents
 CVAT_USERNAME=cveta2
 CVAT_TOKEN=tok
 CVAT_PASSWORD=pw
 """,
     "minio": """
-S3_ENDPOINT=http://minio.k8s.localhost/
+S3_ENDPOINT=https://s3.k8s.docker.internal/
 S3_ENDPOINT_IN_CLUSTER=http://minio.minio.svc:9000
-S3_CONSOLE=http://minio-console.k8s.localhost
+S3_CONSOLE=https://minio.k8s.docker.internal
 S3_ACCESS_KEY=ak
 S3_SECRET_KEY=sk
 S3_REGION=us-east-1
@@ -117,13 +128,16 @@ AWS_ACCESS_KEY_ID=ak
 AWS_SECRET_ACCESS_KEY=sk
 """,
     "clearml": """
-CLEARML_API_HOST=http://clearml-api.k8s.localhost
-CLEARML_WEB_HOST=http://clearml.k8s.localhost
-CLEARML_FILES_HOST=http://clearml-files.k8s.localhost
+CLEARML_API_HOST=https://api.clearml.k8s.docker.internal
+CLEARML_WEB_HOST=https://clearml.k8s.docker.internal
+CLEARML_FILES_HOST=https://files.clearml.k8s.docker.internal
 CLEARML_API_ACCESS_KEY=cak
 CLEARML_API_SECRET_KEY=csk
 CLEARML_QUEUE=agents
 """,
+}
+SECRET_EXPORTS = {
+    stand: exports + CA_EXPORTS for stand, exports in SECRET_EXPORTS.items()
 }
 
 OBSERVED = (
@@ -146,6 +160,10 @@ OBSERVED = (
     "CLEARML_API_ACCESS_KEY",
     "CLEARML_QUEUE",
     "INTEGRATION_SKILL_DIR",
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "AWS_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
 )
 
 
@@ -244,7 +262,7 @@ class Tree(BaseModel):
         for name, text in FAKE_LIFECYCLE.items():
             _write_executable(self.root / "scripts" / name, text)
         (self.root / "bin").mkdir(exist_ok=True)
-        _write_executable(self.root / "bin" / "curl", FAKE_TOOL)
+        _write_executable(self.root / "bin" / "curl", FAKE_CURL)
         return gate
 
     def install_script(self, source: Path) -> Path:
@@ -341,21 +359,43 @@ class TestCredentials:
     def test_secrets_map_onto_the_integration_variables(self, tree: Tree) -> None:
         outcome = tree.run(env={"INFRA_RUN_TAG": MINTED_TAG})
         assert outcome.returncode == 0, outcome.stderr
-        assert outcome.values["CVAT_INTEGRATION_HOST"] == "http://cvat.k8s.localhost"
+        assert (
+            outcome.values["CVAT_INTEGRATION_HOST"]
+            == "https://cvat.k8s.docker.internal"
+        )
         assert outcome.values["CVAT_INTEGRATION_USER"] == "cveta2"
         assert outcome.values["CVAT_INTEGRATION_PASSWORD"] == "pw"
         assert outcome.values["CVAT_INTEGRATION_ORG"] == "agents"
-        assert outcome.values["MINIO_ENDPOINT"] == "http://minio.k8s.localhost"
+        assert outcome.values["MINIO_ENDPOINT"] == "https://s3.k8s.docker.internal"
         assert (
             outcome.values["MINIO_ENDPOINT_FOR_CVAT"] == "http://minio.minio.svc:9000"
         )
         assert outcome.values["MINIO_ACCESS_KEY"] == "ak"
         assert outcome.values["MINIO_SECRET_KEY"] == "sk"
-        assert outcome.values["MINIO_CONSOLE"] == "http://minio-console.k8s.localhost"
+        assert outcome.values["MINIO_CONSOLE"] == "https://minio.k8s.docker.internal"
         assert outcome.values["MINIO_REGION"] == "us-east-1"
-        assert outcome.values["CLEARML_API_HOST"] == "http://clearml-api.k8s.localhost"
+        assert (
+            outcome.values["CLEARML_API_HOST"]
+            == "https://api.clearml.k8s.docker.internal"
+        )
         assert outcome.values["CLEARML_API_ACCESS_KEY"] == "cak"
         assert outcome.values["CLEARML_QUEUE"] == "agents"
+
+    def test_the_helpers_ca_trust_reaches_every_process_of_the_run(
+        self, tree: Tree
+    ) -> None:
+        """The stands are https with a local CA; the helpers' bundle is exported."""
+        outcome = tree.run(
+            'printf "EXPORTED=%s\\n" "$(bash -c \'echo "$SSL_CERT_FILE"\')"',
+            env={"INFRA_RUN_TAG": MINTED_TAG},
+        )
+        assert outcome.returncode == 0, outcome.stderr
+        bundle = "/etc/ssl/certs/ca-certificates.crt"
+        assert outcome.values["SSL_CERT_FILE"] == bundle
+        assert outcome.values["REQUESTS_CA_BUNDLE"] == bundle
+        assert outcome.values["AWS_CA_BUNDLE"] == bundle
+        assert outcome.values["NODE_EXTRA_CA_CERTS"].endswith("k8s-infra-local-ca.crt")
+        assert outcome.values["EXPORTED"] == bundle
 
     def test_nothing_runs_on_this_host_so_no_port_is_derived(self, tree: Tree) -> None:
         outcome = tree.run(env={"INFRA_RUN_TAG": MINTED_TAG})
@@ -542,10 +582,39 @@ class TestGate:
         assert "the integration gate is armed" in completed.stderr
         assert "ClearML stand" in completed.stderr
         assert "clearml.py --project cveta2 whoami failed" in completed.stderr
+        assert "certificate or SSL error in that output is a trust problem" in (
+            completed.stderr
+        )
         assert "k8s-infra skill" in completed.stderr
         assert "deploy" not in completed.stderr
         assert tree.calls() == []
         assert tree.recorded_tag() is None
+
+    def test_an_untrusted_certificate_is_reported_as_tls_not_as_a_down_stand(
+        self, tree: Tree
+    ) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(str(gate), env={"FAKE_CURL_STATUS": "60"})
+        assert completed.returncode == 1
+        assert "the integration gate is armed" in completed.stderr
+        assert "TLS verification of the CVAT stand" in completed.stderr
+        assert "curl exit 60" in completed.stderr
+        assert "certificate-trust problem, not a stand that is down" in (
+            completed.stderr
+        )
+        assert "k8s-infra-local-ca.crt" in completed.stderr
+        assert "does not answer" not in completed.stderr
+        assert "deploy" not in completed.stderr
+        assert tree.calls() == []
+        assert tree.tool_calls() == []
+
+    def test_a_cvat_stand_that_does_not_answer_says_so(self, tree: Tree) -> None:
+        gate = tree.install_gate()
+        completed = tree.bash(str(gate), env={"FAKE_CURL_STATUS": "7"})
+        assert completed.returncode == 1
+        assert "does not answer (curl exit 7)" in completed.stderr
+        assert "TLS" not in completed.stderr
+        assert tree.calls() == []
 
     def test_main_keeps_the_durable_slot(self, tree: Tree) -> None:
         gate = tree.install_gate()
@@ -699,6 +768,9 @@ class TestTestScript:
         assert completed.returncode == 1
         assert tree.tool_calls() == ["clearml whoami"]
         assert "clearml.py --project cveta2 whoami failed" in completed.stderr
+        assert "certificate or SSL error in that output is a trust problem" in (
+            completed.stderr
+        )
         assert "never skipped" in completed.stderr
         assert "k8s-infra skill" in completed.stderr
 

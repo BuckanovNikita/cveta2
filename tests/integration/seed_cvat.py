@@ -38,7 +38,7 @@ from urllib.parse import urlencode
 
 import boto3
 from botocore.config import Config as BotoConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiException
 from cvat_sdk.core.client import Client
@@ -46,6 +46,9 @@ from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from cvat_sdk.core.proxies.tasks import ResourceType
 from loguru import logger
 from pydantic import BaseModel
+from urllib3.exceptions import HTTPError as Urllib3Error
+
+from tests.integration.stand_tls import tls_failure_message
 
 if TYPE_CHECKING:
     from cvat_sdk.core.client import Client as CvatClient
@@ -377,8 +380,11 @@ def open_stand(settings: SeedSettings) -> Client:
             "(`cvat.py --project cveta2 env` from the k8s-infra skill), "
             "cvat_stand.py verify tells which piece is wrong"
         ) from exc
-    except OSError:
+    except (OSError, Urllib3Error) as exc:
         client.close()
+        tls = tls_failure_message(exc, settings.cvat_host)
+        if tls is not None:
+            raise SeedError(tls) from exc
         raise
     client.organization_slug = settings.cvat_organization
     return client
@@ -396,7 +402,15 @@ def main() -> int:
             f"(for CVAT: {settings.minio_endpoint_for_cvat}), "
             f"bucket {settings.minio_bucket}"
         )
-        seed_bucket(settings, make_bucket_client(settings), IMAGES_DIR)
+        try:
+            seed_bucket(settings, make_bucket_client(settings), IMAGES_DIR)
+        except (BotoCoreError, OSError) as exc:
+            # The bucket is the first HTTPS call of the run, so an untrusted CA
+            # usually fails here, as botocore's SSLError, before the CVAT login.
+            tls = tls_failure_message(exc, settings.minio_endpoint)
+            if tls is not None:
+                raise SeedError(tls) from exc
+            raise
         client = open_stand(settings)
         try:
             project_id = seed_project(client, settings)

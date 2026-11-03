@@ -82,6 +82,18 @@ The ClearML stand is not optional: `integration_test.sh` and the gate run
 authenticate. On an armed machine nothing skips; a stand that is down is
 diagnosed with the `k8s-infra` skill, never worked around.
 
+The stands answer on `https://<name>.k8s.docker.internal` with a certificate
+from the k8s-infra local CA. `integration_env.sh` evaluates the helpers' `env`
+output, which also exports, when the k8s-infra CA is installed (the system
+bundle and `/usr/local/share/ca-certificates/k8s-infra-local-ca.crt` exist),
+`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `AWS_CA_BUNDLE` and
+`NODE_EXTRA_CA_CERTS`, so every tool of the run trusts them. A failed handshake is reported as a TLS problem, not as a stand that is
+down: the gate classifies curl's exit status, and `cvat_stand.py`,
+`seed_cvat.py` and the live fixtures raise `TLS verification of <url> failed`
+instead of skipping. Fix trust (the CA under
+`/usr/local/share/ca-certificates`, a fresh `source` of the environment), never
+switch to the old `http://*.k8s.localhost` names or disable verification.
+
 A seeded project is single-use for a full run because tests create fixed task
 names. Run `integration_up.sh` again before a second full suite. Test fixtures
 and `finally` blocks close clients and remove test-owned objects; do not bypass

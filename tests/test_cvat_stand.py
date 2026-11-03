@@ -20,11 +20,12 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from tests.integration import cvat_stand
+from tests.test_stand_tls import untrusted_certificate_error
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-HOST = "http://cvat.k8s.localhost"
+HOST = "https://cvat.k8s.docker.internal"
 USER = "cveta2"
 PASSWORD = "from-the-secret"
 ORG = "agents"
@@ -211,6 +212,22 @@ class TestVerify:
         assert run(monkeypatch, "verify") == 1
         assert f"login as '{USER}' at {HOST} failed: 401" in logs[-1]
         assert "deploy_cvat.sh" in logs[-1]
+        assert stand.closed == 1
+
+    def test_an_untrusted_certificate_is_reported_as_tls(
+        self, stand: Stand, monkeypatch: pytest.MonkeyPatch, logs: list[str]
+    ) -> None:
+        fake_client = fake_client_class(stand)
+
+        class UntrustedClient(fake_client):  # type: ignore[valid-type,misc]
+            def login(self, _credentials: tuple[str, str]) -> None:
+                raise untrusted_certificate_error()
+
+        monkeypatch.setattr(cvat_stand, "Client", UntrustedClient)
+        assert run(monkeypatch, "verify") == 1
+        assert logs[-1].startswith(f"TLS verification of {HOST} failed")
+        assert "not known to be down" in logs[-1]
+        assert stand.logins == []
         assert stand.closed == 1
 
     def test_another_account_behind_the_password_is_refused(

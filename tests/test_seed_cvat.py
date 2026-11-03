@@ -7,11 +7,13 @@ cveta2 key, path-style. The fake CVAT client records what the seed creates.
 
 from __future__ import annotations
 
+import ssl
 import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from botocore.exceptions import SSLError as BotocoreSSLError
 from botocore.stub import ANY, Stubber
 from cvat_sdk.api_client.exceptions import ApiException
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
@@ -20,6 +22,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from tests.integration import seed_cvat
+from tests.test_stand_tls import untrusted_certificate_error
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -27,13 +30,13 @@ if TYPE_CHECKING:
 
 TAG = "cveta2-claude-20260905-integration-k3x9"
 ENV = {
-    "CVAT_INTEGRATION_HOST": "http://cvat.k8s.localhost/",
+    "CVAT_INTEGRATION_HOST": "https://cvat.k8s.docker.internal/",
     "CVAT_INTEGRATION_USER": "cveta2",
     "CVAT_INTEGRATION_PASSWORD": "from-the-secret",
     "CVAT_INTEGRATION_ORG": "agents",
     "CVAT_INTEGRATION_PROJECT": f"{TAG} coco8-dev",
     "INTEGRATION_RUN_TAG": TAG,
-    "MINIO_ENDPOINT": "http://minio.k8s.localhost",
+    "MINIO_ENDPOINT": "https://s3.k8s.docker.internal",
     "MINIO_ENDPOINT_FOR_CVAT": "http://minio.minio.svc:9000",
     "MINIO_ACCESS_KEY": "cveta2",
     "MINIO_SECRET_KEY": "minio-secret",
@@ -104,7 +107,7 @@ def _fake_client_class(stand: Stand) -> type:
 
     class FakeClient:
         def __init__(self, url: str, *, check_server_version: bool = True) -> None:
-            assert url == "http://cvat.k8s.localhost"
+            assert url == "https://cvat.k8s.docker.internal"
             assert check_server_version is False
             self.organization_slug: str | None = None
             self.api_client = SimpleNamespace(
@@ -209,7 +212,7 @@ class TestSettings:
     @pytest.mark.usefixtures("stand")
     def test_names_derive_from_the_tag_and_the_host_loses_its_slash(self) -> None:
         settings = seed_cvat.SeedSettings.from_env()
-        assert settings.cvat_host == "http://cvat.k8s.localhost"
+        assert settings.cvat_host == "https://cvat.k8s.docker.internal"
         assert settings.cloud_storage_name == f"{TAG} minio"
         assert settings.minio_bucket == TAG
 
@@ -218,7 +221,7 @@ class TestBucket:
     @pytest.mark.usefixtures("stand")
     def test_the_client_signs_as_the_cveta2_key_path_style(self) -> None:
         s3: Any = seed_cvat.make_bucket_client(seed_cvat.SeedSettings.from_env())
-        assert s3.meta.endpoint_url == "http://minio.k8s.localhost"
+        assert s3.meta.endpoint_url == "https://s3.k8s.docker.internal"
         assert s3.meta.config.s3 == {"addressing_style": "path"}
         assert s3.meta.config.signature_version == "s3v4"
         assert s3.meta.region_name == "us-east-1"
@@ -372,11 +375,113 @@ class TestMain:
         with stubber:
             assert seed_cvat.main() == 1
         assert logs[-1].startswith(
-            "login as 'cveta2' at http://cvat.k8s.localhost failed: 401"
+            "login as 'cveta2' at https://cvat.k8s.docker.internal failed: 401"
         )
         assert "cvat_stand.py verify" in logs[-1]
         assert stand.closed == 1
         assert stand.projects == []
+
+    def test_an_untrusted_certificate_is_reported_as_tls_and_exit_1(
+        self,
+        stand: Stand,
+        monkeypatch: pytest.MonkeyPatch,
+        logs: list[str],
+        images_dir: Path,
+    ) -> None:
+        fake_client = _fake_client_class(stand)
+
+        class UntrustedClient(fake_client):  # type: ignore[valid-type,misc]
+            def login(self, _credentials: tuple[str, str]) -> None:
+                raise untrusted_certificate_error()
+
+        monkeypatch.setattr(seed_cvat, "Client", UntrustedClient)
+        monkeypatch.setattr(seed_cvat, "IMAGES_DIR", images_dir)
+        settings = seed_cvat.SeedSettings.from_env()
+        s3, stubber = _stubbed_s3(settings, seed_cvat.IMAGE_NAMES)
+        monkeypatch.setattr(seed_cvat, "make_bucket_client", lambda _settings: s3)
+        monkeypatch.setattr(sys, "argv", ["seed_cvat.py"])
+        with stubber:
+            assert seed_cvat.main() == 1
+        assert logs[-1].startswith(
+            "TLS verification of https://cvat.k8s.docker.internal failed"
+        )
+        assert "k8s-infra-local-ca.crt" in logs[-1]
+        assert stand.closed == 1
+        assert stand.projects == []
+
+    @pytest.mark.parametrize("raised_while_handling", [True, False])
+    def test_an_untrusted_s3_certificate_is_reported_as_tls_and_exit_1(
+        self,
+        stand: Stand,
+        monkeypatch: pytest.MonkeyPatch,
+        logs: list[str],
+        images_dir: Path,
+        *,
+        raised_while_handling: bool,
+    ) -> None:
+        handshake = ssl.SSLCertVerificationError(
+            1,
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+            "unable to get local issuer certificate",
+        )
+
+        def untrusted_s3_error() -> BotocoreSSLError:
+            error = BotocoreSSLError(
+                endpoint_url="https://s3.k8s.docker.internal/bucket", error=handshake
+            )
+            if not raised_while_handling:
+                return error
+            # botocore raises its SSLError inside the urllib3 handler, so the
+            # handshake failure is also the context.
+            try:
+                try:
+                    raise handshake
+                except ssl.SSLError:
+                    raise error  # noqa: B904
+            except BotocoreSSLError as raised:
+                return raised
+
+        class UntrustedS3:
+            def create_bucket(self, **_kwargs: Any) -> dict[str, Any]:
+                raise untrusted_s3_error()
+
+            def put_object(self, **_kwargs: Any) -> dict[str, Any]:
+                raise AssertionError("no upload after a failed bucket")
+
+        monkeypatch.setattr(seed_cvat, "IMAGES_DIR", images_dir)
+        monkeypatch.setattr(
+            seed_cvat, "make_bucket_client", lambda _settings: UntrustedS3()
+        )
+        monkeypatch.setattr(sys, "argv", ["seed_cvat.py"])
+        assert seed_cvat.main() == 1
+        assert logs[-1].startswith(
+            "TLS verification of https://s3.k8s.docker.internal failed"
+        )
+        assert "k8s-infra-local-ca.crt" in logs[-1]
+        assert stand.logins == []
+        assert stand.projects == []
+
+    def test_a_non_tls_s3_transport_error_is_not_reported_as_tls(
+        self,
+        stand: Stand,
+        monkeypatch: pytest.MonkeyPatch,
+        logs: list[str],
+        images_dir: Path,
+    ) -> None:
+        class DownS3:
+            def create_bucket(self, **_kwargs: Any) -> dict[str, Any]:
+                raise ConnectionRefusedError("connection refused")
+
+            def put_object(self, **_kwargs: Any) -> dict[str, Any]:
+                raise AssertionError("no upload after a failed bucket")
+
+        monkeypatch.setattr(seed_cvat, "IMAGES_DIR", images_dir)
+        monkeypatch.setattr(seed_cvat, "make_bucket_client", lambda _settings: DownS3())
+        monkeypatch.setattr(sys, "argv", ["seed_cvat.py"])
+        with pytest.raises(ConnectionRefusedError):
+            seed_cvat.main()
+        assert not any(line.startswith("TLS verification") for line in logs)
+        assert stand.logins == []
 
     def test_a_settings_error_is_one_log_line_and_exit_1(
         self, stand: Stand, monkeypatch: pytest.MonkeyPatch, logs: list[str]

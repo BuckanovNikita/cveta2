@@ -31,6 +31,8 @@ echo "==> ClearML: $CLEARML_API_HOST  (the shared stand)"
 if ! integration_helper clearml whoami; then
     echo "ERROR: the ClearML stand does not authenticate the cveta2 identity" >&2
     echo "       (clearml.py --project $INTEGRATION_PROJECT whoami failed, see above)." >&2
+    echo "       A certificate or SSL error in that output is a trust problem, not a refused identity:" >&2
+    printf '       %s\n' "${INTEGRATION_TLS_REMEDY[@]}" >&2
     echo "       Diagnose the stand and the Secret with the k8s-infra skill;" >&2
     echo "       the ClearML tests are never skipped on an armed machine." >&2
     exit 1

@@ -500,6 +500,17 @@ cp tests/integration/.env.example tests/integration/.env
 `~/.claude/skills/k8s-infra`; другой checkout задаётся `K8S_INFRA_SKILL_DIR` —
 единственное, что имеет смысл писать в `.env`.
 
+**HTTPS.** Стенды отвечают на `https://<имя>.k8s.docker.internal` (`cvat`, `s3`,
+`minio`, `api.clearml`, …) с сертификатом локального CA k8s-infra. Вывод `env`
+хелперов рядом с ключами Secret'ов экспортирует (если CA k8s-infra установлен:
+есть `/etc/ssl/certs/ca-certificates.crt` и
+`/usr/local/share/ca-certificates/k8s-infra-local-ca.crt`) `SSL_CERT_FILE`,
+`REQUESTS_CA_BUNDLE`, `AWS_CA_BUNDLE` и `NODE_EXTRA_CA_CERTS`, поэтому curl,
+CVAT SDK, boto3 и ClearML SDK после `source scripts/integration_env.sh`
+доверяют стендам. Старые имена `*.k8s.localhost` по-прежнему обслуживаются по
+HTTP, но конфигурация их больше не использует. Внутрикластерный адрес MinIO для
+CVAT (`MINIO_ENDPOINT_FOR_CVAT`) остаётся `http://…svc…`.
+
 **Тег.** `integration_env.sh` выводит один тег для up / test / stop / gate:
 `INFRA_RUN_TAG`, если экспортирован (так подхватывают чужой или прерванный
 прогон); на `main` — постоянный слот `cveta2-main`; иначе — тег из
@@ -769,6 +780,14 @@ git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
 называет, какого стенда или ключа не хватает; `uv run python tests/integration/cvat_stand.py verify`
 проверяет учётку `cveta2` и её членство в организации. Сами стенды описаны в
 скилле `k8s-infra`; скрипты их не разворачивают
+
+**`TLS verification of … failed` / `certificate verify failed`** — стенд
+отвечает, но процесс не доверяет локальному CA k8s-infra. Проверьте, что
+`/usr/local/share/ca-certificates/k8s-infra-local-ca.crt` установлен
+(`update-ca-certificates`), и запускайте через `source scripts/integration_env.sh`,
+чтобы переменные доверия пришли из хелперов. Гейт (по коду выхода curl) и
+`cvat_stand.py` / `seed_cvat.py` сообщают об этом отдельно от недоступного
+стенда; живые тесты в этом случае падают, а не пропускаются
 
 **`a run is active`** — в `tests/integration/.run-tag` записан тег
 незавершённого прогона: `./scripts/integration_stop.sh` его уберёт, либо

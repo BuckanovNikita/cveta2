@@ -22,7 +22,7 @@ INTEGRATION_DIR = Path(__file__).resolve().parent / "integration"
 TAG = "cveta2-claude-20260905-integration-k3x9"
 ENV = {
     "INTEGRATION_RUN_TAG": TAG,
-    "CLEARML_API_HOST": "http://clearml-api.k8s.localhost/",
+    "CLEARML_API_HOST": "https://api.clearml.k8s.docker.internal/",
     "CLEARML_API_ACCESS_KEY": "cak",
     "CLEARML_API_SECRET_KEY": "csk",
 }
@@ -79,7 +79,7 @@ class TestSettings:
     def test_from_env_reads_the_tag_and_the_stand(self) -> None:
         settings = RunSettings.from_env(ENV)
         assert settings.tag == TAG
-        assert settings.api_host == "http://clearml-api.k8s.localhost"
+        assert settings.api_host == "https://api.clearml.k8s.docker.internal"
 
     def test_every_missing_variable_is_named_at_once(self) -> None:
         env = {**ENV, "INTEGRATION_RUN_TAG": " ", "CLEARML_API_SECRET_KEY": ""}

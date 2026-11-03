@@ -80,13 +80,21 @@ armed_but_down() {
     exit 1
 }
 
-if ! curl -sf "$CVAT_INTEGRATION_HOST/api/server/about" > /dev/null 2>&1; then
-    armed_but_down "but the CVAT stand at $CVAT_INTEGRATION_HOST does not answer."
+cvat_status=0
+curl -sf "$CVAT_INTEGRATION_HOST/api/server/about" > /dev/null 2>&1 || cvat_status=$?
+if (( cvat_status != 0 )); then
+    if integration_curl_tls_failure "$cvat_status"; then
+        armed_but_down "but TLS verification of the CVAT stand at $CVAT_INTEGRATION_HOST failed (curl exit $cvat_status)." \
+            "${INTEGRATION_TLS_REMEDY[@]}"
+    fi
+    armed_but_down "but the CVAT stand at $CVAT_INTEGRATION_HOST does not answer (curl exit $cvat_status)."
 fi
 
 if ! integration_helper clearml whoami; then
     armed_but_down "but the ClearML stand at $CLEARML_API_HOST does not authenticate the cveta2 identity" \
-        "(clearml.py --project $INTEGRATION_PROJECT whoami failed, see above)."
+        "(clearml.py --project $INTEGRATION_PROJECT whoami failed, see above)." \
+        "A certificate or SSL error in that output is a trust problem, not a refused identity:" \
+        "${INTEGRATION_TLS_REMEDY[@]}"
 fi
 
 keep_data() {

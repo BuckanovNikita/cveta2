@@ -15,6 +15,7 @@ import pytest
 from cveta2.adapters.config.settings import CvatConfig
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from tests.fixtures.fake_cvat_project import LoadedFixtures
+from tests.integration.stand_tls import StandTlsError, tls_failure_message
 
 if TYPE_CHECKING:
     from cvat_sdk import Client as CvatSdkClient
@@ -33,7 +34,7 @@ def _env(key: str, default: str) -> str:
 def make_integration_config() -> CvatConfig:
     """CvatConfig for the stand, scoped to the integration organization."""
     return CvatConfig(
-        host=_env("CVAT_INTEGRATION_HOST", "http://cvat.k8s.localhost"),
+        host=_env("CVAT_INTEGRATION_HOST", "https://cvat.k8s.docker.internal"),
         username=_env("CVAT_INTEGRATION_USER", "cveta2"),
         password=_env("CVAT_INTEGRATION_PASSWORD", ""),
         organization=_env("CVAT_INTEGRATION_ORG", "") or None,
@@ -49,13 +50,19 @@ def _make_sdk_client() -> CvatSdkClient:
     """
     from cvat_sdk.api_client.exceptions import ApiException
     from cvat_sdk.core.client import Client
+    from urllib3.exceptions import HTTPError as Urllib3Error
 
     cfg = make_integration_config()
     client = Client(cfg.host, check_server_version=False)
     try:
         client.login((cfg.username, cfg.password))
-    except (OSError, ApiException):
+    except (OSError, ApiException, Urllib3Error) as exc:
         client.close()
+        # A trust failure is an OSError too; callers skip on OSError as
+        # "not reachable", so it is re-raised as a failure that names TLS.
+        tls = tls_failure_message(exc, cfg.host)
+        if tls is not None:
+            raise StandTlsError(tls) from exc
         raise
     if cfg.organization:
         client.organization_slug = cfg.organization
@@ -93,7 +100,7 @@ def fetch_live_fixtures() -> LoadedFixtures:
     ``tests/conftest.py`` when ``request.param == "live"``.
     Skips the test session if CVAT is unreachable.
     """
-    host = _env("CVAT_INTEGRATION_HOST", "http://cvat.k8s.localhost")
+    host = _env("CVAT_INTEGRATION_HOST", "https://cvat.k8s.docker.internal")
     try:
         client = _make_sdk_client()
     except OSError as exc:

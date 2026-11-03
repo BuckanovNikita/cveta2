@@ -33,6 +33,15 @@
 #                      the cveta2 MinIO key, its region and the console URL
 #   MINIO_BUCKET       this run's bucket, <tag>
 #   CLEARML_*          the cveta2 ClearML identity, exported by the helper as is
+#   SSL_CERT_FILE / REQUESTS_CA_BUNDLE / AWS_CA_BUNDLE / NODE_EXTRA_CA_CERTS
+#                      CA trust for the stands' HTTPS names, exported by the
+#                      helpers as is (when the k8s-infra CA is installed)
+#
+# The host-facing URLs are https://<name>.k8s.docker.internal, served with a
+# certificate from the k8s-infra local CA. The helpers' `env` output carries
+# the CA bundle variables next to the Secret keys, so evaluating it is what
+# makes curl, the CVAT SDK, boto3 and the ClearML SDK trust the stands; a
+# failed handshake is reported as a TLS problem, never as a stand that is down.
 #
 # Nothing runs on this host: the stands are the cluster's, so there are no
 # ports to pick and no Compose stack to start.
@@ -108,6 +117,22 @@ integration_eval_env() {
     fi
     eval "$exports"
 }
+
+# curl exit statuses that mean the TLS handshake or certificate check failed:
+# the stand answered, this machine does not trust it.
+integration_curl_tls_failure() {
+    case "$1" in
+        35|51|53|54|58|59|60|64|66|77|80|82|83|90|91) return 0 ;;
+    esac
+    return 1
+}
+
+INTEGRATION_TLS_REMEDY=(
+    "This is a certificate-trust problem, not a stand that is down: the stands serve"
+    "https://<name>.k8s.docker.internal with a certificate from the k8s-infra local CA."
+    "Check that /usr/local/share/ca-certificates/k8s-infra-local-ca.crt is installed"
+    "(update-ca-certificates) and that the k8s-infra helpers export SSL_CERT_FILE."
+)
 
 integration_require_secret_keys() {
     local stand=$1 key
