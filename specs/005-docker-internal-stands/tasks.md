@@ -32,10 +32,10 @@
 - [x] T010 Run ruff format --check, ruff check, mypy, lint-imports, check_architecture.py, vulture, focused suites, boundary tests, docs tests and full non-integration pytest; record dated results (SC-003). Depends on T002–T009.
 - [x] T011 Cross-artifact analysis (evidence/analysis.md); clarify and converge: no open questions, no remaining in-scope work besides T013–T014.
 - [x] T012 Reconcile the task-owned diff, checks and review in architecture.json; validate with `--phase acceptance`. Depends on T010.
-- [ ] T013 Live run of the integration lifecycle against the HTTPS stands with one owned run tag and exact-tag cleanup, via the running-integration-tests skill (SC-004). Not authorized in this change; required before relying on the pre-push gate after the Secret switch.
-- [ ] T014 Fresh independent read-only review of the final diff including these artifacts and T009; the launching agent reported a prior review of the implementation only.
+- [x] T013 Live run of the integration lifecycle against the HTTPS stands with one owned run tag and exact-tag cleanup, via the running-integration-tests skill (SC-004). Done 2026-11-03 under tag cveta2-claude-20261103-https-move-fl1u: 38 passed, 0 skipped; exact-tag cleanup proven (evidence/integration-2026-11-03.md).
+- [x] T014 Fresh independent read-only review of the final diff including these artifacts and T009; the launching agent reported a prior review of the implementation only. Done 2026-11-03: separate-subagent static review, verdict ACCEPT (evidence/review-2026-11-03.md).
 - [ ] T015 After merge to main: semantic-release evaluation and Git-tag-only release per CONTRIBUTING.md (owner's merge-only workflow; not performed here).
 
 ## Dependencies
 
-T005 blocks T006. T002–T009 block T010; T010 blocks T012. T013–T015 are open acceptance/release items outside this change's authorization. Single agent; no parallel delegation was used in the artifact pass.
+T005 blocks T006. T002–T009 block T010; T010 blocks T012. T013 (live run) and T014 (independent review) were completed on 2026-11-03; T015 remains an open release item outside this change's authorization. Single agent; no parallel delegation was used in the artifact pass.

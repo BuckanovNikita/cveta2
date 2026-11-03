@@ -121,7 +121,7 @@
     {
       "id": "integration-tool-boundary",
       "path": "tests/test_integration_tool_boundaries.py",
-      "status": "planned",
+      "status": "existing",
       "rules": "tests/integration/stand_tls.py imports only ssl; no cveta2 runtime module imports tests or scripts (module-level or function-local); negative fixtures show cveta2, cvat_sdk, urllib3 and botocore imports in the helper and tests/scripts imports in runtime are rejected.",
       "check": "boundaries"
     }
@@ -181,13 +181,24 @@
         "exit_code": 0,
         "evidence": "specs/005-docker-internal-stands/evidence/verification-2026-11-03.md"
       }
+    },
+    {
+      "id": "live",
+      "kind": "behavior",
+      "command": "INFRA_RUN_TAG=<minted tag> ./scripts/integration_up.sh && ./scripts/integration_test.sh tests/integration && ./scripts/integration_stop.sh, then cvat.py/minio.py/clearml.py --project cveta2 ls --prefix <tag>",
+      "expectation": "All live integration tests pass against the HTTPS stands with no skips or TLS failures; the run tag leaves no objects on any stand.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "specs/005-docker-internal-stands/evidence/integration-2026-11-03.md"
+      }
     }
   ],
   "documentation": "CONTRIBUTING.md (Russian) and .claude/skills/running-integration-tests/SKILL.md describe HTTPS names, CA variables and TLS troubleshooting. Inspected no-change: specs/baseline.md, docs/, README.md, .specify/memory/architecture.md (no stand URLs or integration tooling) and corp-skills skills/cveta2 at 670b0be (no stand or TLS guidance).",
   "review": {
     "status": "accepted",
-    "reviewer": "Prior implementation review reported by the launching agent (not re-run) plus direct diff inspection by the separate artifact-pass agent (not independent of these artifacts); fresh independent review of the final diff remains open as T014.",
+    "reviewer": "Independent read-only static review of the final diff at 9174b14 by a separate subagent on 2026-11-03 (verdict ACCEPT, no code defects; T014), in addition to the prior implementation review reported by the launching agent and the artifact pass's direct diff inspection.",
     "evidence": "specs/005-docker-internal-stands/evidence/review-2026-11-03.md",
-    "reconciliation": "Compared the complete task-owned diff: 13 modified tracked files, 3 added test/tooling files and the feature directory; no renames or deletions; cveta2 runtime, pyproject.toml, uv.lock, docs and baseline unchanged; ignored .specify/feature.json excluded. Modules stand-tls, integration-tooling, lifecycle-scripts and runtime match the implemented boundaries, and the planned integration-tool-boundary contract exists and passes with negative fixtures."
+    "reconciliation": "Compared the complete task-owned diff: 13 modified tracked files, 3 added test/tooling files and the feature directory; no renames or deletions; cveta2 runtime, pyproject.toml, uv.lock, docs and baseline unchanged; ignored .specify/feature.json excluded. Modules stand-tls, integration-tooling, lifecycle-scripts and runtime match the implemented boundaries, and the planned integration-tool-boundary contract exists and passes with negative fixtures. The T013 commit adds evidence/integration-2026-11-03.md (live run, check 'live') and changes only feature artifacts: tasks.md (T013, T014), architecture.json (contract status existing, live check, review text) and evidence/review-2026-11-03.md; the review's artifact-consistency items are fixed there and no code changed."
   }
 }
