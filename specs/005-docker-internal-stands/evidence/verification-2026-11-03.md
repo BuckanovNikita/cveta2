@@ -38,3 +38,12 @@ The configured pre-commit hooks (uv lock, ruff, lint-imports, architecture, mypy
 ## Ownership
 
 The main checkout `/mnt/wsl/data/nkt/cveta2` was not touched. `.specify/feature.json` is ignored and is not committed.
+
+## Release-resumption clarification
+
+The "Not run" and ownership sections above describe the original artifact pass.
+T013 subsequently completed the live run with 38 passed and exact-tag cleanup;
+see [integration evidence](integration-2026-11-03.md). The user has now authorized
+integration and the final gated main push after fresh checks and independent review.
+Current preparation and delivery outcomes are recorded separately in
+[release evidence](release-2026-11-03.md); earlier observations are preserved.

@@ -68,7 +68,7 @@ env -u CVAT_INTEGRATION_HOST uv run pytest -q -m "not integration"
 uv run pytest tests/test_docs.py
 ```
 
-Live: `running-integration-tests` skill lifecycle against the HTTPS stands with one owned tag and exact-tag cleanup (open, not run here).
+Live: `running-integration-tests` skill lifecycle against the HTTPS stands with one owned tag and exact-tag cleanup. Completed results are in [live integration evidence](evidence/integration-2026-11-03.md).
 
 ## Documentation and release
 
@@ -79,3 +79,23 @@ Live: `running-integration-tests` skill lifecycle against the HTTPS stands with 
 | Violation | Why needed | Simpler alternative rejected because |
 | --- | --- | --- |
 | Artifacts written after implementation | The code change was implemented and reviewed before Spec Kit artifacts existed | Reverting and re-implementing identical code adds no value; the deviation is disclosed instead |
+
+## Release resumption — 2026-11-03
+
+The user authorized dropping the local `docs/lossless-compress` branch and integrating
+all other unfinished work, with intent clarification and independent review before
+the final gated push. The clarified scope is this HTTPS tooling change plus the
+instruction-migration receipt and ledger reconciliation; older branches already
+contained in main need no merge. Local main already contains the two HTTPS commits
+through fast-forward integration. No runtime, dependency or public interface changes
+are planned during this resumption. Preserve the existing feature worktree.
+
+Use T015 for release delivery and append T016 for documentation reconciliation,
+parent verification and fresh independent review. The existing architecture record
+still covers the implemented tooling and its executable boundaries. The companion
+instruction receipt uses its existing documentation-only architecture record.
+Release-only additions affect native Markdown records; inspect links, run documentation
+tests and validate both records. Commit documentation on a task branch and merge into
+main. Semantic-release evaluates the integrated candidate; no new tag is expected
+for test/docs-only changes. Push main through every configured gate only after the
+independent review passes, then verify remote refs and record the delivery outcome.
