@@ -78,7 +78,7 @@ When the machine does not trust the local CA, the stand answers but the TLS hand
 - **SC-001**: Offline unit tests prove HTTPS endpoint and CA variable export through the environment script (FR-001, FR-002).
 - **SC-002**: Offline unit tests prove every TLS failure path named in FR-003–FR-006 reports TLS with the remedy, and the non-TLS paths keep their previous classification.
 - **SC-003**: The full non-integration regression suite, Ruff, strict mypy, import-linter contracts and the architecture effect checker pass.
-- **SC-004**: A live run against the HTTPS stands passes with exact-tag cleanup. This is required before relying on the gate after the Secret switch; it was not executed in this change (see [verification evidence](evidence/verification-2026-11-03.md)).
+- **SC-004**: A live run against the HTTPS stands passes with exact-tag cleanup. This is required before relying on the gate after the Secret switch; the completed run is recorded in [live integration evidence](evidence/integration-2026-11-03.md).
 
 ## Assumptions
 

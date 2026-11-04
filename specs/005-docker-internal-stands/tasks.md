@@ -39,3 +39,14 @@
 ## Dependencies
 
 T005 blocks T006. T002–T009 block T010; T010 blocks T012. T013 (live run) and T014 (independent review) were completed on 2026-11-03; T015 remains an open release item outside this change's authorization. Single agent; no parallel delegation was used in the artifact pass.
+
+## Phase 6: Authorized release resumption — 2026-11-03
+
+The user now authorizes T015 and the final push after checks and independent review.
+The earlier authorization limit above describes the original artifact pass.
+
+- [x] T016 Reconcile stale live-run statements and the instruction-migration receipt/ledger, verify the integrated candidate, validate architecture acceptance and obtain fresh independent final review before T015 delivery (Constitution II, IV, V; plan: release resumption). Preserve prior evidence and unrelated work. Final reviewer returned ship; see evidence/release-2026-11-03.md.
+
+## Phase 7: Candidate reconciliation — 2026-11-04
+
+- [ ] T017 Reconcile the staged tree with preserved commit `6252649`, run fresh scoped checks and architecture acceptance, obtain independent review, and deliver T015 through native gates. Record actual results in evidence/release-2026-11-03.md. Prior dated outcomes remain historical, candidate-specific evidence.
