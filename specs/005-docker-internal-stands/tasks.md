@@ -34,7 +34,7 @@
 - [x] T012 Reconcile the task-owned diff, checks and review in architecture.json; validate with `--phase acceptance`. Depends on T010.
 - [x] T013 Live run of the integration lifecycle against the HTTPS stands with one owned run tag and exact-tag cleanup, via the running-integration-tests skill (SC-004). Done 2026-11-03 under tag cveta2-claude-20261103-https-move-fl1u: 38 passed, 0 skipped; exact-tag cleanup proven (evidence/integration-2026-11-03.md).
 - [x] T014 Fresh independent read-only review of the final diff including these artifacts and T009; the launching agent reported a prior review of the implementation only. Done 2026-11-03: separate-subagent static review, verdict ACCEPT (evidence/review-2026-11-03.md).
-- [ ] T015 After merge to main: semantic-release evaluation and Git-tag-only release per CONTRIBUTING.md (owner's merge-only workflow; not performed here).
+- [x] T015 After merge to main: semantic-release evaluation and Git-tag-only release per CONTRIBUTING.md. Completed for merge `656d0e7` on 2026-11-04; native gates passed and remote main matched. See evidence/release-2026-11-03.md.
 
 ## Dependencies
 
@@ -49,4 +49,4 @@ The earlier authorization limit above describes the original artifact pass.
 
 ## Phase 7: Candidate reconciliation — 2026-11-04
 
-- [ ] T017 Reconcile the staged tree with preserved commit `6252649`, run fresh scoped checks and architecture acceptance, obtain independent review, and deliver T015 through native gates. Record actual results in evidence/release-2026-11-03.md. Prior dated outcomes remain historical, candidate-specific evidence.
+- [x] T017 Reconcile the staged tree with preserved commit `6252649`, run fresh scoped checks and architecture acceptance, obtain independent review, and deliver T015 through native gates. Completed 2026-11-04; actual results are in evidence/release-2026-11-03.md. Prior dated outcomes remain historical, candidate-specific evidence.
