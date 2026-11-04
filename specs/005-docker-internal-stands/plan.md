@@ -99,3 +99,21 @@ tests and validate both records. Commit documentation on a task branch and merge
 main. Semantic-release evaluates the integrated candidate; no new tag is expected
 for test/docs-only changes. Push main through every configured gate only after the
 independent review passes, then verify remote refs and record the delivery outcome.
+
+## Candidate reconciliation — 2026-11-04
+
+Resume feature 005 and T015. The nine staged files in the original checkout
+were byte-identical to the tree of preserved contributor commit `6252649`.
+Selecting that existing branch recovered the committed candidate without
+duplicating its changes or discarding any staged content. Remote main is
+`d3ef946`; prior receipts describe their own dated candidates and do not prove
+publication of `6252649`.
+
+This continuation changes only this plan, tasks and dated evidence. The existing
+feature architecture record covers these paths; inspected runtime, dependencies,
+integration tooling and public interfaces remain unchanged. Both architecture
+records passed planning validation before edits. Reuse the existing implementation
+and live evidence for unchanged code; run fresh documentation/boundary/architecture
+checks, review the integrated documentation, merge into main, evaluate semantic
+release and run every configured push gate with a fresh owned integration tag.
+The portable usage skill needs no update because no usage contract changes.
