@@ -3,6 +3,10 @@
 Read this reference when another developer, agent or pre-push gate may be
 running the integration tests against the shared stands at the same time.
 
+Contents: [Isolation model](#isolation-model) · [Start an isolated run](#start-an-isolated-run) ·
+[Adopt a run started elsewhere](#adopt-a-run-started-elsewhere) ·
+[Diagnose collisions](#diagnose-collisions) · [Cleanup after failure](#cleanup-after-failure)
+
 ## Isolation model
 
 Isolation is the run tag, nothing else. Every object a run creates carries its

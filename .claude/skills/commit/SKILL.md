@@ -1,13 +1,15 @@
 ---
 name: commit
-description: Commit or push a reviewed set of cveta2 changes when the user asks. Preserves unrelated working-tree work, stages exact intended paths, uses Conventional Commits, handles hook rewrites and failures, and runs push gates without silently bypassing them.
+description: Commits and, when authorized, pushes a reviewed set of cveta2 changes, preserving unrelated working-tree work, staging exact intended paths, writing Conventional Commits accepted by scripts/check_commit_msg.py, handling pre-commit rewrites and failures, and running the pre-push mutation, version-drift and live integration gates without silently bypassing them. Use when committing or pushing cveta2 changes or when a commit-msg, pre-commit or pre-push hook fails.
 ---
 
 # Commit cveta2 changes
 
 Create the requested commit from the intended change set while preserving every
 unrelated working-tree change. A request to commit does not imply a push; push
-only when the user asks for it.
+only when the user asks for it or when the standing authorization described in
+`AGENTS.md` and `.specify/memory/engineering.md` ("Preserve the working tree")
+applies. Explicit stopping points still win.
 
 ## Establish the change set
 
@@ -48,11 +50,13 @@ artifacts, integration `.env`, mutation workspace, or unrelated edits.
 
 ## Commit
 
-Use a Conventional Commit subject accepted by
-`scripts/check_commit_msg.py`: `feat:`, `fix:`, `refactor:`, `test:`,
-`docs:`, or `chore:`. Add a body when it helps explain behavior or
-tradeoffs. A breaking change requires both the `!` marker and a
-`BREAKING CHANGE:` footer.
+Use a Conventional Commit subject accepted by `scripts/check_commit_msg.py`:
+`type(scope)!: description`, with the scope and `!` optional and the type one of
+`build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `style` or
+`test` (the script's `TYPES`). Among types, only `feat`, `fix` and `perf` move
+the version; a `!` on any type is a breaking change and also moves it.
+Add a body when it helps explain behavior or tradeoffs. A breaking change
+requires both the `!` marker and a `BREAKING CHANGE:` footer.
 
 `git commit` runs the configured hooks. Read `.pre-commit-config.yaml` for
 the current gate rather than copying its list here. If a hook rewrites files,
@@ -64,7 +68,7 @@ Do not use `--no-verify` unless the user explicitly asks to bypass hooks.
 After success, read back the commit summary and verify that unrelated changes
 remain in the working tree.
 
-## Push only when requested
+## Push only when requested or authorized
 
 The repository convention is an SSH remote. Inspect it, but do not rewrite an
 HTTPS or unexpected remote automatically. Push the requested branch/ref with

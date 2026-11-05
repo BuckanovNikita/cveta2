@@ -1,5 +1,8 @@
 # mutmut internals: what it mutates, what silently misconfigures, what it costs
 
+Contents: [What actually gets mutated](#what-actually-gets-mutated) ·
+[Config notes that are easy to get wrong](#config-notes-that-are-easy-to-get-wrong) · [Cost](#cost)
+
 Read this when a survivor's diff looks unkillable, when a config change to the
 gate behaves oddly, or when judging whether a candidate module is worth gating.
 
@@ -14,7 +17,7 @@ counter-intuitive and decide whether a module is worth gating at all.
   *code* wants it hoisted (it is shared, or it names something), never to
   silence the gate — see the "never reshape working code" rule in `SKILL.md`.
 - **Decorated functions and classes are skipped entirely, body included**
-  (`file_mutation.py:281-293`), except a single bare
+  (`mutmut/mutation/file_mutation.py`, the decorator check in the CST visitor), except a single bare
   `@staticmethod`/`@classmethod`. So `@property`, `@contextmanager`,
   `@dataclass`, `@field_validator` and `@s3_retry` yield nothing. Pydantic
   models declared by inheritance are *not* skipped, so plain validator
@@ -27,9 +30,13 @@ counter-intuitive and decide whether a module is worth gating at all.
 - **`do_not_mutate_patterns` is `re.search` per line, not anchored**, and a
   matched line skips every *expression* starting on it plus its children — so
   `\btqdm\(` suppresses `for x in tqdm(items, desc=...)` without touching the
-  loop body. It cannot single out one argument of a *multi-line* call, because
-  the argument starts on a different line than the call; that residue is what
-  the two `run_s3_transfers` caption entries in the allowlist are.
+  loop body. A pattern on the *call* line cannot reach an argument of a
+  multi-line call, because that argument starts on its own line. A pattern on
+  the argument's own line, such as `^\s*desc=` / `^\s*unit=`, stops the
+  mutants that rewrite the caption text. It does not stop the `desc=None`
+  mutant, which drops the whole keyword argument: mutmut keys that mutant on
+  the first line of the enclosing call, so it stays an allowlist equivalent
+  ("Bar captions, second half" in `pyproject.toml`).
 - **`# pragma: no mutate` only registers** on a standalone comment line or a
   simple statement's trailing comment, and marks the statement's *start* line.
   A trailing pragma on an argument line inside a multi-line call is silently
@@ -38,7 +45,7 @@ counter-intuitive and decide whether a module is worth gating at all.
   (other expressions are skipped, since they run at definition time). A line
   pattern matches call sites, not `def` signatures, so a user-facing string
   used as a default has no pattern-level escape — which is why
-  `interactive/primitives.py` keeps `_CANCELLED` and friends as names.
+  `cveta2/interfaces/commands/interactive/primitives.py` keeps `_CANCELLED` and friends as names.
 - **A glob matching no mutant crashes the run** (`assert filtered_mutants`), so
   never name a zero-mutant module in a profile.
 

@@ -1,6 +1,6 @@
 ---
 name: running-integration-tests
-description: Run or troubleshoot cveta2 integration tests against the shared CVAT, MinIO and ClearML stands of the docker-desktop cluster. Use for integration setup, targeted or full live tests, run-tag ownership and cleanup, pre-push integration failures, or concurrent-run isolation.
+description: Runs and troubleshoots cveta2 integration tests against the shared CVAT, MinIO and ClearML stands of the docker-desktop cluster through the repository lifecycle scripts. Use for integration setup, targeted or full live tests, run-tag ownership and cleanup, TLS trust failures, pre-push integration gate failures, or concurrent-run isolation.
 ---
 
 # Run cveta2 integration tests
@@ -87,7 +87,8 @@ from the k8s-infra local CA. `integration_env.sh` evaluates the helpers' `env`
 output, which also exports, when the k8s-infra CA is installed (the system
 bundle and `/usr/local/share/ca-certificates/k8s-infra-local-ca.crt` exist),
 `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `AWS_CA_BUNDLE` and
-`NODE_EXTRA_CA_CERTS`, so every tool of the run trusts them. A failed handshake is reported as a TLS problem, not as a stand that is
+`NODE_EXTRA_CA_CERTS`, so every tool of the run trusts them.
+A failed handshake is reported as a TLS problem, not as a stand that is
 down: the gate classifies curl's exit status, and `cvat_stand.py`,
 `seed_cvat.py` and the live fixtures raise `TLS verification of <url> failed`
 instead of skipping. Fix trust (the CA under

@@ -1,6 +1,6 @@
 ---
 name: mutation-testing
-description: Diagnose or change cveta2's mutmut gate. Use for surviving or uncovered mutants, fast/full profile failures, mutation-score interpretation, equivalent-mutant decisions, or edits to only_mutate, profiles, and mutation configuration.
+description: Diagnoses and changes cveta2's mutmut mutation gate (scripts/mutation_test.sh, scripts/mutation_gate.py, [tool.mutmut] and [tool.cveta2.mutation] in pyproject.toml). Use for surviving or uncovered mutants, fast/full profile failures, mutation-score interpretation, equivalent-mutant decisions, or edits to only_mutate, profiles, and mutation configuration.
 ---
 
 # Maintain the cveta2 mutation gate

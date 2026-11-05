@@ -1,5 +1,12 @@
 # cveta2 engineering guidance
 
+Contents: [Project](#project) · [Preserve the working tree](#preserve-the-working-tree) ·
+[Spec Kit development workflow](#spec-kit-development-workflow) · [Architecture](#architecture) ·
+[Code conventions](#code-conventions) · [Verification](#verification) ·
+[Documentation](#documentation) · [Mutation testing](#mutation-testing) ·
+[Integration tests](#integration-tests) · [Shared infra](#shared-infra) ·
+[Configuration](#configuration) · [Commits, hooks, and releases](#commits-hooks-and-releases)
+
 ## Project
 
 cveta2 is a Python >=3.12,<3.14 CLI and API for CVAT annotation projects. It fetches
@@ -7,12 +14,9 @@ bounding-box annotations, partitions them by task completion state, downloads
 images from S3, uploads datasets, and manages project labels. Run Python tools
 through `uv run`.
 
-Follow the user's conversation language (English by default); repository language
-conventions do not override it. User documentation and CLI output remain Russian.
-Spec Kit memory, feature artifacts, and the dataset contract are English. This file owns detailed
+Language rules live in [AGENTS.md](../../AGENTS.md). This file owns detailed
 operational guidance; [constitution.md](constitution.md) owns governance.
-[AGENTS.md](../../AGENTS.md) is the discovery entry point and `CLAUDE.md` remains
-a regular file containing `@AGENTS.md`. Read [architecture.md](architecture.md) for module ownership and
+Read [architecture.md](architecture.md) for module ownership and
 [the dataset contract](../../specs/baseline.md)
 for output-format behavior.
 
@@ -307,12 +311,11 @@ integration skill defines that boundary.
 
 `main` changes only by merge. On `main`, semantic-release derives versions,
 tags, and `CHANGELOG.md`; never hand-edit the project version. Release commands
-and commit semantics live in `CONTRIBUTING.md`. Complete that workflow within
-existing user/standing authorization after required checks; documentation-only
-changes still evaluate release but may produce no new version tag. Explicit
-stopping points take precedence. Standing authorization satisfies project commit
-skill request gates and covers the configured commit/push hooks; it does not
-authorize changing remotes, deployment or expanding scope. Publish Git version
+and commit semantics live in `CONTRIBUTING.md`. Complete that workflow after required checks under the authorization rules in
+[Preserve the working tree](#preserve-the-working-tree); documentation-only
+changes still evaluate release but may produce no new version tag. Standing
+authorization covers the configured commit/push hooks; it does not authorize
+changing remotes, deployment or expanding scope. Publish Git version
 tags only: no GitHub Release objects, release assets or registry publication
 without an explicit user override. Report failed/unavailable gates as gaps; never
 bypass them to force completion.
