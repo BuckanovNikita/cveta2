@@ -74,3 +74,5 @@ tests/integration/.run-tag
 .testmondata-*
 # mypy daemon state, one per worktree
 .dmypy.json
+# Hypothesis example database
+.hypothesis/

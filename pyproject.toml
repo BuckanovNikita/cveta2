@@ -81,6 +81,8 @@ dev = [
     "pytest-randomly>=5.0.0",
     "clearml[s3]>=2.1.12,<3",
     "deptry>=0.23",
+    "hypothesis>=6.130",
+    "inline-snapshot>=0.23",
 ]
 
 [tool.semantic_release]

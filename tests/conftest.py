@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import HealthCheck, settings
 from loguru import logger
 from tqdm import tqdm
 
@@ -38,6 +39,17 @@ _CVAT_ENV_VARS = (
     "CVETA2_CVAT_WORKERS",
     "CVETA2_RETRY_ATTEMPTS",
 )
+
+# Property tests stay deterministic and deadline-free: commits run them under
+# xdist load, where wall-clock deadlines turn into flakes.
+settings.register_profile(
+    "cveta2",
+    deadline=None,
+    derandomize=True,
+    max_examples=50,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+settings.load_profile("cveta2")
 
 INTEGRATION_DIR = Path(__file__).resolve().parent / "integration"
 _COLLECTION_ORDER = pytest.StashKey[int]()
