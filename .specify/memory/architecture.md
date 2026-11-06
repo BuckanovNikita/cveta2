@@ -2,8 +2,7 @@
 
 The layer diagram and its rule live in [engineering.md](engineering.md).
 This living Spec Kit context maps module ownership, command flows, and behavior
-constraints for future feature plans. [CONTRIBUTING.md](../../CONTRIBUTING.md)
-covers the same ground in Russian, at overview depth.
+constraints for future feature plans.
 
 ## Module organization
 

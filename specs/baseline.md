@@ -61,7 +61,7 @@ Procedures and complete option inventories remain in these maintained guides:
 
 | Procedure | Current reference and section |
 | --- | --- |
-| Install, configure, contribute, merge and release | [README](../README.md), [CONTRIBUTING](../CONTRIBUTING.md) |
+| Install, configure, contribute, merge and release | [README](../README.md), [engineering guidance](../.specify/memory/engineering.md) |
 | Fetch, promote jobs, compare tasks | [CLI guide](../docs/cli.md), `fetch`, `fetch-task`, `whats-new` |
 | Upload and recover an interrupted CVAT upload | [CLI guide](../docs/cli.md), `upload` and `--resume` |
 | Convert CSV/YOLO/COCO; manage labels/ignore/tasks | [CLI guide](../docs/cli.md), the corresponding command sections |

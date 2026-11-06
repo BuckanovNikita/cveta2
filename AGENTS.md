@@ -23,7 +23,8 @@ sources below rather than duplicating them here.
 4. [Current specification and dataset contract](specs/baseline.md) for preserved
    behavior, acceptance criteria and immutable historical decisions.
 
-Human setup and invocation examples are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Human usage is in [README.md](README.md); setup and release commands are in
+[engineering guidance](.specify/memory/engineering.md).
 
 ## Workflow
 

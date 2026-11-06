@@ -9,7 +9,6 @@ description = "CVAT project annotation utilities"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
-license-files = ["LICENSE"]
 authors = [{ name = "Buckanov Nikita", email = "buckanov32@gmail.com" }]
 keywords = ["cvat", "annotations", "dataset", "yolo", "coco", "computer-vision"]
 classifiers = [
@@ -59,7 +58,6 @@ include = [
     "README.md",
     "CHANGELOG.md",
     "specs/baseline.md",
-    "LICENSE",
     "pyproject.toml",
 ]
 
@@ -324,8 +322,8 @@ on_dependency_change = "rerun"
 #
 # Membership is chosen so `fast` stays meaningfully quicker than `full` -
 # putting every gated module in `fast` once measured the same as `full`, i.e.
-# the split bought nothing. mutation_test.sh prints the count and elapsed time
-# of each run; when a newly gated module erases the gap again, leave it to
+# the split bought nothing. scripts/mutation.py prints the count and elapsed
+# time of each run; when a newly gated module erases the gap again, leave it to
 # `full`.
 [tool.cveta2.mutation.profiles]
 fast = [
@@ -354,7 +352,7 @@ fast = [
 full = []
 
 # Mutants that no test can kill because the mutation genuinely cannot change
-# behaviour. scripts/mutation_gate.py subtracts these from the survivor set and
+# behaviour. scripts/mutation.py subtracts these from the survivor set and
 # fails if an entry stops matching a live survivor, so a stale justification
 # cannot silently widen the gate.
 [tool.cveta2.mutation.equivalent]

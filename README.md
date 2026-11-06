@@ -9,7 +9,7 @@ CLI и Python API для работы с аннотациями CVAT-проек�
 - [Быстрый старт](#быстрый-старт)
 - [Команды](#команды) — краткий указатель, полное описание в [docs/cli.md](docs/cli.md)
 - [Python API](#python-api) — краткий пример, полное описание в [docs/python-api.md](docs/python-api.md)
-- [Разработка через Spec Kit](CONTRIBUTING.md#разработка-через-spec-kit) — обязательный процесс изменений для Codex и Claude
+- [Разработка через Spec Kit](.specify/memory/engineering.md#spec-kit-development-workflow) — обязательный процесс изменений для Codex и Claude
 - Справочники:
   - [docs/cli.md](docs/cli.md) — все команды CLI и их флаги
   - [docs/configuration.md](docs/configuration.md) — конфиг, переменные окружения, параллельность, повторы, неинтерактивный режим

@@ -1,22 +1,22 @@
 ---
 name: mutation-testing
-description: Diagnoses and changes cveta2's mutmut mutation gate (scripts/mutation_test.sh, scripts/mutation_gate.py, [tool.mutmut] and [tool.cveta2.mutation] in pyproject.toml). Use for surviving or uncovered mutants, fast/full profile failures, mutation-score interpretation, equivalent-mutant decisions, or edits to only_mutate, profiles, and mutation configuration.
+description: Diagnoses and changes cveta2's mutmut mutation gate (scripts/mutation.py, [tool.mutmut] and [tool.cveta2.mutation] in pyproject.toml). Use for surviving or uncovered mutants, fast/full profile failures, mutation-score interpretation, equivalent-mutant decisions, or edits to only_mutate, profiles, and mutation configuration.
 ---
 
 # Maintain the cveta2 mutation gate
 
-`scripts/mutation_test.sh` runs mutmut for the current
-`[tool.mutmut].only_mutate` scope and uses `scripts/mutation_gate.py` for
-the real pass/fail result. Read live `pyproject.toml` and the scripts before
+`scripts/mutation.py` runs mutmut for the current
+`[tool.mutmut].only_mutate` scope and computes the real pass/fail result.
+Read live `pyproject.toml` and the script before
 changing configuration; do not rely on a copied module inventory.
 
 ## Commands and profiles
 
 ```bash
-./scripts/mutation_test.sh --profile fast
-./scripts/mutation_test.sh --profile full
-./scripts/mutation_test.sh
-./scripts/mutation_test.sh '<mutant-name-or-glob>'
+uv run python scripts/mutation.py --profile fast
+uv run python scripts/mutation.py --profile full
+uv run python scripts/mutation.py
+uv run python scripts/mutation.py '<mutant-name-or-glob>'
 uv run mutmut show <name>
 uv run mutmut browse
 ```
@@ -30,7 +30,7 @@ also covers the full configured scope.
 ## What pass, score, and profile output mean
 
 `mutmut run` itself exits zero, so it does not decide the gate.
-`mutation_test.sh` exports CI stats and textual results, then the gate:
+`scripts/mutation.py` exports CI stats and textual results, then the gate:
 
 - treats `killed`, `skipped`, and `caught by type check` as benign;
 - fails on any other result not justified in
@@ -96,7 +96,7 @@ current invariants unless the underlying tool behavior changes and is verified:
   verdicts.
 - `mutate_only_covered_lines` stays off because its coverage pre-pass corrupts
   the later stats run in this environment.
-- `mutation_config.py sync-scope` fingerprints mutation-scope fields and
+- `scripts/mutation.py` fingerprints mutation-scope fields and
   recreates `mutants/` when they change; mutmut's own fingerprint omits them.
 - `PYTEST_DEBUG_TEMPROOT` stays under this checkout's `mutants/` so another
   pytest session cannot remove a shared temp-root link and create a false kill.

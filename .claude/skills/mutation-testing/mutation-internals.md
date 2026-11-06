@@ -68,9 +68,9 @@ counter-intuitive and decide whether a module is worth gating at all.
   type-check command. Changing either therefore leaves a stale mutant tree:
   adding five modules to `only_mutate` once reported `0 files mutated, 6
   unmodified` and re-gated the old mutants as if nothing had changed.
-  `scripts/mutation_config.py sync-scope` fingerprints those fields itself and
-  wipes `mutants/` when they move, so this is handled automatically — but if
-  you ever bypass `mutation_test.sh`, wipe `mutants/` by hand.
+  `scripts/mutation.py` fingerprints those fields itself and wipes `mutants/`
+  when they move, so this is handled automatically — but if you ever bypass
+  `scripts/mutation.py`, wipe `mutants/` by hand.
 - **`cache_invalidation_files` re-runs mutants but does not re-derive which
   tests cover which mutant.** Add a *new* test aimed at a specific survivor and
   the gate can still report it as surviving, because the stats pass that
@@ -80,7 +80,7 @@ counter-intuitive and decide whether a module is worth gating at all.
   mutant survives whose diff you can show, by hand, that the new test rejects.
 - `mutants/` is mutmut's working copy: gitignored, and excluded from mypy (two
   `cveta2` packages otherwise collide) and ruff.
-- `mutation_test.sh` exports `PYTEST_DEBUG_TEMPROOT` into `mutants/`. By
+- `scripts/mutation.py` exports `PYTEST_DEBUG_TEMPROOT` into `mutants/`. By
   default every pytest run on the machine shares `/tmp/pytest-of-$USER`, and a
   concurrent session's cleanup can delete the `pytest-current` symlink out from
   under a mutant's forked child. The child then dies for reasons unrelated to
@@ -93,8 +93,8 @@ Each run pays a fixed setup cost, then a throughput that is several times
 higher over modules whose tests stay in memory than over ones that round-trip
 CSVs through `tmp_path`. A fully cached run reports `0.00 mutations/second`.
 
-`mutation_test.sh` prints the mutant count, the score and the elapsed time on
-every run — read them from there rather than from this file. Profile
+A run of `scripts/mutation.py` prints the mutant count, the score and the
+elapsed time — read them from there rather than from this file. Profile
 membership exists to keep `fast` meaningfully quicker than `full`: putting
 *every* gated module in `fast` once measured the same as `full`, i.e. the
 split bought nothing. When a newly gated module erases that gap again, leave

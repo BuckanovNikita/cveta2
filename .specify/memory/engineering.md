@@ -47,8 +47,14 @@ continue independent inspection; do not invent its rules or claim acceptance.
 Inspect current code, configuration, existing diffs and task evidence: artifacts
 record intent, while implementation and executed checks establish behavior.
 
-Both integrations are installed, with Codex as the default. See
-[CONTRIBUTING.md](../../CONTRIBUTING.md) for setup and invocation examples.
+Both integrations are installed, with Codex as the default.
+
+Set up a clone with `uv sync` and `uv run pre-commit install` (one command
+installs the pre-commit, commit-msg and pre-push stages), then
+`git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40"`:
+git opens the SSH session before the pre-push gates, which outlast GitHub's idle
+timeout. Python 3.12 or 3.13 and uv are required; integration tests also need
+`kubectl` with the `docker-desktop` context and the `k8s-infra` skill.
 
 For a new capability, run `specify` to create `specs/<number>-<name>/spec.md`.
 Continue through `clarify` -> `plan` -> `checklist` -> `tasks` -> `analyze` ->
@@ -251,7 +257,7 @@ do not overwrite unrelated edits or install updated skills as a side effect.
 
 ## Mutation testing
 
-`scripts/mutation_test.sh` gates the current `[tool.mutmut].only_mutate`
+`scripts/mutation.py` gates the current `[tool.mutmut].only_mutate`
 scope. Read the `mutation-testing` skill before changing scope, profiles,
 equivalent-mutant entries, or triaging survivors. Scope is a ratchet: add a
 module only with the tests and justified equivalents needed for zero unexplained
@@ -310,8 +316,18 @@ named by its own run tag (on `main`, the durable `cveta2-main` slot); the
 integration skill defines that boundary.
 
 `main` changes only by merge. On `main`, semantic-release derives versions,
-tags, and `CHANGELOG.md`; never hand-edit the project version. Release commands
-and commit semantics live in `CONTRIBUTING.md`. Complete that workflow after required checks under the authorization rules in
+tags, and `CHANGELOG.md`; never hand-edit the project version. Release right
+after the merge, on `main`:
+
+```bash
+uv run semantic-release version --print                     # the version it would make
+uv run semantic-release version --no-push --no-vcs-release  # bump, changelog, commit, tag
+git push origin main --follow-tags                          # one gated push
+git ls-remote origin refs/heads/main refs/tags/vX.Y.Z       # confirm it landed
+```
+
+`No release will be made` after a merge of only non-releasing types is a success.
+Commit semantics live in the `commit` skill. Complete that workflow after required checks under the authorization rules in
 [Preserve the working tree](#preserve-the-working-tree); documentation-only
 changes still evaluate release but may produce no new version tag. Standing
 authorization covers the configured commit/push hooks; it does not authorize

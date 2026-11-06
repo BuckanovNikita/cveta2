@@ -70,7 +70,7 @@ repos:
 
       - id: mutmut
         name: mutmut (mutation testing, fast profile)
-        entry: ./scripts/mutation_test.sh --profile fast
+        entry: uv run python scripts/mutation.py --profile fast
         language: system
         pass_filenames: false
         always_run: true
@@ -101,7 +101,7 @@ repos:
       # for the full scope.
       - id: mutmut-full
         name: mutmut (mutation testing, full scope)
-        entry: ./scripts/mutation_test.sh --profile full
+        entry: uv run python scripts/mutation.py --profile full
         language: system
         pass_filenames: false
         always_run: true

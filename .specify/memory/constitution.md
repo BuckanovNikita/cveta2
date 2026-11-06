@@ -144,7 +144,7 @@ bundled four-step workflow does not replace this repository's full sequence.
 
 This constitution governs Spec Kit planning and analysis within applicable
 user instructions. `AGENTS.md` delegates to Spec Kit memory and contracts;
-`CONTRIBUTING.md` and maintained tool configuration supply implementation
+`README.md`, project skills and maintained tool configuration supply implementation
 evidence. Architecture and dataset contracts remain living shared references
 across feature changes. Reviewers MUST check that the change, artifacts, and verification
 agree with the constitution and with each other.

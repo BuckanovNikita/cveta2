@@ -90,7 +90,7 @@ hooks; if a hook cannot run, report the failure. Use
 Git opens the SSH transport before the pre-push hooks run, and the gates
 outlast GitHub's idle timeout. The clone must therefore carry
 `core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40"`
-(the CONTRIBUTING quick start sets it); check with
+(engineering guidance's setup step sets it); check with
 `git config --get core.sshCommand` before a gated push and set it when
 missing. A push that ends with `Connection to github.com closed by remote
 host` after green hooks delivered nothing: verify with
