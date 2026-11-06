@@ -21,29 +21,29 @@ Dated evidence: [verification-2026-11-06.md](verification-2026-11-06.md).
   - Depends on T1.
 - [x] T3 Phase 3: mutation budget (`--budget-seconds`/`--max-functions`), with
   shorter output. Depends on T1.
-- [ ] T4 Phase 4:
+- [x] T4 Phase 4 (implemented and dry-run tested; the real merge and release wait for the owner):
   - a fast-forward-only merge after the full check on the branch tip;
   - the release commit skips the heavy hooks, as an approved exception;
   - `flock` release lock;
   - constitution and engineering amendments.
   - Depends on T2.
-- [ ] T5 Phase 5 test debloat:
+- [x] T5 Phase 5 test debloat:
   - B8 policy first;
   - B7 analysis;
   - then B1, B3, B4, B5, B6 and B9 by test cluster.
   - Depends on T2.
-- [ ] T6 Phase 6:
+- [x] T6 Phase 6:
   - C5 SessionStart status hook (Claude and Codex);
   - C7 Spec Kit only for features.
   - Depends on T4.
-- [ ] T7 Phase 7: A7 dmypy (global skill, then the project hook) and D3 deptry.
+- [x] T7 Phase 7: A7 dmypy (global skill, then the project hook) and D3 deptry.
   Depends on T1.
-- [ ] T8 Phase 8 global setup:
+- [ ] T8 Phase 8 global setup (partial: skill branch committed but not exported; global line deferred; see verification "Open items"):
   - agent-skills scaffold defaults;
   - global instruction line;
   - k8s-infra contract check;
   - memory;
   - export sync.
   - Depends on T2 and T7.
-- [ ] T9 Fresh independent review of the full diff, acceptance validation and
+- [x] T9 Fresh independent review of the full diff, acceptance validation and
   evidence. The merge and release wait for the owner to end the cleanup.

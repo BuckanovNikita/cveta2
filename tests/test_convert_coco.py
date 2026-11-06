@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from cveta2.composition.conversion import convert_to_coco
@@ -59,6 +59,15 @@ def source_images(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @given(export=_EXPORTS)
+# Pinned: every split, an image without boxes, and the text labels pandas
+# would mangle.
+@example(
+    export={
+        "a.jpg": ("train", [("001", 0.0, 0.0, 10.0, 10.0)]),
+        "b.jpg": ("val", []),
+        "c.jpg": ("test", [("NA", 5.0, 5.0, 15.0, 15.0)]),
+    }
+)
 def test_to_coco_structure(
     source_images: Path,
     export: dict[str, tuple[str, list[tuple[str, float, float, float, float]]]],

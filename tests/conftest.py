@@ -40,8 +40,12 @@ _CVAT_ENV_VARS = (
     "CVETA2_RETRY_ATTEMPTS",
 )
 
-# Property tests stay deterministic and deadline-free: commits run them under
-# xdist load, where wall-clock deadlines turn into flakes.
+# Property tests stay deterministic and deadline-free by default: commits run
+# them under xdist load, where wall-clock deadlines turn into flakes, and a
+# fixed seed keeps a commit's verdict reproducible. That also means every run
+# checks the same examples, so explore with random inputs from time to time:
+#   HYPOTHESIS_PROFILE=explore uv run pytest -m "not integration" -p no:randomly
+# A failure found there is stored in .hypothesis/ and replayed by later runs.
 settings.register_profile(
     "cveta2",
     deadline=None,
@@ -49,7 +53,14 @@ settings.register_profile(
     max_examples=50,
     suppress_health_check=[HealthCheck.too_slow],
 )
-settings.load_profile("cveta2")
+settings.register_profile(
+    "explore",
+    deadline=None,
+    derandomize=False,
+    max_examples=1000,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "cveta2"))
 
 INTEGRATION_DIR = Path(__file__).resolve().parent / "integration"
 _COLLECTION_ORDER = pytest.StashKey[int]()

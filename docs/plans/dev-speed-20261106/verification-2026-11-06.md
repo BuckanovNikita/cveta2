@@ -206,3 +206,64 @@ covered behaviourally by
 - vulture;
 - lint-imports;
 - the unit suite.
+
+## Final checks and second review
+
+**Full pre-merge check** on `b513825`: `uv run pytest --cov`, live tests
+included, seed 3639565251.
+- 2629 passed in 4 min 59 s, with total coverage of 92.23%.
+- The run tag was stopped, and no `.run-tag` remained.
+
+**Hypothesis exploration.** A side note pointed out that the fixed profile
+checks the same 50 inputs on every run.
+- Added the opt-in `HYPOTHESIS_PROFILE=explore` profile (random, 1000
+  examples). It is documented in `engineering.md` and is part of the release
+  skill's step 1.
+- The whole unit suite under it: 2591 passed in 22.7 s, with no new failure.
+
+**Independent review of the debloat** (`5a90d44..b513825`): no high-severity
+finding. Dispositions:
+1. **Mutation `child_env` no longer checked for MinIO, `INFRA_RUN_TAG` and
+   `GIT_*`.** Restored
+   `test_child_env_drops_stand_and_git_variables`; it now also covers
+   `CLEARML_*` and `INTEGRATION_*`.
+2. **8-worker fetch-once check reported missing.** False positive:
+   `test_fetch_service.py::test_concurrent_fetch_produces_the_same_dataset_as_a_serial_one`
+   asserts it, with `cvat=8`.
+3. **Two shared-stand safety scans deleted.** Restored
+   `test_the_source_embeds_no_root_credential` and
+   `test_the_module_has_no_registration_path`.
+4. **Lifecycle rejection of unknown arguments.** Restored.
+5. **`split_deleted_rows` case that deleted nothing checks less.** Now asserts
+   that the frame passes through unchanged.
+6. **The label-picker prompt text is no longer asserted.** Accepted: it is
+   interactive text, not CLI contract.
+7. **The properties had no pinned `@example`s.** Added pinned examples:
+   - YOLO: all three splits, `"001"`/`"NA"`, and corner boxes;
+   - COCO: every split, an image with no boxes, and `"001"`/`"NA"`.
+
+After the fixes:
+- strict mypy (336 files), ruff and vulture are clean;
+- the unit suite has 2595 passed;
+- lint-imports kept 10 contracts;
+- the architecture and boundary tests have 65 passed;
+- the lifecycle and mutation tool tests have 84 passed;
+- `validate_architecture.py --phase acceptance` exits 0.
+
+## Open items (not done)
+
+- **Real stopped-stand run.** A stop/start of a real stand, end to end, needs
+  the owner's go-ahead, because it stops a shared stand.
+- **Terminal notice.** The `/dev/tty` notice has not been seen in a human
+  terminal yet.
+- **Codex hook.** It is not verified whether Codex loads and trusts
+  `.codex/hooks.json`.
+- **Global exports.**
+  - agent-skills `feat/python-workflow-dev-speed` (`3edd79a`) is unmerged and
+    not exported. The installed global exports match none of the agent-skills
+    branches, and the checkout is on another session's WIP branch.
+  - The global-instruction line is deferred for the same reason.
+- **Merge and release.** The real fast-forward merge and release (T4) wait for
+  the owner to end the cleanup.
+- **Owner decision on DEP003.** Whether to declare botocore, urllib3, numpy and
+  prompt_toolkit as direct dependencies.

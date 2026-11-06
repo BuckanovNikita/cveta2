@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ssl
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +27,6 @@ from tests.test_stand_tls import untrusted_certificate_error
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 TAG = "cveta2-claude-20260905-integration-k3x9"
 ENV = {
@@ -467,3 +467,10 @@ class TestMain:
         assert seed_cvat.main() == 1
         assert "MINIO_SECRET_KEY" in logs[-1]
         assert stand.logins == []
+
+
+def test_the_source_embeds_no_root_credential() -> None:
+    """Seeding acts as the cveta2 identity only, never as a stand's root user."""
+    text = Path(seed_cvat.__file__).read_text(encoding="utf-8")
+    assert "minioadmin" not in text
+    assert "localhost:9" not in text

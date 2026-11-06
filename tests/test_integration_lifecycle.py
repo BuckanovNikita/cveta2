@@ -766,3 +766,9 @@ def test_live_tests_are_marked_and_keep_file_order_under_any_seed() -> None:
     assert all(node.startswith("tests/integration/") for node in in_file_order)
     for seed in ("1", "2"):
         assert _collected_live(f"--randomly-seed={seed}") == in_file_order
+
+
+def test_unknown_arguments_are_rejected(tree: Tree) -> None:
+    outcome = tree.run("stop", "--force")
+    assert outcome.returncode == 2
+    assert "unrecognized arguments: --force" in outcome.stderr

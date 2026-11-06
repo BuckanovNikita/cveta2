@@ -85,6 +85,9 @@ def test_split_deleted_rows(
     df_normal, names = split_deleted_rows(df)
     assert names == expected_deleted
     assert df_normal["image_name"].tolist() == expected_normal
+    if not expected_deleted:
+        # Nothing deleted: every column and row passes through unchanged.
+        assert df_normal.equals(df)
 
 
 # ---------------------------------------------------------------------------

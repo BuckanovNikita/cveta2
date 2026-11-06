@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -326,3 +327,15 @@ class TestParser:
         with pytest.raises(SystemExit) as exit_info:
             cvat_stand.build_parser().parse_args(argv)
         assert exit_info.value.code == 2
+
+
+def test_the_module_has_no_registration_path() -> None:
+    """The stand helper never registers users or creates organizations."""
+    source = Path(cvat_stand.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "create_register",
+        "RegisterSerializerExRequest",
+        "OrganizationWriteRequest",
+        "organizations_api.create",
+    ):
+        assert forbidden not in source

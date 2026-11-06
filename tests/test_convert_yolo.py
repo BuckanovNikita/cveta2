@@ -10,7 +10,7 @@ from typing import Literal
 import pandas as pd
 import pytest
 import yaml
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from cveta2.adapters.files.conversion import (
@@ -509,6 +509,15 @@ def source_images(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @given(export=_EXPORTS)
+# Pinned: all three splits at once, the text labels pandas would mangle, and
+# boxes touching the image corners.
+@example(
+    export={
+        "a.jpg": ("train", [("001", 0.0, 0.0, 10.0, 10.0)]),
+        "b.jpg": ("val", [("NA", 1.0, 1.0, 20.0, 20.0)]),
+        "c.jpg": ("test", [("cat", 0.25, 0.5, 640.0, 480.0)]),
+    }
+)
 def test_csv_to_yolo_to_csv_roundtrip(
     source_images: Path,
     export: dict[str, tuple[str, list[tuple[str, float, float, float, float]]]],

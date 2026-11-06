@@ -22,6 +22,7 @@ git fetch origin
 git rebase origin/main                 # skip when already on top of main
 uv run prek run --all-files            # every hook over the whole tree
 uv run pytest --cov                    # full suite, live tests included, coverage enforced
+HYPOTHESIS_PROFILE=explore uv run pytest -m "not integration" -p no:randomly  # random property inputs
 ```
 
 - **After the rebase,** if it rewrote commits, the commit hooks did not run on

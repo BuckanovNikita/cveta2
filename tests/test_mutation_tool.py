@@ -445,3 +445,22 @@ def test_the_budget_interrupts_mutmut_and_its_children(
         time.sleep(0.1)
     else:
         pytest.fail("mutmut's forked child outlived the budget")
+
+
+def test_child_env_drops_stand_and_git_variables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mutmut children must reach neither a shared stand nor the real git index."""
+    dropped = {
+        "CVAT_INTEGRATION_HOST",
+        "MINIO_ENDPOINT",
+        "CLEARML_API_HOST",
+        "INTEGRATION_RUN_TAG",
+        "INFRA_RUN_TAG",
+        "GIT_INDEX_FILE",
+    }
+    for name in dropped:
+        monkeypatch.setenv(name, "x")
+    env = mutation.child_env(tmp_path)
+    assert not dropped & set(env)
+    assert env["PYTEST_DEBUG_TEMPROOT"] == str(tmp_path / ".pytest-temproot")

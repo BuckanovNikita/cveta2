@@ -213,6 +213,14 @@ Keep the suite lean. A test MUST observe behavior a caller or user can see:
 - reuse the shared fakes in `tests/fixtures/` and builders in `tests/helpers.py`
   instead of local copies.
 
+Hypothesis runs with a fixed seed and 50 examples per property (profile
+`cveta2` in `tests/conftest.py`), so commits are reproducible but every run
+checks the same inputs. Explore with random inputs before a merge or after
+changing a property:
+`HYPOTHESIS_PROFILE=explore uv run pytest -m "not integration" -p no:randomly`
+(1000 random examples, about 20 s). A failure is stored in the ignored
+`.hypothesis/` database and replayed by later runs.
+
 Pytest normally uses xdist and loads `tests.env_isolation` during startup. That
 plugin redirects HOME before imports; do not drop it when overriding
 `addopts`. Autouse fixtures isolate config and task cache, reset transfer
