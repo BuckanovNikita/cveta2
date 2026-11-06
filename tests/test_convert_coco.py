@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+import tempfile
+from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cveta2.composition.conversion import convert_to_coco
 from tests.helpers import (
@@ -14,9 +17,6 @@ from tests.helpers import (
     write_convert_csv,
 )
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 def _run_to_coco(tmp_path: Path, csv_path: Path, img_dir: Path) -> Path:
     out_dir = tmp_path / "coco_out"
@@ -24,173 +24,117 @@ def _run_to_coco(tmp_path: Path, csv_path: Path, img_dir: Path) -> Path:
     return out_dir
 
 
-class TestToCoco:
-    """Tests for --to-coco CSV to COCO conversion."""
+_SPLIT_DIRS = {"train": "train", "val": "valid", "test": "test"}
+# Text labels such as "001" and "NA" must survive pandas' type and NA guessing.
+_LABELS = st.sampled_from(["zebra", "apple", "001", "NA"])
 
-    @pytest.mark.parametrize("label", ["001", "NA"])
-    def test_text_labels_survive_export(self, tmp_path: Path, label: str) -> None:
-        images = tmp_path / "source"
-        make_image(images / "a.jpg")
-        csv_path = write_convert_csv(
-            tmp_path, [csv_row("a.jpg", label=label, split="train")]
+
+@st.composite
+def _labelled_box(draw: st.DrawFn) -> tuple[str, float, float, float, float]:
+    """Draw a label and a quarter-pixel box inside a 640x480 image."""
+    x_tl = draw(st.integers(0, 639 * 4)) / 4
+    y_tl = draw(st.integers(0, 479 * 4)) / 4
+    x_br = draw(st.integers(int(x_tl * 4) + 1, 640 * 4)) / 4
+    y_br = draw(st.integers(int(y_tl * 4) + 1, 480 * 4)) / 4
+    return draw(_LABELS), x_tl, y_tl, x_br, y_br
+
+
+# Per image: its split and its boxes; no boxes means one ``none`` row.
+_EXPORTS = st.dictionaries(
+    st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]),
+    st.tuples(
+        st.sampled_from(list(_SPLIT_DIRS)),
+        st.lists(_labelled_box(), max_size=3),
+    ),
+    min_size=1,
+)
+
+
+@pytest.fixture(scope="module")
+def source_images(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    images = tmp_path_factory.mktemp("source")
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        make_image(images / name)
+    return images
+
+
+@given(export=_EXPORTS)
+def test_to_coco_structure(
+    source_images: Path,
+    export: dict[str, tuple[str, list[tuple[str, float, float, float, float]]]],
+) -> None:
+    """Every split gets its images, boxes and 1-based sorted categories.
+
+    ``val`` is written to ``valid/``; a ``none`` image is listed without
+    annotations; annotation ids are unique and link to real image/category ids.
+    """
+    rows: list[dict[str, object]] = []
+    for image, (split, boxes) in export.items():
+        if not boxes:
+            rows.append(csv_row(image, shape="none", split=split))
+        for label, x_tl, y_tl, x_br, y_br in boxes:
+            rows.append(
+                csv_row(
+                    image,
+                    label=label,
+                    split=split,
+                    bbox_x_tl=x_tl,
+                    bbox_y_tl=y_tl,
+                    bbox_x_br=x_br,
+                    bbox_y_br=y_br,
+                    annotation_id=len(rows) + 1,
+                )
+            )
+    labels = sorted({box[0] for _, boxes in export.values() for box in boxes})
+    splits = {split for split, _ in export.values()}
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        out = work / "coco"
+        convert_to_coco(
+            write_convert_csv(work, rows),
+            out,
+            image_dirs=[source_images],
+            link_mode="copy",
         )
-
-        output = _run_to_coco(tmp_path, csv_path, images)
-
-        data = json.loads((output / "train/_annotations.coco.json").read_text())
-        assert data["categories"] == [{"id": 1, "name": label, "supercategory": "none"}]
-        assert data["annotations"][0]["category_id"] == 1
-
-    def test_basic_structure(self, tmp_path: Path) -> None:
-        """Check directory layout, JSON schema, bbox/area/category values."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
-
-        rows = [
-            csv_row(
-                "test.jpg",
-                label="cat",
-                split="train",
-                bbox_x_tl=10,
-                bbox_y_tl=20,
-                bbox_x_br=110,
-                bbox_y_br=120,
-            ),
-        ]
-        csv_path = write_convert_csv(tmp_path, rows)
-        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
-
-        assert (out_dir / "train" / "test.jpg").is_file()
-        json_path = out_dir / "train" / "_annotations.coco.json"
-        assert json_path.is_file()
-
-        with json_path.open() as f:
-            coco = json.load(f)
-
-        assert "images" in coco
-        assert "annotations" in coco
-        assert "categories" in coco
-
-        assert len(coco["images"]) == 1
-        assert coco["images"][0]["file_name"] == "test.jpg"
-        assert coco["images"][0]["width"] == 640
-        assert coco["images"][0]["height"] == 480
-
-        assert len(coco["annotations"]) == 1
-        ann = coco["annotations"][0]
-        assert ann["bbox"] == [10.0, 20.0, 100.0, 100.0]
-        assert ann["area"] == pytest.approx(10000.0)
-        assert ann["iscrowd"] == 0
-        assert ann["category_id"] == 1  # 1-based
-
-        assert len(coco["categories"]) == 1
-        assert coco["categories"][0]["id"] == 1
-        assert coco["categories"][0]["name"] == "cat"
-
-    def test_val_renamed_to_valid(self, tmp_path: Path) -> None:
-        """Val split directory should be renamed to valid/."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
-
-        rows = [csv_row("test.jpg", label="cat", split="val")]
-        csv_path = write_convert_csv(tmp_path, rows)
-        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
-
-        assert (out_dir / "valid" / "_annotations.coco.json").is_file()
-        assert not (out_dir / "val").exists()
-
-    def test_none_shape_in_images_not_annotations(self, tmp_path: Path) -> None:
-        """Images with shape=none appear in images but not annotations."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "empty.jpg")
-
-        rows = [csv_row("empty.jpg", shape="none", split="train")]
-        csv_path = write_convert_csv(tmp_path, rows)
-        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
-
-        json_path = out_dir / "train" / "_annotations.coco.json"
-        with json_path.open() as f:
-            coco = json.load(f)
-
-        assert len(coco["images"]) == 1
-        assert coco["images"][0]["file_name"] == "empty.jpg"
-        assert len(coco["annotations"]) == 0
-
-    def test_multiple_labels_1based_ids(self, tmp_path: Path) -> None:
-        """Sorted labels should get 1-based category IDs."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "a.jpg")
-        make_image(img_dir / "b.jpg")
-        make_image(img_dir / "c.jpg")
-
-        rows = [
-            csv_row("a.jpg", label="zebra", split="train"),
-            csv_row("b.jpg", label="apple", split="train"),
-            csv_row("c.jpg", label="mango", split="train"),
-        ]
-        csv_path = write_convert_csv(tmp_path, rows)
-        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
-
-        json_path = out_dir / "train" / "_annotations.coco.json"
-        with json_path.open() as f:
-            coco = json.load(f)
-
-        cats = {c["name"]: c["id"] for c in coco["categories"]}
-        # Sorted: apple=1, mango=2, zebra=3
-        assert cats == {"apple": 1, "mango": 2, "zebra": 3}
-
-    def test_ids_link_annotations_to_images_and_categories(
-        self, tmp_path: Path
-    ) -> None:
-        """Every annotation points at a real image id and a real category id.
-
-        The existing tests assert absolute starting values on a single-image,
-        single-annotation export, which cannot see the id *wiring*: dropping
-        the ``image_id`` key, blanking ``image_id_map`` or reusing one
-        ``ann_id`` for every annotation all survived.
-        """
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "a.jpg")
-        make_image(img_dir / "b.jpg")
-
-        rows = [
-            csv_row("a.jpg", label="cat", split="train"),
-            csv_row("b.jpg", label="dog", split="train"),
-            csv_row(
-                "b.jpg",
-                label="dog",
-                split="train",
-                bbox_x_tl=200,
-                bbox_x_br=300,
-                annotation_id=2,
-            ),
-        ]
-        csv_path = write_convert_csv(tmp_path, rows)
-        out_dir = _run_to_coco(tmp_path, csv_path, img_dir)
-
-        with (out_dir / "train" / "_annotations.coco.json").open() as f:
-            coco = json.load(f)
-
-        image_ids = {im["file_name"]: im["id"] for im in coco["images"]}
-        assert sorted(image_ids) == ["a.jpg", "b.jpg"]
-        assert len(set(image_ids.values())) == 2
-
-        cat_ids = {c["name"]: c["id"] for c in coco["categories"]}
-        assert sorted(cat_ids) == ["cat", "dog"]
-        assert [c["supercategory"] for c in coco["categories"]] == ["none", "none"]
-
-        ann_ids = [a["id"] for a in coco["annotations"]]
-        assert len(set(ann_ids)) == 3
-        assert all(ann_id > 0 for ann_id in ann_ids)
-
-        linked = sorted((a["image_id"], a["category_id"]) for a in coco["annotations"])
-        assert linked == sorted(
-            [
-                (image_ids["a.jpg"], cat_ids["cat"]),
-                (image_ids["b.jpg"], cat_ids["dog"]),
-                (image_ids["b.jpg"], cat_ids["dog"]),
+        assert {p.name for p in out.iterdir()} == {_SPLIT_DIRS[s] for s in splits}
+        for split in splits:
+            split_dir = out / _SPLIT_DIRS[split]
+            coco = json.loads((split_dir / "_annotations.coco.json").read_text())
+            names = sorted(name for name, (s, _) in export.items() if s == split)
+            assert sorted(p.name for p in split_dir.glob("*.jpg")) == names
+            assert [
+                (im["file_name"], im["width"], im["height"]) for im in coco["images"]
+            ] == [(name, 640, 480) for name in names]
+            assert coco["categories"] == [
+                {"id": i, "name": label, "supercategory": "none"}
+                for i, label in enumerate(labels, start=1)
             ]
-        )
+            image_ids = {im["id"]: im["file_name"] for im in coco["images"]}
+            assert len(image_ids) == len(names)
+            category = {c["id"]: c["name"] for c in coco["categories"]}
+            ann_ids = [a["id"] for a in coco["annotations"]]
+            assert len(set(ann_ids)) == len(ann_ids)
+            assert all(ann_id > 0 for ann_id in ann_ids)
+            got = sorted(
+                (
+                    image_ids[a["image_id"]],
+                    category[a["category_id"]],
+                    *a["bbox"],
+                    a["area"],
+                    a["iscrowd"],
+                )
+                for a in coco["annotations"]
+            )
+            want = sorted(
+                (name, label, x, y, x2 - x, y2 - y, round((x2 - x) * (y2 - y), 2), 0)
+                for name in names
+                for label, x, y, x2, y2 in export[name][1]
+            )
+            assert got == want
+
+
+class TestToCoco:
+    """Example tests for --to-coco CSV to COCO conversion."""
 
     def test_bbox_and_area_rounded_to_two_decimals(self, tmp_path: Path) -> None:
         """Non-round coordinates pin the rounding precision.
@@ -221,18 +165,6 @@ class TestToCoco:
         ann = coco["annotations"][0]
         assert ann["bbox"] == [10.13, 20.24, 100.86, 100.64]
         assert ann["area"] == 10150.05
-
-    def test_default_link_mode_places_the_image(self, tmp_path: Path) -> None:
-        """Omitting ``link_mode`` must select a mode ``_link_or_copy`` knows."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
-        rows = [csv_row("test.jpg", label="cat", split="train")]
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "coco_out"
-        convert_to_coco(csv_path, out_dir, image_dirs=[str(img_dir)])
-
-        assert (out_dir / "train" / "test.jpg").is_file()
 
     def test_nested_output_dir_and_rerun(self, tmp_path: Path) -> None:
         """The split dirs survive a second run into the same output tree.

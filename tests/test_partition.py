@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from cveta2.domain.models import CSV_COLUMNS
 from cveta2.domain.partition import completed_task_ids, partition_annotations_df
@@ -150,379 +152,112 @@ def test_empty_dataframe_keeps_column_order() -> None:
     assert result.deleted_images == []
 
 
-def test_single_completed_task() -> None:
-    """One completed task with 3 images, no deletions -- all go to dataset."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-02T00:00:00"),
-        _row("b.jpg", 1, "2026-01-02T00:00:00"),
-        _row("c.jpg", 1, "2026-01-02T00:00:00"),
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.dataset) == 3
-    assert len(result.obsolete) == 0
-    assert len(result.in_progress) == 0
-    assert result.deleted_images == []
-
-
-def test_single_in_progress_task() -> None:
-    """One annotation-status task -- all rows go to in_progress."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-02T00:00:00", status="annotation"),
-        _row("b.jpg", 1, "2026-01-02T00:00:00", status="annotation"),
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.dataset) == 0
-    assert len(result.obsolete) == 0
-    assert len(result.in_progress) == 2
-    assert result.deleted_images == []
-
-
-@pytest.mark.parametrize(
-    ("ann_task", "ann_date", "del_task", "del_date", "deletion_wins"),
-    [
-        (1, "2026-01-01T00:00:00", 2, "2026-01-02T00:00:00", True),
-        (2, "2026-01-02T00:00:00", 1, "2026-01-01T00:00:00", False),
-    ],
+# One record per annotation row or deletion: (image, task_id, job finished).
+_Record = tuple[str, int, bool]
+_RECORDS = st.tuples(
+    st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]), st.integers(1, 5), st.booleans()
 )
-def test_deleted_image_by_date_relation(
-    ann_task: int,
-    ann_date: str,
-    del_task: int,
-    del_date: str,
-    *,
-    deletion_wins: bool,
+
+
+def _expected_partition(
+    rows: list[_Record], deletions: list[_Record]
+) -> tuple[dict[str, set[int]], list[tuple[str, int]]]:
+    """Specify the partition: row positions per part, and the deleted images.
+
+    A task is complete when every row and deletion record of it is finished.
+    Per image the highest task id is the latest, and a deletion wins a tie
+    within its own task. A deleted image sends all its rows to obsolete;
+    otherwise unfinished tasks go to in_progress, the latest completed task
+    to dataset and older completed tasks to obsolete.
+    """
+    unfinished = {task for _, task, done in rows + deletions if not done}
+    latest: dict[str, tuple[int, bool]] = {}
+    for records, is_deletion in ((rows, False), (deletions, True)):
+        for image, task, _ in records:
+            latest[image] = max(latest.get(image, (0, False)), (task, is_deletion))
+    deleted = {image: task for image, (task, gone) in latest.items() if gone}
+    newest_completed = {
+        image: max(t for i, t, _ in rows if i == image and t not in unfinished)
+        for image, _, _ in rows
+        if any(i == image and t not in unfinished for i, t, _ in rows)
+    }
+    parts: dict[str, set[int]] = {
+        "dataset": set(),
+        "obsolete": set(),
+        "in_progress": set(),
+    }
+    for position, (image, task, _) in enumerate(rows):
+        if image in deleted:
+            part = "obsolete"
+        elif task in unfinished:
+            part = "in_progress"
+        elif task == newest_completed[image]:
+            part = "dataset"
+        else:
+            part = "obsolete"
+        parts[part].add(position)
+    return parts, sorted(deleted.items())
+
+
+def _status(done: bool) -> str:  # noqa: FBT001 - maps a drawn flag
+    return "completed" if done else "annotation"
+
+
+@given(
+    rows=st.lists(_RECORDS, max_size=12),
+    deletions=st.lists(_RECORDS, max_size=4),
+)
+# A deletion in the same task as the image's latest annotation wins the tie.
+@example(rows=[("a.jpg", 1, True), ("a.jpg", 2, True)], deletions=[("a.jpg", 2, True)])
+# Deleted in task 2, re-annotated later in task 5: the image is alive again.
+@example(
+    rows=[("a.jpg", 1, True), ("b.jpg", 3, True), ("a.jpg", 5, True)],
+    deletions=[("a.jpg", 2, True)],
+)
+# Duplicate deletion records collapse into one deleted image.
+@example(rows=[("a.jpg", 1, True)], deletions=[("a.jpg", 2, True)] * 2)
+# An unfinished job seen only through a deletion record holds its task back.
+@example(rows=[("a.jpg", 1, True)], deletions=[("gone.jpg", 1, False)])
+def test_partition_matches_specification(
+    rows: list[_Record], deletions: list[_Record]
 ) -> None:
-    """Deletion newer than annotation -> obsolete/deleted; older -> dataset/alive."""
-    rows = [_row("a.jpg", ann_task, ann_date)]
-    deleted = [make_deleted("a.jpg", del_task, del_date)]
-    result = partition_annotations_df(_df(rows), deleted)
+    """Every row lands in exactly the part the specification assigns.
 
-    if deletion_wins:
-        assert len(result.dataset) == 0
-        assert len(result.obsolete) == 1
-        assert result.obsolete["image_name"].iloc[0] == "a.jpg"
-        assert [d.image_name for d in result.deleted_images] == ["a.jpg"]
-    else:
-        assert len(result.dataset) == 1
-        assert len(result.obsolete) == 0
-        assert result.deleted_images == []
-
-
-def test_deleted_then_restored() -> None:
-    """Image deleted in T1, then re-annotated in T2 (newer).
-
-    The latest task for the image is T2 (annotation, not deletion),
-    so the image is NOT treated as deleted.  T2 annotations go to
-    dataset, T1 annotations go to obsolete, deleted_names is empty.
+    Task dates are deliberately reversed against task ids: only the id orders
+    tasks, so a project-wide label edit that rewrites every date cannot
+    scramble the partition.
     """
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),  # T1 completed (older)
-        _row("a.jpg", 2, "2026-01-03T00:00:00"),  # T2 completed (newer)
-    ]
-    deleted = [
-        make_deleted("a.jpg", 1, "2026-01-02T00:00:00"),  # deletion from T1
-    ]
-    result = partition_annotations_df(_df(rows), deleted)
-
-    # T2 (newest) is an annotation row, not a deletion -> image is alive
-    assert result.deleted_images == []
-    # T2 row in dataset (latest completed)
-    assert len(result.dataset) == 1
-    assert result.dataset["task_id"].iloc[0] == 2
-    # T1 row in obsolete (older completed)
-    assert len(result.obsolete) == 1
-    assert result.obsolete["task_id"].iloc[0] == 1
-
-
-def test_higher_task_id_wins_when_the_dates_disagree() -> None:
-    """A label edit rewrites every task date; only the id still means anything.
-
-    Updating a project's labels in CVAT bumps ``updated_date`` on every task of
-    the project at once, in an order nobody controls, so the dates stop
-    tracking which task annotated an image last.  The higher ``task_id`` is
-    what decides, even when it carries the older date.
-    """
-    rows = [
-        _row("a.jpg", 1, "2026-05-01T00:00:00"),  # older task, newer date
-        _row("a.jpg", 2, "2026-01-01T00:00:00"),  # newer task, older date
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    assert result.dataset["task_id"].tolist() == [2]
-    assert result.obsolete["task_id"].tolist() == [1]
-
-
-def test_multiple_completed_tasks_latest_wins() -> None:
-    """Same image in 2 completed tasks -- latest goes to dataset, older to obsolete."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),  # older
-        _row("a.jpg", 2, "2026-01-02T00:00:00"),  # newer
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.dataset) == 1
-    assert result.dataset["task_id"].iloc[0] == 2
-    assert len(result.obsolete) == 1
-    assert result.obsolete["task_id"].iloc[0] == 1
-
-
-@pytest.mark.parametrize("reverse", [False, True])
-def test_row_order_no_longer_decides_between_two_completed_tasks(
-    *,
-    reverse: bool,
-) -> None:
-    """The higher id wins whichever way CVAT happened to list the tasks.
-
-    Before ids ordered the partition, two completed tasks holding the same
-    image were separated by their dates, and an exact tie fell through to
-    the order CVAT returned the tasks in.
-    """
-    rows = [
-        _row("a.jpg", 5, "2026-01-01T00:00:00"),
-        _row("a.jpg", 9, "2026-01-01T00:00:00"),
-    ]
-    if reverse:
-        rows.reverse()
-
-    result = partition_annotations_df(_df(rows), [])
-
-    assert result.dataset["task_id"].tolist() == [9]
-    assert result.obsolete["task_id"].tolist() == [5]
-
-
-def test_completed_and_in_progress_split() -> None:
-    """Same image: completed task + annotation task -- split correctly."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00", status="completed"),
-        _row("a.jpg", 2, "2026-01-02T00:00:00", status="annotation"),
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.dataset) == 1
-    assert result.dataset["task_id"].iloc[0] == 1
-    assert len(result.in_progress) == 1
-    assert result.in_progress["task_id"].iloc[0] == 2
-    assert len(result.obsolete) == 0
-
-
-def test_image_only_in_deleted_registry() -> None:
-    """Image exists only in deleted_images, not in df -- appears in deleted_names."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-    ]
-    deleted = [
-        make_deleted("phantom.jpg", 2, "2026-01-02T00:00:00"),  # not in df
-    ]
-    result = partition_annotations_df(_df(rows), deleted)
-
-    assert len(result.dataset) == 1  # a.jpg unaffected
-    # phantom.jpg has no df rows, but is tracked in deleted_images
-    assert "phantom.jpg" in [d.image_name for d in result.deleted_images]
-
-
-def test_all_images_deleted() -> None:
-    """All images deleted in latest task -- everything to obsolete."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-        _row("b.jpg", 1, "2026-01-01T00:00:00"),
-    ]
-    deleted = [
-        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),
-        make_deleted("b.jpg", 2, "2026-01-02T00:00:00"),
-    ]
-    result = partition_annotations_df(_df(rows), deleted)
-
-    assert len(result.dataset) == 0
-    assert len(result.obsolete) == 2
-    assert len(result.in_progress) == 0
-    assert sorted(d.image_name for d in result.deleted_images) == ["a.jpg", "b.jpg"]
-
-
-def test_mixed_partition() -> None:
-    """5 images across different scenarios produce correct three-way split.
-
-    - img_ds1.jpg, img_ds2.jpg: completed in latest task -> dataset
-    - img_stale.jpg: completed in older task, newer completed in task 2 -> obsolete
-    - img_ip.jpg: annotation status -> in_progress
-    - img_del.jpg: deleted in latest task -> obsolete + deleted_images
-    """
-    rows = [
-        # Two images only in the latest completed task -> dataset
-        _row("img_ds1.jpg", 2, "2026-01-02T00:00:00"),
-        _row("img_ds2.jpg", 2, "2026-01-02T00:00:00"),
-        # Stale: older completed task for same image -> obsolete
-        _row("img_stale.jpg", 1, "2026-01-01T00:00:00"),
-        _row("img_stale.jpg", 2, "2026-01-02T00:00:00"),
-        # In-progress
-        _row("img_ip.jpg", 3, "2026-01-03T00:00:00", status="annotation"),
-        # Deleted: has an annotation row but deletion is newer
-        _row("img_del.jpg", 1, "2026-01-01T00:00:00"),
-    ]
-    deleted = [
-        make_deleted("img_del.jpg", 4, "2026-01-04T00:00:00"),
+    frame = _df(
+        [
+            _row(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done))
+            for image, task, done in rows
+        ]
+    ).assign(row=range(len(rows)))
+    records = [
+        make_deleted(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done))
+        for image, task, done in deletions
     ]
 
-    result = partition_annotations_df(_df(rows), deleted)
+    result = partition_annotations_df(frame, records)
 
-    # Dataset: img_ds1, img_ds2, img_stale (from task 2)
-    dataset_names = set(result.dataset["image_name"])
-    assert dataset_names == {"img_ds1.jpg", "img_ds2.jpg", "img_stale.jpg"}
-    assert len(result.dataset) == 3
-
-    # Obsolete: img_stale (from task 1) + img_del (annotation row)
-    obsolete_images = list(result.obsolete["image_name"])
-    assert "img_del.jpg" in obsolete_images
-    # img_stale from task 1 is obsolete
-    stale_obsolete = result.obsolete[result.obsolete["image_name"] == "img_stale.jpg"]
-    assert len(stale_obsolete) == 1
-    assert stale_obsolete["task_id"].iloc[0] == 1
-
-    # In-progress
-    assert len(result.in_progress) == 1
-    assert result.in_progress["image_name"].iloc[0] == "img_ip.jpg"
-
-    # Deleted images
-    assert [d.image_name for d in result.deleted_images] == ["img_del.jpg"]
-
-
-def test_deleted_image_with_annotations_in_same_task() -> None:
-    """Bug: Image has annotations AND is marked deleted in same task with same date.
-
-    This reproduces the bug where an image is marked as deleted in a task,
-    but that task still contains annotation shapes for that image (before it
-    was deleted). Both have the same task_updated_date, and the annotation
-    wins because it appears first in the combined dataframe.
-
-    Expected: The image should be marked as deleted and go to obsolete.
-    Actual (bug): The image appears in dataset because annotation wins the tie.
-    """
-    rows = [
-        # Earlier task with annotation
-        _row("img.jpg", 1, "2026-01-01T00:00:00"),
-        # Latest task has annotation for the image (before deletion)
-        _row("img.jpg", 2, "2026-01-02T00:00:00"),
-    ]
-    deleted = [
-        # Same task marks the image as deleted (same date as annotation)
-        make_deleted("img.jpg", 2, "2026-01-02T00:00:00"),
-    ]
-    result = partition_annotations_df(_df(rows), deleted)
-
-    assert len(result.dataset) == 0, "Deleted image should not be in dataset"
-    assert len(result.obsolete) == 2, "Both rows should be obsolete"
-    assert "img.jpg" in [d.image_name for d in result.deleted_images], (
-        "Image should be in deleted_images"
+    parts, deleted = _expected_partition(rows, deletions)
+    assert {
+        "dataset": set(result.dataset["row"]),
+        "obsolete": set(result.obsolete["row"]),
+        "in_progress": set(result.in_progress["row"]),
+    } == parts
+    assert len(result.dataset) + len(result.obsolete) + len(result.in_progress) == len(
+        rows
     )
-
-
-def test_multi_annotation_per_image_all_go_to_dataset() -> None:
-    """Image with 5 bbox rows in one completed task -- all 5 go to dataset."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.dataset) == 5
-    assert len(result.obsolete) == 0
-    assert len(result.in_progress) == 0
-
-
-def test_three_tasks_same_image() -> None:
-    """3 tasks for same image: completed(T1) + annotation(T2) + completed(T3).
-
-    T3 (latest completed) -> dataset, T1 (older completed) -> obsolete,
-    T2 (annotation) -> in_progress.
-    """
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00", status="completed"),
-        _row("a.jpg", 2, "2026-01-02T00:00:00", status="annotation"),
-        _row("a.jpg", 3, "2026-01-03T00:00:00", status="completed"),
-    ]
-    result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.dataset) == 1
-    assert result.dataset["task_id"].iloc[0] == 3
-    assert len(result.obsolete) == 1
-    assert result.obsolete["task_id"].iloc[0] == 1
-    assert len(result.in_progress) == 1
-    assert result.in_progress["task_id"].iloc[0] == 2
-
-
-def test_duplicate_deleted_image_entries() -> None:
-    """Same image deleted in same task twice -- _filter_deleted_images deduplicates."""
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),
-    ]
-    deleted = [
-        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),
-        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # duplicate
-    ]
-    result = partition_annotations_df(_df(rows), deleted)
-
-    assert len(result.deleted_images) == 1
-    assert result.deleted_images[0].image_name == "a.jpg"
-    assert len(result.obsolete) == 1
-
-
-def test_deleted_then_restored_several_tasks_later() -> None:
-    """Image deleted in T2, then re-annotated several tasks later in T5.
-
-    Timeline:
-      T1 (completed, Jan 1) — initial annotation
-      T2 (completed, Jan 2) — image deleted
-      T3 (completed, Jan 3) — unrelated task (different image)
-      T4 (completed, Jan 4) — unrelated task (different image)
-      T5 (completed, Jan 5) — image re-annotated
-
-    Expected:
-      - Image is NOT treated as deleted (T5 annotation is newer than T2 deletion)
-      - T5 row → dataset (latest completed for this image)
-      - T1 row → obsolete (older completed for this image)
-      - Unrelated images from T3, T4 → dataset
-    """
-    rows = [
-        _row("a.jpg", 1, "2026-01-01T00:00:00"),  # T1: initial annotation
-        _row("b.jpg", 3, "2026-01-03T00:00:00"),  # T3: unrelated
-        _row("c.jpg", 4, "2026-01-04T00:00:00"),  # T4: unrelated
-        _row("a.jpg", 5, "2026-01-05T00:00:00"),  # T5: re-annotated
-    ]
-    deleted = [
-        make_deleted("a.jpg", 2, "2026-01-02T00:00:00"),  # T2: deletion
-    ]
-    result = partition_annotations_df(_df(rows), deleted)
-
-    # Image is alive — T5 annotation is newer than T2 deletion
-    assert result.deleted_images == []
-
-    # T5 row in dataset (latest completed for a.jpg)
-    dataset_a = result.dataset[result.dataset["image_name"] == "a.jpg"]
-    assert len(dataset_a) == 1
-    assert dataset_a["task_id"].iloc[0] == 5
-
-    # T1 row in obsolete (older completed for a.jpg)
-    obsolete_a = result.obsolete[result.obsolete["image_name"] == "a.jpg"]
-    assert len(obsolete_a) == 1
-    assert obsolete_a["task_id"].iloc[0] == 1
-
-    # Unrelated images from T3, T4 in dataset
-    assert "b.jpg" in set(result.dataset["image_name"])
-    assert "c.jpg" in set(result.dataset["image_name"])
-
-    assert len(result.in_progress) == 0
+    assert [(d.image_name, d.task_id) for d in result.deleted_images] == deleted
 
 
 def test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort() -> None:
     """Same-timestamp deletion still wins once the frame outgrows insertion sort.
 
-    ``test_deleted_image_with_annotations_in_same_task`` covers the same rule on
-    a two-row frame, where every sort algorithm happens to preserve input order
-    and so cannot detect a lost tie-break. Fourteen unrelated rows push the
+    The partition property covers the same rule on small frames, where every
+    sort algorithm happens to preserve input order and so cannot detect a lost
+    tie-break. Fourteen unrelated rows push the
     combined frame past that threshold, where an implicitly-stable sort starts
     reordering equal keys and the deletion silently loses.
     """
@@ -599,24 +334,6 @@ def _job_row(
     )
 
 
-def test_one_unfinished_job_holds_back_the_whole_task() -> None:
-    """A task is finished only when every one of its jobs is.
-
-    Two jobs of task 1 cover different frames; the second is still being
-    annotated, so CVAT would report the task as ``annotation`` and none of
-    its images may reach the dataset.
-    """
-    rows = [
-        _job_row("a.jpg", 1, "2026-01-02T00:00:00", "acceptance", "completed"),
-        _job_row("b.jpg", 1, "2026-01-02T00:00:00", "annotation", "new"),
-    ]
-
-    result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.in_progress) == 2
-    assert len(result.dataset) == 0
-
-
 @pytest.mark.parametrize(
     ("stage", "state"),
     [
@@ -634,50 +351,6 @@ def test_only_acceptance_plus_completed_counts_as_finished(
     rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", stage, state)]
 
     result = partition_annotations_df(_df(rows), [])
-
-    assert len(result.dataset) == 0
-    assert len(result.in_progress) == 1
-
-
-def test_a_job_whose_frames_were_all_deleted_still_holds_the_task_back() -> None:
-    """Deletion records carry the job position of frames that left the CSV.
-
-    Every surviving row of task 1 belongs to a finished job, so grouping
-    the annotation rows alone would call the task done.  The deleted frame
-    belongs to a second job still at annotation, which is only visible in
-    the deletion records.
-    """
-    rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", "acceptance", "completed")]
-    deleted = [make_deleted("gone.jpg", 1, "2026-01-02T00:00:00", status="annotation")]
-
-    result = partition_annotations_df(_df(rows), deleted)
-
-    assert len(result.dataset) == 0
-    assert len(result.in_progress) == 1
-
-
-def test_finished_task_reaches_the_dataset_despite_a_deleted_frame() -> None:
-    """The deletion fold must not hold back a task whose jobs are all done."""
-    rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", "acceptance", "completed")]
-    deleted = [make_deleted("gone.jpg", 1, "2026-01-02T00:00:00", status="completed")]
-
-    result = partition_annotations_df(_df(rows), deleted)
-
-    assert len(result.dataset) == 1
-    assert len(result.in_progress) == 0
-
-
-def test_an_unfinished_row_still_counts_when_the_deleted_frames_are_finished() -> None:
-    """Unfinished jobs accumulate across both sources, not just the last one.
-
-    The mirror of the case above: here the CSV row is the unfinished one and
-    the deletion record is finished.  A task disqualified by either source
-    stays disqualified.
-    """
-    rows = [_job_row("a.jpg", 1, "2026-01-02T00:00:00", "annotation", "new")]
-    deleted = [make_deleted("gone.jpg", 1, "2026-01-02T00:00:00", status="completed")]
-
-    result = partition_annotations_df(_df(rows), deleted)
 
     assert len(result.dataset) == 0
     assert len(result.in_progress) == 1

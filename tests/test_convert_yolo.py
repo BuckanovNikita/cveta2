@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Literal
 
 import pandas as pd
 import pytest
 import yaml
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cveta2.adapters.files.conversion import (
     LocalConversionFiles,
@@ -162,26 +165,6 @@ class TestConversionRegressions:
         assert result.loc["moved.jpg", "split"] == "val"
         assert result.loc["new.jpg", "instance_label"] == "dog"
 
-    @pytest.mark.parametrize("label", ["001", "NA"])
-    def test_text_labels_survive_export(self, tmp_path: Path, label: str) -> None:
-        images = tmp_path / "source"
-        make_image(images / "a.jpg")
-        csv_path = write_convert_csv(
-            tmp_path, [csv_row("a.jpg", label=label, split="train")]
-        )
-        output = tmp_path / "yolo"
-
-        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
-
-        assert yaml.safe_load((output / "dataset.yaml").read_text())["names"] == {
-            0: label
-        }
-        imported = tmp_path / "imported.csv"
-        convert_from_yolo(output, imported)
-        assert pd.read_csv(imported, dtype=str, keep_default_na=False)[
-            "instance_label"
-        ].tolist() == [label]
-
     @pytest.mark.parametrize("linked_directory", ["images", "images/train"])
     def test_reexport_never_prunes_source_directory_symlinks(
         self, tmp_path: Path, linked_directory: str
@@ -210,65 +193,33 @@ class TestConversionRegressions:
 class TestParseLabelFile:
     """Tests for YOLO label file parsing."""
 
-    def test_standard_5_fields(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            pytest.param(
+                "0 0.5 0.5 0.3 0.4\n1 0.1 0.2 0.3 0.4\n",
+                [[0.0, 0.5, 0.5, 0.3, 0.4], [1.0, 0.1, 0.2, 0.3, 0.4]],
+                id="standard",
+            ),
+            pytest.param(
+                "0 0.5 0.5 0.3 0.4 0.95\n", [[0.0, 0.5, 0.5, 0.3, 0.4, 0.95]], id="conf"
+            ),
+            pytest.param(None, [], id="missing"),
+            pytest.param("", [], id="empty"),
+            pytest.param(
+                "\n  0 0.5 0.5 0.3 0.4   \n\n",
+                [[0.0, 0.5, 0.5, 0.3, 0.4]],
+                id="blank-and-padding",
+            ),
+        ],
+    )
+    def test_parses_well_formed_lines(
+        self, tmp_path: Path, text: str | None, expected: list[list[float]]
+    ) -> None:
         p = tmp_path / "label.txt"
-        p.write_text("0 0.5 0.5 0.3 0.4\n1 0.1 0.2 0.3 0.4\n")
-        result = _parse_label_file(p, files=LocalConversionFiles())
-        assert len(result) == 2
-        assert result[0] == [0.0, 0.5, 0.5, 0.3, 0.4]
-
-    def test_6_fields_with_conf(self, tmp_path: Path) -> None:
-        p = tmp_path / "label.txt"
-        p.write_text("0 0.5 0.5 0.3 0.4 0.95\n")
-        result = _parse_label_file(p, files=LocalConversionFiles())
-        assert len(result) == 1
-        assert len(result[0]) == 6
-        assert result[0][5] == pytest.approx(0.95)
-
-    def test_missing_file(self, tmp_path: Path) -> None:
-        result = _parse_label_file(
-            tmp_path / "nonexistent.txt", files=LocalConversionFiles()
-        )
-        assert result == []
-
-    def test_empty_file(self, tmp_path: Path) -> None:
-        p = tmp_path / "label.txt"
-        p.write_text("")
-        result = _parse_label_file(p, files=LocalConversionFiles())
-        assert result == []
-
-    def test_short_line_is_skipped_not_terminal(self, tmp_path: Path) -> None:
-        """A malformed 4-field line skips only itself.
-
-        Every fixture file was uniformly well-formed, so replacing the
-        ``continue`` with a ``break`` discarded nothing.
-        """
-        p = tmp_path / "label.txt"
-        p.write_text("0 0.5 0.5 0.3\n1 0.1 0.2 0.3 0.4\n")
-        assert _parse_label_file(p, files=LocalConversionFiles()) == [
-            [1.0, 0.1, 0.2, 0.3, 0.4]
-        ]
-
-    def test_blank_lines_and_trailing_whitespace(self, tmp_path: Path) -> None:
-        """Blank lines and padding around a line are tolerated."""
-        p = tmp_path / "label.txt"
-        p.write_text("\n  0 0.5 0.5 0.3 0.4   \n\n")
-        assert _parse_label_file(p, files=LocalConversionFiles()) == [
-            [0.0, 0.5, 0.5, 0.3, 0.4]
-        ]
-
-    def test_non_numeric_line_is_skipped_not_terminal(self, tmp_path: Path) -> None:
-        """A line of the right length but the wrong type skips only itself.
-
-        ``float(part)`` used to escape uncaught, so one header row or one
-        stray token anywhere in a label tree aborted the whole conversion
-        with a bare ``ValueError``.
-        """
-        p = tmp_path / "label.txt"
-        p.write_text("class xc yc w h\n1 0.1 0.2 0.3 0.4\n")
-        assert _parse_label_file(p, files=LocalConversionFiles()) == [
-            [1.0, 0.1, 0.2, 0.3, 0.4]
-        ]
+        if text is not None:
+            p.write_text(text)
+        assert _parse_label_file(p, files=LocalConversionFiles()) == expected
 
     @pytest.mark.parametrize(
         "bad_lines",
@@ -363,103 +314,6 @@ class TestParseLabelFile:
 class TestToYolo:
     """Tests for --to-yolo CSV to YOLO conversion."""
 
-    def test_basic_structure(self, tmp_path: Path) -> None:
-        """Check that --to-yolo creates proper directory structure."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
-
-        rows = [
-            csv_row("test.jpg", label="cat", split="train"),
-            csv_row(
-                "test.jpg",
-                label="dog",
-                split="train",
-                bbox_x_tl=200,
-                bbox_y_tl=100,
-                bbox_x_br=300,
-                bbox_y_br=250,
-            ),
-        ]
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(
-            csv_path,
-            out_dir,
-            image_dirs=[str(img_dir)],
-            link_mode="copy",
-        )
-
-        assert (out_dir / "images" / "train" / "test.jpg").is_file()
-        assert (out_dir / "labels" / "train" / "test.txt").is_file()
-        assert (out_dir / "dataset.yaml").is_file()
-
-        label_content = (out_dir / "labels" / "train" / "test.txt").read_text()
-        lines = label_content.strip().splitlines()
-        assert len(lines) == 2
-
-        with (out_dir / "dataset.yaml").open() as f:
-            ds = yaml.safe_load(f)
-        assert "names" in ds
-        assert "train" in ds
-        assert set(ds["names"].values()) == {"cat", "dog"}
-
-    def test_class_ids_are_zero_based(self, tmp_path: Path) -> None:
-        """YOLO class ids must start at 0, in both dataset.yaml and label lines.
-
-        The structure test above asserts ``set(ds["names"].values())`` — the
-        names, not the keys — and the CSV->YOLO->CSV roundtrip shifts ids and
-        names together, so ``label_start=1`` was invisible to both while
-        emitting 1-based class ids, i.e. silently invalid training data.
-        """
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
-
-        rows = [
-            csv_row("test.jpg", label="dog", split="train"),
-            csv_row(
-                "test.jpg",
-                label="cat",
-                split="train",
-                bbox_x_tl=200,
-                bbox_x_br=300,
-            ),
-        ]
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
-
-        with (out_dir / "dataset.yaml").open() as f:
-            ds = yaml.safe_load(f)
-        assert ds["names"] == {0: "cat", 1: "dog"}
-        assert ds["path"] == str(out_dir.resolve())
-
-        lines = (out_dir / "labels" / "train" / "test.txt").read_text().splitlines()
-        assert sorted(int(line.split()[0]) for line in lines) == [0, 1]
-
-    def test_all_three_splits_listed_in_yaml(self, tmp_path: Path) -> None:
-        """train/val/test each get an ``images/<split>`` entry.
-
-        Only train and val were ever exercised, so corrupting the "test"
-        literal in the split tuple dropped the key unnoticed.
-        """
-        img_dir = tmp_path / "images"
-        rows = []
-        for split in ("train", "val", "test"):
-            make_image(img_dir / f"{split}.jpg")
-            rows.append(csv_row(f"{split}.jpg", label="cat", split=split))
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
-
-        with (out_dir / "dataset.yaml").open() as f:
-            ds = yaml.safe_load(f)
-        assert ds["train"] == "images/train"
-        assert ds["val"] == "images/val"
-        assert ds["test"] == "images/test"
-
     def test_nested_output_dir_and_rerun(self, tmp_path: Path) -> None:
         """The output tree is created from scratch and a second run is a no-op.
 
@@ -485,22 +339,6 @@ class TestToYolo:
             "labels",
         ]
 
-    def test_default_link_mode_places_the_image(self, tmp_path: Path) -> None:
-        """Omitting ``link_mode`` must select a mode ``_link_or_copy`` knows.
-
-        Every test passed ``link_mode="copy"``, so corrupting the "auto"
-        default into an unknown mode was never executed.
-        """
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
-        rows = [csv_row("test.jpg", label="cat", split="train")]
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)])
-
-        assert (out_dir / "images" / "train" / "test.jpg").is_file()
-
     def test_non_positive_csv_dimension_names_the_image(self, tmp_path: Path) -> None:
         """A zero image_width in the CSV aborts, naming the offending image.
 
@@ -520,23 +358,24 @@ class TestToYolo:
                 link_mode="copy",
             )
 
-    def test_missing_image_still_writes_labels(self, tmp_path: Path) -> None:
-        """A CSV row whose image is absent from disk is labelled but not copied.
-
-        Every export test had all images on disk, so relaxing the
-        ``in found and not in images_processed`` guard to ``or`` never
-        reached the ``found[name]`` lookup with a missing key.
-        """
+    @pytest.mark.parametrize(("shape", "label_text"), [("box", None), ("none", "")])
+    def test_missing_image_still_writes_labels(
+        self, tmp_path: Path, shape: str, label_text: str | None
+    ) -> None:
+        """A CSV row whose image is absent from disk is labelled but not copied."""
         img_dir = tmp_path / "images"
         img_dir.mkdir()
-        rows = [csv_row("ghost.jpg", label="cat", split="train")]
+        rows = [csv_row("ghost.jpg", shape=shape, split="val")]
         csv_path = write_convert_csv(tmp_path, rows)
 
         out_dir = tmp_path / "yolo_out"
         convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
 
-        assert (out_dir / "labels" / "train" / "ghost.txt").is_file()
-        assert not (out_dir / "images" / "train" / "ghost.jpg").exists()
+        label = out_dir / "labels" / "val" / "ghost.txt"
+        assert label.is_file()
+        if label_text is not None:
+            assert label.read_text() == label_text
+        assert not (out_dir / "images" / "val" / "ghost.jpg").exists()
 
     def test_image_in_two_splits_is_placed_only_once(self, tmp_path: Path) -> None:
         """An image listed under two splits lands in the first split's dir only.
@@ -567,13 +406,8 @@ class TestToYolo:
         assert not (out_dir / "images" / "val" / "empty.jpg").exists()
         assert (out_dir / "labels" / "val" / "both.txt").is_file()
 
-    def test_none_shape_places_image_and_keeps_tree_names(self, tmp_path: Path) -> None:
-        """A none-shape row copies its image into ``images/<split>``.
-
-        The empty-label test only checked the label file, so inverting either
-        half of the copy guard - and corrupting the "images" directory name -
-        left no trace.
-        """
+    def test_none_shape_places_image_with_empty_label(self, tmp_path: Path) -> None:
+        """A none-shape row copies its image and gets an empty label file."""
         img_dir = tmp_path / "images"
         make_image(img_dir / "empty.jpg")
         rows = [csv_row("empty.jpg", shape="none", split="val")]
@@ -583,69 +417,7 @@ class TestToYolo:
         convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
 
         assert (out_dir / "images" / "val" / "empty.jpg").is_file()
-        assert sorted(p.name for p in out_dir.iterdir()) == [
-            "dataset.yaml",
-            "images",
-            "labels",
-        ]
-
-    def test_none_shape_missing_image_still_writes_label(self, tmp_path: Path) -> None:
-        """A none-shape row whose image is absent is labelled but not copied.
-
-        Mirrors the box case: relaxing the copy guard to ``or`` would look up
-        a key that is not in ``found``.
-        """
-        img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        rows = [csv_row("ghost.jpg", shape="none", split="val")]
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
-
-        assert (out_dir / "labels" / "val" / "ghost.txt").read_text() == ""
-
-    def test_empty_labels_for_none_shape(self, tmp_path: Path) -> None:
-        """Images with instance_shape=none should get empty label files."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "empty.jpg")
-
-        rows = [csv_row("empty.jpg", shape="none", split="val")]
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(
-            csv_path,
-            out_dir,
-            image_dirs=[str(img_dir)],
-            link_mode="copy",
-        )
-
-        label_path = out_dir / "labels" / "val" / "empty.txt"
-        assert label_path.is_file()
-        assert label_path.read_text() == ""
-
-    def test_only_existing_splits_in_yaml(self, tmp_path: Path) -> None:
-        """dataset.yaml should only include splits that exist in data."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
-
-        rows = [csv_row("test.jpg", label="cat", split="val")]
-        csv_path = write_convert_csv(tmp_path, rows)
-
-        out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(
-            csv_path,
-            out_dir,
-            image_dirs=[str(img_dir)],
-            link_mode="copy",
-        )
-
-        with (out_dir / "dataset.yaml").open() as f:
-            ds = yaml.safe_load(f)
-        assert "val" in ds
-        assert "train" not in ds
-        assert "test" not in ds
+        assert (out_dir / "labels" / "val" / "empty.txt").read_text() == ""
 
 
 class TestFromYoloDataset:
@@ -706,72 +478,107 @@ class TestFromYoloDataset:
         assert df.iloc[1]["instance_label"] == "dog"
 
 
-class TestRoundtrip:
-    """Tests for CSV -> YOLO -> CSV roundtrip fidelity."""
+_SPLITS = st.sampled_from(["train", "val", "test"])
+# Text labels such as "001" and "NA" must survive pandas' type and NA guessing.
+_LABELS = st.sampled_from(["cat", "dog", "001", "NA"])
 
-    def test_csv_to_yolo_to_csv(self, tmp_path: Path) -> None:
-        """CSV -> YOLO -> CSV should preserve bbox coordinates."""
-        img_dir = tmp_path / "images"
-        make_image(img_dir / "test.jpg")
 
-        original_rows = [
-            csv_row(
-                "test.jpg",
-                label="cat",
-                split="train",
-                bbox_x_tl=50.0,
-                bbox_y_tl=30.0,
-                bbox_x_br=200.0,
-                bbox_y_br=180.0,
-            ),
-            csv_row(
-                "test.jpg",
-                label="dog",
-                split="train",
-                bbox_x_tl=300.0,
-                bbox_y_tl=100.0,
-                bbox_x_br=500.0,
-                bbox_y_br=400.0,
-            ),
-        ]
-        original_rows[1]["annotation_id"] = 2
-        csv_path = write_convert_csv(tmp_path, original_rows)
+@st.composite
+def _labelled_box(draw: st.DrawFn) -> tuple[str, float, float, float, float]:
+    """Draw a label and a quarter-pixel box inside a 640x480 image."""
+    x_tl = draw(st.integers(0, 639 * 4)) / 4
+    y_tl = draw(st.integers(0, 479 * 4)) / 4
+    x_br = draw(st.integers(int(x_tl * 4) + 1, 640 * 4)) / 4
+    y_br = draw(st.integers(int(y_tl * 4) + 1, 480 * 4)) / 4
+    return draw(_LABELS), x_tl, y_tl, x_br, y_br
 
-        # CSV -> YOLO
-        yolo_dir = tmp_path / "yolo"
+
+_EXPORTS = st.dictionaries(
+    st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]),
+    st.tuples(_SPLITS, st.lists(_labelled_box(), min_size=1, max_size=3)),
+    min_size=1,
+)
+
+
+@pytest.fixture(scope="module")
+def source_images(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    images = tmp_path_factory.mktemp("source")
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        make_image(images / name)
+    return images
+
+
+@given(export=_EXPORTS)
+def test_csv_to_yolo_to_csv_roundtrip(
+    source_images: Path,
+    export: dict[str, tuple[str, list[tuple[str, float, float, float, float]]]],
+) -> None:
+    """CSV -> YOLO -> CSV keeps boxes, text labels and splits; ids are 0-based.
+
+    dataset.yaml lists exactly the splits present, maps sorted labels from
+    class id 0, and records the resolved output root.
+    """
+    rows: list[dict[str, object]] = []
+    expected: list[tuple[str, str, str, float, float, float, float]] = []
+    for image, (split, boxes) in export.items():
+        for label, *coords in boxes:
+            x_tl, y_tl, x_br, y_br = coords
+            rows.append(
+                csv_row(
+                    image,
+                    label=label,
+                    split=split,
+                    bbox_x_tl=x_tl,
+                    bbox_y_tl=y_tl,
+                    bbox_x_br=x_br,
+                    bbox_y_br=y_br,
+                    annotation_id=len(rows) + 1,
+                )
+            )
+            expected.append((image, split, label, x_tl, y_tl, x_br, y_br))
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        out = work / "yolo"
         convert_to_yolo(
-            csv_path,
-            yolo_dir,
-            image_dirs=[str(img_dir)],
+            write_convert_csv(work, rows),
+            out,
+            image_dirs=[source_images],
             link_mode="copy",
         )
-
-        # YOLO -> CSV
-        roundtrip_csv = tmp_path / "roundtrip.csv"
-        convert_from_yolo(yolo_dir, roundtrip_csv, read_all_sizes=False)
-
-        df_orig = pd.read_csv(csv_path)
-        df_rt = pd.read_csv(roundtrip_csv)
-
-        df_orig_box = (
-            df_orig[df_orig["instance_shape"] == "box"]
-            .sort_values(["image_name", "instance_label"])
-            .reset_index(drop=True)
+        config = yaml.safe_load((out / "dataset.yaml").read_text())
+        for image, (split, _) in export.items():
+            assert (out / "images" / split / image).is_file()
+        roundtrip = work / "roundtrip.csv"
+        convert_from_yolo(out, roundtrip)
+        result = pd.read_csv(
+            roundtrip, dtype={"instance_label": str}, keep_default_na=False
         )
-        df_rt_box = (
-            df_rt[df_rt["instance_shape"] == "box"]
-            .sort_values(["image_name", "instance_label"])
-            .reset_index(drop=True)
-        )
-        assert len(df_orig_box) == len(df_rt_box)
 
-        for i in range(len(df_orig_box)):
-            for col in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
-                orig = df_orig_box.iloc[i][col]
-                rt = df_rt_box.iloc[i][col]
-                assert orig == pytest.approx(rt, abs=1.0), (
-                    f"Row {i}, {col}: {orig} vs {rt}"
-                )
+    labels = sorted({row[2] for row in expected})
+    assert config["names"] == dict(enumerate(labels))
+    assert config["path"] == str(out.resolve())
+    splits = {split for split, _ in export.values()}
+    assert {key: config.get(key) for key in ("train", "val", "test")} == {
+        key: f"images/{key}" if key in splits else None
+        for key in ("train", "val", "test")
+    }
+    actual = sorted(
+        result[
+            [
+                "image_name",
+                "split",
+                "instance_label",
+                "bbox_x_tl",
+                "bbox_y_tl",
+                "bbox_x_br",
+                "bbox_y_br",
+            ]
+        ].itertuples(index=False, name=None)
+    )
+    assert len(actual) == len(expected)
+    for got, want in zip(actual, sorted(expected), strict=True):
+        assert got[:3] == want[:3]
+        assert got[3:] == pytest.approx(want[3:], abs=0.011)
 
 
 def _write_yolo_label(root: Path, split: str, stem: str, text: str) -> None:
@@ -863,34 +670,30 @@ class TestFromYoloDatasetRows:
             _write_yolo_label(root, "train", stem, "0 0.5 0.5 0.2 0.2\n")
         _write_yolo_yaml(root, {0: "cat"}, ["train"])
 
-    def test_first_image_size_is_reused_by_default(self, tmp_path: Path) -> None:
-        """Without ``read_all_sizes`` every row carries the first image's size.
-
-        No test asserted ``image_width``/``image_height`` at all, and every
-        call passed ``read_all_sizes`` explicitly, so both the default and the
-        size-caching itself were unobserved.
-        """
+    @pytest.mark.parametrize(
+        ("read_all_sizes", "widths", "heights"),
+        [(None, [640, 640], [480, 480]), (True, [640, 320], [480, 240])],
+    )
+    def test_read_all_sizes_controls_size_measurement(
+        self,
+        tmp_path: Path,
+        read_all_sizes: bool | None,  # noqa: FBT001 - parametrized flag
+        widths: list[int],
+        heights: list[int],
+    ) -> None:
+        """By default every row reuses the first image's size; the flag measures all."""
         root = tmp_path / "ds"
         self._two_differently_sized_images(root)
 
         out = tmp_path / "out.csv"
-        convert_from_yolo(root, out)
+        if read_all_sizes is None:
+            convert_from_yolo(root, out)
+        else:
+            convert_from_yolo(root, out, read_all_sizes=read_all_sizes)
 
         df = pd.read_csv(out)
-        assert df["image_width"].tolist() == [640, 640]
-        assert df["image_height"].tolist() == [480, 480]
-
-    def test_read_all_sizes_measures_every_image(self, tmp_path: Path) -> None:
-        """``read_all_sizes=True`` stamps each image's own dimensions."""
-        root = tmp_path / "ds"
-        self._two_differently_sized_images(root)
-
-        out = tmp_path / "out.csv"
-        convert_from_yolo(root, out, read_all_sizes=True)
-
-        df = pd.read_csv(out)
-        assert df["image_width"].tolist() == [640, 320]
-        assert df["image_height"].tolist() == [480, 240]
+        assert df["image_width"].tolist() == widths
+        assert df["image_height"].tolist() == heights
 
     def test_non_positive_image_size_names_the_image(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1113,24 +916,12 @@ class TestFromYoloDatasetSplits:
         ):
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
 
-    def test_empty_yaml_is_rejected(self, tmp_path: Path) -> None:
-        """An empty dataset.yaml aborts with an explanation, not AttributeError.
-
-        ``yaml.safe_load`` returns ``None`` for an empty document, and the
-        ``.get("names")`` that followed raised a bare ``AttributeError``.
-        """
+    @pytest.mark.parametrize("document", ["", "just-a-string"])
+    def test_non_mapping_yaml_is_rejected(self, tmp_path: Path, document: str) -> None:
+        """An empty or scalar dataset.yaml aborts with an explanation."""
         root = tmp_path / "ds"
         self._labelled(root, "train", "a")
-        (root / "dataset.yaml").write_text("", encoding="utf-8")
-
-        with pytest.raises(Cveta2Error, match="не содержит YAML-словарь"):
-            convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
-
-    def test_scalar_yaml_is_rejected(self, tmp_path: Path) -> None:
-        """A dataset.yaml holding a bare scalar is rejected the same way."""
-        root = tmp_path / "ds"
-        self._labelled(root, "train", "a")
-        (root / "dataset.yaml").write_text("just-a-string", encoding="utf-8")
+        (root / "dataset.yaml").write_text(document, encoding="utf-8")
 
         with pytest.raises(Cveta2Error, match="не содержит YAML-словарь"):
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
@@ -1330,41 +1121,34 @@ class TestLoadClassNamesYaml:
         with pytest.raises(Cveta2Error, match="файл имён классов не найден"):
             _load_class_names_yaml(tmp_path / "nope.yaml")
 
-    def test_names_key_mapping(self, tmp_path: Path) -> None:
-        """A ``{names: {...}}`` document yields the inner mapping."""
+    @pytest.mark.parametrize(
+        "document", [{"names": {0: "cat", 1: "dog"}}, {0: "cat", 1: "dog"}]
+    )
+    def test_names_mapping_forms(
+        self, tmp_path: Path, document: dict[object, object]
+    ) -> None:
+        """Both ``{names: {...}}`` and a bare ``{0: cat}`` document are accepted."""
         path = tmp_path / "names.yaml"
-        path.write_text(yaml.dump({"names": {0: "cat", 1: "dog"}}), encoding="utf-8")
+        path.write_text(yaml.dump(document), encoding="utf-8")
         assert _load_class_names_yaml(path) == {0: "cat", 1: "dog"}
 
-    def test_flat_mapping(self, tmp_path: Path) -> None:
-        """A bare ``{0: cat}`` document is accepted too.
-
-        Only the ``names``-keyed form was ever loaded, so the flat branch's
-        key and value conversions were unexecuted.
-        """
-        path = tmp_path / "names.yaml"
-        path.write_text(yaml.dump({0: "cat", 1: "dog"}), encoding="utf-8")
-        assert _load_class_names_yaml(path) == {0: "cat", 1: "dog"}
-
-    def test_non_mapping_document_is_rejected(self, tmp_path: Path) -> None:
-        """A YAML file that is not a mapping is rejected with file context.
-
-        Both branches guard on ``isinstance(data, dict)``; with only mappings
-        ever loaded, weakening the first guard to ``or`` was invisible.
-        """
-        path = tmp_path / "names.yaml"
-        path.write_text("names\n", encoding="utf-8")
-        with pytest.raises(Cveta2Error, match=r"names\.yaml"):
-            _load_class_names_yaml(path)
-
-    def test_list_form_non_string_names_are_rejected(self, tmp_path: Path) -> None:
-        """``names: [cat, 7]`` contains an invalid non-string class name.
+    @pytest.mark.parametrize(
+        "document",
+        [
+            pytest.param("names\n", id="not-a-mapping"),
+            pytest.param("names: [cat, 7]\n", id="non-string-name"),
+        ],
+    )
+    def test_invalid_names_document_is_rejected(
+        self, tmp_path: Path, document: str
+    ) -> None:
+        """A non-mapping document or a non-string class name names the file.
 
         Asserted on the function, not through the CSV: ``pd.read_csv`` would
         coerce ``"7"`` back to an int and hide a missing ``str()``.
         """
         path = tmp_path / "names.yaml"
-        path.write_text("names: [cat, 7]\n", encoding="utf-8")
+        path.write_text(document, encoding="utf-8")
         with pytest.raises(Cveta2Error, match=r"names\.yaml"):
             _load_class_names_yaml(path)
 

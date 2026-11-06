@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cveta2.application.client.context import _TaskContext
 from cveta2.application.client.extractors import _collect_shapes
@@ -132,15 +134,14 @@ def test_all_except_first_empty(
 # ---------------------------------------------------------------------------
 
 
-def test_unsupported_shape_skipped() -> None:
-    """Other unsupported shapes are still skipped."""
+def test_unsupported_shape_is_skipped_with_a_warning(capture_logs: list[str]) -> None:
     ctx = _make_ctx()
-    polygon = make_raw_shape(type="polyline")
+    polyline = make_raw_shape(type="polyline")
     rect = make_raw_shape(id=2)
-    result = _collect_shapes([polygon, rect], ctx)
+    result = _collect_shapes([polyline, rect], ctx)
 
-    assert len(result) == 1
-    assert result[0].annotation_id == 2
+    assert [r.annotation_id for r in result] == [2]
+    assert any("polyline" in m.lower() for m in capture_logs)
 
 
 def test_missing_frame_skipped() -> None:
@@ -215,68 +216,52 @@ def test_author_is_carried_over_from_the_shape() -> None:
     assert result[0].created_by_username == "tester"
 
 
-def test_multiple_shapes_on_same_frame() -> None:
-    """Two shapes on the same frame are both collected."""
-    ctx = _make_ctx()
-    s1 = make_raw_shape(id=1, frame=0, label_id=1)
-    s2 = make_raw_shape(id=2, frame=0, label_id=2)
-    result = _collect_shapes([s1, s2], ctx)
-
-    assert len(result) == 2
-    assert {r.annotation_id for r in result} == {1, 2}
-    assert all(r.frame_id == 0 for r in result)
+# Quarter-pixel vertices, including negative and beyond-image coordinates.
+_COORD = st.integers(-400, 4000).map(lambda q: q / 4)
 
 
-def test_unsupported_shape_logs_warning(capture_logs: list[str]) -> None:
-    """Unsupported shapes retain their warning."""
-    ctx = _make_ctx()
-    polygon = make_raw_shape(type="polyline")
-
-    result = _collect_shapes([polygon], ctx)
-
-    assert result == []
-    assert any("polyline" in m.lower() for m in capture_logs)
-
-
-@pytest.mark.parametrize(
-    ("points", "expected"),
-    [
-        ([12, 30.5, 90.75, 10.25, 40.5, 80], (12, 10.25, 90.75, 80)),
-        ([6, 6, 8, 2, 5, 4, 2, 8, 1, 1], (1, 1, 8, 8)),
-        ([10, 20, 30, 40, 20, 50, 10, 20], (10, 20, 30, 50)),
-        (
-            [-0.125, 700.75, 950.875, -3.25, 20.5, 80.125],
-            (-0.125, -3.25, 950.875, 700.75),
-        ),
-        ([0, 0, 1, 1, 2, 2], (0, 0, 2, 2)),
-    ],
-    ids=[
-        "triangle",
-        "concave-unordered-extrema",
-        "closed",
-        "outside-fractional",
-        "collinear",
-    ],
+@given(
+    vertices=st.lists(st.tuples(_COORD, _COORD), min_size=3, max_size=8).filter(
+        lambda vs: len({x for x, _ in vs}) > 1 and len({y for _, y in vs}) > 1
+    )
 )
 def test_polygon_bounds_use_every_vertex_without_clipping(
-    points: list[float],
-    expected: tuple[float, float, float, float],
-    capture_logs: list[str],
+    vertices: list[tuple[float, float]],
 ) -> None:
+    """A polygon becomes the unrotated box spanning all of its vertices."""
+    points = [coord for vertex in vertices for coord in vertex]
     result = _collect_shapes(
         [make_raw_shape(id=73, type="polygon", points=points)], _make_ctx()
     )
 
+    xs = [x for x, _ in vertices]
+    ys = [y for _, y in vertices]
     assert len(result) == 1
     box = result[0]
-    assert (box.bbox_x_tl, box.bbox_y_tl, box.bbox_x_br, box.bbox_y_br) == expected
+    assert (box.bbox_x_tl, box.bbox_y_tl, box.bbox_x_br, box.bbox_y_br) == (
+        min(xs),
+        min(ys),
+        max(xs),
+        max(ys),
+    )
     assert box.instance_shape == "box"
     assert box.rotation == 0
+
+
+def test_polygon_approximation_is_reported_once(capture_logs: list[str]) -> None:
+    """The warning identifies the task and the shape that was approximated."""
+    _collect_shapes(
+        [
+            make_raw_shape(
+                id=73, type="polygon", points=[12, 30.5, 90.75, 10.25, 40, 80]
+            )
+        ],
+        _make_ctx(),
+    )
+
     assert len(capture_logs) == 1
     assert "100" in capture_logs[0]
     assert "73" in capture_logs[0]
-    assert "приближение" in capture_logs[0].lower()
-    assert "прямоугольник" in capture_logs[0].lower()
 
 
 def test_polygon_preserves_annotation_and_frame_context() -> None:

@@ -5,11 +5,14 @@ import os
 import subprocess
 import sys
 from collections.abc import Iterator
+from math import isfinite
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 import yaml
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 from yaml.error import Mark
 
@@ -18,10 +21,20 @@ from cveta2.domain.errors import Cveta2Error, MissingCredentialsError
 from tests.helpers import write_split_config_yaml
 
 
-@pytest.mark.parametrize("value", [-1, float("inf"), float("-inf"), float("nan")])
-def test_invalid_timeout_rejected(value: float) -> None:
-    with pytest.raises(ValidationError):
-        CvatConfig(request_timeout=value)
+@given(
+    value=st.one_of(
+        st.none(),
+        st.sampled_from([0, 1.5, -1, float("inf"), float("-inf"), float("nan")]),
+        st.floats(),
+    )
+)
+def test_request_timeout_must_be_finite_and_non_negative(value: float | None) -> None:
+    """``None`` disables the timeout; any other value must be finite and >= 0."""
+    if value is None or (isfinite(value) and value >= 0):
+        assert CvatConfig(request_timeout=value).request_timeout == value
+    else:
+        with pytest.raises(ValidationError):
+            CvatConfig(request_timeout=value)
 
 
 def test_selected_config_credential_hint(
@@ -246,11 +259,6 @@ def test_doctor_required_unavailable_and_optional_unavailable(
     with pytest.raises(SystemExit) as error:
         doctor.run_doctor()
     assert error.value.code == 1
-
-
-@pytest.mark.parametrize("value", [None, 0, 1.5])
-def test_valid_timeout_semantics_preserved(value: float | None) -> None:
-    assert CvatConfig(request_timeout=value).request_timeout == value
 
 
 @pytest.mark.parametrize("raw", ["-1", "nan", "inf"])

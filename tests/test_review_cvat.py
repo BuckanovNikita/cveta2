@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 from cveta2.adapters.config.settings import CvatConfig
-from cveta2.adapters.cvat.transport import _should_retry_write
 from cveta2.adapters.files.manifests import delete_manifest
 from cveta2.application.client.session import TaskWriteSession
 from cveta2.application.ports.cvat import CvatApiPort
@@ -84,15 +83,6 @@ def test_incomplete_boxes_stop_direct_and_service_writes(column: str) -> None:
     assert service_client.mock_calls == []
 
 
-def test_fingerprint_includes_annotation_content() -> None:
-    original = rows()
-    edited = rows()
-    edited.loc[0, "bbox_x_tl"] = 100
-    assert compute_fingerprint(
-        ["a.jpg"], [], ["car"], annotations=original
-    ) != compute_fingerprint(["a.jpg"], [], ["car"], annotations=edited)
-
-
 def test_cleanup_permission_failure_is_a_warning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -103,12 +93,6 @@ def test_cleanup_permission_failure_is_a_warning(
 
     monkeypatch.setattr(Path, "unlink", denied)
     delete_manifest(1, "identity", host="http://cvat.invalid", task_id=99)
-
-
-def test_503_retry_after_does_not_authorize_write_replay() -> None:
-    assert not _should_retry_write(
-        CvatApiError("already applied", status_code=503, retry_after=0)
-    )
 
 
 def test_conflicting_shape_readback_never_appends() -> None:
@@ -155,6 +139,7 @@ def test_empty_and_deleted_records_are_valid(shape: str | None) -> None:
     ("column", "value"),
     [
         ("instance_label", "person"),
+        ("bbox_x_tl", 100),
         ("bbox_y_tl", 20),
         ("instance_attributes", '{"color":"red"}'),
         ("issue_text", "changed comment"),
@@ -277,27 +262,20 @@ def test_cleanup_failure_preserves_success_and_prevents_future_writes(
     monkeypatch.setattr(
         "cveta2.application.use_cases.upload.recovery._stage_images", stage
     )
-    assert (
-        upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=True))
-        == first
-    )
-    assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"])) == first
+    for resuming in (True, False):
+        capture_logs.clear()
+        assert (
+            upload_cvat_dataset(
+                client, make_request(image_names=["a.jpg"], resume=resuming)
+            )
+            == first
+        )
+        # Each recovery names the task whose stale manifest it could not remove.
+        assert any(
+            f"задачу {first.task_id} " in message and "устаревшее" in message
+            for message in capture_logs
+        )
     stage.assert_not_called()
-
-
-def test_applied_then_503_has_exactly_one_effect() -> None:
-    from cveta2.adapters.execution.retry import network_retry
-
-    effects: list[int] = []
-
-    @network_retry(_should_retry_write, label="simulated ambiguous write")
-    def applied() -> None:
-        effects.append(1)
-        raise CvatApiError("applied before error", status_code=503, retry_after=0)
-
-    with pytest.raises(CvatApiError):
-        applied()
-    assert effects == [1]
 
 
 @pytest.mark.parametrize("with_columns", [False, True])
@@ -368,26 +346,62 @@ def test_deletion_only_request_resumes_without_shape_columns(
 
 
 @pytest.mark.parametrize(
-    ("actual", "expected", "matches"),
+    ("actual", "expected", "prefix", "matches"),
     [
-        (["images/old/a.jpg"], ["images/old/a.jpg"], True),
-        (["old/a.jpg"], ["images/old/a.jpg"], True),
-        (["new/a.jpg"], ["images/old/a.jpg"], False),
-        (["images/new/a.jpg"], ["images/old/a.jpg"], False),
-        (["a.jpg"], ["images/old/a.jpg"], True),
-        (["a.jpg", "a.jpg"], ["images/old/a.jpg", "images/new/a.jpg"], False),
-        (["b.jpg", "a.jpg"], ["images/a.jpg", "images/b.jpg"], False),
+        (["images/old/a.jpg"], ["images/old/a.jpg"], "/images/", True),
+        (["old/a.jpg"], ["images/old/a.jpg"], "/images/", True),
+        (["new/a.jpg"], ["images/old/a.jpg"], "/images/", False),
+        (["images/new/a.jpg"], ["images/old/a.jpg"], "/images/", False),
+        (["a.jpg"], ["images/old/a.jpg"], "/images/", True),
+        (
+            ["a.jpg", "a.jpg"],
+            ["images/old/a.jpg", "images/new/a.jpg"],
+            "/images/",
+            False,
+        ),
+        (["b.jpg", "a.jpg"], ["images/a.jpg", "images/b.jpg"], "/images/", False),
+        # Prefix normalization, including an empty prefix.
+        (["old/a.jpg"], ["old/a.jpg"], "", True),
+        (["old/a.jpg"], ["old/a.jpg"], "/", True),
+        (["old/a.jpg"], ["imagesX/old/a.jpg"], "/imagesX/", True),
+        (["different/a.jpg"], ["old/a.jpg"], "", False),
+        (["different/a.jpg"], ["old/a.jpg"], "/", False),
+        ([], ["old/a.jpg"], "/", False),
+        (["different/a.jpg"], ["imagesX/old/a.jpg"], "/imagesX/", False),
+        ([], ["old/a.jpg"], "", False),
+        ([], ["imagesX/old/a.jpg"], "/imagesX/", False),
+        # Prefix characters are a literal prefix, not a strip set.
+        (["dir/a.jpg"], [" /dir/a.jpg"], " ", True),
+        (["dir/a.jpg"], ["XXX/dir/a.jpg"], "XXX", True),
+        (["dir/a.jpg"], ["XXXX/dir/a.jpg"], "", False),
     ],
 )
 def test_frame_paths_preserve_available_directory_identity(
     actual: list[str],
     expected: list[str],
+    prefix: str,
     *,
     matches: bool,
 ) -> None:
     from cveta2.application.use_cases.upload import _frames_match
 
-    assert _frames_match(actual, expected, "/images/") == matches
+    assert _frames_match(actual, expected, prefix) == matches
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected", "warns"),
+    [
+        (["a.jpg"], ["images/old/a.jpg"], True),
+        (["images/dir/a.jpg"], ["images/dir/a.jpg"], False),
+    ],
+)
+def test_only_basename_fallback_reports_its_verification_limit(
+    capture_logs: list[str], actual: list[str], expected: list[str], *, warns: bool
+) -> None:
+    from cveta2.application.use_cases.upload import _frames_match
+
+    assert _frames_match(actual, expected, "images")
+    assert any("подтвердить невозможно" in m for m in capture_logs) == warns
 
 
 def test_active_project_name_query_does_not_trust_stale_single_match() -> None:
@@ -734,25 +748,6 @@ def test_incomplete_completed_outcome_is_a_domain_error(missing: str) -> None:
         _completed_outcome(make_request(image_names=["a.jpg"]), manifest)
 
 
-def test_basename_fallback_reports_its_verification_limit(
-    capture_logs: list[str],
-) -> None:
-    from cveta2.application.use_cases.upload import _frames_match
-
-    assert _frames_match(["a.jpg"], ["images/old/a.jpg"], "images")
-    assert any("подтвердить невозможно" in message for message in capture_logs)
-
-
-@pytest.mark.parametrize("prefix", ["", "/", "/imagesX/"])
-def test_frame_prefix_normalization_and_empty_prefix(prefix: str) -> None:
-    from cveta2.application.use_cases.upload import _frames_match
-
-    expected = ["imagesX/old/a.jpg"] if prefix == "/imagesX/" else ["old/a.jpg"]
-    assert _frames_match(["old/a.jpg"], expected, prefix)
-    assert not _frames_match(["different/a.jpg"], expected, prefix)
-    assert not _frames_match([], expected, prefix)
-
-
 def test_ambiguous_replacement_create_cannot_reuse_the_old_missing_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -892,46 +887,6 @@ def test_completed_recovery_cleans_the_exact_stale_manifest(
     )
     assert list_manifests(7, host=client.host) == []
     stage.assert_not_called()
-
-
-@pytest.mark.parametrize("resuming", [False, True])
-def test_stale_cleanup_warning_identifies_task_on_each_recovery(
-    monkeypatch: pytest.MonkeyPatch,
-    capture_logs: list[str],
-    *,
-    resuming: bool,
-) -> None:
-    from tests.test_upload_service import (
-        make_client,
-        make_request,
-        make_s3,
-        seeded_bucket,
-    )
-
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
-    make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
-    original = Path.unlink
-
-    def denied(self: Path, *, missing_ok: bool = False) -> None:
-        if "uploads" in self.parts and self.suffix == ".json":
-            raise PermissionError("simulated")
-        original(self, missing_ok=missing_ok)
-
-    monkeypatch.setattr(Path, "unlink", denied)
-    first = upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
-    capture_logs.clear()
-    assert (
-        upload_cvat_dataset(
-            client, make_request(image_names=["a.jpg"], resume=resuming)
-        )
-        == first
-    )
-    assert any(
-        f"задачу {first.task_id} " in message and "устаревшее" in message
-        for message in capture_logs
-    )
 
 
 def test_changed_cloud_storage_rejects_before_staging(
@@ -1094,23 +1049,6 @@ def test_completion_save_failure_warns_without_reclassifying_success(
     monkeypatch.setattr(upload_manifest, "replace_shared_bytes", denied)
     save_manifest(manifest)
     assert any("completion bookkeeping denied" in message for message in capture_logs)
-
-
-@pytest.mark.parametrize("prefix", [" ", "XXX"])
-def test_cloud_prefix_characters_are_not_strip_sets(prefix: str) -> None:
-    from cveta2.application.use_cases.upload import _frames_match
-
-    assert _frames_match(["dir/a.jpg"], [f"{prefix}/dir/a.jpg"], prefix)
-    assert not _frames_match(["dir/a.jpg"], ["XXXX/dir/a.jpg"], "")
-
-
-def test_full_frame_paths_do_not_report_basename_uncertainty(
-    capture_logs: list[str],
-) -> None:
-    from cveta2.application.use_cases.upload import _frames_match
-
-    assert _frames_match(["images/dir/a.jpg"], ["images/dir/a.jpg"], "images")
-    assert not any("подтвердить невозможно" in message for message in capture_logs)
 
 
 def test_preflight_unknown_task_identity_is_actionable_before_reads() -> None:

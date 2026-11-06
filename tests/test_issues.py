@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from cveta2.application.client.assembly import task_to_records
@@ -121,35 +123,35 @@ def _issue_row(
 # ---------------------------------------------------------------------------
 
 
+_RAW_ISSUES = st.lists(
+    st.builds(
+        RawIssue,
+        id=st.integers(1, 99),
+        frame=st.integers(0, 3),
+        resolved=st.booleans(),
+        comments=st.lists(st.sampled_from(["a", "b", "плохой бокс"]), max_size=3),
+    ),
+    max_size=5,
+)
+
+
 class TestBuildFrameIssues:
-    def test_no_issues_gives_empty_mapping(self) -> None:
-        assert _build_frame_issues([]) == {}
+    @given(issues=_RAW_ISSUES)
+    def test_issues_are_joined_per_frame_in_order(self, issues: list[RawIssue]) -> None:
+        """Comments join with ``"; "``; issues on one frame join with ``" | "``.
 
-    def test_single_issue_multi_comment_joined_with_semicolon(self) -> None:
-        issues = [RawIssue(id=1, frame=0, resolved=False, comments=["a", "b"])]
-        assert _build_frame_issues(issues) == {0: ("a; b", "open")}
+        Fetched states are only ``open``/``resolved``: the reserved ``new``
+        state, which ``upload`` turns into a CVAT issue, is never produced.
+        """
+        expected: dict[int, tuple[list[str], list[str]]] = {}
+        for issue in issues:
+            texts, states = expected.setdefault(issue.frame, ([], []))
+            texts.append("; ".join(issue.comments))
+            states.append("resolved" if issue.resolved else "open")
 
-    def test_resolved_issue_state(self) -> None:
-        issues = [RawIssue(id=1, frame=2, resolved=True, comments=["done"])]
-        assert _build_frame_issues(issues) == {2: ("done", "resolved")}
-
-    def test_two_issues_on_one_frame_joined_positionally(self) -> None:
-        issues = [
-            RawIssue(id=1, frame=0, resolved=False, comments=["first"]),
-            RawIssue(id=2, frame=0, resolved=True, comments=["second", "more"]),
-        ]
         assert _build_frame_issues(issues) == {
-            0: ("first | second; more", "open | resolved"),
-        }
-
-    def test_issues_on_different_frames(self) -> None:
-        issues = [
-            RawIssue(id=1, frame=0, resolved=False, comments=["x"]),
-            RawIssue(id=2, frame=3, resolved=True, comments=["y"]),
-        ]
-        assert _build_frame_issues(issues) == {
-            0: ("x", "open"),
-            3: ("y", "resolved"),
+            frame: (" | ".join(texts), " | ".join(states))
+            for frame, (texts, states) in expected.items()
         }
 
     def test_from_raw_builds_frame_issues(self) -> None:
@@ -303,15 +305,6 @@ class TestCreateTaskIssues:
         api.create_issue.assert_not_called()
         assert any("img_0.jpg" in msg for msg in capture_logs)
 
-    def test_dedupe_on_image_name_and_text(self) -> None:
-        api = _api_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_api(api)
-        row = _issue_row("img_0.jpg", "same")
-        df = pd.DataFrame([row, row])
-
-        assert client.create_task_issues(7, df) == 1
-        assert api.create_issue.call_count == 1
-
     def test_dedupe_ignores_columns_outside_the_key(self) -> None:
         """Rows identical in image, text and bbox collapse to one issue.
 
@@ -379,44 +372,35 @@ class TestCreateTaskIssues:
             {"image_name": "img_0.jpg"},
             {"image_name": "img_0.jpg", "issue_state": "new"},
             {"image_name": "img_0.jpg", "issue_text": "нет состояния"},
+            _issue_row("img_0.jpg", ""),
+            _issue_row("img_0.jpg", "   "),
+            _issue_row("img_0.jpg", None),  # type: ignore[arg-type]
+            _issue_row("img_0.jpg", "a", issue_state="open"),
+            _issue_row("img_0.jpg", "b", issue_state="resolved"),
         ],
-        ids=["neither-column", "state-without-text", "text-without-state"],
+        ids=[
+            "neither-column",
+            "state-without-text",
+            "text-without-state",
+            "empty-text",
+            "whitespace-text",
+            "missing-text",
+            "open",
+            "resolved",
+        ],
     )
-    def test_missing_issue_column_returns_zero(self, row: dict[str, Any]) -> None:
-        """Both columns are required, not just ``issue_state``.
+    def test_only_new_rows_with_text_are_issues(self, row: dict[str, Any]) -> None:
+        """Both columns are required; only ``new`` with non-blank text is posted.
 
-        Only the "neither" case existed, so the branch that back-fills a
-        missing ``issue_text`` was never entered: it could have been filled
-        with a non-empty placeholder, turning every ``new`` row into an issue.
+        Rows carry a full bbox where they have issue columns, so they are
+        rejected by the predicate itself, not dropped downstream. ``open`` and
+        ``resolved`` were fetched from CVAT and are already there; a blank
+        cell read as NaN must not stringify into a non-empty comment.
         """
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
 
         assert client.create_task_issues(7, pd.DataFrame([row])) == 0
-        api.create_issue.assert_not_called()
-
-    def test_new_state_with_empty_text_ignored(self) -> None:
-        """An empty ``issue_text`` disqualifies the row even when it has a bbox.
-
-        The row previously carried no bbox, so it was dropped downstream for
-        the wrong reason: the ``issue_text != ""`` half of the predicate could
-        be inverted or compared against a different literal and the count
-        stayed 0 regardless.
-        """
-        api = _api_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_api(api)
-        df = pd.DataFrame([_issue_row("img_0.jpg", "")])
-
-        assert client.create_task_issues(7, df) == 0
-        api.create_issue.assert_not_called()
-
-    def test_whitespace_only_text_is_not_an_issue(self) -> None:
-        """Padding must be stripped before the emptiness check."""
-        api = _api_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_api(api)
-        df = pd.DataFrame([_issue_row("img_0.jpg", "   ")])
-
-        assert client.create_task_issues(7, df) == 0
         api.create_issue.assert_not_called()
 
     def test_padding_around_state_and_text_is_stripped(self) -> None:
@@ -435,22 +419,6 @@ class TestCreateTaskIssues:
         assert client.create_task_issues(7, df) == 1
         assert api.create_issue.call_args.args[0].message == "плохой бокс"
 
-    def test_missing_text_on_a_new_row_is_not_an_issue(self) -> None:
-        """``pd.read_csv`` turns a blank ``issue_text`` cell into NaN.
-
-        ``test_csv_roundtrip_empty_state_read_as_nan_is_handled`` had NaN in
-        *both* columns, so the row was rejected on the state alone and the
-        ``fillna("")`` on the text was never load-bearing — without it NaN
-        stringifies to something non-empty and the row gets posted.
-        """
-        api = _api_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_api(api)
-        df = pd.DataFrame([_issue_row("img_0.jpg", "text")])
-        df["issue_text"] = None
-
-        assert client.create_task_issues(7, df) == 0
-        api.create_issue.assert_not_called()
-
     def test_csv_roundtrip_empty_state_read_as_nan_is_handled(
         self, tmp_path: Path
     ) -> None:
@@ -467,26 +435,6 @@ class TestCreateTaskIssues:
         client = _client_with_api(api)
 
         assert client.create_task_issues(7, loaded) == 0
-        api.create_issue.assert_not_called()
-
-    def test_open_and_resolved_states_are_not_uploaded(self) -> None:
-        """Only ``new`` is uploaded; fetched states are already in CVAT.
-
-        These rows previously had no bbox, so they were discarded downstream
-        whatever the predicate said — the ``&`` joining state and text could
-        become ``|`` and the count stayed 0.  With a full bbox the row would
-        actually be posted.
-        """
-        api = _api_for_issue_creation(1, _TWO_JOBS)
-        client = _client_with_api(api)
-        df = pd.DataFrame(
-            [
-                _issue_row("img_0.jpg", "a", issue_state="open"),
-                _issue_row("img_0.jpg", "b", issue_state="resolved"),
-            ]
-        )
-
-        assert client.create_task_issues(7, df) == 0
         api.create_issue.assert_not_called()
 
 
@@ -541,12 +489,6 @@ class TestGetTaskIssuesAdapter:
 
         assert adapter.get_task_issues(42) == []
         sdk.api_client.comments_api.list_endpoint.call_with_http_info.assert_not_called()
-
-
-def test_reserved_new_state_not_produced_by_fetch() -> None:
-    issues = [RawIssue(id=1, frame=0, resolved=False, comments=["x"])]
-    _text, state = _build_frame_issues(issues)[0]
-    assert state != "new"
 
 
 class TestIssueCreationFailure:
@@ -624,75 +566,33 @@ class TestIssuesNotYetOnTask:
         )
         assert _issues_not_yet_on_task(existing, [issue]) == [issue]
 
-    def test_an_issue_without_comments_cannot_match(self) -> None:
-        existing = [
-            RawIssue(id=1, frame=5, resolved=False, comments=[], position=[1, 2, 3, 4])
-        ]
-        built = [_new_issue(frame=5, message="a")]
-        assert _issues_not_yet_on_task(existing, built) == built
-
-    def test_an_issue_already_on_the_task_is_dropped(self) -> None:
-        existing = [
-            RawIssue(
-                id=1,
-                frame=5,
-                resolved=False,
-                comments=["первая"],
-                position=[1.0, 2.0, 3.0, 4.0],
-            )
-        ]
-        built = [_new_issue(frame=5, message="первая")]
-
-        assert _issues_not_yet_on_task(existing, built) == []
-
-    def test_a_missing_issue_survives(self) -> None:
+    @pytest.mark.parametrize(
+        ("comments", "frame", "message", "matched"),
+        [
+            pytest.param(["первая"], 5, "первая", True, id="already-on-task"),
+            pytest.param(["первая"], 5, "вторая", False, id="missing"),
+            pytest.param(["текст"], 6, "текст", False, id="other-frame"),
+            pytest.param(["a", "b"], 5, "b", False, id="reply-is-not-an-issue"),
+            pytest.param([], 5, "a", False, id="no-comments"),
+        ],
+    )
+    def test_match_needs_frame_and_first_comment(
+        self, comments: list[str], frame: int, message: str, *, matched: bool
+    ) -> None:
+        """One comment per frame; a reply is no proof a separate issue exists."""
         existing = [
             RawIssue(
-                id=1,
-                frame=5,
-                resolved=False,
-                comments=["первая"],
-                position=[1.0, 2.0, 3.0, 4.0],
+                id=1, frame=5, resolved=False, comments=comments, position=[1, 2, 3, 4]
             )
         ]
-        built = [_new_issue(frame=5, message="вторая")]
+        built = [_new_issue(frame=frame, message=message)]
 
-        assert _issues_not_yet_on_task(existing, built) == built
-
-    def test_the_same_text_on_another_frame_is_not_a_match(self) -> None:
-        """One comment per frame; matching on text alone would lose the rest."""
-        existing = [
-            RawIssue(
-                id=1,
-                frame=5,
-                resolved=False,
-                comments=["текст"],
-                position=[1.0, 2.0, 3.0, 4.0],
-            )
-        ]
-        built = [_new_issue(frame=6, message="текст")]
-
-        assert _issues_not_yet_on_task(existing, built) == built
+        assert _issues_not_yet_on_task(existing, built) == ([] if matched else built)
 
     def test_nothing_on_the_task_keeps_everything(self) -> None:
         built = [_new_issue(frame=1, message="a"), _new_issue(frame=2, message="b")]
 
         assert _issues_not_yet_on_task([], built) == built
-
-    def test_a_reply_does_not_replace_another_issue(self) -> None:
-        """A matching reply is not proof that a separate issue was created."""
-        existing = [
-            RawIssue(
-                id=1,
-                frame=5,
-                resolved=False,
-                comments=["a", "b"],
-                position=[1.0, 2.0, 3.0, 4.0],
-            )
-        ]
-        built = [_new_issue(frame=5, message="b")]
-
-        assert _issues_not_yet_on_task(existing, built) == built
 
 
 class TestSkipExistingIssues:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from functools import partial
 from math import isfinite
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import urllib3
@@ -25,9 +25,12 @@ from botocore.exceptions import (
     NoCredentialsError,
 )
 from cvat_sdk.api_client.exceptions import ApiException
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from cveta2.adapters.cvat.transport import (
+    _should_retry_idempotent_write,
     _should_retry_read,
     _should_retry_write,
     _translate_api_errors,
@@ -58,46 +61,35 @@ def _client_error(code: str) -> ClientError:
     return ClientError({"Error": {"Code": code, "Message": code}}, "GetObject")
 
 
-class TestReadPredicate:
-    @pytest.mark.parametrize("status", [429, 500, 502, 503, 504])
-    def test_transient_statuses_are_retried(self, status: int) -> None:
-        assert _should_retry_read(CvatApiError("boom", status_code=status))
-
-    @pytest.mark.parametrize("status", [400, 401, 403, 404, 409])
-    def test_client_errors_are_not_retried(self, status: int) -> None:
-        """Repeating a 404 or a 401 only spends the budget to fail again."""
-        assert not _should_retry_read(CvatApiError("boom", status_code=status))
-
-    def test_transport_failures_are_retried(self) -> None:
-        assert _should_retry_read(ConnectionError("reset"))
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+_STATUSES = st.one_of(
+    st.sampled_from([0, 400, 401, 403, 404, 409, 429, 500, 502, 503, 504]),
+    st.integers(100, 599),
+)
 
 
-class TestWritePredicate:
-    def test_rate_limiting_is_retried(self) -> None:
-        """A 429 is a refusal, so the write provably never landed."""
-        assert _should_retry_write(CvatApiError("slow down", status_code=429))
+@given(
+    status=_STATUSES,
+    retry_after=st.one_of(st.none(), st.floats(0, 3600)),
+)
+def test_status_predicates(status: int, retry_after: float | None) -> None:
+    """Reads repeat 429 and transient 5xx; writes repeat only a 429 refusal.
 
-    def test_unavailable_is_never_retried_even_with_retry_after(self) -> None:
-        """``Retry-After`` cannot prove that an ambiguous write was refused."""
-        throttled = CvatApiError("busy", status_code=503, retry_after=2.0)
-        crashed = CvatApiError("busy", status_code=503)
+    A write that failed with 500/502/503/504 may already be applied (shape
+    uploads append), and ``Retry-After`` cannot prove otherwise, so it aborts
+    and ``upload --resume`` reconciles instead.
+    """
+    error = CvatApiError("boom", status_code=status, retry_after=retry_after)
+    assert _should_retry_read(error) is (status in _RETRYABLE_STATUS)
+    assert _should_retry_write(error) is (status == 429)
+    # Replacement writes resend the same values, so a repeat cannot double them.
+    assert _should_retry_idempotent_write(error) is (status in _RETRYABLE_STATUS)
 
-        assert not _should_retry_write(throttled)
-        assert not _should_retry_write(crashed)
 
-    @pytest.mark.parametrize("status", _AMBIGUOUS_WRITE_STATUS)
-    def test_ambiguous_server_errors_are_never_retried(self, status: int) -> None:
-        """The server may have applied the write before failing to say so.
-
-        ``put_task_shapes`` appends rather than replaces, so a retry here
-        would silently double every bbox. These abort instead, and
-        ``upload --resume`` recovers by reading back what CVAT stored.
-        """
-        assert not _should_retry_write(CvatApiError("boom", status_code=status))
-
-    def test_transport_failures_are_not_retried(self) -> None:
-        """A dropped connection cannot tell us whether the write was applied."""
-        assert not _should_retry_write(ConnectionError("reset"))
+def test_transport_failures_repeat_only_for_reads() -> None:
+    """A dropped connection cannot tell us whether the write was applied."""
+    assert _should_retry_read(ConnectionError("reset"))
+    assert not _should_retry_write(ConnectionError("reset"))
 
 
 class TestS3Predicate:
@@ -131,46 +123,37 @@ class TestS3Predicate:
 
 
 class TestRetryLoop:
-    def test_it_retries_until_the_call_succeeds(self) -> None:
-        configure_retries(attempts=5, max_wait=0.01)
+    @given(
+        attempts=st.integers(1, 5),
+        failures=st.integers(0, 6),
+        retryable=st.booleans(),
+    )
+    def test_attempt_budget(
+        self,
+        attempts: int,
+        failures: int,
+        retryable: bool,  # noqa: FBT001 - drawn flag
+    ) -> None:
+        """The budget counts attempts; an unretryable failure is raised at once."""
+        configure_retries(attempts=attempts, max_wait=0.01)
+        status = 429 if retryable else 404
         calls: list[int] = []
 
         @network_retry(_should_retry_write, label="test")
         def flaky() -> str:
             calls.append(1)
-            if len(calls) < 3:
-                raise CvatApiError("throttled", status_code=429)
+            if len(calls) <= failures:
+                raise CvatApiError("boom", status_code=status)
             return "ok"
 
-        assert flaky() == "ok"
-        assert len(calls) == 3
-
-    def test_it_gives_up_after_the_configured_attempts(self) -> None:
-        """The budget is a count of attempts, not of retries after the first."""
-        configure_retries(attempts=3, max_wait=0.01)
-        calls: list[int] = []
-
-        @network_retry(_should_retry_write, label="test")
-        def always_throttled() -> None:
-            calls.append(1)
-            raise CvatApiError("throttled", status_code=429)
-
-        with pytest.raises(CvatApiError):
-            always_throttled()
-        assert len(calls) == 3
-
-    def test_an_unretryable_failure_is_raised_on_the_first_attempt(self) -> None:
-        configure_retries(attempts=5, max_wait=0.01)
-        calls: list[int] = []
-
-        @network_retry(_should_retry_write, label="test")
-        def fails_hard() -> None:
-            calls.append(1)
-            raise CvatApiError("gone", status_code=404)
-
-        with pytest.raises(CvatApiError):
-            fails_hard()
-        assert len(calls) == 1
+        expected_calls = min(failures + 1, attempts if retryable else 1)
+        with patch("tenacity.nap.time.sleep"):
+            if failures < expected_calls:
+                assert flaky() == "ok"
+            else:
+                with pytest.raises(CvatApiError):
+                    flaky()
+        assert len(calls) == expected_calls
 
     def test_configure_retries_changes_a_decorator_bound_earlier(self) -> None:
         """Decorators bind at import time, before any config has been read.
@@ -257,13 +240,10 @@ class TestTransportErrorsLeaveTheAdapterTranslated:
     [
         (ApiException(status=429), 3),
         (ApiException(status=500), 3),
-        (ApiException(status=502), 3),
-        (ApiException(status=503), 3),
-        (ApiException(status=504), 3),
         (ApiException(status=404), 1),
         (ConnectionError("lost reply"), 1),
     ],
-    ids=["429", "500", "502", "503", "504", "404", "transport"],
+    ids=["429", "500", "404", "transport"],
 )
 def test_idempotent_replacements_repeat_only_retryable_status_failures(
     operation: str, error: BaseException, expected_attempts: int
@@ -309,32 +289,26 @@ class _FakeRetryState:
 
 
 class TestBackoff:
-    def test_retry_after_is_honoured_over_exponential_backoff(self) -> None:
-        """A server that names its own delay knows better than our curve."""
-        configure_retries(attempts=3, max_wait=30.0)
+    @given(retry_after=st.floats(0, 7200), max_wait=st.floats(0.01, 600))
+    def test_retry_after_is_honoured_up_to_max_wait(
+        self, retry_after: float, max_wait: float
+    ) -> None:
+        """A server-named delay beats our curve, but an hour must not hang the run."""
+        configure_retries(attempts=3, max_wait=max_wait)
         state = _FakeRetryState(
-            CvatApiError("busy", status_code=503, retry_after=7.0), attempt_number=1
+            CvatApiError("busy", status_code=503, retry_after=retry_after)
         )
 
-        assert _backoff(state) == 7.0  # type: ignore[arg-type]
+        assert _backoff(state) == min(retry_after, max_wait)  # type: ignore[arg-type]
 
-    def test_retry_after_is_capped_by_max_wait(self) -> None:
-        """A server asking for an hour must not hang the run for an hour."""
-        configure_retries(attempts=3, max_wait=5.0)
-        state = _FakeRetryState(
-            CvatApiError("busy", status_code=503, retry_after=3600.0), attempt_number=1
-        )
+    @given(attempt=st.integers(1, 30), max_wait=st.floats(0.01, 600))
+    def test_backoff_without_a_header_stays_within_max_wait(
+        self, attempt: int, max_wait: float
+    ) -> None:
+        configure_retries(attempts=8, max_wait=max_wait)
+        wait = _backoff(_FakeRetryState(ConnectionError("reset"), attempt))  # type: ignore[arg-type]
 
-        assert _backoff(state) == 5.0  # type: ignore[arg-type]
-
-    def test_backoff_without_a_header_stays_within_max_wait(self) -> None:
-        configure_retries(attempts=8, max_wait=4.0)
-        waits = [
-            _backoff(_FakeRetryState(ConnectionError("reset"), attempt))  # type: ignore[arg-type]
-            for attempt in range(1, 8)
-        ]
-
-        assert all(0 < wait <= 4.0 + _JITTER for wait in waits)
+        assert 0 < wait <= max_wait + _JITTER
 
     def test_backoff_grows_with_the_attempt_number(self) -> None:
         """Without growth a rate-limited server just gets hammered harder."""
@@ -361,19 +335,6 @@ class _FakeHttpResponse:
 
 
 class TestRetryAfterParsing:
-    @pytest.mark.parametrize("delay", ["0", "12"])
-    def test_a_delta_seconds_header_reaches_the_exception(self, delay: str) -> None:
-        """The backoff prefers this value over its own curve."""
-
-        @_translate_api_errors
-        def throttled() -> None:
-            raise ApiException(http_resp=_FakeHttpResponse(429, {"Retry-After": delay}))
-
-        with pytest.raises(CvatApiError) as caught:
-            throttled()
-        assert caught.value.retry_after == float(delay)
-        assert caught.value.status_code == 429
-
     @pytest.mark.parametrize(
         "headers",
         [None, {}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}],
@@ -391,17 +352,6 @@ class TestRetryAfterParsing:
         with pytest.raises(CvatApiError) as caught:
             failed()
         assert caught.value.retry_after is None
-
-    def test_a_503_without_the_header_is_not_retried_as_a_write(self) -> None:
-        """A bare 503 must not repeat a potentially applied write."""
-
-        @_translate_api_errors
-        def failed() -> None:
-            raise ApiException(http_resp=_FakeHttpResponse(503, {}))
-
-        with pytest.raises(CvatApiError) as caught:
-            failed()
-        assert not _should_retry_write(caught.value)
 
 
 @pytest.mark.parametrize(

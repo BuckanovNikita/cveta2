@@ -225,7 +225,7 @@ CVAT allows frames to be marked as deleted (`data_meta.deleted_frames`), but ann
 1. **Collection** (`application/client/extractors.py`): Shapes are collected for ALL frames including deleted ones (needed for label counting, etc.)
 2. **Partition** (`domain/partition.py`): Deletion records are placed FIRST in the concat, so the `sort_values` + `drop_duplicates(keep="first")` in `_latest_row_per_image` picks them in case of ties
 
-Two different tasks can no longer tie, so the only tie left is inside one task: a frame it annotated and also marked deleted. That is the case the concat order settles (see `test_deleted_image_with_annotations_in_same_task`, and `test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort` for why the row position is an explicit sort key rather than assumed sort stability).
+Two different tasks can no longer tie, so the only tie left is inside one task: a frame it annotated and also marked deleted. That is the case the concat order settles (see the pinned examples of `test_partition_matches_specification` in `tests/test_partition.py`, and `test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort` for why the row position is an explicit sort key rather than assumed sort stability).
 
 ## Nested frame names
 

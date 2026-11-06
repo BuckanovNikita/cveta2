@@ -14,6 +14,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 import yaml
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cveta2.adapters.files import materialization as convert
 from cveta2.adapters.files.conversion import (
@@ -26,8 +28,6 @@ from cveta2.adapters.files.materialization import _link_or_copy
 from cveta2.application.use_cases.convert.common import _SizeCache
 from cveta2.composition.conversion import (
     _build_search_dirs,
-    convert_to_coco,
-    convert_to_yolo,
 )
 from cveta2.domain.conversion import (
     CocoBox,
@@ -79,32 +79,28 @@ class TestCoordinateConversion:
     ) -> None:
         assert result == pytest.approx(expected)
 
-    def test_roundtrip(self) -> None:
-        """Pixel -> yolo -> pixel should recover original coords."""
-        original = PixelBox(50.0, 30.0, 200.0, 180.0)
-        img_w, img_h = 640, 480
-        yolo = _pixel_to_yolo(original, img_w, img_h)
-        recovered = _yolo_to_pixel(yolo, img_w, img_h)
-        assert recovered.x_tl == pytest.approx(original.x_tl, abs=0.01)
-        assert recovered.y_tl == pytest.approx(original.y_tl, abs=0.01)
-        assert recovered.x_br == pytest.approx(original.x_br, abs=0.01)
-        assert recovered.y_br == pytest.approx(original.y_br, abs=0.01)
-
-    @pytest.mark.parametrize(("width", "height"), [(0, 100), (100, 0), (0, 0), (-1, 5)])
-    def test_non_positive_dimensions_raise(self, width: int, height: int) -> None:
-        with pytest.raises(Cveta2Error, match="некорректный размер"):
-            _require_positive_dimensions(width, height, "bad.jpg")
-
-    @pytest.mark.parametrize(
-        ("width", "height"), [(1, 1), (1, 480), (640, 1), (640, 480)]
+    @given(
+        coords=st.lists(st.integers(0, 4000), min_size=4, max_size=4),
+        size=st.tuples(st.integers(1, 4000), st.integers(1, 4000)),
     )
-    def test_positive_dimensions_pass(self, width: int, height: int) -> None:
-        """A single-pixel dimension is valid.
+    def test_pixel_yolo_roundtrip(
+        self, coords: list[int], size: tuple[int, int]
+    ) -> None:
+        """Pixel -> YOLO -> pixel recovers any box on any positive image size."""
+        x1, x2 = sorted(coords[:2])
+        y1, y2 = sorted(coords[2:])
+        original = PixelBox(x1 / 4, y1 / 4, x2 / 4, y2 / 4)
+        recovered = _yolo_to_pixel(_pixel_to_yolo(original, *size), *size)
+        assert recovered == pytest.approx(original, abs=1e-6)
 
-        The old test only passed 640x480, so widening either bound to
-        ``<= 1`` (rejecting 1-pixel images) changed nothing observable.
-        """
-        _require_positive_dimensions(width, height, "ok.jpg")
+    @given(width=st.integers(-5, 5), height=st.integers(-5, 5))
+    def test_dimensions_must_be_positive(self, width: int, height: int) -> None:
+        """Any zero or negative side is rejected; 1-pixel sides are valid."""
+        if width > 0 and height > 0:
+            _require_positive_dimensions(width, height, "ok.jpg")
+        else:
+            with pytest.raises(Cveta2Error, match="некорректный размер"):
+                _require_positive_dimensions(width, height, "bad.jpg")
 
 
 class TestLinkOrCopy:
@@ -247,36 +243,22 @@ class TestReflinkFallback:
 class TestSizeCache:
     """Tests for _SizeCache image dimension caching."""
 
-    def test_read_all_false_returns_first_size(self, tmp_path: Path) -> None:
-        """When read_all=False, all calls return the first image's size."""
+    @pytest.mark.parametrize(
+        ("read_all", "second"), [(False, (640, 480)), (True, (320, 240))]
+    )
+    def test_read_all_controls_measurement(
+        self,
+        tmp_path: Path,
+        read_all: bool,  # noqa: FBT001 - parametrized flag
+        second: tuple[int, int],
+    ) -> None:
+        """Without read_all every call returns the first image's size."""
         img1 = make_image(tmp_path / "a.jpg", 640, 480)
         img2 = make_image(tmp_path / "b.jpg", 320, 240)
 
-        cache = _SizeCache(read_all=False, files=LocalConversionFiles())
+        cache = _SizeCache(read_all=read_all, files=LocalConversionFiles())
         assert cache.get(img1) == (640, 480)
-        assert cache.get(img2) == (640, 480)
-
-    def test_default_reuses_the_first_size(self, tmp_path: Path) -> None:
-        """Constructed with no arguments, the cache measures only once.
-
-        Both existing tests pass ``read_all`` explicitly, so flipping the
-        default was never observed.
-        """
-        img1 = make_image(tmp_path / "a.jpg", 640, 480)
-        img2 = make_image(tmp_path / "b.jpg", 320, 240)
-
-        cache = _SizeCache(files=LocalConversionFiles())
-        assert cache.get(img1) == (640, 480)
-        assert cache.get(img2) == (640, 480)
-
-    def test_read_all_true_reads_each_image(self, tmp_path: Path) -> None:
-        """When read_all=True, each image is read individually."""
-        img1 = make_image(tmp_path / "a.jpg", 640, 480)
-        img2 = make_image(tmp_path / "b.jpg", 320, 240)
-
-        cache = _SizeCache(read_all=True, files=LocalConversionFiles())
-        assert cache.get(img1) == (640, 480)
-        assert cache.get(img2) == (320, 240)
+        assert cache.get(img2) == second
 
 
 class TestUtf8FileHelpers:
@@ -307,131 +289,120 @@ class TestBuildSearchDirs:
             encoding="utf-8",
         )
 
+    @pytest.mark.parametrize(
+        ("cache", "explicit_names", "expected"),
+        [
+            pytest.param(["c1", "c2"], ["given"], ["given", "c1", "c2"], id="append"),
+            pytest.param(["shared"], ["shared"], ["shared"], id="dedupe"),
+            pytest.param(["c1"], None, ["c1"], id="cache-only"),
+        ],
+    )
     def test_cache_dirs_follow_the_explicit_ones(
-        self, tmp_path: Path, isolated_config_path: Path
+        self,
+        tmp_path: Path,
+        isolated_config_path: Path,
+        cache: list[str],
+        explicit_names: list[str] | None,
+        expected: list[str],
     ) -> None:
-        """Configured cache dirs are appended after the --image-dir args.
-
-        No test called this function at all, so both the dedup check and the
-        appended value itself were free.
-        """
+        """Configured cache dirs are appended after --image-dir, without repeats."""
         self._write_image_cache(
-            isolated_config_path, {"p1": tmp_path / "c1", "p2": tmp_path / "c2"}
+            isolated_config_path,
+            {f"p{i}": tmp_path / name for i, name in enumerate(cache)},
         )
-        assert _build_search_dirs([tmp_path / "given"]) == [
-            tmp_path / "given",
-            tmp_path / "c1",
-            tmp_path / "c2",
-        ]
-
-    def test_cache_dir_already_given_is_not_repeated(
-        self, tmp_path: Path, isolated_config_path: Path
-    ) -> None:
-        """A cache dir passed as --image-dir appears once, not twice."""
-        self._write_image_cache(isolated_config_path, {"p1": tmp_path / "shared"})
-        assert _build_search_dirs([tmp_path / "shared"]) == [tmp_path / "shared"]
-
-    def test_without_args_only_cache_dirs_remain(
-        self, tmp_path: Path, isolated_config_path: Path
-    ) -> None:
-        """With no --image-dir args the cache dirs are the whole search path."""
-        self._write_image_cache(isolated_config_path, {"p1": tmp_path / "c1"})
-        assert _build_search_dirs(None) == [tmp_path / "c1"]
+        explicit = (
+            None
+            if explicit_names is None
+            else [tmp_path / name for name in explicit_names]
+        )
+        assert _build_search_dirs(explicit) == [tmp_path / name for name in expected]
 
 
 class TestFindImageByStem:
     """Tests for the search order of ``_find_image_by_stem``."""
 
-    def test_flat_file_beats_subdir(self, tmp_path: Path) -> None:
-        """A flat hit wins over the same stem inside a subdir."""
-        make_image(tmp_path / "a.jpg")
-        make_image(tmp_path / "images" / "a.jpg")
-        found = _find_image_by_stem("a", [tmp_path], subdirs=["images"])
-        assert found == tmp_path / "a.jpg"
+    @pytest.mark.parametrize(
+        ("images", "dirs", "subdirs", "expected"),
+        [
+            pytest.param(
+                ["a.jpg", "images/a.jpg"], ["."], ["images"], "a.jpg", id="flat-first"
+            ),
+            pytest.param(["a.png", "a.jpg"], ["."], [], "a.jpg", id="extension-order"),
+            pytest.param(
+                ["first/a.jpg", "second/a.jpg"],
+                ["first", "second"],
+                [],
+                "first/a.jpg",
+                id="dir-order",
+            ),
+            pytest.param(
+                ["real/a.jpg"], ["gone", "real"], [], "real/a.jpg", id="missing-dir"
+            ),
+            pytest.param(
+                ["images/a.png"], ["."], ["images"], "images/a.png", id="subdir"
+            ),
+            pytest.param(
+                ["images/a.jpg"],
+                ["."],
+                ["gone", "images"],
+                "images/a.jpg",
+                id="missing-subdir",
+            ),
+            pytest.param([], ["."], ["images"], None, id="no-match"),
+        ],
+    )
+    def test_search_order(
+        self,
+        tmp_path: Path,
+        images: list[str],
+        dirs: list[str],
+        subdirs: list[str],
+        expected: str | None,
+    ) -> None:
+        """Flat hits, then subdirs; earlier dirs and extensions win; gaps skip."""
+        for image in images:
+            make_image(tmp_path / image)
+        found = _find_image_by_stem(
+            "a", [tmp_path / d for d in dirs], subdirs=subdirs or None
+        )
+        assert found == (None if expected is None else tmp_path / expected)
 
-    def test_earlier_extension_wins(self, tmp_path: Path) -> None:
-        """``.jpg`` precedes ``.png`` in the extension order."""
-        make_image(tmp_path / "a.png")
-        make_image(tmp_path / "a.jpg")
-        assert _find_image_by_stem("a", [tmp_path]) == tmp_path / "a.jpg"
 
-    def test_earlier_dir_wins(self, tmp_path: Path) -> None:
-        """The first search dir holding the stem wins."""
-        make_image(tmp_path / "first" / "a.jpg")
-        make_image(tmp_path / "second" / "a.jpg")
-        found = _find_image_by_stem("a", [tmp_path / "first", tmp_path / "second"])
-        assert found == tmp_path / "first" / "a.jpg"
-
-    def test_missing_dir_does_not_stop_the_search(self, tmp_path: Path) -> None:
-        """A nonexistent search dir is skipped, not treated as the end.
-
-        Only ever called with existing dirs, so turning the ``continue``
-        into a ``break`` was invisible.
-        """
-        make_image(tmp_path / "real" / "a.jpg")
-        found = _find_image_by_stem("a", [tmp_path / "gone", tmp_path / "real"])
-        assert found == tmp_path / "real" / "a.jpg"
-
-    def test_found_inside_subdir(self, tmp_path: Path) -> None:
-        """A stem only present under a subdir is still found.
-
-        Every previous call resolved on the flat ``.jpg`` case, so the whole
-        subdir loop was unexecuted.
-        """
-        make_image(tmp_path / "images" / "a.png")
-        found = _find_image_by_stem("a", [tmp_path], subdirs=["images"])
-        assert found == tmp_path / "images" / "a.png"
-
-    def test_missing_subdir_does_not_stop_the_search(self, tmp_path: Path) -> None:
-        """A nonexistent subdir is skipped, not treated as the end."""
-        make_image(tmp_path / "images" / "a.jpg")
-        found = _find_image_by_stem("a", [tmp_path], subdirs=["gone", "images"])
-        assert found == tmp_path / "images" / "a.jpg"
-
-    def test_returns_none_when_nothing_matches(self, tmp_path: Path) -> None:
-        """An absent stem yields None rather than raising."""
-        assert _find_image_by_stem("a", [tmp_path], subdirs=["images"]) is None
+def _yolo_row(shape: str, *, split: str, frame_id: int) -> dict[str, object]:
+    """Return the full expected row with YOLO provenance constants."""
+    expected: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
+    expected.update(
+        image_name="img.jpg",
+        image_width=640,
+        image_height=480,
+        instance_shape=shape,
+        task_id=0,
+        task_name="yolo",
+        job_stage="",
+        job_state="",
+        task_updated_date="",
+        created_by_username="",
+        frame_id=frame_id,
+        split=split,
+        subset="",
+        source="yolo",
+        attributes="{}",
+    )
+    return expected
 
 
 class TestCsvRowBuilders:
     """Tests for the row dicts stamped on every YOLO-imported annotation."""
 
     def test_base_row_stamps_yolo_provenance(self) -> None:
-        """The full row dict is pinned, constants included.
-
-        Nothing asserted the provenance columns this function fills in, so
-        every literal in it - ``task_name``, ``source``, the empty strings,
-        even the ``img_size`` index - was free to change.
-        """
+        """The full row dict is pinned, constants included."""
         row = _make_csv_row_base(
             "none", "img.jpg", (640, 480), split="train", frame_id=7
         )
-        expected: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
-        expected.update(
-            image_name="img.jpg",
-            image_width=640,
-            image_height=480,
-            instance_shape="none",
-            task_id=0,
-            task_name="yolo",
-            job_stage="",
-            job_state="",
-            task_updated_date="",
-            created_by_username="",
-            frame_id=7,
-            split="train",
-            subset="",
-            source="yolo",
-            attributes="{}",
-        )
-        assert row == expected
+        assert row == _yolo_row("none", split="train", frame_id=7)
 
     def test_box_row_rounds_coordinates_to_two_decimals(self) -> None:
-        """Box columns are pinned with coordinates that survive rounding.
-
-        Coordinates with more than two decimals are what makes ``round(x, 3)``
-        and a dropped precision argument distinguishable.
-        """
+        """Coordinates with more than two decimals pin the rounding precision."""
         row = _make_csv_row_box(
             image_name="img.jpg",
             img_w=640,
@@ -446,35 +417,19 @@ class TestCsvRowBuilders:
             annotation_id=9,
             confidence=0.5,
         )
-        expected: dict[str, object] = dict.fromkeys(CSV_COLUMNS, None)
-        expected.update(
-            image_name="img.jpg",
-            image_width=640,
-            image_height=480,
-            instance_shape="box",
-            instance_label="cat",
-            bbox_x_tl=12.35,
-            bbox_y_tl=34.57,
-            bbox_x_br=56.79,
-            bbox_y_br=78.91,
-            occluded=False,
-            z_order=0,
-            rotation=0.0,
-            annotation_id=9,
-            confidence=0.5,
-            task_id=0,
-            task_name="yolo",
-            job_stage="",
-            job_state="",
-            task_updated_date="",
-            created_by_username="",
-            frame_id=3,
-            split="val",
-            subset="",
-            source="yolo",
-            attributes="{}",
-        )
-        assert row == expected
+        assert row == {
+            **_yolo_row("box", split="val", frame_id=3),
+            "instance_label": "cat",
+            "bbox_x_tl": 12.35,
+            "bbox_y_tl": 34.57,
+            "bbox_x_br": 56.79,
+            "bbox_y_br": 78.91,
+            "occluded": False,
+            "z_order": 0,
+            "rotation": 0.0,
+            "annotation_id": 9,
+            "confidence": 0.5,
+        }
 
 
 class TestWriteCsv:
@@ -520,18 +475,6 @@ class TestValidateSplits:
             Cveta2Error, match=r"у 1 изображений не задан split\. Примеры: a\.jpg"
         ):
             _validate_splits(df)
-
-
-@pytest.mark.parametrize("export_format", ["yolo", "coco"])
-def test_missing_split_error(tmp_path: Path, export_format: str) -> None:
-    """--to-yolo and --to-coco both error when any image has no split."""
-    rows = [csv_row("test.jpg", label="cat", split="train")]
-    rows[0]["split"] = None
-    csv_path = write_convert_csv(tmp_path, rows)
-
-    export = convert_to_yolo if export_format == "yolo" else convert_to_coco
-    with pytest.raises(Cveta2Error, match="не задан split"):
-        export(csv_path, tmp_path / "out", image_dirs=[str(tmp_path)], link_mode="copy")
 
 
 def test_run_convert_missing_split_exits(tmp_path: Path) -> None:

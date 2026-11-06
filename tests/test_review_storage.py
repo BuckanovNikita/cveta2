@@ -5,6 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 from boto3.exceptions import S3UploadFailedError
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from cveta2.adapters.config.settings import cache_dir_for_project
 from cveta2.adapters.s3.download import S3Syncer
@@ -78,14 +80,28 @@ def test_directory_not_cached_or_removed(
     assert directory.is_dir()
 
 
-@pytest.mark.parametrize(
-    "name", ["", ".", "..", "/", "\\", "../escape", "a/b", "a\\b", "\x00"]
+# Names built from the characters the encoding treats specially, plus any text.
+_PROJECT_NAMES = st.one_of(
+    st.text(st.sampled_from("./\\%\x00aE2_ Я"), max_size=6),
+    st.text(st.characters(exclude_categories=["Cs"]), max_size=12),
 )
-def test_project_cache_name_contained(tmp_path: Path, name: str) -> None:
-    dest = cache_dir_for_project(tmp_path, name)
-    assert dest.resolve().is_relative_to(tmp_path.resolve())
-    assert dest != tmp_path
-    assert len(dest.relative_to(tmp_path).parts) == 1
+_CACHE_ROOT = Path("/cveta2-cache-root")
+
+
+@given(first=_PROJECT_NAMES, second=_PROJECT_NAMES)
+@example(first="", second="%empty")
+@example(first=".", second="%2E")
+def test_project_cache_component_is_contained_and_distinct(
+    first: str, second: str
+) -> None:
+    """Every project name maps to one component inside the root, injectively."""
+    paths = [cache_dir_for_project(_CACHE_ROOT, name) for name in (first, second)]
+    for path in paths:
+        assert path.parent == _CACHE_ROOT
+        assert path.resolve().is_relative_to(_CACHE_ROOT.resolve())
+        assert path.name not in {"", ".", ".."}
+    assert (paths[0] == paths[1]) == (first == second)
+    assert cache_dir_for_project(_CACHE_ROOT, "Проект").name == "Проект"
 
 
 def test_real_boto3_upload_wrapper_is_accounted(tmp_path: Path) -> None:
@@ -153,13 +169,6 @@ def test_sync_alias_collision_preflight(
             CloudStorageInfo(id=1, bucket="bucket", prefix="root", endpoint_url="")
         )
     assert not (tmp_path / "a.jpg").exists()
-
-
-def test_cache_name_encoding_distinct(tmp_path: Path) -> None:
-    names = ["", ".", "..", "%empty", "%2E", "a/b", "a_b", "a\\b", "Проект"]
-    paths = [cache_dir_for_project(tmp_path, name) for name in names]
-    assert len(set(paths)) == len(names)
-    assert paths[-1].name == "Проект"
 
 
 def test_image_downloader_directory_is_failed(

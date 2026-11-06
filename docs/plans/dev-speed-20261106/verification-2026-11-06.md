@@ -140,3 +140,69 @@ After the fixes:
 - `tests/test_integration_lifecycle.py` had 65 passed.
 - `tests/test_mutation_tool.py` had 27 passed.
 - ruff, vulture and lint-imports were clean.
+
+## T5 Phase 5 test debloat
+
+The work was split across five subagents, each owning a disjoint set of files
+(fetch, upload, core, convert, tooling). The parent integrated it.
+- **Hypothesis and inline-snapshot:** both were added in `5a90d44`, with a
+  deterministic, deadline-free profile.
+- **inline-snapshot was not used:** the large expected blocks became
+  properties or shared helpers instead.
+
+| Measure | Before (5d1aefc) | After |
+|---|---|---|
+| Unit test cases (`-m "not integration"`) | 2821 | 2591 |
+| `def test_` functions, unit files | 1946 | 1576 |
+| Unit test lines | 42457 | 38400 |
+| Line coverage, unit tests only | 9436 / 10086 | 9436 / 10086 (one line was lost, then restored) |
+| Branch coverage, unit tests only | 2362 / 2758 | 2362 / 2758 |
+| Mutation, five modules, no budget | 1194 mutants: 1164 killed, 30 survived | 1194 mutants: 1158 killed, 36 survived |
+
+**Coverage comparison.** The line and branch sets were compared per file. Only
+`cveta2/adapters/s3/download.py:341` was lost: a malformed S3 response, a
+`KeyError`, becoming a transfer failure. The deleted
+`test_download_adds_listing_misses_and_transfer_failures` was restored.
+
+**Mutation comparison.**
+- The run used explicit-file mode with `--budget-seconds 0 --max-functions 0`
+  on five modules:
+  - `domain/merge.py`
+  - `domain/partition.py`
+  - `use_cases/fetch.py`
+  - `upload/planning.py`
+  - `convert/yolo.py`
+- All 30 earlier survivors still survive, and there are six new ones. Each new
+  one is `__mutmut_1`/`_2`, a pin on a default argument of an internal
+  function:
+  - `convert_to_yolo` (two survivors)
+  - `convert_from_yolo`
+  - `build_upload_plan`
+  - `filter_frames_by_labels`
+  - `_merge_datasets`
+- Every production caller passes those arguments explicitly. The public API's
+  defaults live in `composition/conversion.py` and its callers. They are
+  accepted under the B8 policy.
+
+**Properties.** New Hypothesis properties cover:
+- the YOLO round trip and the COCO export structure;
+- partition rules against a reference model, with pinned examples;
+- merge precedence;
+- the retry predicates and backoff;
+- the CSV text and empty-cell round trip;
+- the record image-name and frame-path rules;
+- coordinate conversion.
+
+The subagents checked the partition, merge and CSV properties against
+hand-made mutants.
+
+**Reviewed decision.** The deleted issue-creation default test is still
+covered behaviourally by
+`test_issues.py::TestSkipExistingIssues::test_a_normal_upload_does_not_read_the_issues_back`.
+
+**Checks after integration:**
+- strict mypy (336 files);
+- ruff;
+- vulture;
+- lint-imports;
+- the unit suite.

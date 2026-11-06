@@ -52,8 +52,15 @@ def test_export_rejects_every_invalid_split(
         tmp_path, [csv_row("a.jpg", split="train"), csv_row("b.jpg", split=split)]
     )
     output = tmp_path / "output"
-    with pytest.raises(Cveta2Error):
+    with pytest.raises(Cveta2Error) as error:
         export(csv, output)
+    message = str(error.value)
+    assert "b.jpg" in message
+    if split is None:
+        assert "не задан split" in message
+    else:
+        assert split in message
+        assert all(known in message.lower() for known in ("train", "val", "test"))
     assert not output.exists()
 
 
@@ -100,9 +107,21 @@ def test_coco_replaces_only_owned_files(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["../victim.jpg", "/victim.jpg", "nested/victim.jpg", "bad\x00.jpg"]
+    "name",
+    [
+        "../victim.jpg",
+        "/victim.jpg",
+        "nested/victim.jpg",
+        "bad\x00.jpg",
+        7,
+        "",
+        "..",
+        "_annotations.coco.json",
+        "a\\b.jpg",
+    ],
 )
-def test_coco_rejects_unsafe_previous_metadata(tmp_path: Path, name: str) -> None:
+def test_coco_rejects_unsafe_previous_metadata(tmp_path: Path, name: object) -> None:
+    """Unsafe or invalid owned names abort, naming the metadata, untouched."""
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
     output = tmp_path / "output"
     split = output / "train"
@@ -110,8 +129,9 @@ def test_coco_rejects_unsafe_previous_metadata(tmp_path: Path, name: str) -> Non
     metadata = split / "_annotations.coco.json"
     text = json.dumps({"images": [{"file_name": name}]})
     metadata.write_text(text)
-    with pytest.raises(Cveta2Error):
+    with pytest.raises(Cveta2Error) as error:
         convert_to_coco(csv, output)
+    assert str(metadata) in str(error.value)
     assert metadata.read_text() == text
 
 
@@ -367,8 +387,9 @@ def test_coco_rejects_corrupt_or_ambiguous_metadata(
     metadata = output / "train/_annotations.coco.json"
     metadata.parent.mkdir(parents=True)
     metadata.write_text(content)
-    with pytest.raises(Cveta2Error):
+    with pytest.raises(Cveta2Error) as error:
         convert_to_coco(csv, output)
+    assert str(metadata) in str(error.value)
     assert metadata.read_text() == content
 
 
@@ -406,8 +427,10 @@ def test_coco_rejects_reserved_or_invalid_current_name_before_writes(
     output.mkdir()
     sentinel = output / "sentinel"
     sentinel.write_bytes(b"keep")
-    with pytest.raises(Cveta2Error):
+    with pytest.raises(Cveta2Error) as error:
         convert_to_coco(csv, output)
+    if name == "_annotations.coco.json":
+        assert name in str(error.value)
     assert list(output.iterdir()) == [sentinel]
     assert sentinel.read_bytes() == b"keep"
 
@@ -659,19 +682,6 @@ def test_export_missing_label_has_context_without_output(
 
 
 @pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
-def test_export_split_error_identifies_value_and_image(
-    tmp_path: Path, export: Any
-) -> None:
-    csv = write_convert_csv(tmp_path, [csv_row("split.jpg", split="validation")])
-    with pytest.raises(Cveta2Error) as error:
-        export(csv, tmp_path / "out")
-    message = str(error.value)
-    assert "validation" in message
-    assert "split.jpg" in message
-    assert all(split in message.lower() for split in ("train", "val", "test"))
-
-
-@pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
 def test_invalid_link_mode_identified_before_output(
     tmp_path: Path, export: Any
 ) -> None:
@@ -780,37 +790,6 @@ def test_coco_unsafe_destination_types_rejected_with_context(
     assert not (output / "train").exists()
 
 
-@pytest.mark.parametrize("name", [7, "", "..", "_annotations.coco.json", "a\\b.jpg"])
-def test_coco_invalid_owned_names_identify_metadata(
-    tmp_path: Path, name: object
-) -> None:
-    output = tmp_path / "out"
-    metadata = output / "train/_annotations.coco.json"
-    metadata.parent.mkdir(parents=True)
-    content = json.dumps({"images": [{"file_name": name}]})
-    metadata.write_text(content)
-    csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
-    with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
-    assert str(metadata) in str(error.value)
-    assert metadata.read_text() == content
-
-
-@pytest.mark.parametrize("content", ["{", '{"images": 1}'])
-def test_coco_metadata_parse_errors_identify_source(
-    tmp_path: Path, content: str
-) -> None:
-    output = tmp_path / "out"
-    metadata = output / "train/_annotations.coco.json"
-    metadata.parent.mkdir(parents=True)
-    metadata.write_text(content)
-    csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
-    with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
-    assert str(metadata) in str(error.value)
-    assert metadata.read_text() == content
-
-
 def test_coco_owned_image_directory_rejected_with_context(tmp_path: Path) -> None:
     output = tmp_path / "out"
     metadata = output / "train/_annotations.coco.json"
@@ -835,19 +814,12 @@ def test_coco_prunes_missing_owned_image_without_error(tmp_path: Path) -> None:
     assert (output / "train/_annotations.coco.json").is_file()
 
 
-def test_reserved_coco_image_diagnostic_identifies_conflict(tmp_path: Path) -> None:
-    csv = write_convert_csv(
-        tmp_path, [csv_row("_annotations.coco.json", split="train")]
-    )
-    with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, tmp_path / "out")
-    assert "_annotations.coco.json" in str(error.value)
-
-
 def test_csv_reader_guard_is_collected_before_real_reader() -> None:
     import subprocess
 
-    real_reader = "tests/test_output.py::test_read_dataset_csv_returns_rows"
+    real_reader = (
+        "tests/test_output.py::test_read_dataset_csv_blank_file_names_the_path"
+    )
     bounded_reader = (
         "tests/test_review_dataset.py::test_csv_reader_stops_after_first_eof"
     )

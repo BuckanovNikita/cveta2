@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+import tempfile
+from pathlib import Path
 
 import pandas as pd
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from cveta2.adapters.files.dataset import (
     read_dataset_csv,
@@ -19,9 +22,6 @@ from cveta2.domain.models import CSV_COLUMNS, ProjectAnnotations
 from cveta2.domain.output import PREVIEW_LIMIT, preview_names
 from cveta2.domain.partition import PartitionResult, partition_annotations_df
 from tests.helpers import csv_row, make_bbox, make_deleted, make_df, write_dataset_csv
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _annotations() -> ProjectAnnotations:
@@ -47,33 +47,53 @@ def _partition() -> PartitionResult:
 # ---------------------------------------------------------------------------
 
 
-def test_read_dataset_csv_returns_rows(tmp_path: Path) -> None:
-    """A valid CSV is returned with all of its rows."""
-    path = write_dataset_csv(tmp_path / "d.csv", [csv_row("a.jpg"), csv_row("b.jpg")])
-    df = read_dataset_csv(path, {"image_name"})
-    assert list(df["image_name"]) == ["a.jpg", "b.jpg"]
+_TEXT_COLUMNS = ("instance_label", "image_name", "task_name", "issue_text")
+# Cell text as users write it: numeric-looking ids, NA spellings, separators,
+# quotes and non-ASCII. An empty cell is the only spelling of a missing value.
+_CELL_TEXT = st.one_of(
+    st.sampled_from(["001", "NA", "null", "None", "nan", "1e3", " padded "]),
+    st.text(st.characters(codec="utf-8", exclude_characters="\x00\r"), min_size=1),
+)
 
 
-def test_csv_preserves_text_and_distinguishes_empty_cells(
-    tmp_path: Path,
+@given(
+    rows=st.lists(
+        st.tuples(
+            st.lists(st.one_of(st.just(""), _CELL_TEXT), min_size=4, max_size=4),
+            st.integers(1, 10_000),
+            st.one_of(st.none(), st.floats(0, 1)),
+        ),
+        min_size=1,
+        max_size=4,
+    )
+)
+def test_csv_round_trip_preserves_text_and_empty_cells(
+    rows: list[tuple[list[str], int, float | None]],
 ) -> None:
-    columns = {"instance_label", "image_name", "task_name", "issue_text"}
-    # Keep numeric-looking text separate: mixed tokens mask dtype regressions.
-    for value in ("001", "NA", "null", "None"):
-        rows: list[dict[str, object]] = [
-            dict.fromkeys(columns, value) | {"image_width": 640, "confidence": 0.75},
-            dict.fromkeys(columns, "") | {"image_width": 480, "confidence": None},
-        ]
-        path = write_dataset_csv(tmp_path / "strings.csv", rows)
+    """Text columns read back verbatim; only an empty cell becomes missing.
 
-        df = read_dataset_csv(path, columns)
+    Numbers keep their numeric type next to the text columns.
+    """
+    records: list[dict[str, object]] = [
+        dict(zip(_TEXT_COLUMNS, texts, strict=True))
+        | {"image_width": width, "confidence": confidence}
+        for texts, width, confidence in rows
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        path = write_dataset_csv(Path(tmp) / "strings.csv", records)
+        df = read_dataset_csv(path, set(_TEXT_COLUMNS))
 
-        for column in columns:
-            assert df.loc[0, column] == value, (column, value)
-            assert pd.isna(df.loc[1, column]), (column, value)
-        assert df["image_width"].tolist() == [640, 480]
-        assert df.loc[0, "confidence"] == 0.75
-        assert pd.isna(df.loc[1, "confidence"])
+    for index, (texts, width, confidence) in enumerate(rows):
+        for column, text in zip(_TEXT_COLUMNS, texts, strict=True):
+            if text == "":
+                assert pd.isna(df.loc[index, column]), column
+            else:
+                assert df.loc[index, column] == text, column
+        assert df.loc[index, "image_width"] == width
+        if confidence is None:
+            assert pd.isna(df.loc[index, "confidence"])
+        else:
+            assert df.loc[index, "confidence"] == pytest.approx(confidence)
 
 
 def test_read_dataset_csv_missing_file_names_the_path(tmp_path: Path) -> None:
@@ -85,14 +105,6 @@ def test_read_dataset_csv_missing_file_names_the_path(tmp_path: Path) -> None:
     missing = tmp_path / "nope.csv"
     with pytest.raises(Cveta2Error, match=re.escape(str(missing))):
         read_dataset_csv(missing, {"image_name"})
-
-
-def test_read_dataset_csv_header_only_file_returns_no_rows(tmp_path: Path) -> None:
-    """A CSV holding only the header is a valid, empty dataset."""
-    path = write_dataset_csv(tmp_path / "d.csv", [], columns=CSV_COLUMNS)
-    df = read_dataset_csv(path, set(CSV_COLUMNS))
-    assert list(df.columns) == list(CSV_COLUMNS)
-    assert len(df) == 0
 
 
 def test_read_dataset_csv_blank_file_names_the_path(tmp_path: Path) -> None:
@@ -133,32 +145,21 @@ def test_read_dataset_csv_by_task_error_names_the_column(tmp_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_preview_names_joins_with_comma_space() -> None:
-    """Names below the limit are joined by ``", "`` and get no suffix."""
-    assert preview_names(["a", "b", "c"]) == "a, b, c"
+@given(
+    count=st.integers(0, PREVIEW_LIMIT + 3),
+    limit=st.one_of(st.none(), st.integers(1, PREVIEW_LIMIT + 3)),
+)
+def test_preview_names_shows_the_first_names_and_counts_the_rest(
+    count: int, limit: int | None
+) -> None:
+    """Shown names are joined by ``", "``; a hidden rest of N adds ``(и ещё N)``."""
+    names = [f"img{i}.jpg" for i in range(count)]
+    effective = PREVIEW_LIMIT if limit is None else limit
+    result = preview_names(names) if limit is None else preview_names(names, limit)
 
-
-def test_preview_names_at_limit_has_no_suffix() -> None:
-    """Exactly PREVIEW_LIMIT names are all shown, with no "и ещё" tail.
-
-    Callers only ever passed 2 or 15 names, which cannot tell ``extra > 0``
-    from ``extra >= 0``: at the boundary the latter appends "(и ещё 0)".
-    """
-    names = [f"img{i}.jpg" for i in range(PREVIEW_LIMIT)]
-    assert preview_names(names) == ", ".join(names)
-
-
-def test_preview_names_one_over_limit_reports_one_extra() -> None:
-    """A single hidden name is still reported, which ``extra > 1`` would drop."""
-    names = [f"img{i}.jpg" for i in range(PREVIEW_LIMIT + 1)]
-    result = preview_names(names)
-    assert result.endswith("(и ещё 1)")
-    assert names[PREVIEW_LIMIT] not in result
-
-
-def test_preview_names_honours_explicit_limit() -> None:
-    """An explicit *limit* overrides PREVIEW_LIMIT for both halves."""
-    assert preview_names(["a", "b", "c", "d"], limit=2) == "a, b (и ещё 2)"
+    shown = ", ".join(names[:effective])
+    hidden = count - effective
+    assert result == (f"{shown} (и ещё {hidden})" if hidden > 0 else shown)
 
 
 # ---------------------------------------------------------------------------
@@ -252,29 +253,19 @@ def test_write_dataset_and_deleted_creates_nested_dir_and_is_repeatable(
     assert deleted.loc[0, "task_id"] == 7
 
 
-def test_deleted_csv_keeps_full_header_when_empty(tmp_path: Path) -> None:
-    """An empty deleted.csv still carries every CSV column, in order.
-
-    Only the empty case can tell the explicit ``columns=CSV_COLUMNS`` apart
-    from letting pandas infer the columns from the rows.
-    """
-    result = ProjectAnnotations(annotations=[make_bbox()], deleted_images=[])
-    write_dataset_and_deleted(result, tmp_path)
-
-    header = (tmp_path / "deleted.csv").read_text(encoding="utf-8").splitlines()[0]
-    assert header.split(",") == list(CSV_COLUMNS)
-
-
-def test_dataset_csv_keeps_full_header_when_empty(tmp_path: Path) -> None:
-    """An empty dataset.csv still carries every CSV column, in order.
+def test_dataset_and_deleted_csv_keep_full_header_when_empty(tmp_path: Path) -> None:
+    """Empty dataset.csv and deleted.csv still carry every CSV column, in order.
 
     ``fetch-task --completed-only`` on an unfinished task selects nothing;
-    the file it leaves behind must still be one ``upload`` can read.
+    the files it leaves behind must still be ones ``upload`` can read. Only
+    the empty case can tell explicit ``columns=CSV_COLUMNS`` apart from
+    letting pandas infer the columns from the rows.
     """
     write_dataset_and_deleted(
         ProjectAnnotations(annotations=[], deleted_images=[]), tmp_path
     )
 
-    header = (tmp_path / "dataset.csv").read_text(encoding="utf-8").splitlines()[0]
-    assert header.split(",") == list(CSV_COLUMNS)
-    assert len(read_dataset_csv(tmp_path / "dataset.csv", set(CSV_COLUMNS))) == 0
+    for name in ("dataset.csv", "deleted.csv"):
+        header = (tmp_path / name).read_text(encoding="utf-8").splitlines()[0]
+        assert header.split(",") == list(CSV_COLUMNS), name
+        assert len(read_dataset_csv(tmp_path / name, set(CSV_COLUMNS))) == 0, name
