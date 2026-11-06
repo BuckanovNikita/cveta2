@@ -66,3 +66,13 @@ and dated verification evidence. `.specify/feature.json` is not touched.
 ## Accepted behaviour losses
 
 None. The `commit` content moved into engineering guidance, which every task reads.
+
+## Amendment: Spec Kit 1.3.1
+
+The owner then asked for the upgrade. `specify self upgrade` installed specify-cli
+1.3.1 (uv tool). Both integrations were then regenerated with `specify integration
+upgrade codex|claude --force`, and `specify integration use codex` kept Codex as
+the default. `--force` was used only after a hash check found no local edits in
+the speckit, claude or codex manifests. Spec Kit 1.3.1 no longer ships
+`speckit-taskstoissues`, so both host copies were removed. No tracked instruction
+referenced it.

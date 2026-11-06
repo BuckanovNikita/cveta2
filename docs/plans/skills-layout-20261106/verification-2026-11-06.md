@@ -64,3 +64,24 @@ Run on branch `project-cleunap` from base `ef9cf6e`.
   - added: this plan directory.
 - No `cveta2/` runtime module changed, so neither the mutation hook nor the live
   integration gate applies.
+
+## Spec Kit 1.3.1 upgrade
+
+- `specify self upgrade --dry-run` resolved the uv tool install method and the
+  target v1.3.1; `specify self upgrade` then upgraded 1.0.13 to 1.3.1.
+- Before `--force`, every entry in the speckit (12), claude (10) and codex (10)
+  manifests matched its file hash.
+- The regenerated files are:
+  - the `speckit-specify` skills, which now read templates through
+    `resolve-template.sh`;
+  - the six `.specify/scripts/bash` scripts;
+  - `.specify/.gitignore`, which ignores executable adapter packages;
+  - the version fields and the three manifests.
+
+  `speckit-taskstoissues` was removed upstream. `.specify/templates` did not change.
+- The forced reinstall cleared the execute bit on the six scripts (100755 to
+  100644). It was restored with `chmod +x`, and `git diff --summary` shows no mode
+  change.
+- `check-prerequisites.sh --json --paths-only` resolves the active feature.
+- `specify integration status` reports 0 modified, missing or invalid managed files.
+- `uv run pytest -n 0 -q tests/test_docs.py`: 26 passed against the new manifests.

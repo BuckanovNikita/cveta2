@@ -9,3 +9,4 @@ evidence is in [verification-2026-11-06.md](verification-2026-11-06.md).
 - [x] T4 Regenerate the Spec Kit skills with the installed `specify`. Depends on T1.
 - [x] T5 Layout tests in `tests/test_docs.py`, with negative checks. Depends on T2-T4.
 - [x] T6 Checks, fresh independent review, evidence, `--phase acceptance`, commit and push the branch. Depends on T5.
+- [x] T7 Upgrade specify-cli to 1.3.1 and regenerate both integrations; restore script execute bits; rerun checks. Depends on T6.
