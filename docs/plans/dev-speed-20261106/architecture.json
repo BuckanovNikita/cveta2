@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "task": "Development speed: path-filtered prek hooks, live tests inside the normal suite, testmon selection, budgeted mutation, fast-forward releases, test debloat",
+  "scope": [
+    ".pre-commit-config.yaml",
+    "pyproject.toml",
+    "uv.lock",
+    ".gitignore",
+    "tests/test_docs.py",
+    "tests/conftest.py",
+    "tests/env_isolation.py",
+    "tests/integration",
+    "tests/test_integration_lifecycle.py",
+    "tests/test_integration_tool_boundaries.py",
+    "scripts/mutation.py",
+    "tests/test_mutation_tool.py",
+    "tests",
+    ".specify/memory/constitution.md",
+    ".specify/memory/engineering.md",
+    ".agents/skills",
+    "AGENTS.md",
+    "scripts/README.md",
+    "docs/plans/dev-speed-20261106"
+  ],
+  "impact": "modules",
+  "rules": "pyproject.toml import-linter contracts and tests/test_architecture.py own the runtime package layers and inner effect ownership; this task changes no cveta2 runtime module. tests/test_integration_tool_boundaries.py keeps scripts/ and tests/ tooling out of the runtime package and keeps the integration lifecycle standard-library only. Development tooling never becomes a runtime dependency.",
+  "modules": [
+    {
+      "id": "hook-config",
+      "path": ".pre-commit-config.yaml",
+      "change": "modify",
+      "responsibility": "Declare commit-time checks: fast checks always, heavy checks only for code/dependency paths, a lockfile guard, and testmon-selected pytest that includes live tests.",
+      "interface": "prek install wires pre-commit and commit-msg stages; hook ids are the SKIP= vocabulary used by the release skill.",
+      "layer": "Development tooling configuration.",
+      "allowed_dependencies": ["prek", "uv", "repository dev-group tools"],
+      "forbidden_dependencies": ["cveta2 runtime imports"],
+      "effects": "Runs subprocess checks; ruff format may rewrite files.",
+      "contracts": ["runtime-excludes-tooling"]
+    },
+    {
+      "id": "test-docs",
+      "path": "tests/test_docs.py",
+      "change": "remove",
+      "responsibility": "Removed: documentation change-detector tests (owner decision 2026-11-06).",
+      "interface": "None after removal.",
+      "layer": "Tests.",
+      "allowed_dependencies": [],
+      "forbidden_dependencies": [],
+      "effects": "None.",
+      "contracts": ["runtime-excludes-tooling"]
+    },
+    {
+      "id": "live-suite",
+      "path": "tests/integration",
+      "change": "modify",
+      "responsibility": "Live CVAT/MinIO/ClearML tests as part of the normal pytest run: a session fixture resolves the stand, mints and cleans one run tag, and waits with a notice while a stand is stopped.",
+      "interface": "pytest collects tests/integration with the live marker in one xdist group; -m 'not live' excludes them; CVETA2_STAND_WAIT_TIMEOUT caps the wait; lifecycle.py keeps a manual cleanup command.",
+      "layer": "Integration test tooling, outside the runtime package.",
+      "allowed_dependencies": ["Python standard library", "pytest", "cveta2 public API in test modules", "k8s-infra helper scripts as subprocesses"],
+      "forbidden_dependencies": ["being imported by any cveta2 runtime module", "SDK or cveta2 imports in lifecycle.py"],
+      "effects": "Owns the run tag, stand objects named by it, subprocesses and the child environment.",
+      "contracts": ["runtime-excludes-tooling", "lifecycle-stdlib-only"]
+    },
+    {
+      "id": "mutation-tool",
+      "path": "scripts/mutation.py",
+      "change": "modify",
+      "responsibility": "Change-scoped advisory mutation testing with a time and mutant budget.",
+      "interface": "python scripts/mutation.py [--base REV] [--budget-seconds N] [--max-mutants N] [--keep] [--strict] [FILE...]; exit 0 on completed or budget-limited runs.",
+      "layer": "Development tooling, outside the runtime package.",
+      "allowed_dependencies": ["Python standard library", "git and the repository venv's mutmut as subprocesses"],
+      "forbidden_dependencies": ["cveta2 runtime imports", "being imported by any cveta2 runtime module"],
+      "effects": "Owns subprocesses and one temporary workspace per run.",
+      "contracts": ["runtime-excludes-tooling"]
+    },
+    {
+      "id": "unit-tests",
+      "path": "tests",
+      "change": "modify",
+      "responsibility": "Unit tests consolidated by module: duplicates removed, repetition parametrized, round trips as properties.",
+      "interface": "pytest; package coverage stays at or above fail_under.",
+      "layer": "Tests.",
+      "allowed_dependencies": ["cveta2", "pytest plugins in the dev group", "hypothesis", "inline-snapshot"],
+      "forbidden_dependencies": ["being imported by any cveta2 runtime module"],
+      "effects": "Temporary HOME and fakes only; live effects belong to tests/integration.",
+      "contracts": ["runtime-excludes-tooling", "package-layers"]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "package-layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Exhaustive inward layers and adapter independence for the cveta2 package (import-linter).",
+      "check": "imports"
+    },
+    {
+      "id": "runtime-excludes-tooling",
+      "path": "tests/test_integration_tool_boundaries.py",
+      "status": "existing",
+      "rules": "No cveta2 runtime module imports tests or scripts; negative cases inject both imports.",
+      "check": "boundaries"
+    },
+    {
+      "id": "lifecycle-stdlib-only",
+      "path": "tests/test_integration_tool_boundaries.py",
+      "status": "existing",
+      "rules": "tests/integration/lifecycle.py imports only the standard library; injected cveta2 and SDK imports must fail.",
+      "check": "boundaries"
+    }
+  ],
+  "checks": [
+    {
+      "id": "imports",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run pytest -n 0 -m 'not live' tests/test_architecture.py",
+      "expectation": "Layer contracts kept; effect fixtures still fail."
+    },
+    {
+      "id": "boundaries",
+      "kind": "imports",
+      "command": "uv run pytest -n 0 tests/test_integration_tool_boundaries.py",
+      "expectation": "Runtime modules import no tooling; lifecycle.py stays standard-library only; injected forbidden imports are reported."
+    },
+    {
+      "id": "hooks",
+      "kind": "behavior",
+      "command": "time git commit for a docs-only, a code and a uv.lock-only change",
+      "expectation": "Docs-only runs no pytest/mypy; code runs testmon-selected tests; a lone uv.lock change is rejected."
+    },
+    {
+      "id": "full-suite",
+      "kind": "behavior",
+      "command": "uv run pytest --cov",
+      "expectation": "All tests including live pass with coverage >= fail_under; live tests run in one xdist group and clean their tag."
+    },
+    {
+      "id": "stand-wait",
+      "kind": "behavior",
+      "command": "uv run pytest -n 0 tests/test_integration_lifecycle.py and an owner-approved stand stop/start run",
+      "expectation": "A stopped stand produces a notice, heartbeats and a resume; auth/TLS errors fail at once; timeout and Ctrl-C stop cleanly."
+    }
+  ],
+  "documentation": ".specify/memory/constitution.md, .specify/memory/engineering.md, AGENTS.md, scripts/README.md, .agents/skills/{release,running-integration-tests,mutation-testing}; historical specs and plans are not rewritten.",
+  "review": {"status": "pending"}
+}
