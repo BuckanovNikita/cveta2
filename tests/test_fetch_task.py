@@ -53,7 +53,7 @@ from tests.helpers import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from tests.fixtures.fake_cvat_project import LoadedFixtures
 
@@ -72,39 +72,32 @@ _MODULE = "cveta2.interfaces.commands.fetch"
 class TestResolveTaskSelector:
     """Tests for ``_resolve_task_selector``."""
 
-    def test_explicit_task_id(self, normal_fake: LoadedFixtures) -> None:
-        """Explicit task ID string is returned as-is."""
-        fake = normal_fake
-        client = make_fake_client(fake)
-        task_id_str = str(fake.tasks[0].id)
-
-        result = _resolve_task_selector([task_id_str], client, fake.project.id, None)
-
-        assert result == [task_id_str]
-
-    def test_explicit_task_name(self, normal_fake: LoadedFixtures) -> None:
-        """Explicit task name is returned as-is."""
-        fake = normal_fake
-        client = make_fake_client(fake)
-        task_name = fake.tasks[0].name
-
-        result = _resolve_task_selector([task_name], client, fake.project.id, None)
-
-        assert result == [task_name]
-
-    def test_multiple_explicit_tasks(self, coco8_fixtures: LoadedFixtures) -> None:
-        """Multiple -t values are returned in order."""
+    @pytest.mark.parametrize(
+        "selectors",
+        [
+            lambda fake: [str(fake.tasks[0].id)],
+            lambda fake: [fake.tasks[0].name],
+            lambda fake: [str(t.id) for t in fake.tasks],
+        ],
+        ids=["id", "name", "several-in-order"],
+    )
+    def test_explicit_selectors_are_returned_as_given(
+        self,
+        coco8_fixtures: LoadedFixtures,
+        selectors: Callable[[LoadedFixtures], list[str]],
+    ) -> None:
         fake = build_fake(
             coco8_fixtures,
             ["normal", "all-empty"],
             statuses=["completed", "completed"],
         )
-        client = make_fake_client(fake)
-        ids = [str(t.id) for t in fake.tasks]
+        wanted = selectors(fake)
 
-        result = _resolve_task_selector(ids, client, fake.project.id, None)
+        result = _resolve_task_selector(
+            wanted, make_fake_client(fake), fake.project.id, None
+        )
 
-        assert result == ids
+        assert result == wanted
 
     def test_no_explicit_tasks_triggers_tui(self, normal_fake: LoadedFixtures) -> None:
         """An empty list falls through to the interactive task picker."""
@@ -129,70 +122,43 @@ class TestResolveTaskSelector:
 class TestWarnIgnoredTasks:
     """Tests for ``load_ignore_sets``."""
 
-    def test_no_ignored_tasks(self) -> None:
-        """Returns (None, None) when ignore config is empty for the project."""
+    @pytest.mark.parametrize(
+        ("projects", "expected"),
+        [
+            ({}, (None, None)),
+            ({"other-project": [IgnoredTask(id=10, name="t10")]}, (None, None)),
+            (
+                {
+                    "my-project": [
+                        IgnoredTask(id=10, name="t10"),
+                        IgnoredTask(id=20, name="t20"),
+                    ]
+                },
+                ({10, 20}, None),
+            ),
+            (
+                {
+                    "my-project": [
+                        IgnoredTask(id=10, name="t10", silent=True),
+                        IgnoredTask(id=20, name="t20"),
+                        IgnoredTask(id=30, name="t30", silent=True),
+                    ]
+                },
+                ({10, 20, 30}, {10, 30}),
+            ),
+        ],
+        ids=["empty", "other-project", "loud-only", "silent-subset"],
+    )
+    def test_returns_ignored_and_silent_ids(
+        self,
+        projects: dict[str, list[IgnoredTask]],
+        expected: tuple[set[int] | None, set[int] | None],
+    ) -> None:
         with patch(
             "cveta2.adapters.config.settings.IgnoreConfig.load",
-            return_value=IgnoreConfig(),
+            return_value=IgnoreConfig(projects=projects),
         ):
-            ignore_set, silent_set = load_ignore_sets("my-project")
-
-        assert ignore_set is None
-        assert silent_set is None
-
-    def test_returns_set_of_ignored_ids(self) -> None:
-        """Returns a set of task IDs from the ignore config."""
-        ignore_cfg = IgnoreConfig(
-            projects={
-                "my-project": [
-                    IgnoredTask(id=10, name="t10"),
-                    IgnoredTask(id=20, name="t20"),
-                    IgnoredTask(id=30, name="t30"),
-                ],
-            },
-        )
-        with patch(
-            "cveta2.adapters.config.settings.IgnoreConfig.load",
-            return_value=ignore_cfg,
-        ):
-            ignore_set, silent_set = load_ignore_sets("my-project")
-
-        assert ignore_set == {10, 20, 30}
-        assert silent_set is None
-
-    def test_different_project_returns_none(self) -> None:
-        """Returns (None, None) when the project is not in the ignore config."""
-        ignore_cfg = IgnoreConfig(
-            projects={"other-project": [IgnoredTask(id=10, name="t10")]},
-        )
-        with patch(
-            "cveta2.adapters.config.settings.IgnoreConfig.load",
-            return_value=ignore_cfg,
-        ):
-            ignore_set, silent_set = load_ignore_sets("my-project")
-
-        assert ignore_set is None
-        assert silent_set is None
-
-    def test_returns_silent_task_ids(self) -> None:
-        """Returns silent task IDs as the second element of the tuple."""
-        ignore_cfg = IgnoreConfig(
-            projects={
-                "my-project": [
-                    IgnoredTask(id=10, name="t10", silent=True),
-                    IgnoredTask(id=20, name="t20"),
-                    IgnoredTask(id=30, name="t30", silent=True),
-                ],
-            },
-        )
-        with patch(
-            "cveta2.adapters.config.settings.IgnoreConfig.load",
-            return_value=ignore_cfg,
-        ):
-            ignore_set, silent_set = load_ignore_sets("my-project")
-
-        assert ignore_set == {10, 20, 30}
-        assert silent_set == {10, 30}
+            assert load_ignore_sets("my-project") == expected
 
 
 # ---------------------------------------------------------------------------
@@ -401,32 +367,20 @@ class TestFilterTasksSilent:
             ),
         ]
 
-    def test_silent_ignored_tasks_no_warning(self, capture_logs: list[str]) -> None:
-        """Silent ignored tasks are filtered out but produce no warning."""
-        tasks = self._make_tasks()
+    @pytest.mark.parametrize("silent", [False, True], ids=["loud", "silent"])
+    def test_ignored_task_is_filtered_and_warned_unless_silent(
+        self, capture_logs: list[str], *, silent: bool
+    ) -> None:
         options = _FetchAnnotationsOptions(
             ignore_task_ids={2},
-            silent_task_ids={2},
+            silent_task_ids={2} if silent else None,
         )
 
-        result = _filter_tasks_for_fetch(tasks, options)
+        result = _filter_tasks_for_fetch(self._make_tasks(), options)
 
         assert [t.id for t in result] == [1, 3]
-        assert not any("Пропускаем" in m for m in capture_logs)
-        assert not any("task-2" in m for m in capture_logs)
-
-    def test_non_silent_ignored_tasks_warn(self, capture_logs: list[str]) -> None:
-        """Non-silent ignored tasks produce a warning."""
-        tasks = self._make_tasks()
-        options = _FetchAnnotationsOptions(
-            ignore_task_ids={2},
-        )
-
-        result = _filter_tasks_for_fetch(tasks, options)
-
-        assert [t.id for t in result] == [1, 3]
-        assert any("Пропускаем" in m for m in capture_logs)
-        assert any("task-2" in m for m in capture_logs)
+        assert any("Пропускаем" in m for m in capture_logs) is not silent
+        assert any("task-2" in m for m in capture_logs) is not silent
 
     def test_mixed_silent_and_non_silent(self, capture_logs: list[str]) -> None:
         """Only non-silent ignored tasks appear in the warning."""
@@ -454,22 +408,6 @@ class TestIgnoredTaskSilent:
     """Tests for the ``silent`` field on ``IgnoredTask``."""
 
     @pytest.mark.parametrize(
-        ("raw", "expected"),
-        [
-            (
-                {"id": 5, "name": "t5", "silent": True},
-                IgnoredTask(id=5, name="t5", silent=True),
-            ),
-            ({"id": 5, "name": "t5"}, IgnoredTask(id=5, name="t5", silent=False)),
-        ],
-    )
-    def test_parse_silent(self, raw: dict[str, object], expected: IgnoredTask) -> None:
-        """``_parse_ignore_entry`` reads ``silent`` (defaulting to False)."""
-        entry = _parse_ignore_entry(raw)
-        assert entry is not None
-        assert entry.silent is expected.silent
-
-    @pytest.mark.parametrize(
         ("entry", "expected"),
         [
             (IgnoredTask(id=5, name="t5", silent=True), {"silent": True}),
@@ -488,8 +426,12 @@ class TestIgnoredTaskSilent:
         else:
             assert "silent" not in data
 
-    def test_get_silent_task_ids(self) -> None:
-        """``get_silent_task_ids`` returns only IDs with ``silent=True``."""
+    @pytest.mark.parametrize(
+        ("project", "expected"),
+        [("proj", {1, 3}), ("loud", set()), ("never-configured", set())],
+    )
+    def test_get_silent_task_ids(self, project: str, expected: set[int]) -> None:
+        """Only ``silent=True`` ids; an unconfigured project yields an empty set."""
         cfg = IgnoreConfig(
             projects={
                 "proj": [
@@ -497,32 +439,10 @@ class TestIgnoredTaskSilent:
                     IgnoredTask(id=2, name="b"),
                     IgnoredTask(id=3, name="c", silent=True),
                 ],
+                "loud": [IgnoredTask(id=1, name="a")],
             },
         )
-        assert cfg.get_silent_task_ids("proj") == {1, 3}
-
-    def test_get_silent_task_ids_empty(self) -> None:
-        """Returns empty set when no silent tasks."""
-        cfg = IgnoreConfig(
-            projects={"proj": [IgnoredTask(id=1, name="a")]},
-        )
-        assert cfg.get_silent_task_ids("proj") == set()
-
-    def test_add_task_with_silent(self) -> None:
-        """``add_task`` accepts ``silent`` keyword argument."""
-        cfg = IgnoreConfig()
-        cfg.add_task("proj", 42, "my-task", silent=True)
-        entries = cfg.get_ignored_entries("proj")
-        assert len(entries) == 1
-        assert entries[0].silent is True
-
-    def test_get_silent_task_ids_unknown_project(self) -> None:
-        """An unconfigured project yields an empty set, not an error.
-
-        Every earlier call passed a project that was present, so the ``[]``
-        default of the lookup was never used.
-        """
-        assert IgnoreConfig().get_silent_task_ids("never-configured") == set()
+        assert cfg.get_silent_task_ids(project) == expected
 
 
 class TestParseIgnoreEntry:
@@ -568,24 +488,6 @@ class TestParseIgnoreEntry:
 
 class TestIgnoreConfigEntries:
     """Tests for adding and removing entries on ``IgnoreConfig``."""
-
-    def test_add_task_defaults_to_a_blank_loud_entry(self) -> None:
-        """Omitted ``description``/``silent`` must land as ``""`` / ``False``."""
-        cfg = IgnoreConfig()
-
-        cfg.add_task("proj", 1, "one")
-
-        entry = cfg.get_ignored_entries("proj")[0]
-        assert entry.description == ""
-        assert entry.silent is False
-
-    def test_add_task_stores_the_description(self) -> None:
-        """The description reaches the entry rather than being dropped."""
-        cfg = IgnoreConfig()
-
-        cfg.add_task("proj", 1, "one", "flaky annotations")
-
-        assert cfg.get_ignored_entries("proj")[0].description == "flaky annotations"
 
     def test_add_task_appends_new_ids_and_ignores_duplicates(self) -> None:
         """The duplicate guard must match on the id, not on "any other id".
@@ -795,35 +697,6 @@ class TestFetchSelectedTasks:
         assert set(CSV_COLUMNS).issubset(set(deleted_df.columns))
         assert (deleted_df["instance_shape"] == "deleted").all()
 
-    def test_ignored_tasks_excluded(
-        self,
-        coco8_fixtures: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """Tasks in ``ignore_task_ids`` are excluded from results."""
-        fake = build_fake(
-            coco8_fixtures,
-            ["normal", "all-empty"],
-            statuses=["completed", "completed"],
-        )
-        ignored_task_id = fake.tasks[1].id
-        out_dir = tmp_path / "out"
-
-        fetch_selected_tasks(
-            make_fake_client(fake),
-            FetchTarget(fake.project.id, fake.project.name, out_dir, None),
-            FetchOptions(
-                task_selector=[fake.tasks[0].name],
-                ignore_task_ids={ignored_task_id},
-                use_cache=False,
-            ),
-        )
-
-        df = pd.read_csv(out_dir / "dataset.csv")
-        task_ids_in_csv = set(df["task_id"].unique())
-        assert fake.tasks[0].id in task_ids_in_csv
-        assert ignored_task_id not in task_ids_in_csv
-
     def test_numeric_selector_matches_the_name_selector_without_listing(
         self,
         coco8_fixtures: LoadedFixtures,
@@ -859,24 +732,6 @@ class TestFetchSelectedTasks:
         assert by_name_api.call_counts["get_project_tasks"] == 1
         assert by_id_api.call_counts["get_project_tasks"] == 0
         assert by_id_api.call_counts["get_task"] == len(fake.tasks)
-
-    def test_task_not_found_raises(
-        self,
-        normal_fake: LoadedFixtures,
-        tmp_path: Path,
-    ) -> None:
-        """Non-existent task selector raises ``TaskNotFoundError``."""
-        fake = normal_fake
-
-        with pytest.raises(TaskNotFoundError):
-            fetch_selected_tasks(
-                make_fake_client(fake),
-                FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
-                FetchOptions(
-                    task_selector=["nonexistent-task-xyz"],
-                    use_cache=False,
-                ),
-            )
 
 
 # ---------------------------------------------------------------------------

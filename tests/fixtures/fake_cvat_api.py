@@ -101,6 +101,9 @@ class FakeCvatApi:
     narrow single-method interaction tests (error injection, exact call-arg
     assertions where a one-line ``return_value`` beats fixture setup).
 
+    *cloud_storage* is what ``get_project_cloud_storage`` reports for the
+    project; the default ``None`` keeps every fetch local-only.
+
     *flaky* makes any method fail its first N calls and then succeed, which
     is what a retry policy has to be tested against: ``call_counts`` then
     says how many attempts it actually took.  Mutations are guarded by a
@@ -117,6 +120,7 @@ class FakeCvatApi:
         flaky: Mapping[str, int] | None = None,
         flaky_status: int = 429,
         flaky_retry_after: float | None = None,
+        cloud_storage: CloudStorageInfo | None = None,
     ) -> None:
         """Unpack fixture data into internal stores (copies: writes stay local)."""
         self._project = fixtures.project
@@ -130,6 +134,7 @@ class FakeCvatApi:
         self._flaky = dict(flaky or {})
         self._flaky_status = flaky_status
         self._flaky_retry_after = flaky_retry_after
+        self._cloud_storage = cloud_storage
         self._lock = threading.Lock()
         self.call_counts: Counter[str] = Counter()
         self.annotation_calls: list[int] = []
@@ -236,8 +241,8 @@ class FakeCvatApi:
         return list(self._labels)
 
     def get_project_cloud_storage(self, _project_id: int) -> CloudStorageInfo | None:
-        """Return None: fixture projects have no cloud storage."""
-        return None
+        """Return the configured cloud storage (None unless one was given)."""
+        return self._cloud_storage
 
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
         """Return frame metadata for a task by id."""

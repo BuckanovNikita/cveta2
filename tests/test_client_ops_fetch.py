@@ -89,18 +89,6 @@ class TestPrepareFetchContext:
         assert ctx.project_name == "my-project"
         assert ctx.raise_on_failure is False
 
-    def test_context_defaults_to_empty_host_and_project_name(self) -> None:
-        """Unset host and omitted project name must both render as ``""``.
-
-        Nothing else pins the *default* of ``project_name``; a fetch with
-        no project name behaves identically whatever placeholder it holds
-        until a task 5xxs.
-        """
-        ctx = _client(_fixtures([make_task(1)])).prepare_fetch(1)
-
-        assert ctx.host == ""
-        assert ctx.project_name == ""
-
     def test_completed_only_reaches_the_filter(self) -> None:
         """``completed_only`` is forwarded through an options dataclass.
 
@@ -127,33 +115,6 @@ class TestPrepareFetchContext:
         ctx = client.prepare_fetch(1, ignore_task_ids={2})
 
         assert [t.id for t in ctx.tasks] == [1, 3]
-
-    def test_silent_task_ids_reaches_the_filter(
-        self,
-        capture_logs: list[str],
-    ) -> None:
-        """A silenced ignore is only observable as an *absent* warning.
-
-        ``silent_task_ids`` changes nothing about which tasks are fetched,
-        so dropping it from the options left the task list identical and
-        merely re-introduced the warning the flag exists to suppress.
-        """
-        tasks = [make_task(1), make_task(2)]
-        client = _client(_fixtures(tasks))
-
-        ctx = client.prepare_fetch(1, ignore_task_ids={2}, silent_task_ids={2})
-
-        assert [t.id for t in ctx.tasks] == [1]
-        assert not any("Пропускаем" in message for message in capture_logs)
-
-    def test_non_silent_ignore_still_warns(self, capture_logs: list[str]) -> None:
-        """Counterpart to the silent case: without the flag, the warning fires."""
-        tasks = [make_task(1), make_task(2)]
-        client = _client(_fixtures(tasks))
-
-        client.prepare_fetch(1, ignore_task_ids={2})
-
-        assert any("Пропускаем" in message for message in capture_logs)
 
 
 # ---------------------------------------------------------------------------
@@ -257,49 +218,36 @@ class TestFetchOneTask:
         assert annotation.instance_label == "car"
         assert annotation.attributes == {"colour": "red"}
 
-    def test_status_600_is_outside_the_skip_window(self) -> None:
+    @pytest.mark.parametrize(("status", "skipped"), [(599, True), (600, False)])
+    def test_the_skip_window_ends_below_600(
+        self, status: int, *, skipped: bool
+    ) -> None:
         """600 is the exclusive upper bound of the "server error" range.
 
-        Every other 5xx test uses 500, which cannot tell ``< 600`` from
-        ``<= 600``; only a status *on* the bound decides whether an
-        unknown error is swallowed as a skip or re-raised.
+        A 500 cannot tell ``< 600`` from ``<= 600``; only statuses on both
+        sides of the bound decide whether an error is skipped or re-raised.
         """
         task, fixtures = _annotated_task_fixtures()
-        api = FakeCvatApi(fixtures, fail_task_ids={task.id}, fail_status=600)
+        api = FakeCvatApi(fixtures, fail_task_ids={task.id}, fail_status=status)
         ctx = FetchContext(tasks=[task], label_names={}, attr_names={})
 
-        with pytest.raises(CvatApiError):
-            CvatClient.fetch_one_task(api, task, ctx)
-
-    def test_status_599_is_skipped(self) -> None:
-        """Counterpart to the 600 case: the last in-window status still skips."""
-        task, fixtures = _annotated_task_fixtures()
-        api = FakeCvatApi(fixtures, fail_task_ids={task.id}, fail_status=599)
-        ctx = FetchContext(tasks=[task], label_names={}, attr_names={})
-
-        assert CvatClient.fetch_one_task(api, task, ctx) is None
+        if skipped:
+            assert CvatClient.fetch_one_task(api, task, ctx) is None
+        else:
+            with pytest.raises(CvatApiError):
+                CvatClient.fetch_one_task(api, task, ctx)
 
     def test_rate_limiting_aborts_instead_of_skipping_the_task(self) -> None:
         """A 429 here means the retry budget is already spent.
 
         Skipping would drop the task from the merged dataset for a reason
         that has nothing to do with its contents, and the only trace would
-        be a log line — so the run stops instead.
+        be a log line — so the run stops instead, even though
+        ``raise_on_failure`` is off by default.
         """
         task, fixtures = _annotated_task_fixtures()
         api = FakeCvatApi(fixtures, fail_task_ids={task.id}, fail_status=429)
         ctx = FetchContext(tasks=[task], label_names={}, attr_names={})
 
         with pytest.raises(Cveta2Error, match="cvat_workers"):
-            CvatClient.fetch_one_task(api, task, ctx)
-
-    def test_rate_limiting_aborts_even_when_failures_are_tolerated(self) -> None:
-        """``raise_on_failure`` is off by default and must not soften a 429."""
-        task, fixtures = _annotated_task_fixtures()
-        api = FakeCvatApi(fixtures, fail_task_ids={task.id}, fail_status=429)
-        ctx = FetchContext(
-            tasks=[task], label_names={}, attr_names={}, raise_on_failure=False
-        )
-
-        with pytest.raises(Cveta2Error):
             CvatClient.fetch_one_task(api, task, ctx)

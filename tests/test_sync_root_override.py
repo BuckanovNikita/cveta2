@@ -115,26 +115,17 @@ def test_explicit_root_beats_config(
     assert cs_info.prefix == "cli-prefix"
 
 
-def test_no_root_passthrough(
+@pytest.mark.parametrize(
+    "sync_roots",
+    [None, {"other-project": "s3://custom-bucket/other"}],
+    ids=["no-root", "root-for-other-project"],
+)
+def test_cvat_storage_passes_through_without_an_own_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    sync_roots: dict[str, str] | None,
 ) -> None:
-    _write_config(tmp_path, monkeypatch)
-    original = _cvat_cs_info()
-    cs_info = _resolve(_make_client(original))
-
-    assert cs_info == original
-
-
-def test_root_for_other_project_not_applied(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _write_config(
-        tmp_path,
-        monkeypatch,
-        sync_roots={"other-project": "s3://custom-bucket/other"},
-    )
+    _write_config(tmp_path, monkeypatch, sync_roots=sync_roots)
     original = _cvat_cs_info()
     cs_info = _resolve(_make_client(original))
 

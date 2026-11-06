@@ -581,12 +581,19 @@ class FailingDeleteS3(FakeS3Client):
         raise ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject")
 
 
-@pytest.mark.parametrize("layer", ["local", "s3"])
+@pytest.mark.parametrize(
+    ("layer", "use_cache"),
+    [("local", True), ("s3", True), ("local", False)],
+    ids=["local", "s3", "local-with-cache-disabled"],
+)
 def test_invalidation_failure_aborts_before_task_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     layer: str,
+    *,
+    use_cache: bool,
 ) -> None:
+    """Promotion needs strict invalidation even when cache reads are disabled."""
     monkeypatch.setenv("CVETA2_DISABLE_CACHE", "false")
     api = PromotionApi({11: [_job(101)]})
     config, root = _custom_config(tmp_path, api.get_project(1))
@@ -605,8 +612,8 @@ def test_invalidation_failure_aborts_before_task_mutation(
 
         monkeypatch.setattr(Path, "unlink", deny_stale_unlink)
     with pytest.raises(Cveta2Error) as caught:
-        _run(api, tmp_path / "output", use_cache=True, config_path=config)
-    assert "11" in str(caught.value)
+        _run(api, tmp_path / "output", use_cache=use_cache, config_path=config)
+    assert "кэш задачи 11" in str(caught.value)
     assert api.update_attempts == []
     assert api.annotation_calls == []
     assert not (tmp_path / "output").exists()

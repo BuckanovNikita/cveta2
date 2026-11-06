@@ -1,7 +1,5 @@
-"""Recording ports pin workflow effects and recovery write ordering."""
+"""Recording ports pin upload workflow effects and recovery write ordering."""
 
-from contextlib import nullcontext
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
@@ -9,19 +7,9 @@ import pandas as pd
 import pytest
 
 from cveta2.application.client import ApplicationClient
-from cveta2.application.client.shared import FetchContext
-from cveta2.application.ports.cache import CacheFactory, TaskCache
 from cveta2.application.ports.manifests import ManifestStore
 from cveta2.application.ports.storage import UploadStorage
 from cveta2.application.ports.workflow_files import WorkflowFiles
-from cveta2.application.settings import CacheProjectSettings
-from cveta2.application.use_cases.fetch import (
-    FetchDependencies,
-    FetchOptions,
-    FetchTarget,
-    _promote_completed_annotations,
-    fetch_selected_tasks,
-)
 from cveta2.application.use_cases.upload import (
     UploadDependencies,
     UploadOptions,
@@ -30,103 +18,11 @@ from cveta2.application.use_cases.upload import (
     upload_dataset,
 )
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.models import TaskAnnotations, TaskInfo
 from cveta2.domain.storage import CloudStorageInfo
 from cveta2.domain.upload import UploadManifest, new_manifest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-def _fetch_deps(cache: Mock, files: Mock) -> FetchDependencies:
-    caches = Mock(spec=CacheFactory)
-    caches.create.return_value = cache
-    clock = Mock(return_value=0.0)
-    runner = Mock(side_effect=lambda items, work, **_kwargs: [work(t) for t in items])
-    return FetchDependencies(
-        caches=caches,
-        files=files,
-        runner=runner,
-        clock=clock,
-        lock_factory=nullcontext,
-        cache_settings=CacheProjectSettings(),
-    )
-
-
-def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
-    """A cached selected-task fetch delegates every file effect to its port."""
-    task = TaskInfo(
-        id=12, name="task", status="completed", updated_date="now", subset=""
-    )
-    annotations = TaskAnnotations(
-        annotations=[], deleted_images=[], task_id=12, task_name="task"
-    )
-    client = Mock(spec=ApplicationClient)
-    client.prepare_fetch.return_value = FetchContext([task], {}, {})
-    client.detect_project_cloud_storage.return_value = None
-    cache = Mock(spec=TaskCache)
-    cache.get.return_value = annotations
-    files = Mock(spec=WorkflowFiles)
-    output = Path("unmaterialized-workflow-output")
-    files.prepare_tasks.return_value = output / ".tasks"
-    deps = _fetch_deps(cache, files)
-
-    result = fetch_selected_tasks(
-        client, FetchTarget(7, "project", output), FetchOptions(), deps=deps
-    )
-
-    assert result == TaskAnnotations.merge([annotations])
-    client.fetch_one_task.assert_not_called()
-    files.prepare_tasks.assert_not_called()
-    files.write_task_csv.assert_not_called()
-    files.cleanup_tasks.assert_not_called()
-    files.write_dataset_and_deleted.assert_called_once_with(result, output)
-    cache.put.assert_not_called()
-    cache.prune.assert_not_called()
-
-
-def test_disabled_cache_promotion_strictly_invalidates_local_before_write() -> None:
-    """Promotion requires local invalidation even when cache reads are disabled."""
-    task = TaskInfo(
-        id=12, name="task", status="annotation", updated_date="now", subset=""
-    )
-    client = Mock(spec=ApplicationClient)
-    client.list_project_tasks.return_value = [task]
-    client.api = Mock()
-    client.api.get_task_jobs.return_value = [
-        Mock(id=4, stage="annotation", state="completed")
-    ]
-    events: list[str] = []
-    cache = Mock(spec=TaskCache)
-    cache.invalidate.side_effect = lambda *_args, **_kwargs: events.append("invalidate")
-    client.api.update_job.side_effect = lambda *_args, **_kwargs: events.append("patch")
-    deps = _fetch_deps(cache, Mock(spec=WorkflowFiles))
-
-    _promote_completed_annotations(
-        client,
-        FetchTarget(7, "project", Path("unused")),
-        FetchOptions(use_cache=False),
-        deps=deps,
-    )
-
-    assert events == ["invalidate", "patch"]
-    cache.invalidate.assert_called_once_with(12, strict=True)
-    cast("Mock", deps.caches).create.assert_called_once_with(
-        7, None, deps.cache_settings, local_only=True
-    )
-    client.detect_project_cloud_storage.assert_not_called()
-
-    events.clear()
-    cache.invalidate.side_effect = OSError("cannot delete")
-    client.api.update_job.reset_mock()
-    with pytest.raises(Cveta2Error, match="кэш"):
-        _promote_completed_annotations(
-            client,
-            FetchTarget(7, "project", Path("unused")),
-            FetchOptions(use_cache=False),
-            deps=deps,
-        )
-    client.api.update_job.assert_not_called()
 
 
 def _upload_setup() -> tuple[Mock, UploadRequest, UploadDependencies, list[str]]:

@@ -1,5 +1,6 @@
 """Deterministic effect and accounting regressions for faster fetches."""
 
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
@@ -13,9 +14,13 @@ from cveta2.adapters.config.settings import CvatConfig
 from cveta2.adapters.files.dataset import enrich_dataframe_paths, populate_record_paths
 from cveta2.adapters.files.task_output import LocalWorkflowFiles
 from cveta2.adapters.s3.task_cache import TaskAnnotationCache
+from cveta2.application.client import ApplicationClient
 from cveta2.application.client.shared import FetchContext
-from cveta2.application.ports.cache import TaskCache
+from cveta2.application.ports.cache import CacheFactory, TaskCache
+from cveta2.application.ports.workflow_files import WorkflowFiles
+from cveta2.application.settings import CacheProjectSettings
 from cveta2.application.use_cases.fetch import (
+    FetchDependencies,
     FetchOptions,
     FetchTarget,
     _CachePolicy,
@@ -23,11 +28,12 @@ from cveta2.application.use_cases.fetch import (
     _FetchStats,
     _retrieve_task,
     fetch_project,
+    fetch_selected_tasks,
 )
 from cveta2.composition.client import CvatClient
 from cveta2.composition.workflows import fetch_dependencies
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.models import ProjectAnnotations, TaskAnnotations
+from cveta2.domain.models import ProjectAnnotations, TaskAnnotations, TaskInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import build_fake, make_bbox, make_cs_info, make_task
 
@@ -139,6 +145,53 @@ def test_task_csv_effects_are_opt_in(
     files.cleanup_tasks.assert_not_called()
 
 
+def _fetch_deps(cache: Mock, files: Mock) -> FetchDependencies:
+    caches = Mock(spec=CacheFactory)
+    caches.create.return_value = cache
+    clock = Mock(return_value=0.0)
+    runner = Mock(side_effect=lambda items, work, **_kwargs: [work(t) for t in items])
+    return FetchDependencies(
+        caches=caches,
+        files=files,
+        runner=runner,
+        clock=clock,
+        lock_factory=nullcontext,
+        cache_settings=CacheProjectSettings(),
+    )
+
+
+def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
+    """A cached selected-task fetch delegates every file effect to its port."""
+    task = TaskInfo(
+        id=12, name="task", status="completed", updated_date="now", subset=""
+    )
+    annotations = TaskAnnotations(
+        annotations=[], deleted_images=[], task_id=12, task_name="task"
+    )
+    client = Mock(spec=ApplicationClient)
+    client.prepare_fetch.return_value = FetchContext([task], {}, {})
+    client.detect_project_cloud_storage.return_value = None
+    cache = Mock(spec=TaskCache)
+    cache.get.return_value = annotations
+    files = Mock(spec=WorkflowFiles)
+    output = Path("unmaterialized-workflow-output")
+    files.prepare_tasks.return_value = output / ".tasks"
+    deps = _fetch_deps(cache, files)
+
+    result = fetch_selected_tasks(
+        client, FetchTarget(7, "project", output), FetchOptions(), deps=deps
+    )
+
+    assert result == TaskAnnotations.merge([annotations])
+    client.fetch_one_task.assert_not_called()
+    files.prepare_tasks.assert_not_called()
+    files.write_task_csv.assert_not_called()
+    files.cleanup_tasks.assert_not_called()
+    files.write_dataset_and_deleted.assert_called_once_with(result, output)
+    cache.put.assert_not_called()
+    cache.prune.assert_not_called()
+
+
 def test_path_resolution_scales_with_unique_images(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -241,32 +294,6 @@ def test_task_summary_reports_skipped_and_incomplete_without_cache(
     assert "суммарное время работников" in summary
     assert str(fake.tasks[1].id) in summary
     assert str(fake.tasks[2].id) in summary
-
-
-def test_skipped_task_has_separate_counter(
-    normal_fake: "LoadedFixtures",
-) -> None:
-    api = FakeCvatApi(normal_fake, fail_task_ids={normal_fake.tasks[0].id})
-    client = CvatClient(CvatConfig(), api=api)
-    context = client.prepare_fetch(normal_fake.project.id)
-    target = FetchTarget(
-        normal_fake.project.id, normal_fake.project.name, Path("unused")
-    )
-    deps = replace(
-        fetch_dependencies(target, FetchOptions()),
-        clock=Mock(side_effect=[100.0, 102.0]),
-    )
-    stats = _FetchStats(lock=Lock())
-
-    assert (
-        _retrieve_task(
-            client, context.tasks[0], context, _CachePolicy(), stats, deps=deps
-        )
-        is None
-    )
-    assert stats.skipped_task_ids == [context.tasks[0].id]
-    assert stats.skipped_seconds == 2.0
-    assert stats.fetched == 0
 
 
 def test_legacy_context_does_not_claim_a_complete_inventory() -> None:

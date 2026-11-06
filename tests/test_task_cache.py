@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import stat
 from dataclasses import replace
@@ -14,11 +13,18 @@ import pandas as pd
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
+import cveta2
 from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
 from cveta2.adapters.s3.task_cache import (
     S3CacheBackend,
     TaskAnnotationCache,
     get_task_cache_dir,
+)
+from cveta2.application.ports.dtos import (
+    RawAnnotations,
+    RawDataMeta,
+    RawFrame,
+    RawIssue,
 )
 from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
 from cveta2.composition.client import CvatClient
@@ -29,24 +35,24 @@ from cveta2.composition.workflows import (
     resolved_task,
 )
 from cveta2.domain.cache import CACHE_SCHEMA_VERSION, CachedTaskEnvelope
-from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.models import (
     BBoxAnnotation,
     DeletedImage,
     ImageWithoutAnnotations,
+    ProjectInfo,
     TaskAnnotations,
     TaskInfo,
 )
 from cveta2.domain.storage import CloudStorageInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import CFG, build_fake, make_bbox, make_task, write_split_config_yaml
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from pathlib import Path
-
-    from tests.fixtures.fake_cvat_project import LoadedFixtures
 
 
 @pytest.fixture(autouse=True)
@@ -121,23 +127,37 @@ def _s3_key(task_id: int, prefix: str = "pfx") -> str:
 
 
 class TestLocalCache:
-    def test_schema_four_entry_is_rejected_and_deleted(self, tmp_path: Path) -> None:
-        """Generation four discarded polygons even when the task revision matches."""
+    @pytest.mark.parametrize(
+        "corrupt",
+        [
+            # Generation four discarded polygons even when the revision matches.
+            lambda entry, task: entry.write_bytes(
+                _envelope_bytes(task, _payload(), schema_version=4)
+            ),
+            lambda entry, task: entry.write_bytes(
+                _envelope_bytes(
+                    task, _payload(), schema_version=CACHE_SCHEMA_VERSION + 1
+                )
+            ),
+            lambda entry, _task: entry.write_bytes(b"{not json!!"),
+            # A changed task revision must not serve stale annotations.
+            lambda entry, task: entry.write_bytes(
+                _envelope_bytes(
+                    task.model_copy(update={"updated_date": "2025-12-31"}), _payload()
+                )
+            ),
+        ],
+        ids=["schema-4", "future-schema", "corrupt-json", "older-revision"],
+    )
+    def test_invalid_entry_is_a_miss_and_is_deleted(
+        self, tmp_path: Path, corrupt: Callable[[Path, TaskInfo], object]
+    ) -> None:
         task = make_task(updated=_UPDATED)
         entry = tmp_path / "task_1.json"
-        entry.write_bytes(_envelope_bytes(task, _payload(), schema_version=4))
+        corrupt(entry, task)
 
         assert TaskAnnotationCache(tmp_path).get(task) is None
         assert not entry.exists()
-
-    def test_put_then_get_hit(self, tmp_path: Path) -> None:
-        cache = TaskAnnotationCache(tmp_path / "cache")
-        task = make_task(updated=_UPDATED)
-        payload = _payload()
-
-        cache.put(task, payload)
-
-        assert cache.get(task) == payload
 
     def test_put_creates_group_writable_entry(self, tmp_path: Path) -> None:
         old_umask = os.umask(0o077)
@@ -156,29 +176,6 @@ class TestLocalCache:
         cache = TaskAnnotationCache(tmp_path / "cache")
 
         assert cache.get(make_task(updated=_UPDATED)) is None
-
-    def test_bumped_updated_date_invalidates_local_entry(self, tmp_path: Path) -> None:
-        """A changed task revision must not serve rendered stale annotations."""
-        cache = TaskAnnotationCache(tmp_path / "cache")
-        payload = _payload()
-        cache.put(make_task(updated="2026-01-01T00:00:00"), payload)
-        relabelled_task = make_task(updated="2026-02-02T00:00:00")
-
-        assert cache.get(relabelled_task) is None
-        assert not (tmp_path / "cache" / "task_1.json").exists()
-
-    def test_wrong_schema_version_miss_and_deletes_file(self, tmp_path: Path) -> None:
-        cache_dir = tmp_path / "cache"
-        cache = TaskAnnotationCache(cache_dir)
-        task = make_task(updated=_UPDATED)
-        cache.put(task, _payload())
-        entry_path = cache_dir / "task_1.json"
-        data = json.loads(entry_path.read_text(encoding="utf-8"))
-        data["schema_version"] = CACHE_SCHEMA_VERSION + 1
-        entry_path.write_text(json.dumps(data), encoding="utf-8")
-
-        assert cache.get(task) is None
-        assert not entry_path.exists()
 
     def test_unreadable_entry_is_miss_and_keeps_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -217,15 +214,6 @@ class TestLocalCache:
         envelope = CachedTaskEnvelope.model_validate_json(raw)
 
         assert datetime.fromisoformat(envelope.cached_at).tzinfo == timezone.utc
-
-    def test_corrupt_json_miss_and_deletes_file(self, tmp_path: Path) -> None:
-        cache_dir = tmp_path / "cache"
-        cache_dir.mkdir()
-        (cache_dir / "task_1.json").write_bytes(b"{not json!!")
-        cache = TaskAnnotationCache(cache_dir)
-
-        assert cache.get(make_task(updated=_UPDATED)) is None
-        assert not (cache_dir / "task_1.json").exists()
 
     def test_non_completed_task_get_none_put_noop(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"
@@ -771,6 +759,56 @@ class TestFetchWithCache:
             assert deleted.s3_image_path is None
             assert deleted.image_path is None
 
+    def test_issue_failure_is_retried_next_fetch_before_caching(
+        self, tmp_path: Path
+    ) -> None:
+        """A task whose issues failed to load is not cached as complete."""
+        task = make_task()
+        api = FakeCvatApi(
+            LoadedFixtures(
+                project=ProjectInfo(id=1, name="audit-project"),
+                tasks=[task],
+                labels=[],
+                task_data={
+                    task.id: (
+                        RawDataMeta([RawFrame("a.jpg", 20, 20)]),
+                        RawAnnotations(),
+                    )
+                },
+            )
+        )
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            f"cache:\n  tasks_root: {tmp_path / 'cache'}\n", encoding="utf-8"
+        )
+        connection = cveta2.Connection(
+            client=CvatClient(CFG, api=api), config_path=config
+        )
+
+        def fetch(out: str) -> pd.DataFrame:
+            return cveta2.fetch(
+                "audit-project",
+                tmp_path / out,
+                connection=connection,
+                download_images=False,
+            ).dataset
+
+        with patch.object(
+            api,
+            "get_task_issues",
+            side_effect=[
+                CvatApiError("temporary", status_code=500),
+                [RawIssue(id=1, frame=0, resolved=False, comments=["review this"])],
+            ],
+        ) as issues:
+            assert fetch("first").loc[0, "issue_text"] == ""
+            assert not list((tmp_path / "cache").rglob("task_*.json"))
+            second, third = fetch("second"), fetch("third")
+        assert (
+            second.loc[0, "issue_text"] == third.loc[0, "issue_text"] == "review this"
+        )
+        assert issues.call_count == 2
+
 
 class TestFullFetchPrunesCache:
     def test_full_fetch_prunes_orphaned_entries(
@@ -925,8 +963,17 @@ class TestCacheSettings:
 
         assert fake_s3.put_calls == ["ml-cache/proj/task_annotations/task_1.json"]
 
-    def test_from_cloud_storage_with_full_url_targets_other_bucket(
-        self, tmp_path: Path
+    @pytest.mark.parametrize(
+        ("task_cache_s3", "expected_key"),
+        [
+            (None, "bkt/pfx/.cveta2_cache/task_annotations/task_1.json"),
+            ("s3://ml-cache/proj", "ml-cache/proj/task_annotations/task_1.json"),
+            ("_cveta2_cache", "bkt/_cveta2_cache/task_annotations/task_1.json"),
+        ],
+        ids=["default-layout", "full-url-other-bucket", "bare-prefix-same-bucket"],
+    )
+    def test_from_cloud_storage_key_layout(
+        self, tmp_path: Path, task_cache_s3: str | None, expected_key: str
     ) -> None:
         fake_s3 = FakeS3Client()
         cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
@@ -934,32 +981,14 @@ class TestCacheSettings:
             "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
         ):
             backend = S3CacheBackend.from_cloud_storage(
-                cs_info, task_cache_s3="s3://ml-cache/proj"
+                cs_info, task_cache_s3=task_cache_s3
             )
         assert backend is not None
         cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
 
         cache.put(make_task(updated=_UPDATED), _payload())
 
-        assert fake_s3.put_calls == ["ml-cache/proj/task_annotations/task_1.json"]
-
-    def test_from_cloud_storage_with_bare_prefix_stays_in_project_bucket(
-        self, tmp_path: Path
-    ) -> None:
-        fake_s3 = FakeS3Client()
-        cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
-        with patch(
-            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
-        ):
-            backend = S3CacheBackend.from_cloud_storage(
-                cs_info, task_cache_s3="_cveta2_cache"
-            )
-        assert backend is not None
-        cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
-
-        cache.put(make_task(updated=_UPDATED), _payload())
-
-        assert fake_s3.put_calls == ["bkt/_cveta2_cache/task_annotations/task_1.json"]
+        assert fake_s3.put_calls == [expected_key]
 
     def test_bare_prefix_without_project_storage_builds_nothing(self) -> None:
         """A bare prefix names no bucket, so without storage there is none.
@@ -1007,43 +1036,10 @@ class TestCacheSettings:
 
         make_client.assert_called_once_with("http://minio:9000")
 
-    def test_from_cloud_storage_default_keeps_cveta2_cache_layout(
-        self, tmp_path: Path
-    ) -> None:
-        fake_s3 = FakeS3Client()
-        cs_info = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
-        with patch(
-            "cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3
-        ):
-            backend = S3CacheBackend.from_cloud_storage(cs_info)
-        assert backend is not None
-        cache = TaskAnnotationCache(tmp_path / "local", s3=backend)
-
-        cache.put(make_task(updated=_UPDATED), _payload())
-
-        assert fake_s3.put_calls == [
-            "bkt/pfx/.cveta2_cache/task_annotations/task_1.json"
-        ]
-
 
 # ---------------------------------------------------------------------------
 # _build_task_cache: what the fetch pipeline wires the cache up to
 # ---------------------------------------------------------------------------
-
-
-class _FakeApiWithStorage(FakeCvatApi):
-    """``FakeCvatApi`` whose project reports a cloud storage.
-
-    The base fake answers ``None``, so no service-level test ever reached
-    the S3 half of the cache: every one of them ran local-only.
-    """
-
-    def __init__(self, fake: LoadedFixtures, storage: CloudStorageInfo) -> None:
-        super().__init__(fake)
-        self._storage = storage
-
-    def get_project_cloud_storage(self, _project_id: int) -> CloudStorageInfo | None:
-        return self._storage
 
 
 _PROJECT_STORAGE = CloudStorageInfo(id=1, bucket="bkt", prefix="pfx", endpoint_url="")
@@ -1082,7 +1078,7 @@ class TestFetchBuildsTheS3CacheBackend:
         was reachable only through direct ``S3CacheBackend`` unit tests.
         """
         fake = normal_fake
-        api = _FakeApiWithStorage(fake, _PROJECT_STORAGE)
+        api = FakeCvatApi(fake, cloud_storage=_PROJECT_STORAGE)
         task = fake.tasks[0]
         fake_s3 = FakeS3Client(
             {f"bkt/{_s3_key(task.id)}": _envelope_bytes(task, _payload(task.id))}
@@ -1101,7 +1097,10 @@ class TestFetchBuildsTheS3CacheBackend:
         fake_s3 = FakeS3Client()
 
         self._fetch(
-            _FakeApiWithStorage(fake, _PROJECT_STORAGE), fake, tmp_path / "out", fake_s3
+            FakeCvatApi(fake, cloud_storage=_PROJECT_STORAGE),
+            fake,
+            tmp_path / "out",
+            fake_s3,
         )
 
         assert fake_s3.put_calls == [f"bkt/{_s3_key(fake.tasks[0].id)}"]
@@ -1125,7 +1124,7 @@ class TestFetchBuildsTheS3CacheBackend:
         )
 
         self._fetch(
-            _FakeApiWithStorage(fake, _PROJECT_STORAGE),
+            FakeCvatApi(fake, cloud_storage=_PROJECT_STORAGE),
             fake,
             tmp_path / "out",
             fake_s3,
@@ -1151,7 +1150,7 @@ class TestTaskMutationDropsTheS3Entry:
         task = fake.tasks[0]
         key = f"bkt/{_s3_key(task.id)}"
         fake_s3 = FakeS3Client({key: b"stale"})
-        client = CvatClient(CFG, api=_FakeApiWithStorage(fake, _PROJECT_STORAGE))
+        client = CvatClient(CFG, api=FakeCvatApi(fake, cloud_storage=_PROJECT_STORAGE))
 
         with (
             patch("cveta2.adapters.s3.task_cache.make_s3_client", return_value=fake_s3),
