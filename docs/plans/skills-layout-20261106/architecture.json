@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "task": "Move workflow policy out of project skills, add a release skill, make .agents/skills the single source with .claude/skills symlinks, regenerate the Spec Kit skills",
+  "scope": [
+    ".agents/skills",
+    ".claude/skills",
+    ".gitignore",
+    ".specify/integrations/claude.manifest.json",
+    ".specify/integrations/codex.manifest.json",
+    ".specify/memory/engineering.md",
+    "AGENTS.md",
+    "tests/test_docs.py",
+    "docs/plans/skills-layout-20261106"
+  ],
+  "impact": "none",
+  "rationale": "Inspected the task diff: agent skills and instructions are Markdown read by agents; .gitignore and the Spec Kit manifests change only tracking and install timestamps; tests/test_docs.py gains documentation-layout assertions using only the standard library. No cveta2 runtime module, import-linter contract in pyproject.toml, tests/test_architecture.py, tests/test_integration_tool_boundaries.py, composition target or dependency configuration changes."
+}

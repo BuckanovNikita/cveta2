@@ -58,9 +58,13 @@ tests/integration/.run-tag
 .claude/worktrees/
 .agents/**
 !.agents/skills/
-!.agents/skills/commit
-!.agents/skills/mutation-testing
-!.agents/skills/running-integration-tests
+# Authored project skills: the source lives here; .claude/skills/<name> symlinks to it.
+!.agents/skills/mutation-testing/
+!.agents/skills/mutation-testing/**
+!.agents/skills/release/
+!.agents/skills/release/**
+!.agents/skills/running-integration-tests/
+!.agents/skills/running-integration-tests/**
 # Repository-managed Spec Kit skills; personal skills remain ignored.
 !.agents/skills/speckit-*/
 !.agents/skills/speckit-*/**

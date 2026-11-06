@@ -25,10 +25,10 @@ for output-format behavior.
 Before editing, inspect `git status --short`, the relevant diff, and the staged
 diff. Treat existing modifications and untracked files as user work. Do not
 stash, reset, broadly stage, commit, or push them. Stage and commit only exact
-task-owned paths when authorized; use the project `commit` skill for that
-workflow. Standing user authorization for completion includes required commits,
-release evaluation and commit/tag pushes after applicable gates pass. It satisfies
-the commit and push request gates in that skill; do not request authorization
+task-owned paths when authorized, following
+[Commits, hooks, and releases](#commits-hooks-and-releases). Standing user
+authorization for completion includes required commits, release evaluation and
+commit/tag pushes after applicable gates pass; do not request authorization
 again within scope. Explicit no-commit/no-release or other stopping points override
 it. A commit-only request without push authorization still stops before pushing.
 
@@ -224,6 +224,22 @@ feature evidence or immutable archive sources, including the preserved
 Documentation checks also cover Spec Kit memory and feature Markdown; upstream
 template examples are excluded.
 
+### Project skills
+
+Project skills hold procedures for specific situations; rules that apply to every
+task belong in this file. Authored skills live in `.agents/skills/<name>/`, and
+`.claude/skills/<name>` is a relative symlink to that directory
+(`../../.agents/skills/<name>`), so both hosts read one copy. Add each new
+authored skill to the `.agents/skills` exceptions in `.gitignore`.
+`tests/test_docs.py` enforces this layout and the manifest hashes below.
+
+The `speckit-*` skills are the exception. They are generator-owned host variants:
+each copy carries its host's invocation sigil (`/` for Claude, `$` for Codex), and
+the Claude copy carries Claude-only frontmatter. Their hashes are recorded in
+`.specify/integrations/{claude,codex}.manifest.json`. Never symlink or hand-edit
+them. Regenerate them with `specify` (see `.specify/integration.json` for the
+installed integrations).
+
 ### Portable usage skill
 
 The canonical portable `cveta2` skill lives in
@@ -289,6 +305,7 @@ and resolves the installed skill.
 - Run and clean integration resources through the `running-integration-tests`
   skill and the repository lifecycle tool, on success and failure. Prove cleanup
   with the exact-tag listings; CVAT cloud storage is part of that cleanup.
+- Never broaden a cleanup selector beyond the exact run tag.
 - Read current capacity from the registry; never infer permission from an idle
   stand. Never run `cleanup --stale` without `--dry-run`.
 - Never touch another tag or an unrelated durable name. Report anything
@@ -304,44 +321,62 @@ write a developer's real configuration.
 
 ## Commits, hooks, and releases
 
-Use Conventional Commits. `uv run pre-commit install` installs the pre-commit
-and commit-msg stages. Read `.pre-commit-config.yaml` for the current
-hook set. Do not bypass hooks unless the user explicitly directs it.
+### Commits
 
-Every gate runs at commit time, so a passing commit is safe to push; there is no
-pre-push stage. The changed-function mutation run and the live integration gate
-run last and only when their files change (`cveta2/`; for the live gate also
-`tests/integration/`, `pyproject.toml`, `uv.lock`). The live gate replaces only
-objects named by its own run tag (on `main`, the durable `cveta2-main` slot);
-the integration skill defines that boundary. Rebase, cherry-pick and merge run
-no pre-commit hook: after rewriting history and before pushing it, run
-`uv run pre-commit run --all-files`, and
-`uv run python scripts/mutation.py --base <upstream>` for the mutation report
-(the hook only sees staged changes, which are empty then).
+Stage exact task-owned paths (`git add -- <path>`). Messages are Conventional
+Commits, `type(scope)!: description`, with a lowercase type from the
+`conventional-pre-commit` args in `.pre-commit-config.yaml` (the commit-msg hook
+enforces them). Only `feat`, `fix`, `perf` and `!` move the version; a `!` needs a
+`BREAKING CHANGE:` footer for the changelog text. Reword git's default
+`Revert "..."` subject into a type. Use a unique temporary message file when
+several writers share the checkout.
+
+### Hooks
+
+`uv run pre-commit install` installs the pre-commit and commit-msg stages. Read
+`.pre-commit-config.yaml` for the current hook set. Do not bypass hooks unless the
+user explicitly directs it.
+
+- Every gate runs at commit time, so a passing commit is safe to push with plain
+  `git push`; there is no pre-push stage.
+- A hook that rewrites files (`uv lock`, `ruff format`): inspect the new diff,
+  restage only task-owned paths and commit again.
+- The changed-function mutation run and the live integration gate run last and
+  only when their files change (`cveta2/`; for the live gate also
+  `tests/integration/`, `pyproject.toml`, `uv.lock`). Mutation is advisory: it
+  prints surviving mutants and passes, failing only on a tool error or a failing
+  clean test run; triage
+  behavioural survivors with the `mutation-testing` skill.
+- The live gate runs for minutes while pre-commit keeps unstaged changes stashed:
+  do not edit the checkout meanwhile. It replaces only objects named by its own
+  run tag (on `main`, the durable `cveta2-main` slot); the
+  `running-integration-tests` skill covers its failures. Skip it
+  (`SKIP=integration-tests`) only on the user's request, as a one-commit bypass,
+  never as a recovery step.
+- A failure caused by unrelated pre-existing work: report the exact blocker; do
+  not modify, stage or discard that work.
+- Rebase, cherry-pick and merge run no pre-commit hook, and a commit that only
+  deletes files runs no file-filtered hook. After rewriting history and before
+  pushing it, run `uv run pre-commit run --all-files`, and
+  `uv run python scripts/mutation.py --base <upstream>` for the mutation report
+  (the hook only sees staged changes, which are empty then).
+
+Report the commit hash and subject, the pushed ref confirmed with
+`git ls-remote origin <ref>`, the hooks that ran, the mutation survivors reported
+and the remaining unrelated working-tree state.
+
+### Releases
 
 `main` changes only by merge. On `main`, semantic-release derives versions,
-tags, and `CHANGELOG.md`; never hand-edit the project version. Its release commit
-runs the pre-commit hooks, including the live gate in the `cveta2-main` slot;
-semantic-release captures their output, so expect minutes of silence. If a hook
-fails, the commit and tag are not created while the bumped version files stay
-staged: read the error, restore them (`git restore --staged --worktree
-pyproject.toml uv.lock CHANGELOG.md`), fix the cause and run the release again.
-Skip the live gate (`SKIP=integration-tests`) only on the user's request.
-Release right after the merge, on `main`:
+tags, and `CHANGELOG.md`; never hand-edit the project version. Release right
+after the merge with the `release` skill, which holds the commands and the
+recovery from a failed release hook. Documentation-only changes still evaluate
+release but may produce no new version tag.
 
-```bash
-uv run semantic-release version --print                     # the version it would make
-uv run semantic-release version --no-push --no-vcs-release  # bump, changelog, commit, tag
-git push origin main --follow-tags                          # push the checked commit and tag
-git ls-remote origin refs/heads/main refs/tags/vX.Y.Z       # confirm it landed
-```
-
-`No release will be made` after a merge of only non-releasing types is a success.
-Commit semantics live in the `commit` skill. Complete that workflow after required checks under the authorization rules in
-[Preserve the working tree](#preserve-the-working-tree); documentation-only
-changes still evaluate release but may produce no new version tag. Standing
-authorization covers the configured commit hooks and the push; it does not authorize
-changing remotes, deployment or expanding scope. Publish Git version
+Complete commits and releases after required checks under the authorization rules
+in [Preserve the working tree](#preserve-the-working-tree). Standing
+authorization covers the configured commit hooks and the push; it does not
+authorize changing remotes, deployment or expanding scope. Publish Git version
 tags only: no GitHub Release objects, release assets or registry publication
 without an explicit user override. Report failed/unavailable gates as gaps; never
 bypass them to force completion.

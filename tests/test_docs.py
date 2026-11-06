@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import inspect
+import json
 import re
+import subprocess
 import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
@@ -49,8 +52,40 @@ ALL_DOCS = [
 ]
 AGENT_INSTRUCTIONS = REPO_ROOT / "AGENTS.md"
 ENGINEERING_GUIDANCE = REPO_ROOT / ".specify" / "memory" / "engineering.md"
+AGENT_SKILLS = REPO_ROOT / ".agents" / "skills"
+CLAUDE_SKILLS = REPO_ROOT / ".claude" / "skills"
+# Spec Kit generates one host variant per integration and records its hash in
+# .specify/integrations/<host>.manifest.json; every other skill is authored.
+GENERATED_SKILL_PREFIX = "speckit-"
+
+
+def _authored_skills() -> list[str]:
+    """Tracked authored skills; gitignored personal skills are not project skills."""
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "--", ".agents/skills"],  # noqa: S607
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+    except (OSError, subprocess.CalledProcessError):
+        listed = [
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in AGENT_SKILLS.glob("*/SKILL.md")
+        ]
+    names = {Path(path).parts[2] for path in listed if len(Path(path).parts) > 3}
+    return sorted(
+        name
+        for name in names
+        if not name.startswith(GENERATED_SKILL_PREFIX)
+        and (AGENT_SKILLS / name).is_dir()
+    )
+
+
+AUTHORED_SKILLS = _authored_skills()
 SKILL_DOCS = sorted(
-    (REPO_ROOT / ".claude" / "skills" / "running-integration-tests").glob("*.md")
+    doc for name in AUTHORED_SKILLS for doc in (AGENT_SKILLS / name).rglob("*.md")
 )
 # The integration tests once ran a per-run MinIO/ClearML Compose stack on this
 # host with hand-picked ports and a user-derived tag. Every doc that still
@@ -322,6 +357,81 @@ class TestTheAgentInstructionsDelegateToSpecKit:
     def test_migrated_documents_have_no_standalone_copies(self) -> None:
         for retired in ("ARCHITECTURE.md", "DATASET_FORMAT.md", "BUG_REVIEW.md"):
             assert not (REPO_ROOT / retired).exists()
+
+
+class TestProjectSkillsShareOneSource:
+    """Claude and Codex read the same authored skills; generated ones stay per host."""
+
+    def test_authored_skills_exist(self) -> None:
+        assert AUTHORED_SKILLS
+
+    @pytest.mark.parametrize("name", AUTHORED_SKILLS)
+    def test_authored_skill_source_lives_in_agents(self, name: str) -> None:
+        source = AGENT_SKILLS / name
+        assert source.is_dir()
+        assert not source.is_symlink()
+        skill = (source / "SKILL.md").read_text(encoding="utf-8")
+        assert skill.startswith(f"---\nname: {name}\n")
+
+    @pytest.mark.parametrize("name", AUTHORED_SKILLS)
+    def test_claude_adapter_is_a_relative_symlink(self, name: str) -> None:
+        adapter = CLAUDE_SKILLS / name
+        assert adapter.is_symlink()
+        assert str(adapter.readlink()) == f"../../.agents/skills/{name}"
+        assert adapter.resolve() == (AGENT_SKILLS / name).resolve()
+
+    def test_claude_has_no_skill_without_a_shared_source(self) -> None:
+        adapters = {
+            path.name
+            for path in CLAUDE_SKILLS.glob("*")
+            if path.is_symlink() or (path / "SKILL.md").is_file()
+            if not path.name.startswith(GENERATED_SKILL_PREFIX)
+        }
+        assert adapters == set(AUTHORED_SKILLS)
+
+    @pytest.mark.parametrize("name", AUTHORED_SKILLS)
+    def test_authored_skill_is_not_gitignored(self, name: str) -> None:
+        if not (REPO_ROOT / ".git").exists():
+            pytest.skip("not a git checkout")
+        for path in (AGENT_SKILLS / name).rglob("*"):
+            if path.is_file():
+                ignored = subprocess.run(  # noqa: S603 - fixed git argv
+                    ["git", "check-ignore", "-q", "--no-index", str(path)],  # noqa: S607
+                    cwd=REPO_ROOT,
+                    check=False,
+                )
+                assert ignored.returncode == 1, f"{path} is gitignored"
+
+    def test_generated_skills_are_per_host_copies_matching_their_manifests(
+        self,
+    ) -> None:
+        hosts = {"claude": CLAUDE_SKILLS, "codex": AGENT_SKILLS}
+        names = {
+            host: sorted(p.name for p in root.glob(f"{GENERATED_SKILL_PREFIX}*"))
+            for host, root in hosts.items()
+        }
+        assert names["claude"]
+        assert names["claude"] == names["codex"]
+        for host, root in hosts.items():
+            manifest_path = (
+                REPO_ROOT / ".specify" / "integrations" / f"{host}.manifest.json"
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            skill_entries = {
+                key
+                for key in manifest["files"]
+                if f"/skills/{GENERATED_SKILL_PREFIX}" in key
+            }
+            assert skill_entries == {
+                (root / name / "SKILL.md").relative_to(REPO_ROOT).as_posix()
+                for name in names[host]
+            }
+            for name in names[host]:
+                skill = root / name / "SKILL.md"
+                assert not (root / name).is_symlink()
+                relative = skill.relative_to(REPO_ROOT).as_posix()
+                digest = hashlib.sha256(skill.read_bytes()).hexdigest()
+                assert manifest["files"][relative] == digest, relative
 
 
 def test_baseline_preserves_the_ordered_dataset_schema() -> None:

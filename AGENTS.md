@@ -23,8 +23,9 @@ sources below rather than duplicating them here.
 4. [Current specification and dataset contract](specs/baseline.md) for preserved
    behavior, acceptance criteria and immutable historical decisions.
 
-Human usage is in [README.md](README.md); setup and release commands are in
-[engineering guidance](.specify/memory/engineering.md).
+Human usage is in [README.md](README.md); setup commands are in
+[engineering guidance](.specify/memory/engineering.md); release commands are in the
+`release` skill.
 
 ## Workflow
 
@@ -39,17 +40,20 @@ Human usage is in [README.md](README.md); setup and release commands are in
 
 ## Project skills
 
-These skills remain applicable within the Spec Kit workflow:
+These skills hold situational procedures within the Spec Kit workflow; commit and
+hook rules are in engineering guidance. Sources live in `.agents/skills/` and
+`.claude/skills/` symlinks to them; the generated `speckit-*` skills are per-host
+copies (see engineering guidance, "Project skills").
 
-- `commit` — stage exact paths, write Conventional Commits, handle hook rewrites
-  and failures.
 - `mutation-testing` — run and triage the changed-function mutation check.
 - `running-integration-tests` — live CVAT/MinIO/ClearML runs, run tags, cleanup and
   the pre-commit integration gate.
+- `release` — the semantic-release procedure on `main` and its failure recovery.
 
 ## Authorization
 
 - Continue authorized stages through verification, documentation and the project
   release workflow without requiring a separate user prompt for each stage.
-- Standing user authorization satisfies commit/push request gates in project skills;
-  explicit stopping points and host Plan Mode/read-only limits take precedence.
+- Standing user authorization covers the required commits, release and commit/tag
+  pushes in engineering guidance; explicit stopping points and host Plan
+  Mode/read-only limits take precedence.

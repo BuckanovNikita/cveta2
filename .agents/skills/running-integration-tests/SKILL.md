@@ -27,13 +27,15 @@ variable.
 
 ## Rules
 
+Safety rules for the stands (own tag only, exact-tag cleanup, `cleanup --stale`
+only with `--dry-run`, never act on another run) are in engineering guidance
+§ "Shared infra" and k8s-infra `references/run-contract.md`; follow them. In
+addition, for this tool:
+
 - One run, one tag. `up` mints it (`infra.py newtag`) and writes the gitignored
   `tests/integration/.run-tag`; `test`, `stop` and the gate read it. Export
   `INFRA_RUN_TAG=<tag>` to adopt a run started elsewhere. On `main` the run is
-  the durable slot `cveta2-main`.
-- Operate only your own tag. Never broaden a cleanup selector, never touch
-  another tag or `cveta2-main` from a branch, and never run `cleanup --stale`
-  without `--dry-run`.
+  the durable slot `cveta2-main`; never touch it from a branch.
 - Stop every run with `L stop`; it removes the CVAT project and cloud storage,
   the MinIO bucket and leftover ClearML projects, and releases the tag only when
   every stand succeeded. An empty `ls --prefix <tag>` listing is the proof.
@@ -41,20 +43,23 @@ variable.
   client IP. A seeded project is single-use for a full run; `up` again first.
 - A failed TLS handshake is a trust problem (the k8s-infra local CA), not a stand
   that is down. Never switch to plain HTTP or disable verification.
-- A stand that is down is diagnosed with the `k8s-infra` skill; this tool never
-  deploys or restarts one.
+- This tool never deploys or restarts a stand; diagnose one that is down with the
+  `k8s-infra` skill.
 
-## Pre-commit gate
+## Gate failures
 
-The `integration-tests` hook runs `L gate` on commits that touch `cveta2/`,
-`tests/integration/`, `pyproject.toml` or `uv.lock`, and skips with a notice on
-a machine without the skill. It fails the commit when `infra.py room` answers
-WAIT (retry later), a stand does not answer or authenticate, or a `.run-tag`
-names an active run in this checkout (`L stop` it, or commit from another
-worktree). Branch runs are stopped; the `main` run stays in its slot.
+When the gate runs and the skip policy are in engineering guidance § "Hooks". The
+`integration-tests` hook runs `L gate` and skips with a notice on a machine
+without the k8s-infra skill. It fails the commit when:
+
+- `infra.py room` answers WAIT: retry later;
+- a stand does not answer or authenticate: read the named stand and retry command;
+- a `.run-tag` names an active run in this checkout: `L stop` it, or commit from
+  another worktree.
+
+Branch runs are stopped; the `main` run stays in its slot.
 `INTEGRATION_KEEP_DATA=1` keeps any run and `--keep-stack` keeps a failed one,
-both until `L stop`. `SKIP=integration-tests git commit` is a one-commit bypass
-for the user's explicit request, not a recovery step.
+both until `L stop`.
 
 ## Concurrency
 
