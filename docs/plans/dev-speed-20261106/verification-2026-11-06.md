@@ -277,3 +277,9 @@ After the fixes:
   whenever a staged non-Python file sits under `cveta2/` or `tests/`.
 - **Checked:** the file-detection pipeline, on a preset, on fixture JSON
   together with a `.py` file, and on Python-only changes.
+
+## B9 outcome
+
+`inline-snapshot` was added but never adopted: properties and shared helpers
+replaced the large expected blocks. It was removed from the dev group on
+2026-11-06 at the owner's request.
