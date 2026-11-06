@@ -14,6 +14,7 @@ from botocore.exceptions import (
 from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
 from cveta2.adapters.s3.download import ImageDownloader
 from cveta2.domain.models import ProjectAnnotations
+from cveta2.domain.storage import DownloadStats
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import make_bbox, make_cs_info
 
@@ -29,6 +30,19 @@ def short_retries() -> Iterator[None]:
         yield
     finally:
         configure_retries(*previous)
+
+
+def _download_a(
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, client: FakeS3Client
+) -> DownloadStats:
+    """Download the single frame ``a.jpg`` from ``bucket/images`` via *client*."""
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
+    return ImageDownloader(tmp_path).download(
+        ProjectAnnotations(
+            annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
+        ),
+        make_cs_info(bucket="bucket", prefix="images"),
+    )
 
 
 class _FailingRequest(FakeS3Client):
@@ -52,6 +66,8 @@ class _FailingRequest(FakeS3Client):
         (EndpointConnectionError(endpoint_url="https://storage.invalid"), 2),
         (OSError("request connection failed"), 2),
         (ClientError({"Error": {"Code": "InternalError"}}, "GetObject"), 2),
+        # Without an error payload the original failure still surfaces.
+        (ClientError({}, "GetObject"), 1),
     ],
 )
 def test_request_failures_abort_without_missing_fallback(
@@ -63,16 +79,10 @@ def test_request_failures_abort_without_missing_fallback(
     listing_first: bool,
 ) -> None:
     client = _FailingRequest(error)
-    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
     if listing_first:
         monkeypatch.setattr("cveta2.adapters.s3.download._DIRECT_KEY_PROBE_LIMIT", 0)
     with pytest.raises(type(error)) as caught:
-        ImageDownloader(tmp_path).download(
-            ProjectAnnotations(
-                annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
-            ),
-            make_cs_info(bucket="bucket", prefix="images"),
-        )
+        _download_a(tmp_path, monkeypatch, client)
     assert caught.value is error
     assert client.attempts == attempts
     assert len(client.list_requests) == int(listing_first)
@@ -103,13 +113,7 @@ def test_body_failures_retry_and_never_trigger_missing_fallback(
     tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, *, recover: bool
 ) -> None:
     client = _BodyFailure(recover=recover)
-    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
-    result = ImageDownloader(tmp_path).download(
-        ProjectAnnotations(
-            annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
-        ),
-        make_cs_info(bucket="bucket", prefix="images"),
-    )
+    result = _download_a(tmp_path, monkeypatch, client)
     assert client.attempts == 2
     assert client.list_requests == []
     assert client.head_calls == []
@@ -128,13 +132,7 @@ def test_only_missing_key_responses_trigger_listing(
 ) -> None:
     client = _FailingRequest(ClientError({"Error": {"Code": code}}, "GetObject"))
     client.objects.clear()
-    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
-    stats = ImageDownloader(tmp_path).download(
-        ProjectAnnotations(
-            annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
-        ),
-        make_cs_info(bucket="bucket", prefix="images"),
-    )
+    stats = _download_a(tmp_path, monkeypatch, client)
     assert client.attempts == 1
     assert len(client.list_requests) == 1
     assert stats.failed == stats.total == 1
@@ -145,15 +143,9 @@ def test_object_disappearing_after_listing_counts_once(
     tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, *, listing_first: bool
 ) -> None:
     client = _FailingRequest(ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject"))
-    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
     if listing_first:
         monkeypatch.setattr("cveta2.adapters.s3.download._DIRECT_KEY_PROBE_LIMIT", 0)
-    stats = ImageDownloader(tmp_path).download(
-        ProjectAnnotations(
-            annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
-        ),
-        make_cs_info(bucket="bucket", prefix="images"),
-    )
+    stats = _download_a(tmp_path, monkeypatch, client)
     assert stats.failed == stats.total == 1
     assert stats.downloaded == stats.cached == 0
     assert len(client.list_requests) == 1
@@ -173,38 +165,20 @@ def test_missing_code_during_body_read_is_not_a_missing_key(
             return {"Body": FailedBody()}
 
     client = FailedBodyClient()
-    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
-    stats = ImageDownloader(tmp_path).download(
-        ProjectAnnotations(
-            annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
-        ),
-        make_cs_info(bucket="bucket", prefix="images"),
-    )
+    stats = _download_a(tmp_path, monkeypatch, client)
     assert stats.failed == 1
     assert len(client.get_calls) == 1
     assert client.list_requests == []
 
 
-def test_request_without_error_payload_preserves_original_failure(
-    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
-) -> None:
-    error = ClientError({}, "GetObject")
-    client = _FailingRequest(error)
-    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
-    with pytest.raises(ClientError) as caught:
-        ImageDownloader(tmp_path).download(
-            ProjectAnnotations(
-                annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
-            ),
-            make_cs_info(bucket="bucket", prefix="images"),
-        )
-    assert caught.value is error
-    assert client.list_requests == []
-
-
 def test_direct_failures_missing_keys_and_fallback_failures_accumulate(
-    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
 ) -> None:
+    """Every failure kind adds to ``failed``; the rest still download.
+
+    The failure log names each broken transfer by frame and key.
+    """
+
     class MixedClient(FakeS3Client):
         def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
             if Key in {"images/broken1.jpg", "images/broken2.jpg"}:
@@ -246,6 +220,7 @@ def test_direct_failures_missing_keys_and_fallback_failures_accumulate(
     assert annotations.annotations[0].s3_image_path == "images/broken1.jpg"
     assert annotations.annotations[1].s3_image_path == "images/broken2.jpg"
     assert annotations.annotations[2].s3_image_path is None
+    assert "broken1.jpg (key=images/broken1.jpg)" in "\n".join(capture_logs)
 
 
 def test_listing_full_canonical_key_precedes_basename_fallback(

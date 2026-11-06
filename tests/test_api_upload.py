@@ -133,11 +133,11 @@ class TestUploadApi:
     def test_full_upload_reports_and_creates_the_task(
         self, normal_fake: "LoadedFixtures", tmp_path: "Path"
     ) -> None:
-        """One successful run pins the whole request/result translation.
+        """One default run pins the whole request/result translation.
 
-        ``UploadResult`` fields are required and typed, so every nulled
-        or dropped field of the result dies here; ``UploadTaskSpec`` is
-        recorded verbatim by the fake, which pins the request side.
+        ``labels=None`` derives the label list *and* turns on unannotated
+        frames (``c.jpg``); by default only deleted rows are marked deleted
+        and jobs are left alone.
         """
         fake = normal_fake
         config = write_config_yaml(
@@ -178,31 +178,25 @@ class TestUploadApi:
             2,
             1,
         )
+        assert api.writes.deleted_frames[result.task_id] == [3]
+        assert api.writes.job_updates == []
 
-    def test_labels_none_uploads_every_label_and_unannotated_frames(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
-        """``labels=None`` derives the label list *and* turns on unannotated.
-
-        Both assignments are invisible unless a frame without a label has
-        to survive the filter.
-        """
-        fake = normal_fake
-        _api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
-
-        result = cveta2.upload(
-            self._dataset(tmp_path),
-            project=fake.project.id,
-            name="api-upload",
-            connection=connection,
-        )
-
-        assert result.images == 4
-
-    def test_explicit_labels_drop_unannotated_frames_by_default(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
+    @pytest.mark.parametrize(
+        ("include_unannotated", "expected"),
+        [
+            pytest.param(False, ["images/a.jpg", "images/d.jpg"], id="default-drops"),
+            pytest.param(
+                True, ["images/a.jpg", "images/c.jpg", "images/d.jpg"], id="included"
+            ),
+        ],
+    )
+    def test_explicit_labels_and_unannotated_frames(
+        self,
+        normal_fake: "LoadedFixtures",
+        tmp_path: "Path",
+        *,
+        include_unannotated: bool,
+        expected: list[str],
     ) -> None:
         """``include_unannotated`` defaults to False on both sides."""
         fake = normal_fake
@@ -215,37 +209,12 @@ class TestUploadApi:
             project=fake.project.id,
             name="api-upload",
             labels=["person"],
+            include_unannotated=include_unannotated,
             connection=connection,
         )
 
-        assert api.writes.created_tasks[0].server_files == [
-            "images/a.jpg",
-            "images/d.jpg",
-        ]
-        assert result.images == 2
-
-    def test_include_unannotated_adds_label_less_frames(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
-        fake = normal_fake
-        api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
-
-        cveta2.upload(
-            self._dataset(tmp_path),
-            project=fake.project.id,
-            name="api-upload",
-            labels=["person"],
-            include_unannotated=True,
-            connection=connection,
-        )
-
-        assert api.writes.created_tasks[0].server_files == [
-            "images/a.jpg",
-            "images/c.jpg",
-            "images/d.jpg",
-        ]
+        assert api.writes.created_tasks[0].server_files == expected
+        assert result.images == len(expected)
 
     def test_exclude_in_progress_removes_listed_frames(
         self, normal_fake: "LoadedFixtures", tmp_path: "Path"
@@ -295,24 +264,6 @@ class TestUploadApi:
         assert api.writes.job_updates == [
             (result.task_id, "acceptance", "completed"),
         ]
-
-    def test_defaults_delete_only_deleted_rows_and_leave_jobs_alone(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
-        fake = normal_fake
-        api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
-
-        result = cveta2.upload(
-            self._dataset(tmp_path),
-            project=fake.project.id,
-            name="api-upload",
-            connection=connection,
-        )
-
-        assert api.writes.deleted_frames[result.task_id] == [3]
-        assert api.writes.job_updates == []
 
     def test_image_dirs_are_searched_for_local_files(
         self, normal_fake: "LoadedFixtures", tmp_path: "Path"
@@ -391,7 +342,10 @@ class TestUploadResumeWiring:
 
     @staticmethod
     def _capture(
-        monkeypatch: pytest.MonkeyPatch, fake: "LoadedFixtures", **kwargs: object
+        monkeypatch: pytest.MonkeyPatch,
+        fake: "LoadedFixtures",
+        dataset: "pd.DataFrame | Path",
+        **kwargs: object,
     ) -> UploadRequest:
         """Run ``upload`` far enough to see the request it builds."""
         seen: list[UploadRequest] = []
@@ -412,7 +366,7 @@ class TestUploadResumeWiring:
             import_module("cveta2.interfaces.api.upload"), "upload_cvat_dataset", record
         )
         cveta2.upload(
-            pd.DataFrame([csv_row("a.jpg", label="cat")]),
+            dataset,
             project=fake.project.id,
             name="t",
             connection=fake_connection(fake),
@@ -420,62 +374,34 @@ class TestUploadResumeWiring:
         )
         return seen[0]
 
-    def test_resume_reaches_the_request(
+    def test_a_dataframe_upload_has_no_path_and_does_not_resume(
         self, normal_fake: "LoadedFixtures", monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        assert self._capture(monkeypatch, normal_fake, resume=True).resume is True
+        """A library caller must not silently adopt a stranded task.
 
-    def test_resume_is_off_unless_asked_for(
-        self, normal_fake: "LoadedFixtures", monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A library caller must not silently adopt a stranded task."""
-        assert self._capture(monkeypatch, normal_fake).resume is False
+        There is no file to name, and ``str(df)`` would dump the frame.
+        """
+        request = self._capture(
+            monkeypatch, normal_fake, pd.DataFrame([csv_row("a.jpg", label="cat")])
+        )
 
-    def test_the_selected_labels_reach_the_request(
-        self, normal_fake: "LoadedFixtures", monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """They are half the fingerprint that identifies the upload."""
-        request = self._capture(monkeypatch, normal_fake, labels=["cat"])
+        assert request.resume is False
+        assert request.dataset_path == ""
 
-        assert request.labels == ("cat",)
-
-    def test_a_dataframe_input_has_no_dataset_path(
-        self, normal_fake: "LoadedFixtures", monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """There is no file to name, and ``str(df)`` would dump the frame."""
-        assert self._capture(monkeypatch, normal_fake).dataset_path == ""
-
-    def test_a_csv_input_records_its_path(
+    def test_a_csv_resume_records_its_path_and_labels(
         self,
         normal_fake: "LoadedFixtures",
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: "Path",
     ) -> None:
-        """It is what a mismatch report shows to identify the stranded run."""
+        """The path and the labels identify the stranded run to continue."""
         csv = tmp_path / "dataset.csv"
         csv.write_text("image_name,instance_label\na.jpg,cat\n", encoding="utf-8")
-        seen: list[UploadRequest] = []
 
-        def record(_client: object, request: UploadRequest) -> UploadOutcome:
-            seen.append(request)
-            return UploadOutcome(
-                task_id=1,
-                task_name=request.task_name,
-                images=0,
-                deleted=0,
-                annotations=0,
-                issues=0,
-                jobs=0,
-            )
-
-        monkeypatch.setattr(
-            import_module("cveta2.interfaces.api.upload"), "upload_cvat_dataset", record
-        )
-        cveta2.upload(
-            csv,
-            project=normal_fake.project.id,
-            name="t",
-            connection=fake_connection(normal_fake),
+        request = self._capture(
+            monkeypatch, normal_fake, csv, resume=True, labels=["cat"]
         )
 
-        assert seen[0].dataset_path == str(csv)
+        assert request.resume is True
+        assert request.labels == ("cat",)
+        assert request.dataset_path == str(csv)

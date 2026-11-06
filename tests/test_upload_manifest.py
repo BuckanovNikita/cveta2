@@ -123,7 +123,14 @@ class TestRoundTrip:
 
     @pytest.mark.parametrize(
         ("field", "value"),
-        [("host", "http://other-cvat"), ("project_id", 99), ("fingerprint", "other")],
+        [
+            ("host", "http://other-cvat"),
+            ("project_id", 99),
+            ("fingerprint", "other"),
+            # An older or newer layout would resume with fields that mean
+            # something else.
+            ("schema_version", MANIFEST_SCHEMA_VERSION + 1),
+        ],
     )
     def test_misfiled_state_is_not_resumed(self, field: str, value: object) -> None:
         save_manifest(_manifest())
@@ -155,20 +162,6 @@ class TestRoundTrip:
 
     def test_an_absent_manifest_is_not_an_error(self) -> None:
         assert load_manifest(PROJECT_ID, "nothing-here", host=HOST) is None
-
-    def test_a_manifest_from_another_schema_version_is_ignored(self) -> None:
-        """An older layout would resume with fields that mean something else."""
-        save_manifest(_manifest())
-        path = get_upload_manifest_dir(PROJECT_ID, host=HOST) / "abc123.json"
-        path.write_text(
-            path.read_text(encoding="utf-8").replace(
-                f'"schema_version":{MANIFEST_SCHEMA_VERSION}',
-                f'"schema_version":{MANIFEST_SCHEMA_VERSION + 1}',
-            ),
-            encoding="utf-8",
-        )
-
-        assert load_manifest(PROJECT_ID, "abc123", host=HOST) is None
 
     def test_a_truncated_manifest_is_ignored(self) -> None:
         """Exactly what a crash mid-write would leave without the atomic rename."""

@@ -5,13 +5,11 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
-from unittest.mock import MagicMock
 
 import pytest
 
 from cveta2.adapters.files.image_search import resolve_images
 from cveta2.adapters.s3.upload import S3Uploader, build_server_file_mapping
-from cveta2.domain.paths import build_s3_key
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import make_cs_info, patch_recording_s3
 
@@ -68,75 +66,82 @@ class _UnwritableKeysS3Client(FakeS3Client):
         super().upload_file(filename, bucket, key)
 
 
-def _make_cs_info() -> CloudStorageInfo:
-    return make_cs_info(prefix="project/images")
-
-
-def _mock_s3_client(objects: list[tuple[str, str]]) -> MagicMock:
-    """Create a mock S3 client that returns *objects* from list_objects_v2.
-
-    *objects* is a list of ``(key, name)`` pairs where *name* is the
-    relative path under the prefix.
-    """
-    s3 = MagicMock()
-    s3.list_objects_v2.return_value = {
-        "Contents": [{"Key": key} for key, _ in objects],
-        "IsTruncated": False,
-    }
-    return s3
-
-
 def _touch(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x")
     return path
 
 
+def _bucket(*names: str) -> FakeS3Client:
+    """Return a fake bucket holding *names* under the ``project/images`` prefix."""
+    return FakeS3Client({f"test-bucket/project/images/{name}": b"x" for name in names})
+
+
+class _ResolveCase(NamedTuple):
+    files: list[str]
+    names: list[str]
+    search_dirs: list[str]
+    expected: dict[str, str]
+
+
+_RESOLVE_CASES = [
+    pytest.param(
+        _ResolveCase(["a.jpg"], ["a.jpg"], ["."], {"a.jpg": "a.jpg"}), id="flat"
+    ),
+    pytest.param(
+        _ResolveCase(["sub/a.jpg"], ["sub/a.jpg"], ["."], {"sub/a.jpg": "sub/a.jpg"}),
+        id="subpath-name",
+    ),
+    pytest.param(
+        _ResolveCase(
+            ["deep/nested/a.jpg"], ["a.jpg"], ["."], {"a.jpg": "deep/nested/a.jpg"}
+        ),
+        id="recursive-basename",
+    ),
+    pytest.param(
+        _ResolveCase(["a.jpg", "nested/a.jpg"], ["a.jpg"], ["."], {"a.jpg": "a.jpg"}),
+        id="direct-beats-recursive",
+    ),
+    pytest.param(
+        _ResolveCase(
+            ["dir1/sub/a.jpg", "dir2/a.jpg"],
+            ["a.jpg"],
+            ["dir1", "dir2"],
+            {"a.jpg": "dir1/sub/a.jpg"},
+        ),
+        id="earlier-search-dir-wins",
+    ),
+    pytest.param(
+        _ResolveCase(
+            ["real/a.jpg"], ["a.jpg"], ["nope", "real"], {"a.jpg": "real/a.jpg"}
+        ),
+        id="nonexistent-search-dir-skipped",
+    ),
+]
+
+
 class TestResolveImages:
     """Tests for resolve_images() — direct and recursive lookup."""
 
-    def test_flat_direct_match(self, tmp_path: Path) -> None:
-        img = _touch(tmp_path / "a.jpg")
-        found, missing = resolve_images(["a.jpg"], [tmp_path])
-        assert found == {"a.jpg": img}
+    @pytest.mark.parametrize("case", _RESOLVE_CASES)
+    def test_finds_each_name(self, tmp_path: Path, case: _ResolveCase) -> None:
+        for name in case.files:
+            _touch(tmp_path / name)
+
+        found, missing = resolve_images(
+            case.names, [tmp_path / d for d in case.search_dirs]
+        )
+
+        assert found == {k: tmp_path / v for k, v in case.expected.items()}
         assert missing == []
-
-    def test_subpath_name_direct_match(self, tmp_path: Path) -> None:
-        img = _touch(tmp_path / "sub" / "a.jpg")
-        found, missing = resolve_images(["sub/a.jpg"], [tmp_path])
-        assert found == {"sub/a.jpg": img}
-        assert missing == []
-
-    def test_recursive_basename_match_in_nested_subdir(self, tmp_path: Path) -> None:
-        img = _touch(tmp_path / "deep" / "nested" / "a.jpg")
-        found, missing = resolve_images(["a.jpg"], [tmp_path])
-        assert found == {"a.jpg": img}
-        assert missing == []
-
-    def test_direct_match_wins_over_recursive_in_same_dir(self, tmp_path: Path) -> None:
-        flat = _touch(tmp_path / "a.jpg")
-        _touch(tmp_path / "nested" / "a.jpg")
-        found, _ = resolve_images(["a.jpg"], [tmp_path])
-        assert found["a.jpg"] == flat
-
-    def test_earlier_search_dir_wins(self, tmp_path: Path) -> None:
-        dir1 = tmp_path / "dir1"
-        dir2 = tmp_path / "dir2"
-        nested = _touch(dir1 / "sub" / "a.jpg")
-        _touch(dir2 / "a.jpg")
-        found, _ = resolve_images(["a.jpg"], [dir1, dir2])
-        assert found["a.jpg"] == nested
 
     def test_duplicate_basenames_pick_lexicographic_max_and_warn(
         self, tmp_path: Path, capture_logs: list[str]
     ) -> None:
         """The warning must name the searched directory and the duplicate.
 
-        Those two arguments of ``pick_latest_duplicate`` reach nothing but
-        this message, so asserting only that *some* warning fired left the
-        search directory and the file name free to be dropped.  The
-        directory has to be matched together with the following word: the
-        listed candidate paths all start with it, so a bare containment
+        The directory has to be matched together with the following word:
+        the listed candidate paths all start with it, so a bare containment
         check passes even when the context argument is thrown away.
         """
         _touch(tmp_path / "2026-01" / "a.jpg")
@@ -151,88 +156,67 @@ class TestResolveImages:
         _, missing = resolve_images(["b.jpg", "a.jpg"], [tmp_path])
         assert missing == ["a.jpg", "b.jpg"]
 
-    def test_nonexistent_search_dir_skipped(self, tmp_path: Path) -> None:
-        img = _touch(tmp_path / "real" / "a.jpg")
-        found, missing = resolve_images(
-            ["a.jpg"], [tmp_path / "nope", tmp_path / "real"]
-        )
-        assert found == {"a.jpg": img}
-        assert missing == []
+
+_NEW = "<month>/"
 
 
 class TestBuildServerFileMapping:
     """Tests for build_server_file_mapping()."""
 
-    def test_existing_flat_image_keeps_path(self) -> None:
-        cs_info = _make_cs_info()
-        s3 = _mock_s3_client(
-            [
-                ("project/images/img1.jpg", "img1.jpg"),
-                ("project/images/img2.jpg", "img2.jpg"),
-            ]
-        )
-
+    @pytest.mark.parametrize(
+        ("listed", "names", "expected"),
+        [
+            pytest.param(
+                ["flat.jpg", "2026-03/monthly.jpg", "a/b/c/deep.jpg"],
+                {"flat.jpg", "monthly.jpg", "deep.jpg"},
+                {
+                    "flat.jpg": "flat.jpg",
+                    "monthly.jpg": "2026-03/monthly.jpg",
+                    "deep.jpg": "a/b/c/deep.jpg",
+                },
+                id="existing-images-keep-their-path-at-any-depth",
+            ),
+            pytest.param(
+                [], {"new_img.jpg"}, {"new_img.jpg": _NEW}, id="new-image-month-prefix"
+            ),
+            pytest.param(
+                ["old.jpg"],
+                {"old.jpg", "brand_new.jpg"},
+                {"old.jpg": "old.jpg", "brand_new.jpg": _NEW},
+                id="mixed-existing-and-new",
+            ),
+        ],
+    )
+    def test_maps_each_name(
+        self, listed: list[str], names: set[str], expected: dict[str, str]
+    ) -> None:
         mapping, existing_keys = build_server_file_mapping(
-            cs_info,
-            {"img1.jpg", "img2.jpg"},
-            s3_client=s3,
+            make_cs_info(prefix="project/images"), names, s3_client=_bucket(*listed)
         )
 
-        assert mapping["img1.jpg"] == "img1.jpg"
-        assert mapping["img2.jpg"] == "img2.jpg"
-        assert existing_keys == {
-            "project/images/img1.jpg",
-            "project/images/img2.jpg",
-        }
-
-    def test_existing_subfolder_image_keeps_path(self) -> None:
-        cs_info = _make_cs_info()
-        s3 = _mock_s3_client(
-            [
-                ("project/images/2026-01/img1.jpg", "2026-01/img1.jpg"),
-            ]
-        )
-
-        mapping, _ = build_server_file_mapping(
-            cs_info,
-            {"img1.jpg"},
-            s3_client=s3,
-        )
-
-        assert mapping["img1.jpg"] == "2026-01/img1.jpg"
-
-    def test_new_image_gets_month_prefix(self) -> None:
-        cs_info = _make_cs_info()
-        s3 = _mock_s3_client([])
-
-        mapping, existing_keys = build_server_file_mapping(
-            cs_info,
-            {"new_img.jpg"},
-            s3_client=s3,
-        )
-
-        assert _MONTH_PREFIX_RE.fullmatch(mapping["new_img.jpg"])
-        assert mapping["new_img.jpg"].endswith("/new_img.jpg")
-        assert existing_keys == set()
+        assert mapping.keys() == expected.keys()
+        for name, server_file in expected.items():
+            if server_file == _NEW:
+                assert _MONTH_PREFIX_RE.fullmatch(mapping[name])
+                assert mapping[name].endswith(f"/{name}")
+            else:
+                assert mapping[name] == server_file
+        assert existing_keys == {f"project/images/{key}" for key in listed}
 
     def test_new_image_month_folder_is_the_utc_calendar_month(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The folder is the UTC *month*, not the local month nor the minute.
 
-        The four-digits-dash-two-digits regex above matches ``%Y-%M``
-        (minutes) just as happily as ``%Y-%m``, and with the real clock a
-        naive ``datetime.now()`` agrees with UTC on this machine.  The
-        frozen clock straddles a month boundary, so both mistakes change
-        the answer.
+        The month regex matches ``%Y-%M`` (minutes) just as happily as
+        ``%Y-%m``, and with the real clock a naive ``datetime.now()`` agrees
+        with UTC on this machine.  The frozen clock straddles a month
+        boundary, so both mistakes change the answer.
         """
         monkeypatch.setattr("cveta2.adapters.s3.upload.datetime", _FixedClock)
-        cs_info = _make_cs_info()
 
         mapping, _ = build_server_file_mapping(
-            cs_info,
-            {"new_img.jpg"},
-            s3_client=_mock_s3_client([]),
+            make_cs_info(prefix="project/images"), {"new_img.jpg"}, s3_client=_bucket()
         )
 
         assert mapping["new_img.jpg"] == "2026-03/new_img.jpg"
@@ -240,12 +224,7 @@ class TestBuildServerFileMapping:
     def test_lists_own_bucket_over_the_storage_endpoint(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Without an injected client, the storage's endpoint and bucket are used.
-
-        Every other case passed ``s3_client=``, so the ``make_s3_client``
-        branch never ran, and the mock listing ignored the bucket it was
-        asked for.
-        """
+        """Without an injected client, the storage's endpoint and bucket are used."""
         cs_info = make_cs_info(
             bucket="own-bucket",
             prefix="project/images",
@@ -268,107 +247,19 @@ class TestBuildServerFileMapping:
         assert mapping["mine.jpg"] == "mine.jpg"
         assert _MONTH_PREFIX_RE.fullmatch(mapping["theirs.jpg"])
 
-    def test_mixed_existing_and_new(self) -> None:
-        cs_info = _make_cs_info()
-        s3 = _mock_s3_client(
-            [
-                ("project/images/old.jpg", "old.jpg"),
-            ]
-        )
-
-        mapping, _ = build_server_file_mapping(
-            cs_info,
-            {"old.jpg", "brand_new.jpg"},
-            s3_client=s3,
-        )
-
-        assert mapping["old.jpg"] == "old.jpg"
-        assert _MONTH_PREFIX_RE.fullmatch(mapping["brand_new.jpg"])
-        assert mapping["brand_new.jpg"].endswith("/brand_new.jpg")
-
     def test_duplicate_basenames_uses_latest(self, capture_logs: list[str]) -> None:
-        """Latest month folder wins, and the warning names S3 and the file.
-
-        The context and name handed to ``pick_latest_duplicate`` only ever
-        reach this message, so nothing stopped them from being dropped.
-        """
-        cs_info = _make_cs_info()
-        s3 = _mock_s3_client(
-            [
-                ("project/images/2026-01/img.jpg", "2026-01/img.jpg"),
-                ("project/images/2026-02/img.jpg", "2026-02/img.jpg"),
-            ]
-        )
-
+        """Latest month folder wins, and the warning names S3 and the file."""
         mapping, _ = build_server_file_mapping(
-            cs_info,
+            make_cs_info(prefix="project/images"),
             {"img.jpg"},
-            s3_client=s3,
+            s3_client=_bucket("2026-01/img.jpg", "2026-02/img.jpg"),
         )
 
-        # Lexicographic max = 2026-02
         assert mapping["img.jpg"] == "2026-02/img.jpg"
         warnings = [m for m in capture_logs if "Дубликаты" in m]
         assert len(warnings) == 1
         assert "S3" in warnings[0]
         assert "'img.jpg'" in warnings[0]
-
-    def test_deep_nested_subfolder(self) -> None:
-        cs_info = _make_cs_info()
-        s3 = _mock_s3_client(
-            [
-                (
-                    "project/images/subdir/another/img.jpg",
-                    "subdir/another/img.jpg",
-                ),
-            ]
-        )
-
-        mapping, _ = build_server_file_mapping(
-            cs_info,
-            {"img.jpg"},
-            s3_client=s3,
-        )
-
-        assert mapping["img.jpg"] == "subdir/another/img.jpg"
-        assert (
-            build_s3_key(cs_info.prefix, mapping["img.jpg"])
-            == "project/images/subdir/another/img.jpg"
-        )
-
-    def test_mixed_depths_with_prefix(self) -> None:
-        cs_info = _make_cs_info()
-        s3 = _mock_s3_client(
-            [
-                ("project/images/flat.jpg", "flat.jpg"),
-                ("project/images/2026-03/monthly.jpg", "2026-03/monthly.jpg"),
-                ("project/images/a/b/c/deep.jpg", "a/b/c/deep.jpg"),
-            ]
-        )
-
-        mapping, _ = build_server_file_mapping(
-            cs_info,
-            {"flat.jpg", "monthly.jpg", "deep.jpg"},
-            s3_client=s3,
-        )
-
-        assert mapping["flat.jpg"] == "flat.jpg"
-        assert mapping["monthly.jpg"] == "2026-03/monthly.jpg"
-        assert mapping["deep.jpg"] == "a/b/c/deep.jpg"
-
-        # All produce correct full S3 keys
-        assert (
-            build_s3_key(cs_info.prefix, mapping["flat.jpg"])
-            == "project/images/flat.jpg"
-        )
-        assert (
-            build_s3_key(cs_info.prefix, mapping["monthly.jpg"])
-            == "project/images/2026-03/monthly.jpg"
-        )
-        assert (
-            build_s3_key(cs_info.prefix, mapping["deep.jpg"])
-            == "project/images/a/b/c/deep.jpg"
-        )
 
 
 def _upload_cs_info() -> CloudStorageInfo:

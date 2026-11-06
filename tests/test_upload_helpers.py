@@ -21,70 +21,32 @@ from cveta2.domain.models import ProjectAnnotations
 from tests.helpers import make_bbox, make_cs_info
 
 # ---------------------------------------------------------------------------
-# _read_exclude_names
+# read_exclude_names
 # ---------------------------------------------------------------------------
 
 
-def test_read_exclude_names_none_returns_empty() -> None:
-    assert read_exclude_names(None) == set()
+@pytest.mark.parametrize("value", [None, ""], ids=["none", "empty_string"])
+def test_read_exclude_names_without_a_path_is_empty(value: str | None) -> None:
+    assert read_exclude_names(value) == set()
 
 
-def test_read_exclude_names_empty_string_returns_empty() -> None:
-    assert read_exclude_names("") == set()
-
-
-def test_read_exclude_names_valid_csv(tmp_path: Path) -> None:
-    csv = tmp_path / "ip.csv"
-    csv.write_text("image_name,other\nfoo.jpg,1\nbar.jpg,2\n", encoding="utf-8")
-    assert read_exclude_names(str(csv)) == {"foo.jpg", "bar.jpg"}
-
-
-@pytest.mark.parametrize("name", ["001", "NA"])
-def test_excluded_image_identifiers_keep_their_literal_names(
-    tmp_path: Path, name: str
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("image_name,other\nfoo.jpg,1\nbar.jpg,2\n", {"foo.jpg", "bar.jpg"}),
+        # Image identifiers are kept literally, not parsed as numbers or NaN.
+        ("image_name,task_id\n001,1\n", {"001"}),
+        ("image_name,task_id\nNA,1\n", {"NA"}),
+        ("col_a,col_b\n1,2\n", set()),
+    ],
+    ids=["valid", "leading_zeros", "na_literal", "no_image_name_column"],
+)
+def test_read_exclude_names_reads_the_image_name_column(
+    tmp_path: Path, content: str, expected: set[str]
 ) -> None:
-    path = tmp_path / "in_progress.csv"
-    path.write_text(f"image_name,task_id\n{name},1\n", encoding="utf-8")
-    assert read_exclude_names(str(path)) == {name}
-
-
-def test_local_frame_path_without_cloud_storage_is_relative_to_cache(
-    tmp_path: Path,
-) -> None:
-    cached = tmp_path / "nested" / "a.jpg"
-    cached.parent.mkdir()
-    cached.write_bytes(b"image")
-    record = make_bbox(image_name="a.jpg", frame_path="/nested/a.jpg")
-
-    populate_record_paths(
-        ProjectAnnotations(annotations=[record], deleted_images=[]), None, tmp_path
-    )
-
-    assert record.image_path == str(cached)
-    assert record.s3_image_path is None
-
-
-def test_invalid_resolved_key_reports_the_original_frame_name(tmp_path: Path) -> None:
-    record = make_bbox(image_name="bad.jpg", s3_image_path="images/../bad.jpg")
-    with pytest.raises(Cveta2Error, match=r"bad\.jpg"):
-        populate_record_paths(
-            ProjectAnnotations(annotations=[record], deleted_images=[]),
-            make_cs_info(prefix="images"),
-            tmp_path,
-        )
-
-
-def test_cache_symlink_escape_reports_the_original_frame_name(tmp_path: Path) -> None:
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    (cache / "nested").symlink_to(tmp_path, target_is_directory=True)
-    record = make_bbox(image_name="bad.jpg", frame_path="nested/bad.jpg")
-    with pytest.raises(Cveta2Error, match=r"bad\.jpg"):
-        populate_record_paths(
-            ProjectAnnotations(annotations=[record], deleted_images=[]),
-            make_cs_info(prefix="images"),
-            cache,
-        )
+    csv = tmp_path / "in_progress.csv"
+    csv.write_text(content, encoding="utf-8")
+    assert read_exclude_names(str(csv)) == expected
 
 
 def test_read_exclude_names_missing_file(tmp_path: Path) -> None:
@@ -93,68 +55,41 @@ def test_read_exclude_names_missing_file(tmp_path: Path) -> None:
         read_exclude_names(str(tmp_path / "nope.csv"))
 
 
-def test_read_exclude_names_csv_without_image_name(tmp_path: Path) -> None:
-    csv = tmp_path / "no_col.csv"
-    csv.write_text("col_a,col_b\n1,2\n", encoding="utf-8")
-    assert read_exclude_names(str(csv)) == set()
-
-
 # ---------------------------------------------------------------------------
 # split_deleted_rows
 # ---------------------------------------------------------------------------
 
 
-def test_split_deleted_rows_no_column() -> None:
-    df = pd.DataFrame({"image_name": ["a.jpg", "b.jpg"]})
+@pytest.mark.parametrize(
+    ("columns", "expected_normal", "expected_deleted"),
+    [
+        ({"image_name": ["a.jpg", "b.jpg"]}, ["a.jpg", "b.jpg"], []),
+        ({"image_name": ["a.jpg"], "instance_shape": ["box"]}, ["a.jpg"], []),
+        (
+            {
+                "image_name": ["a.jpg", "c.jpg", "b.jpg", "c.jpg"],
+                "instance_shape": ["box", "deleted", "deleted", "deleted"],
+            },
+            ["a.jpg"],
+            ["c.jpg", "b.jpg"],
+        ),
+    ],
+    ids=["no_shape_column", "none_deleted", "mixed_keeps_csv_order"],
+)
+def test_split_deleted_rows(
+    columns: dict[str, list[str]],
+    expected_normal: list[str],
+    expected_deleted: list[str],
+) -> None:
+    df = pd.DataFrame(columns)
     df_normal, names = split_deleted_rows(df)
-    assert names == []
-    assert df_normal.equals(df)
-
-
-def test_split_deleted_rows_mixed_shapes_keeps_csv_order() -> None:
-    df = pd.DataFrame(
-        {
-            "image_name": ["a.jpg", "c.jpg", "b.jpg", "c.jpg"],
-            "instance_shape": ["box", "deleted", "deleted", "deleted"],
-        }
-    )
-    df_normal, names = split_deleted_rows(df)
-    assert names == ["c.jpg", "b.jpg"]
-    assert df_normal["image_name"].tolist() == ["a.jpg"]
-
-
-def test_split_deleted_rows_none_deleted() -> None:
-    df = pd.DataFrame(
-        {
-            "image_name": ["a.jpg"],
-            "instance_shape": ["box"],
-        }
-    )
-    df_normal, names = split_deleted_rows(df)
-    assert names == []
-    assert len(df_normal) == 1
+    assert names == expected_deleted
+    assert df_normal["image_name"].tolist() == expected_normal
 
 
 # ---------------------------------------------------------------------------
 # build_upload_plan
 # ---------------------------------------------------------------------------
-
-
-def test_build_upload_plan_preserves_csv_order() -> None:
-    df = pd.DataFrame(
-        {
-            "image_name": ["b.jpg", "a.jpg", "b.jpg", "c.jpg"],
-            "instance_label": ["Edge", "Edge", "Edge", "Edge"],
-        }
-    )
-    plan = build_upload_plan(df, [], labels=["Edge"])
-    assert plan.image_names == ["b.jpg", "a.jpg", "c.jpg"]
-
-
-def test_build_upload_plan_raises_when_empty() -> None:
-    df = pd.DataFrame({"image_name": [], "instance_label": []})
-    with pytest.raises(Cveta2Error, match="после фильтрации"):
-        build_upload_plan(df, [], labels=["Edge"])
 
 
 def _plan_input_df() -> pd.DataFrame:
@@ -166,70 +101,87 @@ def _plan_input_df() -> pd.DataFrame:
     )
 
 
-def test_build_upload_plan_skips_unannotated_frames_by_default() -> None:
-    """The default must exclude NaN-label frames.
-
-    Every earlier call either passed ``include_unannotated`` explicitly or
-    used a frame set without NaN labels, so flipping the default was
-    invisible.
-    """
-    plan = build_upload_plan(_plan_input_df(), [], labels=["Edge"])
-
-    assert plan.image_names == ["a.jpg", "c.jpg"]
+def _empty_df() -> pd.DataFrame:
+    return pd.DataFrame({"image_name": [], "instance_label": []})
 
 
-def test_build_upload_plan_forwards_include_unannotated() -> None:
-    """``include_unannotated=True`` must reach ``filter_frames_by_labels``.
-
-    Dropping the keyword, or passing ``None`` for it, both fall back to
-    the falsy default — indistinguishable unless a NaN-label frame is
-    present and the flag is on.
-    """
+@pytest.mark.parametrize(
+    ("df", "deleted", "unannotated", "exclude", "expected_images", "expected_deleted"),
+    [
+        (
+            pd.DataFrame(
+                {
+                    "image_name": ["b.jpg", "a.jpg", "b.jpg", "c.jpg"],
+                    "instance_label": ["Edge"] * 4,
+                }
+            ),
+            [],
+            False,
+            None,
+            ["b.jpg", "a.jpg", "c.jpg"],
+            [],
+        ),
+        # The default must exclude NaN-label frames.
+        (_plan_input_df(), [], False, None, ["a.jpg", "c.jpg"], []),
+        # ``include_unannotated=True`` must reach ``filter_frames_by_labels``.
+        (
+            _plan_input_df(),
+            [],
+            True,
+            None,
+            ["a.jpg", "b.jpg", "c.jpg"],
+            [],
+        ),
+        (_plan_input_df(), [], False, {"a.jpg"}, ["c.jpg"], []),
+        # Deleted-only input is a valid plan and carries the names through.
+        (_empty_df(), ["gone.jpg"], False, None, [], ["gone.jpg"]),
+        (
+            _plan_input_df(),
+            ["busy.jpg", "gone.jpg"],
+            False,
+            {"a.jpg", "busy.jpg"},
+            ["c.jpg"],
+            ["gone.jpg"],
+        ),
+    ],
+    ids=[
+        "preserves_csv_order",
+        "skips_unannotated_by_default",
+        "forwards_include_unannotated",
+        "forwards_exclude_names",
+        "deleted_only",
+        "exclusions_also_remove_deleted",
+    ],
+)
+def test_build_upload_plan(  # noqa: PLR0913, PLR0917
+    df: pd.DataFrame,
+    deleted: list[str],
+    unannotated: bool,  # noqa: FBT001
+    exclude: set[str] | None,
+    expected_images: list[str],
+    expected_deleted: list[str],
+) -> None:
     plan = build_upload_plan(
-        _plan_input_df(), [], labels=["Edge"], include_unannotated=True
-    )
-
-    assert plan.image_names == ["a.jpg", "b.jpg", "c.jpg"]
-
-
-def test_build_upload_plan_forwards_exclude_names() -> None:
-    """``exclude_names`` must reach the filter, not be dropped on the way."""
-    plan = build_upload_plan(
-        _plan_input_df(), [], labels=["Edge"], exclude_names={"a.jpg"}
-    )
-
-    assert plan.image_names == ["c.jpg"]
-
-
-def test_build_upload_plan_keeps_deleted_names_without_images() -> None:
-    """Deleted-only input is a valid plan and carries the names through.
-
-    Nothing asserted ``UploadPlan.deleted_names``, and no test reached the
-    branch where the image list is empty but deletions remain.
-    """
-    empty = pd.DataFrame({"image_name": [], "instance_label": []})
-
-    plan = build_upload_plan(empty, ["gone.jpg"], labels=["Edge"])
-
-    assert plan.image_names == []
-    assert plan.deleted_names == ["gone.jpg"]
-
-
-def test_exclusions_also_remove_deleted_frames() -> None:
-    plan = build_upload_plan(
-        _plan_input_df(),
-        ["busy.jpg", "gone.jpg"],
+        df,
+        deleted,
         labels=["Edge"],
-        exclude_names={"a.jpg", "busy.jpg"},
+        include_unannotated=unannotated,
+        exclude_names=exclude,
     )
-    assert plan.image_names == ["c.jpg"]
-    assert plan.deleted_names == ["gone.jpg"]
+    assert plan.image_names == expected_images
+    assert plan.deleted_names == expected_deleted
+
+
+def test_build_upload_plan_raises_when_empty() -> None:
+    with pytest.raises(Cveta2Error, match="после фильтрации"):
+        build_upload_plan(_empty_df(), [], labels=["Edge"])
 
 
 def test_excluding_every_deleted_frame_leaves_nothing_to_upload() -> None:
-    empty = pd.DataFrame({"image_name": [], "instance_label": []})
     with pytest.raises(Cveta2Error):
-        build_upload_plan(empty, ["busy.jpg"], labels=[], exclude_names={"busy.jpg"})
+        build_upload_plan(
+            _empty_df(), ["busy.jpg"], labels=[], exclude_names={"busy.jpg"}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -237,37 +189,38 @@ def test_excluding_every_deleted_frame_leaves_nothing_to_upload() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _frames_df() -> pd.DataFrame:
-    return pd.DataFrame(
+@pytest.mark.parametrize(
+    ("labels", "unannotated", "exclude", "expected"),
+    [
+        # Every row of a selected frame is kept; frames with only other labels go.
+        (["Edge"], False, None, [("a.jpg", "Edge"), ("a.jpg", "Other")]),
+        ([], True, None, [("c.jpg", None)]),
+        (["Edge", "Other"], False, {"a.jpg"}, [("b.jpg", "Other")]),
+    ],
+    ids=["keeps_all_rows_of_selected_frame", "unannotated", "exclude_names"],
+)
+def test_filter_frames_by_labels(
+    labels: list[str],
+    unannotated: bool,  # noqa: FBT001
+    exclude: set[str] | None,
+    expected: list[tuple[str, str | None]],
+) -> None:
+    frames = pd.DataFrame(
         {
             "image_name": ["a.jpg", "a.jpg", "b.jpg", "c.jpg"],
             "instance_label": ["Edge", "Other", "Other", None],
         }
     )
-
-
-def test_filter_frames_keeps_all_rows_of_selected_frame() -> None:
-    result = filter_frames_by_labels(_frames_df(), ["Edge"])
-    assert result["image_name"].tolist() == ["a.jpg", "a.jpg"]
-    assert set(result["instance_label"]) == {"Edge", "Other"}
-
-
-def test_filter_frames_excludes_frame_with_only_unselected_labels() -> None:
-    result = filter_frames_by_labels(_frames_df(), ["Edge"])
-    assert "b.jpg" not in set(result["image_name"])
-
-
-def test_filter_frames_include_unannotated_selects_nan_label_frames() -> None:
-    result = filter_frames_by_labels(_frames_df(), [], include_unannotated=True)
-    assert result["image_name"].tolist() == ["c.jpg"]
-    assert result["instance_label"].isna().all()
-
-
-def test_filter_frames_exclude_names_removes_frames() -> None:
     result = filter_frames_by_labels(
-        _frames_df(), ["Edge", "Other"], exclude_names={"a.jpg"}
+        frames, labels, include_unannotated=unannotated, exclude_names=exclude
     )
-    assert set(result["image_name"]) == {"b.jpg"}
+    rows = [
+        (name, None if pd.isna(label) else label)
+        for name, label in zip(
+            result["image_name"], result["instance_label"], strict=True
+        )
+    ]
+    assert rows == expected
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +257,6 @@ def test_enrich_paths_adds_columns() -> None:
     df = pd.DataFrame({"image_name": ["a.jpg", "b.jpg"], "label": ["x", "y"]})
     found = {"a.jpg": Path("/data/a.jpg")}
     result = enrich_dataframe_paths(df, make_cs_info(), found)
-    assert "s3_image_path" in result.columns
-    assert "image_path" in result.columns
     assert result.iloc[0]["s3_image_path"] == "images/a.jpg"
     assert result.iloc[0]["image_path"] == str(Path("/data/a.jpg").resolve())
     assert pd.isna(result.iloc[1]["image_path"])
@@ -323,104 +274,72 @@ def test_enrich_paths_with_server_file_mapping() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_build_search_dirs_with_arg(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    img_dir = tmp_path / "imgs"
-    img_dir.mkdir()
-    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
-    dirs = build_search_dirs([str(img_dir)], "proj")
-    assert img_dir.resolve() in dirs
-
-
-def test_build_search_dirs_wraps_a_bare_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A single ``str``/``Path`` is wrapped, not discarded.
-
-    Every earlier call passed a list, so the ``isinstance`` branch that
-    wraps a scalar never ran and dropping its assignment changed nothing.
-    """
-    img_dir = tmp_path / "imgs"
-    img_dir.mkdir()
-    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
-
-    assert build_search_dirs(str(img_dir), "proj") == [img_dir.resolve()]
-
-
-def test_build_search_dirs_none_warns(
+@pytest.mark.parametrize(
+    ("image_dir", "config", "explicit_config_path", "expected", "warns"),
+    [
+        ("list", None, False, "imgs", False),
+        # A single ``str`` is wrapped, not discarded.
+        ("bare", None, False, "imgs", False),
+        (None, None, False, None, True),
+        ("none", "image_cache:\n  proj: {explicit}\n", False, "explicit", False),
+        # A project configured only through ``cache.images_root`` still resolves
+        # (upload used to read ``image_cache`` alone).
+        ("none", "cache:\n  images_root: {root}\n", False, "root", False),
+        # ``image_cache`` wins; the root is only a fallback.
+        (
+            "none",
+            "image_cache:\n  proj: {explicit}\ncache:\n  images_root: {root}\n",
+            False,
+            "explicit",
+            False,
+        ),
+        # ``config_path=`` beats the ambient ``CVETA2_CONFIG`` file.
+        ("none", "image_cache:\n  proj: {explicit}\n", True, "explicit", False),
+    ],
+    ids=[
+        "list_arg",
+        "bare_path_arg",
+        "nothing_warns",
+        "image_cache_entry",
+        "images_root_fallback",
+        "explicit_entry_beats_root",
+        "explicit_config_path",
+    ],
+)
+def test_build_search_dirs(  # noqa: PLR0913, PLR0917
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capture_logs: list[str],
+    image_dir: str | None,
+    config: str | None,
+    explicit_config_path: bool,  # noqa: FBT001
+    expected: str | None,
+    warns: bool,  # noqa: FBT001
 ) -> None:
-    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
-    dirs = build_search_dirs(None, "proj")
-    assert dirs == []
-    assert any("Не указан --image-dir" in m for m in capture_logs)
-
-
-def test_build_search_dirs_falls_back_to_the_global_images_root(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """A project configured only through ``cache.images_root`` still resolves.
-
-    ``upload`` used to read the explicit ``image_cache`` entry alone, so such
-    a project uploaded nothing but what was already on S3 — while ``fetch``
-    and ``s3-sync`` found the images fine.
-    """
-    images_root = tmp_path / "datasets"
-    images_root.mkdir()
+    dirs = {"imgs": tmp_path / "imgs", "explicit": tmp_path / "explicit"}
+    root = tmp_path / "datasets"
+    for path in (*dirs.values(), root):
+        path.mkdir()
+    dirs["root"] = cache_dir_for_project(root, "proj")
     cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(f"cache:\n  images_root: {images_root}\n", encoding="utf-8")
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
+    if config is not None:
+        cfg_path.write_text(
+            config.format(explicit=dirs["explicit"], root=root), encoding="utf-8"
+        )
+    ambient = tmp_path / "nonexistent.yaml" if explicit_config_path else cfg_path
+    monkeypatch.setenv("CVETA2_CONFIG", str(ambient))
+    choices: dict[str, list[str] | str] = {
+        "list": [str(dirs["imgs"])],
+        "bare": str(dirs["imgs"]),
+    }
+    arg = choices.get(image_dir or "")
 
-    dirs = build_search_dirs(None, "my-project")
-
-    assert dirs == [cache_dir_for_project(images_root, "my-project")]
-
-
-def test_build_search_dirs_prefers_an_explicit_entry_over_the_global_root(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """``image_cache`` wins; the root is only a fallback."""
-    explicit = tmp_path / "explicit"
-    explicit.mkdir()
-    images_root = tmp_path / "datasets"
-    images_root.mkdir()
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        f"image_cache:\n  my-project: {explicit}\n"
-        f"cache:\n  images_root: {images_root}\n",
-        encoding="utf-8",
+    result = build_search_dirs(
+        arg, "proj", config_path=cfg_path if explicit_config_path else None
     )
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
 
-    assert build_search_dirs(None, "my-project") == [explicit]
-
-
-def test_build_search_dirs_includes_cache(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(f"image_cache:\n  my-project: {cache_dir}\n", encoding="utf-8")
-    monkeypatch.setenv("CVETA2_CONFIG", str(cfg_path))
-    dirs = build_search_dirs(None, "my-project")
-    assert cache_dir in dirs
-
-
-def test_build_search_dirs_reads_the_explicit_config_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """``config_path=`` beats the ambient ``CVETA2_CONFIG`` file."""
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
-    cfg_path = tmp_path / "explicit.yaml"
-    cfg_path.write_text(f"image_cache:\n  my-project: {cache_dir}\n", encoding="utf-8")
-    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "nonexistent.yaml"))
-
-    assert build_search_dirs(None, "my-project", config_path=cfg_path) == [cache_dir]
+    assert result == ([] if expected is None else [dirs[expected].resolve()])
+    assert any("Не указан --image-dir" in m for m in capture_logs) is warns
 
 
 # ---------------------------------------------------------------------------
@@ -428,23 +347,25 @@ def test_build_search_dirs_reads_the_explicit_config_path(
 # ---------------------------------------------------------------------------
 
 
-def test_populate_paths_nested_frame_builds_full_s3_key() -> None:
-    ann = make_bbox(image_name="sub1/sub2/img.jpg")
-    result = ProjectAnnotations(annotations=[ann], deleted_images=[])
+@pytest.mark.parametrize(
+    ("frame_name", "expected_key"),
+    [
+        ("sub1/sub2/img.jpg", "images/sub1/sub2/img.jpg"),
+        ("img.jpg", "images/img.jpg"),
+    ],
+    ids=["nested", "flat"],
+)
+def test_populate_paths_builds_full_s3_key(frame_name: str, expected_key: str) -> None:
+    ann = make_bbox(image_name=frame_name)
 
-    populate_record_paths(result, make_cs_info(prefix="images"), None)
+    populate_record_paths(
+        ProjectAnnotations(annotations=[ann], deleted_images=[]),
+        make_cs_info(prefix="images"),
+        None,
+    )
 
     assert ann.image_name == "img.jpg"
-    assert ann.s3_image_path == "images/sub1/sub2/img.jpg"
-
-
-def test_populate_paths_flat_frame_unchanged() -> None:
-    ann = make_bbox(image_name="img.jpg")
-    result = ProjectAnnotations(annotations=[ann], deleted_images=[])
-
-    populate_record_paths(result, make_cs_info(prefix="images"), None)
-
-    assert ann.s3_image_path == "images/img.jpg"
+    assert ann.s3_image_path == expected_key
 
 
 def test_populate_paths_local_mirrors_s3_by_default(tmp_path: Path) -> None:
@@ -475,3 +396,38 @@ def test_populate_paths_local_nested_with_ignored_prefix(tmp_path: Path) -> None
 
     assert ann.s3_image_path == "data/projA/2026-01/img.jpg"
     assert ann.image_path == str(nested.resolve())
+
+
+def test_local_frame_path_without_cloud_storage_is_relative_to_cache(
+    tmp_path: Path,
+) -> None:
+    cached = tmp_path / "nested" / "a.jpg"
+    cached.parent.mkdir()
+    cached.write_bytes(b"image")
+    record = make_bbox(image_name="a.jpg", frame_path="/nested/a.jpg")
+
+    populate_record_paths(
+        ProjectAnnotations(annotations=[record], deleted_images=[]), None, tmp_path
+    )
+
+    assert record.image_path == str(cached)
+    assert record.s3_image_path is None
+
+
+@pytest.mark.parametrize("escape", ["dotdot_key", "cache_symlink"])
+def test_invalid_resolved_path_reports_the_original_frame_name(
+    tmp_path: Path, escape: str
+) -> None:
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    if escape == "dotdot_key":
+        record = make_bbox(image_name="bad.jpg", s3_image_path="images/../bad.jpg")
+    else:
+        (cache / "nested").symlink_to(tmp_path, target_is_directory=True)
+        record = make_bbox(image_name="bad.jpg", frame_path="nested/bad.jpg")
+    with pytest.raises(Cveta2Error, match=r"bad\.jpg"):
+        populate_record_paths(
+            ProjectAnnotations(annotations=[record], deleted_images=[]),
+            make_cs_info(prefix="images"),
+            cache,
+        )

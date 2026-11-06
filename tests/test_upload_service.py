@@ -32,7 +32,7 @@ from cveta2.application.use_cases.upload import (
     request_fingerprint,
 )
 from cveta2.composition.workflows import upload_cvat_dataset, upload_dependencies
-from cveta2.domain.errors import CvatApiError, Cveta2Error, LabelsMismatchError
+from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.models import CSV_COLUMNS, LabelInfo, ProjectInfo
 from cveta2.domain.paths import build_s3_key
 from tests.fixtures.fake_cvat_api import FakeCvatApi, RecordedWrites
@@ -140,10 +140,13 @@ class _ListCountingS3(FakeS3Client):
         super().upload_file(filename, bucket, key)
 
 
+_DEFAULT_STORAGE = make_cs_info(bucket=BUCKET, prefix=PREFIX)
+
+
 def make_client(
     *,
     labels: list[str] | None = None,
-    cloud_storage: CloudStorageInfo | None = None,
+    cloud_storage: CloudStorageInfo | None = _DEFAULT_STORAGE,
 ) -> CvatClient:
     """Build a CvatClient over a project-scoped fake with no tasks yet."""
     fixtures = LoadedFixtures(
@@ -155,7 +158,10 @@ def make_client(
         ],
         task_data={},
     )
-    api = _ProjectScopedFake(fixtures, cloud_storage=cloud_storage)
+    api = _ProjectScopedFake(
+        fixtures,
+        cloud_storage=cloud_storage.model_copy() if cloud_storage else None,
+    )
     return client_with_api(api)
 
 
@@ -283,6 +289,24 @@ class TestStageImages:
         assert s3.list_calls == 1
         assert any("a.jpg" in message for message in capture_logs)
 
+    def test_task_frames_follow_plan_order_with_deleted_last(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Frame order is the plan's (not sorted), deleted names after it."""
+        make_s3(monkeypatch, seeded_bucket(["b.jpg", "a.jpg", "c.jpg", "z.jpg"]))
+        request = make_request(
+            image_names=["b.jpg", "a.jpg", "c.jpg"], deleted_names=["z.jpg"]
+        )
+
+        staged = _stage_images(make_client(), request, deps=upload_dependencies())
+
+        assert staged.task_image_names == [
+            "images/b.jpg",
+            "images/a.jpg",
+            "images/c.jpg",
+            "images/z.jpg",
+        ]
+
     def test_missing_cloud_storage_names_the_project(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -301,23 +325,6 @@ class TestStageImages:
         with pytest.raises(Cveta2Error, match=PROJECT_NAME):
             _stage_images(client, request, deps=upload_dependencies())
 
-    def test_unknown_label_error_names_the_project(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """``validate_labels`` must receive the request's project name.
-
-        Passing ``project_name=None`` only ever surfaces inside
-        :class:`LabelsMismatchError`, so the raise itself is not enough.
-        """
-        make_s3(monkeypatch, _ListCountingS3())
-        client = make_client(labels=["person"], cloud_storage=make_cs_info())
-        request = make_request(image_names=["a.jpg"])
-
-        with pytest.raises(LabelsMismatchError) as exc_info:
-            _stage_images(client, request, deps=upload_dependencies())
-
-        assert PROJECT_NAME in str(exc_info.value)
-
 
 # ---------------------------------------------------------------------------
 # _push_to_cvat / upload_cvat_dataset
@@ -332,16 +339,13 @@ class TestUploadDataset:
     ) -> None:
         """Cover the whole write chain and pin what each step is handed.
 
-        Nothing executed ``_push_to_cvat`` before, so all of its mutants
-        were reported as uncovered.  The task spec fields, the recorded
-        shapes/issues/deleted frames and the returned outcome pin the
-        arguments; ``data_meta_calls`` pins the shared session — every
-        write that opens its own session instead adds a fetch.
+        ``data_meta_calls`` pins the shared write session: every write that
+        opens its own session instead adds a metadata fetch.
         """
         s3 = _ListCountingS3()
         make_s3(monkeypatch, s3)
         image_dir = make_local_images(tmp_path, ["a.jpg", "b.jpg", "d.jpg"])
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         request = make_request(
             image_names=["a.jpg", "b.jpg"],
             deleted_names=["d.jpg"],
@@ -383,28 +387,6 @@ class TestUploadDataset:
         assert outcome.issues == 1
         assert outcome.jobs == 2
 
-    def test_without_issue_columns_no_issues_are_opened(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A dataset without ``issue_state`` must report zero issues.
-
-        Together with the previous test this pins both directions of the
-        ``"issue_state" in columns`` guard and the ``num_issues = 0``
-        seed, which an inverted guard or a non-zero seed would change.
-        """
-        make_s3(monkeypatch, _ListCountingS3())
-        image_dir = make_local_images(tmp_path, ["a.jpg"])
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        request = make_request(image_names=["a.jpg"], search_dirs=[image_dir])
-
-        outcome = upload_cvat_dataset(client, request)
-
-        api = client.api
-        assert isinstance(api, _ProjectScopedFake)
-        assert api.writes.issues == []
-        assert outcome.issues == 0
-        assert api.writes.job_updates == []
-
     def test_a_dataset_of_only_deleted_rows_still_creates_the_task(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -417,7 +399,7 @@ class TestUploadDataset:
         """
         make_s3(monkeypatch, _ListCountingS3())
         image_dir = make_local_images(tmp_path, ["d.jpg"])
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         request = UploadRequest(
             project_id=PROJECT_ID,
             project_name=PROJECT_NAME,
@@ -463,12 +445,12 @@ class TestUploadDataset:
 
         ``mark_all_deleted`` covers plan images *and* deleted names, the
         ``elif`` covers only the deleted names, and with neither the task
-        must be left untouched — a single-case test could not tell the
-        three apart.
+        must be left untouched.  The rows carry no issue columns and
+        ``complete`` is off, so no issue and no job update may be written.
         """
         make_s3(monkeypatch, _ListCountingS3())
         image_dir = make_local_images(tmp_path, ["a.jpg", "b.jpg", "d.jpg"])
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         request = make_request(
             image_names=["a.jpg", "b.jpg"],
             deleted_names=deleted_names,
@@ -476,12 +458,15 @@ class TestUploadDataset:
             mark_all_deleted=mark_all_deleted,
         )
 
-        upload_cvat_dataset(client, request)
+        outcome = upload_cvat_dataset(client, request)
 
         api = client.api
         assert isinstance(api, _ProjectScopedFake)
         assert api.writes.deleted_frames.get(NEW_TASK_ID) == expected_frames
         assert api.data_meta_calls == [NEW_TASK_ID]
+        assert api.writes.issues == []
+        assert outcome.issues == 0
+        assert api.writes.job_updates == []
 
     @pytest.mark.parametrize(
         ("segment_size", "expected_jobs"),
@@ -502,11 +487,10 @@ class TestUploadDataset:
         segment_size: int,
         expected_jobs: int,
     ) -> None:
-        """``UploadOutcome.jobs`` was never asserted by any test."""
         make_s3(monkeypatch, _ListCountingS3())
         names = [f"img{index}.jpg" for index in range(5)]
         image_dir = make_local_images(tmp_path, names)
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         request = make_request(
             image_names=names,
             search_dirs=[image_dir],
@@ -545,7 +529,7 @@ class TestUploadDataset:
         entry = cache_dir / f"task_{NEW_TASK_ID}.json"
         entry.write_text("{}", encoding="utf-8")
         image_dir = make_local_images(tmp_path, ["a.jpg"])
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         request = make_request(image_names=["a.jpg"], search_dirs=[image_dir])
 
         upload_cvat_dataset(client, request)
@@ -649,8 +633,8 @@ class TestResume:
     def test_a_manifest_from_another_host_cannot_delete_a_task(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        first = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        second = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        first = make_client()
+        second = make_client()
         second._cfg = second._cfg.model_copy(update={"host": "http://other-cvat"})
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
         with _dies_attaching_frames(first), pytest.raises(_InterruptedRunError):
@@ -670,7 +654,7 @@ class TestResume:
     def test_a_task_in_another_project_is_never_resumed_or_deleted(
         self, monkeypatch: pytest.MonkeyPatch, frames: list[str]
     ) -> None:
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
         task_id = client.create_upload_task(999, "unrelated", frames, 1)
         _seed_manifest_for(client, make_request(image_names=["a.jpg"]), task_id)
@@ -687,15 +671,20 @@ class TestResume:
         assert len(list_manifests(PROJECT_ID, host=client.host)) == 1
 
     def test_a_fresh_upload_leaves_no_manifest_behind(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
     ) -> None:
-        """A finished upload has nothing to resume; a stale file would mislead."""
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        """A finished upload has nothing to resume; a stale file would mislead.
+
+        The stranded-task warning keys on a real stranded task, so a first
+        run warns about nothing.
+        """
+        client = make_client()
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
 
         assert list_manifests(PROJECT_ID, host=client.host) == []
+        assert not any("--resume" in message for message in capture_logs)
 
     def test_the_task_id_is_recorded_before_the_frames_are_attached(
         self, monkeypatch: pytest.MonkeyPatch
@@ -705,7 +694,7 @@ class TestResume:
         A crash while CVAT processes the images leaves a task that only the
         manifest knows about; without this checkpoint it is orphaned.
         """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
@@ -719,7 +708,7 @@ class TestResume:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An empty read-back cannot prove background attachment did not commit."""
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         names = ["a.jpg", "b.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
 
@@ -733,32 +722,45 @@ class TestResume:
         assert len(_writes_of(client).created_tasks) == 1
         assert list_manifests(PROJECT_ID, host=client.host)[0].task_id == stranded
 
-    def test_resume_keeps_a_task_whose_frames_did_attach(
+    def test_resume_of_a_finished_task_keeps_it_and_writes_nothing_twice(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The common recovery: the server finished, only the reply was lost.
 
-        Recreating here would abandon a fully processed task and pay for
-        the upload twice, which is exactly what --resume exists to avoid.
+        Recreating would abandon a fully processed task and pay for the
+        upload twice.  ``put_task_shapes`` appends and issues are one
+        request each, so a second pass would double every bbox and every
+        annotator comment — the corruption the read-back exists to prevent.
         """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         names = ["a.jpg", "b.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
+        rows = [
+            annotation_row("a.jpg", issue_state="new", issue_text="смотри"),
+            annotation_row("b.jpg"),
+        ]
+        request = make_request(image_names=names, rows=rows)
 
-        outcome = upload_cvat_dataset(client, make_request(image_names=names))
-        _seed_manifest_for(client, make_request(image_names=names), outcome.task_id)
+        outcome = upload_cvat_dataset(client, request)
+        shapes_before = len(_writes_of(client).shapes[outcome.task_id])
+        _seed_manifest_for(client, request, outcome.task_id)
 
-        resumed = upload_cvat_dataset(client, _resume_request(names))
+        resumed = upload_cvat_dataset(
+            client, make_request(image_names=names, rows=rows, resume=True)
+        )
 
         assert resumed.task_id == outcome.task_id
         assert _writes_of(client).deleted_tasks == []
         assert len(_writes_of(client).created_tasks) == 1
+        assert shapes_before == len(names)
+        assert len(_writes_of(client).shapes[outcome.task_id]) == shapes_before
+        assert len(_writes_of(client).issues) == 1
 
     def test_resume_refuses_a_task_built_from_different_frames(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Guessing which frames it holds would misplace every annotation."""
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, seeded_bucket(["a.jpg", "b.jpg"]))
 
         outcome = upload_cvat_dataset(
@@ -778,7 +780,7 @@ class TestResume:
         Skipping here would leave a task of frames with no annotations at
         all, which looks finished and is not.
         """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         names = ["a.jpg", "b.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
 
@@ -792,33 +794,11 @@ class TestResume:
         assert outcome.annotations == len(names)
         assert _writes_of(client).deleted_tasks == []
 
-    def test_resume_does_not_duplicate_annotations(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """put_task_shapes appends, so a second pass would double every bbox.
-
-        This is the corruption the 429-only write-retry policy and this
-        readback both exist to prevent.
-        """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        names = ["a.jpg", "b.jpg"]
-        make_s3(monkeypatch, seeded_bucket(names))
-
-        outcome = upload_cvat_dataset(client, make_request(image_names=names))
-        before = len(_writes_of(client).shapes[outcome.task_id])
-        _seed_manifest_for(client, make_request(image_names=names), outcome.task_id)
-
-        resumed = upload_cvat_dataset(client, _resume_request(names))
-
-        assert resumed.task_id == outcome.task_id
-        assert len(_writes_of(client).shapes[outcome.task_id]) == before
-        assert before > 0
-
     def test_resume_without_a_matching_manifest_reports_the_others(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The likely mistake is a different CSV, so name what *is* pending."""
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
 
         with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
@@ -832,7 +812,7 @@ class TestResume:
     def test_resume_with_nothing_pending_says_so(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, _ListCountingS3())
 
         with pytest.raises(Cveta2Error, match="нечего продолжать"):
@@ -847,7 +827,7 @@ class TestResume:
         images in a different folder than the frame order already promised,
         and the task would bind keys that do not exist.
         """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, _ListCountingS3())
         names = ["a.jpg", "b.jpg"]
         image_dir = make_local_images(tmp_path, names)
@@ -892,7 +872,7 @@ class TestManifestLifecycle:
         Without the warning the task stays in CVAT with nothing pointing at
         it, and `--resume` can no longer reach it.
         """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         names = ["a.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
 
@@ -905,37 +885,6 @@ class TestManifestLifecycle:
         assert str(stranded) in str(caught.value)
         assert len(_writes_of(client).created_tasks) == 1
         assert capture_logs
-
-    def test_a_first_run_warns_about_nothing(
-        self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
-    ) -> None:
-        """The warning must key on a real stranded task, not on any manifest."""
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
-
-        upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
-
-        assert not any("--resume" in message for message in capture_logs)
-
-    def test_one_upload_fetches_the_frame_metadata_once(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Annotations, issues and deleted frames all need the frame map.
-
-        Fetching it per step is what the shared write session exists to
-        avoid, and on a task of tens of thousands of frames that reply is
-        not small.
-        """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, seeded_bucket(["a.jpg", "b.jpg", "c.jpg"]))
-
-        upload_cvat_dataset(
-            client,
-            make_request(image_names=["a.jpg", "b.jpg"], deleted_names=["c.jpg"]),
-        )
-
-        api = cast("FakeCvatApi", client.api)
-        assert api.call_counts["get_task_data_meta"] == 1
 
 
 class TestS3FailureAbortsBeforeTaskCreation:
@@ -959,7 +908,7 @@ class TestS3FailureAbortsBeforeTaskCreation:
                     "PutObject",
                 )
 
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, _FailingS3())
         image_dir = make_local_images(tmp_path, ["a.jpg"])
 
@@ -982,7 +931,7 @@ class TestS3FailureAbortsBeforeTaskCreation:
         """
         s3 = _ListCountingS3()
         make_s3(monkeypatch, s3)
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         image_dir = make_local_images(tmp_path, ["a.jpg"])
 
         with pytest.raises(Cveta2Error, match=r"c\.jpg") as caught:
@@ -1001,7 +950,7 @@ class TestResumeWithIssues:
     def test_partial_same_text_issues_resume_each_bbox(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
         rows = [
             annotation_row(
@@ -1037,32 +986,6 @@ class TestResumeWithIssues:
         ]
         assert list_manifests(PROJECT_ID, host=client.host) == []
 
-    def test_resuming_does_not_reopen_the_issues_already_created(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Issues are one request each, so a half-applied set is real.
-
-        Re-creating them would leave every annotator comment duplicated on
-        the frame, which no read-back can undo.
-        """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
-        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
-        rows = [
-            annotation_row("a.jpg", issue_state="new", issue_text="смотри"),
-        ]
-        request = make_request(image_names=["a.jpg"], rows=rows)
-
-        outcome = upload_cvat_dataset(client, request)
-        created = len(_writes_of(client).issues)
-        _seed_manifest_for(client, request, outcome.task_id)
-
-        upload_cvat_dataset(
-            client, make_request(image_names=["a.jpg"], rows=rows, resume=True)
-        )
-
-        assert created == 1
-        assert len(_writes_of(client).issues) == created
-
 
 class TestResumeAfterManualDeletion:
     def test_a_task_deleted_in_the_ui_is_recreated(
@@ -1074,7 +997,7 @@ class TestResumeAfterManualDeletion:
         retried, and unhelpful: the run has everything it needs to start
         over.
         """
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         names = ["a.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
 
@@ -1093,7 +1016,7 @@ class TestResumeAfterManualDeletion:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Only 404 means "gone"; a 500 must not be read as one."""
-        client = make_client(cloud_storage=make_cs_info(bucket=BUCKET, prefix=PREFIX))
+        client = make_client()
         names = ["a.jpg"]
         make_s3(monkeypatch, seeded_bucket(names))
 

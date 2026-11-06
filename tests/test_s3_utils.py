@@ -54,6 +54,8 @@ class TestBuildS3Key:
             ("data/proj1", "proj10/img.jpg", "data/proj1/proj10/img.jpg"),
             ("data/proj1", "data/proj10/img.jpg", "data/proj1/data/proj10/img.jpg"),
             ("proj/", "img.jpg", "proj/img.jpg"),
+            # ``rstrip`` takes a character *set*, so only the slash may come off.
+            ("dataX", "img.jpg", "dataX/img.jpg"),
         ],
         ids=[
             "prefix_prepended",
@@ -66,18 +68,11 @@ class TestBuildS3Key:
             "sibling_named_like_the_prefix",
             "sibling_key_is_not_already_prefixed",
             "configured_trailing_slash_does_not_double",
+            "prefix_may_end_in_any_character",
         ],
     )
     def test_build_s3_key(self, prefix: str, path: str, expected: str) -> None:
         assert build_s3_key(prefix, path) == expected
-
-    def test_a_prefix_may_end_in_any_character(self) -> None:
-        """``rstrip`` takes a character *set*, so only the slash may come off.
-
-        Every other prefix here ends in a lowercase letter or a digit that no
-        plausible mutation of ``"/"`` also contains.
-        """
-        assert build_s3_key("dataX", "img.jpg") == "dataX/img.jpg"
 
     @pytest.mark.parametrize(
         ("prefix", "name"),
@@ -118,6 +113,9 @@ class TestParseSyncRoot:
             ("some/prefix///", (None, "some/prefix")),
             ("prefix", (None, "prefix")),
             ("  s3://bucket/p  ", ("bucket", "p")),
+            # ``rstrip`` takes a character *set*: only slashes leave the tail.
+            ("s3://bucket/imagesX/", ("bucket", "imagesX")),
+            ("dataX//", (None, "dataX")),
         ],
         ids=[
             "url_with_prefix",
@@ -129,24 +127,11 @@ class TestParseSyncRoot:
             "bare_prefix_trailing_slashes",
             "bare_single_segment",
             "surrounding_whitespace",
+            "url_tail_ends_in_any_letter",
+            "bare_tail_ends_in_any_letter",
         ],
     )
     def test_valid_roots(self, root: str, expected: tuple[str | None, str]) -> None:
-        assert parse_sync_root(root) == expected
-
-    @pytest.mark.parametrize(
-        ("root", "expected"),
-        [("s3://bucket/imagesX/", ("bucket", "imagesX")), ("dataX//", (None, "dataX"))],
-        ids=["url", "bare"],
-    )
-    def test_only_slashes_are_stripped_from_the_tail(
-        self, root: str, expected: tuple[str | None, str]
-    ) -> None:
-        """``rstrip`` takes a character *set*, so a prefix may end in any letter.
-
-        Every previous case ended in a slash-preceded lowercase name, which
-        cannot tell ``rstrip("/")`` apart from stripping a wider set.
-        """
         assert parse_sync_root(root) == expected
 
     @pytest.mark.parametrize(
@@ -174,6 +159,10 @@ class TestStripKeyPrefix:
             ("data/proj10/img.jpg", "data/proj1", "data/proj10/img.jpg"),
             ("data/projA", "data/projA", ""),
             ("data/projA/", "data/projA", ""),
+            # The slice cuts exactly the prefix, so the first letter survives.
+            ("data/Xmas.jpg", "data", "Xmas.jpg"),
+            # ``a//b`` and ``a/b`` are different objects and stay different.
+            ("data//img.jpg", "data", "/img.jpg"),
         ],
         ids=[
             "keeps_subfolders",
@@ -185,25 +174,12 @@ class TestStripKeyPrefix:
             "sibling_prefix_is_not_a_match",
             "folder_marker_strips_to_empty",
             "folder_marker_with_slash_strips_to_empty",
+            "only_the_separator_leaves_the_head",
+            "doubled_separator_is_left_alone",
         ],
     )
     def test_strip_key_prefix(self, key: str, prefix: str, expected: str) -> None:
         assert strip_key_prefix(key, prefix) == expected
-
-    def test_only_the_separator_is_stripped_from_the_head(self) -> None:
-        """The slice cuts exactly the prefix, so the first letter must survive.
-
-        Every other case has a remainder starting with a lowercase letter or a
-        digit, which cannot tell an exact cut apart from stripping more.
-        """
-        assert strip_key_prefix("data/Xmas.jpg", "data") == "Xmas.jpg"
-
-    def test_a_doubled_separator_in_the_key_is_left_alone(self) -> None:
-        """``a//b`` and ``a/b`` are different S3 objects and stay different.
-
-        Collapsing the second slash would map both onto one local file.
-        """
-        assert strip_key_prefix("data//img.jpg", "data") == "/img.jpg"
 
 
 @pytest.fixture
@@ -339,57 +315,52 @@ def test_get_bytes_retries_a_body_dropped_mid_read() -> None:
         configure_retries(*previous)
 
 
-class TestPickLatestDuplicate:
-    """Tests for pick_latest_duplicate() winner choice and duplicate warning."""
-
-    def test_lexicographic_max_wins(self) -> None:
-        candidates = ["2026-01/img.jpg", "2026-03/img.jpg", "2026-02/img.jpg"]
-        assert pick_latest_duplicate("S3", "img.jpg", candidates) == "2026-03/img.jpg"
-
-    def test_ordering_is_lexicographic_not_natural(self) -> None:
-        """``key=str`` is load-bearing: "9" sorts after "10", 9 does not after 10.
-
-        Path and str candidates order identically with and without the key,
-        so only a value whose natural order differs from its text order can
-        show that the key is applied at all.
-        """
-        assert pick_latest_duplicate("S3", "img.jpg", [9, 10]) == 9
-
-    def test_single_candidate_is_not_reported_as_a_duplicate(
-        self, capture_logs: list[str]
-    ) -> None:
-        """The warning is the whole point of the branch, so its absence counts."""
-        assert pick_latest_duplicate("S3", "img.jpg", ["2026-01/img.jpg"]) == (
-            "2026-01/img.jpg"
-        )
-        assert capture_logs == []
-
-    def test_two_candidates_warn_once(self, capture_logs: list[str]) -> None:
-        """Two is already a duplicate; nothing else observes the branch."""
-        pick_latest_duplicate("S3", "img.jpg", ["2026-01/img.jpg", "2026-02/img.jpg"])
-        assert len(capture_logs) == 1
+@pytest.mark.parametrize(
+    ("candidates", "expected", "warnings"),
+    [
+        pytest.param(
+            ["2026-01/img.jpg", "2026-03/img.jpg", "2026-02/img.jpg"],
+            "2026-03/img.jpg",
+            1,
+            id="lexicographic-max",
+        ),
+        # "9" sorts after "10" as text but not as a number.
+        pytest.param([9, 10], 9, 1, id="text-not-natural-order"),
+        pytest.param(["2026-01/img.jpg"], "2026-01/img.jpg", 0, id="single-no-warning"),
+    ],
+)
+def test_pick_latest_duplicate(
+    capture_logs: list[str], candidates: list[object], expected: object, warnings: int
+) -> None:
+    assert pick_latest_duplicate("S3", "img.jpg", candidates) == expected
+    assert len(capture_logs) == warnings
 
 
-class TestNamesWithBasenameFallback:
-    """Tests for names_with_basename_fallback() aliasing rules."""
-
-    def test_nested_name_is_also_reachable_by_basename(self) -> None:
-        result = names_with_basename_fallback([("2026-02/img.jpg", "key-a")])
-        assert result == {"2026-02/img.jpg": "key-a", "img.jpg": "key-a"}
-
-    def test_real_name_wins_over_a_later_basename_alias(self) -> None:
-        """An explicit flat name must not be overwritten by an alias behind it."""
-        result = names_with_basename_fallback(
-            [("img.jpg", "flat"), ("2026-02/img.jpg", "nested")]
-        )
-        assert result["img.jpg"] == "flat"
-        assert result["2026-02/img.jpg"] == "nested"
-
-    def test_first_alias_wins(self) -> None:
-        result = names_with_basename_fallback(
-            [("2026-01/img.jpg", "old"), ("2026-02/img.jpg", "new")]
-        )
-        assert result["img.jpg"] == "old"
+@pytest.mark.parametrize(
+    ("pairs", "expected"),
+    [
+        pytest.param(
+            [("2026-02/img.jpg", "key-a")],
+            {"2026-02/img.jpg": "key-a", "img.jpg": "key-a"},
+            id="nested-reachable-by-basename",
+        ),
+        # An explicit flat name is not overwritten by an alias behind it.
+        pytest.param(
+            [("img.jpg", "flat"), ("2026-02/img.jpg", "nested")],
+            {"img.jpg": "flat", "2026-02/img.jpg": "nested"},
+            id="real-name-wins",
+        ),
+        pytest.param(
+            [("2026-01/img.jpg", "old"), ("2026-02/img.jpg", "new")],
+            {"2026-01/img.jpg": "old", "2026-02/img.jpg": "new", "img.jpg": "old"},
+            id="first-alias-wins",
+        ),
+    ],
+)
+def test_names_with_basename_fallback(
+    pairs: list[tuple[str, str]], expected: dict[str, str]
+) -> None:
+    assert names_with_basename_fallback(pairs) == expected
 
 
 class TestListS3Objects:
@@ -411,59 +382,67 @@ class TestListS3Objects:
         ]
         assert [call.get("ContinuationToken") for call in s3.list_calls] == [None, "1"]
 
-    def test_bucket_and_prefix_are_sent_under_their_s3_names(self) -> None:
-        """The listing is filtered server-side, so the parameter names matter."""
-        s3 = PagedFakeS3Client([["images/a.jpg", "other/b.jpg"]])
+    @pytest.mark.parametrize(
+        ("keys", "prefix", "expected"),
+        [
+            pytest.param(
+                ["images/a.jpg", "other/b.jpg"],
+                "images",
+                ("images/a.jpg", "a.jpg"),
+                id="bucket-and-prefix",
+            ),
+            # ``Prefix`` is a raw substring to S3, so without the trailing
+            # slash ``data/proj1`` would also return every ``data/proj10/`` key.
+            pytest.param(
+                ["data/proj1/a.jpg", "data/proj10/b.jpg"],
+                "data/proj1",
+                ("data/proj1/a.jpg", "a.jpg"),
+                id="sibling-prefix-excluded",
+            ),
+        ],
+    )
+    def test_the_listing_is_filtered_server_side(
+        self, keys: list[str], prefix: str, expected: tuple[str, str]
+    ) -> None:
+        """Bucket and prefix are sent under their S3 parameter names."""
+        s3 = PagedFakeS3Client([keys])
 
-        result = list_s3_objects(s3, "test-bucket", "images")
-
-        assert result == [("images/a.jpg", "a.jpg")]
-        assert s3.list_calls == [{"Bucket": "test-bucket", "Prefix": "images/"}]
-
-    def test_the_server_side_filter_excludes_sibling_prefixes(self) -> None:
-        """``Prefix`` is a raw substring to S3, so the trailing slash matters.
-
-        Listing ``data/proj1`` without it also returns every ``data/proj10/``
-        key, which then reaches the name map, the local cache layout and
-        upload's existing-key set as a mangled ``0/...`` name.
-        """
-        s3 = PagedFakeS3Client([["data/proj1/a.jpg", "data/proj10/b.jpg"]])
-
-        assert list_s3_objects(s3, "test-bucket", "data/proj1") == [
-            ("data/proj1/a.jpg", "a.jpg")
-        ]
-        assert s3.list_calls == [{"Bucket": "test-bucket", "Prefix": "data/proj1/"}]
+        assert list_s3_objects(s3, "test-bucket", prefix) == [expected]
+        assert s3.list_calls == [{"Bucket": "test-bucket", "Prefix": f"{prefix}/"}]
 
     def test_empty_listing_omits_the_contents_key(self) -> None:
         """S3 drops ``Contents`` from an empty page instead of sending ``[]``."""
         s3 = PagedFakeS3Client([[]])
         assert list_s3_objects(s3, "test-bucket", "images") == []
 
-    def test_names_are_relative_to_the_prefix(self) -> None:
-        s3 = FakeS3Client(
-            {"images/a.jpg": b"a", "images/b.jpg": b"b"},
-            keyed_by_bucket=False,
-        )
-
-        assert list_s3_objects(s3, "test-bucket", "images") == [
-            ("images/a.jpg", "a.jpg"),
-            ("images/b.jpg", "b.jpg"),
-        ]
-
-    def test_an_empty_prefix_keeps_full_names(self) -> None:
-        s3 = FakeS3Client({"cat.jpg": b"cat", "dog.jpg": b"dog"}, keyed_by_bucket=False)
-
-        assert list_s3_objects(s3, "test-bucket", "") == [
-            ("cat.jpg", "cat.jpg"),
-            ("dog.jpg", "dog.jpg"),
-        ]
-
-    def test_folder_marker_is_not_returned_as_a_file(self) -> None:
-        s3 = FakeS3Client({"images/": b"", "images/a.jpg": b"a"}, keyed_by_bucket=False)
-
-        assert list_s3_objects(s3, "test-bucket", "images") == [
-            ("images/a.jpg", "a.jpg")
-        ]
+    @pytest.mark.parametrize(
+        ("objects", "prefix", "expected"),
+        [
+            pytest.param(
+                {"images/a.jpg": b"a", "images/b.jpg": b"b"},
+                "images",
+                [("images/a.jpg", "a.jpg"), ("images/b.jpg", "b.jpg")],
+                id="relative-to-prefix",
+            ),
+            pytest.param(
+                {"cat.jpg": b"cat", "dog.jpg": b"dog"},
+                "",
+                [("cat.jpg", "cat.jpg"), ("dog.jpg", "dog.jpg")],
+                id="empty-prefix-keeps-full-names",
+            ),
+            pytest.param(
+                {"images/": b"", "images/a.jpg": b"a"},
+                "images",
+                [("images/a.jpg", "a.jpg")],
+                id="folder-marker-skipped",
+            ),
+        ],
+    )
+    def test_names(
+        self, objects: dict[str, bytes], prefix: str, expected: list[tuple[str, str]]
+    ) -> None:
+        s3 = FakeS3Client(objects, keyed_by_bucket=False)
+        assert list_s3_objects(s3, "test-bucket", prefix) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -506,15 +485,18 @@ def test_parallel_listing_matches_the_sequential_one_exactly() -> None:
 
     assert parallel == sequential
     assert sequential == sorted(sequential, key=lambda pair: pair[0])
+    # Keys directly under the prefix belong to no subfolder and are only
+    # reachable from the delimiter pass.
     assert len(sequential) == len(_LISTING_OBJECTS)
 
 
+@pytest.mark.parametrize("workers", [2, 8])
 @pytest.mark.usefixtures("_listing_workers")
-def test_the_fan_out_really_pages_each_subfolder_separately() -> None:
+def test_the_fan_out_really_pages_each_subfolder_separately(workers: int) -> None:
     """Without the delimiter pass this silently stays one serial chain.
 
     The result is identical either way, so only the call pattern shows
-    whether the work was actually split.
+    whether the work was actually split.  Two workers already fan out.
     """
     client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
 
@@ -523,7 +505,7 @@ def test_the_fan_out_really_pages_each_subfolder_separately() -> None:
     serial_calls = len(client.list_requests)
 
     client.list_requests.clear()
-    configure_workers(s3=8, cvat=1)
+    configure_workers(s3=workers, cvat=1)
     list_s3_objects(client, "bucket", "data/proj")
 
     subfolders = {"2026-01/", "2026-02/", "2026-03/", "nested/"}
@@ -536,17 +518,6 @@ def test_the_fan_out_really_pages_each_subfolder_separately() -> None:
 
 
 @pytest.mark.usefixtures("_listing_workers")
-def test_two_workers_already_take_the_parallel_path() -> None:
-    """The threshold is "more than one", not some larger round number."""
-    client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
-    configure_workers(s3=2, cvat=1)
-
-    list_s3_objects(client, "bucket", "data/proj")
-
-    assert len(client.list_requests) > 1
-
-
-@pytest.mark.usefixtures("_listing_workers")
 def test_the_listing_targets_the_requested_bucket() -> None:
     """Every page — delimiter pass and subfolder pass alike — needs the bucket."""
     client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
@@ -554,22 +525,6 @@ def test_the_listing_targets_the_requested_bucket() -> None:
 
     assert list_s3_objects(client, "other-bucket", "data/proj") == []
     assert all(call.get("Bucket") == "other-bucket" for call in client.list_requests)
-
-
-@pytest.mark.usefixtures("_listing_workers")
-def test_parallel_listing_keeps_keys_outside_any_subfolder() -> None:
-    """A key sitting directly under the prefix belongs to no subfolder.
-
-    The fan-out pages subfolders; anything at the top level is only
-    reachable from the delimiter pass and would otherwise vanish.
-    """
-    client = FakeS3Client(dict(_LISTING_OBJECTS), keyed_by_bucket=True)
-    configure_workers(s3=8, cvat=1)
-
-    names = {name for _, name in list_s3_objects(client, "bucket", "data/proj")}
-
-    assert "loose.jpg" in names
-    assert "nested/deep/f.jpg" in names
 
 
 @pytest.mark.usefixtures("_listing_workers")

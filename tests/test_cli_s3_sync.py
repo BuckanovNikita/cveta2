@@ -44,39 +44,13 @@ def test_s3_sync_no_image_cache_exits() -> None:
         app.run(["s3-sync"])
 
 
-def test_s3_sync_all_projects(
-    tmp_path: Path,
-    test_config: Path,
-) -> None:
-    write_test_config(
-        test_config,
-        image_cache={
-            "project-a": str(tmp_path / "images-a"),
-            "project-b": str(tmp_path / "images-b"),
-        },
-    )
-
-    mock_client = _s3_sync_client()
-    mock_client.find_project_by_name.side_effect = [
-        ProjectInfo(id=1, name="project-a"),
-        ProjectInfo(id=2, name="project-b"),
-    ]
-
-    with patch_cli_client(mock_client):
-        app = CliApp()
-        app.run(["s3-sync"])
-
-    assert mock_client.sync_project_images.call_count == 2
-    call_dirs = {str(c[0][1]) for c in mock_client.sync_project_images.call_args_list}
-    assert str(tmp_path / "images-a") in call_dirs
-    assert str(tmp_path / "images-b") in call_dirs
-
-
 def test_s3_sync_falls_back_to_cache_images_root(
     tmp_path: Path,
     test_config: Path,
 ) -> None:
-    """A project known only to ``cache`` lands in ``images_root/<name>``.
+    """Every configured project is synced, each into its own directory.
+
+    A project known only to ``cache`` lands in ``images_root/<name>``.
 
     ``s3-sync`` shares the resolution with ``fetch``/``upload``; an explicit
     ``image_cache`` entry still wins over the per-project root.
