@@ -135,7 +135,7 @@ def test_resume_after_injected_post_write_failure() -> None:
 def test_clone_real_task_specific_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     """The operator helper clones differing task sizes and frame sequences."""
     _project_id, _name, storage, cfg = _get_project_and_storage()
-    path = Path(__file__).resolve().parents[2] / "scripts/clone_project_to_s3.py"
+    path = Path(__file__).resolve().parent / "clone_project_to_s3.py"
     spec = importlib.util.spec_from_file_location("review_clone_helper", path)
     assert spec is not None
     assert spec.loader is not None

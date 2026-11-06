@@ -37,7 +37,7 @@ def test_canonical_layers_are_explicit_packages(layer: str) -> None:
     ],
 )
 def test_inner_effect_negative_fixtures(source: str, fragment: str) -> None:
-    from scripts.check_architecture import inspect_source
+    from tests.architecture_effects import inspect_source
 
     assert any(
         fragment in item for item in inspect_source(source, "cveta2.application.probe")
@@ -45,7 +45,7 @@ def test_inner_effect_negative_fixtures(source: str, fragment: str) -> None:
 
 
 def test_pure_lexical_paths_and_dataframe_transforms_are_allowed() -> None:
-    from scripts.check_architecture import inspect_source
+    from tests.architecture_effects import inspect_source
 
     source = (
         "from pathlib import Path\n"
@@ -56,7 +56,7 @@ def test_pure_lexical_paths_and_dataframe_transforms_are_allowed() -> None:
 
 
 def test_canonical_effect_ownership() -> None:
-    from scripts.check_architecture import check_tree
+    from tests.architecture_effects import check_tree
 
     assert check_tree(PACKAGE) == []
 
@@ -262,7 +262,7 @@ import cveta2.application.use_cases.dataset_bundle
     ],
 )
 def test_aliased_and_typed_effect_calls_are_rejected(source: str) -> None:
-    from scripts.check_architecture import inspect_source
+    from tests.architecture_effects import inspect_source
 
     assert inspect_source(source, "cveta2.domain.probe")
 

@@ -166,9 +166,9 @@ search directories arrive as values. Upload checkpoints use `ManifestStore`;
 completion is persisted before cleanup. Cache invalidation remains available
 with cache reads disabled and then uses local-only effects.
 
-Run `uv run lint-imports`, `uv run python scripts/check_architecture.py` and
-`uv run pytest tests/test_architecture.py` after changing boundaries. The
-import contracts cover exhaustive module classification, inward layers, adapter
+Run `uv run lint-imports` and `uv run pytest tests/test_architecture.py` (which
+also runs the effect-ownership checker in `tests/architecture_effects.py`) after
+changing boundaries. The import contracts cover exhaustive module classification, inward layers, adapter
 independence, canonical facade exclusion, SDK/prompt ownership and internal
 acyclicity, including local and type-only imports. AST acceptance checks reject
 inner effect imports/calls (including aliases) and representative negative

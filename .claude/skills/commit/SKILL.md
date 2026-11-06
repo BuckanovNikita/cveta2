@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Commits and, when authorized, pushes a reviewed set of cveta2 changes, preserving unrelated working-tree work, staging exact intended paths, writing Conventional Commits accepted by scripts/check_commit_msg.py, handling pre-commit rewrites and failures, and running the pre-push mutation, version-drift and live integration gates without silently bypassing them. Use when committing or pushing cveta2 changes or when a commit-msg, pre-commit or pre-push hook fails.
+description: Commits and, when authorized, pushes a reviewed set of cveta2 changes, preserving unrelated working-tree work, staging exact intended paths, writing Conventional Commits accepted by the conventional-pre-commit commit-msg hook, handling pre-commit rewrites and failures, and running the pre-push mutation, version-drift and live integration gates without silently bypassing them. Use when committing or pushing cveta2 changes or when a commit-msg, pre-commit or pre-push hook fails.
 ---
 
 # Commit cveta2 changes
@@ -50,13 +50,18 @@ artifacts, integration `.env`, mutation workspace, or unrelated edits.
 
 ## Commit
 
-Use a Conventional Commit subject accepted by `scripts/check_commit_msg.py`:
-`type(scope)!: description`, with the scope and `!` optional and the type one of
-`build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `style` or
-`test` (the script's `TYPES`). Among types, only `feat`, `fix` and `perf` move
+Use a Conventional Commit subject accepted by the `conventional-pre-commit`
+commit-msg hook: `type(scope)!: description`, with the scope and `!` optional and
+the type one of `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
+`refactor`, `style` or `test` (the hook's `args` in `.pre-commit-config.yaml`).
+Write the type in lowercase: semantic-release reads it case-sensitively. Merge
+and autosquash subjects are exempt; git's default `Revert "..."` subject is not,
+so reword a revert into one of these types. Among types, only `feat`, `fix` and `perf` move
 the version; a `!` on any type is a breaking change and also moves it.
-Add a body when it helps explain behavior or tradeoffs. A breaking change
-requires both the `!` marker and a `BREAKING CHANGE:` footer.
+Add a body when it helps explain behavior or tradeoffs; separate it from the
+subject with a blank line. A breaking change needs both the `!` marker and a
+`BREAKING CHANGE:` footer: the hook no longer enforces the footer, but without it
+the changelog entry has no text.
 
 `git commit` runs the configured hooks. Read `.pre-commit-config.yaml` for
 the current gate rather than copying its list here. If a hook rewrites files,

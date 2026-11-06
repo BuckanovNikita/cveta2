@@ -145,9 +145,9 @@ execution are external effects. Runners, clocks and locks are explicit
 application dependencies. Execution preserves input order, cancels queued work
 on uncaught failures and joins active work before propagating them.
 
-Run `uv run lint-imports`, `uv run python scripts/check_architecture.py` and
-`uv run pytest tests/test_architecture.py` to verify layers, module coverage,
-adapter independence, SDK/prompt ownership, facade exclusion, sibling acyclicity
+Run `uv run lint-imports` and `uv run pytest tests/test_architecture.py` (which
+also runs the effect-ownership checker in `tests/architecture_effects.py`) to
+verify layers, module coverage, adapter independence, SDK/prompt ownership, facade exclusion, sibling acyclicity
 and inner effect ownership, including local/type-only imports and aliases.
 Negative acceptance fixtures exercise forbidden dependencies and effects.
 Architecture acceptance reconciles the module record, task-owned diff,

@@ -10,55 +10,25 @@ Credentials:
   - S3:   reads from ~/.aws/credentials (boto3 default chain)
 
 Example:
-  uv run python scripts/clone_project_to_s3.py \\
+  uv run python tests/integration/clone_project_to_s3.py \\
       --source coco8-dev --dest coco8-dev-s3 --cloud-storage-id 1
 
 """
 
-from __future__ import annotations
-
 import argparse
 import time
 from typing import Any
-from urllib.parse import parse_qs
 
 import boto3
 from cvat_sdk import make_client
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.core.proxies.annotations import AnnotationUpdateAction
 from loguru import logger
-from pydantic import BaseModel
 
 from cveta2.adapters.config.settings import CvatConfig
+from cveta2.adapters.cvat.storage import parse_cloud_storage
 from cveta2.domain.errors import Cveta2Error
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-
-class CloudStorageInfo(BaseModel):
-    """Parsed cloud storage metadata from CVAT."""
-
-    id: int
-    bucket: str
-    prefix: str
-    endpoint_url: str
-
-
-def parse_cloud_storage(cs: Any) -> CloudStorageInfo:
-    """Extract bucket, prefix, endpoint from CVAT cloud storage object."""
-    specific = str(cs.specific_attributes or "")
-    parsed = parse_qs(specific)
-    prefix = (parsed.get("prefix") or [""])[0]
-    endpoint_url = (parsed.get("endpoint_url") or [""])[0]
-    return CloudStorageInfo(
-        id=int(cs.id),
-        bucket=str(cs.resource),
-        prefix=prefix,
-        endpoint_url=endpoint_url,
-    )
-
+from cveta2.domain.storage import CloudStorageInfo
 
 # ---------------------------------------------------------------------------
 # S3 helpers

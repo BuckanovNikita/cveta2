@@ -1,12 +1,13 @@
 """Check canonical effect ownership beyond import-linter's dependency graph.
 
+Used by ``tests/test_architecture.py``, which runs it on the real package.
+
 This is a source-level guard for known Python effect APIs, not a Python sandbox.
 Ports remain responsible for effects: named filesystem methods on a workflow
 port are allowed only when their names describe workflow operations.
 """
 
 import ast
-import sys
 from pathlib import Path
 
 INNER_LAYERS = {"domain", "application"}
@@ -227,15 +228,3 @@ def check_tree(package: Path) -> list[str]:
         module = ".".join(path.relative_to(package.parent).with_suffix("").parts)
         violations.extend(inspect_source(path.read_text(), module))
     return violations
-
-
-def main() -> int:
-    """Report ownership violations for the commit gate."""
-    violations = check_tree(Path(__file__).resolve().parents[1] / "cveta2")
-    for violation in violations:
-        print(violation)
-    return int(bool(violations))
-
-
-if __name__ == "__main__":
-    sys.exit(main())

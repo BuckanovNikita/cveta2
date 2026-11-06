@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "task": "Simplify scripts/: stock hooks, merged mutation gate, Python integration lifecycle",
+  "scope": [
+    "scripts",
+    "scripts/check_commit_msg.py",
+    "scripts/check_version_drift.py",
+    "scripts/check_architecture.py",
+    "scripts/upload_dataset_to_cvat.py",
+    "scripts/export_cvat_fixtures.py",
+    "scripts/clone_project_to_s3.py",
+    "scripts/mutation_test.sh",
+    "scripts/mutation_config.py",
+    "scripts/mutation_gate.py",
+    "scripts/mutation.py",
+    "scripts/integration_env.sh",
+    "scripts/integration_up.sh",
+    "scripts/integration_test.sh",
+    "scripts/integration_stop.sh",
+    "scripts/integration_gate.sh",
+    "tests/architecture_effects.py",
+    "tests/test_architecture.py",
+    "tests/integration/clone_project_to_s3.py",
+    "tests/integration/lifecycle.py",
+    "tests/integration/test_review_remediation.py",
+    "tests/test_integration_env.py",
+    "tests/test_integration_lifecycle.py",
+    "tests/test_mutation_wrapper.py",
+    "tests/test_mutation_tool.py",
+    "tests/test_integration_tool_boundaries.py",
+    "cveta2/adapters/cvat/storage.py",
+    ".pre-commit-config.yaml",
+    "pyproject.toml"
+  ],
+  "impact": "modules",
+  "rules": "pyproject.toml import-linter contracts and tests/test_architecture.py own the runtime package layers (public facades -> interfaces -> composition -> adapters -> application -> domain) and inner effect ownership. tests/test_integration_tool_boundaries.py keeps test and script tooling out of the runtime package and keeps stand tooling that runs before environment resolution on the standard library. Development tooling never becomes a runtime dependency.",
+  "modules": [
+    {
+      "id": "effect-checker",
+      "path": "tests/architecture_effects.py",
+      "change": "move",
+      "previous_path": "scripts/check_architecture.py",
+      "responsibility": "Source-level guard that inner layers do not own external effects, complementing import-linter.",
+      "interface": "inspect_source(source, module) -> list of violations; check_tree(package) -> list of violations for the whole package. No CLI; tests/test_architecture.py asserts the real package is clean and that fixtures with forbidden effects fail.",
+      "layer": "Test tooling, outside the runtime package.",
+      "allowed_dependencies": ["Python standard library (ast, pathlib)"],
+      "forbidden_dependencies": ["cveta2 runtime imports", "third-party SDKs"],
+      "effects": "Reads package source files passed by the caller; no other effects.",
+      "contracts": ["runtime-excludes-tooling", "package-layers"]
+    },
+    {
+      "id": "clone-helper",
+      "path": "tests/integration/clone_project_to_s3.py",
+      "change": "move",
+      "previous_path": "scripts/clone_project_to_s3.py",
+      "responsibility": "Operator and integration-test helper that clones a CVAT project onto S3 cloud storage, preserving per-task frame order.",
+      "interface": "main() CLI with --source/--dest/--cloud-storage-id; clone_task_images and remap helpers used by tests/integration/test_review_remediation.py. Cloud-storage parsing now comes from cveta2.adapters.cvat.storage.parse_cloud_storage.",
+      "layer": "Integration test tooling, outside the runtime package.",
+      "allowed_dependencies": ["cveta2 public and adapter modules", "cvat_sdk", "boto3", "loguru"],
+      "forbidden_dependencies": ["being imported by any cveta2 runtime module"],
+      "effects": "CVAT and S3 network IO owned by this standalone helper.",
+      "contracts": ["runtime-excludes-tooling"]
+    },
+    {
+      "id": "mutation-gate",
+      "path": "scripts/mutation.py",
+      "change": "add",
+      "responsibility": "Run mutmut over the configured scope or profile, keep mutants/ consistent with the scope fingerprint, and turn results into a pass/fail verdict against the equivalent-mutant allowlist.",
+      "interface": "python scripts/mutation.py [--profile NAME] [mutmut args...]; exit 0 when every mutant is killed or allowlisted, 1 on an unknown profile, an escaped mutant, a stale allowlist entry or missing stats. Replaces mutation_test.sh, mutation_config.py and mutation_gate.py.",
+      "layer": "Development tooling, outside the runtime package.",
+      "allowed_dependencies": ["Python standard library", "uv and mutmut as subprocesses"],
+      "forbidden_dependencies": ["cveta2 runtime imports", "being imported by any cveta2 runtime module"],
+      "effects": "Owns subprocesses (uv run mutmut) and the generated mutants/ workspace.",
+      "contracts": ["runtime-excludes-tooling"]
+    },
+    {
+      "id": "integration-lifecycle",
+      "path": "tests/integration/lifecycle.py",
+      "change": "add",
+      "responsibility": "Resolve one integration run (arming file, k8s-infra skill, run tag, Secret-derived environment) and drive up, test, stop and the pre-push gate on the shared stands.",
+      "interface": "python -m tests.integration.lifecycle {env,up,test,stop,gate} [--repo-root PATH]; env prints shell exports; gate accepts --keep-stack and pytest arguments. Exit codes and messages match the replaced shell scripts; tag precedence INFRA_RUN_TAG > main slot > .run-tag > mint.",
+      "layer": "Integration test tooling, outside the runtime package; runs before pytest and before tests.env_isolation.",
+      "allowed_dependencies": ["Python standard library", "k8s-infra helper scripts, uv, curl and git as subprocesses"],
+      "forbidden_dependencies": ["cveta2 runtime imports", "SDKs (cvat_sdk, boto3, clearml)", "being imported by any cveta2 runtime module"],
+      "effects": "Owns subprocesses, the tests/integration/.run-tag file, the coco8 image download and the process environment handed to children.",
+      "contracts": ["runtime-excludes-tooling", "lifecycle-stdlib-only"]
+    },
+    {
+      "id": "storage-adapter-doc",
+      "path": "cveta2/adapters/cvat/storage.py",
+      "change": "modify",
+      "responsibility": "Translate opaque CVAT cloud-storage objects into CloudStorageInfo.",
+      "interface": "parse_cloud_storage(cs_raw) -> CloudStorageInfo, unchanged; only the docstring reference to the removed script changes.",
+      "layer": "Adapters (cvat).",
+      "allowed_dependencies": ["cveta2.domain"],
+      "forbidden_dependencies": ["tests", "scripts"],
+      "effects": "None.",
+      "contracts": ["package-layers", "runtime-excludes-tooling"]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "package-layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Exhaustive inward layers and adapter independence for the cveta2 package (import-linter).",
+      "check": "imports"
+    },
+    {
+      "id": "runtime-excludes-tooling",
+      "path": "tests/test_integration_tool_boundaries.py",
+      "status": "existing",
+      "rules": "No cveta2 runtime module imports tests or scripts; negative cases inject both imports.",
+      "check": "boundaries"
+    },
+    {
+      "id": "lifecycle-stdlib-only",
+      "path": "tests/test_integration_tool_boundaries.py",
+      "status": "existing",
+      "rules": "tests/integration/lifecycle.py imports only the standard library; negative cases inject cveta2 and SDK imports and must fail.",
+      "check": "boundaries"
+    }
+  ],
+  "checks": [
+    {
+      "id": "imports",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run pytest -n 0 tests/test_architecture.py",
+      "expectation": "Layer contracts kept; check_tree on the real package returns no violations; effect fixtures still fail."
+    },
+    {
+      "id": "boundaries",
+      "kind": "imports",
+      "command": "uv run pytest -n 0 tests/test_integration_tool_boundaries.py",
+      "expectation": "Runtime modules import no tooling; lifecycle.py imports only the standard library; injected forbidden imports are reported."
+    },
+    {
+      "id": "lifecycle-parity",
+      "kind": "behavior",
+      "command": "uv run pytest -n 0 tests/test_integration_lifecycle.py tests/test_mutation_tool.py",
+      "expectation": "Every behaviour asserted for the shell scripts holds for the Python replacements, including tag precedence, refusals, teardown matrix, TLS reporting and profile resolution before mutation work."
+    },
+    {
+      "id": "live-lifecycle",
+      "kind": "behavior",
+      "command": "uv run python -m tests.integration.lifecycle up && uv run python -m tests.integration.lifecycle test tests/integration/test_upload.py && uv run python -m tests.integration.lifecycle stop",
+      "expectation": "A minted tag is seeded, tested and fully removed; exact-tag listings are empty afterwards."
+    },
+    {
+      "id": "docs",
+      "kind": "documentation",
+      "command": "uv run pytest -n 0 tests/test_docs.py",
+      "expectation": "Documented commands, paths and links resolve after the removals."
+    }
+  ],
+  "documentation": "scripts/README.md, CONTRIBUTING.md, .specify/memory/engineering.md, .specify/memory/architecture.md, .claude/skills/{commit,mutation-testing,running-integration-tests}, tests/integration/.env.example and integration docstrings; historical specs and plans are not rewritten.",
+  "review": {"status": "pending"}
+}

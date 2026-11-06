@@ -24,12 +24,10 @@ from cveta2.domain.errors import Cveta2Error
 from tests.helpers import csv_row, make_image, write_convert_csv
 
 
-def _helper_script(name: str) -> ModuleType:
-    """Load a dev helper without making scripts a second package identity."""
-    path = Path(__file__).resolve().parents[1] / "scripts" / f"{name}.py"
-    if not path.is_file():
-        pytest.skip("Helper scripts are absent from the copied source tree")
-    spec = importlib.util.spec_from_file_location(f"review_{name}", path)
+def _clone_helper() -> ModuleType:
+    """Load the integration clone helper, a standalone script, by path."""
+    path = Path(__file__).resolve().parent / "integration" / "clone_project_to_s3.py"
+    spec = importlib.util.spec_from_file_location("review_clone_project_to_s3", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -184,7 +182,7 @@ def test_clone_uses_each_tasks_frame_order(monkeypatch: pytest.MonkeyPatch) -> N
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    clone = _helper_script("clone_project_to_s3")
+    clone = _clone_helper()
 
     source_tasks = [
         SimpleNamespace(id=11, name="one", subset=""),
@@ -264,7 +262,7 @@ def test_clone_empty_project_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    clone = _helper_script("clone_project_to_s3")
+    clone = _clone_helper()
 
     source = MagicMock()
     source.id, source.name = 1, "source"
@@ -292,66 +290,6 @@ def test_clone_empty_project_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     client.api_client.tasks_api.create.assert_not_called()
 
 
-def test_helper_sparse_class_mapping(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import sys
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    upload = _helper_script("upload_dataset_to_cvat")
-
-    image = tmp_path / "images/train/a.jpg"
-    make_image(image)
-    label = tmp_path / "labels/train/a.txt"
-    label.parent.mkdir(parents=True)
-    label.write_text("2 .5 .5 .2 .2\n5 .5 .5 .2 .2\n")
-    yaml = tmp_path / "data.yaml"
-    yaml.write_text("path: .\ntrain: images/train\nnames: {2: cat, 5: dog}\n")
-    task = MagicMock()
-    task.id, task.name, task.size = 9, "task", 1
-    task.get_labels.return_value = [
-        SimpleNamespace(name="cat", id=42),
-        SimpleNamespace(name="dog", id=45),
-    ]
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.projects.create.return_value = SimpleNamespace(id=1, name="project")
-    client.tasks.create_from_data.return_value = task
-    config = MagicMock()
-    config.require_credentials.return_value = SimpleNamespace(
-        host="host", username="u", password="p", organization=None
-    )
-    monkeypatch.setattr(upload.CvatConfig, "load", lambda: config)
-    monkeypatch.setattr(upload, "make_client", lambda **_: client)
-    monkeypatch.setattr(sys, "argv", ["upload", "--yaml", str(yaml), "--tasks", "1"])
-    upload.main()
-    request = task.update_annotations.call_args.args[0]
-    assert [shape.label_id for shape in request.shapes] == [42, 45]
-
-
-def test_helper_unknown_class_rejected_before_remote_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import sys
-    from unittest.mock import MagicMock
-
-    upload = _helper_script("upload_dataset_to_cvat")
-
-    make_image(tmp_path / "images/train/a.jpg")
-    label = tmp_path / "labels/train/a.txt"
-    label.parent.mkdir(parents=True)
-    label.write_text("3 .5 .5 .2 .2\n")
-    yaml = tmp_path / "data.yaml"
-    yaml.write_text("path: .\ntrain: images/train\nnames: {2: cat}\n")
-    remote = MagicMock()
-    monkeypatch.setattr(upload, "make_client", remote)
-    monkeypatch.setattr(sys, "argv", ["upload", "--yaml", str(yaml)])
-    with pytest.raises(Cveta2Error, match="3"):
-        upload.main()
-    remote.assert_not_called()
-
-
 def test_internal_reader_failure_is_not_hidden(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -373,7 +311,7 @@ def test_clone_ambiguous_project_rejected_before_mutation(
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    clone = _helper_script("clone_project_to_s3")
+    clone = _clone_helper()
 
     client = MagicMock()
     client.__enter__.return_value = client
@@ -392,16 +330,6 @@ def test_clone_ambiguous_project_rejected_before_mutation(
         clone.main()
     client.projects.create.assert_not_called()
     client.api_client.cloudstorages_api.retrieve.assert_not_called()
-
-
-@pytest.mark.parametrize("class_id", ["-1", "1.9", "nan", "missing"])
-def test_helper_invalid_class_ids_are_rejected(tmp_path: Path, class_id: str) -> None:
-    upload = _helper_script("upload_dataset_to_cvat")
-
-    path = tmp_path / "a.txt"
-    path.write_text(f"{class_id} .5 .5 .2 .2\n")
-    with pytest.raises(Cveta2Error, match=r"a\.txt:1"):
-        upload.parse_yolo_label_file(path)
 
 
 def test_coco_preserves_unowned_empty_split_directory(tmp_path: Path) -> None:

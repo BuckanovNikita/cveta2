@@ -44,14 +44,6 @@ repos:
         always_run: true
         stages: [pre-commit]
 
-      - id: architecture-effects
-        name: architecture (effect ownership)
-        entry: uv run python scripts/check_architecture.py
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
-
       - id: mypy
         name: mypy (all files)
         entry: uv run mypy .
@@ -87,7 +79,16 @@ repos:
       # Reject version drift before paying for mutation or live checks.
       - id: version-drift
         name: version matches the nearest tag
-        entry: uv run python scripts/check_version_drift.py
+        # project.version is written by semantic-release only; a hand edit shows up
+        # as a version no reachable tag carries. Pre-push, not pre-commit: during
+        # a release the bump and the tag land together, so the tag exists by push.
+        entry: >-
+          bash -c 'tag=$(git describe --tags --abbrev=0 2>/dev/null) || { echo "No tag reachable from HEAD."; exit 0; };
+          version=$(uv version --short) || exit 1;
+          [ "v$version" = "$tag" ] && { echo "Version $version matches tag $tag."; exit 0; };
+          echo "FAILED: pyproject.toml has version $version, nearest tag is $tag.";
+          echo "The version is written by the release: uv run semantic-release version --no-push --no-vcs-release";
+          echo "If this branch predates a release on main, rebase onto main instead."; exit 1'
         language: system
         pass_filenames: false
         always_run: true
@@ -127,14 +128,6 @@ repos:
         stages: [pre-push]
         verbose: true
 
-      # No pass_filenames here: at this stage pre-commit passes the path of the
-      # commit message file, which is the whole input.
-      - id: conventional-commit
-        name: conventional commit message
-        entry: uv run python scripts/check_commit_msg.py
-        language: system
-        stages: [commit-msg]
-
       - id: count-lines
         name: count lines of code
         entry: bash -c 'echo "Lines of code:"; find cveta2 -name "*.py" | xargs wc -l | tail -1'
@@ -151,3 +144,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+
+  # The version, the tag and CHANGELOG.md are derived from commit subjects by
+  # python-semantic-release, so a subject outside these types silently drops out
+  # of the release. Merge and autosquash subjects stay exempt (non-strict mode).
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.5.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [build, chore, ci, docs, feat, fix, perf, refactor, style, test]

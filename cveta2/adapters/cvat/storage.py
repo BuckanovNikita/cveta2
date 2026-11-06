@@ -12,7 +12,7 @@ def parse_cloud_storage(cs_raw: object) -> CloudStorageInfo:
     and its attributes vary across SDK versions.  This is an intentional
     exception to the project style rule "avoid getattr" (see CLAUDE.md).
 
-    Mirrors the logic in ``scripts/clone_project_to_s3.py``.
+    Also used by ``tests/integration/clone_project_to_s3.py``.
     """
     specific = str(getattr(cs_raw, "specific_attributes", None) or "")
     parsed = parse_qs(specific)
