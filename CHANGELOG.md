@@ -2,6 +2,88 @@
 
 <!-- version list -->
 
+## v0.13.2 (2026-11-06)
+
+### Bug Fixes
+
+- **scripts**: Address independent review of the scripts simplification
+  ([`45d16e7`](https://github.com/BuckanovNikita/cveta2/commit/45d16e77004b0925f0394075374a4f433e6e792c))
+
+### Build System
+
+- **deps**: Drop the unused inline-snapshot dev dependency
+  ([`fe42408`](https://github.com/BuckanovNikita/cveta2/commit/fe424085069da78df2820d95c2e00045df0adc25))
+
+### Documentation
+
+- Bind stand delivery evidence to the preserved candidate
+  ([`c1137ec`](https://github.com/BuckanovNikita/cveta2/commit/c1137ecbf741b946afd2d06272dae95ef43e6de4))
+
+- Close verified HTTPS stand delivery
+  ([`fdfd09c`](https://github.com/BuckanovNikita/cveta2/commit/fdfd09c97772ae18affbf66df05391500eb94d0c))
+
+- Reconcile HTTPS stand delivery and instruction receipts
+  ([`6252649`](https://github.com/BuckanovNikita/cveta2/commit/62526490184e69d853ea45d8c58e3a1dab3795ab))
+
+- Record managed dataset release acceptance
+  ([`3ec0fc7`](https://github.com/BuckanovNikita/cveta2/commit/3ec0fc798058ab4875acba1c22d00ccd2f0ee414))
+
+- **agents**: Refactor agent instructions and skills to current best practices
+  ([`922a087`](https://github.com/BuckanovNikita/cveta2/commit/922a0873b5d7bdc0dafdb1b54d9ae40b691c9ace))
+
+- **plans**: Cover the Spec Kit upgrade in the skills layout record
+  ([`a4f89cb`](https://github.com/BuckanovNikita/cveta2/commit/a4f89cbbcf335a3b848f0949bb0149140e904b05))
+
+- **plans**: Plan development speed changes and record open discussion
+  ([`4cf5fdd`](https://github.com/BuckanovNikita/cveta2/commit/4cf5fdd7b7b2d5134fd9f3183c99b1a1b037ee3c))
+
+- **plans**: Record the commit gate and acceptance of the gates simplification
+  ([`ef9cf6e`](https://github.com/BuckanovNikita/cveta2/commit/ef9cf6e8c91b844a083291c94dea587d11f75054))
+
+### Refactoring
+
+- **gates**: Run every gate at commit and make mutation change-scoped
+  ([`96e33be`](https://github.com/BuckanovNikita/cveta2/commit/96e33be3d482b86dacf450dcd753cb4ddb217650))
+
+- **integration**: Replace the shell lifecycle with tests/integration/lifecycle.py
+  ([`f2755c8`](https://github.com/BuckanovNikita/cveta2/commit/f2755c8f79d150abf315668e0cb8fbbbf158d7ca))
+
+- **scripts**: Merge the mutation gate and drop CONTRIBUTING.md
+  ([`28eeedd`](https://github.com/BuckanovNikita/cveta2/commit/28eeedd7e7d0646b45c2a3bc63db30c399c35bf3))
+
+- **scripts**: Replace custom hooks and drop unused operator tools
+  ([`89b607d`](https://github.com/BuckanovNikita/cveta2/commit/89b607d79514b7821b1461e0e7db656ccdc21331))
+
+- **skills**: Keep policy in guidance and share skill sources via symlinks
+  ([`f884ba5`](https://github.com/BuckanovNikita/cveta2/commit/f884ba53f26970ff048e40fbc965df07f040ffcd))
+
+### Testing
+
+- Restore review-flagged checks and add a Hypothesis explore profile
+  ([`63c0fc4`](https://github.com/BuckanovNikita/cveta2/commit/63c0fc45f4c4875b1ffaa6c7bc394cdbb959ddf2))
+
+- **convert**: Replace example lists with properties for conversion, partition and retry
+  ([`b513825`](https://github.com/BuckanovNikita/cveta2/commit/b513825e30a34396e55f4ead99cafdf38eab063f))
+
+- **core**: Fold origin-named test files into module tests and add merge properties
+  ([`116e316`](https://github.com/BuckanovNikita/cveta2/commit/116e3165198e81e13b1d608387697e34afe7c523))
+
+- **fetch**: Merge duplicated fetch scenarios and share the storage fake
+  ([`b68919c`](https://github.com/BuckanovNikita/cveta2/commit/b68919c01b29f6675d4e235ae8394ce8e24b2335))
+
+- **integration**: Record live HTTPS stand run and independent review
+  ([`d3ef946`](https://github.com/BuckanovNikita/cveta2/commit/d3ef946bb4dc97d98690adff2684853a9437a5ff))
+
+- **integration**: Use https docker.internal stands and report TLS failures
+  ([`9174b14`](https://github.com/BuckanovNikita/cveta2/commit/9174b1432ac51b185e8e8a1c199c4cdf9f09d7cd))
+
+- **tooling**: Keep harness tests to the behaviour they guard
+  ([`cb679d6`](https://github.com/BuckanovNikita/cveta2/commit/cb679d6f3da490d28c5a2c7d1965e5d738181ce2))
+
+- **upload**: Parametrize upload and S3 tests and drop duplicates
+  ([`cf081e7`](https://github.com/BuckanovNikita/cveta2/commit/cf081e7d1f18e4ccc62d28d4d8fb1d34f4158c85))
+
+
 ## v0.13.1 (2026-11-02)
 
 ### Bug Fixes
