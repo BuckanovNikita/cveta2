@@ -2,7 +2,7 @@
 
 Both features are only really tested here. Concurrency's failure mode is
 CVAT rate-limiting under parallel load — this stack does that, which is why
-``lifecycle test`` disables xdist — and no fake can produce it. Resume
+the live tests run serially in one xdist group — and no fake can produce it. Resume
 exists for a task the client lost track of, which means the task has to
 actually exist somewhere the client cannot see.
 """

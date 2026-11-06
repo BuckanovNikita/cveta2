@@ -33,28 +33,31 @@ uv run pytest --cov                    # full suite, live tests included, covera
 ## 2. Merge, release and push under the lock
 
 ```bash
-git switch main && git pull --ff-only origin main
+git switch main
 flock -n "$(git rev-parse --git-common-dir)/cveta2-release.lock" bash -c '
   set -e
-  git merge --ff-only "'"$BRANCH"'"
+  git fetch origin
+  git merge --ff-only origin/main      # catch up with what other sessions pushed
+  git merge --ff-only "$1"             # land the checked branch
   uv run semantic-release version --print
   SKIP=lint-imports,mypy,vulture,pytest uv run semantic-release version --no-push --no-vcs-release
   git push origin main --follow-tags
-'
+' _ "$BRANCH"
 git ls-remote origin refs/heads/main 'refs/tags/v*' | tail -3   # confirm it landed
 ```
 
 - **The lock.** `flock -n` fails at once when another session holds the lock.
   Report that and retry after that session's release, instead of waiting
   silently.
-- **The merge is refused.** `--ff-only` refuses when `main` moved. Return to
-  step 1: rebase and check again.
+- **The merge is refused.** `--ff-only` refuses when `origin/main` moved past
+  the branch's base. Nothing was tagged; return to step 1: rebase and check
+  again.
 - **No release.** `No release will be made` after a merge of only non-releasing
   types is a success; the push publishes `main` alone.
 - **The skip.** The release commit touches `pyproject.toml`, `uv.lock` and
   `CHANGELOG.md` on an already-checked tree. The `SKIP` list is the documented
-  exception. Ruff, `uv lock --check`, the lockfile guard and `uv build` still
-  run.
+  exception. Ruff, `uv lock --check`, the lockfile guard, deptry and `uv build`
+  still run.
 
 ## A release hook fails
 

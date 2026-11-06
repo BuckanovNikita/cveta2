@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -54,7 +56,7 @@ def pytest_itemcollected(item: pytest.Item) -> None:
     global _collected  # noqa: PLW0603 - a per-process collection counter
     item.stash[_COLLECTION_ORDER] = _collected
     _collected += 1
-    if item.path.is_relative_to(INTEGRATION_DIR):
+    if item.path.resolve().is_relative_to(INTEGRATION_DIR):
         item.add_marker(pytest.mark.integration)
         item.add_marker(pytest.mark.xdist_group("live"))
 
@@ -134,6 +136,22 @@ def _fork_safe_tqdm() -> None:
     """
     tqdm.monitor_interval = 0
     tqdm.set_lock(threading.RLock())
+
+
+@pytest.fixture(autouse=True)
+def _hide_live_run_variables(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep a live run's credentials and endpoints away from unit tests.
+
+    The live session fixture exports the run's variables into its worker and
+    lists their names in ``CVETA2_LIVE_EXPORTED``; a unit test scheduled on the
+    same worker after the live group must not see them.
+    """
+    if request.node.get_closest_marker("integration"):
+        return
+    for name in json.loads(os.environ.get("CVETA2_LIVE_EXPORTED", "[]")):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture(autouse=True)

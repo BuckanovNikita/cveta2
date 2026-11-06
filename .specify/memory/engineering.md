@@ -373,9 +373,11 @@ user explicitly directs it.
   `git push`; there is no pre-push stage.
 - A hook that rewrites files (`uv lock`, `ruff format`): inspect the new diff,
   restage only task-owned paths and commit again.
-- The `mypy` hook runs the mypy daemon (`dmypy run`), which stays alive per
-  worktree; stop it with `uv run dmypy stop` after a dependency or mypy
-  configuration change or a confusing result.
+- The `mypy` hook runs the mypy daemon (`dmypy run -- .`), which stays alive
+  per worktree; any daemon failure falls back to a full `mypy .`, which gives
+  the verdict. Run the daemon on `.` only (a path subset can crash its
+  fine-grained mode in third-party code) and stop it with `uv run dmypy stop`
+  after a dependency or mypy configuration change.
 - The `pytest` hook runs `pytest --testmon`: only the tests whose executed code
   changed, live tests included. It does not enforce coverage; the full run
   `uv run pytest --cov` does, and it is required on the branch tip before a
@@ -410,7 +412,7 @@ rebased onto it, after the full suite passed on that exact tip:
 coverage enforced). The `main` tip is then a checked commit, so the release
 commit, which only bumps the version, `CHANGELOG.md` and `uv.lock`, runs with
 `SKIP=lint-imports,mypy,vulture,pytest` - the second standing hook exception;
-ruff, `uv lock --check`, the lockfile guard and `uv build` still run. One
+ruff, `uv lock --check`, the lockfile guard, deptry and `uv build` still run. One
 release at a time: the `release` skill holds a `flock` on
 `.git/cveta2-release.lock` from the merge to the push.
 

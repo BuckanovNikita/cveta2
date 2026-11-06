@@ -33,7 +33,7 @@ repos:
       # is a `build(deps):` commit made with SKIP=lockfile-guard.
       - id: lockfile-guard
         name: uv.lock changes only with pyproject.toml
-        entry: bash -c 'git diff --cached --name-only | grep -qx pyproject.toml || { echo "uv.lock is staged without pyproject.toml - a deliberate re-lock is a build(deps) commit made with SKIP=lockfile-guard"; exit 1; }'
+        entry: bash -c 'git diff --cached --name-only | grep -qx uv.lock || exit 0; git diff --cached --name-only | grep -qx pyproject.toml || { echo "uv.lock is staged without pyproject.toml - a deliberate re-lock is a build(deps) commit made with SKIP=lockfile-guard"; exit 1; }'
         language: system
         pass_filenames: false
         files: ^uv\.lock$
@@ -64,11 +64,13 @@ repos:
         stages: [pre-commit]
 
       # The mypy daemon keeps its state between commits (one per worktree,
-      # .dmypy.json): warm runs take well under a second. After a dependency or
-      # mypy-configuration change, or a confusing result: `uv run dmypy stop`.
+      # .dmypy.json): warm runs take well under a second. Any daemon failure
+      # (type errors or a fine-grained crash) falls back to a fresh full mypy
+      # run, which gives the verdict. Run the daemon only on `.`; a path subset
+      # can crash its fine-grained mode in third-party stubs.
       - id: mypy
         name: mypy (daemon, all files)
-        entry: uv run --locked dmypy run -- .
+        entry: bash -c 'uv run --locked dmypy run -- . >/dev/null 2>&1 || { uv run dmypy stop >/dev/null 2>&1; uv run --locked mypy .; }' 
         language: system
         pass_filenames: false
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)

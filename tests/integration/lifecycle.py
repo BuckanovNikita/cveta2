@@ -60,6 +60,7 @@ import time
 import urllib.request
 import zipfile
 from collections.abc import Callable, Sequence
+from http import HTTPStatus
 from pathlib import Path
 from types import FrameType
 from typing import NoReturn
@@ -466,7 +467,7 @@ class Run:
             f"{os.environ.get('MINIO_CONSOLE') or 'not published by the Secret'}"
         )
         log(f"ClearML:       {os.environ['CLEARML_API_HOST']}  (the shared stand)")
-        log(f"Run integration tests:  {MODULE} test")
+        log("Run live tests:         uv run pytest tests/integration")
         log(f"Tear down:              {MODULE} stop")
 
     def _ensure_coco8_images(self) -> None:
@@ -554,32 +555,59 @@ PROBE_TIMEOUT_SECONDS = 20
 WAIT_TIMEOUT_VARIABLE = "CVETA2_STAND_WAIT_TIMEOUT"
 
 
-def _quiet(command: Sequence[str]) -> int:
-    """Exit status of a probe command; its output is noise between polls."""
+# curl exit statuses of an endpoint that is not there right now: host not
+# resolved, connection refused, timeout, empty reply, connection reset.
+DOWN_CURL_STATUSES = frozenset({6, 7, 28, 52, 56, -1})
+HTTP_SERVER_ERROR = 500
+
+
+def _quiet(command: Sequence[str]) -> tuple[int, str]:
+    """Exit status and stdout of a probe command; its stderr is noise."""
     try:
-        return subprocess.run(  # noqa: S603 - fixed tool commands and stand URLs
+        completed = subprocess.run(  # noqa: S603 - fixed tool commands and stand URLs
             list(command),
             check=False,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            text=True,
             env=child_env(),
             timeout=PROBE_TIMEOUT_SECONDS,
-        ).returncode
+        )
     except subprocess.TimeoutExpired:
-        return -1
+        return -1, ""
+    except FileNotFoundError:
+        fail(f"{command[0]} is not installed or not on PATH; the live tests need it.")
+    return completed.returncode, completed.stdout
 
 
 def _curl(name: str, url: str) -> str | None:
-    """None when the endpoint answers; a reason when it is down; TLS fails."""
-    status = _quiet(["curl", "-sf", "--max-time", "10", url])
+    """None when the endpoint answers; a reason when it is down; else fail.
+
+    Down means no connection or an HTTP 5xx (an ingress whose backend is scaled
+    to zero answers 503). A TLS failure or another HTTP error (404, 401) is a
+    problem waiting cannot fix.
+    """
+    status, out = _quiet(
+        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url]
+    )
     if status in TLS_CURL_STATUSES:
         fail(
             f"TLS verification of the {name} stand at {url} failed "
             f"(curl exit {status}).",
             *TLS_REMEDY,
         )
-    if status != 0:
+    if status in DOWN_CURL_STATUSES:
         return f"the {name} stand at {url} does not answer (curl exit {status})"
+    if status != 0:
+        fail(f"curl could not check the {name} stand at {url} (exit {status}).")
+    code = int(out.strip() or "0")
+    if code >= HTTP_SERVER_ERROR:
+        return f"the {name} stand at {url} answers HTTP {code}"
+    if code >= HTTPStatus.BAD_REQUEST or code == 0:
+        fail(
+            f"the {name} stand at {url} answers HTTP {code}; that is not a stopped "
+            "stand. Diagnose it with the k8s-infra skill."
+        )
     return None
 
 
@@ -587,21 +615,25 @@ def probe(root: Path) -> "Run | str":
     """Return a ready run, or the reason the stands are down.
 
     "Down" is what the owner causes by stopping the stands (cluster or stand
-    unreachable, capacity WAIT) and is waited for. Everything else - a missing
-    skill or Secret, an untrusted certificate, a refused identity - is raised
-    as a LifecycleError, because waiting would not fix it.
+    unreachable or answering 5xx, capacity WAIT) and is waited for. Everything
+    else - a missing tool, skill or Secret, an untrusted certificate, a failing
+    room check, another HTTP error, a refused identity - is raised as a
+    LifecycleError, because waiting would not fix it.
     """
     skill_dir = find_skill_dir()
-    if skill_dir is not None and _quiet(
-        ["kubectl", "--context", "docker-desktop", "get", "--raw=/readyz"]
+    if (
+        skill_dir is not None
+        and _quiet(["kubectl", "--context", "docker-desktop", "get", "--raw=/readyz"])[
+            0
+        ]
     ):
         return "the docker-desktop cluster does not answer"
     run = Run(root)
-    room = _quiet(["python3", str(run.skill_dir / "scripts" / "infra.py"), "room"])
+    room, _ = _quiet(["python3", str(run.skill_dir / "scripts" / "infra.py"), "room"])
     if room == ROOM_WAIT:
         return "infra.py room answers WAIT: the stands are at capacity"
     if room != 0:
-        return f"infra.py room failed (exit {room})"
+        fail(f"infra.py room failed (exit {room}); run it by hand to see why.")
     for name, url in (
         ("CVAT", f"{os.environ['CVAT_INTEGRATION_HOST']}/api/server/about"),
         ("MinIO", f"{os.environ['MINIO_ENDPOINT']}/minio/health/live"),
@@ -614,6 +646,9 @@ def probe(root: Path) -> "Run | str":
         fail(
             "the ClearML stand answers but does not authenticate the cveta2 identity",
             f"(clearml.py --project {PROJECT} whoami failed, see above).",
+            "A certificate or SSL error in that output is a trust problem, "
+            "not a refused identity:",
+            *TLS_REMEDY,
             "Diagnose the stand and the Secret with the k8s-infra skill.",
         )
     return run
@@ -679,10 +714,22 @@ def wait_timeout() -> float | None:
 
 
 def prepare(root: Path, *, notify: Callable[[str], None]) -> "Run":
-    """Wait for the stands, refuse a foreign active run, then claim and seed."""
+    """Wait for the stands, refuse a foreign active run, then claim and seed.
+
+    The teardown is armed before seeding: a failed or interrupted ``up`` keeps
+    or stops whatever its tag already created, exactly as ``finish`` would.
+    """
     run = wait_for_stands(lambda: probe(root), notify=notify, timeout=wait_timeout())
     run.refuse_active_run()
-    run.up()
+    try:
+        run.up()
+    except BaseException:
+        if run.tag:
+            try:
+                finish(run)
+            except LifecycleError as error:
+                report(error)
+        raise
     return run
 
 

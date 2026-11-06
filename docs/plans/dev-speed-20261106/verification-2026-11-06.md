@@ -86,3 +86,57 @@ Plan: [plan.md](plan.md). Base: `a4f89cb` on branch `project-cleunap`.
     agent-skills branches, and the checkout sits on another session's WIP
     branch.
   - The global-instruction line is deferred for the same reason.
+
+## Independent review of bded204..928ab8b and its resolution
+
+A fresh general-purpose reviewer read the diff without editing anything. Its
+findings and their dispositions:
+
+1. **High: teardown was armed only after `up()` succeeded.** Fixed:
+   `prepare` now keeps or stops a failed or interrupted `up`. The restored test
+   `test_a_failed_seed_still_tears_the_run_down` covers it.
+2. **The lockfile guard failed `prek run --all-files`.** Fixed: the guard now
+   passes when `uv.lock` is not staged. `prek run lockfile-guard --all-files`
+   passed.
+3. **A failing `room` and HTTP 4xx were waited on forever.** Fixed:
+   - The probe now waits only on room WAIT, connection-level curl statuses
+     (6, 7, 28, 52, 56, timeout) and HTTP 5xx.
+   - Any other room failure, HTTP 4xx, or a missing tool fails at once.
+   - Tests cover room exit 2, HTTP 404 and HTTP 503.
+4. **The mutation budget orphaned mutmut's children.** Fixed: mutmut runs in its
+   own session; when the budget is spent, the group gets SIGINT and then
+   SIGKILL after 15 s. The new test
+   `test_the_budget_interrupts_mutmut_and_its_children` checks that the forked
+   child is gone; it ran in 1.8 s.
+5. **The notice was hidden by the hook runner's output buffering.** Fixed: the
+   notice is also written to `/dev/tty` when one exists. A human terminal has
+   not verified this yet.
+6. **Run variables leaked into unit tests on the live worker.** Fixed: the
+   fixture records the exported names in `CVETA2_LIVE_EXPORTED`, an autouse
+   fixture removes them for non-live tests, and teardown restores the
+   environment.
+7. **Stale `lifecycle test` references.** Fixed in `clearml_run.py`,
+   `test_clearml.py`, `test_resilience.py`, `lifecycle.py` and
+   `test_clearml_run.py`.
+8. **No capture plugin:** fixed (falls back to stderr).
+9. **Missing kubectl or curl:** fixed (clear error).
+10. **Symlinked checkout path:** fixed (the item path is resolved).
+11. **Release skill:** fixed. The fetch and the merge to `origin/main` now run
+    inside the lock, the branch is passed as `$1`, and deptry is listed among
+    the hooks that still run.
+12. **`--amend` guard edge case:** accepted. A deliberate re-lock uses the
+    documented `SKIP=lockfile-guard`.
+13. **Coverage:**
+    - Accepted: the dropped `live-cvat` coco8 re-run was already excluded from
+      the old gate.
+    - Added: `test_live_tests_are_marked_and_keep_file_order_under_any_seed`.
+    - Restored: the TLS remedy in the identity failure message.
+14. **Found while fixing, not by the reviewer:** dmypy crashed on a path subset
+    inside clearml. The hook runs dmypy only on `.` and falls back to a full
+    `mypy .` on any daemon failure.
+
+After the fixes:
+- The unit suite (`-m "not integration"`) had 2821 passed.
+- `tests/test_integration_lifecycle.py` had 65 passed.
+- `tests/test_mutation_tool.py` had 27 passed.
+- ruff, vulture and lint-imports were clean.

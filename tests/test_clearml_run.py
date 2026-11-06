@@ -87,7 +87,7 @@ class TestSettings:
             RunSettings.from_env(env)
         message = str(excinfo.value)
         assert "INTEGRATION_RUN_TAG, CLEARML_API_SECRET_KEY not set" in message
-        assert "uv run python -m tests.integration.lifecycle test" in message
+        assert "live session fixture" in message
 
 
 class TestNames:

@@ -48,10 +48,10 @@ class RunSettings(BaseModel):
         missing = [key for key, value in values.items() if not value]
         if missing:
             raise RunError(
-                f"{', '.join(missing)} not set; run the suite through "
-                "`uv run python -m tests.integration.lifecycle test`, which "
-                "exports the run tag and the cveta2 ClearML identity from the "
-                "Secret through the k8s-infra skill"
+                f"{', '.join(missing)} not set; run it through pytest, whose "
+                "live session fixture (tests/integration/conftest.py) exports "
+                "the run tag and the cveta2 ClearML identity from the Secret "
+                "through the k8s-infra skill"
             )
         return cls(
             tag=values["INTEGRATION_RUN_TAG"],

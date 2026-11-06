@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
 import tomllib
 from pathlib import Path
 
@@ -48,6 +49,11 @@ if args[0] == "run":
     if os.environ.get("FAKE_NOTHING"):
         print("AssertionError: Filtered for specific mutants, but nothing matches")
         sys.exit(1)
+    if os.environ.get("FAKE_HANG"):
+        import subprocess, time
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        Path(os.environ["FAKE_HANG"]).write_text(str(child.pid))
+        time.sleep(60)
     sys.exit(int(os.environ.get("FAKE_RUN_STATUS", "0")))
 if args[0] == "results":
     print(os.environ.get("FAKE_RESULTS", ""))
@@ -432,3 +438,31 @@ def test_max_functions_limits_and_lists_the_rest(
     assert len(run["args"][1:]) == 1  # type: ignore[index]
     out = capsys.readouterr().out
     assert "mutating 1 of 3 changed functions" in out
+
+
+def test_the_budget_interrupts_mutmut_and_its_children(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    _stage(repo, MODULE.replace("x * 2", "x * 3"))
+    child_pid_file = tmp_path / "child.pid"
+    monkeypatch.setenv("FAKE_HANG", str(child_pid_file))
+    monkeypatch.setenv("FAKE_RESULTS", "    cveta2.mod.x_beta__mutmut_1: not checked")
+    started = time.monotonic()
+    assert mutation.main(["--budget-seconds", "1"]) == 0
+    assert time.monotonic() - started < 30
+    out = capsys.readouterr().out
+    assert "mutmut stopped after 1.0 s" in out
+    assert "not run (budget): 1" in out
+    child = int(child_pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        pytest.fail("mutmut's forked child outlived the budget")

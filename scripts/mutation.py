@@ -38,6 +38,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -256,6 +257,30 @@ def mutmut_binary() -> Path:
     return binary
 
 
+BUDGET_GRACE_SECONDS = 15
+
+
+def _stop_group(process: subprocess.Popen[bytes], spent: threading.Event) -> None:
+    """Interrupt mutmut's whole process group, then kill what is left.
+
+    mutmut forks one child per mutant and stops them only on KeyboardInterrupt,
+    so the group gets SIGINT first; children still alive after the grace period
+    (they hold the output pipe) get SIGKILL.
+    """
+    spent.set()
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+        process.wait(timeout=BUDGET_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    except ProcessLookupError:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
 def run_mutmut(
     binary: Path,
     workspace: Path,
@@ -266,20 +291,22 @@ def run_mutmut(
     """Stream ``mutmut run``; return its status (None: budget spent) and tail.
 
     Captured output (pre-commit) would otherwise hold every spinner redraw, so
-    only what a terminal would have left on each line is printed. With a budget,
-    a timer terminates mutmut once it is spent; the mutants judged so far keep
-    their results.
+    only what a terminal would have left on each line is printed. mutmut runs
+    in its own session; with a budget, a timer interrupts that process group
+    once the budget is spent, and the mutants judged so far keep their results.
     """
     tail: deque[str] = deque(maxlen=40)
+    spent = threading.Event()
     with subprocess.Popen(  # noqa: S603 - the venv's own mutmut
         [str(binary), "run", *args],
         cwd=workspace,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        start_new_session=True,
     ) as process:
         timer = (
-            threading.Timer(budget_seconds, process.terminate)
+            threading.Timer(budget_seconds, _stop_group, (process, spent))
             if budget_seconds > 0
             else None
         )
@@ -293,10 +320,10 @@ def run_mutmut(
                 sys.stdout.write(line)
                 sys.stdout.flush()
         finally:
-            spent = timer is not None and not timer.is_alive()
             if timer is not None:
                 timer.cancel()
-    if spent and process.returncode != 0:
+                timer.join()
+    if spent.is_set() and process.returncode != 0:
         return None, "".join(tail)
     return process.returncode, "".join(tail)
 

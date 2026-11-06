@@ -11,6 +11,7 @@ Everything else reads the ``CVAT_INTEGRATION_*`` variables that run exports.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -33,32 +34,64 @@ if TYPE_CHECKING:
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+LIVE_EXPORTED_VARIABLE = "CVETA2_LIVE_EXPORTED"
+
+
+def _notify(request: pytest.FixtureRequest, message: str) -> None:
+    """Show *message* now, past output capture and a buffering hook runner.
+
+    prek, like pre-commit, shows a hook's output only when the hook ends, so a
+    terminal (``/dev/tty``) gets the notice directly; the stderr copy reaches
+    the hook log and agent sessions without a terminal.
+    """
+    line = f"\n==> {message}\n"
+    try:
+        with Path("/dev/tty").open("w", encoding="utf-8") as tty:
+            tty.write(line)
+    except OSError:
+        pass
+    capture = request.config.pluginmanager.getplugin("capturemanager")
+    if capture is None:
+        sys.stderr.write(line)
+        return
+    with capture.global_and_fixture_disabled():
+        sys.stderr.write(line)
+        sys.stderr.flush()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Run]:
     """Prepare this session's run on the stands, then keep or stop it.
 
-    Notices bypass output capture so a waiting commit says why it waits.
+    The run's variables stay in this worker's environment until the session
+    ends; ``tests/conftest.py`` hides the names listed in
+    ``CVETA2_LIVE_EXPORTED`` from unit tests, and teardown restores the
+    environment.
     """
-    capture = request.config.pluginmanager.getplugin("capturemanager")
-
-    def notify(message: str) -> None:
-        with capture.global_and_fixture_disabled():
-            sys.stderr.write(f"\n==> {message}\n")
-            sys.stderr.flush()
-
+    saved = dict(os.environ)
     try:
-        run = lifecycle.prepare(REPO_ROOT, notify=notify)
+        run = lifecycle.prepare(REPO_ROOT, notify=lambda m: _notify(request, m))
     except lifecycle.LifecycleError as error:
         refusal = "\n".join(error.lines)
     else:
         refusal = ""
     if refusal:
         pytest.fail(refusal, pytrace=False)
+    os.environ[LIVE_EXPORTED_VARIABLE] = json.dumps(
+        sorted(set(os.environ) - set(saved) | set(run.exported))
+    )
     try:
         yield run
     finally:
-        if lifecycle.finish(run):
-            notify(f"run '{run.tag}' is not fully torn down; see the output above.")
+        try:
+            if lifecycle.finish(run):
+                _notify(
+                    request,
+                    f"run '{run.tag}' is not fully torn down; see the output above.",
+                )
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
 
 
 def _env(key: str, default: str) -> str:

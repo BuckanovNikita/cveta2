@@ -46,8 +46,7 @@ def clearml_run() -> Iterator[RunSettings]:
         import clearml  # noqa: F401
     except ImportError:
         pytest.fail(
-            "Run `uv run python -m tests.integration.lifecycle test` "
-            "to install the ClearML extra"
+            "The clearml package is missing; `uv sync` installs it with the dev group"
         )
     try:
         yield settings

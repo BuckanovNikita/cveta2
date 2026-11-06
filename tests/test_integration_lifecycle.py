@@ -79,14 +79,17 @@ echo "uv $*" >> "$FAKE_TOOL_CALLS"
 if [[ "$*" == *" pytest "* && -n "${FAKE_FAIL_TESTS:-}" ]]; then exit 1; fi
 exit 0
 """
-# The availability probe: FAKE_CURL_STATUS is the exit status curl reports for
-# URLs containing FAKE_CURL_URL (every URL when unset); 60 is curl's "peer
-# certificate cannot be authenticated", 7 "connection refused".
+# The availability probe: for URLs containing FAKE_CURL_URL (every URL when
+# unset) curl exits FAKE_CURL_STATUS (60 is "peer certificate cannot be
+# authenticated", 7 "connection refused") or prints FAKE_CURL_CODE as the HTTP
+# status; anything else answers 200.
 FAKE_CURL = """#!/usr/bin/env bash
 if [[ -z "${FAKE_CURL_URL:-}" || "$*" == *"$FAKE_CURL_URL"* ]]; then
-    exit "${FAKE_CURL_STATUS:-0}"
+    [[ "${FAKE_CURL_STATUS:-0}" == 0 ]] || exit "$FAKE_CURL_STATUS"
+    printf '%s' "${FAKE_CURL_CODE:-200}"
+    exit 0
 fi
-exit 0
+printf 200
 """
 FAKE_KUBECTL = '#!/usr/bin/env bash\nexit "${FAKE_KUBECTL_STATUS:-0}"\n'
 
@@ -480,7 +483,11 @@ class TestUp:
         outcome = tree.run("up", env={"FAKE_FAIL_COMMAND": "uv"})
         assert outcome.returncode == 1
         assert "cvat_stand.py verify failed" in outcome.stderr
-        assert tree.tool_calls() == ["clearml whoami", cvat("verify")]
+        assert tree.tool_calls() == [
+            "clearml whoami",
+            cvat("verify"),
+            *stop_calls(MINTED_TAG),
+        ]
 
 
 class TestStop:
@@ -620,7 +627,6 @@ class TestProbe:
         [
             ({"FAKE_KUBECTL_STATUS": "1"}, "docker-desktop cluster does not answer"),
             ({"FAKE_ROOM_STATUS": "3"}, "infra.py room answers WAIT"),
-            ({"FAKE_ROOM_STATUS": "2"}, "infra.py room failed (exit 2)"),
             (
                 {"FAKE_CURL_URL": "cvat", "FAKE_CURL_STATUS": "7"},
                 (
@@ -629,8 +635,11 @@ class TestProbe:
                 ),
             ),
             (
-                {"FAKE_CURL_URL": "minio/health", "FAKE_CURL_STATUS": "22"},
-                "MinIO stand",
+                {"FAKE_CURL_URL": "minio/health", "FAKE_CURL_CODE": "503"},
+                (
+                    "MinIO stand at https://s3.k8s.docker.internal/minio/health/live "
+                    "answers HTTP 503"
+                ),
             ),
             (
                 {"FAKE_CURL_URL": "debug.ping", "FAKE_CURL_STATUS": "28"},
@@ -657,6 +666,37 @@ class TestProbe:
         assert "certificate-trust problem, not a stand that is down" in outcome.stderr
         assert "CVETA2_STAND_WAIT_TIMEOUT" not in outcome.stderr
         assert tree.tool_calls() == []
+
+    @pytest.mark.parametrize(
+        ("env", "message"),
+        [
+            ({"FAKE_ROOM_STATUS": "2"}, "infra.py room failed (exit 2)"),
+            (
+                {"FAKE_CURL_URL": "debug.ping", "FAKE_CURL_CODE": "404"},
+                "answers HTTP 404; that is not a stopped stand",
+            ),
+        ],
+    )
+    def test_a_broken_check_fails_at_once_instead_of_waiting(
+        self, tree: Tree, env: dict[str, str], message: str
+    ) -> None:
+        outcome = tree.run("up", env=env)
+        assert outcome.returncode == 1
+        assert message in outcome.stderr
+        assert "CVETA2_STAND_WAIT_TIMEOUT" not in outcome.stderr
+        assert tree.recorded_tag() is None
+
+    def test_a_failed_seed_still_tears_the_run_down(self, tree: Tree) -> None:
+        tree.root.joinpath("bin", "uv").write_text(
+            '#!/usr/bin/env bash\necho "uv $*" >> "$FAKE_TOOL_CALLS"\n'
+            '[[ "$*" != *seed_cvat* ]]\n',
+            encoding="utf-8",
+        )
+        outcome = tree.run("up")
+        assert outcome.returncode == 1
+        assert "seed_cvat.py failed" in outcome.stderr
+        assert tree.tool_calls()[-3:] == stop_calls(MINTED_TAG)
+        assert tree.recorded_tag() is None
 
     def test_a_refused_clearml_identity_fails_at_once(self, tree: Tree) -> None:
         outcome = tree.run("up", env={"FAKE_FAIL_COMMAND": "clearml whoami"})
@@ -783,3 +823,39 @@ def test_children_get_the_real_home_back(
     environ = lifecycle.child_env()
     assert environ["HOME"] == "/home/real"
     assert "XDG_CACHE_HOME" not in environ
+
+
+def _collected_live(*options: str) -> list[str]:
+    """Node ids ``-m integration`` selects from the live and a unit directory."""
+    completed = subprocess.run(  # noqa: S603 - this repository's own pytest
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-o",
+            "addopts=-p tests.env_isolation",
+            "-p",
+            "no:cacheprovider",
+            "-m",
+            "integration",
+            *options,
+            "tests/integration",
+            "tests/test_output.py",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    return [line for line in completed.stdout.splitlines() if "::" in line]
+
+
+def test_live_tests_are_marked_and_keep_file_order_under_any_seed() -> None:
+    in_file_order = _collected_live("-p", "no:randomly")
+    assert in_file_order
+    assert all(node.startswith("tests/integration/") for node in in_file_order)
+    for seed in ("1", "2"):
+        assert _collected_live(f"--randomly-seed={seed}") == in_file_order
