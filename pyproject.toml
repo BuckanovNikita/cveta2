@@ -184,7 +184,8 @@ markers = [
 
 [tool.mutmut]
 source_paths = ["cveta2"]
-# The architecture regression fixtures run in mutmut's copied workspace.
+# tests/test_mutation_tool.py exercises scripts/mutation.py; copying scripts/
+# keeps it running in mutmut's workspace instead of skipping.
 also_copy = ["scripts"]
 # Ratchet: a module joins this list in the same commit that takes it to zero
 # survivors, so the pre-commit hook is never red on main.

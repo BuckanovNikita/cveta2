@@ -120,6 +120,37 @@ def report(error: LifecycleError) -> None:
         warn(f"       {line}")
 
 
+def call(
+    command: Sequence[str], *, cwd: Path | None = None, capture: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """Run a child and, if this process is interrupted, let the child finish first.
+
+    ``subprocess.run`` kills its child on any exception, so Ctrl-C or SIGTERM
+    would orphan pytest's own session cleanup and race the gate's teardown.
+    Like a shell's foreground job, the child is waited for: Ctrl-C already
+    reached it through the terminal's process group, SIGTERM is forwarded.
+    A second Ctrl-C while waiting kills it.
+    """
+    with subprocess.Popen(  # noqa: S603 - fixed tool commands
+        list(command),
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+    ) as child:
+        try:
+            stdout, _ = child.communicate()
+        except BaseException as interrupt:
+            if isinstance(interrupt, SystemExit) and child.poll() is None:
+                child.send_signal(signal.SIGTERM)
+            try:
+                child.wait()
+            except KeyboardInterrupt:
+                child.kill()
+                child.wait()
+            raise
+    return subprocess.CompletedProcess(list(command), child.returncode, stdout)
+
+
 def valid_tag(tag: str) -> bool:
     return bool(TAG_PATTERN.match(tag))
 
@@ -130,7 +161,10 @@ def parse_exports(text: str, source: str) -> dict[str, str]:
     for line in text.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):
             continue
-        words = shlex.split(line)
+        try:
+            words = shlex.split(line)
+        except ValueError:
+            words = []
         key, _, value = words[-1].partition("=") if words else ("", "", "")
         if len(words) != 2 or words[0] != "export" or not NAME_PATTERN.match(key):
             fail(f"{source} printed an unexpected line: {line!r}")
@@ -138,21 +172,26 @@ def parse_exports(text: str, source: str) -> dict[str, str]:
     return values
 
 
-def parse_env_file(path: Path) -> dict[str, str]:
-    """Read ``KEY=value`` overrides (an optional ``export`` prefix, comments)."""
-    values: dict[str, str] = {}
+def load_env_file(path: Path) -> None:
+    """Apply ``KEY=value`` overrides to this process, as sourcing the file would.
+
+    An optional ``export`` prefix, shell quoting and ``#`` comments are
+    accepted; ``$VAR`` and a leading ``~`` are expanded (single quotes do not
+    suppress that, unlike a shell). Each line sees the ones before it.
+    """
     for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        try:
+            words = shlex.split(line, comments=True)
+        except ValueError:
+            fail(f"{path} has a line with unbalanced quotes: {line!r}")
+        if not words:
             continue
-        words = shlex.split(stripped)
-        if words and words[0] == "export":
+        if words[0] == "export":
             words = words[1:]
         key, _, value = words[0].partition("=") if words else ("", "", "")
         if len(words) != 1 or "=" not in words[0] or not NAME_PATTERN.match(key):
             fail(f"{path} has a line that is not KEY=value: {line!r}")
-        values[key] = value
-    return values
+        os.environ[key] = str(Path(os.path.expandvars(value)).expanduser())
 
 
 class Run:
@@ -170,7 +209,7 @@ class Run:
                 "cp tests/integration/.env.example tests/integration/.env  arms "
                 "this machine.",
             )
-        os.environ.update(parse_env_file(self.env_file))
+        load_env_file(self.env_file)
         self.skill_dir = self._find_skill_dir()
         self.tag = ""
         self._resolve_run_tag()
@@ -232,11 +271,8 @@ class Run:
     ) -> subprocess.CompletedProcess[str]:
         """Run a k8s-infra helper as project cveta2."""
         script = self.skill_dir / "scripts" / f"{stand}.py"
-        return subprocess.run(  # noqa: S603 - the installed skill's own helper
-            ["python3", str(script), "--project", PROJECT, *args],  # noqa: S607
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE if capture else None,
+        return call(
+            ["python3", str(script), "--project", PROJECT, *args], capture=capture
         )
 
     def _stand_env(self, stand: str) -> dict[str, str]:
@@ -339,8 +375,8 @@ class Run:
         if not self.would_mint():
             return
         self.refuse_active_run()
-        minted = subprocess.run(  # noqa: S603 - the installed skill's own helper
-            [  # noqa: S607
+        minted = call(
+            [
                 "python3",
                 str(self.skill_dir / "scripts" / "infra.py"),
                 "newtag",
@@ -349,9 +385,7 @@ class Run:
                 "--slug",
                 TAG_SLUG,
             ],
-            check=False,
-            stdout=subprocess.PIPE,
-            text=True,
+            capture=True,
         )
         tag = minted.stdout.strip()
         if minted.returncode != 0 or not valid_tag(tag):
@@ -376,11 +410,7 @@ class Run:
     # -- steps ------------------------------------------------------------
 
     def uv_python(self, *args: str) -> int:
-        return subprocess.run(  # noqa: S603 - repository scripts
-            ["uv", "run", "python", *args],  # noqa: S607
-            check=False,
-            cwd=self.root,
-        ).returncode
+        return call(["uv", "run", "python", *args], cwd=self.root).returncode
 
     def _require(self, status: int, command: str) -> None:
         if status != 0:
@@ -481,8 +511,8 @@ class Run:
         )
         log(f"MinIO:   {os.environ['MINIO_ENDPOINT']}  (bucket {self.tag})")
         log("Running pytest (xdist disabled for CVAT rate limits)")
-        return subprocess.run(  # noqa: S603 - pytest with caller arguments
-            [  # noqa: S607
+        return call(
+            [
                 "uv",
                 "run",
                 "--extra",
@@ -492,7 +522,6 @@ class Run:
                 "addopts=-v --tb=short -p tests.env_isolation",
                 *pytest_args,
             ],
-            check=False,
             cwd=self.root,
         ).returncode
 
@@ -652,20 +681,30 @@ def gate(root: Path, pytest_args: Sequence[str], *, keep_stack: bool) -> int:
 
     passed = False
     try:
-        log("integration gate: preparing the run")
-        run.up()
-        log(f"integration gate: run tag '{run.tag}'")
-        # Scoped to tests/integration: CVAT_INTEGRATION_HOST also adds a
-        # live-cvat parameter to the coco8_fixtures session fixture, which
-        # re-runs a slice of the unit tests against live CVAT, serially. That
-        # re-run is worth doing by hand, not on every push.
-        log("integration gate: running tests/integration")
-        passed = run.test(["tests/integration", *pytest_args]) == 0
+        try:
+            log("integration gate: preparing the run")
+            run.up()
+            log(f"integration gate: run tag '{run.tag}'")
+            # Scoped to tests/integration: CVAT_INTEGRATION_HOST also adds a
+            # live-cvat parameter to the coco8_fixtures session fixture, which
+            # re-runs a slice of the unit tests against live CVAT, serially.
+            # That re-run is worth doing by hand, not on every push.
+            log("integration gate: running tests/integration")
+            passed = run.test(["tests/integration", *pytest_args]) == 0
+        except LifecycleError as error:
+            # Reported before the teardown, so "see above" still points at
+            # the failing step's own output.
+            report(error)
+        if passed:
+            log("integration gate: passed")
+        else:
+            _report_gate_failure()
     finally:
         _teardown(run, passed=passed, keep_stack=keep_stack)
-    if passed:
-        log("integration gate: passed")
-        return 0
+    return 0 if passed else 1
+
+
+def _report_gate_failure() -> None:
     warn("")
     warn("==> integration gate FAILED. Reproduce and triage with:")
     warn(f"      {MODULE} up")
@@ -677,7 +716,6 @@ def gate(root: Path, pytest_args: Sequence[str], *, keep_stack: bool) -> int:
     )
     warn("==> To push without this gate (mutmut-full still runs):")
     warn("      SKIP=integration-tests git push")
-    return 1
 
 
 # -- command line ----------------------------------------------------------
@@ -686,6 +724,34 @@ def gate(root: Path, pytest_args: Sequence[str], *, keep_stack: bool) -> int:
 def _terminate(signum: int, _frame: FrameType | None) -> NoReturn:
     """Turn SIGTERM into an exit so the gate's teardown still runs."""
     raise SystemExit(128 + signum)
+
+
+def _print_env(run: Run) -> None:
+    if sys.stdout.isatty():
+        fail(
+            "env prints the run's credentials; evaluate it instead of reading it:",
+            f'eval "$({MODULE} env)"',
+        )
+    for key, value in run.exported.items():
+        sys.stdout.write(f"export {key}={shlex.quote(value)}\n")
+
+
+def _dispatch(
+    command: str, root: Path, extra: Sequence[str], *, keep_stack: bool
+) -> int:
+    if command == "gate":
+        return gate(root, extra, keep_stack=keep_stack)
+    run = Run(root)
+    status = 0
+    if command == "env":
+        _print_env(run)
+    elif command == "up":
+        run.up()
+    elif command == "test":
+        status = run.test(extra)
+    else:
+        status = run.stop()
+    return status
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -698,6 +764,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[2],
         help=argparse.SUPPRESS,
     )
+    parser.set_defaults(keep_stack=False)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("env", help="print this run's variables as shell exports")
     commands.add_parser("up", help="claim a tag and seed the run")
@@ -721,22 +788,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _terminate)
     root: Path = args.repo_root.resolve()
     try:
-        if args.command == "gate":
-            return gate(root, extra, keep_stack=args.keep_stack)
-        run = Run(root)
-        if args.command == "env":
-            for key, value in run.exported.items():
-                sys.stdout.write(f"export {key}={shlex.quote(value)}\n")
-            return 0
-        if args.command == "up":
-            run.up()
-            return 0
-        if args.command == "test":
-            return run.test(extra)
-        return run.stop()
+        return _dispatch(args.command, root, extra, keep_stack=args.keep_stack)
     except LifecycleError as error:
         report(error)
         return 1
+    except KeyboardInterrupt:
+        warn("interrupted")
+        return 130
 
 
 if __name__ == "__main__":

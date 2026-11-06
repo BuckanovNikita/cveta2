@@ -8,10 +8,14 @@ git is never consulted. These cases were ported one for one from the shell
 scripts' suite and are the parity specification of the replacement.
 """
 
+import os
+import pty
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -748,3 +752,148 @@ def test_an_unexpected_helper_line_is_refused_not_evaluated(
     assert outcome.returncode == 1
     assert "cvat.py env printed an unexpected line" in outcome.stderr
     assert not values
+
+
+# A pytest stand-in that takes a while and records its own cleanup, the way a
+# real session's finalizers remove their ClearML and CVAT objects.
+SLOW_UV = """#!/usr/bin/env bash
+echo "uv $*" >> "$FAKE_TOOL_CALLS"
+if [[ "$*" == *" pytest "* ]]; then
+    trap 'echo "pytest cleanup done" >> "$FAKE_TOOL_CALLS"; exit 1' INT TERM
+    touch "$PYTEST_STARTED"
+    sleep 30 &
+    wait
+fi
+exit 0
+"""
+
+
+@pytest.mark.parametrize(
+    ("signum", "to_group"), [(signal.SIGTERM, False), (signal.SIGINT, True)]
+)
+def test_an_interrupted_gate_lets_pytest_finish_before_tearing_down(
+    tree: Tree, signum: signal.Signals, *, to_group: bool
+) -> None:
+    """SIGTERM (forwarded) and Ctrl-C (whole group): cleanup first, then stop."""
+    _write_executable(tree.root / "bin" / "uv", SLOW_UV)
+    started = tree.root / "pytest-started"
+    env = {
+        "PATH": f"{tree.root / 'bin'}:/usr/bin:/bin",
+        "HOME": str(tree.root / "home"),
+        "PRE_COMMIT_REMOTE_BRANCH": FEATURE_BRANCH,
+        "K8S_INFRA_SKILL_DIR": str(tree.skill_dir),
+        "FAKE_TAG": MINTED_TAG,
+        "FAKE_TOOL_CALLS": str(tree.root / "tool-calls"),
+        "PYTEST_STARTED": str(started),
+    }
+    with subprocess.Popen(  # noqa: S603 - the module under test
+        [
+            sys.executable,
+            "-m",
+            "tests.integration.lifecycle",
+            "--repo-root",
+            str(tree.root),
+            "gate",
+        ],
+        env=env,
+        cwd=REPO_ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as gate:
+        deadline = time.monotonic() + 30
+        while not started.exists():
+            assert gate.poll() is None, gate.stderr.read() if gate.stderr else ""
+            assert time.monotonic() < deadline
+            time.sleep(0.05)
+        if to_group:
+            os.killpg(gate.pid, signum)
+        else:
+            gate.send_signal(signum)
+        gate.wait(timeout=30)
+    calls = tree.tool_calls()
+    cleanup = calls.index("pytest cleanup done")
+    assert calls[cleanup + 1 :] == stop_calls(MINTED_TAG)
+    assert gate.returncode != 0
+    assert tree.recorded_tag() is None
+
+
+def test_a_failing_step_is_reported_before_the_teardown(tree: Tree) -> None:
+    tree.root.joinpath("bin", "uv").write_text(
+        '#!/usr/bin/env bash\necho "uv $*" >> "$FAKE_TOOL_CALLS"\n'
+        '[[ "$*" != *seed_cvat* ]]\n',
+        encoding="utf-8",
+    )
+    outcome = tree.run("gate")
+    assert outcome.returncode == 1
+    error = outcome.stderr.index("seed_cvat.py failed")
+    assert error < outcome.stderr.index("integration gate FAILED")
+    assert "tearing down the run" in outcome.stdout
+
+
+def test_the_env_file_expands_like_a_shell_and_allows_comments(tree: Tree) -> None:
+    home_skill = tree.root / "home" / "k8s"
+    shutil.copytree(tree.skill_dir, home_skill)
+    tree.env_file.write_text(
+        "BASE=~/k8s  # where the skill lives\nK8S_INFRA_SKILL_DIR=$BASE\n",
+        encoding="utf-8",
+    )
+    outcome, values = tree.env()
+    assert outcome.returncode == 0, outcome.stderr
+    assert values["INTEGRATION_SKILL_DIR"] == str(home_skill)
+
+
+def test_unbalanced_quotes_in_the_env_file_are_refused(tree: Tree) -> None:
+    tree.env_file.write_text("K8S_INFRA_SKILL_DIR='/x\n", encoding="utf-8")
+    outcome, _ = tree.env()
+    assert outcome.returncode == 1
+    assert "unbalanced quotes" in outcome.stderr
+    assert "Traceback" not in outcome.stderr
+
+
+def test_the_claimed_tag_names_the_bucket_and_the_project(tree: Tree) -> None:
+    assert tree.run("up").returncode == 0
+    outcome, values = tree.env()
+    assert outcome.returncode == 0, outcome.stderr
+    assert values["INTEGRATION_RUN_TAG"] == MINTED_TAG
+    assert values["MINIO_BUCKET"] == MINTED_TAG
+    assert values["CVAT_INTEGRATION_PROJECT"] == f"{MINTED_TAG} coco8-dev"
+
+
+def test_env_refuses_to_print_credentials_to_a_terminal(tree: Tree) -> None:
+    leader, follower = pty.openpty()
+    try:
+        completed = subprocess.run(  # noqa: S603 - the module under test
+            [
+                sys.executable,
+                "-m",
+                "tests.integration.lifecycle",
+                "--repo-root",
+                str(tree.root),
+                "env",
+            ],
+            env={
+                "PATH": f"{tree.root / 'bin'}:/usr/bin:/bin",
+                "HOME": str(tree.root / "home"),
+                "PRE_COMMIT_REMOTE_BRANCH": FEATURE_BRANCH,
+                "K8S_INFRA_SKILL_DIR": str(tree.skill_dir),
+            },
+            cwd=REPO_ROOT,
+            stdout=follower,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        os.set_blocking(leader, False)
+        try:
+            shown = os.read(leader, 65536).decode()
+        except BlockingIOError:
+            shown = ""
+    finally:
+        os.close(leader)
+        os.close(follower)
+    assert completed.returncode == 1
+    assert "evaluate it instead" in completed.stderr
+    assert "pw with" not in shown

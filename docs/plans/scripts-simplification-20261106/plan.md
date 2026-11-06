@@ -18,10 +18,16 @@ feature is created; `.specify/feature.json` (spec 005) is left untouched.
   replaces `check_commit_msg.py`. Merge and autosquash subjects stay exempt (its
   non-strict default; source checked). Lost: the rule that a `!` subject needs a
   `BREAKING CHANGE:` footer. Also, git's default `Revert "..."` subject is now
-  rejected (write `revert`-style subjects as a conventional type instead), and type
-  matching becomes case-insensitive.
+  rejected (write `revert`-style subjects as a conventional type instead), type
+  matching becomes case-insensitive, a body must be separated from the subject by
+  a blank line, and a scope may contain only word characters, spaces and
+  `:,-/.#` (so `fix(a+b): x` is now rejected). Found by the independent review.
+- **Tier 3, `.env` file.** The file is parsed rather than sourced: shell
+  quoting, `export`, comments, `$VAR` and a leading `~` work; command
+  substitution does not, and single quotes do not suppress expansion.
 - Nothing else is lost: every other script is moved, merged or ported with parity
-  tests.
+  tests. `lifecycle env` refuses to print credentials to a terminal (the old
+  `source` printed nothing).
 
 ## Changes
 

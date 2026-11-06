@@ -277,12 +277,12 @@ class TestEveryDocumentedLinkResolves:
 
 
 def test_only_readme_files_and_user_docs_are_russian() -> None:
-    """CONTRIBUTING.md and docs/ are user-facing Russian; the rest is English."""
+    """README files and docs/ are user-facing Russian; the rest is English."""
     unexpected = [
         str(doc.relative_to(REPO_ROOT))
         for doc in ALL_DOCS
         if doc.exists()
-        and doc.name not in {"README.md", "CONTRIBUTING.md"}
+        and doc.name != "README.md"
         and doc.parent.name != "docs"
         and re.search(r"[А-Яа-я]", doc.read_text(encoding="utf-8"))
     ]

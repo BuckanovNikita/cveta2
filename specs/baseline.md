@@ -68,7 +68,7 @@ Procedures and complete option inventories remain in these maintained guides:
 | Verify, explicitly clean, prepare, review, publish | [CLI guide](../docs/cli.md), `verify` and `upload-dataset`; [API guide](../docs/python-api.md), verification/publication examples |
 | Configuration, environment, retries, noninteractive use | [Configuration guide](../docs/configuration.md) |
 | Image paths, annotation cache and ClearML prerequisites | [Images and cache guide](../docs/images-and-cache.md) |
-| Operator clone, fixture-export and source-upload helpers | [Scripts guide](../scripts/README.md) |
+| Development tools: mutation gate, fetch benchmark, and where the other helpers live | [Scripts guide](../scripts/README.md) |
 
 ### Configuration and failures
 

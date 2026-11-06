@@ -56,7 +56,8 @@ the type one of `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
 `refactor`, `style` or `test` (the hook's `args` in `.pre-commit-config.yaml`).
 Write the type in lowercase: semantic-release reads it case-sensitively. Merge
 and autosquash subjects are exempt; git's default `Revert "..."` subject is not,
-so reword a revert into one of these types. Among types, only `feat`, `fix` and `perf` move
+so reword a revert into one of these types. A scope may contain only word
+characters, spaces and `:,-/.#`. Among types, only `feat`, `fix` and `perf` move
 the version; a `!` on any type is a breaking change and also moves it.
 Add a body when it helps explain behavior or tradeoffs; separate it from the
 subject with a blank line. A breaking change needs both the `!` marker and a

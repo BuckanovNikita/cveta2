@@ -57,3 +57,41 @@ the deletions were intended and asked for them to be committed with this work;
 
 The pre-push gates (full mutation profile and `lifecycle gate`) are recorded
 with the push.
+
+## Independent review and fixes
+
+A fresh general-purpose reviewer read the whole diff `66b431b..f2755c8` against
+the originals (read-only, no live services). Verdict: no blockers; one major and
+seven minor findings, all addressed in the follow-up commit:
+
+1. Major, interrupting the gate could orphan pytest: `subprocess.run` kills its
+   child on any exception, so teardown raced pytest's own cleanup. Children now
+   run through `lifecycle.call`, which waits for the child (forwarding SIGTERM)
+   before re-raising. `test_an_interrupted_gate_lets_pytest_finish_before_tearing_down`
+   covers SIGTERM and a group-wide SIGINT; the SIGTERM case fails when the old
+   kill-on-exception behaviour is restored and passes with the fix. The SIGINT
+   case cannot tell the two apart (the whole group receives the signal at once)
+   and stays as a behaviour check.
+2. `.env` parsing: `$VAR`, `~` and inline comments now work; unbalanced quotes
+   are a refusal, not a traceback (also for helper output).
+3. Gate output order: a failing step is reported, then the FAILED block, then
+   the teardown, matching the shell gate.
+4. `scripts/mutation.py` runs mutmut from the repository root, passes a failing
+   `mutmut run` status through, and no longer hides `mutmut results` stderr.
+5. Tests: the real `fast`/`full` profiles must resolve; exit-status passthrough;
+   `MINIO_BUCKET` and the project name after `up`.
+6. Additional commit-msg losses (blank line before a body, scope characters) are
+   recorded in plan.md and the `commit` skill.
+7. Stale text: `specs/baseline.md` scripts row, the `also_copy` comment, the
+   `tests/test_docs.py` Russian-docs rule.
+8. `lifecycle env` refuses to print credentials to a terminal.
+
+After the fixes: `uv run pytest -n auto tests` 2824 passed; `ruff check`,
+`ruff format --check`, `mypy .`, `vulture` clean; `lint-imports` 10 kept,
+0 broken. The architecture review is accepted on the reviewer's verified list
+(effect checker still runs on the real package, lifecycle stdlib-only contract,
+no runtime module imports tooling) plus these fixes.
+
+Out of scope, reported: the separate k8s-infra repository still names
+`integration_up.sh` in `projects.toml:160` and `references/minio-stand.md:169`
+comments.

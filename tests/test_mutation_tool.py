@@ -6,6 +6,7 @@ mutmut: ``run`` prints spinner frames, ``export-cicd-stats`` writes the stats
 file and ``results`` prints ``FAKE_RESULTS``.
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -38,6 +39,9 @@ FAKE_UV = """#!{python}
 import json, os, sys
 from pathlib import Path
 args = sys.argv[1:]
+expected_cwd = os.environ.get("FAKE_EXPECT_CWD")
+if expected_cwd and os.getcwd() != expected_cwd:
+    sys.exit(f"uv ran in {{os.getcwd()}}, not {{expected_cwd}}")
 with open(os.environ["CALL_LOG"], "a") as log:
     print(" ".join(args), file=log)
 mutants = Path(os.environ["TREE"]) / "mutants"
@@ -175,10 +179,10 @@ def test_missing_stats_fail(tree: Tree) -> None:
     assert "was not written" in result.stderr
 
 
-def test_a_failing_mutmut_run_fails_before_the_verdict(tree: Tree) -> None:
-    result = tree.run(FAKE_RUN_STATUS="3")
-    assert result.returncode == 1
-    assert "mutmut run exited with status 3" in result.stderr
+def test_a_failing_mutmut_run_passes_its_status_through(tree: Tree) -> None:
+    result = tree.run(FAKE_RUN_STATUS="91")
+    assert result.returncode == 91
+    assert "mutmut run exited with status 91" in result.stderr
     assert tree.calls()[-1].startswith("TEMPROOT=")
 
 
@@ -208,3 +212,34 @@ def test_a_scope_change_wipes_the_mutant_tree(tree: Tree) -> None:
         (tree.root / "mutants" / "mutmut-cicd-stats.json").read_text(encoding="utf-8")
     )
     assert stats["total"] == 4
+
+
+def test_the_repository_profiles_resolve() -> None:
+    """The hooks pass --profile fast and full; both must exist in pyproject."""
+    spec = importlib.util.spec_from_file_location("mutation_tool", TOOL)
+    assert spec is not None
+    assert spec.loader is not None
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    assert tool.profile_globs("fast")
+    assert tool.profile_globs("full") == []
+
+
+def test_the_gate_runs_from_the_repository_root(tree: Tree) -> None:
+    (tree.root / "sub").mkdir()
+    result = subprocess.run(
+        [sys.executable, "../scripts/mutation.py"],
+        cwd=tree.root / "sub",
+        env=os.environ
+        | {
+            "PATH": f"{tree.root / 'bin'}:{os.environ['PATH']}",
+            "CALL_LOG": str(tree.call_log),
+            "TREE": str(tree.root),
+            "FAKE_RESULTS": SURVIVORS_EXPLAINED,
+            "FAKE_EXPECT_CWD": str(tree.root),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

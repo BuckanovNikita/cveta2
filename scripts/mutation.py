@@ -146,8 +146,8 @@ def run_mutmut(args: list[str]) -> int:
     """
     command = _mutmut("run", *args)
     if sys.stdout.isatty():
-        return subprocess.run(command, check=False).returncode  # noqa: S603
-    with subprocess.Popen(command, stdout=subprocess.PIPE) as process:  # noqa: S603
+        return subprocess.run(command, check=False, cwd=REPO_ROOT).returncode  # noqa: S603
+    with subprocess.Popen(command, stdout=subprocess.PIPE, cwd=REPO_ROOT) as process:  # noqa: S603
         assert process.stdout is not None  # noqa: S101 - set by stdout=PIPE
         for raw in process.stdout:
             line = raw.decode("utf-8", errors="replace").rsplit("\r", 1)[-1]
@@ -246,14 +246,14 @@ def gate(profile: str | None, mutmut_args: list[str]) -> int:
 
     status = run_mutmut([*mutmut_args, *globs])
     if status != 0:
-        msg = f"mutmut run exited with status {status}."
-        raise GateError(msg)
-    subprocess.run(_mutmut("export-cicd-stats"), check=True)  # noqa: S603
+        print(f"ERROR: mutmut run exited with status {status}.", file=sys.stderr)
+        return status
+    subprocess.run(_mutmut("export-cicd-stats"), check=True, cwd=REPO_ROOT)  # noqa: S603
     if not STATS_FILE.is_file():
         msg = f"{STATS_FILE} was not written; mutmut run produced no results."
         raise GateError(msg)
     results = subprocess.run(  # noqa: S603
-        _mutmut("results"), check=True, capture_output=True, text=True
+        _mutmut("results"), check=True, stdout=subprocess.PIPE, text=True, cwd=REPO_ROOT
     ).stdout
     RESULTS_FILE.write_text(results, encoding="utf-8")
 
