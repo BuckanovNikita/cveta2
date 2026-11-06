@@ -68,7 +68,7 @@ Procedures and complete option inventories remain in these maintained guides:
 | Verify, explicitly clean, prepare, review, publish | [CLI guide](../docs/cli.md), `verify` and `upload-dataset`; [API guide](../docs/python-api.md), verification/publication examples |
 | Configuration, environment, retries, noninteractive use | [Configuration guide](../docs/configuration.md) |
 | Image paths, annotation cache and ClearML prerequisites | [Images and cache guide](../docs/images-and-cache.md) |
-| Development tools: mutation gate, fetch benchmark, and where the other helpers live | [Scripts guide](../scripts/README.md) |
+| Development tools: changed-function mutation check, fetch benchmark, and where the other helpers live | [Scripts guide](../scripts/README.md) |
 
 ### Configuration and failures
 
@@ -579,9 +579,9 @@ ordering, Unicode handling, effects and mutation scope during internal cleanup.
 The maintained architecture reference and executable contracts own detailed module
 assignments rather than this snapshot freezing implementation file layouts.
 
-The mutation wrapper rejects unknown or explicitly empty profile names with a
-nonzero exit before scope synchronization or mutation execution. The named `full`
-profile intentionally has an empty glob list and covers the complete scope.
+Mutation testing (development tooling, constitution 2.0.0) mutates the functions a
+commit changes in an isolated per-run workspace and reports survivors without
+blocking; tool or clean-test failures fail the commit.
 
 Current acceptance requires the behavior above and the applicable repository
 gates, with positive and negative architecture checks. Changes need current

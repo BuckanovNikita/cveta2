@@ -15,8 +15,8 @@ The run tag, in order of precedence:
 
 1. ``INFRA_RUN_TAG`` when exported (the contract's own variable; also how a
    shell adopts an active run);
-2. on main (or when pre-commit pushes ``refs/heads/main``) the durable slot
-   ``cveta2-main``, which the next main run replaces;
+2. on the ``main`` branch the durable slot ``cveta2-main``, which the next main
+   run replaces;
 3. ``tests/integration/.run-tag``, the gitignored file ``up`` writes when it
    mints a tag and ``stop`` deletes;
 4. nothing: ``up`` mints one; ``test`` and ``stop`` refuse.
@@ -32,11 +32,11 @@ makes curl, the CVAT SDK, boto3 and the ClearML SDK trust the stands'
 ``https://<name>.k8s.docker.internal`` names. A failed handshake is reported as
 a TLS problem, never as a stand that is down.
 
-``tests/integration/.env`` must exist: its presence arms the machine for
-integration tests and the pre-push gate. It holds optional overrides only (see
-``.env.example``); a value in the file wins over the shell. A missing Secret key
-is an error, never a default: a defaulted credential would silently act as
-somebody else on a shared stand.
+A machine is armed when the k8s-infra skill is installed (``~/.agents/skills``
+or ``~/.claude/skills``, or ``K8S_INFRA_SKILL_DIR``); without it the pre-commit
+gate skips with a notice and the other commands refuse. A missing Secret key is
+an error, never a default: a defaulted credential would silently act as somebody
+else on a shared stand.
 
 This is a standard-library CLI rather than a pytest fixture on purpose: it must
 resolve the installed k8s-infra skill under the real HOME, which
@@ -172,26 +172,29 @@ def parse_exports(text: str, source: str) -> dict[str, str]:
     return values
 
 
-def load_env_file(path: Path) -> None:
-    """Apply ``KEY=value`` overrides to this process, as sourcing the file would.
+def find_skill_dir() -> Path | None:
+    """Return the installed k8s-infra skill; its presence arms the machine.
 
-    An optional ``export`` prefix, shell quoting and ``#`` comments are
-    accepted; ``$VAR`` and a leading ``~`` are expanded (single quotes do not
-    suppress that, unlike a shell). Each line sees the ones before it.
+    An explicit ``K8S_INFRA_SKILL_DIR`` that does not hold the skill is an
+    error rather than "not armed": somebody meant to arm this machine.
     """
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            words = shlex.split(line, comments=True)
-        except ValueError:
-            fail(f"{path} has a line with unbalanced quotes: {line!r}")
-        if not words:
-            continue
-        if words[0] == "export":
-            words = words[1:]
-        key, _, value = words[0].partition("=") if words else ("", "", "")
-        if len(words) != 1 or "=" not in words[0] or not NAME_PATTERN.match(key):
-            fail(f"{path} has a line that is not KEY=value: {line!r}")
-        os.environ[key] = str(Path(os.path.expandvars(value)).expanduser())
+    explicit = os.environ.get("K8S_INFRA_SKILL_DIR", "")
+    if explicit:
+        if not (Path(explicit) / "scripts" / "infra.py").is_file():
+            fail(
+                f"K8S_INFRA_SKILL_DIR={explicit} has no scripts/infra.py;",
+                "point it at k8s-infra/skills/k8s-infra of a checkout that "
+                "carries the run contract.",
+            )
+        return Path(explicit)
+    home = Path(os.environ.get("HOME", "~")).expanduser()
+    for candidate in (
+        home / ".agents" / "skills" / "k8s-infra",
+        home / ".claude" / "skills" / "k8s-infra",
+    ):
+        if (candidate / "scripts" / "infra.py").is_file():
+            return candidate
+    return None
 
 
 class Run:
@@ -200,17 +203,18 @@ class Run:
     def __init__(self, root: Path) -> None:
         """Resolve everything a run owns, as sourcing the old env script did."""
         self.root = root
-        self.env_file = root / "tests" / "integration" / ".env"
         self.tag_file = root / "tests" / "integration" / ".run-tag"
         self.exported: dict[str, str] = {}
-        if not self.env_file.is_file():
+        skill_dir = find_skill_dir()
+        if skill_dir is None:
             fail(
-                f"{self.env_file} is missing.",
-                "cp tests/integration/.env.example tests/integration/.env  arms "
-                "this machine.",
+                "the k8s-infra skill was not found under ~/.agents/skills or "
+                "~/.claude/skills,",
+                "or the installed one predates the run contract (no scripts/infra.py).",
+                "Install or update it, or export "
+                "K8S_INFRA_SKILL_DIR=<k8s-infra>/skills/k8s-infra.",
             )
-        load_env_file(self.env_file)
-        self.skill_dir = self._find_skill_dir()
+        self.skill_dir = skill_dir
         self.tag = ""
         self._resolve_run_tag()
 
@@ -240,31 +244,6 @@ class Run:
     def _export(self, **values: str) -> None:
         os.environ.update(values)
         self.exported.update(values)
-
-    def _find_skill_dir(self) -> Path:
-        explicit = os.environ.get("K8S_INFRA_SKILL_DIR", "")
-        if explicit:
-            if not (Path(explicit) / "scripts" / "infra.py").is_file():
-                fail(
-                    f"K8S_INFRA_SKILL_DIR={explicit} has no scripts/infra.py;",
-                    "point it at k8s-infra/skills/k8s-infra of a checkout that "
-                    "carries the run contract.",
-                )
-            return Path(explicit)
-        home = Path(os.environ.get("HOME", "~")).expanduser()
-        for candidate in (
-            home / ".agents" / "skills" / "k8s-infra",
-            home / ".claude" / "skills" / "k8s-infra",
-        ):
-            if (candidate / "scripts" / "infra.py").is_file():
-                return candidate
-        fail(
-            "the k8s-infra skill was not found under ~/.agents/skills or "
-            "~/.claude/skills,",
-            "or the installed one predates the run contract (no scripts/infra.py).",
-            "Install or update it, or export "
-            "K8S_INFRA_SKILL_DIR=<k8s-infra>/skills/k8s-infra.",
-        )
 
     def helper(
         self, stand: str, *args: str, capture: bool = False
@@ -296,9 +275,6 @@ class Run:
     # -- run tag ----------------------------------------------------------
 
     def on_main(self) -> bool:
-        remote_branch = os.environ.get("PRE_COMMIT_REMOTE_BRANCH", "")
-        if remote_branch:
-            return remote_branch == "refs/heads/main"
         branch = subprocess.run(  # noqa: S603 - fixed git arguments
             ["git", "-C", str(self.root), "symbolic-ref", "--quiet", "--short", "HEAD"],  # noqa: S607
             check=False,
@@ -577,16 +553,33 @@ class Run:
         return 0
 
 
-# -- the pre-push gate -----------------------------------------------------
+# -- the pre-commit gate ---------------------------------------------------
 
 
 def _armed_but_down(*lines: str) -> NoReturn:
     fail(
-        "the integration gate is armed (tests/integration/.env exists)",
+        "the integration gate is armed (the k8s-infra skill is installed)",
         *lines,
-        "Diagnose the stand with the k8s-infra skill, or push without this gate:",
-        "    SKIP=integration-tests git push",
+        "Diagnose the stand with the k8s-infra skill, or commit without this gate:",
+        "    SKIP=integration-tests git commit ...",
     )
+
+
+ROOM_WAIT = 3
+
+
+def _require_room(run: Run) -> None:
+    """Fail the gate unless the stands' own admission check answers GO."""
+    status = call(
+        ["python3", str(run.skill_dir / "scripts" / "infra.py"), "room"]
+    ).returncode
+    if status == ROOM_WAIT:
+        _armed_but_down(
+            "but infra.py room answers WAIT: the stands are at capacity.",
+            "Retry the commit later.",
+        )
+    if status != 0:
+        _armed_but_down(f"but infra.py room failed (exit {status}, see above).")
 
 
 def _keep_data(run: Run) -> bool:
@@ -636,20 +629,23 @@ def _teardown(run: Run, *, passed: bool, keep_stack: bool) -> None:
 
 
 def gate(root: Path, pytest_args: Sequence[str], *, keep_stack: bool) -> int:
-    """Pre-push gate: preflight, then up, test and keep-or-stop.
+    """Pre-commit gate: preflight, then up, test and keep-or-stop.
 
-    A missing ``.env`` is the only silent skip: once armed, the gate passes,
-    fails or is skipped on purpose (``SKIP=integration-tests``). A stand that is
-    down fails it, because a gate that quietly passes teaches everyone to
-    ignore it. The teardown is armed only after the preflight and the
-    active-run check, so a run that never prepared anything cannot tear another
-    one down.
+    A machine without the k8s-infra skill is the only silent skip: once armed,
+    the gate passes, fails or is skipped on purpose (``SKIP=integration-tests``).
+    A stand that is down fails it, because a gate that quietly passes teaches
+    everyone to ignore it. The teardown is armed only after the preflight and
+    the active-run check, so a run that never prepared anything cannot tear
+    another one down.
     """
-    if not (root / "tests" / "integration" / ".env").is_file():
-        log("integration gate skipped: no tests/integration/.env on this machine")
-        log("    arm it with: cp tests/integration/.env.example tests/integration/.env")
+    if find_skill_dir() is None:
+        log("integration gate skipped: the k8s-infra skill is not installed here")
         return 0
-    run = Run(root)
+    try:
+        run = Run(root)
+    except LifecycleError as error:
+        _armed_but_down(*error.lines)
+    _require_room(run)
     host = os.environ["CVAT_INTEGRATION_HOST"]
     curl = subprocess.run(  # noqa: S603 - the stand URL from the Secret
         ["curl", "-sf", f"{host}/api/server/about"],  # noqa: S607
@@ -688,7 +684,7 @@ def gate(root: Path, pytest_args: Sequence[str], *, keep_stack: bool) -> int:
             # Scoped to tests/integration: CVAT_INTEGRATION_HOST also adds a
             # live-cvat parameter to the coco8_fixtures session fixture, which
             # re-runs a slice of the unit tests against live CVAT, serially.
-            # That re-run is worth doing by hand, not on every push.
+            # That re-run is worth doing by hand, not on every commit.
             log("integration gate: running tests/integration")
             passed = run.test(["tests/integration", *pytest_args]) == 0
         except LifecycleError as error:
@@ -714,8 +710,8 @@ def _report_gate_failure() -> None:
         "==> A stand that misbehaves is diagnosed with the k8s-infra skill; this "
         "tool never deploys one."
     )
-    warn("==> To push without this gate (mutmut-full still runs):")
-    warn("      SKIP=integration-tests git push")
+    warn("==> To commit without this gate (every other hook still runs):")
+    warn("      SKIP=integration-tests git commit ...")
 
 
 # -- command line ----------------------------------------------------------
@@ -773,7 +769,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     commands.add_parser("stop", help="remove the run and release its tag")
     gate_parser = commands.add_parser(
-        "gate", help="pre-push gate: up, test, keep-or-stop (extra args go to pytest)"
+        "gate", help="pre-commit gate: up, test, keep-or-stop (extra args go to pytest)"
     )
     gate_parser.add_argument(
         "--keep-stack", action="store_true", help="keep a failed run for triage"

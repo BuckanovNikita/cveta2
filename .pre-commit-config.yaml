@@ -1,11 +1,15 @@
-# A single `uv run pre-commit install` wires all three stages. Without this the
-# commit-stage hooks below are documentation: they run only when someone types
-# `uv run pre-commit run --all-files`.
-default_install_hook_types: [pre-commit, commit-msg, pre-push]
+# A single `uv run pre-commit install` wires both stages. Every check, long ones
+# included, runs at commit time, so a commit that passed is safe to push and no
+# pre-push hook exists. History rewrites (rebase, cherry-pick, merge) run no
+# pre-commit hook: re-check with `uv run pre-commit run --all-files` after one.
+default_install_hook_types: [pre-commit, commit-msg]
 
-# Every hook below names its stage. A hook with no `stages` key runs at *every*
-# installed stage, which would make each push replay the whole commit pipeline
-# before the pre-push gates it actually exists for.
+# Hooks run fast to slow; the first failure stops the rest, so a lint or unit
+# failure never spends mutation or live-stand time.
+fail_fast: true
+
+# Every hook below names its stage. A hook with no `stages` key runs at every
+# installed stage, including commit-msg.
 
 repos:
   - repo: local
@@ -17,7 +21,6 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-        fail_fast: true
         stages: [pre-commit]
 
       - id: ruff-format
@@ -68,66 +71,6 @@ repos:
         always_run: true
         stages: [pre-commit]
 
-      - id: mutmut
-        name: mutmut (mutation testing, fast profile)
-        entry: uv run python scripts/mutation.py --profile fast
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
-
-      # Reject version drift before paying for mutation or live checks.
-      - id: version-drift
-        name: version matches the nearest tag
-        # project.version is written by semantic-release only; a hand edit shows up
-        # as a version no reachable tag carries. Pre-push, not pre-commit: during
-        # a release the bump and the tag land together, so the tag exists by push.
-        entry: >-
-          bash -c 'tag=$(git describe --tags --abbrev=0 2>/dev/null) || { echo "No tag reachable from HEAD."; exit 0; };
-          version=$(uv version --short) || exit 1;
-          [ "v$version" = "$tag" ] && { echo "Version $version matches tag $tag."; exit 0; };
-          echo "FAILED: pyproject.toml has version $version, nearest tag is $tag.";
-          echo "The version is written by the release: uv run semantic-release version --no-push --no-vcs-release";
-          echo "If this branch predates a release on main, rebase onto main instead."; exit 1'
-        language: system
-        pass_filenames: false
-        always_run: true
-        fail_fast: true
-        stages: [pre-push]
-
-      # The whole gated scope, kept off the commit path because any edit under
-      # tests/ invalidates every cached verdict (cache_invalidation_files +
-      # on_dependency_change = "rerun"), so a commit that touches a test pays
-      # for the full scope.
-      - id: mutmut-full
-        name: mutmut (mutation testing, full scope)
-        entry: uv run python scripts/mutation.py --profile full
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-
-      # Integration tests need the shared CVAT, MinIO and ClearML stands of the
-      # cluster, and this run's CVAT project must be fresh (a reused one fails
-      # with "Duplicate base task name"), so the gate owns
-      # up -> test -> keep-or-stop and a run costs minutes. Hence pre-push,
-      # after the mutation gate.
-      #
-      # It disables itself when tests/integration/.env is missing, which is the
-      # case on a fresh clone and on any machine never set up for integration
-      # testing. verbose: true so that notice is visible - pre-commit swallows the
-      # output of hooks that pass.
-      #
-      # Skip it for one push with: SKIP=integration-tests git push
-      - id: integration-tests
-        name: integration tests (live stands)
-        entry: uv run python -m tests.integration.lifecycle gate
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-push]
-        verbose: true
-
       - id: count-lines
         name: count lines of code
         entry: bash -c 'echo "Lines of code:"; find cveta2 -name "*.py" | xargs wc -l | tail -1'
@@ -144,6 +87,34 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+
+      # Mutation testing of the functions this commit changes, in a throwaway
+      # workspace (scripts/mutation.py). Advisory: survivors are printed, not
+      # fatal; only a tool or clean-test failure fails the hook. verbose so the
+      # survivors are visible - pre-commit hides the output of passing hooks.
+      - id: mutmut
+        name: mutmut (changed functions, advisory)
+        entry: uv run python scripts/mutation.py
+        language: system
+        pass_filenames: false
+        files: ^cveta2/.*\.py$
+        stages: [pre-commit]
+        verbose: true
+
+      # Live tests on the shared CVAT, MinIO and ClearML stands: up -> test ->
+      # keep-or-stop under one run tag, minutes per run, so last. Runs when the
+      # package, the integration suite or the dependencies change; skips with a
+      # notice on a machine without the k8s-infra skill.
+      #
+      # Skip it for one commit with: SKIP=integration-tests git commit ...
+      - id: integration-tests
+        name: integration tests (live stands)
+        entry: uv run python -m tests.integration.lifecycle gate
+        language: system
+        pass_filenames: false
+        files: ^(cveta2/|tests/integration/|pyproject\.toml$|uv\.lock$)
+        stages: [pre-commit]
+        verbose: true
 
   # The version, the tag and CHANGELOG.md are derived from commit subjects by
   # python-semantic-release, so a subject outside these types silently drops out

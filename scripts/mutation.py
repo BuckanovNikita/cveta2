@@ -1,287 +1,442 @@
 #!/usr/bin/env python3
-"""Run mutmut over [tool.mutmut].only_mutate and fail if a mutant escapes.
+"""Mutation-test only the functions a change touches, in a throwaway workspace.
 
-``mutmut run`` always exits 0 and has no threshold flag, so this gate builds the
-verdict itself: ``mutmut export-cicd-stats`` writes the counters,
-``mutmut results`` lists every mutant not conclusively killed, and survivors are
-checked against the allowlist in ``[tool.cveta2.mutation.equivalent]``.
+    uv run python scripts/mutation.py                  # staged change vs HEAD
+    uv run python scripts/mutation.py --base main      # staged tree vs main
+    uv run python scripts/mutation.py cveta2/x.py      # every function of a file
+    uv run python scripts/mutation.py --keep --strict  # keep it; fail on survivors
 
-    uv run python scripts/mutation.py                     # whole scope, cache honoured
-    uv run python scripts/mutation.py --profile fast      # the pre-commit subset
-    uv run python scripts/mutation.py 'cveta2.domain.partition.*'
-    uv run python scripts/mutation.py --max-children 4
+The pre-commit hook runs the first form. Changed lines of staged ``cveta2/**/*.py``
+files are mapped to the top-level functions and methods that contain them, and
+mutmut runs only their mutants. The verdict is advisory: surviving mutants are
+printed with their diffs and the run passes, unless ``--strict`` is given. A tool,
+configuration or clean-test failure always fails.
 
-Arguments other than ``--profile`` pass through to ``mutmut run``.
+Nothing is shared between runs. Each run exports the *staged* tree with
+``git checkout-index`` into a fresh temporary directory, narrows that copy's
+``[tool.mutmut].only_mutate`` to the changed files, and runs the repository
+venv's ``mutmut`` there. No mutmut cache, scope fingerprint or pytest temp root
+outlives the run, so concurrent runs from other worktrees or agents cannot
+corrupt each other, and a stale verdict cannot be reused. The price is a fresh
+stats pass (the whole unit suite, serially) on every run.
 
-Profiles live in ``[tool.cveta2.mutation.profiles]``. An empty profile means
-"run everything with no positional filter", which is not the same as passing
-``"*"``: mutmut honours a cached verdict only when no mutant name is given
-(``if not mutant_names and result is not None: continue``), so a ``"*"`` filter
-would re-execute the entire scope on every run.
-
-Scope fingerprint. ``Config.config_fingerprint()`` deliberately hashes only
-pytest args, timeouts and the type-check command; ``only_mutate`` and
-``do_not_mutate_patterns`` are excluded because mutmut assumes new mutants are
-born uncached and dropped ones stop being walked. That breaks in both
-directions: adding a file to ``only_mutate`` leaves the mutant tree stale
-("0 files mutated, N unmodified", observed), and suppressing a call renumbers a
-function's mutants so an old verdict re-attaches to a different mutation. Both
-are silent, so ``mutants/`` is wiped whenever the scope fields change.
-
-Allowlist. Both of mutmut's suppression mechanisms (``# pragma: no mutate`` and
-``do_not_mutate_patterns``) key on the first line of the mutated node, so
-neither can exempt one argument of a multi-line call without also dropping the
-killable mutants that share that line. The allowlist works per mutant, and an
-entry that no longer matches a live survivor is itself an error: a
-justification cannot rot into a blanket pass. Under a profile the glob narrows
-the allowlist as well as the survivors, because ``mutmut results`` walks every
-file in ``only_mutate`` regardless of what the run filtered on.
+mutmut only mutates code inside undecorated top-level functions and methods
+(a lone ``@staticmethod``/``@classmethod`` is allowed), never f-strings, and
+skips lines matched by ``do_not_mutate_patterns``. A change outside those
+produces no mutants, and a change no unit test reaches cannot be tested; both
+are reported and pass.
 """
 
 import argparse
-import fnmatch
-import hashlib
+import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
-import tomllib
+import tempfile
+from collections import deque
+from collections.abc import Iterable, Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PYPROJECT = REPO_ROOT / "pyproject.toml"
-MUTANTS_DIR = REPO_ROOT / "mutants"
-FINGERPRINT_FILE = MUTANTS_DIR / ".cveta2-scope-fingerprint"
-STATS_FILE = MUTANTS_DIR / "mutmut-cicd-stats.json"
-RESULTS_FILE = MUTANTS_DIR / "mutmut-results.txt"
-# Keep pytest's temp root inside this checkout. By default every run shares
-# /tmp/pytest-of-$USER, and a concurrent session's cleanup can delete the
-# `pytest-current` symlink out from under a mutant's forked child. The child
-# then dies for reasons unrelated to the mutation, which mutmut reads as
-# "killed" - the gate lying in the unsafe direction. tests.env_isolation gives
-# each mutation child its own PID-based basetemp beneath this root.
-PYTEST_TEMPROOT = MUTANTS_DIR / ".pytest-temproot"
-
-# The mutmut settings that decide *which* mutants exist. A change to any of
-# them invalidates the whole tree, not just one function's verdicts.
-SCOPE_KEYS = ("only_mutate", "do_not_mutate", "do_not_mutate_patterns", "source_paths")
-# `mutmut results` lists every mutant it did not conclusively kill. These
-# statuses are benign; anything else means the mutation escaped the tests.
+PACKAGE = "cveta2"
+# `mutmut results` statuses that mean the mutant did not escape.
 BENIGN_STATUSES = frozenset({"killed", "skipped", "caught by type check"})
+# mutmut asserts when a name filter matches no generated mutant.
+NOTHING_MATCHES = "Filtered for specific mutants, but nothing matches"
+# mutmut stops when no unit test reaches any mutated function at all.
+NO_TESTS = "could not find any test case for any mutant"
+# Live-stand variables an earlier `eval "$(lifecycle env)"` may have left in the
+# shell. The unit suite must never see them: some fixtures switch to live CVAT.
+STAND_PREFIXES = ("CVAT_INTEGRATION_", "MINIO_", "CLEARML_", "INTEGRATION_")
+STAND_NAMES = frozenset({"INFRA_RUN_TAG"})
+CLASS_SEPARATOR = "ǁ"
+HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+MAX_DIFFS = 20
 
 
-class GateError(Exception):
-    """A configuration or run failure that stops the gate before a verdict."""
+class MutationError(Exception):
+    """A tool or configuration failure: the run cannot produce a verdict."""
 
 
-def _load_pyproject() -> dict[str, object]:
-    return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+@dataclass(frozen=True)
+class Target:
+    """One mutable function and the mutmut names that select its mutants.
 
-
-def _tool_table(config: dict[str, object], *path: str) -> dict[str, object]:
-    node: object = config
-    for key in path:
-        if not isinstance(node, dict):
-            return {}
-        node = node.get(key, {})
-    return node if isinstance(node, dict) else {}
-
-
-def profile_globs(name: str) -> list[str]:
-    """Return the mutant-name globs of profile *name*."""
-    profiles = _tool_table(_load_pyproject(), "tool", "cveta2", "mutation", "profiles")
-    if name not in profiles:
-        known = ", ".join(sorted(profiles)) or "(none defined)"
-        msg = f"Unknown mutation profile {name!r}. Known profiles: {known}"
-        raise GateError(msg)
-    globs = profiles[name]
-    if not isinstance(globs, list) or not all(isinstance(g, str) for g in globs):
-        msg = f"Profile {name!r} must be a list of mutant-name glob strings."
-        raise GateError(msg)
-    return [str(g) for g in globs]
-
-
-def scope_fingerprint() -> str:
-    """Hash of the mutmut settings that decide which mutants exist."""
-    mutmut_config = _tool_table(_load_pyproject(), "tool", "mutmut")
-    scope = {key: mutmut_config.get(key) for key in SCOPE_KEYS}
-    payload = json.dumps(scope, sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
-
-
-def sync_scope() -> None:
-    """Drop a stale mutant tree so the next run regenerates it from scratch."""
-    current = scope_fingerprint()
-    previous = (
-        FINGERPRINT_FILE.read_text(encoding="utf-8").strip()
-        if FINGERPRINT_FILE.is_file()
-        else None
-    )
-    if previous == current:
-        return
-    if MUTANTS_DIR.exists():
-        if previous is None:
-            print("==> mutants/ has no scope fingerprint; regenerating from scratch.")
-        else:
-            print(
-                f"==> Mutation scope changed ({previous} -> {current}); "
-                "wiping mutants/."
-            )
-        shutil.rmtree(MUTANTS_DIR, ignore_errors=True)
-    MUTANTS_DIR.mkdir(parents=True, exist_ok=True)
-    FINGERPRINT_FILE.write_text(f"{current}\n", encoding="utf-8")
-
-
-def _mutmut(*args: str) -> list[str]:
-    return ["uv", "run", "mutmut", *args]
-
-
-def run_mutmut(args: list[str]) -> int:
-    """Run ``mutmut run``; strip the CR spinner when stdout is not a terminal.
-
-    On a TTY the spinner renders fine. Captured (pre-commit), it would dump tens
-    of thousands of redraw frames, so keep only what a terminal would have shown
-    on each line.
+    ``names`` are mangled function names (``pkg.mod.x_func``). The run filter is
+    ``<name>*`` rather than ``<name>__mutmut_*``: mutmut also matches the filter
+    against mangled function names to pick the clean-run tests, and a pattern
+    with the ``__mutmut_`` suffix matches none of them, which silently makes the
+    clean run execute the whole suite. The wider glob can also run mutants of a
+    function whose name extends this one; the report counts exact names only.
     """
-    command = _mutmut("run", *args)
-    if sys.stdout.isatty():
-        return subprocess.run(command, check=False, cwd=REPO_ROOT).returncode  # noqa: S603
-    with subprocess.Popen(command, stdout=subprocess.PIPE, cwd=REPO_ROOT) as process:  # noqa: S603
+
+    path: str
+    qualname: str
+    names: tuple[str, ...]
+
+    @property
+    def globs(self) -> tuple[str, ...]:
+        """Return the ``mutmut run`` filters for this function."""
+        return tuple(f"{name}*" for name in self.names)
+
+
+def git(*args: str) -> str:
+    """Run git in the repository and return stdout; a failure is a tool error."""
+    completed = subprocess.run(  # noqa: S603 - fixed program, caller-built args
+        ["git", *args],  # noqa: S607
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        msg = f"git {' '.join(args)} failed: {completed.stderr.strip()}"
+        raise MutationError(msg)
+    return completed.stdout
+
+
+def changed_lines(base: str) -> dict[str, set[int]]:
+    """Return staged ``cveta2`` Python files and their changed lines.
+
+    The index is compared with the merge base of *base* and ``HEAD``, so a moving
+    ``main`` does not count its own changes as this branch's. A deletion-only
+    hunk marks the lines on both sides of the gap. The prefixes, quoting and
+    external-diff options are pinned so that user git configuration cannot
+    change the format this parser reads.
+    """
+    diff = git(
+        "-c", "core.quotePath=false",
+        "diff", "--cached", "--merge-base", "--unified=0", "--no-color",
+        "--no-renames", "--no-ext-diff", "--no-textconv",
+        "--src-prefix=a/", "--dst-prefix=b/",
+        "--diff-filter=AM", base, "--", f"{PACKAGE}/*.py",
+    )  # fmt: skip
+    files: dict[str, set[int]] = {}
+    current: str | None = None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            target = line[4:]
+            if not target.startswith("b/"):
+                msg = f"unexpected diff header {line!r}"
+                raise MutationError(msg)
+            current = target[2:]
+            files.setdefault(current, set())
+        elif current is not None and (match := HUNK.match(line)):
+            start, count = int(match.group(1)), int(match.group(2) or "1")
+            if count == 0:
+                # `-U0` numbers a pure deletion by the line before the gap.
+                files[current].update({max(start, 1), start + 1})
+            else:
+                files[current].update(range(start, start + count))
+    return {path: lines for path, lines in files.items() if lines}
+
+
+def _module_names(path: str) -> list[str]:
+    parts = list(Path(path).with_suffix("").parts)
+    names = [".".join(parts)]
+    if parts[-1] == "__init__":
+        names.append(".".join(parts[:-1]))
+    return names
+
+
+def _decorated_out(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Tell whether mutmut skips *node*: decorated, bar one static/classmethod."""
+    if not node.decorator_list:
+        return False
+    if len(node.decorator_list) > 1:
+        return True
+    decorator = node.decorator_list[0]
+    return not (
+        isinstance(decorator, ast.Name)
+        and decorator.id in {"staticmethod", "classmethod"}
+    )
+
+
+def _span(node: ast.stmt) -> range:
+    decorators = getattr(node, "decorator_list", [])
+    first = min([node.lineno, *(d.lineno for d in decorators)])
+    return range(first, (node.end_lineno or node.lineno) + 1)
+
+
+def _functions(tree: ast.Module) -> Iterator[tuple[str, str, range]]:
+    """Yield (qualname, mangled mutmut name, line span) of every mutable function."""
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            if not _decorated_out(node):
+                yield node.name, f"x_{node.name}", _span(node)
+        elif isinstance(node, ast.ClassDef) and not node.decorator_list:
+            for member in node.body:
+                if isinstance(
+                    member, ast.FunctionDef | ast.AsyncFunctionDef
+                ) and not _decorated_out(member):
+                    yield (
+                        f"{node.name}.{member.name}",
+                        f"x{CLASS_SEPARATOR}{node.name}{CLASS_SEPARATOR}{member.name}",
+                        _span(member),
+                    )
+
+
+def targets_for(path: str, source: str, lines: set[int] | None) -> list[Target]:
+    """Return the mutable functions of *source* that contain any of *lines*."""
+    tree = ast.parse(source, filename=path)
+    found: list[Target] = []
+    for qualname, mangled, span in _functions(tree):
+        if lines is None or any(line in span for line in lines):
+            names = tuple(f"{module}.{mangled}" for module in _module_names(path))
+            found.append(Target(path, qualname, names))
+    return found
+
+
+def export_staged_tree(workspace: Path) -> None:
+    """Write the index (exactly what a commit would contain) into *workspace*."""
+    git("checkout-index", "--all", "--force", f"--prefix={workspace}{os.sep}")
+
+
+def narrow_scope(pyproject: Path, files: Sequence[str]) -> None:
+    """Point the workspace's ``[tool.mutmut]`` at *files* and nothing else."""
+    text = pyproject.read_text(encoding="utf-8")
+    header = re.search(r"^\[tool\.mutmut\]\s*$", text, flags=re.MULTILINE)
+    if header is None:
+        msg = "pyproject.toml has no [tool.mutmut] table."
+        raise MutationError(msg)
+    if re.search(r"^only_mutate\s*=", text, flags=re.MULTILINE):
+        msg = (
+            "pyproject.toml sets [tool.mutmut].only_mutate; the scope is "
+            "derived from the change, remove the setting."
+        )
+        raise MutationError(msg)
+    scope = ", ".join(json.dumps(name) for name in files)
+    # Git change detection would compare against a repository this copy is not.
+    addition = f"\nonly_mutate = [{scope}]\nuse_git_change_detection = false\n"
+    pyproject.write_text(
+        text[: header.end()] + addition + text[header.end() :], encoding="utf-8"
+    )
+
+
+def child_env(workspace: Path) -> dict[str, str]:
+    """Build mutmut's environment: no stand or git variables, a private temp root."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in STAND_NAMES
+        and not key.startswith(STAND_PREFIXES)
+        # git's hook variables (GIT_INDEX_FILE) point at the real repository.
+        and not key.startswith("GIT_")
+    }
+    temproot = workspace / ".pytest-temproot"
+    temproot.mkdir(parents=True, exist_ok=True)
+    # Shared /tmp/pytest-of-$USER lets a concurrent session delete this run's
+    # `pytest-current` link, which kills a mutant for unrelated reasons.
+    env["PYTEST_DEBUG_TEMPROOT"] = str(temproot)
+    return env
+
+
+def mutmut_binary() -> Path:
+    """Locate the repo venv's mutmut (``uv run`` in the copy builds a new venv)."""
+    binary = Path(sys.executable).with_name("mutmut")
+    if not binary.is_file():
+        msg = f"{binary} not found; run this script with `uv run python`."
+        raise MutationError(msg)
+    return binary
+
+
+def run_mutmut(
+    binary: Path, workspace: Path, env: dict[str, str], args: Sequence[str]
+) -> tuple[int, str]:
+    """Stream ``mutmut run``; return its status and the output tail.
+
+    Captured output (pre-commit) would otherwise hold every spinner redraw, so
+    only what a terminal would have left on each line is printed.
+    """
+    tail: deque[str] = deque(maxlen=40)
+    with subprocess.Popen(  # noqa: S603 - the venv's own mutmut
+        [str(binary), "run", *args],
+        cwd=workspace,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    ) as process:
         assert process.stdout is not None  # noqa: S101 - set by stdout=PIPE
         for raw in process.stdout:
             line = raw.decode("utf-8", errors="replace").rsplit("\r", 1)[-1]
+            tail.append(line)
             sys.stdout.write(line)
             sys.stdout.flush()
-    return process.returncode
+    return process.returncode, "".join(tail)
 
 
-def _load_allowlist() -> dict[str, str]:
-    table = _tool_table(_load_pyproject(), "tool", "cveta2", "mutation", "equivalent")
-    return {str(name): str(reason) for name, reason in table.items()}
-
-
-def _parse_results(results: str) -> dict[str, str]:
+def parse_results(text: str) -> dict[str, str]:
+    """``name: status`` lines of ``mutmut results`` as a mapping."""
     statuses: dict[str, str] = {}
-    for line in results.splitlines():
+    for line in text.splitlines():
         name, separator, status = line.strip().partition(": ")
         if separator and name and not name.startswith("#"):
             statuses[name] = status
     return statuses
 
 
-def _in_profile(name: str, globs: list[str]) -> bool:
-    return not globs or any(fnmatch.fnmatch(name, glob) for glob in globs)
+def _selected(mutant: str, functions: Iterable[str]) -> bool:
+    return mutant.partition("__mutmut_")[0] in functions
 
 
-def _report_score(stats: dict[str, int], escaped: dict[str, str], profile: str) -> None:
-    """Print the score, preferring profile-local numbers over mutmut's totals.
+class ShowFn:
+    """``mutmut show`` in the workspace, as a callable."""
 
-    mutmut's cicd stats always cover the whole ``only_mutate`` set and count
-    not-checked mutants inside ``total``. Under a profile those totals describe
-    a different population than the verdict below them, so report the filtered
-    counts and keep the global figure only as context.
-    """
-    total = stats.get("total", 0)
-    killed = stats.get("killed", 0)
-    counts = ", ".join(
-        f"{name}={stats.get(name, 0)}"
-        for name in ("survived", "no_tests", "not_checked", "skipped", "timeout")
-    )
-    if profile:
-        print(f"Profile '{profile}': {len(escaped)} mutant(s) not killed")
-    score = f"{killed / total:.1%}" if total else "n/a"
-    print(f"Mutation score (whole scope): {killed}/{total} killed ({score})")
-    print(f"Breakdown: {counts}")
+    def __init__(self, binary: Path, workspace: Path, env: dict[str, str]) -> None:
+        """Bind the mutmut binary, workspace and environment of this run."""
+        self.binary, self.workspace, self.env = binary, workspace, env
 
-
-def verdict(
-    stats: dict[str, int], results: str, globs: list[str], profile: str
-) -> bool:
-    """Print the gate verdict; True when no unexplained mutant escaped."""
-    escaped = {
-        name: status
-        for name, status in _parse_results(results).items()
-        if status not in BENIGN_STATUSES and _in_profile(name, globs)
-    }
-    allowlist = {
-        name: reason
-        for name, reason in _load_allowlist().items()
-        if _in_profile(name, globs)
-    }
-    _report_score(stats, escaped, profile)
-
-    unexplained = {n: s for n, s in escaped.items() if n not in allowlist}
-    stale = [name for name in allowlist if name not in escaped]
-    if allowlist:
-        print(f"Allowlisted as equivalent: {len(allowlist) - len(stale)}")
-    if stale:
-        print(
-            "FAILED: these [tool.cveta2.mutation.equivalent] entries no longer "
-            "match a surviving mutant. mutmut renumbers mutants when a function "
-            "changes, so re-review and update or drop them:"
+    def __call__(self, name: str) -> str:
+        """Return the diff of mutant *name*."""
+        completed = subprocess.run(  # noqa: S603 - the venv's own mutmut
+            [str(self.binary), "show", name],
+            cwd=self.workspace,
+            env=self.env,
+            check=False,
+            capture_output=True,
+            text=True,
         )
-        for name in stale:
-            print(f"    {name}")
-    if unexplained:
-        print(f"FAILED: {len(unexplained)} mutant(s) escaped the tests:")
-        for name, status in sorted(unexplained.items()):
-            print(f"    {name}: {status}")
-    if stale or unexplained:
-        return False
-    print("No unexplained mutants escaped.")
-    return True
+        return completed.stdout or f"# {name}: (no diff available)"
 
 
-def gate(profile: str | None, mutmut_args: list[str]) -> int:
-    """Run the whole gate and return the process exit status."""
-    globs: list[str] = []
-    if profile is not None:
-        # Resolve before touching the generated workspace: an unknown profile
-        # must neither wipe mutants/ nor start an unfiltered mutation run.
-        globs = profile_globs(profile)
-    sync_scope()
-    PYTEST_TEMPROOT.mkdir(parents=True, exist_ok=True)
-    os.environ["PYTEST_DEBUG_TEMPROOT"] = str(PYTEST_TEMPROOT)
-
-    status = run_mutmut([*mutmut_args, *globs])
-    if status != 0:
-        print(f"ERROR: mutmut run exited with status {status}.", file=sys.stderr)
-        return status
-    subprocess.run(_mutmut("export-cicd-stats"), check=True, cwd=REPO_ROOT)  # noqa: S603
-    if not STATS_FILE.is_file():
-        msg = f"{STATS_FILE} was not written; mutmut run produced no results."
-        raise GateError(msg)
-    results = subprocess.run(  # noqa: S603
-        _mutmut("results"), check=True, stdout=subprocess.PIPE, text=True, cwd=REPO_ROOT
-    ).stdout
-    RESULTS_FILE.write_text(results, encoding="utf-8")
-
-    stats = json.loads(STATS_FILE.read_text(encoding="utf-8"))
-    if verdict(stats, results, globs, profile or ""):
-        return 0
-    print()
-    print("==> Inspect a mutant with: uv run mutmut show <name>")
-    print("==> Triage interactively with: uv run mutmut browse")
-    print("==> A mutant no test can possibly kill belongs in")
-    print("    [tool.cveta2.mutation.equivalent] in pyproject.toml, with a reason.")
-    return 1
+def report(
+    statuses: dict[str, str],
+    functions: Sequence[str],
+    show: ShowFn,
+) -> list[str]:
+    """Print the verdict; return the names of mutants that escaped."""
+    selected = {n: s for n, s in statuses.items() if _selected(n, functions)}
+    if not selected:
+        print("The changed functions produce no mutants; nothing to do.")
+        return []
+    escaped = sorted(n for n, s in selected.items() if s not in BENIGN_STATUSES)
+    killed = sum(1 for s in selected.values() if s == "killed")
+    print(f"Mutants in changed functions: {len(selected)}, killed: {killed}, "
+          f"not killed: {len(escaped)}")  # fmt: skip
+    if not escaped:
+        print("Every mutant of the changed functions was killed.")
+    for name in escaped[:MAX_DIFFS]:
+        print()
+        print(show(name).rstrip())
+    if len(escaped) > MAX_DIFFS:
+        print(f"... and {len(escaped) - MAX_DIFFS} more:")
+        for name in escaped[MAX_DIFFS:]:
+            print(f"    {name}: {selected[name]}")
+    return escaped
 
 
-def main(argv: list[str] | None = None) -> int:
+def collect_targets(workspace: Path, base: str, files: Sequence[str]) -> list[Target]:
+    """Targets from explicit *files* (whole files) or the staged diff."""
+    scope: dict[str, set[int] | None]
+    if files:
+        scope = {}
+        for name in files:
+            resolved = Path(name).resolve()
+            if not resolved.is_relative_to(REPO_ROOT):
+                msg = f"{name} is not a {PACKAGE}/ Python file."
+                raise MutationError(msg)
+            relative = resolved.relative_to(REPO_ROOT).as_posix()
+            if not relative.startswith(f"{PACKAGE}/") or not relative.endswith(".py"):
+                msg = f"{name} is not a {PACKAGE}/ Python file."
+                raise MutationError(msg)
+            scope[relative] = None
+    else:
+        scope = dict(changed_lines(base))
+    targets: list[Target] = []
+    for path, lines in sorted(scope.items()):
+        source_file = workspace / path
+        if not source_file.is_file():
+            msg = f"{path} is not in the index; stage it first."
+            raise MutationError(msg)
+        targets.extend(targets_for(path, source_file.read_text("utf-8"), lines))
+    return targets
+
+
+def run(args: argparse.Namespace) -> int:
+    """Export, narrow, mutate, report. Returns the process exit status."""
+    workspace = Path(tempfile.mkdtemp(prefix="cveta2-mutation-"))
+    try:
+        export_staged_tree(workspace)
+        targets = collect_targets(workspace, args.base, args.files)
+        if not targets:
+            print("No changed cveta2 function can be mutated; nothing to do.")
+            return 0
+        files = sorted({t.path for t in targets})
+        globs = [glob for t in targets for glob in t.globs]
+        print(f"Mutating {len(targets)} function(s) in {len(files)} file(s):")
+        for target in targets:
+            print(f"    {target.path}: {target.qualname}")
+        narrow_scope(workspace / "pyproject.toml", files)
+
+        binary = mutmut_binary()
+        env = child_env(workspace)
+        mutmut_args = [*(["--max-children", str(args.max_children)]
+                         if args.max_children else []), *globs]  # fmt: skip
+        status, tail = run_mutmut(binary, workspace, env, mutmut_args)
+        if status != 0:
+            if NOTHING_MATCHES in tail:
+                print("The changed functions produce no mutants; nothing to do.")
+                return 0
+            if NO_TESTS in tail:
+                print("No unit test exercises the changed functions.")
+                print("Advisory: add tests that call them.")
+                return 1 if args.strict else 0
+            msg = f"mutmut run exited with status {status} (output above)."
+            raise MutationError(msg)
+        results = subprocess.run(  # noqa: S603 - the venv's own mutmut
+            [str(binary), "results", "--all", "true"],
+            cwd=workspace,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        functions = [name for t in targets for name in t.names]
+        escaped = report(
+            parse_results(results), functions, ShowFn(binary, workspace, env)
+        )
+        if not escaped:
+            return 0
+        print()
+        print("Advisory: strengthen a test that should observe these mutations,")
+        print("or leave them when the mutation cannot change observable behaviour.")
+        return 1 if args.strict else 0
+    finally:
+        if args.keep:
+            mutmut = Path(sys.executable).with_name("mutmut")
+            print(f"Workspace kept: {workspace}")
+            print(f"    cd there; {mutmut} show <name>  (or browse)")
+        else:
+            shutil.rmtree(workspace, ignore_errors=True)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Mutation gate: mutmut run plus an allowlist-aware verdict.",
-        epilog="Other arguments pass through to `mutmut run`.",
+        description="Mutation-test the functions a change touches (advisory).",
     )
     parser.add_argument(
-        "--profile", help="mutant-name globs from [tool.cveta2.mutation.profiles]"
+        "files", nargs="*", help="cveta2/ files to mutate whole instead of the diff"
     )
-    args, mutmut_args = parser.parse_known_args(argv)
+    parser.add_argument(
+        "--base",
+        default="HEAD",
+        help="diff the staged tree against the merge base with REV (default HEAD)",
+    )
+    parser.add_argument("--keep", action="store_true", help="keep the workspace")
+    parser.add_argument(
+        "--strict", action="store_true", help="exit 1 when a mutant survives"
+    )
+    parser.add_argument("--max-children", type=int, help="mutmut worker count")
+    args = parser.parse_args(argv)
     try:
-        return gate(args.profile, mutmut_args)
-    except (GateError, subprocess.CalledProcessError) as exc:
+        return run(args)
+    except (MutationError, subprocess.CalledProcessError, SyntaxError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
-        return 1
+        return 2
 
 
 if __name__ == "__main__":

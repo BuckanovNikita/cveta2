@@ -3,9 +3,8 @@
 The lifecycle runs as a subprocess with ``--repo-root`` pointing at a temporary
 tree, so it reads and writes only there. The k8s-infra helpers are stand-ins
 that print the exports a Secret would give and record every other call; ``uv``
-and ``curl`` are recording stubs; ``PRE_COMMIT_REMOTE_BRANCH`` decides "main" so
-git is never consulted. These cases were ported one for one from the shell
-scripts' suite and are the parity specification of the replacement.
+and ``curl`` are recording stubs. The tree is an empty git repository whose
+``HEAD`` names the branch, which is how the lifecycle decides "main".
 """
 
 import os
@@ -59,6 +58,12 @@ for line in filter(None, """@EXPORTS@""".splitlines()):
 
 FAKE_INFRA = """#!/usr/bin/env python3
 import os, sys
+if sys.argv[1:] == ["room"]:
+    with open(os.environ["FAKE_TOOL_CALLS"] + ".room", "a") as record:
+        print("room", file=record)
+    status = int(os.environ.get("FAKE_ROOM_STATUS", "0"))
+    print("room: WAIT" if status == 3 else "room: GO")
+    sys.exit(status)
 expected = ["newtag", "--project", "cveta2", "--slug", "integration"]
 if sys.argv[1:] != expected:
     sys.exit(f"unexpected arguments {sys.argv[1:]}")
@@ -157,10 +162,6 @@ class Tree(BaseModel):
     skill_dir: Path
 
     @property
-    def env_file(self) -> Path:
-        return self.root / "tests" / "integration" / ".env"
-
-    @property
     def run_tag_file(self) -> Path:
         return self.root / "tests" / "integration" / ".run-tag"
 
@@ -170,10 +171,13 @@ class Tree(BaseModel):
         branch: str = FEATURE_BRANCH,
         env: dict[str, str] | None = None,
     ) -> Outcome:
+        subprocess.run(  # noqa: S603 - fixed git arguments
+            ["git", "-C", str(self.root), "symbolic-ref", "HEAD", branch],  # noqa: S607
+            check=True,
+        )
         run_env = {
             "PATH": f"{self.root / 'bin'}:/usr/bin:/bin",
             "HOME": str(self.root / "home"),
-            "PRE_COMMIT_REMOTE_BRANCH": branch,
             "K8S_INFRA_SKILL_DIR": str(self.skill_dir),
             "FAKE_TAG": MINTED_TAG,
             "FAKE_TOOL_CALLS": str(self.root / "tool-calls"),
@@ -251,27 +255,15 @@ def tree(tmp_path: Path) -> Tree:
             FAKE_HELPER.replace("@STAND@", stand).replace("@EXPORTS@", exports),
         )
     _write_executable(skill_dir / "scripts" / "infra.py", FAKE_INFRA)
-    result = Tree(root=tmp_path, skill_dir=skill_dir)
-    result.env_file.write_text("", encoding="utf-8")
-    return result
-
-
-class TestArming:
-    def test_a_missing_env_file_refuses_and_names_the_example(self, tree: Tree) -> None:
-        tree.env_file.unlink()
-        outcome, values = tree.env()
-        assert outcome.returncode == 1
-        assert ".env.example" in outcome.stderr
-        assert not values
-
-    def test_the_env_file_may_carry_the_skill_dir(self, tree: Tree) -> None:
-        tree.env_file.write_text(
-            f"# a comment\nexport K8S_INFRA_SKILL_DIR='{tree.skill_dir}'\n",
-            encoding="utf-8",
-        )
-        outcome, values = tree.env(env={"K8S_INFRA_SKILL_DIR": str(tree.root / "no")})
-        assert outcome.returncode == 0, outcome.stderr
-        assert values["INTEGRATION_SKILL_DIR"] == str(tree.skill_dir)
+    subprocess.run(  # noqa: S603 - fixed git arguments
+        ["git", "init", "-q", str(tmp_path)],  # noqa: S607
+        check=True,
+    )
+    subprocess.run(  # noqa: S603 - fixed git arguments
+        ["git", "-C", str(tmp_path), "symbolic-ref", "HEAD", FEATURE_BRANCH],  # noqa: S607
+        check=True,
+    )
+    return Tree(root=tmp_path, skill_dir=skill_dir)
 
 
 class TestSkillDirectory:
@@ -489,7 +481,7 @@ class TestUp:
 
 
 class TestGate:
-    def test_a_branch_push_runs_up_test_stop_under_the_minted_tag(
+    def test_a_branch_commit_runs_up_test_stop_under_the_minted_tag(
         self, tree: Tree
     ) -> None:
         outcome = tree.run("gate")
@@ -502,6 +494,7 @@ class TestGate:
         ]
         assert f"run tag '{MINTED_TAG}'" in outcome.stdout
         assert tree.recorded_tag() is None
+        assert (tree.root / "tool-calls.room").read_text(encoding="utf-8") == "room\n"
 
     def test_extra_arguments_reach_pytest(self, tree: Tree) -> None:
         outcome = tree.run("gate", "-k", "upload")
@@ -624,16 +617,50 @@ class TestGate:
         assert tree.tool_calls() == ["clearml whoami"]
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
 
-    def test_a_missing_env_file_skips_without_touching_anything(
+    def test_a_machine_without_the_skill_skips_without_touching_anything(
         self, tree: Tree
     ) -> None:
-        tree.env_file.unlink()
         tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome = tree.run("gate")
+        outcome = tree.run("gate", env={"K8S_INFRA_SKILL_DIR": ""})
         assert outcome.returncode == 0, outcome.stderr
         assert "integration gate skipped" in outcome.stdout
         assert tree.tool_calls() == []
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
+
+    def test_a_skill_dir_without_the_run_contract_fails_the_gate(
+        self, tree: Tree
+    ) -> None:
+        (tree.skill_dir / "scripts" / "infra.py").unlink()
+        outcome = tree.run("gate")
+        assert outcome.returncode == 1
+        assert "K8S_INFRA_SKILL_DIR" in outcome.stderr
+        assert tree.tool_calls() == []
+
+    def test_room_wait_fails_the_gate_before_anything_is_touched(
+        self, tree: Tree
+    ) -> None:
+        outcome = tree.run("gate", env={"FAKE_ROOM_STATUS": "3"})
+        assert outcome.returncode == 1
+        assert "infra.py room answers WAIT" in outcome.stderr
+        assert "Retry the commit later" in outcome.stderr
+        assert "SKIP=integration-tests git commit" in outcome.stderr
+        assert tree.tool_calls() == []
+        assert tree.recorded_tag() is None
+
+    def test_an_unreadable_secret_fails_the_gate_with_the_skip_hint(
+        self, tree: Tree
+    ) -> None:
+        outcome = tree.run("gate", env={"FAKE_FAIL_STAND": "minio"})
+        assert outcome.returncode == 1
+        assert "minio.py --project cveta2 env failed" in outcome.stderr
+        assert "SKIP=integration-tests git commit" in outcome.stderr
+        assert tree.tool_calls() == []
+
+    def test_a_failing_room_check_fails_the_gate(self, tree: Tree) -> None:
+        outcome = tree.run("gate", env={"FAKE_ROOM_STATUS": "2"})
+        assert outcome.returncode == 1
+        assert "infra.py room failed (exit 2" in outcome.stderr
+        assert tree.tool_calls() == []
 
 
 class TestStop:
@@ -780,7 +807,6 @@ def test_an_interrupted_gate_lets_pytest_finish_before_tearing_down(
     env = {
         "PATH": f"{tree.root / 'bin'}:/usr/bin:/bin",
         "HOME": str(tree.root / "home"),
-        "PRE_COMMIT_REMOTE_BRANCH": FEATURE_BRANCH,
         "K8S_INFRA_SKILL_DIR": str(tree.skill_dir),
         "FAKE_TAG": MINTED_TAG,
         "FAKE_TOOL_CALLS": str(tree.root / "tool-calls"),
@@ -832,26 +858,6 @@ def test_a_failing_step_is_reported_before_the_teardown(tree: Tree) -> None:
     assert "tearing down the run" in outcome.stdout
 
 
-def test_the_env_file_expands_like_a_shell_and_allows_comments(tree: Tree) -> None:
-    home_skill = tree.root / "home" / "k8s"
-    shutil.copytree(tree.skill_dir, home_skill)
-    tree.env_file.write_text(
-        "BASE=~/k8s  # where the skill lives\nK8S_INFRA_SKILL_DIR=$BASE\n",
-        encoding="utf-8",
-    )
-    outcome, values = tree.env()
-    assert outcome.returncode == 0, outcome.stderr
-    assert values["INTEGRATION_SKILL_DIR"] == str(home_skill)
-
-
-def test_unbalanced_quotes_in_the_env_file_are_refused(tree: Tree) -> None:
-    tree.env_file.write_text("K8S_INFRA_SKILL_DIR='/x\n", encoding="utf-8")
-    outcome, _ = tree.env()
-    assert outcome.returncode == 1
-    assert "unbalanced quotes" in outcome.stderr
-    assert "Traceback" not in outcome.stderr
-
-
 def test_the_claimed_tag_names_the_bucket_and_the_project(tree: Tree) -> None:
     assert tree.run("up").returncode == 0
     outcome, values = tree.env()
@@ -876,7 +882,6 @@ def test_env_refuses_to_print_credentials_to_a_terminal(tree: Tree) -> None:
             env={
                 "PATH": f"{tree.root / 'bin'}:/usr/bin:/bin",
                 "HOME": str(tree.root / "home"),
-                "PRE_COMMIT_REMOTE_BRANCH": FEATURE_BRANCH,
                 "K8S_INFRA_SKILL_DIR": str(tree.skill_dir),
             },
             cwd=REPO_ROOT,

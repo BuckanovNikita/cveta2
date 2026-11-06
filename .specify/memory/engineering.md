@@ -50,11 +50,9 @@ record intent, while implementation and executed checks establish behavior.
 Both integrations are installed, with Codex as the default.
 
 Set up a clone with `uv sync` and `uv run pre-commit install` (one command
-installs the pre-commit, commit-msg and pre-push stages), then
-`git config core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40"`:
-git opens the SSH session before the pre-push gates, which outlast GitHub's idle
-timeout. Python 3.12 or 3.13 and uv are required; integration tests also need
-`kubectl` with the `docker-desktop` context and the `k8s-infra` skill.
+installs the pre-commit and commit-msg stages). Python 3.12 or 3.13 and uv are
+required; integration tests also need `kubectl` with the `docker-desktop`
+context and the `k8s-infra` skill, whose presence arms the live gate.
 
 For a new capability, run `specify` to create `specs/<number>-<name>/spec.md`.
 Continue through `clarify` -> `plan` -> `checklist` -> `tasks` -> `analyze` ->
@@ -257,11 +255,11 @@ do not overwrite unrelated edits or install updated skills as a side effect.
 
 ## Mutation testing
 
-`scripts/mutation.py` gates the current `[tool.mutmut].only_mutate`
-scope. Read the `mutation-testing` skill before changing scope, profiles,
-equivalent-mutant entries, or triaging survivors. Scope is a ratchet: add a
-module only with the tests and justified equivalents needed for zero unexplained
-survivors.
+`scripts/mutation.py` mutates the functions a commit changes, in a fresh
+workspace exported from the index, and reports survivors without failing (the
+pre-commit `mutmut` hook). Nothing is cached between runs. Read the
+`mutation-testing` skill before triaging survivors or changing the
+`[tool.mutmut]` settings.
 
 ## Integration tests
 
@@ -306,23 +304,35 @@ write a developer's real configuration.
 
 ## Commits, hooks, and releases
 
-Use Conventional Commits. `uv run pre-commit install` installs pre-commit,
-commit-msg, and pre-push stages. Read `.pre-commit-config.yaml` for the current
+Use Conventional Commits. `uv run pre-commit install` installs the pre-commit
+and commit-msg stages. Read `.pre-commit-config.yaml` for the current
 hook set. Do not bypass hooks unless the user explicitly directs it.
 
-Pre-push runs the full mutation profile, version drift check, and the integration
-gate when `tests/integration/.env` exists. The live gate replaces only objects
-named by its own run tag (on `main`, the durable `cveta2-main` slot); the
-integration skill defines that boundary.
+Every gate runs at commit time, so a passing commit is safe to push; there is no
+pre-push stage. The changed-function mutation run and the live integration gate
+run last and only when their files change (`cveta2/`; for the live gate also
+`tests/integration/`, `pyproject.toml`, `uv.lock`). The live gate replaces only
+objects named by its own run tag (on `main`, the durable `cveta2-main` slot);
+the integration skill defines that boundary. Rebase, cherry-pick and merge run
+no pre-commit hook: after rewriting history and before pushing it, run
+`uv run pre-commit run --all-files`, and
+`uv run python scripts/mutation.py --base <upstream>` for the mutation report
+(the hook only sees staged changes, which are empty then).
 
 `main` changes only by merge. On `main`, semantic-release derives versions,
-tags, and `CHANGELOG.md`; never hand-edit the project version. Release right
-after the merge, on `main`:
+tags, and `CHANGELOG.md`; never hand-edit the project version. Its release commit
+runs the pre-commit hooks, including the live gate in the `cveta2-main` slot;
+semantic-release captures their output, so expect minutes of silence. If a hook
+fails, the commit and tag are not created while the bumped version files stay
+staged: read the error, restore them (`git restore --staged --worktree
+pyproject.toml uv.lock CHANGELOG.md`), fix the cause and run the release again.
+Skip the live gate (`SKIP=integration-tests`) only on the user's request.
+Release right after the merge, on `main`:
 
 ```bash
 uv run semantic-release version --print                     # the version it would make
 uv run semantic-release version --no-push --no-vcs-release  # bump, changelog, commit, tag
-git push origin main --follow-tags                          # one gated push
+git push origin main --follow-tags                          # push the checked commit and tag
 git ls-remote origin refs/heads/main refs/tags/vX.Y.Z       # confirm it landed
 ```
 
@@ -330,7 +340,7 @@ git ls-remote origin refs/heads/main refs/tags/vX.Y.Z       # confirm it landed
 Commit semantics live in the `commit` skill. Complete that workflow after required checks under the authorization rules in
 [Preserve the working tree](#preserve-the-working-tree); documentation-only
 changes still evaluate release but may produce no new version tag. Standing
-authorization covers the configured commit/push hooks; it does not authorize
+authorization covers the configured commit hooks and the push; it does not authorize
 changing remotes, deployment or expanding scope. Publish Git version
 tags only: no GitHub Release objects, release assets or registry publication
 without an explicit user override. Report failed/unavailable gates as gaps; never

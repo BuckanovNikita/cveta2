@@ -1,102 +1,47 @@
 ---
 name: commit
-description: Commits and, when authorized, pushes a reviewed set of cveta2 changes, preserving unrelated working-tree work, staging exact intended paths, writing Conventional Commits accepted by the conventional-pre-commit commit-msg hook, handling pre-commit rewrites and failures, and running the pre-push mutation, version-drift and live integration gates without silently bypassing them. Use when committing or pushing cveta2 changes or when a commit-msg, pre-commit or pre-push hook fails.
+description: Commits and, when authorized, pushes a reviewed set of cveta2 changes. Stages exact task-owned paths, writes Conventional Commits accepted by the commit-msg hook, and handles pre-commit rewrites and failures, including the changed-function mutation report and the live integration gate. Use when committing or pushing cveta2 changes or when a pre-commit or commit-msg hook fails.
 ---
 
 # Commit cveta2 changes
 
-Create the requested commit from the intended change set while preserving every
-unrelated working-tree change. A request to commit does not imply a push; push
-only when the user asks for it or when the standing authorization described in
-`AGENTS.md` and `.specify/memory/engineering.md` ("Preserve the working tree")
-applies. Explicit stopping points still win.
+General rules (inspect status and diffs, stage exact paths with
+`git add -- <path>`, never stash/reset/broad-stage, no `--no-verify`) come from
+`AGENTS.md` and engineering guidance. This skill adds what is specific here.
 
-## Establish the change set
+## Message
 
-Inspect before staging:
+`type(scope)!: description`, lowercase type from the `conventional-pre-commit`
+args in `.pre-commit-config.yaml`. Only `feat`, `fix`, `perf` and `!` move the
+version (semantic-release). A `!` needs a `BREAKING CHANGE:` footer for the
+changelog text. Reword git's default `Revert "..."` subject into a type.
 
-```bash
-git status --short --branch
-git diff -- <intended paths>
-git diff --cached
-git remote -v
-```
+## Hooks
 
-Identify which modified and untracked paths belong to the current task. Existing
-changes outside that set remain untouched. If ownership is unclear, use the
-conversation and earlier status snapshots; ask only when ambiguity could place
-someone else's work in the commit.
+`git commit` runs every gate; there is no pre-push stage, so a passing commit is
+safe to push with plain `git push`. Read `.pre-commit-config.yaml` for the list.
 
-Update documentation only when the change invalidates it. CLI or public API
-changes normally require the Russian user docs and their index; architecture or
-data-format changes require their named documents. A docs-only change does not
-require unrelated code edits.
+- A hook that rewrites files (`uv lock`, `ruff format`): inspect the new diff,
+  restage only task-owned paths, commit again.
+- `mutmut` (when `cveta2/` changes) is advisory: it prints surviving mutants of
+  the changed functions and passes. Triage them with the `mutation-testing`
+  skill when the change is behavioural; it fails only on a tool error.
+- `integration-tests` (when `cveta2/`, `tests/integration/`, `pyproject.toml`
+  or `uv.lock` change) runs the live suite for minutes. Do not edit the checkout
+  meanwhile: pre-commit holds unstaged changes stashed. A down stand, a `room`
+  WAIT or an active `tests/integration/.run-tag` fails it; see the
+  `running-integration-tests` skill. `SKIP=integration-tests` only on the user's
+  explicit request.
+- A failure caused by unrelated pre-existing work: report the exact blocker; do
+  not modify, stage or discard that work.
 
-## Stage exact paths
+After rebase, cherry-pick or merge (no pre-commit hook runs), run
+`uv run pre-commit run --all-files` and, for the mutation report,
+`uv run python scripts/mutation.py --base <upstream>` before pushing. A commit
+that only deletes files runs no file-filtered hook (mutation, live gate).
 
-Use `git add -- <path>...` for the intended files. Never use `git add -A`,
-`git add .`, a broad glob, or a manual stash. Pre-commit may temporarily stash
-unstaged changes as part of its own isolation; leave that to the hook.
+## Report
 
-Review the actual candidate:
-
-```bash
-git diff --cached --stat
-git diff --cached
-```
-
-Confirm it contains only the intended changes and no credentials, generated
-artifacts, integration `.env`, mutation workspace, or unrelated edits.
-
-## Commit
-
-Use a Conventional Commit subject accepted by the `conventional-pre-commit`
-commit-msg hook: `type(scope)!: description`, with the scope and `!` optional and
-the type one of `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`,
-`refactor`, `style` or `test` (the hook's `args` in `.pre-commit-config.yaml`).
-Write the type in lowercase: semantic-release reads it case-sensitively. Merge
-and autosquash subjects are exempt; git's default `Revert "..."` subject is not,
-so reword a revert into one of these types. A scope may contain only word
-characters, spaces and `:,-/.#`. Among types, only `feat`, `fix` and `perf` move
-the version; a `!` on any type is a breaking change and also moves it.
-Add a body when it helps explain behavior or tradeoffs; separate it from the
-subject with a blank line. A breaking change needs both the `!` marker and a
-`BREAKING CHANGE:` footer: the hook no longer enforces the footer, but without it
-the changelog entry has no text.
-
-`git commit` runs the configured hooks. Read `.pre-commit-config.yaml` for
-the current gate rather than copying its list here. If a hook rewrites files,
-inspect the new diff and restage only task-owned paths before retrying. If a hook
-fails because of unrelated pre-existing work, report the exact blocker; do not
-modify, stage, stash, or discard that work.
-
-Do not use `--no-verify` unless the user explicitly asks to bypass hooks.
-After success, read back the commit summary and verify that unrelated changes
-remain in the working tree.
-
-## Push only when requested or authorized
-
-The repository convention is an SSH remote. Inspect it, but do not rewrite an
-HTTPS or unexpected remote automatically. Push the requested branch/ref with
-plain `git push` when its configured upstream is correct, or name the explicit
-ref when needed.
-
-Pre-push runs the full mutation profile, version-drift check, and, when
-`tests/integration/.env` exists, a live integration gate. That gate recreates
-MinIO/ClearML and exact-tag CVAT objects according to the
-`running-integration-tests` skill. A push request authorizes the configured
-hooks; if a hook cannot run, report the failure. Use
-`SKIP=integration-tests` only when the user explicitly requests that skip.
-
-Git opens the SSH transport before the pre-push hooks run, and the gates
-outlast GitHub's idle timeout. The clone must therefore carry
-`core.sshCommand "ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=40"`
-(engineering guidance's setup step sets it); check with
-`git config --get core.sshCommand` before a gated push and set it when
-missing. A push that ends with `Connection to github.com closed by remote
-host` after green hooks delivered nothing: verify with
-`git ls-remote origin <refs>` and simply push again with the keepalive in
-place. Never shorten the gates with `SKIP` to work around this.
-
-Return the commit hash and subject, pushed ref if any, checks run by the hooks,
-and the remaining unrelated working-tree state.
+Commit hash and subject, pushed ref if any (confirm with
+`git ls-remote origin <ref>`), the hooks that ran and the mutation survivors
+reported, and the remaining unrelated working-tree state.

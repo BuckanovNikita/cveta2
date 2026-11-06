@@ -1,114 +1,55 @@
 ---
 name: mutation-testing
-description: Diagnoses and changes cveta2's mutmut mutation gate (scripts/mutation.py, [tool.mutmut] and [tool.cveta2.mutation] in pyproject.toml). Use for surviving or uncovered mutants, fast/full profile failures, mutation-score interpretation, equivalent-mutant decisions, or edits to only_mutate, profiles, and mutation configuration.
+description: Runs and triages cveta2's changed-function mutation check (scripts/mutation.py, [tool.mutmut] in pyproject.toml). Use for surviving mutants reported by the pre-commit mutmut hook, hardening tests of a function, deciding whether a survivor is equivalent, a run that produces no mutants, or edits to the mutmut settings.
 ---
 
-# Maintain the cveta2 mutation gate
+# Changed-function mutation testing
 
-`scripts/mutation.py` runs mutmut for the current
-`[tool.mutmut].only_mutate` scope and computes the real pass/fail result.
-Read live `pyproject.toml` and the script before
-changing configuration; do not rely on a copied module inventory.
-
-## Commands and profiles
+`scripts/mutation.py` maps the staged diff to the top-level functions and methods
+it touches, exports the index into a fresh temporary workspace, and runs mutmut
+there on those functions only. It reports survivors with their diffs and passes;
+nothing is cached or shared between runs. Read the script's docstring for the
+mechanics.
 
 ```bash
-uv run python scripts/mutation.py --profile fast
-uv run python scripts/mutation.py --profile full
-uv run python scripts/mutation.py
-uv run python scripts/mutation.py '<mutant-name-or-glob>'
-uv run mutmut show <name>
-uv run mutmut browse
+uv run python scripts/mutation.py                   # staged change vs HEAD (the hook)
+uv run python scripts/mutation.py --base main       # the whole branch
+uv run python scripts/mutation.py cveta2/domain/merge.py   # every function of a file
+uv run python scripts/mutation.py --keep --strict   # keep workspace; exit 1 on survivors
 ```
 
-`fast` is the pre-commit subset. `full` is the pre-push scope and its
-profile list is intentionally empty: that produces a bare `mutmut run`, which
-can reuse cached verdicts. Replacing the empty list with `"*"` passes a
-positional filter and re-executes the whole scope. A run without `--profile`
-also covers the full configured scope.
-
-## What pass, score, and profile output mean
-
-`mutmut run` itself exits zero, so it does not decide the gate.
-`scripts/mutation.py` exports CI stats and textual results, then the gate:
-
-- treats `killed`, `skipped`, and `caught by type check` as benign;
-- fails on any other result not justified in
-  `[tool.cveta2.mutation.equivalent]`;
-- fails when an equivalent entry no longer names a live survivor;
-- narrows both survivors and allowlist entries to the selected profile.
-
-The printed mutation score is `killed / total` for the whole configured scope.
-It includes whole-scope context even during a filtered profile and is not a
-quality threshold. A passing gate means zero unexplained survivors and zero
-stale justifications in the selected scope; read the profile's “not killed”
-count separately from the whole-scope score.
-
-## Scope decisions
-
-Scope is a ratchet. Add a module to `only_mutate` only with the coverage,
-assertions, and justified equivalents that make the gate pass in the same
-change. There is no parked measured tier because `mutmut results` walks every
-configured file. Evaluate a candidate in an isolated worktree or disposable
-copy so temporary scope edits cannot overwrite a shared working tree.
-
-Use two admission stages:
-
-1. Close meaningful line coverage. With `mutate_only_covered_lines` off, an
-   uncovered line produces automatic survivors; mutmut's `no tests` result is
-   the relevant disqualifier.
-2. Triage survivors for assertion quality and genuine equivalence.
-
-Exclude zero-mutable or low-signal presentation/plumbing surfaces only for a
-specific, documented reason. Do not preserve static “in/out of scope” lists in
-this skill; `only_mutate` is authoritative.
+With `--keep`, `cd` into the printed workspace and use
+`<repo>/.venv/bin/mutmut show <name>` or `browse`.
 
 ## Triage a survivor
 
-Inspect the exact mutant and the test path that should observe it.
+1. Read the diff. If the mutation changes an outcome, boundary, side effect or
+   contract a caller can observe, strengthen or add a behavioural test, stage
+   it, and rerun.
+2. If it cannot change observable behaviour (equivalent), or only changes
+   presentation, leave it and say so in the report. There is no allowlist.
+3. Never reshape correct production code only to stop a mutant, and do not pin
+   message wording or serialized formatting a consumer parses anyway.
 
-1. Strengthen a behavioral assertion when the mutation changes an outcome,
-   boundary, side effect, or contract.
-2. If the mutation genuinely cannot change behavior, add the exact mutant name
-   to `[tool.cveta2.mutation.equivalent]` with a reason that proves
-   equivalence.
-3. Use `do_not_mutate_patterns` for a stable class of low-signal presentation
-   surfaces, not to hide functional logic.
+## Why a change produces no mutants
 
-Never reshape correct production code solely to make mutmut stop generating a
-mutant. Do not pin serialized formatting when consumers parse it, or message
-wording when only presentation changes. Test the contract the user or caller
-observes.
+mutmut mutates only code inside undecorated top-level functions and methods (a
+single bare `@staticmethod`/`@classmethod` is allowed), never f-strings, module
+constants or docstrings, and skips lines matching `do_not_mutate_patterns`
+(logging, progress bars, argparse help). "No mutants" is a pass. "No unit test
+exercises the changed functions" (e.g. code only `tests/integration` reaches)
+also passes, but is a prompt to add a unit test.
 
-Equivalent names are unstable when a function changes. Re-read every affected
-justification after renumbering; stale entries intentionally fail the gate.
+## Settings invariants
 
-## Configuration invariants
-
-Read [mutation-internals.md](mutation-internals.md) before an unkillable mutant,
-scope/profile edit, cache surprise, or performance diagnosis. Preserve these
-current invariants unless the underlying tool behavior changes and is verified:
-
-- `pytest_add_cli_args` includes `-n 0`; an xdist pool per mutant can hang
-  or distort results.
-- `cache_invalidation_files` and
-  `on_dependency_change = "rerun"` prevent weakened tests from reusing stale
-  verdicts.
-- `mutate_only_covered_lines` stays off because its coverage pre-pass corrupts
-  the later stats run in this environment.
-- `scripts/mutation.py` fingerprints mutation-scope fields and
-  recreates `mutants/` when they change; mutmut's own fingerprint omits them.
-- `PYTEST_DEBUG_TEMPROOT` stays under this checkout's `mutants/` so another
-  pytest session cannot remove a shared temp-root link and create a false kill.
-- `mutants/` remains generated, gitignored, and excluded from normal analysis.
-
-Adding a new targeted test may require regenerating `mutants/` because mutmut
-can retain the old test-to-mutant association. Confirm that diagnosis before
-removing the generated workspace; never delete source or test files.
+- `pytest_add_cli_args` keeps `-n 0` (mutmut forks per mutant; xdist would spawn
+  a pool each time) and the `--ignore` list of suites that never execute
+  package code.
+- `mutate_only_covered_lines` stays off (its coverage pass breaks numpy import).
+- Do not set `only_mutate`: the script derives it and refuses a checked-in one.
+- `do_not_mutate_patterns` is for stable presentation surfaces, not logic.
 
 ## Completion
 
-For a survivor, report its diff, classification, observing test, and targeted
-rerun. For a configuration or scope change, report the changed live settings
-and the required fast/full result. Do not claim a mutation gate passed unless
-the corresponding script completed and printed no unexplained mutants.
+Report the functions mutated, killed/not-killed counts, each survivor's
+classification (test added, equivalent, presentation) and the rerun result.

@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "task": "Simplify development gates: change-scoped advisory mutation, every gate in pre-commit, slimmer skills",
+  "scope": [
+    "scripts/mutation.py",
+    "tests/test_mutation_tool.py",
+    "tests/integration/lifecycle.py",
+    "tests/test_integration_lifecycle.py",
+    "tests/integration/.env.example",
+    ".pre-commit-config.yaml",
+    "pyproject.toml",
+    "tests/env_isolation.py",
+    ".gitignore"
+  ],
+  "impact": "modules",
+  "rules": "pyproject.toml import-linter contracts and tests/test_architecture.py own the runtime package layers and inner effect ownership; they do not change. tests/test_integration_tool_boundaries.py keeps scripts/ and tests/ tooling out of the runtime package and keeps the integration lifecycle standard-library only. Development tooling never becomes a runtime dependency.",
+  "modules": [
+    {
+      "id": "mutation-tool",
+      "path": "scripts/mutation.py",
+      "change": "modify",
+      "responsibility": "Change-scoped mutation testing: map changed lines to functions, run mutmut in a fresh per-run workspace exported from the staged tree, and report survivors.",
+      "interface": "python scripts/mutation.py [--base REV] [--keep] [--strict] [--max-children N] [FILE...]; exit 0 when the run completes (survivors reported) or nothing is mutable; nonzero on a tool, configuration or clean-test failure, or on survivors with --strict.",
+      "layer": "Development tooling, outside the runtime package.",
+      "allowed_dependencies": [
+        "Python standard library",
+        "git and the repository venv's mutmut as subprocesses"
+      ],
+      "forbidden_dependencies": [
+        "cveta2 runtime imports",
+        "being imported by any cveta2 runtime module"
+      ],
+      "effects": "Owns subprocesses and one temporary workspace per run, removed afterwards unless --keep.",
+      "contracts": [
+        "runtime-excludes-tooling",
+        "package-layers"
+      ]
+    },
+    {
+      "id": "integration-lifecycle",
+      "path": "tests/integration/lifecycle.py",
+      "change": "modify",
+      "responsibility": "Resolve one integration run (installed k8s-infra skill, run tag, Secret-derived environment) and drive up, test, stop and the pre-commit gate on the shared stands.",
+      "interface": "python -m tests.integration.lifecycle {env,up,test,stop,gate}; armed when the k8s-infra skill is found; the gate adds an infra.py room preflight; tag precedence INFRA_RUN_TAG > main branch slot > .run-tag > mint.",
+      "layer": "Integration test tooling, outside the runtime package; runs before pytest and tests.env_isolation.",
+      "allowed_dependencies": [
+        "Python standard library",
+        "k8s-infra helper scripts, uv, curl and git as subprocesses"
+      ],
+      "forbidden_dependencies": [
+        "cveta2 runtime imports",
+        "SDKs (cvat_sdk, boto3, clearml)",
+        "being imported by any cveta2 runtime module"
+      ],
+      "effects": "Owns subprocesses, tests/integration/.run-tag, the coco8 download and the child process environment.",
+      "contracts": [
+        "runtime-excludes-tooling",
+        "lifecycle-stdlib-only",
+        "package-layers"
+      ]
+    }
+  ],
+  "contracts": [
+    {
+      "id": "package-layers",
+      "path": "pyproject.toml",
+      "status": "existing",
+      "rules": "Exhaustive inward layers and adapter independence for the cveta2 package (import-linter).",
+      "check": "imports"
+    },
+    {
+      "id": "runtime-excludes-tooling",
+      "path": "tests/test_integration_tool_boundaries.py",
+      "status": "existing",
+      "rules": "No cveta2 runtime module imports tests or scripts; negative cases inject both imports.",
+      "check": "boundaries"
+    },
+    {
+      "id": "lifecycle-stdlib-only",
+      "path": "tests/test_integration_tool_boundaries.py",
+      "status": "existing",
+      "rules": "tests/integration/lifecycle.py imports only the standard library; injected cveta2 and SDK imports must fail.",
+      "check": "boundaries"
+    }
+  ],
+  "checks": [
+    {
+      "id": "imports",
+      "kind": "imports",
+      "command": "uv run lint-imports && uv run pytest -n 0 tests/test_architecture.py",
+      "expectation": "Layer contracts kept; effect fixtures still fail."
+    },
+    {
+      "id": "boundaries",
+      "kind": "imports",
+      "command": "uv run pytest -n 0 tests/test_integration_tool_boundaries.py",
+      "expectation": "Runtime modules import no tooling; lifecycle.py stays standard-library only; injected forbidden imports are reported."
+    },
+    {
+      "id": "tools",
+      "kind": "behavior",
+      "command": "uv run pytest -n 0 tests/test_integration_lifecycle.py tests/test_mutation_tool.py",
+      "expectation": "Lifecycle arming, room preflight and tag rules; mutation diff mapping, workspace isolation, exit codes and reporting."
+    },
+    {
+      "id": "mutation-e2e",
+      "kind": "behavior",
+      "command": "uv run python scripts/mutation.py --base HEAD~0 <changed file> (weakened assertion) and on a clean tree",
+      "expectation": "A weakened test yields a reported survivor; a clean tree reports nothing to mutate; workspace removed."
+    },
+    {
+      "id": "live-gate",
+      "kind": "behavior",
+      "command": "git commit (pre-commit runs uv run python -m tests.integration.lifecycle gate)",
+      "expectation": "The live gate runs at pre-commit, passes and stops its tag."
+    },
+    {
+      "id": "docs",
+      "kind": "documentation",
+      "command": "uv run pytest -n 0 tests/test_docs.py",
+      "expectation": "Documented commands, paths and links resolve."
+    }
+  ],
+  "documentation": ".specify/memory/constitution.md, .specify/memory/engineering.md, AGENTS.md, scripts/README.md, .claude/skills/{commit,mutation-testing,running-integration-tests}; historical specs and plans are not rewritten.",
+  "review": {
+    "status": "pending"
+  }
+}

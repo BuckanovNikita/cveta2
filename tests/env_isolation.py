@@ -31,6 +31,12 @@ os.environ["USERPROFILE"] = str(_FAKE_HOME)
 os.environ["XDG_CONFIG_HOME"] = str(_FAKE_HOME / ".config")
 os.environ["XDG_CACHE_HOME"] = str(_FAKE_HOME / ".cache")
 
+# Under the pre-commit hook git exports GIT_INDEX_FILE (and may export GIT_DIR
+# or GIT_WORK_TREE). A test that builds its own throwaway repository would
+# otherwise read or write the index of the commit in progress.
+for _name in [name for name in os.environ if name.startswith("GIT_")]:
+    del os.environ[_name]
+
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_configure(config: pytest.Config) -> None:

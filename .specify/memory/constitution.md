@@ -62,10 +62,12 @@ it when feasible, and verify the original failure path. When reproduction is
 unavailable, distinguish hypotheses, static evidence, and performed checks.
 Documentation-only work normally runs `uv run pytest tests/test_docs.py`.
 Reported results MUST identify skipped or unavailable checks accurately.
-Preserve test environment isolation and cleanup. Mutation scope remains a
-ratchet with zero unexplained survivors; use the repository mutation skill for
-scope changes or triage. Commits and pushes still require their configured
-stage checks; Spec Kit does not replace them.
+Preserve test environment isolation and cleanup. Mutation testing is advisory
+and scoped to each change: commits mutate the functions they change and report
+survivors, which are triaged with the repository mutation skill rather than
+recorded in an allowlist. Commits still require their configured pre-commit
+checks, which include every long-running gate, so a committed change needs no
+separate push gate; Spec Kit does not replace them.
 
 ### V. Preserve ownership, documentation, and release controls
 
@@ -183,4 +185,11 @@ Version 1.5.1 clarifies cross-host instruction discovery: a regular Claude impor
 adapter replaces the symlink so the same shared policy works in regular-file
 checkouts. Project workflow, review gates and application contracts are unchanged.
 
-**Version**: 1.5.1 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-02
+Version 2.0.0 redefines the mutation principle and the gate placement at the
+user's request. The zero-survivor ratchet and its equivalent-mutant allowlist are
+removed; mutation testing runs on each commit's changed functions in an isolated
+workspace and reports survivors without blocking. All quality gates, including
+the live integration gate, run at the pre-commit stage; no pre-push stage exists.
+Application contracts are unchanged; inactive feature history is not rewritten.
+
+**Version**: 2.0.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-06

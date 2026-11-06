@@ -41,11 +41,11 @@ Human usage is in [README.md](README.md); setup and release commands are in
 
 These skills remain applicable within the Spec Kit workflow:
 
-- `commit` — stage exact paths, write Conventional Commits, handle hook rewrites,
-  and run gated pushes.
-- `mutation-testing` — mutmut gate failures, survivors, equivalents, scope and profiles.
+- `commit` — stage exact paths, write Conventional Commits, handle hook rewrites
+  and failures.
+- `mutation-testing` — run and triage the changed-function mutation check.
 - `running-integration-tests` — live CVAT/MinIO/ClearML runs, run tags, cleanup and
-  the pre-push integration gate.
+  the pre-commit integration gate.
 
 ## Authorization
 
