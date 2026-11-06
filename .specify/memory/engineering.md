@@ -389,8 +389,9 @@ user explicitly directs it.
 - The `pytest` hook runs `pytest --testmon`: only the tests whose executed code
   changed, live tests included. It does not enforce coverage; the full run
   `uv run pytest --cov` does, and it is required on the branch tip before a
-  merge. Reset a confused selection with `rm .testmondata` (one per worktree,
-  gitignored).
+  merge. testmon tracks Python only, so a commit that stages a data file under
+  `cveta2/` or `tests/` (preset YAML, fixture JSON) runs the whole suite. Reset
+  a confused selection with `rm .testmondata` (one per worktree, gitignored).
 - The changed-function mutation run comes last and only when `cveta2/` Python
   files change. Mutation is advisory: it prints surviving mutants and passes,
   failing only on a tool error or a failing clean test run; triage behavioural

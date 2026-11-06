@@ -86,12 +86,14 @@ repos:
 
       # pytest-testmon runs only the tests whose executed code changed, live
       # tests included (they wait, with a notice, while the stands are
-      # stopped). Coverage is enforced by the full run before a merge
+      # stopped). testmon tracks Python only, so a staged data file under
+      # cveta2/ or tests/ (preset YAML, fixture JSON) runs everything instead.
+      # Coverage is enforced by the full run before a merge
       # (`uv run pytest --cov`), not here: testmon and coverage cannot share
       # one run.
       - id: pytest
         name: pytest (affected tests, testmon)
-        entry: uv run --locked pytest --testmon
+        entry: bash -c 'if git diff --cached --name-only | grep -E "^(cveta2|tests)/" | grep -qvE "\.py$"; then exec uv run --locked pytest --testmon-noselect; fi; exec uv run --locked pytest --testmon' 
         language: system
         pass_filenames: false
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)

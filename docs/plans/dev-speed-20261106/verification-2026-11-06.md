@@ -267,3 +267,13 @@ After the fixes:
   the owner to end the cleanup.
 - **Owner decision on DEP003.** Whether to declare botocore, urllib3, numpy and
   prompt_toolkit as direct dependencies.
+
+## Post-acceptance fix: data-only changes under testmon
+
+- **The problem.** A probe appended a line to `cveta2/presets/default.yaml`.
+  `pytest --testmon --collect-only` then reported "changed files: 0" and
+  collected no tests: testmon tracks Python only.
+- **The fix.** The `pytest` hook now runs `--testmon-noselect`, the whole suite,
+  whenever a staged non-Python file sits under `cveta2/` or `tests/`.
+- **Checked:** the file-detection pipeline, on a preset, on fixture JSON
+  together with a `.py` file, and on Python-only changes.
