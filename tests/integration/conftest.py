@@ -1,30 +1,64 @@
-"""Integration test helpers: the stand client, the seeded project, live fixtures.
+"""Live-test session and helpers: the run on the stands, its client and project.
 
-Everything here reads ``CVAT_INTEGRATION_*`` (exported by
-``tests/integration/lifecycle.py``): host, credentials, the organization every
-call is scoped to, and the full name of this run's seeded project.
+The live tests are part of the normal pytest run. ``tests/conftest.py`` marks
+every test here ``integration`` and puts it in the ``live`` xdist group, so one
+worker runs them serially (CVAT rate limits) while unit tests stay parallel.
+The autouse session fixture ``live_run`` prepares one tagged run through
+``tests/integration/lifecycle.py`` before the first live test - waiting, with a
+notice, while the stands are stopped - and keeps or stops it after the last.
+Everything else reads the ``CVAT_INTEGRATION_*`` variables that run exports.
 """
 
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
 from cveta2.adapters.config.settings import CvatConfig
-from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
-from tests.fixtures.fake_cvat_project import LoadedFixtures
+from tests.integration import lifecycle
 from tests.integration.stand_tls import StandTlsError, tls_failure_message
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from cvat_sdk import Client as CvatSdkClient
 
     from cveta2.application.ports.cvat import CvatApiPort
-    from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta
-    from cveta2.domain.models import LabelInfo, ProjectInfo, TaskInfo
+    from cveta2.domain.models import ProjectInfo
 
-pytestmark = pytest.mark.integration
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Run]:
+    """Prepare this session's run on the stands, then keep or stop it.
+
+    Notices bypass output capture so a waiting commit says why it waits.
+    """
+    capture = request.config.pluginmanager.getplugin("capturemanager")
+
+    def notify(message: str) -> None:
+        with capture.global_and_fixture_disabled():
+            sys.stderr.write(f"\n==> {message}\n")
+            sys.stderr.flush()
+
+    try:
+        run = lifecycle.prepare(REPO_ROOT, notify=notify)
+    except lifecycle.LifecycleError as error:
+        refusal = "\n".join(error.lines)
+    else:
+        refusal = ""
+    if refusal:
+        pytest.fail(refusal, pytrace=False)
+    try:
+        yield run
+    finally:
+        if lifecycle.finish(run):
+            notify(f"run '{run.tag}' is not fully torn down; see the output above.")
 
 
 def _env(key: str, default: str) -> str:
@@ -94,37 +128,3 @@ def find_seeded_project(adapter: CvatApiPort) -> ProjectInfo:
             "run cvat_stand.py cleanup --tag and seed again"
         )
     return matches[0]
-
-
-def fetch_live_fixtures() -> LoadedFixtures:
-    """Connect to live CVAT and fetch the seeded project as LoadedFixtures.
-
-    Called by the parameterized ``coco8_fixtures`` fixture in
-    ``tests/conftest.py`` when ``request.param == "live"``.
-    Skips the test session if CVAT is unreachable.
-    """
-    host = _env("CVAT_INTEGRATION_HOST", "https://cvat.k8s.docker.internal")
-    try:
-        client = _make_sdk_client()
-    except OSError as exc:
-        pytest.skip(f"CVAT not reachable at {host}: {exc}")
-
-    try:
-        adapter = SdkCvatApiAdapter(client)
-        project = find_seeded_project(adapter)
-        tasks: list[TaskInfo] = adapter.get_project_tasks(project.id)
-        labels: list[LabelInfo] = adapter.get_project_labels(project.id)
-        task_data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {}
-        for task in tasks:
-            data_meta = adapter.get_task_data_meta(task.id)
-            annotations = adapter.get_task_annotations(task.id)
-            task_data[task.id] = (data_meta, annotations)
-
-        return LoadedFixtures(
-            project=project,
-            tasks=tasks,
-            labels=labels,
-            task_data=task_data,
-        )
-    finally:
-        client.close()

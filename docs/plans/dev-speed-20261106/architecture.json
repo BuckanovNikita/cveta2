@@ -66,7 +66,7 @@
       "path": "scripts/mutation.py",
       "change": "modify",
       "responsibility": "Change-scoped advisory mutation testing with a time and mutant budget.",
-      "interface": "python scripts/mutation.py [--base REV] [--budget-seconds N] [--max-mutants N] [--keep] [--strict] [FILE...]; exit 0 on completed or budget-limited runs.",
+      "interface": "python scripts/mutation.py [--base REV] [--budget-seconds N] [--max-functions N] [--keep] [--strict] [FILE...]; exit 0 on completed or budget-limited runs.",
       "layer": "Development tooling, outside the runtime package.",
       "allowed_dependencies": ["Python standard library", "git and the repository venv's mutmut as subprocesses"],
       "forbidden_dependencies": ["cveta2 runtime imports", "being imported by any cveta2 runtime module"],

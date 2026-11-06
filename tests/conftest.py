@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,8 +17,6 @@ from tests.helpers import build_fake, write_test_config
 
 if TYPE_CHECKING:
     from collections.abc import Generator
-
-    from _pytest.mark.structures import ParameterSet
 
     from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta
     from cveta2.domain.models import TaskInfo
@@ -40,19 +37,46 @@ _CVAT_ENV_VARS = (
     "CVETA2_RETRY_ATTEMPTS",
 )
 
-# Gate tests/integration/ collection on CVAT_INTEGRATION_HOST env var.
-collect_ignore_glob: list[str] = (
-    [] if os.environ.get("CVAT_INTEGRATION_HOST") else ["integration/*"]
-)
+INTEGRATION_DIR = Path(__file__).resolve().parent / "integration"
+_COLLECTION_ORDER = pytest.StashKey[int]()
+_collected = 0
 
 
+def pytest_itemcollected(item: pytest.Item) -> None:
+    """Mark live tests and put them in one xdist group.
+
+    Every test under ``tests/integration`` is marked ``integration`` and joins
+    the ``live`` xdist group: with ``--dist loadgroup`` one worker runs them
+    serially, so the run's session fixture prepares the stands once. This runs
+    per item during collection, before xdist reads the groups. Exclude them
+    with ``-m "not integration"``.
+    """
+    global _collected  # noqa: PLW0603 - a per-process collection counter
+    item.stash[_COLLECTION_ORDER] = _collected
+    _collected += 1
+    if item.path.is_relative_to(INTEGRATION_DIR):
+        item.add_marker(pytest.mark.integration)
+        item.add_marker(pytest.mark.xdist_group("live"))
+
+
+@pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Check isolation and termination before tests relying on those invariants.
+    """Keep the live tests in file order, then order the invariant guards first.
+
+    pytest-randomly shuffles everything; the live tests share one seeded
+    project and some add tasks to it, so they run in their collection order
+    (in the slots the shuffle gave them) while unit tests stay shuffled.
 
     Invalid worker floors break the sequential-transfer fixture. The bounded
     stream rejects CSV scanning beyond EOF. Check both before dependent tests,
-    even when a runner supplies selected tests in arbitrary order.
+    even when a runner (or pytest-randomly, hence ``trylast``) supplies the
+    selected tests in arbitrary order.
     """
+    slots = [i for i, it in enumerate(items) if it.get_closest_marker("integration")]
+    live = sorted((items[i] for i in slots), key=lambda it: it.stash[_COLLECTION_ORDER])
+    for slot, item in zip(slots, live, strict=True):
+        items[slot] = item
+
     guards = {
         "test_counts_below_one_are_floored": 0,
         "test_csv_reader_stops_after_first_eof": 1,
@@ -60,25 +84,10 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     items.sort(key=lambda item: guards.get(item.name, len(guards)))
 
 
-def _coco8_params() -> list[ParameterSet]:
-    """Build parameterization list for coco8_fixtures."""
-    params: list[ParameterSet] = [pytest.param("json", id="fixtures")]
-    if os.environ.get("CVAT_INTEGRATION_HOST"):
-        params.append(
-            pytest.param("live", id="live-cvat", marks=pytest.mark.integration)
-        )
-    return params
-
-
-@pytest.fixture(scope="session", params=_coco8_params())
-def coco8_fixtures(request: pytest.FixtureRequest) -> LoadedFixtures:
-    """Load coco8-dev fixtures from JSON files or live CVAT."""
-    if request.param == "json":
-        return load_cvat_fixtures(COCO8_DIR)
-    # Lazy import to avoid failures when integration deps aren't needed
-    from tests.integration.conftest import fetch_live_fixtures
-
-    return fetch_live_fixtures()
+@pytest.fixture(scope="session")
+def coco8_fixtures() -> LoadedFixtures:
+    """Load the coco8-dev fixtures from their recorded JSON files."""
+    return load_cvat_fixtures(COCO8_DIR)
 
 
 @pytest.fixture

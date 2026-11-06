@@ -34,8 +34,9 @@ it. A commit-only request without push authorization still stops before pushing.
 
 ## Spec Kit development workflow
 
-Spec Kit is the primary specification, planning, and task workflow for behavior
-changes, including bug fixes. Read [constitution.md](constitution.md) before
+Spec Kit is the primary specification, planning, and task workflow for new or
+changed capabilities. Bug fixes and refactors that change no capability contract
+use the lightweight path below instead. Read [constitution.md](constitution.md) before
 planning. Codex uses `$speckit-<step>`; Claude uses `/speckit-<step>`.
 Discover the governing process from explicit user selection, these instructions
 and active artifacts before invoking helpers. This project retains Spec Kit; the
@@ -52,8 +53,8 @@ Both integrations are installed, with Codex as the default.
 Set up a clone with `uv sync` and `uv run prek install` (one command
 installs the pre-commit and commit-msg stages; prek is a pre-commit-compatible
 runner that reads `.pre-commit-config.yaml`). Python 3.12 or 3.13 and uv are
-required; integration tests also need `kubectl` with the `docker-desktop`
-context and the `k8s-infra` skill, whose presence arms the live gate.
+required; the live tests, part of the normal suite, also need `kubectl` with the
+`docker-desktop` context and the installed `k8s-infra` skill.
 
 For a new capability, run `specify` to create `specs/<number>-<name>/spec.md`.
 Continue through `clarify` -> `plan` -> `checklist` -> `tasks` -> `analyze` ->
@@ -93,9 +94,11 @@ use the existing lightweight workflow: a scoped maintenance plan and adjacent
 architecture record under `docs/plans/<task>/`, appropriate checks and applicable
 review/release evaluation, without creating an application feature specification.
 Runtime maintenance uses module impact and behavioral checks; only inspected
-documentation-only work uses no-impact reasoning. A behavior-changing bug fix needs a
-failing observation, reproduction when feasible, and verification of the
-original failure path in its Spec Kit artifacts.
+documentation-only work uses no-impact reasoning. A bug fix or refactor uses the
+same lightweight path (for a small one, the commit message alone may carry it);
+a bug fix still needs a failing observation, reproduction when feasible, and
+verification of the original failure path. A fix that changes a documented
+capability contract goes through Spec Kit.
 
 Other skills may support implementation, debugging, review, and verification;
 do not create a competing specification or plan under another workflow.
@@ -199,16 +202,32 @@ no package test run: its commit runs only ruff and the other fast hooks, because
 the heavy hooks are filtered to code and dependency paths. A commit runs the
 configured hooks, so do not duplicate the full gate before every small edit.
 
+Keep the suite lean. A test MUST observe behavior a caller or user can see:
+- do not add a test whose only purpose is to kill a mutant of a default
+  argument, a log line or other presentation wording;
+- assert message wording only for CLI contract output;
+- extend the module's existing test file instead of creating a new file per
+  origin (`*_regressions`, `*_architecture` for non-structural checks);
+- parametrize near-identical cases, and prefer a Hypothesis property over a
+  list of examples for round trips and invariants;
+- reuse the shared fakes in `tests/fixtures/` and builders in `tests/helpers.py`
+  instead of local copies.
+
 Pytest normally uses xdist and loads `tests.env_isolation` during startup. That
 plugin redirects HOME before imports; do not drop it when overriding
 `addopts`. Autouse fixtures isolate config and task cache, reset transfer
 workers before and after each test, and clean the temporary HOME at session
 teardown. Preserve those yield/finally cleanup paths when editing fixtures.
 
-The only registered live-test marker is `integration`. Integration collection
-is enabled by `CVAT_INTEGRATION_HOST`; integration runs must disable xdist to
-avoid CVAT rate limiting. No GPU-specific pytest marker is configured. Use the
-`running-integration-tests` skill for live tests and lifecycle operations.
+The live tests under `tests/integration` are part of every pytest run.
+`tests/conftest.py` marks them `integration` and puts them in the `live` xdist
+group, so `--dist loadgroup` (in `addopts`; keep it when overriding) runs them
+serially on one worker while unit tests stay parallel. Exclude them with
+`-m "not integration"` for quick local runs and in bounded subagent work.
+pytest-randomly shuffles test order and prints the seed; reproduce an order
+with `--randomly-seed=<seed>` and disable it with `-p no:randomly`. No
+GPU-specific pytest marker is configured. Use the `running-integration-tests`
+skill for live tests, the stopped-stand wait and lifecycle operations.
 
 ## Documentation
 
@@ -271,19 +290,28 @@ do not overwrite unrelated edits or install updated skills as a side effect.
 
 `scripts/mutation.py` mutates the functions a commit changes, in a fresh
 workspace exported from the index, and reports survivors without failing (the
-pre-commit `mutmut` hook). Nothing is cached between runs. Read the
+pre-commit `mutmut` hook), within a budget of 8 functions and 120 s per commit.
+Survivors are information: triage behavioural ones and never add a test whose
+only purpose is to kill a mutant of a default argument or of wording. Nothing
+is cached between runs. Read the
 `mutation-testing` skill before triaging survivors or changing the
 `[tool.mutmut]` settings.
 
 ## Integration tests
 
 Live tests run against the shared CVAT, MinIO and ClearML stands of the
-docker-desktop cluster under one run tag per run; nothing runs on this host.
-The `running-integration-tests` skill owns the lifecycle tool, the tag
-(minted through the k8s-infra skill, adopted with `INFRA_RUN_TAG`), the
-credentials (evaluated from the project Secrets, never stored), serial pytest
-execution, and exact-tag cleanup. Do not start, stop, or clean a stand
-manually, and never act on another run's tag.
+docker-desktop cluster under one run tag per pytest session; nothing runs on this
+host. The `running-integration-tests` skill owns the session fixture and
+lifecycle tool, the tag (minted through the k8s-infra skill, adopted with
+`INFRA_RUN_TAG`), the credentials (evaluated from the project Secrets, never
+stored), serial execution and exact-tag cleanup. Do not start, stop, or clean a
+stand manually, and never act on another run's tag.
+
+The owner stops the stands at times. A stopped stand makes the session print a
+notice and wait until the stands answer again (`CVETA2_STAND_WAIT_TIMEOUT`
+bounds the wait); it is not a failure. Run a command that may wait in the
+background, tell the user it waits for the stands, and never restart a stand,
+skip the live tests or bypass the hook because of it.
 
 ## Shared infra
 
@@ -337,25 +365,31 @@ Hooks call `uv run --locked`, so a stale `uv.lock` fails rather than re-locks.
 `uv.lock` may change only together with `pyproject.toml` (the `lockfile-guard`
 hook); a deliberate re-lock alone, such as a dependency upgrade, is a
 `build(deps):` commit made with `SKIP=lockfile-guard`, the one standing
-exception to the no-bypass rule below. Do not bypass hooks unless the
+exception to the no-bypass rule below; the release commit's skip in
+[Releases](#releases) is the other. Do not bypass hooks otherwise unless the
 user explicitly directs it.
 
 - Every gate runs at commit time, so a passing commit is safe to push with plain
   `git push`; there is no pre-push stage.
 - A hook that rewrites files (`uv lock`, `ruff format`): inspect the new diff,
   restage only task-owned paths and commit again.
-- The changed-function mutation run and the live integration gate run last and
-  only when their files change (`cveta2/`; for the live gate also
-  `tests/integration/`, `pyproject.toml`, `uv.lock`). Mutation is advisory: it
-  prints surviving mutants and passes, failing only on a tool error or a failing
-  clean test run; triage
-  behavioural survivors with the `mutation-testing` skill.
-- The live gate runs for minutes while pre-commit keeps unstaged changes stashed:
-  do not edit the checkout meanwhile. It replaces only objects named by its own
-  run tag (on `main`, the durable `cveta2-main` slot); the
-  `running-integration-tests` skill covers its failures. Skip it
-  (`SKIP=integration-tests`) only on the user's request, as a one-commit bypass,
-  never as a recovery step.
+- The `mypy` hook runs the mypy daemon (`dmypy run`), which stays alive per
+  worktree; stop it with `uv run dmypy stop` after a dependency or mypy
+  configuration change or a confusing result.
+- The `pytest` hook runs `pytest --testmon`: only the tests whose executed code
+  changed, live tests included. It does not enforce coverage; the full run
+  `uv run pytest --cov` does, and it is required on the branch tip before a
+  merge. Reset a confused selection with `rm .testmondata` (one per worktree,
+  gitignored).
+- The changed-function mutation run comes last and only when `cveta2/` Python
+  files change. Mutation is advisory: it prints surviving mutants and passes,
+  failing only on a tool error or a failing clean test run; triage behavioural
+  survivors with the `mutation-testing` skill.
+- When live tests are selected, the commit takes minutes while the hook runner
+  keeps unstaged changes stashed: do not edit the checkout meanwhile. A run
+  replaces only objects named by its own run tag (on `main`, the durable
+  `cveta2-main` slot); the `running-integration-tests` skill covers failures
+  and the stopped-stand wait.
 - A failure caused by unrelated pre-existing work: report the exact blocker; do
   not modify, stage or discard that work.
 - Rebase, cherry-pick and merge run no pre-commit hook, and a commit that only
@@ -370,11 +404,21 @@ and the remaining unrelated working-tree state.
 
 ### Releases
 
-`main` changes only by merge. On `main`, semantic-release derives versions,
-tags, and `CHANGELOG.md`; never hand-edit the project version. Release right
-after the merge with the `release` skill, which holds the commands and the
-recovery from a failed release hook. Documentation-only changes still evaluate
-release but may produce no new version tag.
+`main` changes only by a fast-forward merge (`git merge --ff-only`) of a branch
+rebased onto it, after the full suite passed on that exact tip:
+`uv run prek run --all-files` and `uv run pytest --cov` (live tests included,
+coverage enforced). The `main` tip is then a checked commit, so the release
+commit, which only bumps the version, `CHANGELOG.md` and `uv.lock`, runs with
+`SKIP=lint-imports,mypy,vulture,pytest` - the second standing hook exception;
+ruff, `uv lock --check`, the lockfile guard and `uv build` still run. One
+release at a time: the `release` skill holds a `flock` on
+`.git/cveta2-release.lock` from the merge to the push.
+
+On `main`, semantic-release derives versions, tags, and `CHANGELOG.md`; never
+hand-edit the project version. Release right after the merge with the `release`
+skill, which holds the commands and the recovery from a failed release hook.
+Documentation-only changes still evaluate release but may produce no new version
+tag.
 
 Complete commits and releases after required checks under the authorization rules
 in [Preserve the working tree](#preserve-the-working-tree). Standing

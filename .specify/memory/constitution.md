@@ -4,9 +4,12 @@
 
 ### I. Specify behavior before implementation
 
-Every behavior change, including a bug fix, MUST have a current `spec.md`,
-`plan.md`, and `tasks.md` under `specs/` before implementation. Spec Kit is the
-primary development workflow. Requirements MUST describe the intended outcome,
+Every new or changed capability MUST have a current `spec.md`, `plan.md`, and
+`tasks.md` under `specs/` before implementation. Spec Kit is the primary
+development workflow for features. A bug fix or refactor that changes no
+capability contract MAY instead use a plain `docs/plans/<task>/plan.md` (or,
+when small, only its commit) that records the failing observation, the
+reproduction when feasible and the verification of the original failure path. Requirements MUST describe the intended outcome,
 compatibility boundaries, and verifiable acceptance criteria. Existing code and
 documentation are evidence for planning, not an inferred specification of the
 entire application. The current consolidated product contract is
@@ -14,7 +17,7 @@ entire application. The current consolidated product contract is
 MUST retain current requirements, deliberate limitations and outstanding obligations,
 with immutable decision sources and a verified reachable checkpoint before retiring
 historical records. Archived specifications are evidence, not competing contracts.
-Subsequent behavior changes MUST use a new or active feature's spec, plan and tasks,
+Subsequent capability changes MUST use a new or active feature's spec, plan and tasks,
 describe their delta from the baseline and reconcile the baseline on acceptance.
 Completed feature history MUST remain recoverable rather than being rewritten.
 
@@ -63,18 +66,25 @@ unavailable, distinguish hypotheses, static evidence, and performed checks.
 Documentation-only work needs no package test run; commit hooks are
 path-filtered so that such commits run only fast checks.
 Reported results MUST identify skipped or unavailable checks accurately.
-Preserve test environment isolation and cleanup. Mutation testing is advisory
-and scoped to each change: commits mutate the functions they change and report
-survivors, which are triaged with the repository mutation skill rather than
-recorded in an allowlist. Commits still require their configured pre-commit
-checks, which include every long-running gate, so a committed change needs no
-separate push gate; Spec Kit does not replace them.
+Preserve test environment isolation and cleanup. Live tests on the shared stands
+are part of the normal test suite; a stopped stand is waited for with a notice,
+never skipped or bypassed. Mutation testing is advisory, scoped to each change
+and bounded by a per-commit budget: survivors are information, triaged with the
+repository mutation skill rather than recorded in an allowlist. Tests MUST
+observe behavior; do not add tests whose only purpose is to kill a mutant of a
+default argument or to pin presentation wording, and extend a module's existing
+test file before creating a new one. Commits require their configured,
+path-filtered hooks, whose test hook runs the tests affected by the change
+(live tests included). The full suite with coverage MUST pass on a branch tip
+before it is merged; Spec Kit does not replace these checks.
 
 ### V. Preserve ownership, documentation, and release controls
 
 Agents MUST inspect status and diffs before editing, preserve unrelated work,
 and stage only task-owned paths when a commit is authorized. Do not automatically
-stash, reset, revert, or bypass hooks. Shared integration resources MUST use the
+stash, reset, revert, or bypass hooks; the only standing exceptions are the
+release commit's documented heavy-hook skip and the `build(deps)` re-lock skip
+of the lockfile guard, both defined in engineering guidance. Shared integration resources MUST use the
 existing lifecycle skills, one owned run tag, and exact-tag cleanup on success
 and failure; leave other runs and durable resources intact. Do not store
 credentials or machine-specific setup in tracked project artifacts.
@@ -92,8 +102,9 @@ and `CLAUDE.md` as a regular file importing it with `@AGENTS.md`. Detailed opera
 Retain dated reviews as historical feature evidence, preserving dispositions
 without treating old suggestions as a current work queue.
 Use Conventional Commits when authorized; `main`
-changes only by merge and semantic-release owns versions, tags, and changelog
-updates. Never commit, push, publish, release, or change remotes without the
+changes only by a fast-forward merge of a branch whose tip passed the full
+suite, one release at a time, and semantic-release owns versions, tags, and
+changelog updates. Never commit, push, publish, release, or change remotes without the
 applicable user authorization.
 
 ## Project Constraints
@@ -136,7 +147,8 @@ work. Convergence MUST compare implementation with the current spec, plan, and
 tasks; repeat implementation and convergence until no required work remains.
 Keep dated verification evidence and limitations with the feature artifacts.
 Documentation-only corrections and maintenance without behavior changes may
-use the existing lightweight checks without feature artifacts. Enforcement is
+use the existing lightweight checks without feature artifacts; bug fixes and
+refactors may use the plain-plan path of principle I. Enforcement is
 through repository guidance, not a new CI or hook gate.
 
 Active feature selection is local checkout state, independent of Git branches.
@@ -198,4 +210,14 @@ request: the documentation test module is removed, and heavy commit hooks run
 only for code and dependency paths. Hooks run through prek. Gate placement and
 application contracts are unchanged.
 
-**Version**: 2.0.1 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-06
+Version 2.1.0 amends principles I, IV and V at the user's request (development
+speed plan, `docs/plans/dev-speed-20261106/`). Spec Kit is required for new or
+changed capabilities only; bug fixes and refactors may use a plain plan. Live
+tests join the normal suite and a stopped stand is waited for; the commit test
+hook runs affected tests, and the full suite with coverage gates the merge.
+Mutation testing gains a per-commit budget, and tests must observe behavior
+rather than pin defaults or wording for mutants. `main` advances by fast-forward
+merge, one release at a time, and the release commit skips the heavy hooks its
+already-checked tree does not need. Application contracts are unchanged.
+
+**Version**: 2.1.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-06

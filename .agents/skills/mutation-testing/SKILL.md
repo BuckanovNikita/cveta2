@@ -7,21 +7,29 @@ description: Runs and triages cveta2's changed-function mutation check (scripts/
 
 `scripts/mutation.py` maps the staged diff to the top-level functions and methods
 it touches, exports the index into a fresh temporary workspace, and runs mutmut
-there on those functions only. It reports survivors with their diffs and passes;
-nothing is cached or shared between runs. Read the script's docstring for the
-mechanics.
+there on those functions only. It reports survivors (the first five with diffs)
+and passes; nothing is cached or shared between runs. The hook runs within a
+budget: at most 8 changed functions (`--max-functions`) and 120 s of mutmut
+(`--budget-seconds`); unjudged mutants count as "not run", and mutants no unit
+test reaches as "not reached by tests", never as survivors. Read the script's
+docstring for the mechanics.
 
 ```bash
 uv run python scripts/mutation.py                   # staged change vs HEAD (the hook)
 uv run python scripts/mutation.py --base main       # the whole branch
 uv run python scripts/mutation.py cveta2/domain/merge.py   # every function of a file
 uv run python scripts/mutation.py --keep --strict   # keep workspace; exit 1 on survivors
+uv run python scripts/mutation.py --budget-seconds 0 --max-functions 0  # no budget
 ```
 
 With `--keep`, `cd` into the printed workspace and use
 `<repo>/.venv/bin/mutmut show <name>` or `browse`.
 
 ## Triage a survivor
+
+Survivors are information, not a gate. Triage only behavioural ones; do not add
+tests that exist only to kill a mutant of a default argument, a message's
+wording or another presentation detail.
 
 1. Read the diff. If the mutation changes an outcome, boundary, side effect or
    contract a caller can observe, strengthen or add a behavioural test, stage
@@ -51,5 +59,6 @@ also passes, but is a prompt to add a unit test.
 
 ## Completion
 
-Report the functions mutated, killed/not-killed counts, each survivor's
+Report the functions mutated (and any skipped by the budget), the
+killed/survived/not-reached/not-run counts, each survivor's
 classification (test added, equivalent, presentation) and the rerun result.

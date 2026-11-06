@@ -1,33 +1,62 @@
 ---
 name: release
-description: Cuts a cveta2 release on main with semantic-release right after a merge - previews the version, bumps pyproject.toml, uv.lock and CHANGELOG.md, creates the release commit and Git tag through the pre-commit hooks (including the live gate in the cveta2-main slot), pushes and confirms them. Use after merging into main, when semantic-release fails or stays silent, or when a release hook fails and leaves bumped files staged.
+description: Merges a checked cveta2 branch into main by fast-forward and cuts the release with semantic-release under a release lock - full check on the branch tip, ff-only merge, version bump, changelog and Git tag with the heavy hooks skipped, push and confirmation. Use when a branch is ready to land on main, when semantic-release fails or stays silent, or when a release hook fails and leaves bumped files staged.
 ---
 
-# Release cveta2
+# Merge and release cveta2
 
-Release policy (merge-only `main`, semantic-release as the only version writer,
-Git tags only, authorization) is in engineering guidance § "Commits, hooks, and
-releases". This skill is the procedure.
+Release policy is in engineering guidance § "Commits, hooks, and releases":
+- `main` changes only by fast-forward merge;
+- semantic-release is the only writer of the version;
+- only Git tags are published;
+- authorization rules apply.
 
-## Steps
+This skill is the procedure. `BRANCH` is the branch to land.
 
-Run on `main`, right after the merge, from a clean working tree:
+## 1. Check the branch tip
+
+On `BRANCH`, with a clean working tree:
 
 ```bash
-uv run semantic-release version --print                     # the version it would make
-uv run semantic-release version --no-push --no-vcs-release  # bump, changelog, commit, tag
-git push origin main --follow-tags                          # push the checked commit and tag
-git ls-remote origin refs/heads/main refs/tags/vX.Y.Z       # confirm it landed
+git fetch origin
+git rebase origin/main                 # skip when already on top of main
+uv run prek run --all-files            # every hook over the whole tree
+uv run pytest --cov                    # full suite, live tests included, coverage enforced
 ```
 
-- `No release will be made` after a merge of only non-releasing types is a
-  success; push `main` alone and stop.
-- The release commit touches `pyproject.toml`, `uv.lock` and `CHANGELOG.md`, so
-  pre-commit runs the live integration gate in the durable `cveta2-main` slot
-  (see the `running-integration-tests` skill). semantic-release captures hook
-  output: expect minutes of silence.
+- **After the rebase,** if it rewrote commits, the commit hooks did not run on
+  them. The two checks above are what covers them.
+- **Live tests may wait for stopped stands,** with a notice. Run the full suite
+  in the background and tell the user it is waiting; never skip it.
+- **Every check must pass** before step 2.
 
-## A hook fails
+## 2. Merge, release and push under the lock
+
+```bash
+git switch main && git pull --ff-only origin main
+flock -n "$(git rev-parse --git-common-dir)/cveta2-release.lock" bash -c '
+  set -e
+  git merge --ff-only "'"$BRANCH"'"
+  uv run semantic-release version --print
+  SKIP=lint-imports,mypy,vulture,pytest uv run semantic-release version --no-push --no-vcs-release
+  git push origin main --follow-tags
+'
+git ls-remote origin refs/heads/main 'refs/tags/v*' | tail -3   # confirm it landed
+```
+
+- **The lock.** `flock -n` fails at once when another session holds the lock.
+  Report that and retry after that session's release, instead of waiting
+  silently.
+- **The merge is refused.** `--ff-only` refuses when `main` moved. Return to
+  step 1: rebase and check again.
+- **No release.** `No release will be made` after a merge of only non-releasing
+  types is a success; the push publishes `main` alone.
+- **The skip.** The release commit touches `pyproject.toml`, `uv.lock` and
+  `CHANGELOG.md` on an already-checked tree. The `SKIP` list is the documented
+  exception. Ruff, `uv lock --check`, the lockfile guard and `uv build` still
+  run.
+
+## A release hook fails
 
 The commit and tag are not created, but the bumped version files stay staged.
 Read the error, then restore them and fix the cause before releasing again:
@@ -36,10 +65,12 @@ Read the error, then restore them and fix the cause before releasing again:
 git restore --staged --worktree pyproject.toml uv.lock CHANGELOG.md
 ```
 
-Never hand-edit the version or create the tag yourself. `SKIP=integration-tests`
-only on the user's explicit request.
+Never hand-edit the version or create the tag yourself. Never widen the `SKIP`
+list beyond the one above.
 
 ## Report
 
-The released version (or "no release"), the release commit and tag confirmed by
-`git ls-remote`, the hooks that ran, and any failed or skipped gate as a gap.
+- The merged range and the full-check results from step 1.
+- The released version, or "no release".
+- The release commit and tag, confirmed by `git ls-remote`.
+- Any failed, skipped or waiting gate, reported as a gap.

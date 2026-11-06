@@ -4,14 +4,14 @@ Plan: [plan.md](plan.md). A task's status changes only after it is verified.
 Dated evidence: [verification-2026-11-06.md](verification-2026-11-06.md).
 
 - [x] T0 Plan record, discussion and architecture record (`--phase plan`).
-- [ ] T1 Phase 1:
+- [x] T1 Phase 1:
   - `prek` runner;
   - delete `tests/test_docs.py` and its references;
   - A1 path filters;
   - A3, which removes `count-lines` and gates `uv build` on `pyproject.toml`;
   - A8 `uv lock --check`, `UV_LOCKED=1` and the lockfile guard.
   - Depends on T0.
-- [ ] T2 Phase 2:
+- [x] T2 Phase 2:
   - live tests in the normal suite, behind a session fixture with tag
     lifecycle and a wait-and-notify for a stopped stand;
   - `--dist loadgroup` in `addopts`, and a marker that excludes the live tests;
@@ -19,7 +19,7 @@ Dated evidence: [verification-2026-11-06.md](verification-2026-11-06.md).
   - pytest-randomly;
   - remove the `integration-tests` hook in the same commit.
   - Depends on T1.
-- [ ] T3 Phase 3: mutation budget (`--budget-seconds`/`--max-mutants`), with
+- [x] T3 Phase 3: mutation budget (`--budget-seconds`/`--max-functions`), with
   shorter output. Depends on T1.
 - [ ] T4 Phase 4:
   - a fast-forward-only merge after the full check on the branch tip;

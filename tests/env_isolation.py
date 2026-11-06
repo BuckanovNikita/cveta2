@@ -17,6 +17,7 @@ fixture; this module only guarantees the fallback is harmless.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -25,6 +26,15 @@ from pathlib import Path
 import pytest
 
 _FAKE_HOME = Path(tempfile.mkdtemp(prefix="cveta2-test-home-"))
+_REPLACED = ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")
+
+# The live-test lifecycle needs the real values for kubectl, uv and the
+# k8s-infra skill lookup (tests/integration/lifecycle.py::child_env). An xdist
+# worker inherits the controller's record, so only the first writer sets it.
+os.environ.setdefault(
+    "CVETA2_REAL_ENV",
+    json.dumps({name: os.environ.get(name) for name in _REPLACED}),
+)
 
 os.environ["HOME"] = str(_FAKE_HOME)
 os.environ["USERPROFILE"] = str(_FAKE_HOME)

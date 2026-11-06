@@ -46,8 +46,8 @@ hook rules are in engineering guidance. Sources live in `.agents/skills/` and
 copies (see engineering guidance, "Project skills").
 
 - `mutation-testing` — run and triage the changed-function mutation check.
-- `running-integration-tests` — live CVAT/MinIO/ClearML runs, run tags, cleanup and
-  the pre-commit integration gate.
+- `running-integration-tests` — live CVAT/MinIO/ClearML tests inside the normal
+  pytest run, run tags, cleanup and the stopped-stand wait.
 - `release` — the semantic-release procedure on `main` and its failure recovery.
 
 ## Authorization

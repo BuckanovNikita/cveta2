@@ -63,9 +63,12 @@ repos:
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
 
+      # The mypy daemon keeps its state between commits (one per worktree,
+      # .dmypy.json): warm runs take well under a second. After a dependency or
+      # mypy-configuration change, or a confusing result: `uv run dmypy stop`.
       - id: mypy
-        name: mypy (all files)
-        entry: uv run --locked mypy .
+        name: mypy (daemon, all files)
+        entry: uv run --locked dmypy run -- .
         language: system
         pass_filenames: false
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
@@ -79,12 +82,25 @@ repos:
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
 
+      # pytest-testmon runs only the tests whose executed code changed, live
+      # tests included (they wait, with a notice, while the stands are
+      # stopped). Coverage is enforced by the full run before a merge
+      # (`uv run pytest --cov`), not here: testmon and coverage cannot share
+      # one run.
       - id: pytest
-        name: pytest (with coverage)
-        entry: uv run --locked pytest -n auto --cov --cov-report=term-missing
+        name: pytest (affected tests, testmon)
+        entry: uv run --locked pytest --testmon
         language: system
         pass_filenames: false
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
+        stages: [pre-commit]
+
+      - id: deptry
+        name: deptry (declared dependencies)
+        entry: uv run --locked deptry .
+        language: system
+        pass_filenames: false
+        files: ^(cveta2/|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
 
       - id: uv-build
@@ -105,21 +121,6 @@ repos:
         language: system
         pass_filenames: false
         files: ^cveta2/.*\.py$
-        stages: [pre-commit]
-        verbose: true
-
-      # Live tests on the shared CVAT, MinIO and ClearML stands: up -> test ->
-      # keep-or-stop under one run tag, minutes per run, so last. Runs when the
-      # package, the integration suite or the dependencies change; skips with a
-      # notice on a machine without the k8s-infra skill.
-      #
-      # Skip it for one commit with: SKIP=integration-tests git commit ...
-      - id: integration-tests
-        name: integration tests (live stands)
-        entry: uv run --locked python -m tests.integration.lifecycle gate
-        language: system
-        pass_filenames: false
-        files: ^(cveta2/|tests/integration/|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
         verbose: true
 

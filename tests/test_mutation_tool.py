@@ -259,7 +259,7 @@ def test_run_uses_a_private_workspace_of_the_staged_tree(
     assert results["args"] == ["results", "--all", "true"]
     out = capsys.readouterr().out
     assert "frame 1" not in out
-    assert "killed: 1, not killed: 0" in out
+    assert "killed: 1, survived: 0" in out
 
 
 def test_survivors_are_reported_with_diffs_and_pass_unless_strict(
@@ -275,7 +275,7 @@ def test_survivors_are_reported_with_diffs_and_pass_unless_strict(
     )
     assert mutation.main([]) == 0
     out = capsys.readouterr().out
-    assert "Mutants in changed functions: 2, killed: 1, not killed: 1" in out
+    assert "Mutants in changed functions: 2, killed: 1, survived: 1" in out
     assert "# cveta2.mod.x_beta__mutmut_1: survived" in out
     assert "x_alpha" not in out
     assert "x_beta_two" not in out
@@ -406,3 +406,29 @@ def test_pytest_sessions_never_see_git_hook_variables() -> None:
     The pre-commit pytest hook runs with git's GIT_INDEX_FILE exported.
     """
     assert not [name for name in os.environ if name.startswith("GIT_")]
+
+
+def test_unjudged_mutants_are_counted_not_reported_as_survivors(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _stage(repo, MODULE.replace("x * 2", "x * 3"))
+    monkeypatch.setenv(
+        "FAKE_RESULTS",
+        "    cveta2.mod.x_beta__mutmut_1: killed\n"
+        "    cveta2.mod.x_beta__mutmut_2: not checked\n"
+        "    cveta2.mod.x_beta__mutmut_3: no tests",
+    )
+    assert mutation.main(["--strict"]) == 0
+    out = capsys.readouterr().out
+    assert "survived: 0, not reached by tests: 1, not run (budget): 1" in out
+
+
+def test_max_functions_limits_and_lists_the_rest(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(repo)
+    assert mutation.main(["--max-functions", "1", "cveta2/mod.py"]) == 0
+    run = _calls(repo)[0]
+    assert len(run["args"][1:]) == 1  # type: ignore[index]
+    out = capsys.readouterr().out
+    assert "mutating 1 of 3 changed functions" in out

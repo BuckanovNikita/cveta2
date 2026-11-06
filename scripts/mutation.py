@@ -5,12 +5,17 @@
     uv run python scripts/mutation.py --base main      # staged tree vs main
     uv run python scripts/mutation.py cveta2/x.py      # every function of a file
     uv run python scripts/mutation.py --keep --strict  # keep it; fail on survivors
+    uv run python scripts/mutation.py --budget-seconds 0 --max-functions 0  # no limits
 
-The pre-commit hook runs the first form. Changed lines of staged ``cveta2/**/*.py``
-files are mapped to the top-level functions and methods that contain them, and
-mutmut runs only their mutants. The verdict is advisory: surviving mutants are
-printed with their diffs and the run passes, unless ``--strict`` is given. A tool,
-configuration or clean-test failure always fails.
+The pre-commit hook runs the first form, within a budget: at most
+``--max-functions`` (default 8) changed functions are mutated and the rest are
+listed; mutmut stops after ``--budget-seconds`` (default 120), and mutants it
+did not reach by then count as "not run", not as survivors. Changed lines of
+staged ``cveta2/**/*.py`` files are mapped to the top-level functions and
+methods that contain them, and mutmut runs only their mutants. The verdict is
+advisory: surviving mutants are printed (the first few with diffs) and the run
+passes, unless ``--strict`` is given. Mutants no unit test reaches are counted
+separately. A tool, configuration or clean-test failure always fails.
 
 Nothing is shared between runs. Each run exports the *staged* tree with
 ``git checkout-index`` into a fresh temporary directory, narrows that copy's
@@ -36,6 +41,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from collections import deque
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -45,6 +51,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "cveta2"
 # `mutmut results` statuses that mean the mutant did not escape.
 BENIGN_STATUSES = frozenset({"killed", "skipped", "caught by type check"})
+# Statuses of mutants that were never judged: the budget ran out first, or no
+# unit test reaches the line. Reported as counts, never as survivors.
+UNRUN_STATUSES = frozenset({"not checked"})
+UNREACHED_STATUSES = frozenset({"no tests"})
 # mutmut asserts when a name filter matches no generated mutant.
 NOTHING_MATCHES = "Filtered for specific mutants, but nothing matches"
 # mutmut stops when no unit test reaches any mutated function at all.
@@ -55,7 +65,9 @@ STAND_PREFIXES = ("CVAT_INTEGRATION_", "MINIO_", "CLEARML_", "INTEGRATION_")
 STAND_NAMES = frozenset({"INFRA_RUN_TAG"})
 CLASS_SEPARATOR = "ǁ"
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-MAX_DIFFS = 20
+MAX_DIFFS = 5
+DEFAULT_MAX_FUNCTIONS = 8
+DEFAULT_BUDGET_SECONDS = 120
 
 
 class MutationError(Exception):
@@ -245,12 +257,18 @@ def mutmut_binary() -> Path:
 
 
 def run_mutmut(
-    binary: Path, workspace: Path, env: dict[str, str], args: Sequence[str]
-) -> tuple[int, str]:
-    """Stream ``mutmut run``; return its status and the output tail.
+    binary: Path,
+    workspace: Path,
+    env: dict[str, str],
+    args: Sequence[str],
+    budget_seconds: float = 0,
+) -> tuple[int | None, str]:
+    """Stream ``mutmut run``; return its status (None: budget spent) and tail.
 
     Captured output (pre-commit) would otherwise hold every spinner redraw, so
-    only what a terminal would have left on each line is printed.
+    only what a terminal would have left on each line is printed. With a budget,
+    a timer terminates mutmut once it is spent; the mutants judged so far keep
+    their results.
     """
     tail: deque[str] = deque(maxlen=40)
     with subprocess.Popen(  # noqa: S603 - the venv's own mutmut
@@ -260,12 +278,26 @@ def run_mutmut(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     ) as process:
-        assert process.stdout is not None  # noqa: S101 - set by stdout=PIPE
-        for raw in process.stdout:
-            line = raw.decode("utf-8", errors="replace").rsplit("\r", 1)[-1]
-            tail.append(line)
-            sys.stdout.write(line)
-            sys.stdout.flush()
+        timer = (
+            threading.Timer(budget_seconds, process.terminate)
+            if budget_seconds > 0
+            else None
+        )
+        if timer is not None:
+            timer.start()
+        try:
+            assert process.stdout is not None  # noqa: S101 - set by stdout=PIPE
+            for raw in process.stdout:
+                line = raw.decode("utf-8", errors="replace").rsplit("\r", 1)[-1]
+                tail.append(line)
+                sys.stdout.write(line)
+                sys.stdout.flush()
+        finally:
+            spent = timer is not None and not timer.is_alive()
+            if timer is not None:
+                timer.cancel()
+    if spent and process.returncode != 0:
+        return None, "".join(tail)
     return process.returncode, "".join(tail)
 
 
@@ -313,12 +345,16 @@ def report(
     if not selected:
         print("The changed functions produce no mutants; nothing to do.")
         return []
-    escaped = sorted(n for n, s in selected.items() if s not in BENIGN_STATUSES)
+    judged = BENIGN_STATUSES | UNRUN_STATUSES | UNREACHED_STATUSES
+    escaped = sorted(n for n, s in selected.items() if s not in judged)
     killed = sum(1 for s in selected.values() if s == "killed")
+    unrun = sum(1 for s in selected.values() if s in UNRUN_STATUSES)
+    unreached = sum(1 for s in selected.values() if s in UNREACHED_STATUSES)
     print(f"Mutants in changed functions: {len(selected)}, killed: {killed}, "
-          f"not killed: {len(escaped)}")  # fmt: skip
+          f"survived: {len(escaped)}, not reached by tests: {unreached}, "
+          f"not run (budget): {unrun}")  # fmt: skip
     if not escaped:
-        print("Every mutant of the changed functions was killed.")
+        print("No judged mutant of the changed functions survived.")
     for name in escaped[:MAX_DIFFS]:
         print()
         print(show(name).rstrip())
@@ -356,6 +392,17 @@ def collect_targets(workspace: Path, base: str, files: Sequence[str]) -> list[Ta
     return targets
 
 
+def limit_targets(targets: list[Target], limit: int) -> list[Target]:
+    """Keep the first *limit* targets (0 keeps all) and list the others."""
+    if not 0 < limit < len(targets):
+        return targets
+    print(f"Budget: mutating {limit} of {len(targets)} changed functions "
+          "(--max-functions); not mutated:")  # fmt: skip
+    for target in targets[limit:]:
+        print(f"    {target.path}: {target.qualname}")
+    return targets[:limit]
+
+
 def run(args: argparse.Namespace) -> int:
     """Export, narrow, mutate, report. Returns the process exit status."""
     workspace = Path(tempfile.mkdtemp(prefix="cveta2-mutation-"))
@@ -365,6 +412,7 @@ def run(args: argparse.Namespace) -> int:
         if not targets:
             print("No changed cveta2 function can be mutated; nothing to do.")
             return 0
+        targets = limit_targets(targets, args.max_functions)
         files = sorted({t.path for t in targets})
         globs = [glob for t in targets for glob in t.globs]
         print(f"Mutating {len(targets)} function(s) in {len(files)} file(s):")
@@ -376,8 +424,13 @@ def run(args: argparse.Namespace) -> int:
         env = child_env(workspace)
         mutmut_args = [*(["--max-children", str(args.max_children)]
                          if args.max_children else []), *globs]  # fmt: skip
-        status, tail = run_mutmut(binary, workspace, env, mutmut_args)
-        if status != 0:
+        status, tail = run_mutmut(
+            binary, workspace, env, mutmut_args, args.budget_seconds
+        )
+        if status is None:
+            print(f"Budget: mutmut stopped after {args.budget_seconds} s "
+                  "(--budget-seconds); unjudged mutants count as not run.")  # fmt: skip
+        elif status != 0:
             if NOTHING_MATCHES in tail:
                 print("The changed functions produce no mutants; nothing to do.")
                 return 0
@@ -431,6 +484,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--strict", action="store_true", help="exit 1 when a mutant survives"
     )
     parser.add_argument("--max-children", type=int, help="mutmut worker count")
+    parser.add_argument(
+        "--max-functions",
+        type=int,
+        default=DEFAULT_MAX_FUNCTIONS,
+        help="mutate at most N changed functions, 0 for all (default %(default)s)",
+    )
+    parser.add_argument(
+        "--budget-seconds",
+        type=float,
+        default=DEFAULT_BUDGET_SECONDS,
+        help="stop mutmut after N seconds, 0 for no limit (default %(default)s)",
+    )
     args = parser.parse_args(argv)
     try:
         return run(args)

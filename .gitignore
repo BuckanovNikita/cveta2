@@ -68,3 +68,9 @@ tests/integration/.run-tag
 # Repository-managed Spec Kit skills; personal skills remain ignored.
 !.agents/skills/speckit-*/
 !.agents/skills/speckit-*/**
+
+# pytest-testmon dependency database, one per worktree
+.testmondata
+.testmondata-*
+# mypy daemon state, one per worktree
+.dmypy.json

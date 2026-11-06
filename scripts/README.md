@@ -7,7 +7,7 @@
 |---|---|
 | Проверка сообщения коммита | `.pre-commit-config.yaml` (готовый хук `conventional-pre-commit`) |
 | Проверка владения эффектами (дополняет import-linter) | `tests/architecture_effects.py`, запускается из `tests/test_architecture.py` |
-| Жизненный цикл интеграционного прогона (up / test / stop / gate / env) | `tests/integration/lifecycle.py`, см. скилл `running-integration-tests` |
+| Жизненный цикл живого прогона (up / stop / env; в pytest — фикстура сессии) | `tests/integration/lifecycle.py`, см. скилл `running-integration-tests` |
 | Клонирование CVAT-проекта в S3 cloud storage | `tests/integration/clone_project_to_s3.py` |
 
 ## benchmark_fetch.py

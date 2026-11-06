@@ -11,14 +11,15 @@ import os
 import pty
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from pydantic import BaseModel
+
+from tests.integration import lifecycle
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LIFECYCLE = REPO_ROOT / "tests" / "integration" / "lifecycle.py"
@@ -26,9 +27,6 @@ FEATURE_BRANCH = "refs/heads/feature"
 MAIN_BRANCH = "refs/heads/main"
 MINTED_TAG = "cveta2-claude-20260905-integration-k3x9"
 ACTIVE_TAG = "cveta2-claude-20260901-integration-a1b2"
-PYTEST_CALL = (
-    "uv run --extra clearml pytest -o addopts=-v --tb=short -p tests.env_isolation"
-)
 
 # A helper answers `env` with the Secret's exports; every other subcommand is
 # recorded in FAKE_TOOL_CALLS as "<stand> <args>" and succeeds, unless
@@ -81,9 +79,16 @@ echo "uv $*" >> "$FAKE_TOOL_CALLS"
 if [[ "$*" == *" pytest "* && -n "${FAKE_FAIL_TESTS:-}" ]]; then exit 1; fi
 exit 0
 """
-# The gate's preflight: FAKE_CURL_STATUS is the exit status it reports
-# (60 is curl's "peer certificate cannot be authenticated", 7 "connection refused").
-FAKE_CURL = '#!/usr/bin/env bash\nexit "${FAKE_CURL_STATUS:-0}"\n'
+# The availability probe: FAKE_CURL_STATUS is the exit status curl reports for
+# URLs containing FAKE_CURL_URL (every URL when unset); 60 is curl's "peer
+# certificate cannot be authenticated", 7 "connection refused".
+FAKE_CURL = """#!/usr/bin/env bash
+if [[ -z "${FAKE_CURL_URL:-}" || "$*" == *"$FAKE_CURL_URL"* ]]; then
+    exit "${FAKE_CURL_STATUS:-0}"
+fi
+exit 0
+"""
+FAKE_KUBECTL = '#!/usr/bin/env bash\nexit "${FAKE_KUBECTL_STATUS:-0}"\n'
 
 # What every k8s-infra helper's `env` adds next to the Secret keys once the
 # local CA is installed; the stands' https names are trusted through them.
@@ -131,6 +136,7 @@ def cvat(command: str) -> str:
 
 def up_calls(tag: str) -> list[str]:
     return [
+        "clearml whoami",
         cvat("verify"),
         cvat(f"cleanup --tag {tag}"),
         f"minio cleanup --prefix {tag}",
@@ -144,9 +150,6 @@ def stop_calls(tag: str) -> list[str]:
         f"minio cleanup --prefix {tag}",
         f"clearml cleanup --prefix {tag}",
     ]
-
-
-TEST_CALLS = ["clearml whoami", f"{PYTEST_CALL} tests/integration"]
 
 
 class Outcome(BaseModel):
@@ -247,6 +250,7 @@ def tree(tmp_path: Path) -> Tree:
     (tmp_path / "bin").mkdir()
     _write_executable(tmp_path / "bin" / "uv", FAKE_UV)
     _write_executable(tmp_path / "bin" / "curl", FAKE_CURL)
+    _write_executable(tmp_path / "bin" / "kubectl", FAKE_KUBECTL)
     skill_dir = tmp_path / "skill"
     (skill_dir / "scripts").mkdir(parents=True)
     for stand, exports in SECRET_EXPORTS.items():
@@ -328,7 +332,7 @@ class TestCredentials:
             "#!/usr/bin/env bash\n"
             'echo "uv sees $SSL_CERT_FILE" >> "$FAKE_TOOL_CALLS"\n',
         )
-        tree.run("test", env={"INFRA_RUN_TAG": MINTED_TAG})
+        tree.run("up", env={"INFRA_RUN_TAG": MINTED_TAG})
         assert f"uv sees {bundle}" in tree.tool_calls()
 
     def test_nothing_runs_on_this_host_so_no_port_is_derived(self, tree: Tree) -> None:
@@ -396,9 +400,8 @@ class TestRunTagPrecedence:
         assert values["CVAT_INTEGRATION_PROJECT"] == ""
         assert values["MINIO_BUCKET"] == ""
 
-    @pytest.mark.parametrize("command", ["test", "stop"])
-    def test_test_and_stop_refuse_without_a_run(self, tree: Tree, command: str) -> None:
-        outcome = tree.run(command)
+    def test_stop_refuses_without_a_run(self, tree: Tree) -> None:
+        outcome = tree.run("stop")
         assert outcome.returncode == 1
         assert "no run is active" in outcome.stderr
         assert "INFRA_RUN_TAG" in outcome.stderr
@@ -448,7 +451,7 @@ class TestUp:
         )
         assert ACTIVE_TAG in outcome.stderr
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
-        assert tree.tool_calls() == []
+        assert tree.tool_calls() == ["clearml whoami"]
 
     def test_up_with_infra_run_tag_leaves_another_runs_file_alone(
         self, tree: Tree
@@ -471,196 +474,13 @@ class TestUp:
         assert "did not mint a tag" in outcome.stderr
         assert "already in use" in outcome.stderr
         assert tree.recorded_tag() is None
-        assert tree.tool_calls() == []
+        assert tree.tool_calls() == ["clearml whoami"]
 
     def test_a_failing_step_stops_up(self, tree: Tree) -> None:
         outcome = tree.run("up", env={"FAKE_FAIL_COMMAND": "uv"})
         assert outcome.returncode == 1
         assert "cvat_stand.py verify failed" in outcome.stderr
-        assert tree.tool_calls() == [cvat("verify")]
-
-
-class TestGate:
-    def test_a_branch_commit_runs_up_test_stop_under_the_minted_tag(
-        self, tree: Tree
-    ) -> None:
-        outcome = tree.run("gate")
-        assert outcome.returncode == 0, outcome.stderr
-        assert tree.tool_calls() == [
-            "clearml whoami",
-            *up_calls(MINTED_TAG),
-            *TEST_CALLS,
-            *stop_calls(MINTED_TAG),
-        ]
-        assert f"run tag '{MINTED_TAG}'" in outcome.stdout
-        assert tree.recorded_tag() is None
-        assert (tree.root / "tool-calls.room").read_text(encoding="utf-8") == "room\n"
-
-    def test_extra_arguments_reach_pytest(self, tree: Tree) -> None:
-        outcome = tree.run("gate", "-k", "upload")
-        assert outcome.returncode == 0, outcome.stderr
-        assert f"{PYTEST_CALL} tests/integration -k upload" in tree.tool_calls()
-
-    def test_the_clearml_identity_is_verified_before_the_run_is_prepared(
-        self, tree: Tree
-    ) -> None:
-        outcome = tree.run("gate")
-        assert outcome.returncode == 0, outcome.stderr
-        assert outcome.stdout.index("clearml whoami ok") < outcome.stdout.index(
-            "preparing the run"
-        )
-
-    def test_a_clearml_stand_refusing_the_identity_fails_the_armed_gate(
-        self, tree: Tree
-    ) -> None:
-        outcome = tree.run("gate", env={"FAKE_FAIL_COMMAND": "clearml whoami"})
-        assert outcome.returncode == 1
-        assert "the integration gate is armed" in outcome.stderr
-        assert "ClearML stand" in outcome.stderr
-        assert "clearml.py --project cveta2 whoami failed" in outcome.stderr
-        assert "certificate or SSL error in that output is a trust problem" in (
-            outcome.stderr
-        )
-        assert "k8s-infra skill" in outcome.stderr
-        assert "deploy" not in outcome.stderr
-        assert tree.tool_calls() == ["clearml whoami"]
-        assert tree.recorded_tag() is None
-
-    def test_an_untrusted_certificate_is_reported_as_tls_not_as_a_down_stand(
-        self, tree: Tree
-    ) -> None:
-        outcome = tree.run("gate", env={"FAKE_CURL_STATUS": "60"})
-        assert outcome.returncode == 1
-        assert "the integration gate is armed" in outcome.stderr
-        assert "TLS verification of the CVAT stand" in outcome.stderr
-        assert "curl exit 60" in outcome.stderr
-        assert "certificate-trust problem, not a stand that is down" in (outcome.stderr)
-        assert "k8s-infra-local-ca.crt" in outcome.stderr
-        assert "does not answer" not in outcome.stderr
-        assert "deploy" not in outcome.stderr
-        assert tree.tool_calls() == []
-
-    def test_a_cvat_stand_that_does_not_answer_says_so(self, tree: Tree) -> None:
-        outcome = tree.run("gate", env={"FAKE_CURL_STATUS": "7"})
-        assert outcome.returncode == 1
-        assert "does not answer (curl exit 7)" in outcome.stderr
-        assert "TLS" not in outcome.stderr
-        assert tree.tool_calls() == []
-
-    def test_main_keeps_the_durable_slot(self, tree: Tree) -> None:
-        outcome = tree.run("gate", branch=MAIN_BRANCH)
-        assert outcome.returncode == 0, outcome.stderr
-        assert tree.tool_calls() == [
-            "clearml whoami",
-            *up_calls("cveta2-main"),
-            *TEST_CALLS,
-        ]
-        assert "durable slot 'cveta2-main'" in outcome.stdout
-        assert "cveta2-main coco8-dev" in outcome.stdout
-        assert "ClearML" in outcome.stdout
-
-    def test_keep_data_keeps_a_branch_run_and_its_tag_file(self, tree: Tree) -> None:
-        outcome = tree.run("gate", env={"INTEGRATION_KEEP_DATA": "1"})
-        assert outcome.returncode == 0, outcome.stderr
-        assert tree.tool_calls()[-1] == TEST_CALLS[-1]
-        assert tree.recorded_tag() == f"{MINTED_TAG}\n"
-        assert "INTEGRATION_KEEP_DATA=1" in outcome.stdout
-        assert ".run-tag still names it" in outcome.stdout
-
-    def test_keep_data_zero_stops_the_main_slot(self, tree: Tree) -> None:
-        outcome = tree.run(
-            "gate", branch=MAIN_BRANCH, env={"INTEGRATION_KEEP_DATA": "0"}
-        )
-        assert outcome.returncode == 0, outcome.stderr
-        assert tree.tool_calls()[-3:] == stop_calls("cveta2-main")
-
-    def test_a_failed_branch_run_is_stopped_and_the_message_only_diagnoses(
-        self, tree: Tree
-    ) -> None:
-        outcome = tree.run("gate", env={"FAKE_FAIL_TESTS": "1"})
-        assert outcome.returncode == 1
-        assert tree.tool_calls()[-3:] == stop_calls(MINTED_TAG)
-        assert "integration gate FAILED" in outcome.stderr
-        assert "k8s-infra skill" in outcome.stderr
-        assert "deploy" not in outcome.stderr.replace("never deploys one", "")
-        assert tree.recorded_tag() is None
-
-    def test_keep_stack_keeps_a_failed_branch_run(self, tree: Tree) -> None:
-        outcome = tree.run("gate", "--keep-stack", env={"FAKE_FAIL_TESTS": "1"})
-        assert outcome.returncode == 1
-        assert tree.tool_calls()[-1] == TEST_CALLS[-1]
-        assert tree.recorded_tag() == f"{MINTED_TAG}\n"
-        assert "--keep-stack" in outcome.stdout
-
-    def test_a_failed_preparation_is_still_torn_down(self, tree: Tree) -> None:
-        tree.root.joinpath("bin", "uv").write_text(
-            '#!/usr/bin/env bash\necho "uv $*" >> "$FAKE_TOOL_CALLS"\n'
-            '[[ "$*" != *seed_cvat* ]]\n',
-            encoding="utf-8",
-        )
-        outcome = tree.run("gate")
-        assert outcome.returncode == 1
-        assert "seed_cvat.py failed" in outcome.stderr
-        assert tree.tool_calls()[-3:] == stop_calls(MINTED_TAG)
-        assert tree.recorded_tag() is None
-
-    def test_an_active_run_is_refused_before_the_teardown_is_armed(
-        self, tree: Tree
-    ) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome = tree.run("gate")
-        assert outcome.returncode == 1
-        assert (
-            "a run is active; stop it or export INFRA_RUN_TAG to adopt it"
-            in outcome.stderr
-        )
-        assert tree.tool_calls() == ["clearml whoami"]
-        assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
-
-    def test_a_machine_without_the_skill_skips_without_touching_anything(
-        self, tree: Tree
-    ) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome = tree.run("gate", env={"K8S_INFRA_SKILL_DIR": ""})
-        assert outcome.returncode == 0, outcome.stderr
-        assert "integration gate skipped" in outcome.stdout
-        assert tree.tool_calls() == []
-        assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
-
-    def test_a_skill_dir_without_the_run_contract_fails_the_gate(
-        self, tree: Tree
-    ) -> None:
-        (tree.skill_dir / "scripts" / "infra.py").unlink()
-        outcome = tree.run("gate")
-        assert outcome.returncode == 1
-        assert "K8S_INFRA_SKILL_DIR" in outcome.stderr
-        assert tree.tool_calls() == []
-
-    def test_room_wait_fails_the_gate_before_anything_is_touched(
-        self, tree: Tree
-    ) -> None:
-        outcome = tree.run("gate", env={"FAKE_ROOM_STATUS": "3"})
-        assert outcome.returncode == 1
-        assert "infra.py room answers WAIT" in outcome.stderr
-        assert "Retry the commit later" in outcome.stderr
-        assert "SKIP=integration-tests git commit" in outcome.stderr
-        assert tree.tool_calls() == []
-        assert tree.recorded_tag() is None
-
-    def test_an_unreadable_secret_fails_the_gate_with_the_skip_hint(
-        self, tree: Tree
-    ) -> None:
-        outcome = tree.run("gate", env={"FAKE_FAIL_STAND": "minio"})
-        assert outcome.returncode == 1
-        assert "minio.py --project cveta2 env failed" in outcome.stderr
-        assert "SKIP=integration-tests git commit" in outcome.stderr
-        assert tree.tool_calls() == []
-
-    def test_a_failing_room_check_fails_the_gate(self, tree: Tree) -> None:
-        outcome = tree.run("gate", env={"FAKE_ROOM_STATUS": "2"})
-        assert outcome.returncode == 1
-        assert "infra.py room failed (exit 2" in outcome.stderr
-        assert tree.tool_calls() == []
+        assert tree.tool_calls() == ["clearml whoami", cvat("verify")]
 
 
 class TestStop:
@@ -708,44 +528,7 @@ class TestStop:
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
 
 
-class TestTest:
-    """Whoami first, then pytest without xdist and with the ClearML extra."""
-
-    def test_whoami_then_pytest_with_the_clearml_extra(self, tree: Tree) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome = tree.run("test", "tests/integration", "-k", "upload")
-        assert outcome.returncode == 0, outcome.stderr
-        whoami, pytest_call = tree.tool_calls()
-        assert whoami == "clearml whoami"
-        assert pytest_call == f"{PYTEST_CALL} tests/integration -k upload"
-        assert "-n auto" not in pytest_call
-
-    def test_the_pytest_status_is_the_exit_status(self, tree: Tree) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome = tree.run("test", env={"FAKE_FAIL_TESTS": "1"})
-        assert outcome.returncode == 1
-
-    def test_a_refused_identity_runs_no_test(self, tree: Tree) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome = tree.run("test", env={"FAKE_FAIL_COMMAND": "clearml whoami"})
-        assert outcome.returncode == 1
-        assert tree.tool_calls() == ["clearml whoami"]
-        assert "clearml.py --project cveta2 whoami failed" in outcome.stderr
-        assert "certificate or SSL error in that output is a trust problem" in (
-            outcome.stderr
-        )
-        assert "never skipped" in outcome.stderr
-        assert "k8s-infra skill" in outcome.stderr
-
-    def test_the_source_carries_no_soft_gate_and_no_key_pair(self) -> None:
-        source = LIFECYCLE.read_text(encoding="utf-8")
-        assert "debug.ping" not in source
-        assert "CLEARML_API_ACCESS_KEY=" not in source
-        assert "CLEARML_API_SECRET_KEY=" not in source
-        assert "localhost:" not in source
-
-
-def test_unknown_arguments_are_rejected_outside_test_and_gate(tree: Tree) -> None:
+def test_unknown_arguments_are_rejected(tree: Tree) -> None:
     outcome = tree.run("stop", "--force")
     assert outcome.returncode == 2
     assert "unrecognized arguments: --force" in outcome.stderr
@@ -779,83 +562,6 @@ def test_an_unexpected_helper_line_is_refused_not_evaluated(
     assert outcome.returncode == 1
     assert "cvat.py env printed an unexpected line" in outcome.stderr
     assert not values
-
-
-# A pytest stand-in that takes a while and records its own cleanup, the way a
-# real session's finalizers remove their ClearML and CVAT objects.
-SLOW_UV = """#!/usr/bin/env bash
-echo "uv $*" >> "$FAKE_TOOL_CALLS"
-if [[ "$*" == *" pytest "* ]]; then
-    trap 'echo "pytest cleanup done" >> "$FAKE_TOOL_CALLS"; exit 1' INT TERM
-    touch "$PYTEST_STARTED"
-    sleep 30 &
-    wait
-fi
-exit 0
-"""
-
-
-@pytest.mark.parametrize(
-    ("signum", "to_group"), [(signal.SIGTERM, False), (signal.SIGINT, True)]
-)
-def test_an_interrupted_gate_lets_pytest_finish_before_tearing_down(
-    tree: Tree, signum: signal.Signals, *, to_group: bool
-) -> None:
-    """SIGTERM (forwarded) and Ctrl-C (whole group): cleanup first, then stop."""
-    _write_executable(tree.root / "bin" / "uv", SLOW_UV)
-    started = tree.root / "pytest-started"
-    env = {
-        "PATH": f"{tree.root / 'bin'}:/usr/bin:/bin",
-        "HOME": str(tree.root / "home"),
-        "K8S_INFRA_SKILL_DIR": str(tree.skill_dir),
-        "FAKE_TAG": MINTED_TAG,
-        "FAKE_TOOL_CALLS": str(tree.root / "tool-calls"),
-        "PYTEST_STARTED": str(started),
-    }
-    with subprocess.Popen(  # noqa: S603 - the module under test
-        [
-            sys.executable,
-            "-m",
-            "tests.integration.lifecycle",
-            "--repo-root",
-            str(tree.root),
-            "gate",
-        ],
-        env=env,
-        cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    ) as gate:
-        deadline = time.monotonic() + 30
-        while not started.exists():
-            assert gate.poll() is None, gate.stderr.read() if gate.stderr else ""
-            assert time.monotonic() < deadline
-            time.sleep(0.05)
-        if to_group:
-            os.killpg(gate.pid, signum)
-        else:
-            gate.send_signal(signum)
-        gate.wait(timeout=30)
-    calls = tree.tool_calls()
-    cleanup = calls.index("pytest cleanup done")
-    assert calls[cleanup + 1 :] == stop_calls(MINTED_TAG)
-    assert gate.returncode != 0
-    assert tree.recorded_tag() is None
-
-
-def test_a_failing_step_is_reported_before_the_teardown(tree: Tree) -> None:
-    tree.root.joinpath("bin", "uv").write_text(
-        '#!/usr/bin/env bash\necho "uv $*" >> "$FAKE_TOOL_CALLS"\n'
-        '[[ "$*" != *seed_cvat* ]]\n',
-        encoding="utf-8",
-    )
-    outcome = tree.run("gate")
-    assert outcome.returncode == 1
-    error = outcome.stderr.index("seed_cvat.py failed")
-    assert error < outcome.stderr.index("integration gate FAILED")
-    assert "tearing down the run" in outcome.stdout
 
 
 def test_the_claimed_tag_names_the_bucket_and_the_project(tree: Tree) -> None:
@@ -902,3 +608,178 @@ def test_env_refuses_to_print_credentials_to_a_terminal(tree: Tree) -> None:
     assert completed.returncode == 1
     assert "evaluate it instead" in completed.stderr
     assert "pw with" not in shown
+
+
+class TestProbe:
+    """`up` probes the stands first; a zero wait timeout turns "down" into a refusal."""
+
+    NO_WAIT: ClassVar[dict[str, str]] = {"CVETA2_STAND_WAIT_TIMEOUT": "0"}
+
+    @pytest.mark.parametrize(
+        ("env", "reason"),
+        [
+            ({"FAKE_KUBECTL_STATUS": "1"}, "docker-desktop cluster does not answer"),
+            ({"FAKE_ROOM_STATUS": "3"}, "infra.py room answers WAIT"),
+            ({"FAKE_ROOM_STATUS": "2"}, "infra.py room failed (exit 2)"),
+            (
+                {"FAKE_CURL_URL": "cvat", "FAKE_CURL_STATUS": "7"},
+                (
+                    "CVAT stand at https://cvat.k8s.docker.internal/api/server/about "
+                    "does not answer (curl exit 7)"
+                ),
+            ),
+            (
+                {"FAKE_CURL_URL": "minio/health", "FAKE_CURL_STATUS": "22"},
+                "MinIO stand",
+            ),
+            (
+                {"FAKE_CURL_URL": "debug.ping", "FAKE_CURL_STATUS": "28"},
+                "ClearML stand",
+            ),
+        ],
+    )
+    def test_a_stopped_stand_is_waited_for_not_failed(
+        self, tree: Tree, env: dict[str, str], reason: str
+    ) -> None:
+        outcome = tree.run("up", env={**self.NO_WAIT, **env})
+        assert outcome.returncode == 1
+        assert "CVETA2_STAND_WAIT_TIMEOUT" in outcome.stderr
+        assert reason in outcome.stderr
+        assert tree.tool_calls() == []
+        assert tree.recorded_tag() is None
+
+    def test_an_untrusted_certificate_fails_at_once_as_tls(self, tree: Tree) -> None:
+        outcome = tree.run(
+            "up", env={"FAKE_CURL_URL": "cvat", "FAKE_CURL_STATUS": "60"}
+        )
+        assert outcome.returncode == 1
+        assert "TLS verification of the CVAT stand" in outcome.stderr
+        assert "certificate-trust problem, not a stand that is down" in outcome.stderr
+        assert "CVETA2_STAND_WAIT_TIMEOUT" not in outcome.stderr
+        assert tree.tool_calls() == []
+
+    def test_a_refused_clearml_identity_fails_at_once(self, tree: Tree) -> None:
+        outcome = tree.run("up", env={"FAKE_FAIL_COMMAND": "clearml whoami"})
+        assert outcome.returncode == 1
+        assert "does not authenticate the cveta2 identity" in outcome.stderr
+        assert tree.tool_calls() == ["clearml whoami"]
+
+    def test_a_missing_skill_fails_at_once(self, tree: Tree) -> None:
+        (tree.skill_dir / "scripts" / "infra.py").unlink()
+        outcome = tree.run("up")
+        assert outcome.returncode == 1
+        assert "K8S_INFRA_SKILL_DIR" in outcome.stderr
+        assert tree.tool_calls() == []
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        """Start at zero; every sleep advances the clock and is recorded."""
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class TestWaitForStands:
+    """The wait loop with an injected probe and clock."""
+
+    @staticmethod
+    def wait(
+        answers: list[str], clock: FakeClock, timeout: float | None = None
+    ) -> tuple[object, list[str]]:
+        ready = object()
+        pending = iter(answers)
+        notices: list[str] = []
+        result = lifecycle.wait_for_stands(
+            lambda: next(pending, ready),  # type: ignore[arg-type,return-value]
+            notify=notices.append,
+            sleep=clock.sleep,
+            now=lambda: clock.now,
+            timeout=timeout,
+        )
+        assert result is ready
+        return result, notices
+
+    def test_ready_stands_wait_for_nothing(self) -> None:
+        clock = FakeClock()
+        _, notices = self.wait([], clock)
+        assert notices == []
+        assert clock.sleeps == []
+
+    def test_one_notice_backoff_heartbeats_and_a_recovery_notice(self) -> None:
+        clock = FakeClock()
+        _, notices = self.wait(["CVAT is down"] * 9, clock)
+        assert clock.sleeps == [15, 30, 60, 60, 60, 60, 60, 60, 60]
+        assert notices[0].startswith("Стенды недоступны: CVAT is down.")
+        assert "Ctrl-C" in notices[0]
+        heartbeats = [n for n in notices if n.startswith("Всё ещё жду стенды")]
+        assert len(heartbeats) == 1
+        assert notices[-1].startswith("Стенды снова доступны")
+
+    def test_the_timeout_fails_with_the_last_reason(self) -> None:
+        clock = FakeClock()
+        with pytest.raises(lifecycle.LifecycleError) as error:
+            self.wait(["room WAIT"] * 10, clock, timeout=40)
+        assert "CVETA2_STAND_WAIT_TIMEOUT" in error.value.lines[0]
+        assert "room WAIT" in error.value.lines[0]
+        assert sum(clock.sleeps) == 40
+
+    def test_ctrl_c_ends_the_wait(self) -> None:
+        def interrupted(_seconds: float) -> None:
+            raise KeyboardInterrupt
+
+        with pytest.raises(KeyboardInterrupt):
+            lifecycle.wait_for_stands(
+                lambda: "down", notify=lambda _: None, sleep=interrupted
+            )
+
+    @pytest.mark.parametrize(("raw", "expected"), [("", None), ("90", 90.0)])
+    def test_the_timeout_comes_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch, raw: str, expected: float | None
+    ) -> None:
+        monkeypatch.setenv("CVETA2_STAND_WAIT_TIMEOUT", raw)
+        assert lifecycle.wait_timeout() == expected
+
+
+class StubRun:
+    def __init__(self, *, main: bool) -> None:
+        """Stand in for a run on main or on a branch."""
+        self.tag = "cveta2-main" if main else MINTED_TAG
+        self.main = main
+        self.stopped = False
+
+    def on_main(self) -> bool:
+        return self.main
+
+    def stop(self) -> int:
+        self.stopped = True
+        return 0
+
+
+@pytest.mark.parametrize(
+    ("main", "keep", "stopped"),
+    [(False, "", True), (True, "", False), (False, "1", False), (True, "0", True)],
+)
+def test_finish_keeps_main_or_an_explicit_keep_and_stops_the_rest(
+    monkeypatch: pytest.MonkeyPatch, *, main: bool, keep: str, stopped: bool
+) -> None:
+    monkeypatch.setenv("INTEGRATION_KEEP_DATA", keep)
+    run = StubRun(main=main)
+    assert lifecycle.finish(run) == 0  # type: ignore[arg-type]
+    assert run.stopped is stopped
+
+
+def test_children_get_the_real_home_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / ".cache"))
+    monkeypatch.setenv(
+        "CVETA2_REAL_ENV", '{"HOME": "/home/real", "XDG_CACHE_HOME": null}'
+    )
+    environ = lifecycle.child_env()
+    assert environ["HOME"] == "/home/real"
+    assert "XDG_CACHE_HOME" not in environ

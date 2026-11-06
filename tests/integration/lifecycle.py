@@ -1,9 +1,11 @@
 """Integration-run lifecycle on the shared docker-desktop stands.
 
-    uv run python -m tests.integration.lifecycle up      # claim a tag, seed the run
-    uv run python -m tests.integration.lifecycle test [pytest args]
+The live tests in ``tests/integration`` are part of the normal pytest run: the
+session fixture in ``tests/integration/conftest.py`` calls ``prepare`` before the
+first live test and ``finish`` after the last one. The same steps by hand:
+
+    uv run python -m tests.integration.lifecycle up      # wait, claim a tag, seed
     uv run python -m tests.integration.lifecycle stop    # remove it, release the tag
-    uv run python -m tests.integration.lifecycle gate [--keep-stack] [pytest args]
     eval "$(uv run python -m tests.integration.lifecycle env)"  # this run's variables
 
 The run acts as project ``cveta2`` of the shared stands (k8s-infra skill,
@@ -19,7 +21,7 @@ The run tag, in order of precedence:
    run replaces;
 3. ``tests/integration/.run-tag``, the gitignored file ``up`` writes when it
    mints a tag and ``stop`` deletes;
-4. nothing: ``up`` mints one; ``test`` and ``stop`` refuse.
+4. nothing: ``up`` mints one; ``stop`` refuses.
 
 Exported for the run (and printed by ``env``): ``INTEGRATION_RUN_TAG``;
 ``CVAT_INTEGRATION_HOST/USER/PASSWORD/ORG`` from Secret
@@ -27,25 +29,25 @@ Exported for the run (and printed by ``env``): ``INTEGRATION_RUN_TAG``;
 ``MINIO_ENDPOINT`` (as the host sees it), ``MINIO_ENDPOINT_FOR_CVAT`` (as the CVAT
 pods see it), ``MINIO_ACCESS_KEY/SECRET_KEY/REGION/CONSOLE`` and ``MINIO_BUCKET``
 = ``<tag>``; the ``CLEARML_*`` identity as the helper exports it; and the CA
-trust variables (``SSL_CERT_FILE`` and friends) the helpers add, which is what
-makes curl, the CVAT SDK, boto3 and the ClearML SDK trust the stands'
-``https://<name>.k8s.docker.internal`` names. A failed handshake is reported as
-a TLS problem, never as a stand that is down.
+trust variables (``SSL_CERT_FILE`` and friends) the helpers add. A failed
+handshake is reported as a TLS problem, never as a stand that is down.
 
-A machine is armed when the k8s-infra skill is installed (``~/.agents/skills``
-or ``~/.claude/skills``, or ``K8S_INFRA_SKILL_DIR``); without it the pre-commit
-gate skips with a notice and the other commands refuse. A missing Secret key is
-an error, never a default: a defaulted credential would silently act as somebody
-else on a shared stand.
+Stopped stands are normal: the owner shuts them down at times. ``prepare``
+then prints one notice, polls with backoff, prints a heartbeat every few
+minutes and continues once they answer; ``CVETA2_STAND_WAIT_TIMEOUT`` (seconds)
+bounds the wait. A missing skill or Secret key, an untrusted certificate or a
+refused identity fails at once. A missing Secret key is never defaulted: a
+defaulted credential would silently act as somebody else on a shared stand.
 
-This is a standard-library CLI rather than a pytest fixture on purpose: it must
-resolve the installed k8s-infra skill under the real HOME, which
-``tests.env_isolation`` replaces once pytest starts, and the gate's preflight and
-keep-or-stop decision belong outside the test session.
+The module stays standard-library only. Inside pytest, ``tests.env_isolation``
+replaces HOME; it records the real environment in ``CVETA2_REAL_ENV`` and this
+module restores it for the skill lookup and for every child (kubectl, uv and
+the k8s-infra helpers need the real HOME and caches).
 """
 
 import argparse
 import io
+import json
 import os
 import re
 import shlex
@@ -54,9 +56,10 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import FrameType
 from typing import NoReturn
@@ -120,6 +123,28 @@ def report(error: LifecycleError) -> None:
         warn(f"       {line}")
 
 
+REAL_ENV_VARIABLE = "CVETA2_REAL_ENV"
+
+
+def child_env() -> dict[str, str]:
+    """Return the environment with what env_isolation replaced restored.
+
+    ``CVETA2_REAL_ENV`` maps each replaced name to its original value, or to
+    null when it was unset; outside pytest it is absent and nothing changes.
+    """
+    environ = dict(os.environ)
+    try:
+        real = json.loads(environ.get(REAL_ENV_VARIABLE, "{}"))
+    except json.JSONDecodeError:
+        real = {}
+    for name, value in real.items():
+        if value is None:
+            environ.pop(name, None)
+        else:
+            environ[name] = value
+    return environ
+
+
 def call(
     command: Sequence[str], *, cwd: Path | None = None, capture: bool = False
 ) -> subprocess.CompletedProcess[str]:
@@ -136,6 +161,7 @@ def call(
         cwd=cwd,
         text=True,
         stdout=subprocess.PIPE if capture else None,
+        env=child_env(),
     ) as child:
         try:
             stdout, _ = child.communicate()
@@ -187,7 +213,7 @@ def find_skill_dir() -> Path | None:
                 "carries the run contract.",
             )
         return Path(explicit)
-    home = Path(os.environ.get("HOME", "~")).expanduser()
+    home = Path(child_env().get("HOME", "~")).expanduser()
     for candidate in (
         home / ".agents" / "skills" / "k8s-infra",
         home / ".claude" / "skills" / "k8s-infra",
@@ -466,41 +492,6 @@ class Run:
     def whoami_clearml(self) -> bool:
         return self.helper("clearml", "whoami").returncode == 0
 
-    def test(self, pytest_args: Sequence[str]) -> int:
-        """Check the ClearML identity, then run pytest serially with the SDK extra."""
-        self.require_tag()
-        log(f"ClearML: {os.environ['CLEARML_API_HOST']}  (the shared stand)")
-        if not self.whoami_clearml():
-            fail(
-                "the ClearML stand does not authenticate the cveta2 identity",
-                f"(clearml.py --project {PROJECT} whoami failed, see above).",
-                "A certificate or SSL error in that output is a trust problem, "
-                "not a refused identity:",
-                *TLS_REMEDY,
-                "Diagnose the stand and the Secret with the k8s-infra skill;",
-                "the ClearML tests are never skipped on an armed machine.",
-            )
-        log(
-            f"CVAT:    {os.environ['CVAT_INTEGRATION_HOST']}  (org "
-            f"{os.environ['CVAT_INTEGRATION_ORG']}, project "
-            f"'{os.environ['CVAT_INTEGRATION_PROJECT']}')"
-        )
-        log(f"MinIO:   {os.environ['MINIO_ENDPOINT']}  (bucket {self.tag})")
-        log("Running pytest (xdist disabled for CVAT rate limits)")
-        return call(
-            [
-                "uv",
-                "run",
-                "--extra",
-                "clearml",
-                "pytest",
-                "-o",
-                "addopts=-v --tb=short -p tests.env_isolation",
-                *pytest_args,
-            ],
-            cwd=self.root,
-        ).returncode
-
     def stop(self) -> int:
         """Remove this tag's objects: CVAT, then the bucket, then ClearML."""
         self.require_tag()
@@ -553,36 +544,149 @@ class Run:
         return 0
 
 
-# -- the pre-commit gate ---------------------------------------------------
-
-
-def _armed_but_down(*lines: str) -> NoReturn:
-    fail(
-        "the integration gate is armed (the k8s-infra skill is installed)",
-        *lines,
-        "Diagnose the stand with the k8s-infra skill, or commit without this gate:",
-        "    SKIP=integration-tests git commit ...",
-    )
-
+# -- stand availability ----------------------------------------------------
 
 ROOM_WAIT = 3
+FIRST_DELAY_SECONDS = 15.0
+MAX_DELAY_SECONDS = 60.0
+HEARTBEAT_SECONDS = 300.0
+PROBE_TIMEOUT_SECONDS = 20
+WAIT_TIMEOUT_VARIABLE = "CVETA2_STAND_WAIT_TIMEOUT"
 
 
-def _require_room(run: Run) -> None:
-    """Fail the gate unless the stands' own admission check answers GO."""
-    status = call(
-        ["python3", str(run.skill_dir / "scripts" / "infra.py"), "room"]
-    ).returncode
-    if status == ROOM_WAIT:
-        _armed_but_down(
-            "but infra.py room answers WAIT: the stands are at capacity.",
-            "Retry the commit later.",
+def _quiet(command: Sequence[str]) -> int:
+    """Exit status of a probe command; its output is noise between polls."""
+    try:
+        return subprocess.run(  # noqa: S603 - fixed tool commands and stand URLs
+            list(command),
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=child_env(),
+            timeout=PROBE_TIMEOUT_SECONDS,
+        ).returncode
+    except subprocess.TimeoutExpired:
+        return -1
+
+
+def _curl(name: str, url: str) -> str | None:
+    """None when the endpoint answers; a reason when it is down; TLS fails."""
+    status = _quiet(["curl", "-sf", "--max-time", "10", url])
+    if status in TLS_CURL_STATUSES:
+        fail(
+            f"TLS verification of the {name} stand at {url} failed "
+            f"(curl exit {status}).",
+            *TLS_REMEDY,
         )
     if status != 0:
-        _armed_but_down(f"but infra.py room failed (exit {status}, see above).")
+        return f"the {name} stand at {url} does not answer (curl exit {status})"
+    return None
 
 
-def _keep_data(run: Run) -> bool:
+def probe(root: Path) -> "Run | str":
+    """Return a ready run, or the reason the stands are down.
+
+    "Down" is what the owner causes by stopping the stands (cluster or stand
+    unreachable, capacity WAIT) and is waited for. Everything else - a missing
+    skill or Secret, an untrusted certificate, a refused identity - is raised
+    as a LifecycleError, because waiting would not fix it.
+    """
+    skill_dir = find_skill_dir()
+    if skill_dir is not None and _quiet(
+        ["kubectl", "--context", "docker-desktop", "get", "--raw=/readyz"]
+    ):
+        return "the docker-desktop cluster does not answer"
+    run = Run(root)
+    room = _quiet(["python3", str(run.skill_dir / "scripts" / "infra.py"), "room"])
+    if room == ROOM_WAIT:
+        return "infra.py room answers WAIT: the stands are at capacity"
+    if room != 0:
+        return f"infra.py room failed (exit {room})"
+    for name, url in (
+        ("CVAT", f"{os.environ['CVAT_INTEGRATION_HOST']}/api/server/about"),
+        ("MinIO", f"{os.environ['MINIO_ENDPOINT']}/minio/health/live"),
+        ("ClearML", f"{os.environ['CLEARML_API_HOST']}/debug.ping"),
+    ):
+        reason = _curl(name, url)
+        if reason is not None:
+            return reason
+    if not run.whoami_clearml():
+        fail(
+            "the ClearML stand answers but does not authenticate the cveta2 identity",
+            f"(clearml.py --project {PROJECT} whoami failed, see above).",
+            "Diagnose the stand and the Secret with the k8s-infra skill.",
+        )
+    return run
+
+
+def _minutes(seconds: float) -> str:
+    return f"{int(seconds // 60)} мин {int(seconds % 60)} с"
+
+
+def wait_for_stands(
+    check: Callable[[], "Run | str"],
+    *,
+    notify: Callable[[str], None],
+    sleep: Callable[[float], None] = time.sleep,
+    now: Callable[[], float] = time.monotonic,
+    timeout: float | None = None,
+) -> "Run":
+    """Poll until the stands are ready; say once that we wait, then heartbeat.
+
+    The wait is unbounded unless a timeout is given; Ctrl-C ends it, and
+    nothing has been minted or created at that point.
+    """
+    started = now()
+    delay = FIRST_DELAY_SECONDS
+    last_notice: float | None = None
+    while True:
+        result = check()
+        if not isinstance(result, str):
+            if last_notice is not None:
+                notify(
+                    f"Стенды снова доступны (ожидание {_minutes(now() - started)}); "
+                    "продолжаю."
+                )
+            return result
+        elapsed = now() - started
+        if timeout is not None and elapsed >= timeout:
+            fail(
+                f"Стенды не восстановились за {int(timeout)} с "
+                f"({WAIT_TIMEOUT_VARIABLE}): {result}."
+            )
+        if last_notice is None:
+            notify(
+                f"Стенды недоступны: {result}. Похоже, они остановлены; жду "
+                "восстановления (Ctrl-C - прервать). Пока идёт коммит, не "
+                "редактируйте рабочую копию."
+            )
+            last_notice = now()
+        elif now() - last_notice >= HEARTBEAT_SECONDS:
+            notify(f"Всё ещё жду стенды ({_minutes(elapsed)}): {result}.")
+            last_notice = now()
+        sleep(delay if timeout is None else min(delay, timeout - elapsed))
+        delay = min(delay * 2, MAX_DELAY_SECONDS)
+
+
+def wait_timeout() -> float | None:
+    raw = os.environ.get(WAIT_TIMEOUT_VARIABLE, "").strip()
+    if not raw:
+        return None
+    try:
+        return max(float(raw), 0.0)
+    except ValueError:
+        fail(f"{WAIT_TIMEOUT_VARIABLE}={raw} is not a number of seconds.")
+
+
+def prepare(root: Path, *, notify: Callable[[str], None]) -> "Run":
+    """Wait for the stands, refuse a foreign active run, then claim and seed."""
+    run = wait_for_stands(lambda: probe(root), notify=notify, timeout=wait_timeout())
+    run.refuse_active_run()
+    run.up()
+    return run
+
+
+def keep_data(run: "Run") -> bool:
     choice = os.environ.get("INTEGRATION_KEEP_DATA", "")
     if choice == "1":
         return True
@@ -591,138 +695,29 @@ def _keep_data(run: Run) -> bool:
     return run.on_main()
 
 
-def _teardown(run: Run, *, passed: bool, keep_stack: bool) -> None:
+def finish(run: "Run") -> int:
     """Keep the main slot or an explicitly kept run; stop everything else."""
-    if _keep_data(run):
-        if run.on_main():
-            log(
-                "keeping the run for inspection: it is the durable slot "
-                f"'{run.tag}' (main)"
-            )
-        else:
-            log("keeping the run for inspection (INTEGRATION_KEEP_DATA=1):")
-            log(
-                "    tests/integration/.run-tag still names it; the next gate "
-                "refuses to start until it is stopped"
-            )
-        log(
-            f"    CVAT:    {os.environ['CVAT_INTEGRATION_HOST']}  organization "
-            f"{os.environ['CVAT_INTEGRATION_ORG']}, project "
-            f"'{os.environ['CVAT_INTEGRATION_PROJECT']}'"
-        )
-        log(f"    MinIO:   bucket {run.tag} at {os.environ['MINIO_ENDPOINT']}")
-        log(
-            "    ClearML: nothing is kept - the tests remove their "
-            f"'{run.tag} ...' projects at session end"
-        )
-        log(f"    remove everything with {MODULE} stop")
-        return
-    if not passed and keep_stack:
-        log("leaving the run's data for triage (--keep-stack);")
-        log(f"    remove it with {MODULE} stop")
-        return
-    log("tearing down the run")
-    try:
-        run.stop()
-    except LifecycleError as error:
-        report(error)
-
-
-def gate(root: Path, pytest_args: Sequence[str], *, keep_stack: bool) -> int:
-    """Pre-commit gate: preflight, then up, test and keep-or-stop.
-
-    A machine without the k8s-infra skill is the only silent skip: once armed,
-    the gate passes, fails or is skipped on purpose (``SKIP=integration-tests``).
-    A stand that is down fails it, because a gate that quietly passes teaches
-    everyone to ignore it. The teardown is armed only after the preflight and
-    the active-run check, so a run that never prepared anything cannot tear
-    another one down.
-    """
-    if find_skill_dir() is None:
-        log("integration gate skipped: the k8s-infra skill is not installed here")
-        return 0
-    try:
-        run = Run(root)
-    except LifecycleError as error:
-        _armed_but_down(*error.lines)
-    _require_room(run)
-    host = os.environ["CVAT_INTEGRATION_HOST"]
-    curl = subprocess.run(  # noqa: S603 - the stand URL from the Secret
-        ["curl", "-sf", f"{host}/api/server/about"],  # noqa: S607
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    ).returncode
-    if curl in TLS_CURL_STATUSES:
-        _armed_but_down(
-            f"but TLS verification of the CVAT stand at {host} failed "
-            f"(curl exit {curl}).",
-            *TLS_REMEDY,
-        )
-    if curl != 0:
-        _armed_but_down(
-            f"but the CVAT stand at {host} does not answer (curl exit {curl})."
-        )
-    if not run.whoami_clearml():
-        _armed_but_down(
-            "but the ClearML stand at "
-            f"{os.environ['CLEARML_API_HOST']} does not authenticate the cveta2 "
-            "identity",
-            f"(clearml.py --project {PROJECT} whoami failed, see above).",
-            "A certificate or SSL error in that output is a trust problem, not a "
-            "refused identity:",
-            *TLS_REMEDY,
-        )
-    run.refuse_active_run()
-
-    passed = False
-    try:
-        try:
-            log("integration gate: preparing the run")
-            run.up()
-            log(f"integration gate: run tag '{run.tag}'")
-            # Scoped to tests/integration: CVAT_INTEGRATION_HOST also adds a
-            # live-cvat parameter to the coco8_fixtures session fixture, which
-            # re-runs a slice of the unit tests against live CVAT, serially.
-            # That re-run is worth doing by hand, not on every commit.
-            log("integration gate: running tests/integration")
-            passed = run.test(["tests/integration", *pytest_args]) == 0
-        except LifecycleError as error:
-            # Reported before the teardown, so "see above" still points at
-            # the failing step's own output.
-            report(error)
-        if passed:
-            log("integration gate: passed")
-        else:
-            _report_gate_failure()
-    finally:
-        _teardown(run, passed=passed, keep_stack=keep_stack)
-    return 0 if passed else 1
-
-
-def _report_gate_failure() -> None:
-    warn("")
-    warn("==> integration gate FAILED. Reproduce and triage with:")
-    warn(f"      {MODULE} up")
-    warn(f"      {MODULE} test tests/integration -x --tb=long")
-    warn(f"      {MODULE} stop")
-    warn(
-        "==> A stand that misbehaves is diagnosed with the k8s-infra skill; this "
-        "tool never deploys one."
+    if not keep_data(run):
+        return run.stop()
+    reason = (
+        f"it is the durable slot '{run.tag}' (main)"
+        if run.on_main()
+        else "INTEGRATION_KEEP_DATA=1"
     )
-    warn("==> To commit without this gate (every other hook still runs):")
-    warn("      SKIP=integration-tests git commit ...")
+    log(f"keeping run '{run.tag}' for inspection: {reason}")
+    log(f"    remove everything with {MODULE} stop")
+    return 0
 
 
 # -- command line ----------------------------------------------------------
 
 
 def _terminate(signum: int, _frame: FrameType | None) -> NoReturn:
-    """Turn SIGTERM into an exit so the gate's teardown still runs."""
+    """Turn SIGTERM into an exit so an interrupted child is waited for."""
     raise SystemExit(128 + signum)
 
 
-def _print_env(run: Run) -> None:
+def _print_env(run: "Run") -> None:
     if sys.stdout.isatty():
         fail(
             "env prints the run's credentials; evaluate it instead of reading it:",
@@ -732,22 +727,15 @@ def _print_env(run: Run) -> None:
         sys.stdout.write(f"export {key}={shlex.quote(value)}\n")
 
 
-def _dispatch(
-    command: str, root: Path, extra: Sequence[str], *, keep_stack: bool
-) -> int:
-    if command == "gate":
-        return gate(root, extra, keep_stack=keep_stack)
+def _dispatch(command: str, root: Path) -> int:
+    if command == "up":
+        prepare(root, notify=warn)
+        return 0
     run = Run(root)
-    status = 0
     if command == "env":
         _print_env(run)
-    elif command == "up":
-        run.up()
-    elif command == "test":
-        status = run.test(extra)
-    else:
-        status = run.stop()
-    return status
+        return 0
+    return run.stop()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -760,23 +748,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=Path(__file__).resolve().parents[2],
         help=argparse.SUPPRESS,
     )
-    parser.set_defaults(keep_stack=False)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("env", help="print this run's variables as shell exports")
-    commands.add_parser("up", help="claim a tag and seed the run")
-    commands.add_parser(
-        "test", help="run pytest against the run (extra args go to pytest)"
-    )
+    commands.add_parser("up", help="wait for the stands, claim a tag, seed the run")
     commands.add_parser("stop", help="remove the run and release its tag")
-    gate_parser = commands.add_parser(
-        "gate", help="pre-commit gate: up, test, keep-or-stop (extra args go to pytest)"
-    )
-    gate_parser.add_argument(
-        "--keep-stack", action="store_true", help="keep a failed run for triage"
-    )
-    args, extra = parser.parse_known_args(argv)
-    if extra and args.command not in {"test", "gate"}:
-        parser.error(f"unrecognized arguments: {' '.join(extra)}")
+    args = parser.parse_args(argv)
 
     if isinstance(sys.stdout, io.TextIOWrapper):
         # Our lines must interleave with the children's in captured output.
@@ -784,7 +760,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     signal.signal(signal.SIGTERM, _terminate)
     root: Path = args.repo_root.resolve()
     try:
-        return _dispatch(args.command, root, extra, keep_stack=args.keep_stack)
+        return _dispatch(args.command, root)
     except LifecycleError as error:
         report(error)
         return 1
