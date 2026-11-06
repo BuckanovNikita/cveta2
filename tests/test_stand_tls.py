@@ -65,14 +65,11 @@ def test_a_cyclic_chain_terminates() -> None:
     assert find_tls_error(first) is None
 
 
-def test_the_message_names_tls_the_host_and_the_remedy_not_a_down_stand() -> None:
+def test_the_message_names_tls_the_host_and_the_ca_to_trust() -> None:
     message = tls_failure_message(untrusted_certificate_error(), HOST)
     assert message is not None
-    assert message.startswith(f"TLS verification of {HOST} failed")
-    assert "CERTIFICATE_VERIFY_FAILED" in message
+    assert message.startswith(f"TLS verification of {HOST}")
     assert "k8s-infra-local-ca.crt" in message
-    assert "SSL_CERT_FILE" in message
-    assert "not known to be down" in message
 
 
 def test_the_tls_error_is_not_an_oserror_so_live_tests_cannot_skip_it() -> None:

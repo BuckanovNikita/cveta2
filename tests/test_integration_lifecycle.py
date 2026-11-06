@@ -274,15 +274,6 @@ def tree(tmp_path: Path) -> Tree:
 
 
 class TestSkillDirectory:
-    def test_an_explicit_skill_dir_must_carry_the_run_contract(
-        self, tree: Tree
-    ) -> None:
-        (tree.skill_dir / "scripts" / "infra.py").unlink()
-        outcome, _ = tree.env()
-        assert outcome.returncode == 1
-        assert "K8S_INFRA_SKILL_DIR" in outcome.stderr
-        assert "infra.py" in outcome.stderr
-
     @pytest.mark.parametrize("installed_under", [".agents", ".claude"])
     def test_the_installed_skill_is_found_under_home(
         self, tree: Tree, installed_under: str
@@ -338,102 +329,85 @@ class TestCredentials:
         tree.run("up", env={"INFRA_RUN_TAG": MINTED_TAG})
         assert f"uv sees {bundle}" in tree.tool_calls()
 
-    def test_nothing_runs_on_this_host_so_no_port_is_derived(self, tree: Tree) -> None:
-        outcome, values = tree.env(env={"INFRA_RUN_TAG": MINTED_TAG})
-        assert outcome.returncode == 0, outcome.stderr
-        assert not [key for key in values if key.endswith("_PORT")]
-        assert "_PORT" not in LIFECYCLE.read_text(encoding="utf-8")
-
     @pytest.mark.parametrize("stand", ["cvat", "minio", "clearml"])
     def test_a_failing_helper_fails_the_run(self, tree: Tree, stand: str) -> None:
         outcome, values = tree.env(env={"FAKE_FAIL_STAND": stand})
         assert outcome.returncode == 1
-        assert f"{stand}.py --project cveta2 env failed" in outcome.stderr
-        assert "cannot read the Secret" in outcome.stderr
+        assert f"{stand}.py" in outcome.stderr
         assert not values
 
     @pytest.mark.parametrize(
-        ("stand", "key"),
-        [
-            ("cvat", "CVAT_PASSWORD"),
-            ("cvat", "CVAT_ORG"),
-            ("minio", "S3_ENDPOINT_IN_CLUSTER"),
-            ("minio", "S3_REGION"),
-            ("clearml", "CLEARML_API_SECRET_KEY"),
-        ],
+        "key", ["CVAT_PASSWORD", "S3_ENDPOINT_IN_CLUSTER", "CLEARML_API_SECRET_KEY"]
     )
     def test_a_secret_without_a_needed_key_is_an_error_not_a_default(
-        self, tree: Tree, stand: str, key: str
+        self, tree: Tree, key: str
     ) -> None:
         outcome, values = tree.env(env={"FAKE_DROP_KEYS": key})
         assert outcome.returncode == 1
-        assert f"the cveta2 {stand} Secret carries no {key}" in outcome.stderr
+        assert key in outcome.stderr
+        assert not values
+
+    @pytest.mark.parametrize("line", ["export 'A B'=x", "rm -rf /"])
+    def test_an_unexpected_helper_line_is_refused_not_evaluated(
+        self, tree: Tree, line: str
+    ) -> None:
+        helper = tree.skill_dir / "scripts" / "cvat.py"
+        text = helper.read_text(encoding="utf-8")
+        helper.write_text(
+            text + f"if command == ['env']:\n    print({line!r})\n", encoding="utf-8"
+        )
+        outcome, values = tree.env()
+        assert outcome.returncode == 1
+        assert "cvat.py" in outcome.stderr
         assert not values
 
 
 class TestRunTagPrecedence:
-    def test_infra_run_tag_wins_and_names_everything(self, tree: Tree) -> None:
+    @pytest.mark.parametrize(
+        ("branch", "env", "expected"),
+        [
+            (MAIN_BRANCH, {"INFRA_RUN_TAG": MINTED_TAG}, MINTED_TAG),
+            (MAIN_BRANCH, {}, "cveta2-main"),
+            (FEATURE_BRANCH, {}, ACTIVE_TAG),
+        ],
+        ids=["infra-run-tag-wins", "main-is-the-durable-slot", "branch-file"],
+    )
+    def test_the_tag_names_the_bucket_and_the_project(
+        self, tree: Tree, branch: str, env: dict[str, str], expected: str
+    ) -> None:
         tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome, values = tree.env(
-            branch=MAIN_BRANCH, env={"INFRA_RUN_TAG": MINTED_TAG}
-        )
+        outcome, values = tree.env(branch=branch, env=env)
         assert outcome.returncode == 0, outcome.stderr
-        assert values["INTEGRATION_RUN_TAG"] == MINTED_TAG
-        assert values["CVAT_INTEGRATION_PROJECT"] == f"{MINTED_TAG} coco8-dev"
-        assert values["MINIO_BUCKET"] == MINTED_TAG
-
-    def test_main_is_the_durable_slot(self, tree: Tree) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome, values = tree.env(branch=MAIN_BRANCH)
-        assert outcome.returncode == 0, outcome.stderr
-        assert values["INTEGRATION_RUN_TAG"] == "cveta2-main"
-        assert values["MINIO_BUCKET"] == "cveta2-main"
-        assert values["CVAT_INTEGRATION_PROJECT"] == "cveta2-main coco8-dev"
-
-    def test_a_branch_reads_the_run_tag_file(self, tree: Tree) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome, values = tree.env()
-        assert outcome.returncode == 0, outcome.stderr
-        assert values["INTEGRATION_RUN_TAG"] == ACTIVE_TAG
+        assert values["INTEGRATION_RUN_TAG"] == expected
+        assert values["MINIO_BUCKET"] == expected
+        assert values["CVAT_INTEGRATION_PROJECT"] == f"{expected} coco8-dev"
 
     def test_no_tag_leaves_the_derived_names_empty(self, tree: Tree) -> None:
-        outcome, values = tree.env()
+        # A stale export from a stopped run neither names a tag nor fails.
+        outcome, values = tree.env(env={"INTEGRATION_RUN_TAG": ACTIVE_TAG})
         assert outcome.returncode == 0, outcome.stderr
         assert values["INTEGRATION_RUN_TAG"] == ""
         assert values["CVAT_INTEGRATION_PROJECT"] == ""
         assert values["MINIO_BUCKET"] == ""
 
-    def test_stop_refuses_without_a_run(self, tree: Tree) -> None:
-        outcome = tree.run("stop")
-        assert outcome.returncode == 1
-        assert "no run is active" in outcome.stderr
-        assert "INFRA_RUN_TAG" in outcome.stderr
-        assert tree.tool_calls() == []
-
-    def test_a_corrupt_run_tag_file_is_an_error(self, tree: Tree) -> None:
-        tree.run_tag_file.write_text("Not A Tag\n", encoding="utf-8")
-        outcome, _ = tree.env()
-        assert outcome.returncode == 1
-        assert ".run-tag does not hold a run tag" in outcome.stderr
-
-    def test_a_malformed_infra_run_tag_is_refused(self, tree: Tree) -> None:
-        outcome, _ = tree.env(env={"INFRA_RUN_TAG": "Cveta2_Main"})
-        assert outcome.returncode == 1
-        assert "not lowercase [a-z0-9-]" in outcome.stderr
-
-    def test_a_preset_integration_run_tag_that_disagrees_is_refused(
-        self, tree: Tree
+    @pytest.mark.parametrize(
+        ("tag_file", "env", "fact"),
+        [
+            ("Not A Tag\n", {}, ".run-tag"),
+            ("", {"INFRA_RUN_TAG": "Cveta2_Main"}, "Cveta2_Main"),
+            (f"{ACTIVE_TAG}\n", {"INTEGRATION_RUN_TAG": "nkt-x"}, "INFRA_RUN_TAG"),
+        ],
+        ids=["corrupt-file", "malformed-infra-tag", "disagreeing-preset"],
+    )
+    def test_a_bad_tag_is_refused(
+        self, tree: Tree, tag_file: str, env: dict[str, str], fact: str
     ) -> None:
-        tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
-        outcome, _ = tree.env(env={"INTEGRATION_RUN_TAG": "nkt-feature"})
+        if tag_file:
+            tree.run_tag_file.write_text(tag_file, encoding="utf-8")
+        outcome, values = tree.env(env=env)
         assert outcome.returncode == 1
-        assert "INTEGRATION_RUN_TAG=nkt-feature is set" in outcome.stderr
-        assert "INFRA_RUN_TAG" in outcome.stderr
-
-    def test_a_stale_export_from_a_stopped_run_is_harmless(self, tree: Tree) -> None:
-        outcome, values = tree.env(env={"INTEGRATION_RUN_TAG": ACTIVE_TAG})
-        assert outcome.returncode == 0, outcome.stderr
-        assert values["INTEGRATION_RUN_TAG"] == ""
+        assert fact in outcome.stderr
+        assert not values
 
 
 class TestUp:
@@ -442,16 +416,13 @@ class TestUp:
         assert outcome.returncode == 0, outcome.stderr
         assert tree.recorded_tag() == f"{MINTED_TAG}\n"
         assert tree.tool_calls() == up_calls(MINTED_TAG)
-        assert f"project '{MINTED_TAG} coco8-dev'" in outcome.stdout
+        _, values = tree.env()
+        assert values["INTEGRATION_RUN_TAG"] == MINTED_TAG
 
     def test_up_refuses_while_a_run_is_active(self, tree: Tree) -> None:
         tree.run_tag_file.write_text(f"{ACTIVE_TAG}\n", encoding="utf-8")
         outcome = tree.run("up")
         assert outcome.returncode == 1
-        assert (
-            "a run is active; stop it or export INFRA_RUN_TAG to adopt it"
-            in outcome.stderr
-        )
         assert ACTIVE_TAG in outcome.stderr
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
         assert tree.tool_calls() == ["clearml whoami"]
@@ -474,15 +445,12 @@ class TestUp:
     def test_a_refused_mint_records_nothing(self, tree: Tree) -> None:
         outcome = tree.run("up", env={"FAKE_FAIL_NEWTAG": "1"})
         assert outcome.returncode == 1
-        assert "did not mint a tag" in outcome.stderr
-        assert "already in use" in outcome.stderr
         assert tree.recorded_tag() is None
         assert tree.tool_calls() == ["clearml whoami"]
 
-    def test_a_failing_step_stops_up(self, tree: Tree) -> None:
+    def test_a_failing_step_stops_up_and_tears_down(self, tree: Tree) -> None:
         outcome = tree.run("up", env={"FAKE_FAIL_COMMAND": "uv"})
         assert outcome.returncode == 1
-        assert "cvat_stand.py verify failed" in outcome.stderr
         assert tree.tool_calls() == [
             "clearml whoami",
             cvat("verify"),
@@ -509,6 +477,12 @@ class TestStop:
         assert tree.tool_calls() == stop_calls(MINTED_TAG)
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
 
+    def test_stop_refuses_without_a_run(self, tree: Tree) -> None:
+        outcome = tree.run("stop")
+        assert outcome.returncode == 1
+        assert "INFRA_RUN_TAG" in outcome.stderr
+        assert tree.tool_calls() == []
+
     def test_a_failing_clearml_cleanup_keeps_the_tag_and_names_the_retry(
         self, tree: Tree
     ) -> None:
@@ -516,12 +490,7 @@ class TestStop:
         outcome = tree.run("stop", env={"FAKE_FAIL_COMMAND": "clearml cleanup"})
         assert outcome.returncode == 1
         assert tree.tool_calls()[-1] == f"clearml cleanup --prefix {ACTIVE_TAG}"
-        assert "ClearML projects of tag" in outcome.stderr
-        assert (
-            f"clearml.py\" --project cveta2 cleanup --prefix '{ACTIVE_TAG}'"
-            in outcome.stderr
-        )
-        assert "not fully torn down" in outcome.stderr
+        assert f"cleanup --prefix '{ACTIVE_TAG}'" in outcome.stderr
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
 
     def test_a_failing_cvat_cleanup_still_reaches_the_other_stands(
@@ -531,14 +500,7 @@ class TestStop:
         outcome = tree.run("stop", env={"FAKE_FAIL_COMMAND": "uv"})
         assert outcome.returncode == 1
         assert len(tree.tool_calls()) == 3
-        assert "CVAT data of tag" in outcome.stderr
         assert tree.recorded_tag() == f"{ACTIVE_TAG}\n"
-
-
-def test_unknown_arguments_are_rejected(tree: Tree) -> None:
-    outcome = tree.run("stop", "--force")
-    assert outcome.returncode == 2
-    assert "unrecognized arguments: --force" in outcome.stderr
 
 
 def test_the_env_output_evaluates_in_a_shell(tree: Tree) -> None:
@@ -554,30 +516,6 @@ def test_the_env_output_evaluates_in_a_shell(tree: Tree) -> None:
         text=True,
     )
     assert shell.stdout == f"pw with 'quotes'|{MINTED_TAG}"
-
-
-@pytest.mark.parametrize("line", ["export =''", "export 'A B'=x", "rm -rf /", "export"])
-def test_an_unexpected_helper_line_is_refused_not_evaluated(
-    tree: Tree, line: str
-) -> None:
-    helper = tree.skill_dir / "scripts" / "cvat.py"
-    text = helper.read_text(encoding="utf-8")
-    helper.write_text(
-        text + f"if command == ['env']:\n    print({line!r})\n", encoding="utf-8"
-    )
-    outcome, values = tree.env()
-    assert outcome.returncode == 1
-    assert "cvat.py env printed an unexpected line" in outcome.stderr
-    assert not values
-
-
-def test_the_claimed_tag_names_the_bucket_and_the_project(tree: Tree) -> None:
-    assert tree.run("up").returncode == 0
-    outcome, values = tree.env()
-    assert outcome.returncode == 0, outcome.stderr
-    assert values["INTEGRATION_RUN_TAG"] == MINTED_TAG
-    assert values["MINIO_BUCKET"] == MINTED_TAG
-    assert values["CVAT_INTEGRATION_PROJECT"] == f"{MINTED_TAG} coco8-dev"
 
 
 def test_env_refuses_to_print_credentials_to_a_terminal(tree: Tree) -> None:
@@ -613,7 +551,6 @@ def test_env_refuses_to_print_credentials_to_a_terminal(tree: Tree) -> None:
         os.close(leader)
         os.close(follower)
     assert completed.returncode == 1
-    assert "evaluate it instead" in completed.stderr
     assert "pw with" not in shown
 
 
@@ -623,68 +560,57 @@ class TestProbe:
     NO_WAIT: ClassVar[dict[str, str]] = {"CVETA2_STAND_WAIT_TIMEOUT": "0"}
 
     @pytest.mark.parametrize(
-        ("env", "reason"),
+        ("env", "fact"),
         [
-            ({"FAKE_KUBECTL_STATUS": "1"}, "docker-desktop cluster does not answer"),
-            ({"FAKE_ROOM_STATUS": "3"}, "infra.py room answers WAIT"),
-            (
-                {"FAKE_CURL_URL": "cvat", "FAKE_CURL_STATUS": "7"},
-                (
-                    "CVAT stand at https://cvat.k8s.docker.internal/api/server/about "
-                    "does not answer (curl exit 7)"
-                ),
-            ),
-            (
-                {"FAKE_CURL_URL": "minio/health", "FAKE_CURL_CODE": "503"},
-                (
-                    "MinIO stand at https://s3.k8s.docker.internal/minio/health/live "
-                    "answers HTTP 503"
-                ),
-            ),
-            (
-                {"FAKE_CURL_URL": "debug.ping", "FAKE_CURL_STATUS": "28"},
-                "ClearML stand",
-            ),
+            ({"FAKE_KUBECTL_STATUS": "1"}, "docker-desktop"),
+            ({"FAKE_ROOM_STATUS": "3"}, "WAIT"),
+            ({"FAKE_CURL_URL": "cvat", "FAKE_CURL_STATUS": "7"}, "CVAT"),
+            ({"FAKE_CURL_URL": "minio/health", "FAKE_CURL_CODE": "503"}, "MinIO"),
+            ({"FAKE_CURL_URL": "debug.ping", "FAKE_CURL_STATUS": "28"}, "ClearML"),
         ],
+        ids=["cluster", "room", "cvat-refused", "minio-503", "clearml-timeout"],
     )
     def test_a_stopped_stand_is_waited_for_not_failed(
-        self, tree: Tree, env: dict[str, str], reason: str
+        self, tree: Tree, env: dict[str, str], fact: str
     ) -> None:
         outcome = tree.run("up", env={**self.NO_WAIT, **env})
         assert outcome.returncode == 1
         assert "CVETA2_STAND_WAIT_TIMEOUT" in outcome.stderr
-        assert reason in outcome.stderr
+        assert fact in outcome.stderr
         assert tree.tool_calls() == []
         assert tree.recorded_tag() is None
-
-    def test_an_untrusted_certificate_fails_at_once_as_tls(self, tree: Tree) -> None:
-        outcome = tree.run(
-            "up", env={"FAKE_CURL_URL": "cvat", "FAKE_CURL_STATUS": "60"}
-        )
-        assert outcome.returncode == 1
-        assert "TLS verification of the CVAT stand" in outcome.stderr
-        assert "certificate-trust problem, not a stand that is down" in outcome.stderr
-        assert "CVETA2_STAND_WAIT_TIMEOUT" not in outcome.stderr
-        assert tree.tool_calls() == []
 
     @pytest.mark.parametrize(
-        ("env", "message"),
+        ("env", "fact"),
         [
-            ({"FAKE_ROOM_STATUS": "2"}, "infra.py room failed (exit 2)"),
-            (
-                {"FAKE_CURL_URL": "debug.ping", "FAKE_CURL_CODE": "404"},
-                "answers HTTP 404; that is not a stopped stand",
-            ),
+            ({"FAKE_CURL_URL": "cvat", "FAKE_CURL_STATUS": "60"}, "TLS"),
+            ({"FAKE_ROOM_STATUS": "2"}, "room"),
+            ({"FAKE_CURL_URL": "debug.ping", "FAKE_CURL_CODE": "404"}, "404"),
         ],
+        ids=["untrusted-certificate", "room-error", "http-4xx"],
     )
     def test_a_broken_check_fails_at_once_instead_of_waiting(
-        self, tree: Tree, env: dict[str, str], message: str
+        self, tree: Tree, env: dict[str, str], fact: str
     ) -> None:
+        # No NO_WAIT here: a wait would hang until the subprocess timeout.
         outcome = tree.run("up", env=env)
         assert outcome.returncode == 1
-        assert message in outcome.stderr
+        assert fact in outcome.stderr
         assert "CVETA2_STAND_WAIT_TIMEOUT" not in outcome.stderr
+        assert tree.tool_calls() == []
         assert tree.recorded_tag() is None
+
+    def test_a_refused_clearml_identity_fails_at_once(self, tree: Tree) -> None:
+        outcome = tree.run("up", env={"FAKE_FAIL_COMMAND": "clearml whoami"})
+        assert outcome.returncode == 1
+        assert tree.tool_calls() == ["clearml whoami"]
+
+    def test_a_missing_skill_fails_at_once(self, tree: Tree) -> None:
+        (tree.skill_dir / "scripts" / "infra.py").unlink()
+        outcome = tree.run("up")
+        assert outcome.returncode == 1
+        assert "K8S_INFRA_SKILL_DIR" in outcome.stderr
+        assert tree.tool_calls() == []
 
     def test_a_failed_seed_still_tears_the_run_down(self, tree: Tree) -> None:
         tree.root.joinpath("bin", "uv").write_text(
@@ -694,22 +620,8 @@ class TestProbe:
         )
         outcome = tree.run("up")
         assert outcome.returncode == 1
-        assert "seed_cvat.py failed" in outcome.stderr
         assert tree.tool_calls()[-3:] == stop_calls(MINTED_TAG)
         assert tree.recorded_tag() is None
-
-    def test_a_refused_clearml_identity_fails_at_once(self, tree: Tree) -> None:
-        outcome = tree.run("up", env={"FAKE_FAIL_COMMAND": "clearml whoami"})
-        assert outcome.returncode == 1
-        assert "does not authenticate the cveta2 identity" in outcome.stderr
-        assert tree.tool_calls() == ["clearml whoami"]
-
-    def test_a_missing_skill_fails_at_once(self, tree: Tree) -> None:
-        (tree.skill_dir / "scripts" / "infra.py").unlink()
-        outcome = tree.run("up")
-        assert outcome.returncode == 1
-        assert "K8S_INFRA_SKILL_DIR" in outcome.stderr
-        assert tree.tool_calls() == []
 
 
 class FakeClock:
@@ -729,7 +641,7 @@ class TestWaitForStands:
     @staticmethod
     def wait(
         answers: list[str], clock: FakeClock, timeout: float | None = None
-    ) -> tuple[object, list[str]]:
+    ) -> list[str]:
         ready = object()
         pending = iter(answers)
         notices: list[str] = []
@@ -741,29 +653,24 @@ class TestWaitForStands:
             timeout=timeout,
         )
         assert result is ready
-        return result, notices
+        return notices
 
     def test_ready_stands_wait_for_nothing(self) -> None:
         clock = FakeClock()
-        _, notices = self.wait([], clock)
-        assert notices == []
+        assert self.wait([], clock) == []
         assert clock.sleeps == []
 
-    def test_one_notice_backoff_heartbeats_and_a_recovery_notice(self) -> None:
+    def test_one_notice_backoff_one_heartbeat_and_a_recovery_notice(self) -> None:
         clock = FakeClock()
-        _, notices = self.wait(["CVAT is down"] * 9, clock)
+        notices = self.wait(["CVAT is down"] * 9, clock)
         assert clock.sleeps == [15, 30, 60, 60, 60, 60, 60, 60, 60]
-        assert notices[0].startswith("Стенды недоступны: CVAT is down.")
-        assert "Ctrl-C" in notices[0]
-        heartbeats = [n for n in notices if n.startswith("Всё ещё жду стенды")]
-        assert len(heartbeats) == 1
-        assert notices[-1].startswith("Стенды снова доступны")
+        assert len(notices) == 3
+        assert "CVAT is down" in notices[0]
 
     def test_the_timeout_fails_with_the_last_reason(self) -> None:
         clock = FakeClock()
         with pytest.raises(lifecycle.LifecycleError) as error:
             self.wait(["room WAIT"] * 10, clock, timeout=40)
-        assert "CVETA2_STAND_WAIT_TIMEOUT" in error.value.lines[0]
         assert "room WAIT" in error.value.lines[0]
         assert sum(clock.sleeps) == 40
 

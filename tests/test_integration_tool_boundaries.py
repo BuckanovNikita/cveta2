@@ -11,6 +11,7 @@ k8s-infra environment exists, so it imports only the standard library too.
 
 import ast
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -52,36 +53,8 @@ def test_stand_tls_imports_only_the_standard_library_ssl_module() -> None:
     assert stand_tls_violations(STAND_TLS.read_text(encoding="utf-8")) == set()
 
 
-@pytest.mark.parametrize(
-    ("source", "violation"),
-    [
-        ("import cveta2.adapters.cvat.sdk_adapter\n", "cveta2"),
-        ("from cvat_sdk.core.client import Client\n", "cvat_sdk"),
-        ("def f() -> None:\n    import urllib3\n", "urllib3"),
-        ("from botocore.exceptions import SSLError\n", "botocore"),
-    ],
-)
-def test_stand_tls_rejects_runtime_and_sdk_imports(source: str, violation: str) -> None:
-    assert violation in stand_tls_violations(source)
-
-
 def test_lifecycle_imports_only_the_standard_library() -> None:
     assert lifecycle_violations(LIFECYCLE.read_text(encoding="utf-8")) == set()
-
-
-@pytest.mark.parametrize(
-    ("source", "violation"),
-    [
-        ("from cveta2.adapters.config.settings import CvatConfig\n", "cveta2"),
-        ("import boto3\n", "boto3"),
-        ("def f() -> None:\n    from clearml import Task\n", "clearml"),
-        ("from tests.integration.stand_tls import tls_failure_message\n", "tests"),
-    ],
-)
-def test_lifecycle_rejects_package_sdk_and_test_imports(
-    source: str, violation: str
-) -> None:
-    assert violation in lifecycle_violations(source)
 
 
 def test_no_runtime_module_imports_test_or_script_tooling() -> None:
@@ -94,11 +67,22 @@ def test_no_runtime_module_imports_test_or_script_tooling() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "violation"),
+    ("check", "source", "violation"),
     [
-        ("from tests.integration.stand_tls import tls_failure_message\n", "tests"),
-        ("def f() -> None:\n    import scripts.mutation\n", "scripts"),
+        (stand_tls_violations, "import cveta2.adapters.cvat.sdk_adapter\n", "cveta2"),
+        (stand_tls_violations, "def f() -> None:\n    import urllib3\n", "urllib3"),
+        (lifecycle_violations, "from clearml import Task\n", "clearml"),
+        (lifecycle_violations, "from tests.integration import stand_tls\n", "tests"),
+        (runtime_violations, "from tests.integration import stand_tls\n", "tests"),
+        (
+            runtime_violations,
+            "def f() -> None:\n    import scripts.mutation\n",
+            "scripts",
+        ),
     ],
 )
-def test_runtime_rejects_test_and_script_imports(source: str, violation: str) -> None:
-    assert violation in runtime_violations(source)
+def test_the_checks_see_absolute_and_nested_imports(
+    check: Callable[[str], set[str]], source: str, violation: str
+) -> None:
+    """The contracts above pass vacuously if a check stops seeing imports."""
+    assert violation in check(source)

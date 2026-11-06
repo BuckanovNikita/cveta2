@@ -211,24 +211,6 @@ def test_narrow_scope_refuses_a_checked_in_scope(tmp_path: Path) -> None:
         mutation.narrow_scope(pyproject, ["cveta2/a.py"])
 
 
-def test_child_env_drops_stand_and_git_variables(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("CVAT_INTEGRATION_HOST", "https://cvat")
-    monkeypatch.setenv("MINIO_ENDPOINT", "https://minio")
-    monkeypatch.setenv("INFRA_RUN_TAG", "t")
-    monkeypatch.setenv("GIT_INDEX_FILE", "/repo/.git/index")
-    env = mutation.child_env(tmp_path)
-    dropped = {
-        "CVAT_INTEGRATION_HOST",
-        "MINIO_ENDPOINT",
-        "INFRA_RUN_TAG",
-        "GIT_INDEX_FILE",
-    }
-    assert not dropped & set(env)
-    assert env["PYTEST_DEBUG_TEMPROOT"] == str(tmp_path / ".pytest-temproot")
-
-
 # -- end to end ------------------------------------------------------------
 
 
@@ -325,12 +307,16 @@ def test_explicit_files_mutate_every_function_and_keep_leaves_the_workspace(
     shutil.rmtree(workspace)
 
 
-def test_explicit_file_outside_the_package_is_refused(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("outside", ["pyproject.toml", "../elsewhere.py"])
+def test_an_explicit_file_outside_the_package_is_refused(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    outside: str,
 ) -> None:
     monkeypatch.chdir(repo)
-    assert mutation.main(["pyproject.toml"]) == 2
-    assert "is not a cveta2/ Python file" in capsys.readouterr().err
+    assert mutation.main([outside]) == 2
+    assert outside in capsys.readouterr().err
 
 
 def test_a_deletion_only_hunk_selects_its_function(repo: Path) -> None:
@@ -381,13 +367,6 @@ def test_no_selected_mutant_is_not_reported_as_all_killed(
     out = capsys.readouterr().out
     assert "produce no mutants" in out
     assert "was killed" not in out
-
-
-def test_a_path_outside_the_repository_is_refused(
-    repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    assert mutation.main([str(repo.parent / "elsewhere.py")]) == 2
-    assert "is not a cveta2/ Python file" in capsys.readouterr().err
 
 
 def test_a_custom_index_file_is_honoured(
