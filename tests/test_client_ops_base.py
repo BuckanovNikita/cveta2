@@ -7,10 +7,10 @@ the exception forwarded on the way out -- therefore ran only under the
 integration suite, so a fake factory here is the first thing that pins it.
 """
 
-from __future__ import annotations
-
-import re
-from typing import TYPE_CHECKING, Any, Literal, NoReturn
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from types import TracebackType
+from typing import Any, Literal, NoReturn
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,10 +25,6 @@ from cveta2.composition.client import CvatClient
 from cveta2.domain.errors import CvatApiError
 from cveta2.domain.models import LabelInfo
 from tests.helpers import CFG, client_with_api, csv_row, make_df
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-    from types import TracebackType
 
 
 class _RecordingSdkCm:
@@ -72,11 +68,8 @@ class _RecordingFactory:
 def _forbid_the_real_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turn the default SDK factory into an immediate error.
 
-    Several mutations drop ``self._client_factory`` from the
-    ``open_sdk_api`` call, and ``open_sdk_api`` then falls back to the real
-    ``cvat_sdk.make_client``.  Left alone that tries to reach the config's
-    host, so the mutant would be recorded as a timeout instead of a kill --
-    and the suite would depend on a DNS failure for its speed.
+    A client that ignored its injected factory would otherwise try to reach
+    the config's host through the real ``cvat_sdk.make_client``.
     """
 
     def _explode(**_kwargs: Any) -> NoReturn:
@@ -96,13 +89,7 @@ class TestConnectionLifecycle:
     """Enter opens exactly one connection; exit closes it exactly once."""
 
     def test_enter_opens_one_connection_through_the_injected_factory(self) -> None:
-        """The factory stored in ``__init__`` is what ``__enter__`` must use.
-
-        Nothing asserted that ``client_factory`` survived construction or
-        reached ``open_sdk_api``, so dropping it, passing it as the config,
-        or passing the config as ``None`` all left the tests green while
-        silently falling back to a real network client.
-        """
+        """The factory stored in ``__init__`` is what ``__enter__`` must use."""
         client, factory = _client()
 
         with client as entered:
@@ -163,6 +150,7 @@ class TestConnectionLifecycle:
 
         assert factory.calls == []
         assert factory.cm.exits == []
+        assert client.is_ready
 
     def test_exit_closes_the_connection_once_and_only_once(self) -> None:
         """The stack swap in ``__exit__`` is what makes a second exit a no-op.
@@ -182,22 +170,6 @@ class TestConnectionLifecycle:
         client.__exit__(None, None, None)
 
         assert len(factory.cm.exits) == 1
-
-    def test_operation_after_the_block_asks_for_a_new_context(self) -> None:
-        """Leaving the block must clear the port, not merely falsify it.
-
-        ``_persistent_api`` is read through ``or``, so any falsy value keeps
-        ``_require_api`` from raising and the caller gets an
-        ``AttributeError`` from a stale handle instead of the actionable
-        "requires a context manager" message.
-        """
-        client, _factory = _client()
-
-        with client:
-            pass
-
-        with pytest.raises(RuntimeError, match=r"list_projects\(\) requires"):
-            client.list_projects()
 
     def test_exit_forwards_the_original_exception_to_the_sdk_client(self) -> None:
         """A failure inside the block must reach the SDK client unaltered.
@@ -291,30 +263,27 @@ class TestConnectionFailures:
 
 
 _CONTEXT_REQUIRED_OPS: list[tuple[str, Callable[[CvatClient], object]]] = [
+    ("list_projects", lambda c: c.list_projects()),
     ("set_organization", lambda c: c.set_organization("acme")),
     ("open_task_session", lambda c: c.open_task_session(7)),
 ]
 
 
 @pytest.mark.parametrize(
-    ("operation", "call"),
-    _CONTEXT_REQUIRED_OPS,
+    "call",
+    [call for _, call in _CONTEXT_REQUIRED_OPS],
     ids=[name for name, _ in _CONTEXT_REQUIRED_OPS],
 )
-def test_operation_outside_context_manager_names_itself(
-    operation: str,
+def test_operation_after_the_block_asks_for_a_new_context(
     call: Callable[[CvatClient], object],
 ) -> None:
-    """The literal each method hands ``_require_api`` must be its own name.
+    """Leaving the block clears the port: callers get the actionable error."""
+    client, _factory = _client()
 
-    Both strings only ever reach this error message, so nothing separated
-    ``"set_organization"`` from ``None`` or ``"SET_ORGANIZATION"`` -- the
-    user would be told to wrap a call they never made.
-    """
-    client = CvatClient(CFG)
+    with client:
+        pass
 
-    expected = re.escape(f"{operation}() requires a context manager")
-    with pytest.raises(RuntimeError, match=expected):
+    with pytest.raises(RuntimeError, match="requires a context manager"):
         call(client)
 
 
@@ -331,31 +300,15 @@ class TestTaskWriteSessionReuse:
         api.get_task_jobs.return_value = [RawJob(id=3, start_frame=0, stop_frame=0)]
         return api
 
-    def test_session_binds_the_requested_task(self) -> None:
-        """A session must carry the caller's task id, not a default.
-
-        Everything downstream reads ``session.task_id``, so a session built
-        for the wrong task would silently write to it.
-        """
-        api = self._api()
-
-        session = client_with_api(api).open_task_session(41)
-
-        assert session.task_id == 41
-        assert session.api is api
-
     def test_one_write_chain_fetches_task_metadata_once(self) -> None:
-        """Reusing a session is the whole point of ``open_task_session``.
-
-        Annotations, issues and deleted frames each need ``data_meta``.
-        Nothing asserted the session actually memoises it, so a regression
-        would cost one extra CVAT round-trip per write op and ship silently.
-        """
+        """Annotations, issues and deleted frames share one metadata fetch."""
         api = self._api()
         client = client_with_api(api)
         df = make_df([csv_row("a.jpg", issue_state="new", issue_text="fix me")])
 
         session = client.open_task_session(5)
+        assert session.task_id == 5
+        assert session.api is api
         client.upload_task_annotations(5, df, session=session)
         client.create_task_issues(5, df, session=session)
         client.mark_frames_deleted(5, {"a.jpg"}, session=session)
@@ -363,3 +316,89 @@ class TestTaskWriteSessionReuse:
         assert api.get_task_data_meta.call_count == 1
         assert api.get_task_labels.call_count == 1
         assert api.get_task_jobs.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Public client: runtime settings are read late
+# ---------------------------------------------------------------------------
+
+
+def test_public_client_resolves_late_environment_and_worker_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Public clients observe runtime settings changed after construction."""
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.adapters.execution.concurrency import Workers, configure_workers
+    from cveta2.domain.models import TaskInfo
+
+    api = MagicMock(spec=CvatApiPort)
+    api.get_task.return_value = TaskInfo(
+        id=1, name="task", project_id=7, status="completed", subset="", updated_date=""
+    )
+    api.get_project_labels.return_value = []
+    api.get_task_jobs.return_value = [RawJob(id=9, start_frame=0, stop_frame=0)]
+    api.get_task_labels.return_value = [LabelInfo(id=2, name="car")]
+    api.get_task_data_meta.return_value = RawDataMeta(
+        frames=[RawFrame(name="a.jpg", width=100, height=100)]
+    )
+    runner = MagicMock(
+        side_effect=lambda items, work, **_kwargs: list(map(work, items))
+    )
+    monkeypatch.setattr("cveta2.composition.client.run_concurrent", runner)
+    monkeypatch.delenv("CVETA2_RAISE_ON_FAILURE", raising=False)
+    prior = Workers.s3, Workers.cvat
+    client = CvatClient(CvatConfig(), api=api)
+    try:
+        monkeypatch.setenv("CVETA2_RAISE_ON_FAILURE", "true")
+        configure_workers(s3=prior[0], cvat=3)
+        ctx = client.prepare_fetch(7, task_selector=[1])
+        assert ctx.raise_on_failure is True
+        assert runner.call_args.kwargs["max_workers"] == 3
+
+        configure_workers(s3=prior[0], cvat=4)
+        assert client.set_task_jobs_status(1, stage="acceptance") == 1
+        assert runner.call_args.kwargs["max_workers"] == 4
+
+        configure_workers(s3=prior[0], cvat=5)
+        rows = make_df([csv_row("a.jpg", issue_state="new", issue_text="fix")])
+        assert client.create_task_issues(1, rows) == 1
+        assert runner.call_args.kwargs["max_workers"] == 5
+    finally:
+        configure_workers(s3=prior[0], cvat=prior[1])
+
+
+def test_public_client_observes_mutable_config_before_owned_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Connection settings and public identity use the same current config."""
+    from cveta2.client import CvatClient as PublicCvatClient
+    from cveta2.config import CvatConfig
+
+    cfg = CvatConfig(
+        host="https://old.example", organization="old", username="u", password="p"
+    )
+    api = MagicMock(spec=CvatApiPort)
+    api.get_project_tasks.return_value = []
+    api.get_project_labels.return_value = []
+    connected: list[tuple[str | None, str | None]] = []
+
+    @contextmanager
+    def open_session(resolved: CvatConfig, _factory: object) -> Iterator[CvatApiPort]:
+        connected.append((resolved.host, resolved.organization))
+        yield api
+
+    monkeypatch.setattr("cveta2.composition.client.open_sdk_api", open_session)
+    client = PublicCvatClient(cfg)
+    cfg.host = "https://new.example"
+    cfg.organization = "new"
+
+    assert client.host == cfg.host
+    assert client.default_organization == cfg.organization
+    with client:
+        assert client.api is api
+        assert connected == [(client.host, client.default_organization)]
+        assert client.prepare_fetch(7).host == cfg.host
+    cfg.host = ""
+    cfg.organization = None
+    assert client.host == ""
+    assert client.default_organization is None

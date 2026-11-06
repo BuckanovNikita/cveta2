@@ -1,9 +1,16 @@
-"""Tests for the pure assembly helpers extracted from ``client``."""
+"""Tests for ``ApplicationClient`` over injected ports and its assembly helpers."""
 
-from __future__ import annotations
+import subprocess
+import sys
+from pathlib import Path
+from threading import get_ident
+from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
+from cveta2.adapters.execution.concurrency import run_concurrent
+from cveta2.application.client import ApplicationClient
 from cveta2.application.client.assembly import task_to_records
 from cveta2.application.client.mapping import build_name_to_frame
 from cveta2.application.client.upload_mapping import (
@@ -11,6 +18,8 @@ from cveta2.application.client.upload_mapping import (
     build_upload_shapes,
     find_job_for_frame,
 )
+from cveta2.application.ports.client import ClientSettings
+from cveta2.application.ports.cvat import CvatApiPort
 from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawAttribute,
@@ -19,7 +28,15 @@ from cveta2.application.ports.dtos import (
     RawIssue,
     RawJob,
 )
-from cveta2.domain.models import BBoxAnnotation, DeletedImage, ImageWithoutAnnotations
+from cveta2.application.ports.images import ImageReadPort
+from cveta2.domain.models import (
+    BBoxAnnotation,
+    DeletedImage,
+    ImageWithoutAnnotations,
+    ProjectAnnotations,
+    TaskInfo,
+)
+from cveta2.domain.storage import CloudStorageInfo, DownloadStats
 from tests.helpers import make_raw_shape, make_task
 
 
@@ -340,32 +357,20 @@ class TestTaskToRecords:
 
         assert [(r.job_stage, r.job_state) for r in records] == [("", "")]
 
-    def test_deleted_frames_carry_their_jobs_position(self) -> None:
+    def test_deleted_frames_carry_task_provenance_and_jobs_position(self) -> None:
         """A deleted frame keeps the review position of the job it belonged to.
 
         The partition folds deletion records back in to decide whether a
         task is finished, so a deleted frame that loses its job position
         would let an unfinished task pass as complete.
         """
-        task = make_task(3, subset="train", updated="2026-02-02")
+        task = make_task(3, status="completed", subset="train", updated="2026-02-02")
         jobs = [
             RawJob(id=1, start_frame=0, stop_frame=99, stage="annotation", state="new")
         ]
 
         _records, deleted = task_to_records(
             task, self._meta_with_deleted(), RawAnnotations(), {}, {}, None, jobs
-        )
-
-        assert [(d.job_stage, d.job_state) for d in deleted] == [
-            ("annotation", "new"),
-            ("annotation", "new"),
-        ]
-
-    def test_deleted_frames_carry_task_provenance(self) -> None:
-        task = make_task(3, status="completed", subset="train", updated="2026-02-02")
-
-        _records, deleted = task_to_records(
-            task, self._meta_with_deleted(), RawAnnotations(), {}, {}
         )
 
         assert deleted == [
@@ -378,6 +383,9 @@ class TestTaskToRecords:
                 image_width=800,
                 image_height=600,
                 subset="train",
+                job_stage="annotation",
+                job_state="new",
+                task_completed=False,
             ),
             DeletedImage(
                 task_id=3,
@@ -388,6 +396,9 @@ class TestTaskToRecords:
                 image_width=0,
                 image_height=0,
                 subset="train",
+                job_stage="annotation",
+                job_state="new",
+                task_completed=False,
             ),
         ]
 
@@ -461,3 +472,149 @@ class TestTaskToRecords:
 
         without = [r for r in records if isinstance(r, ImageWithoutAnnotations)]
         assert [r.image_name for r in without] == ["empty.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# ApplicationClient over injected ports
+# ---------------------------------------------------------------------------
+
+
+def test_inner_client_imports_without_infrastructure() -> None:
+    """Importing the aggregate must not even attempt loading an adapter."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import importlib.abc
+import sys
+class BlockInfrastructure(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.startswith(('cveta2.adapters', 'cveta2.composition',
+                                'cvat_sdk', 'boto3', 'clearml')):
+            raise AssertionError('Forbidden infrastructure import: ' + fullname)
+sys.meta_path.insert(0, BlockInfrastructure())
+from cveta2.application.client import ApplicationClient
+from cveta2.application.ports.cvat import CvatApiPort
+from cveta2.application.ports.dtos import RawDataMeta
+assert ApplicationClient and CvatApiPort and RawDataMeta
+""",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def _completed_task(task_id: int) -> TaskInfo:
+    return TaskInfo(
+        id=task_id,
+        name=str(task_id),
+        project_id=7,
+        status="completed",
+        subset="",
+        updated_date="",
+    )
+
+
+def test_selected_tasks_use_injected_execution_and_settings() -> None:
+    """Selection preserves order, worker limit, and resolved failure policy."""
+    api = MagicMock(spec=CvatApiPort)
+    tasks = {i: _completed_task(i) for i in (12, 3)}
+    api.get_task.side_effect = tasks.__getitem__
+    api.get_project_labels.return_value = []
+    runner = MagicMock(
+        side_effect=lambda items, work, **_kwargs: list(map(work, items))
+    )
+    client = ApplicationClient(
+        ClientSettings(
+            host="https://example.test", cvat_workers=4, raise_on_failure=True
+        ),
+        images=MagicMock(spec=ImageReadPort),
+        runner=runner,
+        api=api,
+    )
+
+    ctx = client.prepare_fetch(7, task_selector=[12, 3, 12])
+
+    assert [task.id for task in ctx.tasks] == [12, 3]
+    assert ctx.host == "https://example.test"
+    assert ctx.raise_on_failure is True
+    assert runner.call_args.args[0] == [12, 3]
+    assert runner.call_args.kwargs["max_workers"] == 4
+    assert runner.call_args.kwargs["catch"] == ()
+    api.get_project_tasks.assert_not_called()
+
+
+def test_image_port_receives_storage_and_prefix_without_local_io() -> None:
+    """Application image methods pass lexical paths and storage to the port."""
+    api = MagicMock(spec=CvatApiPort)
+    images = MagicMock(spec=ImageReadPort)
+    images.download.return_value = DownloadStats(total=0)
+    images.sync.return_value = DownloadStats(total=0)
+    storage = CloudStorageInfo(id=2, bucket="bucket", prefix="raw", endpoint_url="")
+    annotations = ProjectAnnotations(annotations=[], deleted_images=[])
+    target = Path("unmaterialized/output")
+    client = ApplicationClient(
+        ClientSettings(), images=images, runner=MagicMock(), api=api
+    )
+
+    assert (
+        client.download_images(
+            annotations,
+            target,
+            project_id=7,
+            project_cloud_storage=storage,
+            ignored_prefix="raw",
+        )
+        is images.download.return_value
+    )
+    assert (
+        client.sync_project_images(
+            7, target, project_cloud_storage=storage, ignored_prefix="raw"
+        )
+        is images.sync.return_value
+    )
+
+    images.download.assert_called_once_with(
+        annotations, target, project_cloud_storage=storage, ignored_prefix="raw"
+    )
+    images.sync.assert_called_once_with(storage, target, ignored_prefix="raw")
+    api.get_project_cloud_storage.assert_not_called()
+
+
+def _label_usage_client(api: MagicMock) -> ApplicationClient:
+    api.get_project_tasks.return_value = [_completed_task(5)]
+    return ApplicationClient(
+        ClientSettings(cvat_workers=8),
+        images=MagicMock(spec=ImageReadPort),
+        runner=run_concurrent,
+        api=api,
+    )
+
+
+def test_label_usage_propagates_unexpected_failure_unchanged() -> None:
+    """A non-API exception must retain its identity across execution."""
+    api = MagicMock(spec=CvatApiPort)
+    failure = ValueError("unexpected annotation failure")
+    api.get_task_annotations.side_effect = failure
+
+    with pytest.raises(ValueError, match="unexpected annotation failure") as caught:
+        _label_usage_client(api).count_label_usage(7)
+    assert caught.value is failure
+
+
+def test_label_usage_keeps_annotation_reads_on_the_calling_thread() -> None:
+    """The sequential counting contract owns unprotected counters."""
+    api = MagicMock(spec=CvatApiPort)
+    readers: list[int] = []
+
+    def read_annotations(_task_id: int) -> RawAnnotations:
+        readers.append(get_ident())
+        return RawAnnotations()
+
+    api.get_task_annotations.side_effect = read_annotations
+
+    assert _label_usage_client(api).count_label_usage(7) == {}
+    assert readers == [get_ident()]

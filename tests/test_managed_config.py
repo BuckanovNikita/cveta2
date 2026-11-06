@@ -20,15 +20,24 @@ from cveta2.adapters.config.project import (
 )
 from cveta2.adapters.config.settings import (
     CacheConfig,
+    CacheProjectSettings,
     CvatConfig,
     IgnoreConfig,
     ImageCacheConfig,
     NetworkConfig,
     SyncRootsConfig,
+    _split_cache_policy,
 )
-from cveta2.domain.managed.models import ManagedError, MigrationRequired
+from cveta2.domain.managed.models import (
+    CvatIdentity,
+    ManagedError,
+    MigrationRequired,
+    ProjectConfig,
+    ProjectDefinition,
+)
 from cveta2.interfaces.commands import setup
 from cveta2.interfaces.commands.interactive import primitives
+from tests.helpers import write_config_yaml, write_split_config_yaml
 
 
 def write(path: Path, data: dict[str, object]) -> Path:
@@ -442,3 +451,374 @@ def test_concurrent_journal_is_not_overwritten(
     assert journal.read_bytes() == b"another transaction"
     assert not list(tmp_path.glob(".*.migration-*"))
     assert not proposal.shared_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Legacy migration review and attachment validation
+# ---------------------------------------------------------------------------
+
+
+def _legacy_registry(
+    tmp_path: Path, names: dict[str, int], ignore: dict[str, object] | None = None
+) -> Path:
+    path = tmp_path / "personal.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "cvat": {"host": "https://cvat.example"},
+                "sync_roots": {
+                    name: f"s3://bucket/{identity}" for name, identity in names.items()
+                },
+                "ignore": ignore or {},
+            }
+        )
+    )
+    (tmp_path / "projects.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "organizations": [
+                    {
+                        "slug": "",
+                        "projects": [
+                            {"id": identity, "name": name}
+                            for name, identity in names.items()
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    return path
+
+
+def test_migration_key_collision_requires_review_without_losing_active_policy(
+    tmp_path: Path,
+) -> None:
+    """Generated and literal project keys cannot silently overwrite each other."""
+    path = _legacy_registry(tmp_path, {"A B": 7, "project-7": 8})
+    original = path.read_bytes()
+    proposal = migration_proposal(path)
+    assert any("collision" in reason.lower() for reason in proposal.unresolved)
+    with pytest.raises(ManagedError, match="unresolved"):
+        activate_migration(proposal)
+    assert path.read_bytes() == original
+    assert not proposal.shared_path.exists()
+
+
+@pytest.mark.parametrize("legacy_key", ["sync_roots", "ignore", "unknown_section"])
+def test_attachment_validates_final_versioned_bytes_before_write(
+    tmp_path: Path, legacy_key: str
+) -> None:
+    """Empty obsolete sections must not become invalid version-one state."""
+    personal = tmp_path / "personal.yaml"
+    personal.write_text(yaml.safe_dump({"cvat": {"username": "alice"}, legacy_key: {}}))
+    shared = tmp_path / "shared.yaml"
+    shared.write_text(
+        yaml.safe_dump({"schema_version": 1, "cvat": {"host": "https://cvat.example"}})
+    )
+    original = personal.read_bytes()
+    with pytest.raises(MigrationRequired):
+        attach_project_config(personal, shared)
+    assert personal.read_bytes() == original
+
+
+def test_numeric_string_ignore_entries_survive_reviewed_migration(
+    tmp_path: Path,
+) -> None:
+    """Legacy scalar and dictionary IDs retain the same exclusion semantics."""
+    path = _legacy_registry(
+        tmp_path,
+        {"main": 7},
+        {"main": [" 42 ", {"id": "43", "name": "old", "silent": True}]},
+    )
+    proposal = migration_proposal(path)
+    assert not proposal.unresolved
+    activate_migration(proposal)
+    shared = yaml.safe_load(proposal.shared_path.read_bytes())
+    assert shared["projects"]["main"]["ignore"] == [
+        {"id": 42, "name": ""},
+        {"id": 43, "name": "old", "description": "", "silent": True},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Shared policy writers: registry keys and cache policy ownership
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", ["sync", "ignore", "cache"])
+def test_shared_policy_writers_reject_unknown_registry_keys(
+    tmp_path: Path, kind: str
+) -> None:
+    """A rejected edit names the unknown source and leaves both files untouched."""
+    personal = write_split_config_yaml(
+        tmp_path / "personal.yaml", project_ids={"Friendly project": 7}
+    )
+    shared = personal.with_name("personal-projects.yaml")
+    before = personal.read_bytes(), shared.read_bytes()
+    config: SyncRootsConfig | IgnoreConfig | CacheConfig
+    if kind == "sync":
+        config = SyncRootsConfig(projects={"unknown-project": "s3://bucket/new"})
+    elif kind == "ignore":
+        config = IgnoreConfig()
+        config.add_task("unknown-project", 42, "ignored")
+    else:
+        config = CacheConfig(
+            projects={"unknown-project": CacheProjectSettings(ignored_prefix="raw/")}
+        )
+    with pytest.raises(ManagedError, match="unknown-project"):
+        config.save(personal)
+    assert (personal.read_bytes(), shared.read_bytes()) == before
+
+
+def test_shared_policy_writers_accept_registry_key_alias(tmp_path: Path) -> None:
+    """Both shared policy types accept stable keys when display names differ."""
+    personal = write_split_config_yaml(
+        tmp_path / "personal.yaml", project_ids={"Friendly project": 7}
+    )
+    SyncRootsConfig(projects={"project-7": "s3://bucket/new"}).save(personal)
+    ignored = IgnoreConfig()
+    ignored.add_task("project-7", 42, "ignored")
+    ignored.save(personal)
+    project = load_project_config(personal).projects["project-7"]
+    assert project.sync_root == "s3://bucket/new"
+    assert project.ignore[0]["id"] == 42
+
+
+def test_personal_cache_key_binding_survives_display_name_resolution(
+    tmp_path: Path,
+) -> None:
+    """A shared registry key resolves to one display-name entry without path loss."""
+    images = tmp_path / "personal-images"
+    tasks = tmp_path / "personal-tasks"
+    personal = write_split_config_yaml(
+        tmp_path / "personal.yaml",
+        project_ids={"Friendly project": 7},
+        cache={
+            "projects": {
+                "project-7": {
+                    "images_root": str(images),
+                    "tasks_root": str(tasks),
+                }
+            }
+        },
+    )
+    loaded = CacheConfig.load(personal)
+    assert set(loaded.projects) == {"Friendly project"}
+    effective = loaded.for_project("Friendly project")
+    assert effective.images_root == images
+    assert effective.tasks_root == tasks
+
+
+def test_cache_writer_prunes_policy_only_bindings_from_personal_output(
+    tmp_path: Path,
+) -> None:
+    """Shared-only updates leave neither shadow policy nor empty local aliases."""
+    global_tasks = tmp_path / "global-tasks"
+    other_tasks = tmp_path / "other-tasks"
+    personal = write_split_config_yaml(
+        tmp_path / "personal.yaml",
+        project_ids={"Friendly project": 7, "Other project": 8},
+        cache={"tasks_root": str(global_tasks)},
+    )
+    cache = CacheConfig.load(personal)
+    cache.projects["Friendly project"] = CacheProjectSettings(
+        ignored_prefix="raw/", task_cache_s3="s3://bucket/shared-cache"
+    )
+    cache.projects["Other project"] = CacheProjectSettings(tasks_root=other_tasks)
+    cache.save(personal)
+
+    shared = load_project_config(personal)
+    assert shared.projects["project-7"].ignored_prefix == "raw/"
+    assert shared.projects["project-7"].task_cache_s3 == "s3://bucket/shared-cache"
+    assert read_config(personal)["cache"] == {
+        "tasks_root": str(global_tasks),
+        "projects": {"Other project": {"tasks_root": str(other_tasks)}},
+    }
+
+
+def test_malformed_cache_entry_does_not_skip_a_later_valid_policy(
+    tmp_path: Path,
+) -> None:
+    """Defensive normalization must not discard later valid project changes."""
+    shared = ProjectConfig(
+        cvat=CvatIdentity(host="https://cvat.example"),
+        projects={"main": ProjectDefinition(id=7, name="Friendly project")},
+    )
+    images = tmp_path / "images"
+    values: dict[str, object] = {
+        "projects": {
+            "malformed": None,
+            "Friendly project": {"ignored_prefix": "raw/", "images_root": str(images)},
+        }
+    }
+    changes = _split_cache_policy(values, shared)
+    assert changes == {"Friendly project": {"ignored_prefix": "raw/"}}
+    assert values == {"projects": {"Friendly project": {"images_root": str(images)}}}
+
+
+def test_global_cache_save_still_rejects_ambiguous_shared_project_names(
+    tmp_path: Path,
+) -> None:
+    """Even a global local-path save must not bless an ambiguous shared registry."""
+    shared = write_config_yaml(
+        tmp_path / "shared.yaml",
+        schema_version=1,
+        cvat={"host": "https://cvat.example"},
+        projects={
+            "first": {"id": 7, "name": "Collision"},
+            "second": {"id": 8, "name": "Collision"},
+        },
+        datasets={},
+    )
+    personal = write_config_yaml(
+        tmp_path / "personal.yaml", schema_version=1, project_config=str(shared)
+    )
+    personal_before, shared_before = personal.read_bytes(), shared.read_bytes()
+    with pytest.raises(ManagedError, match="Collision"):
+        CacheConfig(images_root=tmp_path / "local-images").save(personal)
+    assert personal.read_bytes() == personal_before
+    assert shared.read_bytes() == shared_before
+
+
+# ---------------------------------------------------------------------------
+# Shared identity and credential load/save boundaries
+# ---------------------------------------------------------------------------
+
+
+def shared_personal(path: Path) -> Path:
+    """Create an explicit shared identity with independently owned credentials."""
+    return write_split_config_yaml(
+        path,
+        project_ids={"Source": 71},
+        cvat={
+            "host": "https://shared.example",
+            "organization": "team",
+            "username": "old-user",
+            "password": "old-password",
+        },
+        image_cache={"Source": "/local/images"},
+    )
+
+
+@pytest.mark.parametrize("organization", ["team", "other-team"])
+def test_shared_loader_accepts_only_matching_environment_organization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, organization: str
+) -> None:
+    """Organization identity is checked independently from the matching host."""
+    path = shared_personal(tmp_path / "personal.yaml")
+    monkeypatch.setenv("CVAT_HOST", "https://shared.example/")
+    monkeypatch.setenv("CVAT_ORGANIZATION", organization)
+    monkeypatch.setenv("CVAT_USERNAME", "env-user")
+    monkeypatch.setenv("CVAT_PASSWORD", "env-password")
+    monkeypatch.setenv("CVETA2_DATA_TIMEOUT", "7.5")
+    if organization != "team":
+        with pytest.raises(ManagedError) as error:
+            CvatConfig.load(path)
+        assert str(error.value)
+    else:
+        config = CvatConfig.load(path)
+        assert config.host == "https://shared.example"
+        assert config.organization == "team"
+        assert config.username == "env-user"
+        assert config.password == "env-password"
+        assert config.request_timeout == 7.5
+
+
+@pytest.mark.parametrize(
+    ("host", "organization"),
+    [("https://different.example", "team"), ("https://shared.example", "other")],
+)
+def test_shared_credentials_save_refuses_either_identity_change(
+    tmp_path: Path, host: str, organization: str
+) -> None:
+    """A host-only or organization-only mismatch must refuse before writing."""
+    path = shared_personal(tmp_path / "personal.yaml")
+    original = path.read_bytes()
+    with pytest.raises(ManagedError) as error:
+        CvatConfig(host=host, organization=organization, username="new").save_to_file(
+            path
+        )
+    assert str(error.value)
+    assert path.read_bytes() == original
+    assert load_project_config(path).cvat.host == "https://shared.example"
+
+
+def test_shared_credentials_save_omits_identity_and_preserves_local_settings(
+    tmp_path: Path,
+) -> None:
+    """Saving credentials cannot copy either shared identity field personally."""
+    path = shared_personal(tmp_path / "personal.yaml")
+    config = CvatConfig(
+        host="https://shared.example",
+        organization="team",
+        username="new-user",
+        password="new-password",
+        request_timeout=15,
+    )
+    config.save_to_file(path)
+    saved = yaml.safe_load(path.read_bytes())
+    assert saved["cvat"] == {
+        "username": "new-user",
+        "password": "new-password",
+        "request_timeout": 15,
+    }
+    assert saved["image_cache"] == {"Source": "/local/images"}
+    assert saved["schema_version"] == 1
+    assert CvatConfig.load(path).host == "https://shared.example"
+    assert CvatConfig.load(path).organization == "team"
+
+
+@pytest.mark.parametrize(
+    "section", ["sync", "ignore", "ignored_prefix", "task_cache_s3"]
+)
+def test_new_policy_save_requires_attached_shared_file(
+    tmp_path: Path, section: str
+) -> None:
+    """Policy writers cannot manufacture a fresh personal policy section."""
+    path = tmp_path / "personal.yaml"
+    config: SyncRootsConfig | IgnoreConfig | CacheConfig
+    if section == "sync":
+        config = SyncRootsConfig(projects={"Source": "s3://bucket/images"})
+    elif section == "ignore":
+        config = IgnoreConfig()
+        config.add_task("Source", 73, "ignored")
+    else:
+        settings = CacheProjectSettings.model_validate({section: "s3://bucket/images"})
+        config = CacheConfig(projects={"Source": settings})
+    with pytest.raises(MigrationRequired) as error:
+        config.save(path)
+    if section in {"sync", "ignore"}:
+        assert {"setup", "--project-config"}.issubset(str(error.value).split())
+    assert not path.exists()
+
+
+def test_unattached_local_cache_save_preserves_only_supported_nonempty_fields(
+    tmp_path: Path,
+) -> None:
+    """Local cache records are legal without shared policy and have one schema."""
+    path = write_config_yaml(tmp_path / "personal.yaml")
+    cache = CacheConfig(
+        images_root=Path("/local/root"),
+        projects={
+            "kept": CacheProjectSettings(images_root=Path("/local/kept")),
+            "empty": CacheProjectSettings(),
+        },
+    )
+    cache.save(path)
+    saved = yaml.safe_load(path.read_bytes())
+    assert saved["cache"] == {
+        "images_root": "/local/root",
+        "projects": {"kept": {"images_root": "/local/kept"}},
+    }
+    assert CacheConfig.load(path).projects == {
+        "kept": CacheProjectSettings(images_root=Path("/local/kept"))
+    }
+
+
+def test_empty_local_cache_save_does_not_invent_policy_or_raise(tmp_path: Path) -> None:
+    """Empty serialized local settings must not enter cache-policy inspection."""
+    path = tmp_path / "personal.yaml"
+    CacheConfig().save(path)
+    assert yaml.safe_load(path.read_bytes()) == {}
+    assert CacheConfig.load(path) == CacheConfig()

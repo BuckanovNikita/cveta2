@@ -1,39 +1,14 @@
-"""Conversion and merge application workflows accept in-memory file ports."""
+"""Conversion workflows accept in-memory file ports.
+
+Awaiting placement: the YOLO tests belong in ``test_convert_yolo.py`` and the
+COCO test in ``test_convert_coco.py``.
+"""
 
 from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
-
-from cveta2.application.use_cases.merge import merge_datasets
-
-
-def test_merge_uses_supplied_files_without_touching_paths() -> None:
-    old = pd.DataFrame(
-        [{"image_name": "same.jpg", "task_id": 9, "instance_label": "old"}]
-    )
-    new = pd.DataFrame(
-        [{"image_name": "same.jpg", "task_id": 2, "instance_label": "new"}]
-    )
-    writes: list[tuple[pd.DataFrame, Path]] = []
-    files = SimpleNamespace(
-        read_dataset_csv=lambda path, _columns, **_kwargs: (
-            old if path.name == "old.csv" else new
-        ),
-        read_deleted_names=lambda _path: set(),
-        save_csv=lambda df, path: writes.append((df, path)),
-    )
-    result = merge_datasets(
-        "/missing/old.csv",
-        "/missing/new.csv",
-        "/missing/result.csv",
-        by_task=True,
-        files=files,
-    )
-    assert result["instance_label"].tolist() == ["old"]
-    assert writes[0][0] is result
-    assert writes[0][1] == Path("/missing/result.csv")
 
 
 def test_yolo_export_uses_port_and_preserves_utf8_label_order() -> None:
@@ -103,25 +78,6 @@ def test_yolo_import_uses_port_and_keeps_confidence() -> None:
     assert rows[0]["bbox_x_tl"] == 40
     assert rows[0]["bbox_y_tl"] == 15
     assert rows[0]["instance_label"] == "class_2"
-
-
-def test_baseline_keeps_unfinished_sibling_task_eligible() -> None:
-    from cveta2.application.use_cases.whats_new import compute_baseline
-
-    frame = pd.DataFrame(
-        [{"task_id": 3, "job_stage": "acceptance", "job_state": "completed"}]
-    )
-    sibling = pd.DataFrame(
-        [
-            {"task_id": 8, "job_stage": "acceptance", "job_state": "completed"},
-            {"task_id": 8, "job_stage": "annotation", "job_state": "new"},
-            {"task_id": 9, "job_stage": "acceptance", "job_state": "completed"},
-        ]
-    )
-    files = SimpleNamespace(read_baseline_siblings=lambda _path: [sibling])
-    baseline = compute_baseline(frame, Path("/missing/data.csv"), files=files)
-    assert baseline.cutoff == 3
-    assert baseline.known_task_ids == {3, 9}
 
 
 def test_empty_coco_export_creates_output_root(tmp_path: Path) -> None:

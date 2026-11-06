@@ -1,8 +1,6 @@
 """Tests for the ``cveta2 whats-new`` command and its client method."""
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -12,6 +10,7 @@ from cveta2.composition.client import CvatClient
 from cveta2.composition.conversion import compute_baseline
 from cveta2.domain.baseline import compute_cutoff
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import TaskInfo
 from cveta2.interfaces.commands.whats_new import run_whats_new
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.helpers import (
@@ -21,11 +20,6 @@ from tests.helpers import (
     patch_cli_client,
     write_dataset_csv,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from cveta2.domain.models import TaskInfo
 
 
 def _client_with_tasks(tasks: list[TaskInfo]) -> CvatClient:
@@ -120,54 +114,34 @@ class TestListNewCompletedTasks:
 class TestComputeCutoff:
     """Tests for ``compute_cutoff``."""
 
-    def test_cutoff_from_completed_rows_only(self, tmp_path: Path) -> None:
-        """Non-completed rows must not push the cutoff forward."""
-        df = pd.DataFrame([_row(1), _row(2, completed=False)])
+    @pytest.mark.parametrize(
+        ("rows", "expected"),
+        [
+            # Non-completed rows must not push the cutoff forward.
+            ([_row(1), _row(2, completed=False)], 1),
+            ([_row(1, completed=False), _row(2, completed=False)], 2),
+            # As text "9" would rank above "100".
+            ([_row("9"), _row("100")], 100),
+            # An id-less completed row must not win; all rows are the fallback.
+            ([_row(None), _row(6, completed=False)], 6),
+        ],
+        ids=["completed-only", "no-completed", "numeric", "id-less-completed"],
+    )
+    def test_cutoff(
+        self, tmp_path: Path, rows: list[dict[str, object]], expected: int
+    ) -> None:
+        assert compute_cutoff(pd.DataFrame(rows), tmp_path / "dataset.csv") == expected
 
-        assert compute_cutoff(df, tmp_path / "dataset.csv") == 1
-
-    def test_falls_back_to_all_rows_when_no_completed(self, tmp_path: Path) -> None:
-        """With no completed rows, the max over all rows is used."""
-        df = pd.DataFrame([_row(1, completed=False), _row(2, completed=False)])
-
-        assert compute_cutoff(df, tmp_path / "dataset.csv") == 2
-
-    def test_missing_task_ids_raise(self, tmp_path: Path) -> None:
-        df = pd.DataFrame([_row(None)])
-
+    @pytest.mark.parametrize(
+        "rows",
+        [[_row(None)], [_row("not-an-id"), _row("also-not", completed=False)]],
+        ids=["missing", "non-numeric"],
+    )
+    def test_unusable_task_ids_raise(
+        self, tmp_path: Path, rows: list[dict[str, object]]
+    ) -> None:
         with pytest.raises(Cveta2Error, match="пуст"):
-            compute_cutoff(df, tmp_path / "dataset.csv")
-
-    def test_unusable_task_ids_raise(self, tmp_path: Path) -> None:
-        """A column of non-numeric text is as empty as a column of NaN.
-
-        Pins the numeric coercion specifically: without it these values
-        survive as strings and the max() below returns one of them.
-        """
-        df = pd.DataFrame([_row("not-an-id"), _row("also-not", completed=False)])
-
-        with pytest.raises(Cveta2Error, match="пуст"):
-            compute_cutoff(df, tmp_path / "dataset.csv")
-
-    def test_ids_are_compared_as_numbers_not_text(self, tmp_path: Path) -> None:
-        """Ids read from a CSV must not be ranked as strings.
-
-        Same-width ids agree either way; 9 against 100 is where text
-        ordering diverges and would pick the lower id as the cutoff.
-        """
-        df = pd.DataFrame([_row("9"), _row("100")])
-
-        assert compute_cutoff(df, tmp_path / "dataset.csv") == 100
-
-    def test_missing_completed_id_falls_back_to_all_rows(self, tmp_path: Path) -> None:
-        """A completed row with no id must not win the max().
-
-        Here the id-less row is the only completed one, so the fallback to
-        all rows is what produces a usable cutoff.
-        """
-        df = pd.DataFrame([_row(None), _row(6, completed=False)])
-
-        assert compute_cutoff(df, tmp_path / "dataset.csv") == 6
+            compute_cutoff(pd.DataFrame(rows), tmp_path / "dataset.csv")
 
     def test_baseline_reports_the_csv_path_when_ids_are_unusable(
         self, tmp_path: Path
@@ -307,29 +281,13 @@ class TestComputeCutoff:
         baseline = compute_baseline(pd.DataFrame([_row(1)]), tmp_path / "dataset.csv")
         assert baseline.known_task_ids == {1, 20}
 
-    def test_a_missing_sibling_does_not_stop_the_later_ones(
-        self, tmp_path: Path
+    @pytest.mark.parametrize("obsolete", [None, 'a,b\n"unclosed\n'])
+    def test_a_missing_or_unreadable_sibling_does_not_stop_the_later_ones(
+        self, tmp_path: Path, obsolete: str | None
     ) -> None:
-        """Absent siblings are skipped over, not treated as the end of the list.
-
-        ``deleted.csv`` is last, so nothing before it may abandon the loop.
-        """
-        write_dataset_csv(tmp_path / "deleted.csv", [_row(6)])
-        df = pd.DataFrame([_row(7)])
-
-        baseline = compute_baseline(df, tmp_path / "dataset.csv")
-
-        assert baseline.known_task_ids == {6, 7}
-
-    def test_an_unreadable_sibling_does_not_stop_the_later_ones(
-        self, tmp_path: Path
-    ) -> None:
-        """A damaged obsolete.csv costs its own ids, never the whole command.
-
-        The valid ``deleted.csv`` behind it must still be read, so the
-        failure has to be skipped rather than abandon the loop.
-        """
-        (tmp_path / "obsolete.csv").write_text('a,b\n"unclosed\n', encoding="utf-8")
+        """A bad obsolete.csv costs its own ids; deleted.csv after it is still read."""
+        if obsolete is not None:
+            (tmp_path / "obsolete.csv").write_text(obsolete, encoding="utf-8")
         write_dataset_csv(tmp_path / "deleted.csv", [_row(6)])
         df = pd.DataFrame([_row(7)])
 

@@ -1,293 +1,27 @@
 """Unit tests for merge: split propagation, by-task resolution, and I/O."""
 
-from __future__ import annotations
-
 import re
-from typing import TYPE_CHECKING
+from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from cveta2.adapters.files.dataset import read_deleted_names as _read_deleted_names
+from cveta2.application.use_cases.merge import merge_datasets as merge_with_files
 from cveta2.composition.conversion import merge_datasets
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.merge import _merge_datasets, _propagate_splits, _resolve_by_task
 from tests.helpers import csv_row, make_args, make_df, write_dataset_csv
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _row(
-    image: str,
-    label: str = "cat",
-    split: str | None = None,
-    task_updated_date: str | None = None,
-) -> dict[str, object]:
-    if task_updated_date is None:
-        return csv_row(image, label=label, split=split)
-    return csv_row(image, label=label, split=split, updated=task_updated_date)
-
-
-def _df(rows: list[dict[str, object]]) -> pd.DataFrame:
-    return make_df(rows)
-
-
-# ---------------------------------------------------------------------------
-# Split propagation — _propagate_splits directly
-# ---------------------------------------------------------------------------
-
-
-class TestPropagateSplits:
-    """Tests for the _propagate_splits helper."""
-
-    def test_split_propagated_to_new_rows(self) -> None:
-        """Split from old is filled into merged rows where split is null."""
-        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
-        new = _df([_row("a.jpg"), _row("b.jpg")])
-        merged = new.copy()
-        common = {"a.jpg", "b.jpg"}
-
-        result = _propagate_splits(merged, old, new, common)
-
-        splits = result.set_index("image_name")["split"].to_dict()
-        assert splits["a.jpg"] == "train"
-        assert splits["b.jpg"] == "val"
-
-    def test_no_propagation_when_old_has_no_split_column(
-        self, capture_logs: list[str]
-    ) -> None:
-        """Warning emitted and no changes when old lacks split column."""
-        old = pd.DataFrame(
-            [
-                {
-                    "image_name": "a.jpg",
-                    "instance_shape": "box",
-                    "instance_label": "cat",
-                    "bbox_x_tl": 0,
-                    "bbox_y_tl": 0,
-                    "bbox_x_br": 1,
-                    "bbox_y_br": 1,
-                },
-            ]
-        )
-        new = _df([_row("a.jpg")])
-        merged = new.copy()
-
-        result = _propagate_splits(merged, old, new, {"a.jpg"})
-
-        assert pd.isna(result["split"].iloc[0])
-        assert any("нет данных split" in m for m in capture_logs)
-
-    def test_no_propagation_when_old_splits_all_null(
-        self, capture_logs: list[str]
-    ) -> None:
-        """Warning emitted when old has split column but all values are NaN."""
-        old = _df([_row("a.jpg", split=None)])
-        new = _df([_row("a.jpg")])
-        merged = new.copy()
-
-        _propagate_splits(merged, old, new, {"a.jpg"})
-
-        assert any("нет данных split" in m for m in capture_logs)
-
-    def test_conflict_warning_when_both_have_split(
-        self, capture_logs: list[str]
-    ) -> None:
-        """Warning emitted when both old and new have non-null split for same image."""
-        old = _df([_row("a.jpg", split="train")])
-        new = _df([_row("a.jpg", split="test")])
-        merged = new.copy()
-
-        _propagate_splits(merged, old, new, {"a.jpg"})
-
-        assert any("split задан в обоих датасетах" in m for m in capture_logs)
-
-    def test_no_conflict_warning_when_only_old_has_split(
-        self, capture_logs: list[str]
-    ) -> None:
-        """No conflict is reported when new has no split of its own.
-
-        The user is told about disagreeing split data only when both sides
-        actually carry a value.  Nothing pinned the negative case before, so
-        widening either set operation behind the warning went unnoticed.
-        """
-        old = _df([_row("a.jpg", split="train")])
-        new = _df([_row("a.jpg")])
-        merged = new.copy()
-
-        _propagate_splits(merged, old, new, {"a.jpg"})
-
-        assert not any("split задан в обоих датасетах" in m for m in capture_logs)
-
-    def test_first_old_row_wins_for_duplicate_image(self) -> None:
-        """When old has two split values for one image, the first one is used.
-
-        Both rows are non-null and differ only in ``split``, so deduplicating
-        on all columns instead of on ``image_name`` keeps both and the later
-        value silently overwrites the earlier one.
-        """
-        old = _df([_row("a.jpg", split="train"), _row("a.jpg", split="val")])
-        new = _df([_row("a.jpg")])
-        merged = new.copy()
-
-        result = _propagate_splits(merged, old, new, {"a.jpg"})
-
-        assert result["split"].iloc[0] == "train"
-
-    def test_conflict_keeps_winner_split(self) -> None:
-        """Winner's split value is preserved, not overwritten."""
-        old = _df([_row("a.jpg", split="train")])
-        new = _df([_row("a.jpg", split="test")])
-        merged = new.copy()
-
-        result = _propagate_splits(merged, old, new, {"a.jpg"})
-
-        assert result["split"].iloc[0] == "test"
-
-    def test_partial_propagation(self) -> None:
-        """Rows with null split get propagated; existing split kept."""
-        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
-        new = _df([_row("a.jpg", split="test"), _row("b.jpg")])
-        merged = new.copy()
-
-        result = _propagate_splits(merged, old, new, {"a.jpg", "b.jpg"})
-
-        splits = result.set_index("image_name")["split"].to_dict()
-        assert splits["a.jpg"] == "test"
-        assert splits["b.jpg"] == "val"
-
-
-# ---------------------------------------------------------------------------
-# Integration — _merge_datasets
-# ---------------------------------------------------------------------------
-
-
-class TestMergeDatasetsSplitPropagation:
-    """Integration tests: split propagation through _merge_datasets."""
-
-    def test_new_wins_propagates_old_split(self) -> None:
-        """Default mode: new wins for common images, split from old is carried over."""
-        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
-        new = _df([_row("a.jpg"), _row("b.jpg"), _row("c.jpg")])
-
-        merged = _merge_datasets(old, new, set())
-
-        splits = merged.set_index("image_name")["split"].to_dict()
-        assert splits["a.jpg"] == "train"
-        assert splits["b.jpg"] == "val"
-        assert pd.isna(splits["c.jpg"])
-
-    def test_old_only_images_keep_split(self) -> None:
-        """Images only in old retain their split values in merged output."""
-        old = _df([_row("a.jpg", split="train")])
-        new = _df([_row("b.jpg")])
-
-        merged = _merge_datasets(old, new, set())
-
-        a_split = merged.loc[merged["image_name"] == "a.jpg", "split"].iloc[0]
-        assert a_split == "train"
-
-    def test_deleted_images_excluded(self) -> None:
-        """Deleted images are excluded, even if they had split in old."""
-        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
-        new = _df([_row("a.jpg"), _row("b.jpg")])
-
-        merged = _merge_datasets(old, new, {"a.jpg"})
-
-        assert "a.jpg" not in merged["image_name"].to_numpy()
-        b_split = merged.loc[merged["image_name"] == "b.jpg", "split"].iloc[0]
-        assert b_split == "val"
-
-    def test_no_split_in_old_warns(self, capture_logs: list[str]) -> None:
-        """Warning is logged when old dataset has no split data."""
-        old = _df([_row("a.jpg")])
-        new = _df([_row("a.jpg")])
-
-        _merge_datasets(old, new, set())
-
-        assert any("нет данных split" in m for m in capture_logs)
-
-    def test_multiple_rows_per_image_propagated(self) -> None:
-        """When an image has multiple annotation rows, all get the split from old."""
-        old = _df([_row("a.jpg", label="cat", split="train")])
-        new_rows = [_row("a.jpg", label="cat"), _row("a.jpg", label="dog")]
-        new = _df(new_rows)
-
-        merged = _merge_datasets(old, new, set())
-
-        a_rows = merged[merged["image_name"] == "a.jpg"]
-        assert len(a_rows) == 2
-        assert (a_rows["split"] == "train").all()
-
-
-class TestMergeDatasetsEdgeCases:
-    """Edge cases for _merge_datasets."""
-
-    def test_empty_old_preserves_new(self) -> None:
-        """Empty old DataFrame -- all new images preserved."""
-        old = _df([])
-        new = _df([_row("a.jpg"), _row("b.jpg")])
-
-        merged = _merge_datasets(old, new, set())
-
-        assert set(merged["image_name"]) == {"a.jpg", "b.jpg"}
-
-    def test_empty_new_preserves_old(self) -> None:
-        """Empty new DataFrame -- all old images preserved."""
-        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
-        new = _df([])
-
-        merged = _merge_datasets(old, new, set())
-
-        assert set(merged["image_name"]) == {"a.jpg", "b.jpg"}
-
-    def test_both_empty_no_crash(self) -> None:
-        """Both DataFrames empty -- no crash, empty result."""
-        old = _df([])
-        new = _df([])
-
-        merged = _merge_datasets(old, new, set())
-
-        assert len(merged) == 0
-
-    def test_merged_row_labels_are_unique(self) -> None:
-        """Both sides contribute rows, so the result gets fresh row labels.
-
-        Every other test reads the merged frame by column or by position, so
-        nothing noticed that concatenating without re-indexing leaves the two
-        sources' 0..n labels colliding — ``merged.loc[0]`` would then hand the
-        caller two rows instead of one.
-        """
-        old = _df([_row("a.jpg"), _row("b.jpg")])
-        new = _df([_row("c.jpg"), _row("d.jpg")])
-
-        merged = _merge_datasets(old, new, set())
-
-        assert merged.index.is_unique
-
-    def test_disjoint_datasets_fully_preserved(self) -> None:
-        """No common images -- both sides fully preserved."""
-        old = _df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
-        new = _df([_row("c.jpg"), _row("d.jpg")])
-
-        merged = _merge_datasets(old, new, set())
-
-        assert set(merged["image_name"]) == {"a.jpg", "b.jpg", "c.jpg", "d.jpg"}
-        a_split = merged.loc[merged["image_name"] == "a.jpg", "split"].iloc[0]
-        assert a_split == "train"
-
-
-# ---------------------------------------------------------------------------
-# By-task resolution — _resolve_by_task
-# ---------------------------------------------------------------------------
-
 _ID_OLD = 10
 _ID_NEW = 20
+
+
+def _row(image: str, label: str = "cat", split: str | None = None) -> dict[str, object]:
+    return csv_row(image, label=label, split=split)
 
 
 def _trow(
@@ -302,234 +36,192 @@ def _trow(
     return d
 
 
-def _tdf(rows: list[dict[str, object]]) -> pd.DataFrame:
-    return make_df(rows)
-
-
-class TestResolveByTask:
-    """Unit tests for _resolve_by_task."""
-
-    def test_new_has_the_later_task_and_wins(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
-        new = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        assert result == {"a.jpg"}
-
-    def test_old_has_the_later_task_and_keeps_it(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
-        new = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        assert result == set()
-
-    def test_equal_task_ids_new_wins(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
-        new = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        assert result == {"a.jpg"}
-
-    def test_unusable_old_task_id_falls_back_to_new(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id="not-an-id")])
-        new = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        assert result == {"a.jpg"}
-
-    def test_unusable_new_task_id_falls_back_to_new(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id=_ID_OLD)])
-        new = _tdf([_trow("a.jpg", task_id="not-an-id")])
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        assert result == {"a.jpg"}
-
-    def test_both_task_ids_unusable_falls_back_to_new(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id="garbage")])
-        new = _tdf([_trow("a.jpg", task_id="garbage")])
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        assert result == {"a.jpg"}
-
-    def test_multiple_rows_per_image_uses_max_task_id(self) -> None:
-        """With multiple rows per image, the max id per side is compared."""
-        old = _tdf(
-            [
-                _trow("a.jpg", task_id=10, label="cat"),
-                _trow("a.jpg", task_id=15, label="dog"),
-            ]
-        )
-        new = _tdf(
-            [
-                _trow("a.jpg", task_id=11, label="cat"),
-                _trow("a.jpg", task_id=12, label="dog"),
-            ]
-        )
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        # old max = 15, new max = 12 -> old wins
-        assert result == set()
-
-    def test_task_ids_are_compared_as_numbers_not_text(self) -> None:
-        """Ids read from a CSV must not be compared as strings.
-
-        Every other case here uses ids of equal width, where a string
-        comparison happens to agree.  9 against 100 is where it stops:
-        as text "9" sorts above "100".
-        """
-        old = _tdf([_trow("a.jpg", task_id="100")])
-        new = _tdf([_trow("a.jpg", task_id="9")])
-
-        result = _resolve_by_task(old, new, {"a.jpg"})
-
-        assert result == set()
-
-    def test_mixed_images_resolved_independently(self) -> None:
-        old = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_NEW),
-                _trow("b.jpg", task_id=_ID_OLD),
-            ]
-        )
-        new = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_OLD),
-                _trow("b.jpg", task_id=_ID_NEW),
-            ]
-        )
-
-        result = _resolve_by_task(old, new, {"a.jpg", "b.jpg"})
-
-        assert "a.jpg" not in result  # old holds the later task
-        assert "b.jpg" in result  # new holds the later task
+def _no_task_id_row(image: str) -> dict[str, object]:
+    row = _row(image)
+    del row["task_id"]
+    return row
 
 
 # ---------------------------------------------------------------------------
-# Integration — _merge_datasets with by_task=True
+# Merge precedence and split propagation — property over _merge_datasets
+# ---------------------------------------------------------------------------
+
+_IMAGES = ["a.jpg", "b.jpg", "c.jpg"]
+# One annotation row: (image, task id, split).
+_Row = tuple[str, int, str | None]
+_side = st.lists(
+    st.tuples(
+        st.sampled_from(_IMAGES),
+        st.integers(1, 3),
+        st.sampled_from([None, "train", "val"]),
+    ),
+    max_size=5,
+)
+
+
+def _frame(side: str, rows: list[_Row]) -> pd.DataFrame:
+    """Rows labelled ``<side><index>`` so each merged row names its origin."""
+    return pd.DataFrame(
+        [
+            {
+                "image_name": image,
+                "task_id": task_id,
+                "instance_label": f"{side}{i}",
+                "split": split,
+            }
+            for i, (image, task_id, split) in enumerate(rows)
+        ],
+        columns=["image_name", "task_id", "instance_label", "split"],
+    )
+
+
+def _expected_labels(
+    old: list[_Row], new: list[_Row], deleted: set[str], *, by_task: bool
+) -> list[str]:
+    """Each surviving image keeps every row of exactly one side."""
+    labels: list[str] = []
+    for image in {r[0] for r in old} | {r[0] for r in new}:
+        if image in deleted:
+            continue
+        old_ids = [task for name, task, _ in old if name == image]
+        new_ids = [task for name, task, _ in new if name == image]
+        old_wins = not new_ids or (
+            by_task and bool(old_ids) and max(old_ids) > max(new_ids)
+        )
+        side, rows = ("old", old) if old_wins else ("new", new)
+        labels += [f"{side}{i}" for i, r in enumerate(rows) if r[0] == image]
+    return sorted(labels)
+
+
+@given(
+    old=_side,
+    new=_side,
+    deleted=st.sets(st.sampled_from(_IMAGES)),
+    by_task=st.booleans(),
+)
+# Either side, or both, may be empty.
+@example(old=[], new=[], deleted=set(), by_task=True)
+@example(old=[("a.jpg", 1, "train")], new=[], deleted=set(), by_task=False)
+@example(old=[], new=[("a.jpg", 1, None)], deleted=set(), by_task=True)
+# Default mode ignores task ids: new wins although old holds the later task.
+@example(
+    old=[("a.jpg", 3, "train")], new=[("a.jpg", 1, None)], deleted=set(), by_task=False
+)
+# By-task mode: the later task wins, deleted images stay out even then.
+@example(
+    old=[("a.jpg", 3, None), ("b.jpg", 3, "val")],
+    new=[("a.jpg", 1, None), ("b.jpg", 1, None), ("c.jpg", 1, None)],
+    deleted={"a.jpg"},
+    by_task=True,
+)
+# Every row of a multi-row image gets the old split; new-only rows stay empty.
+@example(
+    old=[("a.jpg", 1, "train")],
+    new=[("a.jpg", 1, None), ("a.jpg", 2, None), ("b.jpg", 1, None)],
+    deleted=set(),
+    by_task=False,
+)
+def test_merge_keeps_one_side_per_image_and_fills_split_from_old(
+    old: list[_Row], new: list[_Row], deleted: set[str], *, by_task: bool
+) -> None:
+    merged = _merge_datasets(
+        _frame("old", old), _frame("new", new), deleted, by_task=by_task
+    )
+
+    assert sorted(merged["instance_label"]) == _expected_labels(
+        old, new, deleted, by_task=by_task
+    )
+    assert merged.index.equals(pd.RangeIndex(len(merged)))
+    first_old_split: dict[str, str] = {}
+    for image, _, split in old:
+        if split is not None:
+            first_old_split.setdefault(image, split)
+    sources = {"old": old, "new": new}
+    for label, image, split in merged[
+        ["instance_label", "image_name", "split"]
+    ].itertuples(index=False):
+        own = sources[label[:3]][int(label[3:])][2]
+        expected = own if own is not None else first_old_split.get(image)
+        assert (split if pd.notna(split) else None) == expected
+
+
+# ---------------------------------------------------------------------------
+# Split propagation — _propagate_splits directly
 # ---------------------------------------------------------------------------
 
 
-class TestMergeDatasetsByTask:
-    """Integration tests: by-task merge resolution through _merge_datasets."""
+class TestPropagateSplits:
+    """Tests for the _propagate_splits helper."""
 
-    def test_by_task_later_new_task_keeps_new(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id=_ID_OLD, label="cat")])
-        new = _tdf([_trow("a.jpg", task_id=_ID_NEW, label="dog")])
+    def test_partial_propagation_keeps_the_winner_split(self) -> None:
+        """Rows with null split get propagated; existing split kept."""
+        old = make_df([_row("a.jpg", split="train"), _row("b.jpg", split="val")])
+        new = make_df([_row("a.jpg", split="test"), _row("b.jpg")])
 
-        merged = _merge_datasets(old, new, set(), by_task=True)
+        result = _propagate_splits(new.copy(), old, new, {"a.jpg", "b.jpg"})
 
-        assert len(merged) == 1
-        assert merged.iloc[0]["instance_label"] == "dog"
+        splits = result.set_index("image_name")["split"].to_dict()
+        assert splits == {"a.jpg": "test", "b.jpg": "val"}
 
-    def test_by_task_later_old_task_keeps_old(self) -> None:
-        old = _tdf([_trow("a.jpg", task_id=_ID_NEW, label="cat")])
-        new = _tdf([_trow("a.jpg", task_id=_ID_OLD, label="dog")])
+    @pytest.mark.parametrize("old_has_column", [False, True])
+    def test_no_old_split_data_warns_and_changes_nothing(
+        self, capture_logs: list[str], *, old_has_column: bool
+    ) -> None:
+        old = make_df([_row("a.jpg")])
+        if not old_has_column:
+            old = old.drop(columns=["split"])
+        new = make_df([_row("a.jpg")])
 
-        merged = _merge_datasets(old, new, set(), by_task=True)
+        result = _propagate_splits(new.copy(), old, new, {"a.jpg"})
 
-        assert len(merged) == 1
-        assert merged.iloc[0]["instance_label"] == "cat"
+        assert pd.isna(result["split"].iloc[0])
+        assert any("нет данных split" in m for m in capture_logs)
 
-    def test_default_mode_ignores_task_ids(self) -> None:
-        """Without --by-task new wins even when old holds the later task.
+    @pytest.mark.parametrize(("new_split", "conflict"), [("test", True), (None, False)])
+    def test_conflict_warning_only_when_both_sides_have_split(
+        self, capture_logs: list[str], new_split: str | None, *, conflict: bool
+    ) -> None:
+        old = make_df([_row("a.jpg", split="train")])
+        new = make_df([_row("a.jpg", split=new_split)])
 
-        The other default-mode tests leave every row on the same task, where
-        id-based resolution would pick new anyway; only a strictly later old
-        row separates "new always wins" from "the later task wins".
-        """
-        old = _tdf([_trow("a.jpg", task_id=_ID_NEW, label="old_a")])
-        new = _tdf([_trow("a.jpg", task_id=_ID_OLD, label="new_a")])
+        _propagate_splits(new.copy(), old, new, {"a.jpg"})
 
-        merged = _merge_datasets(old, new, set())
+        warned = any("split задан в обоих датасетах" in m for m in capture_logs)
+        assert warned is conflict
 
-        assert len(merged) == 1
-        assert merged.iloc[0]["instance_label"] == "new_a"
+    def test_first_old_row_wins_for_duplicate_image(self) -> None:
+        """When old has two split values for one image, the first one is used."""
+        old = make_df([_row("a.jpg", split="train"), _row("a.jpg", split="val")])
+        new = make_df([_row("a.jpg")])
 
-    def test_by_task_deleted_still_excluded(self) -> None:
-        old = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_OLD, split="train"),
-                _trow("b.jpg", task_id=_ID_OLD, split="val"),
-            ]
-        )
-        new = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_NEW),
-                _trow("b.jpg", task_id=_ID_NEW),
-            ]
-        )
+        result = _propagate_splits(new.copy(), old, new, {"a.jpg"})
 
-        merged = _merge_datasets(old, new, {"a.jpg"}, by_task=True)
+        assert result["split"].iloc[0] == "train"
 
-        assert "a.jpg" not in merged["image_name"].to_numpy()
-        assert "b.jpg" in merged["image_name"].to_numpy()
 
-    def test_by_task_deleted_excluded_when_old_wins(self) -> None:
-        """A --deleted image stays out even when the by-task rule assigns it to old."""
-        old = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_NEW, label="old_a"),
-                _trow("b.jpg", task_id=_ID_NEW, label="old_b"),
-            ]
-        )
-        new = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_OLD, label="new_a"),
-                _trow("b.jpg", task_id=_ID_OLD, label="new_b"),
-            ]
-        )
+# ---------------------------------------------------------------------------
+# By-task resolution — _resolve_by_task edge cases the property cannot reach
+# ---------------------------------------------------------------------------
 
-        merged = _merge_datasets(old, new, {"a.jpg"}, by_task=True)
 
-        assert merged["image_name"].tolist() == ["b.jpg"]
-        assert merged["instance_label"].tolist() == ["old_b"]
+@pytest.mark.parametrize(
+    ("old_id", "new_id", "new_wins"),
+    [
+        ("not-an-id", _ID_NEW, True),
+        (_ID_OLD, "not-an-id", True),
+        ("garbage", "garbage", True),
+        # Ids read from a CSV are numbers: as text "9" sorts above "100".
+        ("100", "9", False),
+    ],
+    ids=["unusable-old", "unusable-new", "both-unusable", "numeric-not-text"],
+)
+def test_resolve_by_task_edge_ids(
+    old_id: object, new_id: object, *, new_wins: bool
+) -> None:
+    old = make_df([_trow("a.jpg", task_id=old_id)])
+    new = make_df([_trow("a.jpg", task_id=new_id)])
 
-    def test_by_task_split_propagation(self) -> None:
-        """Split from old propagated even when new wins via by_task."""
-        old = _tdf([_trow("a.jpg", task_id=_ID_OLD, split="train")])
-        new = _tdf([_trow("a.jpg", task_id=_ID_NEW)])
-
-        merged = _merge_datasets(old, new, set(), by_task=True)
-
-        assert merged.iloc[0]["split"] == "train"
-
-    def test_by_task_only_old_and_only_new_preserved(self) -> None:
-        """Images exclusive to one side are always kept."""
-        old = _tdf([_trow("old_only.jpg", task_id=_ID_OLD)])
-        new = _tdf([_trow("new_only.jpg", task_id=_ID_NEW)])
-
-        merged = _merge_datasets(old, new, set(), by_task=True)
-
-        names = set(merged["image_name"])
-        assert names == {"old_only.jpg", "new_only.jpg"}
-
-    def test_by_task_mixed_conflict_resolution(self) -> None:
-        """Some common images won by old, some by new."""
-        old = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_NEW, label="old_a"),
-                _trow("b.jpg", task_id=_ID_OLD, label="old_b"),
-            ]
-        )
-        new = _tdf(
-            [
-                _trow("a.jpg", task_id=_ID_OLD, label="new_a"),
-                _trow("b.jpg", task_id=_ID_NEW, label="new_b"),
-            ]
-        )
-
-        merged = _merge_datasets(old, new, set(), by_task=True)
-
-        labels = merged.set_index("image_name")["instance_label"].to_dict()
-        assert labels["a.jpg"] == "old_a"  # old held the later task
-        assert labels["b.jpg"] == "new_b"  # new held the later task
+    assert _resolve_by_task(old, new, {"a.jpg"}) == ({"a.jpg"} if new_wins else set())
 
 
 # ---------------------------------------------------------------------------
@@ -543,56 +235,80 @@ class TestReadDeletedNames:
     def test_none_returns_empty_set(self) -> None:
         assert _read_deleted_names(None) == set()
 
-    def test_csv_format_with_image_name_column(self, tmp_path: Path) -> None:
-        """A multi-column CSV is parsed as CSV, not as one name per line.
+    @pytest.mark.parametrize(
+        ("name", "content", "expected"),
+        [
+            # The extra column makes the CSV and line-per-name readers disagree.
+            (
+                "deleted.csv",
+                "image_name,reason\na.jpg,dup\nb.jpg,blurred\na.jpg,dup\n",
+                {"a.jpg", "b.jpg"},
+            ),
+            ("deleted.txt", "a.jpg\nb.jpg\n  \nc.jpg\n", {"a.jpg", "b.jpg", "c.jpg"}),
+            ("deleted.txt", "\n  \n", set()),
+        ],
+        ids=["csv", "legacy-text", "blank-lines"],
+    )
+    def test_reads_names(
+        self, tmp_path: Path, name: str, content: str, expected: set[str]
+    ) -> None:
+        path = tmp_path / name
+        path.write_text(content, encoding="utf-8")
 
-        With a single-column file the legacy line-per-name reader returns the
-        same names apart from the header, so it could stand in for the CSV
-        reader unnoticed; the extra column makes the two disagree.
-        """
-        csv_path = tmp_path / "deleted.csv"
-        csv_path.write_text(
-            "image_name,reason\na.jpg,dup\nb.jpg,blurred\na.jpg,dup\n",
-            encoding="utf-8",
-        )
+        assert _read_deleted_names(path) == expected
 
-        result = _read_deleted_names(csv_path)
+    @pytest.mark.parametrize("content", [None, 'image_name\n"unterminated,quote\n'])
+    def test_unreadable_file_error_names_the_file(
+        self, tmp_path: Path, content: str | None
+    ) -> None:
+        path = tmp_path / "deleted.csv"
+        if content is not None:
+            path.write_text(content, encoding="utf-8")
 
-        assert result == {"a.jpg", "b.jpg"}
+        with pytest.raises(Cveta2Error, match=re.escape(str(path))):
+            _read_deleted_names(path)
 
-    def test_legacy_plain_text_format(self, tmp_path: Path) -> None:
-        txt_path = tmp_path / "deleted.txt"
-        txt_path.write_text("a.jpg\nb.jpg\n  \nc.jpg\n", encoding="utf-8")
 
-        result = _read_deleted_names(txt_path)
+# ---------------------------------------------------------------------------
+# Application use case — in-memory dataset port
+# ---------------------------------------------------------------------------
 
-        assert result == {"a.jpg", "b.jpg", "c.jpg"}
 
-    def test_empty_file_yields_no_names(self, tmp_path: Path) -> None:
-        """A file with only blank lines means "nothing deleted", not an error."""
-        txt_path = tmp_path / "deleted.txt"
-        txt_path.write_text("\n  \n", encoding="utf-8")
+@pytest.mark.parametrize(("by_task", "label"), [(False, "new"), (True, "old")])
+def test_merge_use_case_works_through_the_files_port(
+    *, by_task: bool, label: str
+) -> None:
+    """Paths are only handed to the port; the merged frame is what is saved."""
+    old = pd.DataFrame(
+        [{"image_name": "same.jpg", "task_id": 9, "instance_label": "old"}]
+    )
+    new = pd.DataFrame(
+        [{"image_name": "same.jpg", "task_id": 2, "instance_label": "new"}]
+    )
+    writes: list[tuple[pd.DataFrame, Path]] = []
+    reads: list[bool] = []
 
-        assert _read_deleted_names(txt_path) == set()
+    def read_dataset_csv(
+        path: Path, _columns: object, *, require_task_id_column: bool
+    ) -> pd.DataFrame:
+        reads.append(require_task_id_column)
+        return old if path.name == "old.csv" else new
 
-    def test_missing_file_error_names_the_file(self, tmp_path: Path) -> None:
-        """The error says which file is missing, not just that one is.
-
-        The message was never asserted, so dropping its content left the user
-        with a bare exception and no path to check.
-        """
-        missing = tmp_path / "does_not_exist.csv"
-
-        with pytest.raises(Cveta2Error, match=re.escape(str(missing))):
-            _read_deleted_names(missing)
-
-    def test_malformed_csv_error_names_the_file(self, tmp_path: Path) -> None:
-        """A parse failure is reported against the offending file."""
-        csv_path = tmp_path / "deleted.csv"
-        csv_path.write_text('image_name\n"unterminated,quote\n', encoding="utf-8")
-
-        with pytest.raises(Cveta2Error, match=re.escape(str(csv_path))):
-            _read_deleted_names(csv_path)
+    files = SimpleNamespace(
+        read_dataset_csv=read_dataset_csv,
+        read_deleted_names=lambda _path: set(),
+        save_csv=lambda df, path: writes.append((df, path)),
+    )
+    result = merge_with_files(
+        "/missing/old.csv",
+        "/missing/new.csv",
+        "/missing/result.csv",
+        by_task=by_task,
+        files=files,
+    )
+    assert result["instance_label"].tolist() == [label]
+    assert reads == [by_task, by_task]
+    assert writes == [(result, Path("/missing/result.csv"))]
 
 
 # ---------------------------------------------------------------------------
@@ -603,19 +319,19 @@ class TestReadDeletedNames:
 class TestMergeDatasetsIO:
     """Tests for merge_datasets with real temp files."""
 
-    def test_basic_merge_output(self, tmp_path: Path) -> None:
+    def test_nested_output_gets_merged_rows_with_propagated_split(
+        self, tmp_path: Path
+    ) -> None:
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
-        out_path = tmp_path / "merged.csv"
-
+        out_path = tmp_path / "runs" / "2026-01" / "merged.csv"
         write_dataset_csv(old_path, [_row("a.jpg", split="train")])
         write_dataset_csv(new_path, [_row("a.jpg"), _row("b.jpg")])
 
         merge_datasets(old_path, new_path, out_path)
 
         result = pd.read_csv(out_path)
-        names = set(result["image_name"])
-        assert names == {"a.jpg", "b.jpg"}
+        assert set(result["image_name"]) == {"a.jpg", "b.jpg"}
         a_split = result.loc[result["image_name"] == "a.jpg", "split"].iloc[0]
         assert a_split == "train"
 
@@ -624,93 +340,23 @@ class TestMergeDatasetsIO:
         new_path = tmp_path / "new.csv"
         del_path = tmp_path / "deleted.csv"
         out_path = tmp_path / "merged.csv"
-
         write_dataset_csv(old_path, [_row("a.jpg"), _row("b.jpg")])
         write_dataset_csv(new_path, [_row("a.jpg"), _row("c.jpg")])
         del_path.write_text("image_name\na.jpg\n", encoding="utf-8")
 
         merge_datasets(old_path, new_path, out_path, deleted=del_path)
 
-        result = pd.read_csv(out_path)
-        names = set(result["image_name"])
-        assert "a.jpg" not in names
-        assert names == {"b.jpg", "c.jpg"}
+        assert set(pd.read_csv(out_path)["image_name"]) == {"b.jpg", "c.jpg"}
 
-    def test_merge_by_task(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("by_task", "label"), [(None, "new_label"), (True, "old_label")]
+    )
+    def test_by_task_flag_decides_the_winner(
+        self, tmp_path: Path, label: str, *, by_task: bool | None
+    ) -> None:
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
-
-        write_dataset_csv(
-            old_path,
-            [_trow("a.jpg", task_id=_ID_NEW, label="old_label")],
-        )
-        write_dataset_csv(
-            new_path,
-            [_trow("a.jpg", task_id=_ID_OLD, label="new_label")],
-        )
-
-        merge_datasets(old_path, new_path, out_path, by_task=True)
-
-        result = pd.read_csv(out_path)
-        assert result.iloc[0]["instance_label"] == "old_label"
-
-    def test_by_task_missing_column_raises(self, tmp_path: Path) -> None:
-        old_path = tmp_path / "old.csv"
-        new_path = tmp_path / "new.csv"
-        out_path = tmp_path / "merged.csv"
-
-        no_task_id = _row("a.jpg")
-        del no_task_id["task_id"]
-        write_dataset_csv(old_path, [dict(no_task_id)])
-        write_dataset_csv(new_path, [dict(no_task_id)])
-
-        with pytest.raises(Cveta2Error):
-            merge_datasets(old_path, new_path, out_path, by_task=True)
-
-    def test_by_task_missing_column_in_old_only_raises(self, tmp_path: Path) -> None:
-        """--by-task validates the old CSV too, before any id is compared.
-
-        With the column missing on one side only, skipping that side's check
-        defers the failure to a raw pandas KeyError deep inside the merge
-        instead of the guided Cveta2Error.
-        """
-        old_path = tmp_path / "old.csv"
-        new_path = tmp_path / "new.csv"
-        out_path = tmp_path / "merged.csv"
-
-        no_task_id = _row("a.jpg")
-        del no_task_id["task_id"]
-        write_dataset_csv(old_path, [dict(no_task_id)])
-        write_dataset_csv(new_path, [_trow("a.jpg", task_id=_ID_NEW)])
-
-        with pytest.raises(Cveta2Error, match=re.escape(str(old_path))):
-            merge_datasets(old_path, new_path, out_path, by_task=True)
-
-    def test_by_task_missing_column_in_new_only_raises(self, tmp_path: Path) -> None:
-        """--by-task validates the new CSV too, before any id is compared."""
-        old_path = tmp_path / "old.csv"
-        new_path = tmp_path / "new.csv"
-        out_path = tmp_path / "merged.csv"
-
-        no_task_id = _row("a.jpg")
-        del no_task_id["task_id"]
-        write_dataset_csv(old_path, [_trow("a.jpg", task_id=_ID_NEW)])
-        write_dataset_csv(new_path, [dict(no_task_id)])
-
-        with pytest.raises(Cveta2Error, match=re.escape(str(new_path))):
-            merge_datasets(old_path, new_path, out_path, by_task=True)
-
-    def test_default_mode_keeps_new_when_old_is_newer(self, tmp_path: Path) -> None:
-        """Through the public entry point, --by-task off means new always wins.
-
-        ``test_merge_by_task`` pins the opposite outcome for the same data, so
-        without this pair the default of the ``by_task`` flag is unpinned.
-        """
-        old_path = tmp_path / "old.csv"
-        new_path = tmp_path / "new.csv"
-        out_path = tmp_path / "merged.csv"
-
         write_dataset_csv(
             old_path, [_trow("a.jpg", task_id=_ID_NEW, label="old_label")]
         )
@@ -718,27 +364,31 @@ class TestMergeDatasetsIO:
             new_path, [_trow("a.jpg", task_id=_ID_OLD, label="new_label")]
         )
 
-        merge_datasets(old_path, new_path, out_path)
+        if by_task is None:  # the flag left at its default
+            merge_datasets(old_path, new_path, out_path)
+        else:
+            merge_datasets(old_path, new_path, out_path, by_task=by_task)
 
-        result = pd.read_csv(out_path)
-        assert result.iloc[0]["instance_label"] == "new_label"
+        assert pd.read_csv(out_path).iloc[0]["instance_label"] == label
 
-    def test_output_parent_directories_are_created(self, tmp_path: Path) -> None:
-        """A nested output path is created, parents included.
+    @pytest.mark.parametrize("missing", ["old", "new"])
+    def test_by_task_missing_column_names_the_file(
+        self, tmp_path: Path, missing: str
+    ) -> None:
+        """--by-task validates both CSVs before any id is compared."""
+        paths = {"old": tmp_path / "old.csv", "new": tmp_path / "new.csv"}
+        for side, path in paths.items():
+            row = (
+                _no_task_id_row("a.jpg")
+                if side == missing
+                else _trow("a.jpg", task_id=_ID_NEW)
+            )
+            write_dataset_csv(path, [row])
 
-        Every other I/O test writes straight into tmp_path, which already
-        exists, so nothing required the parents of the output file.
-        """
-        old_path = tmp_path / "old.csv"
-        new_path = tmp_path / "new.csv"
-        out_path = tmp_path / "runs" / "2026-01" / "merged.csv"
-
-        write_dataset_csv(old_path, [_row("a.jpg")])
-        write_dataset_csv(new_path, [_row("b.jpg")])
-
-        merge_datasets(old_path, new_path, out_path)
-
-        assert set(pd.read_csv(out_path)["image_name"]) == {"a.jpg", "b.jpg"}
+        with pytest.raises(Cveta2Error, match=re.escape(str(paths[missing]))):
+            merge_datasets(
+                paths["old"], paths["new"], tmp_path / "merged.csv", by_task=True
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -752,17 +402,13 @@ def test_run_merge_by_task_missing_column_exits(tmp_path: Path) -> None:
 
     old_path = tmp_path / "old.csv"
     new_path = tmp_path / "new.csv"
-    out_path = tmp_path / "merged.csv"
-
-    no_task_id = _row("a.jpg")
-    del no_task_id["task_id"]
-    write_dataset_csv(old_path, [dict(no_task_id)])
-    write_dataset_csv(new_path, [dict(no_task_id)])
+    write_dataset_csv(old_path, [_no_task_id_row("a.jpg")])
+    write_dataset_csv(new_path, [_no_task_id_row("a.jpg")])
 
     args = make_args(
         old=str(old_path),
         new=str(new_path),
-        output=str(out_path),
+        output=str(tmp_path / "merged.csv"),
         deleted=None,
         by_task=True,
     )
