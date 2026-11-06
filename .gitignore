@@ -65,6 +65,3 @@ tests/integration/.run-tag
 # Repository-managed Spec Kit skills; personal skills remain ignored.
 !.agents/skills/speckit-*/
 !.agents/skills/speckit-*/**
-.claude/skills/lossless-doc-compress
-.claude/skills/ai-stage-gate
-.claude/skills/ml-system-design-review
