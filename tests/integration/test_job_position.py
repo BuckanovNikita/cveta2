@@ -8,7 +8,7 @@ a running CVAT rather than restated in a unit test: every case below
 compares the verdict :func:`completed_task_ids` reaches from the fetched
 rows against the ``status`` the same CVAT reports for the task.
 
-Requires a running, seeded CVAT + MinIO (see scripts/integration_up.sh).
+Requires a running, seeded CVAT + MinIO (see ``lifecycle.py up``).
 """
 
 from __future__ import annotations

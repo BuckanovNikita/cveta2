@@ -1,6 +1,6 @@
 """Integration tests for upload (S3Uploader, create_upload_task, etc).
 
-Requires a seeded run on the shared CVAT and MinIO stands (scripts/integration_up.sh).
+Requires a seeded run on the shared CVAT and MinIO stands (``lifecycle.py up``).
 Uses coco8-dev project and tests/fixtures/data/coco8/images/.
 """
 
@@ -80,11 +80,14 @@ def _cs_info_for_host(cs_info: CloudStorageInfo) -> CloudStorageInfo:
     """CloudStorageInfo with the host-visible MinIO endpoint (S3Uploader runs here).
 
     The cloud storage itself carries the in-cluster endpoint, which only the
-    CVAT pods can reach; integration_env.sh exports the host-side one.
+    CVAT pods can reach; lifecycle.py exports the host-side one.
     """
     endpoint = _env("MINIO_ENDPOINT", "")
     if not endpoint:
-        pytest.fail("MINIO_ENDPOINT is not set; source scripts/integration_env.sh")
+        pytest.fail(
+            "MINIO_ENDPOINT is not set; "
+            'eval "$(uv run python -m tests.integration.lifecycle env)"'
+        )
     return CloudStorageInfo(
         id=cs_info.id,
         bucket=cs_info.bucket,
@@ -100,7 +103,7 @@ class TestS3UploaderIntegration:
         _project_id, _project_name, cs_info, _cfg = _get_project_and_storage()
         search_dirs = _coco8_search_dirs()
         if not any(d.is_dir() for d in search_dirs):
-            pytest.skip("coco8 images dirs missing (run integration_up.sh to download)")
+            pytest.skip("coco8 images dirs missing (run lifecycle up to download)")
         names = set(IMAGE_NAMES[:3])
         found, _missing = resolve_images(names, search_dirs)
         if not found:

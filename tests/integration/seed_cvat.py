@@ -8,7 +8,7 @@ tests/fixtures/data/coco8/images/, cloud storage "<tag> minio" pointing at
 that bucket through the in-cluster MinIO endpoint, and project
 "<tag> coco8-dev" with its tasks.
 
-Environment (scripts/integration_env.sh exports all of it):
+Environment (tests/integration/lifecycle.py exports all of it):
   CVAT_INTEGRATION_HOST / CVAT_INTEGRATION_USER / CVAT_INTEGRATION_PASSWORD
   CVAT_INTEGRATION_ORG      organization every object is created in
   CVAT_INTEGRATION_PROJECT  full project name, "<tag> coco8-dev"
@@ -112,7 +112,8 @@ class SeedSettings(BaseModel):
         missing = [ENV_KEYS[field] for field, value in values.items() if not value]
         if missing:
             raise SeedError(
-                f"{', '.join(missing)} not set; source scripts/integration_env.sh "
+                f"{', '.join(missing)} not set; "
+                'eval "$(uv run python -m tests.integration.lifecycle env)" '
                 "(it exports them from the cveta2 Secrets through the k8s-infra skill)"
             )
         values["cvat_host"] = values["cvat_host"].rstrip("/")
@@ -162,7 +163,7 @@ def collect_image_paths(images_dir: Path) -> list[Path]:
         if not directory.is_dir():
             raise SeedError(
                 f"missing images directory {directory}; "
-                "scripts/integration_up.sh downloads coco8 first"
+                "uv run python -m tests.integration.lifecycle up downloads coco8 first"
             )
         paths.extend(
             p for p in sorted(directory.iterdir()) if p.suffix.lower() in IMAGE_SUFFIXES

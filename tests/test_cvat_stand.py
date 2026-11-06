@@ -187,7 +187,7 @@ class TestSettings:
         monkeypatch.setenv("CVAT_INTEGRATION_ORG", "  ")
         assert run(monkeypatch, "verify") == 1
         assert "CVAT_INTEGRATION_PASSWORD, CVAT_INTEGRATION_ORG not set" in logs[-1]
-        assert "integration_env.sh" in logs[-1]
+        assert "tests.integration.lifecycle env" in logs[-1]
         assert stand.logins == []
 
     @pytest.mark.usefixtures("stand")

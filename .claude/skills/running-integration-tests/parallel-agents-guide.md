@@ -29,45 +29,45 @@ What is still shared:
   slot, so two such runs at once replace each other. Run branch work from a
   branch, and only one main run at a time;
 - one checkout's `tests/integration/.run-tag` file, which names the run active
-  in that checkout. `integration_up.sh` and the gate refuse to mint while it
+  in that checkout. `lifecycle up` and the gate refuse to mint while it
   exists; a second run from the same checkout needs another worktree or must
   adopt the tag (below).
 
 ## Start an isolated run
 
-The default path is already isolated: `integration_up.sh` mints a fresh tag and
+The default path is already isolated: `lifecycle up` mints a fresh tag and
 records it, and test and stop read the record.
 
 ```bash
-./scripts/integration_up.sh
-./scripts/integration_test.sh tests/integration/<target>.py
-./scripts/integration_stop.sh
+uv run python -m tests.integration.lifecycle up
+uv run python -m tests.integration.lifecycle test tests/integration/<target>.py
+uv run python -m tests.integration.lifecycle stop
 ```
 
 To run under a tag you chose (a `--keep` tag, a slug that names the work), mint
-it through the skill and export it before the first script; every script in
+it through the skill and export it before the first command; every command in
 that shell then acts on it and nothing is written to `.run-tag`:
 
 ```bash
 INFRA_RUN_TAG=$(python3 <skill-dir>/scripts/infra.py newtag --project cveta2 --slug <what>) && export INFRA_RUN_TAG
-./scripts/integration_up.sh
-./scripts/integration_test.sh tests/integration/<target>.py
-./scripts/integration_stop.sh
+uv run python -m tests.integration.lifecycle up
+uv run python -m tests.integration.lifecycle test tests/integration/<target>.py
+uv run python -m tests.integration.lifecycle stop
 ```
 
-Never hand-write a tag and never set `INTEGRATION_RUN_TAG`: the scripts derive
+Never hand-write a tag and never set `INTEGRATION_RUN_TAG`: the tool derives
 it and refuse a conflicting shell value. Not Claude Code? Export
 `INFRA_HARNESS=codex|ci|human` first, so the tag records who ran it.
 
 ## Adopt a run started elsewhere
 
 A run's tag is its only handle. To test or stop a run that another shell or a
-killed gate started, export its tag and use the same scripts:
+killed gate started, export its tag and use the same commands:
 
 ```bash
 export INFRA_RUN_TAG=<tag>          # from .run-tag, the gate log, or `ls` below
-./scripts/integration_test.sh tests/integration/<target>.py
-./scripts/integration_stop.sh
+uv run python -m tests.integration.lifecycle test tests/integration/<target>.py
+uv run python -m tests.integration.lifecycle stop
 ```
 
 Adopt only a tag you own or were handed: adopting a live run of somebody else
@@ -76,7 +76,7 @@ and stopping it deletes their objects. When in doubt, list first.
 ## Diagnose collisions
 
 ```bash
-source scripts/integration_env.sh
+eval "$(uv run python -m tests.integration.lifecycle env)"
 cat tests/integration/.run-tag                               # the run active in this checkout
 uv run python tests/integration/cvat_stand.py ls             # what the cveta2 user owns on CVAT
 python3 "$INTEGRATION_SKILL_DIR/scripts/cvat.py"    --project cveta2 ls
@@ -92,14 +92,14 @@ Choose a fresh tag; never stop a tag you did not start.
 
 ## Cleanup after failure
 
-Clean only the tag recorded for the current run; `integration_stop.sh` prints
+Clean only the tag recorded for the current run; `lifecycle stop` prints
 the exact same-tag retry command for the stand that failed:
 
 ```bash
-INFRA_RUN_TAG=<owned-tag> ./scripts/integration_stop.sh
+INFRA_RUN_TAG=<owned-tag> uv run python -m tests.integration.lifecycle stop
 ```
 
-If only one stand needs retrying, use the command the script printed:
+If only one stand needs retrying, use the command the tool printed:
 `cvat_stand.py cleanup --tag <owned-tag>` for CVAT, or the skill's
 `minio.py` / `clearml.py --project cveta2 cleanup --prefix <owned-tag>`. Never
 substitute a shorter prefix: the helpers refuse one that does not reach

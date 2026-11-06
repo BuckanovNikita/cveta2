@@ -45,7 +45,10 @@ def clearml_run() -> Iterator[RunSettings]:
     try:
         import clearml  # noqa: F401
     except ImportError:
-        pytest.fail("Run scripts/integration_test.sh to install the ClearML extra")
+        pytest.fail(
+            "Run `uv run python -m tests.integration.lifecycle test` "
+            "to install the ClearML extra"
+        )
     try:
         yield settings
     finally:

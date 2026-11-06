@@ -7,7 +7,7 @@
 
 Credentials come from ``CVAT_INTEGRATION_HOST`` / ``CVAT_INTEGRATION_USER`` /
 ``CVAT_INTEGRATION_PASSWORD`` / ``CVAT_INTEGRATION_ORG``, which
-``scripts/integration_env.sh`` derives from the project's Secret through the
+``tests/integration/lifecycle.py`` derives from the project's Secret through the
 k8s-infra skill (``cvat.py --project cveta2 env``).
 
 ``verify`` logs in as that user, checks that the stand answers as the same
@@ -75,7 +75,8 @@ class StandSettings(BaseModel):
         missing = [keys[field] for field, value in values.items() if not value]
         if missing:
             raise StandError(
-                f"{', '.join(missing)} not set; source scripts/integration_env.sh "
+                f"{', '.join(missing)} not set; "
+                'eval "$(uv run python -m tests.integration.lifecycle env)" '
                 "(it exports them from the cveta2 Secret through the k8s-infra skill)"
             )
         values["host"] = values["host"].rstrip("/")

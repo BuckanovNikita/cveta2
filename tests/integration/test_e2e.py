@@ -4,7 +4,7 @@ These tests exercise code paths that the parameterized fixture tests
 cannot reach: real SdkCvatApiAdapter round-trips, real CvatClient
 usage, and real CLI invocation without mocks.
 
-Requires a running, seeded CVAT (see scripts/integration_up.sh).
+Requires a running, seeded CVAT (see uv run python -m tests.integration.lifecycle up).
 """
 
 from __future__ import annotations

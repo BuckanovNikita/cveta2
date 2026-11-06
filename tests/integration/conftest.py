@@ -1,7 +1,7 @@
 """Integration test helpers: the stand client, the seeded project, live fixtures.
 
 Everything here reads ``CVAT_INTEGRATION_*`` (exported by
-``scripts/integration_env.sh``): host, credentials, the organization every
+``tests/integration/lifecycle.py``): host, credentials, the organization every
 call is scoped to, and the full name of this run's seeded project.
 """
 
@@ -83,7 +83,10 @@ def find_seeded_project(adapter: CvatApiPort) -> ProjectInfo:
     name = seeded_project_name()
     matches = [p for p in adapter.list_projects() if p.name == name]
     if not matches:
-        pytest.skip(f"project '{name}' not found (run scripts/integration_up.sh first)")
+        pytest.skip(
+            f"project '{name}' not found "
+            "(run `uv run python -m tests.integration.lifecycle up` first)"
+        )
     if len(matches) > 1:
         ids = ", ".join(str(p.id) for p in matches)
         pytest.fail(

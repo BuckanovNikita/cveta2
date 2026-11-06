@@ -1,6 +1,6 @@
 """Integration tests for CVAT issues sync (issue_text / issue_state columns).
 
-Requires a running, seeded CVAT + MinIO (see scripts/integration_up.sh).
+Requires a running, seeded CVAT + MinIO (see ``lifecycle.py up``).
 Uses coco8-dev project and images seeded by seed_cvat.py.
 """
 

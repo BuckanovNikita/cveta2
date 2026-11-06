@@ -207,7 +207,7 @@ class TestSettings:
         with pytest.raises(seed_cvat.SeedError) as error:
             seed_cvat.SeedSettings.from_env()
         assert "MINIO_REGION, MINIO_BUCKET not set" in str(error.value)
-        assert "integration_env.sh" in str(error.value)
+        assert "tests.integration.lifecycle env" in str(error.value)
 
     @pytest.mark.usefixtures("stand")
     def test_names_derive_from_the_tag_and_the_host_loses_its_slash(self) -> None:
@@ -276,7 +276,7 @@ class TestBucket:
         with stubber, pytest.raises(seed_cvat.SeedError) as error:
             seed_cvat.seed_bucket(settings, s3, tmp_path / "nowhere")
         assert "missing images directory" in str(error.value)
-        assert "integration_up.sh" in str(error.value)
+        assert "lifecycle up" in str(error.value)
         with pytest.raises(AssertionError, match="1 responses remaining"):
             stubber.assert_no_pending_responses()
 

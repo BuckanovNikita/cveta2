@@ -267,7 +267,7 @@ survivors.
 
 Live tests run against the shared CVAT, MinIO and ClearML stands of the
 docker-desktop cluster under one run tag per run; nothing runs on this host.
-The `running-integration-tests` skill owns the lifecycle scripts, the tag
+The `running-integration-tests` skill owns the lifecycle tool, the tag
 (minted through the k8s-infra skill, adopted with `INFRA_RUN_TAG`), the
 credentials (evaluated from the project Secrets, never stored), serial pytest
 execution, and exact-tag cleanup. Do not start, stop, or clean a stand
@@ -279,8 +279,8 @@ Use the installed global `k8s-infra` skill and read its
 `references/run-contract.md` before touching a stand. Its maintained registry
 owns project identities, allowed stands, capacity limits, helper locations,
 credential lookup, and machine setup; do not duplicate those values here.
-This project's lifecycle scripts act as `cveta2` and resolve the installed skill
-through `scripts/integration_env.sh`.
+This project's lifecycle tool, `tests/integration/lifecycle.py`, acts as `cveta2`
+and resolves the installed skill.
 
 - Preflight with the skill's `infra.py room`; obey WAIT (exit status 3).
 - Mint one owned tag through `infra.py newtag --project cveta2 --slug <what>`.
@@ -289,7 +289,7 @@ through `scripts/integration_env.sh`.
 - Name every created object with that tag. Read credentials from the skill's
   project environment helpers, never from files or logged output.
 - Run and clean integration resources through the `running-integration-tests`
-  skill and repository lifecycle scripts, on success and failure. Prove cleanup
+  skill and the repository lifecycle tool, on success and failure. Prove cleanup
   with the exact-tag listings; CVAT cloud storage is part of that cleanup.
 - Read current capacity from the registry; never infer permission from an idle
   stand. Never run `cleanup --stale` without `--dry-run`.

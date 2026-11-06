@@ -1,7 +1,7 @@
 """The run's objects on the shared ClearML stand: their names and their removal.
 
 The run acts as project ``cveta2`` under one run tag (``INTEGRATION_RUN_TAG``,
-exported by ``scripts/integration_env.sh`` together with the ``CLEARML_*``
+exported by ``tests/integration/lifecycle.py`` together with the ``CLEARML_*``
 identity of the cveta2 Secret, which the ClearML SDK reads from the
 environment). Everything the tests create on the stand is a project named
 ``"<tag> <what>"``; the SDK files a dataset under ``<project>/.datasets/<name>``,
@@ -9,7 +9,7 @@ so a run owns every project whose first ``/`` path element starts with the tag
 as its first whitespace token - the rule ``clearml.py`` of the k8s-infra skill
 applies too. ``delete_run_projects`` removes them deepest first, with their
 contents, over the same ``projects.get_all`` / ``projects.delete`` calls the
-skill uses; ``scripts/integration_stop.sh`` runs the skill's
+skill uses; ``uv run python -m tests.integration.lifecycle stop`` runs the skill's
 ``clearml.py --project cveta2 cleanup --prefix <tag>`` afterwards for whatever
 a killed session left behind.
 """
@@ -49,8 +49,9 @@ class RunSettings(BaseModel):
         if missing:
             raise RunError(
                 f"{', '.join(missing)} not set; run the suite through "
-                "scripts/integration_test.sh, which exports the run tag and the "
-                "cveta2 ClearML identity from the Secret through the k8s-infra skill"
+                "`uv run python -m tests.integration.lifecycle test`, which "
+                "exports the run tag and the cveta2 ClearML identity from the "
+                "Secret through the k8s-infra skill"
             )
         return cls(
             tag=values["INTEGRATION_RUN_TAG"],

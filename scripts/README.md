@@ -1,8 +1,14 @@
 # Скрипты (scripts/)
 
-Вспомогательные скрипты для разработки и тестов. Проверки архитектуры, сообщения коммита и версии живут в `tests/` и `.pre-commit-config.yaml`, помощник клонирования проекта в S3 — в `tests/integration/clone_project_to_s3.py`. Запускать из корня
-репозитория: Python-скрипты через `uv run python scripts/<script>.py ...`,
-shell-скрипты — напрямую (`./scripts/<script>.sh`).
+Два инструмента разработки, оба запускаются из корня репозитория через
+`uv run python`. Остальная обвязка живёт там, где её используют:
+
+| Что | Где |
+|---|---|
+| Проверка сообщения коммита и дрейфа версии | `.pre-commit-config.yaml` (готовый хук `conventional-pre-commit` и встроенная команда `version-drift`) |
+| Проверка владения эффектами (дополняет import-linter) | `tests/architecture_effects.py`, запускается из `tests/test_architecture.py` |
+| Жизненный цикл интеграционного прогона (up / test / stop / gate / env) | `tests/integration/lifecycle.py`, см. скилл `running-integration-tests` |
+| Клонирование CVAT-проекта в S3 cloud storage | `tests/integration/clone_project_to_s3.py` |
 
 ## benchmark_fetch.py
 
@@ -53,11 +59,3 @@ pre-commit, `full` на pre-push. Профили заданы в
 **Вывод:** `mutants/mutmut-cicd-stats.json` (счётчики), `mutants/mutmut-results.txt` (имена и статусы). Каталог `mutants/` — рабочая копия mutmut, он в `.gitignore`.
 
 Скрипт срезает CR-спиннер mutmut, когда stdout не терминал: иначе pre-commit сохранил бы десятки тысяч кадров перерисовки. Перед прогоном он сверяет «отпечаток» охвата (`only_mutate`, `do_not_mutate_patterns` и т. п.) и пересоздаёт `mutants/`, если охват изменился: собственный отпечаток mutmut эти поля не учитывает.
-
-## Остальные скрипты
-
-Отдельных разделов у них нет — они описаны там, где используются:
-
-| Скрипт | Где описан |
-|---|---|
-| `integration_env.sh`, `integration_up.sh`, `integration_test.sh`, `integration_stop.sh`, `integration_gate.sh` | Скилл `running-integration-tests` (`.claude/skills/running-integration-tests/SKILL.md`) |

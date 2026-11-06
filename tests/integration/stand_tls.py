@@ -13,7 +13,8 @@ import ssl
 
 TLS_REMEDY = (
     "the stands answer over HTTPS with a certificate from the k8s-infra local CA, "
-    "and this process does not trust it: source scripts/integration_env.sh, whose "
+    "and this process does not trust it: run under "
+    "`uv run python -m tests.integration.lifecycle`, whose "
     "k8s-infra helpers export SSL_CERT_FILE, REQUESTS_CA_BUNDLE and AWS_CA_BUNDLE, "
     "and check that the CA is installed "
     "(/usr/local/share/ca-certificates/k8s-infra-local-ca.crt, "
