@@ -1,7 +1,8 @@
-# A single `uv run pre-commit install` wires both stages. Every check, long ones
-# included, runs at commit time, so a commit that passed is safe to push and no
-# pre-push hook exists. History rewrites (rebase, cherry-pick, merge) run no
-# pre-commit hook: re-check with `uv run pre-commit run --all-files` after one.
+# Hooks run through prek (a pre-commit-compatible runner): `uv run prek install`
+# wires the pre-commit and commit-msg stages. Every check runs at commit time, so
+# a commit that passed is safe to push and no pre-push hook exists. History
+# rewrites (rebase, cherry-pick, merge) run no hook: re-check with
+# `uv run prek run --all-files` after one.
 default_install_hook_types: [pre-commit, commit-msg]
 
 # Hooks run fast to slow; the first failure stops the rest, so a lint or unit
@@ -10,22 +11,37 @@ fail_fast: true
 
 # Every hook below names its stage. A hook with no `stages` key runs at every
 # installed stage, including commit-msg.
+#
+# Heavy hooks are path-filtered: a commit touching only Markdown, plans or
+# specifications runs ruff and nothing that imports the package. `uv run
+# --locked` never re-locks: a stale uv.lock fails instead of being rewritten.
 
 repos:
   - repo: local
     hooks:
-      # A rewritten lockfile needs restaging before the expensive checks.
-      - id: uv-lock
-        name: uv lock
-        entry: uv lock
+      # The lockfile must already match pyproject.toml; nothing re-locks here.
+      - id: uv-lock-check
+        name: uv lock --check
+        entry: uv lock --check
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(pyproject\.toml|uv\.lock)$
+        stages: [pre-commit]
+
+      # uv.lock changes only together with pyproject.toml (a dependency edit or
+      # a semantic-release bump). A deliberate re-lock alone, such as an upgrade,
+      # is a `build(deps):` commit made with SKIP=lockfile-guard.
+      - id: lockfile-guard
+        name: uv.lock changes only with pyproject.toml
+        entry: bash -c 'git diff --cached --name-only | grep -qx pyproject.toml || { echo "uv.lock is staged without pyproject.toml - a deliberate re-lock is a build(deps) commit made with SKIP=lockfile-guard"; exit 1; }'
+        language: system
+        pass_filenames: false
+        files: ^uv\.lock$
         stages: [pre-commit]
 
       - id: ruff-format
         name: ruff format (all files)
-        entry: uv run ruff format .
+        entry: uv run --locked ruff format .
         language: system
         pass_filenames: false
         always_run: true
@@ -33,7 +49,7 @@ repos:
 
       - id: ruff-check
         name: ruff check (all files)
-        entry: uv run ruff check .
+        entry: uv run --locked ruff check .
         language: system
         pass_filenames: false
         always_run: true
@@ -41,51 +57,42 @@ repos:
 
       - id: lint-imports
         name: import-linter (architecture)
-        entry: uv run lint-imports
+        entry: uv run --locked lint-imports
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
 
       - id: mypy
         name: mypy (all files)
-        entry: uv run mypy .
+        entry: uv run --locked mypy .
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
 
       - id: vulture
         name: vulture (dead code)
-        entry: uv run vulture
+        entry: uv run --locked vulture
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
 
       - id: pytest
         name: pytest (with coverage)
-        entry: uv run pytest -n auto --cov --cov-report=term-missing
+        entry: uv run --locked pytest -n auto --cov --cov-report=term-missing
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
-
-      - id: count-lines
-        name: count lines of code
-        entry: bash -c 'echo "Lines of code:"; find cveta2 -name "*.py" | xargs wc -l | tail -1'
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
-        verbose: true
 
       - id: uv-build
         name: uv build (check project is buildable)
         entry: bash -c 'uv build --quiet && rm -rf dist'
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^pyproject\.toml$
         stages: [pre-commit]
 
       # Mutation testing of the functions this commit changes, in a throwaway
@@ -94,7 +101,7 @@ repos:
       # survivors are visible - pre-commit hides the output of passing hooks.
       - id: mutmut
         name: mutmut (changed functions, advisory)
-        entry: uv run python scripts/mutation.py
+        entry: uv run --locked python scripts/mutation.py
         language: system
         pass_filenames: false
         files: ^cveta2/.*\.py$
@@ -109,7 +116,7 @@ repos:
       # Skip it for one commit with: SKIP=integration-tests git commit ...
       - id: integration-tests
         name: integration tests (live stands)
-        entry: uv run python -m tests.integration.lifecycle gate
+        entry: uv run --locked python -m tests.integration.lifecycle gate
         language: system
         pass_filenames: false
         files: ^(cveta2/|tests/integration/|pyproject\.toml$|uv\.lock$)

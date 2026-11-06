@@ -49,8 +49,9 @@ record intent, while implementation and executed checks establish behavior.
 
 Both integrations are installed, with Codex as the default.
 
-Set up a clone with `uv sync` and `uv run pre-commit install` (one command
-installs the pre-commit and commit-msg stages). Python 3.12 or 3.13 and uv are
+Set up a clone with `uv sync` and `uv run prek install` (one command
+installs the pre-commit and commit-msg stages; prek is a pre-commit-compatible
+runner that reads `.pre-commit-config.yaml`). Python 3.12 or 3.13 and uv are
 required; integration tests also need `kubectl` with the `docker-desktop`
 context and the `k8s-infra` skill, whose presence arms the live gate.
 
@@ -193,10 +194,10 @@ for Python and architecture criteria rather than introducing a competing review.
 Small low-risk edits may use direct review and focused checks.
 
 Start with the nearest meaningful tests and expand when shared behavior,
-interfaces, or observed failures justify it. A documentation-only change
-normally needs `uv run pytest tests/test_docs.py`, not the entire code suite.
-A commit runs the configured pre-commit hooks, so do not duplicate the full gate
-before every small edit.
+interfaces, or observed failures justify it. A documentation-only change needs
+no package test run: its commit runs only ruff and the other fast hooks, because
+the heavy hooks are filtered to code and dependency paths. A commit runs the
+configured hooks, so do not duplicate the full gate before every small edit.
 
 Pytest normally uses xdist and loads `tests.env_isolation` during startup. That
 plugin redirects HOME before imports; do not drop it when overriding
@@ -211,9 +212,9 @@ avoid CVAT rate limiting. No GPU-specific pytest marker is configured. Use the
 
 ## Documentation
 
-`tests/test_docs.py` checks documented signatures, commands, flags, environment
-variables, config fields, and relative links/anchors. Update the Russian
-`README.md` and `docs/` when CLI or public API behavior changes.
+No automated documentation tests exist; check relative links and documented
+flags by hand when editing them. Update the Russian `README.md` and `docs/` when
+CLI or public API behavior changes.
 `docs/configuration.md` owns configuration details; `docs/cli.md` owns
 commands and flags; `docs/images-and-cache.md` owns S3, cache, and ClearML
 behavior. Maintain [architecture.md](architecture.md) and the
@@ -221,8 +222,6 @@ behavior. Maintain [architecture.md](architecture.md) and the
 when a feature changes their documented behavior. Keep dated findings in
 feature evidence or immutable archive sources, including the preserved
 [2026-09-04 review](https://github.com/BuckanovNikita/cveta2/blob/af0073e5bd8a8799f0cfd322cfb27c8efd7b747d/specs/001-project-documentation/evidence/bug-review-2026-09-04.md).
-Documentation checks also cover Spec Kit memory and feature Markdown; upstream
-template examples are excluded.
 
 ### Project skills
 
@@ -231,7 +230,6 @@ task belong in this file. Authored skills live in `.agents/skills/<name>/`, and
 `.claude/skills/<name>` is a relative symlink to that directory
 (`../../.agents/skills/<name>`), so both hosts read one copy. Add each new
 authored skill to the `.agents/skills` exceptions in `.gitignore`.
-`tests/test_docs.py` enforces this layout and the manifest hashes below.
 
 The `speckit-*` skills are the exception. They are generator-owned host variants:
 each copy carries its host's invocation sigil (`/` for Claude, `$` for Codex), and
@@ -333,8 +331,13 @@ several writers share the checkout.
 
 ### Hooks
 
-`uv run pre-commit install` installs the pre-commit and commit-msg stages. Read
-`.pre-commit-config.yaml` for the current hook set. Do not bypass hooks unless the
+`uv run prek install` installs the pre-commit and commit-msg stages. Read
+`.pre-commit-config.yaml` for the current hook set and each hook's path filter.
+Hooks call `uv run --locked`, so a stale `uv.lock` fails rather than re-locks.
+`uv.lock` may change only together with `pyproject.toml` (the `lockfile-guard`
+hook); a deliberate re-lock alone, such as a dependency upgrade, is a
+`build(deps):` commit made with `SKIP=lockfile-guard`, the one standing
+exception to the no-bypass rule below. Do not bypass hooks unless the
 user explicitly directs it.
 
 - Every gate runs at commit time, so a passing commit is safe to push with plain
@@ -357,7 +360,7 @@ user explicitly directs it.
   not modify, stage or discard that work.
 - Rebase, cherry-pick and merge run no pre-commit hook, and a commit that only
   deletes files runs no file-filtered hook. After rewriting history and before
-  pushing it, run `uv run pre-commit run --all-files`, and
+  pushing it, run `uv run prek run --all-files`, and
   `uv run python scripts/mutation.py --base <upstream>` for the mutation report
   (the hook only sees staged changes, which are empty then).
 

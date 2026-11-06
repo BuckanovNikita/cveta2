@@ -60,7 +60,8 @@ the nearest meaningful tests and expand when shared behavior, interfaces, or
 failures justify it. Bug fixes MUST capture the failing observation, reproduce
 it when feasible, and verify the original failure path. When reproduction is
 unavailable, distinguish hypotheses, static evidence, and performed checks.
-Documentation-only work normally runs `uv run pytest tests/test_docs.py`.
+Documentation-only work needs no package test run; commit hooks are
+path-filtered so that such commits run only fast checks.
 Reported results MUST identify skipped or unavailable checks accurately.
 Preserve test environment isolation and cleanup. Mutation testing is advisory
 and scoped to each change: commits mutate the functions they change and report
@@ -192,4 +193,9 @@ workspace and reports survivors without blocking. All quality gates, including
 the live integration gate, run at the pre-commit stage; no pre-push stage exists.
 Application contracts are unchanged; inactive feature history is not rewritten.
 
-**Version**: 2.0.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-06
+Version 2.0.1 clarifies verification for documentation-only work at the user's
+request: the documentation test module is removed, and heavy commit hooks run
+only for code and dependency paths. Hooks run through prek. Gate placement and
+application contracts are unchanged.
+
+**Version**: 2.0.1 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-06

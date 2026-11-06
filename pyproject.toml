@@ -67,7 +67,6 @@ dev = [
     "mutmut>=3.7.0",
     "mypy>=2.3.0",
     "pandas-stubs>=2.3.3.260113",
-    "pre-commit>=4.6.1",
     "pytest>=9.1.1",
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.1",
@@ -80,6 +79,7 @@ dev = [
     "matplotlib>=3.10.8",
     "pytest-cov>=7.1.0",
     "python-semantic-release>=10.6.1",
+    "prek>=0.5.10",
 ]
 
 [tool.semantic_release]
@@ -200,7 +200,6 @@ pytest_add_cli_args = [
     "--ignore=tests/test_mutation_tool.py",
     "--ignore=tests/test_integration_tool_boundaries.py",
     "--ignore=tests/test_architecture.py",
-    "--ignore=tests/test_docs.py",
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
 # Presentation is not behaviour. Log lines, progress bars and the text of a
