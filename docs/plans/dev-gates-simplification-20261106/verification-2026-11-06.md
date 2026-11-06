@@ -118,5 +118,18 @@ Test gaps added:
 
 ## Commit gate
 
-Recorded after the commit, in a follow-up documentation commit (its paths start
-neither the mutation hook nor the live gate).
+Commit `96e33be` ran the new pre-commit pipeline, and every hook passed. The
+hooks were uv lock, ruff format and check, import-linter, mypy, vulture, pytest
+with coverage, count-lines, uv build, the integration gate and the Conventional
+Commit check. `mutmut` was skipped as "no files to check", correctly: the commit
+changes no `cveta2/` file. The live gate:
+- passed its `room` and stand preflight;
+- seeded tag `cveta2-claude-20261106-integration-cnf1`;
+- ran `tests/integration`: 38 passed in 232 s;
+- tore the run down.
+
+The exact-tag listings afterwards found 0 CVAT projects, tasks and storages,
+0 MinIO buckets and 0 ClearML projects, and `.run-tag` was gone.
+
+This record goes in a follow-up documentation commit. Its paths start neither
+the mutation hook nor the live gate.

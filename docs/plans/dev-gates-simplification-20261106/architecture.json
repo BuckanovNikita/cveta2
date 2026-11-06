@@ -88,41 +88,74 @@
       "id": "imports",
       "kind": "imports",
       "command": "uv run lint-imports && uv run pytest -n 0 tests/test_architecture.py",
-      "expectation": "Layer contracts kept; effect fixtures still fail."
+      "expectation": "Layer contracts kept; effect fixtures still fail.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/dev-gates-simplification-20261106/verification-2026-11-06.md"
+      }
     },
     {
       "id": "boundaries",
       "kind": "imports",
       "command": "uv run pytest -n 0 tests/test_integration_tool_boundaries.py",
-      "expectation": "Runtime modules import no tooling; lifecycle.py stays standard-library only; injected forbidden imports are reported."
+      "expectation": "Runtime modules import no tooling; lifecycle.py stays standard-library only; injected forbidden imports are reported.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/dev-gates-simplification-20261106/verification-2026-11-06.md"
+      }
     },
     {
       "id": "tools",
       "kind": "behavior",
       "command": "uv run pytest -n 0 tests/test_integration_lifecycle.py tests/test_mutation_tool.py",
-      "expectation": "Lifecycle arming, room preflight and tag rules; mutation diff mapping, workspace isolation, exit codes and reporting."
+      "expectation": "Lifecycle arming, room preflight and tag rules; mutation diff mapping, workspace isolation, exit codes and reporting.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/dev-gates-simplification-20261106/verification-2026-11-06.md"
+      }
     },
     {
       "id": "mutation-e2e",
       "kind": "behavior",
-      "command": "uv run python scripts/mutation.py --base HEAD~0 <changed file> (weakened assertion) and on a clean tree",
-      "expectation": "A weakened test yields a reported survivor; a clean tree reports nothing to mutate; workspace removed."
+      "command": "uv run python scripts/mutation.py (staged probe branch in cveta2/domain/paths.py::build_s3_key; then a clean index)",
+      "expectation": "A weakened test yields a reported survivor; a clean tree reports nothing to mutate; workspace removed.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/dev-gates-simplification-20261106/verification-2026-11-06.md"
+      }
     },
     {
       "id": "live-gate",
       "kind": "behavior",
       "command": "git commit (pre-commit runs uv run python -m tests.integration.lifecycle gate)",
-      "expectation": "The live gate runs at pre-commit, passes and stops its tag."
+      "expectation": "The live gate runs at pre-commit, passes and stops its tag.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/dev-gates-simplification-20261106/verification-2026-11-06.md"
+      }
     },
     {
       "id": "docs",
       "kind": "documentation",
       "command": "uv run pytest -n 0 tests/test_docs.py",
-      "expectation": "Documented commands, paths and links resolve."
+      "expectation": "Documented commands, paths and links resolve.",
+      "result": {
+        "status": "passed",
+        "exit_code": 0,
+        "evidence": "docs/plans/dev-gates-simplification-20261106/verification-2026-11-06.md"
+      }
     }
   ],
   "documentation": ".specify/memory/constitution.md, .specify/memory/engineering.md, AGENTS.md, scripts/README.md, .claude/skills/{commit,mutation-testing,running-integration-tests}; historical specs and plans are not rewritten.",
   "review": {
-    "status": "pending"
+    "status": "accepted",
+    "reviewer": "fresh independent general-purpose subagent (read-only review of the full uncommitted diff with real mutmut 3.7.0 runs); findings resolved by the parent",
+    "evidence": "docs/plans/dev-gates-simplification-20261106/verification-2026-11-06.md",
+    "reconciliation": "Compared with the complete task-owned diff 45d16e7..96e33be: modified scripts/mutation.py, tests/test_mutation_tool.py, tests/integration/lifecycle.py, tests/test_integration_lifecycle.py, tests/env_isolation.py, pyproject.toml, .pre-commit-config.yaml, .gitignore, constitution, engineering.md, AGENTS.md, scripts/README.md, specs/baseline.md and three skills; removed tests/integration/.env.example, mutation-internals.md and parallel-agents-guide.md; added this plan directory. No cveta2 runtime module changed. Local-only: pre-push hook uninstalled, generated mutants/ removed, agent memory updated."
   }
 }

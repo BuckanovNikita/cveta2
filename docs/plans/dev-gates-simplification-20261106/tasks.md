@@ -12,4 +12,4 @@ evidence is in [verification-2026-11-06.md](verification-2026-11-06.md).
 - [x] T7 Remove `mutants/`, uninstall the local pre-push hook, update agent memory. Depends on T5.
 - [x] T8 Static checks, targeted tests, mutation end-to-end checks (survivor reported, nothing to mutate, timing). Depends on T2-T6.
 - [x] T9 Fresh independent review of the full diff; resolve findings. Depends on T8.
-- [ ] T10 Record evidence; `--phase acceptance`; commit through the full pre-commit gate including live integration; push; confirm with `git ls-remote`. Depends on T9.
+- [x] T10 Record evidence; `--phase acceptance`; commit through the full pre-commit gate including live integration; push; confirm with `git ls-remote`. Depends on T9.
