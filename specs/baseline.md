@@ -1,40 +1,8 @@
-# cveta2: problem and desired behavior
+# cveta2: functionality
 
-## Problem
-
-Dataset maintainers need to turn changing CVAT annotations and external CSV sources
-into reproducible training datasets without losing lineage, overwriting unrelated
-annotations, mixing train/test content or publishing unchecked bytes. They also need
-predictable errors and efficient incremental exports across unreliable services.
-
-## Desired outcome and scope
-
-Provide a prompt-free Python API and a Russian CLI for fetching, validating, converting,
-reviewing and explicitly publishing datasets. Preserve source evidence separately from
-user transformations, make repairs and remote writes explicit, and reject ambiguity
-before mutation. This document states required behavior, not implementation progress.
-
-The [engineering guidance](../.specify/memory/engineering.md) owns development and
-verification procedures; the [constitution](../.specify/memory/constitution.md) and
-[architecture reference](../.specify/memory/architecture.md) govern implementation.
-
-## Capability specifications
-
-- [fetch speed diagnostics](001-fetch-speed-diagnostics/spec.md).
-- [nullable completion](002-nullable-completion/spec.md).
-- [operational errors](003-operational-errors/spec.md).
-- [managed datasets](004-managed-datasets/spec.md).
-- [docker internal stands](005-docker-internal-stands/spec.md).
-
-## Acceptance boundaries
-
-Acceptance requires the scenarios and rejection conditions in the contracts below.
-A successful local/mock check does not certify remote mutation, outage recovery or
-publication. Validate those outcomes on explicitly owned live resources.
-Unsupported tracks, ambiguous duplicate basenames, cross-job transactions and generic
-rollback after arbitrary output I/O failure are outside the promised behavior.
-Basename-only remote metadata provides limited identity evidence; local review hashes
-do not defend against a hostile owner. These limits do not waive ordinary write safety.
+Fetch, curate, convert and publish reproducible datasets from CVAT and S3 through a
+prompt-free Python API and Russian CLI. Preserve source lineage and reject ambiguity
+before remote mutation; transformations and repairs remain explicit user actions.
 
 ## Product and public interfaces
 
@@ -46,49 +14,13 @@ and publish reviewed datasets to ClearML. Python 3.12 and 3.13 are supported;
 conservative syntax target is not an additional runtime support promise.
 ClearML is optional; ordinary CSV verification requires neither CVAT nor ClearML.
 
-Supported public module paths and model identities remain compatible:
-`cveta2`, `cveta2.api`, `cli`, `client`, `config`, `dataset_partition`,
-`exceptions`, `fs_utils`, `image_downloader`, `image_uploader`, `models`,
-`projects_cache`, `s3_types`, `s3_utils`, `task_cache` and `upload_manifest`
-under the `cveta2` package. Unsupported old `_client`, `_client_ops`, `services`,
-`_clearml` and `commands` package paths are retired. Public facades contain no
-business policy and canonical modules do not depend on them.
-
-Public workflows include `fetch`, `fetch_task`, `upload`, `merge`, `whats_new`,
-`s3_sync`, `get_labels`, `update_labels`, `ignore`, `task_mark_deleted`,
-`task_drop_label`, `task_delete`, `task_set_status`, `convert_from_yolo`,
-`convert_to_yolo`, `convert_to_coco`, `partition_annotations_df`, `verify`,
-`verify_dataframe`, `schema_for`, `prepare_dataset` and `upload_dataset`.
-Supported signatures, options, return models and runnable examples are maintained
-in the [Python API guide](../docs/python-api.md); public functions never prompt or
-exit. Expected operational failures use `Cveta2Error` and its typed subclasses;
-unexpected implementation errors remain visible.
-
-`Connection` accepts optional `host`, `username`, `password`, `organization`,
-`config_path` and an already usable `client`. Explicit values override environment,
-selected file and preset; `organization=""` explicitly selects the personal
-workspace. Injected clients/sessions remain caller-owned; owned sessions close
-deterministically. `CvatClient` retains lazy credential checking when entering
-its owned session.
-
-CVAT selectors accept numeric IDs or names scoped to their project/organization;
-`ORG/PROJECT` selects an organization and `/PROJECT` the personal workspace.
-Ambiguous names fail with matching IDs before mutation; an active client uses
-the authoritative scoped project list. Cached disconnected queries remain
-supported. `verify --bundle --project` instead names the exact ClearML project.
-
-Procedures and complete option inventories remain in these maintained guides:
-
-| Procedure | Current reference and section |
-| --- | --- |
-| Install, configure, contribute, merge and release | [README](../README.md), [engineering guidance](../.specify/memory/engineering.md) |
-| Fetch, promote jobs, compare tasks | [CLI guide](../docs/cli.md), `fetch`, `fetch-task`, `whats-new` |
-| Upload and recover an interrupted CVAT upload | [CLI guide](../docs/cli.md), `upload` and `--resume` |
-| Convert CSV/YOLO/COCO; manage labels/ignore/tasks | [CLI guide](../docs/cli.md), the corresponding command sections |
-| Verify, explicitly clean, prepare, review, publish | [CLI guide](../docs/cli.md), `verify` and `upload-dataset`; [API guide](../docs/python-api.md), verification/publication examples |
-| Configuration, environment, retries, noninteractive use | [Configuration guide](../docs/configuration.md) |
-| Image paths, annotation cache and ClearML prerequisites | [Images and cache guide](../docs/images-and-cache.md) |
-| Development tools: changed-function mutation check, fetch benchmark, and where the other helpers live | [Scripts guide](../scripts/README.md) |
+The [Python API guide](../docs/python-api.md) defines supported imports, signatures,
+return types and caller-owned session lifetimes; the [CLI guide](../docs/cli.md) defines
+commands. APIs never prompt or exit. Expected failures use typed Cveta2Error subclasses;
+unexpected defects remain visible. Project names are organization-scoped; ambiguous
+names return matching IDs before mutation. Explicit connection values override environment,
+selected file and preset; an empty organization selects personal workspace. Injected
+clients remain caller-owned, and owned sessions close deterministically.
 
 ### Configuration and failures
 
@@ -126,7 +58,10 @@ the exceptions facade. Actual failing HTTP context, UTC time, status, resource
 IDs, allowlisted correlation IDs and bounded sanitized summaries are available;
 credentials/cookies/raw HTML are excluded. Retry logs count cveta2 attempts,
 not all underlying HTTP attempts. Configured retry budgets, SDK interaction and worker settings remain documented
-in the configuration guide.
+in the configuration guide. Request context stays isolated across concurrent calls and
+subsequent successes. Diagnostics are immutable neutral values with name/value identifier
+tuples, a timezone-aware UTC timestamp and status 0 when unavailable; no SDK object is retained.
+Stage wall time is distinct from summed worker duration; report cached/fetched/skipped/degraded totals.
 
 `doctor` returns 0 when required CVAT configuration checks succeed and 1 when
 they fail or cannot run. Optional AWS/image-cache/cache warnings and disabled
@@ -580,46 +515,6 @@ without a compatibility period. Old configuration files are not rewritten;
 obsolete automatic settings do not restore publication. CVAT `upload` remains a
 separate supported operation. No split generation, automated end-to-end pipeline,
 remote deployment or cryptographic review system is implied.
-
-## Architecture and acceptance
-
-Preserve inward dependencies: public facades -> interfaces -> composition ->
-adapters -> application -> domain; composition may construct/inject inner values.
-Application owns typed ports and receives settings/effects explicitly, without
-configuration discovery, concrete client creation or a service locator. Domain
-owns pure policies. CVAT, S3, config, class-API and ClearML adapters retain their
-declared independence and SDK ownership; canonical siblings remain acyclic.
-Inner imports do not eagerly load infrastructure. Filesystem/environment/network,
-clocks, execution and prompts remain at their owned outer boundaries.
-
-Execution returns input-ordered outcomes; explicitly caught per-item failures
-remain outcomes, while uncaught failures cancel queued work and join active work
-before propagation. Preserve source/storage schemas, public aliases, recovery
-ordering, Unicode handling, effects and mutation scope during internal cleanup.
-The maintained architecture reference and executable contracts own detailed module
-assignments rather than this snapshot freezing implementation file layouts.
-
-Mutation testing (development tooling, constitution 2.0.0) mutates the functions a
-commit changes in an isolated per-run workspace and reports survivors without
-blocking; tool or clean-test failures fail the commit.
-
-Current acceptance requires the behavior above and the applicable repository
-gates, with positive and negative architecture checks. Changes need current
-documentation, task-owned architecture evidence, appropriate regression/mutation
-and live checks, fresh independent review when required, and convergence before
-authorized Git-only delivery. A passing ordinary suite is not evidence that
-unexecuted mutation/live/platform checks passed. The checklist for future changes
-includes these boundary scenarios:
-
-| Area | Preserved acceptance |
-| --- | --- |
-| Fetch/data | Exact CSV order/types; task completion fallback; same-task deletion; ID recency; polygon edge cases and cache refresh |
-| Promotion/recovery | No excluded writes; strict invalidation; no output after promotion failure; partial-write retry without duplicates |
-| Upload/storage | Ambiguity/changed intent fail before mutation; exact remote reconciliation; mandatory checkpoints; safe paths and truthful outcomes |
-| Conversion | Literal names; prewrite split validation; current image bytes; owned-only cleanup; contextual malformed-input diagnostics |
-| Verification | Both profiles; original positions/values; quarantine, duplicate/class policy; explicit repairs; truthful skipped checks |
-| Preparation/publication | Four exact sources; choices/roots/trainability; derived task IDs; tamper/prerequisite blocking before child creation; exact finalized payload |
-| Public/tooling | Supported imports/signatures; prompt-free API; documented CLI exits/config; isolated wheel behavior on supported interpreters; enforced inward effects |
 
 ## Managed dataset configuration and lifecycle
 

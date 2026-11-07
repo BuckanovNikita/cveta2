@@ -19,7 +19,7 @@ sources below rather than duplicating them here.
 3. [Architecture context](.specify/memory/architecture.md) when changing module
    flow, project resolution, fetch/upload, or conversion behavior.
 4. [Current specification and dataset contract](specs/baseline.md) for preserved
-   behavior, acceptance criteria.
+   behavior, behavior rules.
 
 Human usage is in [README.md](README.md); setup commands are in
 [engineering guidance](.specify/memory/engineering.md); release commands are in the

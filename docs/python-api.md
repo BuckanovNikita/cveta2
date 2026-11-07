@@ -362,7 +362,7 @@ print(publication.dataset_id, publication.version)
 Ошибки операций относятся к `Cveta2Error`; известный ID созданной дочерней версии
 сохраняется в сообщении при последующем сбое. Точный порядок, состав пакета и
 действия при несовпадении описаны в [CLI](cli.md#опубликовать-подготовленный-пакет-cveta2-upload-dataset)
-и [контракте](../specs/baseline.md#verification-and-prepared-bundles).
+и [контракте](../specs/baseline.md).
 
 ## Диагностика ошибок CVAT
 
