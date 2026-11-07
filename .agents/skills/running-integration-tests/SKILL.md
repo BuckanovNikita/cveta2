@@ -1,6 +1,6 @@
 ---
 name: running-integration-tests
-description: Runs and troubleshoots cveta2's live tests against the shared CVAT, MinIO and ClearML stands of the docker-desktop cluster. They are part of the normal pytest run (tests/integration, session fixture over tests/integration/lifecycle.py). Use for targeted or full live runs, a commit that waits for stopped stands, live failures in the pytest hook, run-tag ownership and cleanup, TLS trust failures, or concurrent runs.
+description: Runs and troubleshoots cveta2's live tests against the shared CVAT, MinIO and ClearML stands of the docker-desktop cluster. They run through the manual integration-tests hook or an explicit full pytest run (tests/integration, session fixture over tests/integration/lifecycle.py). Use for targeted or full live runs, stopped-stand waits, live test failures, run-tag ownership and cleanup, TLS trust failures, or concurrent runs.
 ---
 
 # Run cveta2 live tests
@@ -10,7 +10,9 @@ Live tests run on the shared stands owned by the `k8s-infra` skill (read its
 host. Credentials come from the project Secrets through the skill, never from a
 file.
 
-The live tests are ordinary pytest tests under `tests/integration`.
+The live tests are ordinary pytest tests under `tests/integration`. The default
+prek pipeline excludes this directory; invoke live checks explicitly. The full
+suite with coverage, including live tests, remains required before merging.
 `tests/conftest.py` marks them `integration` and puts them in the `live` xdist
 group, so under the default `-n auto --dist loadgroup` one worker runs them
 serially; unit tests stay parallel. The autouse session fixture `live_run`
@@ -22,10 +24,10 @@ serially; unit tests stay parallel. The autouse session fixture `live_run`
 3. Keeps or stops the run after the last live test.
 
 ```bash
-uv run pytest                                  # everything, live included
+uv run prek run acceptance-tests --hook-stage manual --all-files  # full suite with coverage
 uv run pytest tests/integration/test_upload.py -k upload
 uv run pytest -m "not integration"             # unit tests only
-uv run pytest --testmon                        # what the commit hook runs
+uv run prek run integration-tests --hook-stage manual --all-files
 ```
 
 `L` below is `uv run python -m tests.integration.lifecycle`, for manual work:
@@ -58,7 +60,7 @@ The owner stops the stands at times. A stopped stand is not a failure:
 
 These fail at once instead:
 
-- a missing k8s-infra skill or Secret key;
+- a missing Secret key;
 - an untrusted certificate (a TLS trust problem, not a stopped stand; never
   switch to plain HTTP or disable verification);
 - a ClearML identity that the stand refuses.

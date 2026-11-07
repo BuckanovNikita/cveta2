@@ -119,7 +119,7 @@ exclude_commit_patterns = [
 [tool.ruff]
 # Conservative syntax/lint baseline; runtime support is declared by requires-python.
 target-version = "py310"
-line-length = 88
+line-length = 120
 # vendor/ and local/ need no entry here: both are gitignored, and ruff
 # respects .gitignore. mutants/ is gitignored too but must stay listed --
 # ruff would otherwise see mutmut's copy of the tree when it is passed
@@ -153,9 +153,6 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 # not an API surface. What only one script trips is suppressed at that site,
 # where RUF100 retires the suppression once the site is fixed.
 "scripts/*.py" = ["T201", "D103", "ANN401", "PLR2004"]
-
-[tool.ruff.format]
-docstring-code-format = true
 
 [tool.mypy]
 # Analyze against the minimum supported package interpreter.

@@ -1,12 +1,12 @@
 # Hooks run through prek (a pre-commit-compatible runner): `uv run prek install`
-# wires the pre-commit and commit-msg stages. Every check runs at commit time, so
-# a commit that passed is safe to push and no pre-push hook exists. History
+# wires the pre-commit and commit-msg stages. Unit checks run at commit time;
+# live integration and advisory mutation use explicit manual hooks. History
 # rewrites (rebase, cherry-pick, merge) run no hook: re-check with
 # `uv run prek run --all-files` after one.
 default_install_hook_types: [pre-commit, commit-msg]
 
-# Hooks run fast to slow; the first failure stops the rest, so a lint or unit
-# failure never spends mutation or live-stand time.
+# Default hooks run fast to slow; the first failure stops the rest. Live-stand
+# and mutation checks are selected separately with --hook-stage manual.
 fail_fast: true
 
 # Every hook below names its stage. A hook with no `stages` key runs at every
@@ -84,20 +84,41 @@ repos:
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
 
-      # pytest-testmon runs only the tests whose executed code changed, live
-      # tests included (they wait, with a notice, while the stands are
-      # stopped). testmon tracks Python only, so a staged data file under
-      # cveta2/ or tests/ (preset YAML, fixture JSON) runs everything instead.
-      # Coverage is enforced by the full run before a merge
-      # (`uv run pytest --cov`), not here: testmon and coverage cannot share
-      # one run.
+      # testmon selects affected unit tests. Ignore the live directory entirely,
+      # including its conftest, so default verification never prepares a stand.
+      # Staged non-Python fixtures require all unit tests rather than testmon
+      # selection. Full-suite coverage remains an explicit merge requirement.
       - id: pytest
-        name: pytest (affected tests, testmon)
-        entry: bash -c 'if git diff --cached --name-only | grep -E "^(cveta2|tests)/" | grep -qvE "\.py$"; then exec uv run --locked pytest --testmon-noselect; fi; exec uv run --locked pytest --testmon' 
+        name: pytest (affected unit tests, testmon)
+        entry: bash -c 'if git diff --cached --name-only | grep -E "^(cveta2|tests)/" | grep -qvE "\.py$"; then exec uv run --locked pytest --testmon-noselect -m "not integration" --ignore=tests/integration; fi; exec uv run --locked pytest --testmon -m "not integration" --ignore=tests/integration'
         language: system
         pass_filenames: false
         files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
         stages: [pre-commit]
+
+      - id: integration-tests
+        name: pytest (live integration, shared stands required)
+        entry: uv run --locked pytest tests/integration
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+
+      - id: acceptance-tests
+        name: pytest (full acceptance suite with coverage, shared stands required)
+        entry: uv run --locked pytest --cov
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
+
+      - id: property-exploration
+        name: pytest (random property exploration, unit tests only)
+        entry: bash -c 'HYPOTHESIS_PROFILE=explore exec uv run --locked pytest -m "not integration" --ignore=tests/integration -p no:randomly'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [manual]
 
       - id: deptry
         name: deptry (declared dependencies)
@@ -118,14 +139,14 @@ repos:
       # Mutation testing of the functions this commit changes, in a throwaway
       # workspace (scripts/mutation.py). Advisory: survivors are printed, not
       # fatal; only a tool or clean-test failure fails the hook. verbose so the
-      # survivors are visible - pre-commit hides the output of passing hooks.
+      # survivors are visible. Invoke explicitly with --hook-stage manual.
       - id: mutmut
         name: mutmut (changed functions, advisory)
         entry: uv run --locked python scripts/mutation.py
         language: system
         pass_filenames: false
         files: ^cveta2/.*\.py$
-        stages: [pre-commit]
+        stages: [manual]
         verbose: true
 
   # The version, the tag and CHANGELOG.md are derived from commit subjects by

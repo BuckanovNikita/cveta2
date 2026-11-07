@@ -26,11 +26,8 @@ Before editing, inspect `git status --short`, the relevant diff, and the staged
 diff. Treat existing modifications and untracked files as user work. Do not
 stash, reset, broadly stage, commit, or push them. Stage and commit only exact
 task-owned paths when authorized, following
-[Commits, hooks, and releases](#commits-hooks-and-releases). Standing user
-authorization for completion includes required commits, release evaluation and
-commit/tag pushes after applicable gates pass; do not request authorization
-again within scope. Explicit no-commit/no-release or other stopping points override
-it. A commit-only request without push authorization still stops before pushing.
+[Commits, hooks, and releases](#commits-hooks-and-releases). Local task-owned commits may be autonomous. Pushes require separate authorization;
+existing session authorization remains valid within scope. Explicit stopping points apply.
 
 ## Spec Kit development workflow
 
@@ -39,12 +36,8 @@ changed capabilities. Bug fixes and refactors that change no capability contract
 use the lightweight path below instead. Read [constitution.md](constitution.md) before
 planning. Codex uses `$speckit-<step>`; Claude uses `/speckit-<step>`.
 Discover the governing process from explicit user selection, these instructions
-and active artifacts before invoking helpers. This project retains Spec Kit; the
-shared `python-project-workflow` skill adds Python contract, checks, documentation
-and packaging evidence inside its native stages, not another lifecycle. Use the
-shared `module-architecture-planning` skill for the architecture gates below.
-If either required shared skill is unavailable, report the missing gate and
-continue independent inspection; do not invent its rules or claim acceptance.
+and active artifacts before invoking helpers. Record relevant Python contract and
+verification evidence within the native stages.
 Inspect current code, configuration, existing diffs and task evidence: artifacts
 record intent, while implementation and executed checks establish behavior.
 
@@ -53,7 +46,7 @@ Both integrations are installed, with Codex as the default.
 Set up a clone with `uv sync` and `uv run prek install` (one command
 installs the pre-commit and commit-msg stages; prek is a pre-commit-compatible
 runner that reads `.pre-commit-config.yaml`). Python 3.12 or 3.13 and uv are
-required; the live tests, part of the normal suite, also need `kubectl` with the
+required; the live tests in the full acceptance suite also need `kubectl` with the
 `docker-desktop` context and the installed `k8s-infra` skill.
 
 For a new capability, run `specify` to create `specs/<number>-<name>/spec.md`.
@@ -89,14 +82,11 @@ resuming a feature; confirm resolution with
 artifact-writing command. Create development branches manually; the optional
 Git extension is not installed.
 
-Documentation-only corrections and maintenance without behavior changes may
-use the existing lightweight workflow: a scoped maintenance plan and adjacent
-architecture record under `docs/plans/<task>/`, appropriate checks and applicable
+Documentation-only corrections use only native Spec Kit or OpenSpec documentation checks. Maintenance without
+behavior changes may use a scoped maintenance plan under `docs/plans/<task>/`
+(or, for a small change, its commit message), appropriate checks and applicable
 review/release evaluation, without creating an application feature specification.
-Runtime maintenance uses module impact and behavioral checks; only inspected
-documentation-only work uses no-impact reasoning. A bug fix or refactor uses the
-same lightweight path (for a small one, the commit message alone may carry it);
-a bug fix still needs a failing observation, reproduction when feasible, and
+A bug fix still needs a failing observation, reproduction when feasible, and
 verification of the original failure path. A fix that changes a documented
 capability contract goes through Spec Kit.
 
@@ -108,23 +98,10 @@ through repository guidance, without an additional CI or hook gate.
 
 ## Architecture
 
-Before implementation, record affected module responsibilities, interfaces,
-allowed/forbidden dependencies and effect ownership in the native `plan.md`, with
-an adjacent task-owned `architecture.json` and dependent checks in `tasks.md`.
 Reuse executable import contracts; add scoped coverage and a meaningful forbidden
-dependency negative case where affected boundaries lack enforcement. Validate the
-record with the shared skill's validator using `--phase plan` and this repository
-as `--repo-root` before implementation. Documentation-only work records inspected
-no-impact reasoning and documentation checks; it does not need unrelated runtime
-suites. Missing, unavailable or failing required documentation/architecture
-checks remain acceptance gaps, not passing verification. Before acceptance
-reconcile the complete task-owned diff, actual checks,
-documentation and applicable review; validate with `--phase acceptance`.
-
-For resumed work, compare current implementation with existing records and append
-missing architecture/check/documentation tasks and amendments without rewriting
-completed history. Do not bulk retrofit inactive feature records. Shared skills
-add evidence to native artifacts; do not edit installed Spec Kit skills/templates.
+dependency negative case where affected boundaries lack enforcement. Reconcile the
+final diff with actual checks, documentation and applicable review. Missing or
+failing required checks remain acceptance gaps.
 
 The contracts in `pyproject.toml` enforce exhaustive inward layers:
 
@@ -217,7 +194,7 @@ Hypothesis runs with a fixed seed and 50 examples per property (profile
 `cveta2` in `tests/conftest.py`), so commits are reproducible but every run
 checks the same inputs. Explore with random inputs before a merge or after
 changing a property:
-`HYPOTHESIS_PROFILE=explore uv run pytest -m "not integration" -p no:randomly`
+`uv run prek run property-exploration --hook-stage manual --all-files`
 (1000 random examples, about 20 s). A failure is stored in the ignored
 `.hypothesis/` database and replayed by later runs.
 
@@ -227,7 +204,8 @@ plugin redirects HOME before imports; do not drop it when overriding
 workers before and after each test, and clean the temporary HOME at session
 teardown. Preserve those yield/finally cleanup paths when editing fixtures.
 
-The live tests under `tests/integration` are part of every pytest run.
+An unfiltered pytest run includes the live tests under `tests/integration`.
+The default prek unit hook excludes that directory and its conftest.
 `tests/conftest.py` marks them `integration` and puts them in the `live` xdist
 group, so `--dist loadgroup` (in `addopts`; keep it when overriding) runs them
 serially on one worker while unit tests stay parallel. Exclude them with
@@ -239,8 +217,7 @@ skill for live tests, the stopped-stand wait and lifecycle operations.
 
 ## Documentation
 
-No automated documentation tests exist; check relative links and documented
-flags by hand when editing them. Update the Russian `README.md` and `docs/` when
+Update the Russian `README.md` and `docs/` when
 CLI or public API behavior changes.
 `docs/configuration.md` owns configuration details; `docs/cli.md` owns
 commands and flags; `docs/images-and-cache.md` owns S3, cache, and ClearML
@@ -273,32 +250,14 @@ It teaches tool usage; this repository owns implementation and public contracts.
 Edit that source package, not an installed agent copy. Keep machine-specific setup
 in global environment guidance.
 
-During planning, inspect the skill for changes to commands, public API, configuration,
-authentication, dataset/conversion formats, defaults, side effects or failure recovery.
-Record affected skill/reference paths in the native plan and add update and validation
-tasks dependent on implementation. Internal-only changes may record a concrete,
-inspected no-change reason. This applies to fixes and resumed features as well as
-new features; preserve completed history when adding tasks.
-
-During the documentation stage, reconcile the skill with the final implementation
-and current user guides. Update examples, prerequisites, warnings and evaluation
-cases together. Verify documented flags/signatures and representative local examples;
-validate frontmatter, packaged links, Markdown and discovery using
-[corp-skills maintenance](https://github.com/BuckanovNikita/corp-skills/blob/main/MAINTENANCE.md).
-Repository documentation tests do not validate this external package.
-
-Before convergence/completion, record the inspected source version/commit, changed
-skill paths, actual checks and remaining limitations in dated feature evidence.
-Reference the companion corp-skills commit when committed. If its checkout or access
-is unavailable, record the required update as an open documentation task; do not mark
-the feature complete. Follow each repository's release policy within authorization;
-do not overwrite unrelated edits or install updated skills as a side effect.
+Update this canonical usage guidance when public behavior changes. Preserve unrelated
+edits and dated evidence; installation remains a separate action.
 
 ## Mutation testing
 
 `scripts/mutation.py` mutates the functions a commit changes, in a fresh
 workspace exported from the index, and reports survivors without failing (the
-pre-commit `mutmut` hook), within a budget of 8 functions and 120 s per commit.
+manual `mutmut` hook), within a budget of 8 functions and 120 s per commit.
 Survivors are information: triage behavioural ones and never add a test whose
 only purpose is to kill a mutant of a default argument or of wording. Nothing
 is cached between runs. Read the
@@ -377,8 +336,9 @@ exception to the no-bypass rule below; the release commit's skip in
 [Releases](#releases) is the other. Do not bypass hooks otherwise unless the
 user explicitly directs it.
 
-- Every gate runs at commit time, so a passing commit is safe to push with plain
-  `git push`; there is no pre-push stage.
+- Default verification runs unit checks at commit time; live integration and
+  advisory mutation are manual hooks. There is no pre-push stage. Pushes still
+  require separate authorization and the acceptance checks below.
 - A hook that rewrites files (`uv lock`, `ruff format`): inspect the new diff,
   restage only task-owned paths and commit again.
 - The `mypy` hook runs the mypy daemon (`dmypy run -- .`), which stays alive
@@ -386,21 +346,18 @@ user explicitly directs it.
   the verdict. Run the daemon on `.` only (a path subset can crash its
   fine-grained mode in third-party code) and stop it with `uv run dmypy stop`
   after a dependency or mypy configuration change.
-- The `pytest` hook runs `pytest --testmon`: only the tests whose executed code
-  changed, live tests included. It does not enforce coverage; the full run
-  `uv run pytest --cov` does, and it is required on the branch tip before a
-  merge. testmon tracks Python only, so a commit that stages a data file under
-  `cveta2/` or `tests/` (preset YAML, fixture JSON) runs the whole suite. Reset
-  a confused selection with `rm .testmondata` (one per worktree, gitignored).
-- The changed-function mutation run comes last and only when `cveta2/` Python
-  files change. Mutation is advisory: it prints surviving mutants and passes,
-  failing only on a tool error or a failing clean test run; triage behavioural
-  survivors with the `mutation-testing` skill.
-- When live tests are selected, the commit takes minutes while the hook runner
-  keeps unstaged changes stashed: do not edit the checkout meanwhile. A run
-  replaces only objects named by its own run tag (on `main`, the durable
-  `cveta2-main` slot); the `running-integration-tests` skill covers failures
-  and the stopped-stand wait.
+- The `pytest` hook runs affected unit tests and excludes `tests/integration`,
+  including its conftest. Staged non-Python fixtures run all unit tests because
+  testmon tracks Python only. Coverage remains an explicit full-suite merge gate.
+- Invoke `integration-tests` with `--hook-stage manual --all-files` for the live
+  suite. It may wait for stopped stands; the `running-integration-tests` skill
+  owns prerequisites, run tags and cleanup.
+- Invoke `acceptance-tests` with `--hook-stage manual --all-files` for the full
+  suite with coverage, including live tests, on the branch tip before merging.
+- Invoke `mutmut` with `--hook-stage manual --all-files` for the staged change's
+  advisory mutation report. Before accepting code changes, run it explicitly;
+  for an unstaged branch tip use the mutation skill's branch comparison. Survivors
+  remain advisory, while tool errors and failing clean tests must be resolved.
 - A failure caused by unrelated pre-existing work: report the exact blocker; do
   not modify, stage or discard that work.
 - Rebase, cherry-pick and merge run no pre-commit hook, and a commit that only
@@ -417,8 +374,9 @@ and the remaining unrelated working-tree state.
 
 `main` changes only by a fast-forward merge (`git merge --ff-only`) of a branch
 rebased onto it, after the full suite passed on that exact tip:
-`uv run prek run --all-files` and `uv run pytest --cov` (live tests included,
-coverage enforced). The `main` tip is then a checked commit, so the release
+`uv run prek run --all-files` and
+`uv run prek run acceptance-tests --hook-stage manual --all-files` (live tests
+included, coverage enforced). The `main` tip is then a checked commit, so the release
 commit, which only bumps the version, `CHANGELOG.md` and `uv.lock`, runs with
 `SKIP=lint-imports,mypy,vulture,pytest` - the second standing hook exception;
 ruff, `uv lock --check`, the lockfile guard, deptry and `uv build` still run. One
@@ -432,8 +390,7 @@ Documentation-only changes still evaluate release but may produce no new version
 tag.
 
 Complete commits and releases after required checks under the authorization rules
-in [Preserve the working tree](#preserve-the-working-tree). Standing
-authorization covers the configured commit hooks and the push; it does not
+in [Preserve the working tree](#preserve-the-working-tree). Pushes require separate authorization, including existing session authorization; it does not
 authorize changing remotes, deployment or expanding scope. Publish Git version
 tags only: no GitHub Release objects, release assets or registry publication
 without an explicit user override. Report failed/unavailable gates as gaps; never

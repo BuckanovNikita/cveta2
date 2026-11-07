@@ -1,6 +1,6 @@
 ---
 name: mutation-testing
-description: Runs and triages cveta2's changed-function mutation check (scripts/mutation.py, [tool.mutmut] in pyproject.toml). Use for surviving mutants reported by the pre-commit mutmut hook, hardening tests of a function, deciding whether a survivor is equivalent, a run that produces no mutants, or edits to the mutmut settings.
+description: Runs and triages cveta2's changed-function mutation check (scripts/mutation.py, [tool.mutmut] in pyproject.toml). Use for surviving mutants reported by the manual mutmut hook, hardening tests of a function, deciding whether a survivor is equivalent, a run that produces no mutants, or edits to the mutmut settings.
 ---
 
 # Changed-function mutation testing
@@ -15,7 +15,7 @@ test reaches as "not reached by tests", never as survivors. Read the script's
 docstring for the mechanics.
 
 ```bash
-uv run python scripts/mutation.py                   # staged change vs HEAD (the hook)
+uv run prek run mutmut --hook-stage manual --all-files  # staged change vs HEAD
 uv run python scripts/mutation.py --base main       # the whole branch
 uv run python scripts/mutation.py cveta2/domain/merge.py   # every function of a file
 uv run python scripts/mutation.py --keep --strict   # keep workspace; exit 1 on survivors

@@ -20,13 +20,13 @@ On `BRANCH`, with a clean working tree:
 ```bash
 git fetch origin
 git rebase origin/main                 # skip when already on top of main
-uv run prek run --all-files            # every hook over the whole tree
-uv run pytest --cov                    # full suite, live tests included, coverage enforced
-HYPOTHESIS_PROFILE=explore uv run pytest -m "not integration" -p no:randomly  # random property inputs
+uv run prek run --all-files            # default verification over the whole tree
+uv run prek run acceptance-tests --hook-stage manual --all-files
+uv run prek run property-exploration --hook-stage manual --all-files
 ```
 
 - **After the rebase,** if it rewrote commits, the commit hooks did not run on
-  them. The two checks above are what covers them.
+  them. These checks are what covers them.
 - **Live tests may wait for stopped stands,** with a notice. Run the full suite
   in the background and tell the user it is waiting; never skip it.
 - **Every check must pass** before step 2.

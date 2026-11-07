@@ -31,13 +31,6 @@ external effects through application-owned ports. Composition constructs outgoin
 adapters; incoming interfaces map CLI/API calls. Public facades must not become
 dependencies of canonical modules. Public API functions remain prompt-free. All
 `cvat_sdk` imports stay inside `adapters/cvat/`.
-Before implementation, the shared module-architecture-planning skill MUST record
-module responsibilities, interfaces, dependencies, effect ownership and executable
-contracts in the native plan and adjacent architecture record, with checks in tasks.
-Validate its planning phase before implementation and acceptance phase after diff
-reconciliation, checks and applicable review. Documentation-only work MUST record
-inspected no-impact reasoning and scoped documentation checks. Resumed gaps MUST
-be appended without rewriting completed history; inactive records need no retrofit.
 Public CLI, API, configuration, and dataset compatibility MUST be preserved
 unless the specification explicitly requests and describes a contract change.
 Fetch partitioning MUST preserve deletion precedence for same-task ties and
@@ -67,15 +60,16 @@ Documentation-only work needs no package test run; commit hooks are
 path-filtered so that such commits run only fast checks.
 Reported results MUST identify skipped or unavailable checks accurately.
 Preserve test environment isolation and cleanup. Live tests on the shared stands
-are part of the normal test suite; a stopped stand is waited for with a notice,
+remain part of the full acceptance suite; a stopped stand is waited for with a notice,
 never skipped or bypassed. Mutation testing is advisory, scoped to each change
 and bounded by a per-commit budget: survivors are information, triaged with the
 repository mutation skill rather than recorded in an allowlist. Tests MUST
 observe behavior; do not add tests whose only purpose is to kill a mutant of a
 default argument or to pin presentation wording, and extend a module's existing
 test file before creating a new one. Commits require their configured,
-path-filtered hooks, whose test hook runs the tests affected by the change
-(live tests included). The full suite with coverage MUST pass on a branch tip
+path-filtered hooks, whose test hook runs unit tests affected by the change.
+Live integration and advisory mutation run through explicit manual stages;
+code changes still require a reported mutation run before acceptance. The full suite with coverage MUST pass on a branch tip
 before it is merged; Spec Kit does not replace these checks.
 
 ### V. Preserve ownership, documentation, and release controls
@@ -104,8 +98,9 @@ without treating old suggestions as a current work queue.
 Use Conventional Commits when authorized; `main`
 changes only by a fast-forward merge of a branch whose tip passed the full
 suite, one release at a time, and semantic-release owns versions, tags, and
-changelog updates. Never commit, push, publish, release, or change remotes without the
-applicable user authorization.
+changelog updates. Local task-owned commits may be autonomous. Pushes require
+separate authorization; existing session authorization remains valid within scope.
+Publication, releases and remote changes require their applicable authorization.
 
 ## Project Constraints
 
@@ -126,12 +121,9 @@ consolidated into the baseline, create a feature describing only the intended de
 Unresolved behavior ambiguities, constitution violations, incomplete quality
 checklists, and blocking analysis findings MUST be resolved before implementation.
 Supporting skills MUST NOT establish a competing spec/plan workflow. Discover the
-governing process from explicit selection, instructions and active artifacts. The
-shared python-project-workflow skill supplies Python and architecture evidence
-within native stages; installed Spec Kit skills/templates remain unchanged.
-Unavailable required shared skills or missing/failing documentation/architecture
-checks MUST be reported as acceptance gaps; continue independent inspection
-without inventing the missing contract or claiming acceptance.
+governing process from explicit selection, instructions and active artifacts.
+Installed Spec Kit skills/templates remain unchanged.
+Required executable behavior checks MUST pass before claiming acceptance.
 Completion requests MUST progress automatically through authorized stages,
 documentation, verification and release without separate stage prompts. Standing
 user authorization satisfies project commit/push skill request gates after checks;
@@ -220,4 +212,10 @@ rather than pin defaults or wording for mutants. `main` advances by fast-forward
 merge, one release at a time, and the release commit skips the heavy hooks its
 already-checked tree does not need. Application contracts are unchanged.
 
-**Version**: 2.1.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-06
+Version 3.0.0 separates routine commit verification from infrastructure-dependent
+and advisory expensive checks at the user's request. The default pipeline runs
+unit checks; live integration and changed-function mutation are explicit manual
+stages. Full-suite coverage before merge and mutation reporting for code changes
+remain acceptance requirements. Application behavior and test fixtures are unchanged.
+
+**Version**: 3.0.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-07

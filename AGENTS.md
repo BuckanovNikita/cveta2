@@ -8,8 +8,6 @@ sources below rather than duplicating them here.
 
 ## Language
 
-- Follow the user's conversation language (English by default); repository language
-  conventions do not override it.
 - Human guides and CLI output remain Russian. Agent instructions, skills, Spec Kit
   memory and feature artifacts, and the dataset contract are English.
 
@@ -27,6 +25,9 @@ Human usage is in [README.md](README.md); setup commands are in
 [engineering guidance](.specify/memory/engineering.md); release commands are in the
 `release` skill.
 
+Release only Git version tags; do not create GitHub Releases or publish release
+assets or packages. Follow the release policy in the engineering guidance.
+
 ## Workflow
 
 - Use `$speckit-<step>` in Codex and `/speckit-<step>` in Claude. Follow the full
@@ -34,9 +35,7 @@ Human usage is in [README.md](README.md); setup commands are in
   writing artifacts.
 - New features describe deltas from the baseline; archived features are historical
   evidence.
-- Use the shared `python-project-workflow` and `module-architecture-planning` skills
-  within the selected native stages for Python conventions and architecture evidence.
-- Inspect instructions, current artifacts, configuration and diffs before choosing checks.
+- Apply the Python conventions in the constitution within the selected native stages.
 
 ## Project skills
 
@@ -46,14 +45,21 @@ hook rules are in engineering guidance. Sources live in `.agents/skills/` and
 copies (see engineering guidance, "Project skills").
 
 - `mutation-testing` — run and triage the changed-function mutation check.
-- `running-integration-tests` — live CVAT/MinIO/ClearML tests inside the normal
-  pytest run, run tags, cleanup and the stopped-stand wait.
+- `running-integration-tests` — explicitly invoked live CVAT/MinIO/ClearML tests,
+  run tags, cleanup and the stopped-stand wait.
 - `release` — the semantic-release procedure on `main` and its failure recovery.
 
 ## Authorization
 
 - Continue authorized stages through verification, documentation and the project
   release workflow without requiring a separate user prompt for each stage.
-- Standing user authorization covers the required commits, release and commit/tag
-  pushes in engineering guidance; explicit stopping points and host Plan
-  Mode/read-only limits take precedence.
+- Explicit stopping points and host Plan Mode/read-only limits take precedence.
+
+## Project execution policy
+
+Use Spec Kit for new capabilities or documented behavior changes; routine fixes,
+docs and small refactors proceed directly, updating existing task artifacts as needed.
+Behavior, interface, dependency, security and operational-policy changes require
+independent review after integration and verification; wording edits may be self-reviewed.
+Documentation checks are limited to native Spec Kit or OpenSpec checks. Local commits
+may be autonomous; pushes require separate authorization, including existing session authorization.
