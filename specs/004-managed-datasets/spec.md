@@ -1,9 +1,4 @@
-# Feature Specification: Managed datasets
-
-**Feature Branch**: `feat/004-managed-datasets`
-**Created**: 2026-11-02
-**Status**: Approved for implementation
-**Input**: Implement the approved conversational plan for strict shared/personal configuration, migration, mixed CVAT/S3 sources, external transformation, stable splits, CVAT feedback and reviewed ClearML publication.
+# Capability: Managed datasets
 
 ## User Scenarios & Testing
 

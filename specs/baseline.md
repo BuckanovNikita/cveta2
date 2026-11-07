@@ -1,20 +1,40 @@
-# cveta2 specification baseline
+# cveta2: problem and desired behavior
 
-This is the current product and data contract consolidated on 2026-10-21 from
-released behavior through v0.11.0, inspected at
-`f6717f0211169f8f94c78da2bfa8dee86bfab602`. It replaces the retired numbered
-specifications as the starting point for new work; it does not reset application
-versions, Git history, compatibility, or verification requirements. New feature
-records begin at `001` and state their changes to this baseline explicitly.
+## Problem
 
-The [constitution](../.specify/memory/constitution.md),
-[engineering guidance](../.specify/memory/engineering.md), and
-[architecture reference](../.specify/memory/architecture.md) remain authoritative
-for development, dependencies, effects, checks, ownership and release. English
-specifications coexist with Russian user guides and CLI output. Archived plans,
-task checkboxes and review suggestions are historical evidence, not a current
-work queue. [Status and provenance](#status-and-provenance) distinguish completed,
-superseded and deliberately unsupported behavior.
+Dataset maintainers need to turn changing CVAT annotations and external CSV sources
+into reproducible training datasets without losing lineage, overwriting unrelated
+annotations, mixing train/test content or publishing unchecked bytes. They also need
+predictable errors and efficient incremental exports across unreliable services.
+
+## Desired outcome and scope
+
+Provide a prompt-free Python API and a Russian CLI for fetching, validating, converting,
+reviewing and explicitly publishing datasets. Preserve source evidence separately from
+user transformations, make repairs and remote writes explicit, and reject ambiguity
+before mutation. This document states required behavior, not implementation progress.
+
+The [engineering guidance](../.specify/memory/engineering.md) owns development and
+verification procedures; the [constitution](../.specify/memory/constitution.md) and
+[architecture reference](../.specify/memory/architecture.md) govern implementation.
+
+## Capability specifications
+
+- [fetch speed diagnostics](001-fetch-speed-diagnostics/spec.md).
+- [nullable completion](002-nullable-completion/spec.md).
+- [operational errors](003-operational-errors/spec.md).
+- [managed datasets](004-managed-datasets/spec.md).
+- [docker internal stands](005-docker-internal-stands/spec.md).
+
+## Acceptance boundaries
+
+Acceptance requires the scenarios and rejection conditions in the contracts below.
+A successful local/mock check does not certify remote mutation, outage recovery or
+publication. Validate those outcomes on explicitly owned live resources.
+Unsupported tracks, ambiguous duplicate basenames, cross-job transactions and generic
+rollback after arbitrary output I/O failure are outside the promised behavior.
+Basename-only remote metadata provides limited identity evidence; local review hashes
+do not defend against a hostile owner. These limits do not waive ordinary write safety.
 
 ## Product and public interfaces
 
@@ -600,69 +620,6 @@ includes these boundary scenarios:
 | Verification | Both profiles; original positions/values; quarantine, duplicate/class policy; explicit repairs; truthful skipped checks |
 | Preparation/publication | Four exact sources; choices/roots/trainability; derived task IDs; tamper/prerequisite blocking before child creation; exact finalized payload |
 | Public/tooling | Supported imports/signatures; prompt-free API; documented CLI exits/config; isolated wheel behavior on supported interpreters; enforced inward effects |
-
-## Status and provenance
-
-At the 2026-10-21 consolidation, current implementation, checked tasks, later
-integrated closure and release evidence establish no remaining required product
-work from the retired records. Earlier pending statements describe intermediate
-handoffs; later closures supersede them. This conclusion is scoped to those
-records and does not claim a new exhaustive audit or that all platforms were
-tested. Cleanup/cutover verification is recorded separately with its own task.
-
-| Retired work | Reconciled disposition and decision source |
-| --- | --- |
-| `001-project-documentation` | Completed documentation/governance migration; this baseline supersedes its dataset-contract location. [Original contract and evidence](https://github.com/BuckanovNikita/cveta2/tree/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/001-project-documentation); [September fixes](https://github.com/BuckanovNikita/cveta2/blob/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/001-project-documentation/evidence/bug-review-2026-09-04.md) |
-| `002-cvat-write-safety`, `003-dataset-correctness`, `004-storage-interfaces` | Implemented, verified and released in v0.7.0; all 26 October findings reconciled, including three clarified contracts and the simulated retry risk. [Remediation](https://github.com/BuckanovNikita/cveta2/commit/a6d3d6672b918649a9a2442527872041a56ac22c), [ledger and integrated evidence](https://github.com/BuckanovNikita/cveta2/blob/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/004-storage-interfaces/evidence/remediation-ledger.md) |
-| `005-polygon-bboxes` | Implemented, verified, released v0.8.0. [Implementation](https://github.com/BuckanovNikita/cveta2/commit/41c045e76757b6af65687fe7da49a4e7aa30218d) |
-| `002-fetch-skip-validation` | Implemented, verified, released v0.9.0. [Implementation](https://github.com/BuckanovNikita/cveta2/commit/a1e92b98f04d7965b79b2ea6b561a17d83aeb50f) |
-| `006-clean-architecture` | Implemented, verified, released v0.9.1. [Implementation](https://github.com/BuckanovNikita/cveta2/commit/d67a83aed079dbc484c5e57678800e850687a4ed); its automatic-publisher contract and old interpreter target are superseded below. |
-| `python-workflow-alignment` | Governance/documentation alignment completed and delivered; final delivery follows intermediate pending notes. [Evidence](https://github.com/BuckanovNikita/cveta2/blob/f6717f0211169f8f94c78da2bfa8dee86bfab602/docs/plans/python-workflow-alignment/verification-2026-10-14.md) |
-| `007-python-support-window` | Implemented, verified, released v0.10.0. [Implementation](https://github.com/BuckanovNikita/cveta2/commit/7f91109ddd36e85ff7912fddafb7136d6700959b); the old wider support window is superseded. |
-| `008-dataset-verification-publication` | Implemented, verified, released v0.11.0; T028/T029 and companion guidance delivery closed. [Implementation](https://github.com/BuckanovNikita/cveta2/commit/78138b80af33e2651711b399cd428aad646b431c), [delivery/convergence](https://github.com/BuckanovNikita/cveta2/blob/f6717f0211169f8f94c78da2bfa8dee86bfab602/specs/008-dataset-verification-publication/evidence/delivery-2026-10-20.md) |
-
-Deliberate dispositions remain: unsupported tracks (BR-02); unique basename/stem
-input constraints and undefined duplicate-basename selection (BR-03/05); no
-cross-job/remote-edit transaction; limited identity proof with basename-only
-server metadata; no generic rollback after arbitrary output I/O failure; local
-review checksum rather than hostile-owner protection. The old `setup-clearml`
-persistence requirement (UI-004) was implemented historically, then superseded by
-explicit publication and removal of the wizard. A waiver or unsupported-input
-decision is not a tested success. Historical conditional CVAT outage evidence
-used injected failures; it is not a claim of a naturally observed outage. Dated
-evidence retains platform, integration and agent-interaction limits rather than
-turning them into newly promised functionality.
-
-### Archive recovery
-
-Checkpoint: `af0073e5bd8a8799f0cfd322cfb27c8efd7b747d`. The
-[complete archive manifest](https://github.com/BuckanovNikita/cveta2/blob/af0073e5bd8a8799f0cfd322cfb27c8efd7b747d/archive/manifest.json)
-records each original path, storage location, size, mode and SHA-256. It covers
-107 former `specs/` files, three old `docs/plans/` files and 129 originally
-untracked `bugs/` files. Tracked historical documents remain directly accessible
-at that checkpoint; the original bug tree is contained byte-for-byte in
-`archive/legacy-bugs.tar.gz`. The archive/checkpoint is historical evidence, not
-current application source or a test suite. No executable fixture relocation was
-needed; maintained fixtures remain under `tests/`.
-
-```bash
-git show 'af0073e5bd8a8799f0cfd322cfb27c8efd7b747d:specs/002-cvat-write-safety/spec.md'
-git ls-tree -r af0073e5bd8a8799f0cfd322cfb27c8efd7b747d -- specs/ docs/plans/ archive/
-git show 'af0073e5bd8a8799f0cfd322cfb27c8efd7b747d:archive/manifest.json'
-git show 'af0073e5bd8a8799f0cfd322cfb27c8efd7b747d:archive/legacy-bugs.tar.gz' |
-  tar -xzOf - 'bugs/review-2026-10-03/findings/CVAT-001/report.md'
-```
-
-For full recovery, extract the archived tree into a separate directory and verify
-against the checkpoint manifest. Preserve the old
-`bugs/review-2026-10-03/SHA256SUMS` as evidence: at consolidation 115 of its 128
-entries matched, while 13 Python files already differed. The new manifest binds
-the actually archived current bytes; it does not rewrite the old hash claims or
-assert that current reproducers are identical to their original capture. A
-historical reproducer's exit 0 meant it observed the old defect, not that current
-behavior passed. Original implementation SHAs above remain distinct from the
-checkpoint SHA that proves archive contents.
-
 
 ## Managed dataset configuration and lifecycle
 

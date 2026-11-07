@@ -1,10 +1,4 @@
-# Feature Specification: Predictable operational errors
-
-**Feature Branch**: `cleanup/contracts-and-release`
-**Created**: 2026-11-01
-**Status**: Released in v0.12.1
-**Input**: Fix reproduced operational-error bugs from the compatibility-preserving
-cleanup. Delta from [baseline](../baseline.md#configuration-and-failures).
+# Capability: Predictable operational errors
 
 ## User Scenarios & Testing
 

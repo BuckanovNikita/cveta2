@@ -1,14 +1,4 @@
-# Feature Specification: HTTPS docker.internal integration stands
-
-**Feature Directory**: `specs/005-docker-internal-stands` (development branch `feat/docker-internal-names`)
-
-**Created**: 2026-11-03
-
-**Status**: Implemented; artifacts recorded after implementation
-
-**Input**: The shared local Kubernetes stands moved from `http://*.k8s.localhost` to `https://*.k8s.docker.internal`, served with a certificate from a local name-constrained k8s-infra CA. The old names are still served over plain HTTP. The k8s-infra helpers' `env` output now also exports `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `AWS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS`, and the live cveta2 access Secrets for CVAT, MinIO and ClearML switch to the HTTPS names. The cveta2 live-integration tooling must use the new names, trust the local CA through the helper environment, and report TLS trust failures as TLS problems rather than as stands that are down.
-
-**Process note**: The implementation in the working tree preceded these Spec Kit artifacts in this change. This specification describes the already-implemented delta truthfully; it was written from the inspected diff, not before coding. See [plan.md](plan.md) and [tasks.md](tasks.md).
+# Capability: HTTPS docker.internal integration stands
 
 ## Baseline delta
 
@@ -78,7 +68,7 @@ When the machine does not trust the local CA, the stand answers but the TLS hand
 - **SC-001**: Offline unit tests prove HTTPS endpoint and CA variable export through the environment script (FR-001, FR-002).
 - **SC-002**: Offline unit tests prove every TLS failure path named in FR-003–FR-006 reports TLS with the remedy, and the non-TLS paths keep their previous classification.
 - **SC-003**: The full non-integration regression suite, Ruff, strict mypy, import-linter contracts and the architecture effect checker pass.
-- **SC-004**: A live run against the HTTPS stands passes with exact-tag cleanup. This is required before relying on the gate after the Secret switch; the completed run is recorded in [live integration evidence](evidence/integration-2026-11-03.md).
+- **SC-004**: A live run against the HTTPS stands passes with exact-tag cleanup. This is required before relying on the gate after the Secret switch; the completed run is recorded in live integration evidence.
 
 ## Assumptions
 

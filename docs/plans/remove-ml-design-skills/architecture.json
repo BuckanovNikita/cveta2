@@ -1,7 +1,0 @@
-{
-  "schema_version": 1,
-  "task": "Remove obsolete ML-SystemDesign skill metadata",
-  "scope": ["skills-lock.json", ".gitignore", "docs/plans/remove-ml-design-skills"],
-  "impact": "none",
-  "rationale": "Inspection found all three ML-SystemDesign skills absent from both host skill directories. Remove only their installer lockfile and dedicated ignore entries. No application modules, Python dependencies, interfaces, effects, composition targets or executable architecture contracts change. The adjacent maintenance evidence records this tooling-metadata cleanup."
-}

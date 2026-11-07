@@ -19,7 +19,7 @@ sources below rather than duplicating them here.
 3. [Architecture context](.specify/memory/architecture.md) when changing module
    flow, project resolution, fetch/upload, or conversion behavior.
 4. [Current specification and dataset contract](specs/baseline.md) for preserved
-   behavior, acceptance criteria and immutable historical decisions.
+   behavior, acceptance criteria.
 
 Human usage is in [README.md](README.md); setup commands are in
 [engineering guidance](.specify/memory/engineering.md); release commands are in the
@@ -33,8 +33,8 @@ assets or packages. Follow the release policy in the engineering guidance.
 - Use `$speckit-<step>` in Codex and `/speckit-<step>` in Claude. Follow the full
   sequence in engineering guidance; select the active feature explicitly before
   writing artifacts.
-- New features describe deltas from the baseline; archived features are historical
-  evidence.
+- New features describe deltas from the baseline; product requirements contain no
+  implementation status.
 - Apply the Python conventions in the constitution within the selected native stages.
 
 ## Project skills

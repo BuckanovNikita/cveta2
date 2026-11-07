@@ -1,9 +1,4 @@
-# Feature Specification: Faster fetches and actionable CVAT errors
-
-**Feature Branch**: `feat/fetch-speed-diagnostics`
-**Created**: 2026-10-28
-**Status**: Accepted; released as v0.12.0
-**Input**: Implement the supplied faster-fetch and CVAT-diagnostics plan.
+# Capability: Faster fetches and actionable CVAT errors
 
 ## User Scenarios & Testing
 
