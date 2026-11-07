@@ -389,9 +389,7 @@ def test_configure_network_installs_the_whole_retry_budget() -> None:
     """
     attempts, max_wait = RetryPolicy.attempts, RetryPolicy.max_wait
     try:
-        configure_network(
-            NetworkConfig(s3_workers=7, retry_attempts=9, retry_max_wait=12.5)
-        )
+        configure_network(NetworkConfig(s3_workers=7, retry_attempts=9, retry_max_wait=12.5))
         assert (RetryPolicy.attempts, RetryPolicy.max_wait) == (9, 12.5)
     finally:
         configure_retries(attempts, max_wait)

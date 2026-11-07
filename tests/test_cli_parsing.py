@@ -255,9 +255,7 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
 
 
 @pytest.mark.parametrize(("argv", "expected"), _PARSE_CASES)
-def test_parser_sets_expected_attrs(
-    argv: list[str], expected: dict[str, object]
-) -> None:
+def test_parser_sets_expected_attrs(argv: list[str], expected: dict[str, object]) -> None:
     args = _parse(argv)
     for attr, value in expected.items():
         assert getattr(args, attr) == value
@@ -441,9 +439,6 @@ def test_fetch_forwards_and_echoes_skip_validation(
             return_value=tmp_path / "chosen",
         ),
     ):
-        CliApp().run(
-            ["fetch", "-p", "1", "-o", "out", "--no-images"]
-            + (["--skip-validation"] if enabled else [])
-        )
+        CliApp().run(["fetch", "-p", "1", "-o", "out", "--no-images"] + (["--skip-validation"] if enabled else []))
     assert service.call_args.args[2].skip_validation is enabled
     assert ("--skip-validation" in capsys.readouterr().out) is enabled

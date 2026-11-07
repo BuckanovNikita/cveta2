@@ -75,8 +75,7 @@ def test_csv_round_trip_preserves_text_and_empty_cells(
     Numbers keep their numeric type next to the text columns.
     """
     records: list[dict[str, object]] = [
-        dict(zip(_TEXT_COLUMNS, texts, strict=True))
-        | {"image_width": width, "confidence": confidence}
+        dict(zip(_TEXT_COLUMNS, texts, strict=True)) | {"image_width": width, "confidence": confidence}
         for texts, width, confidence in rows
     ]
     with tempfile.TemporaryDirectory() as tmp:
@@ -149,9 +148,7 @@ def test_read_dataset_csv_by_task_error_names_the_column(tmp_path: Path) -> None
     count=st.integers(0, PREVIEW_LIMIT + 3),
     limit=st.one_of(st.none(), st.integers(1, PREVIEW_LIMIT + 3)),
 )
-def test_preview_names_shows_the_first_names_and_counts_the_rest(
-    count: int, limit: int | None
-) -> None:
+def test_preview_names_shows_the_first_names_and_counts_the_rest(count: int, limit: int | None) -> None:
     """Shown names are joined by ``", "``; a hidden rest of N adds ``(и ещё N)``."""
     names = [f"img{i}.jpg" for i in range(count)]
     effective = PREVIEW_LIMIT if limit is None else limit
@@ -261,9 +258,7 @@ def test_dataset_and_deleted_csv_keep_full_header_when_empty(tmp_path: Path) -> 
     the empty case can tell explicit ``columns=CSV_COLUMNS`` apart from
     letting pandas infer the columns from the rows.
     """
-    write_dataset_and_deleted(
-        ProjectAnnotations(annotations=[], deleted_images=[]), tmp_path
-    )
+    write_dataset_and_deleted(ProjectAnnotations(annotations=[], deleted_images=[]), tmp_path)
 
     for name in ("dataset.csv", "deleted.csv"):
         header = (tmp_path / name).read_text(encoding="utf-8").splitlines()[0]

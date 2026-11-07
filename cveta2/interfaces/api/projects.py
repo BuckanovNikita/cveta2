@@ -52,9 +52,7 @@ def whats_new(
     baseline = compute_baseline(df, dataset_path)
     with _open(connection) as c:
         project_id, _ = resolve_project_spec(c, project)
-        tasks = c.list_new_completed_tasks(
-            project_id, baseline.cutoff, baseline.known_task_ids
-        )
+        tasks = c.list_new_completed_tasks(project_id, baseline.cutoff, baseline.known_task_ids)
     return WhatsNewResult(tasks=tasks, cutoff=baseline.cutoff)
 
 
@@ -69,15 +67,9 @@ def s3_sync(
     config_path = _config_path(connection)
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
-        cs_info = project_cloud_storage(
-            c, project_id, project_name, root, config_path=config_path
-        )
-        ignored_prefix = (
-            CacheConfig.load(config_path).for_project(project_name).ignored_prefix
-        )
-        return c.sync_project_images(
-            project_id, Path(target_dir), cs_info, ignored_prefix=ignored_prefix
-        )
+        cs_info = project_cloud_storage(c, project_id, project_name, root, config_path=config_path)
+        ignored_prefix = CacheConfig.load(config_path).for_project(project_name).ignored_prefix
+        return c.sync_project_images(project_id, Path(target_dir), cs_info, ignored_prefix=ignored_prefix)
 
 
 def get_labels(
@@ -109,9 +101,7 @@ def update_labels(  # noqa: PLR0913
     """
     with _open(connection) as c:
         project_id, _ = resolve_project_spec(c, project)
-        c.update_project_labels(
-            project_id, add=add, rename=rename, delete=delete, recolor=recolor
-        )
+        c.update_project_labels(project_id, add=add, rename=rename, delete=delete, recolor=recolor)
 
 
 def ignore(  # noqa: PLR0913
@@ -136,9 +126,7 @@ def ignore(  # noqa: PLR0913
         if add or remove:
             stored_ids = set(ignore_cfg.get_ignored_tasks(project_name))
             local_removals = {
-                int(selector)
-                for selector in remove or []
-                if str(selector).isdigit() and int(selector) in stored_ids
+                int(selector) for selector in remove or [] if str(selector).isdigit() and int(selector) in stored_ids
             }
             remote_removals = [
                 selector
@@ -147,9 +135,7 @@ def ignore(  # noqa: PLR0913
             ]
             tasks = c.list_project_tasks(project_id) if add or remote_removals else []
             for task in c.resolve_task_selectors(tasks, list(add or [])):
-                ignore_cfg.add_task(
-                    project_name, task.id, task.name, description, silent=silent
-                )
+                ignore_cfg.add_task(project_name, task.id, task.name, description, silent=silent)
             resolved_removals = c.resolve_task_selectors(tasks, remote_removals)
             for task_id in local_removals:
                 ignore_cfg.remove_task(project_name, task_id)

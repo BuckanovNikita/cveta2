@@ -60,9 +60,7 @@ class FrameComparison(TypedDict):
 
 def _validate_frame(frame: pd.DataFrame, required: Sequence[str] = ()) -> None:
     """Do not let duplicate headers or missing identity pick an arbitrary owner."""
-    if not frame.columns.is_unique or any(
-        not isinstance(column, str) or not column for column in frame.columns
-    ):
+    if not frame.columns.is_unique or any(not isinstance(column, str) or not column for column in frame.columns):
         raise ManagedError("Managed CSV must have unique, nonempty string columns")
     if missing := set(required) - set(frame.columns):
         raise ManagedError(f"Managed CSV lacks required columns: {sorted(missing)}")
@@ -89,9 +87,7 @@ def _content_hashes(frame: pd.DataFrame, image_hashes: Mapping[str, str]) -> lis
 
 def _new_split(digest: str, policy: SplitPolicy) -> SplitName:
     """Assign a content identity independently of input row order."""
-    value = int.from_bytes(
-        hashlib.sha256(f"{policy.seed}\x00{digest}".encode()).digest()
-    ) / (1 << 256)
+    value = int.from_bytes(hashlib.sha256(f"{policy.seed}\x00{digest}".encode()).digest()) / (1 << 256)
     if value < policy.train:
         return "train"
     return "val" if value < policy.train + policy.val else "test"
@@ -132,44 +128,29 @@ def resolve_overlaps(
     digests = _content_hashes(frame, image_hashes)
     name_content: dict[str, str] = {}
     grouped: dict[str, list[int]] = defaultdict(list)
-    for position, (name, digest) in enumerate(
-        zip(frame["image_name"], digests, strict=True)
-    ):
+    for position, (name, digest) in enumerate(zip(frame["image_name"], digests, strict=True)):
         if (filename := _text(name)) is None:
             raise ManagedError(f"Invalid image filename at row {position}")
         if name_content.setdefault(filename, digest) != digest:
-            raise ManagedError(
-                f"Conflicting image filename for different content: {filename}"
-            )
+            raise ManagedError(f"Conflicting image filename for different content: {filename}")
         grouped[digest].append(position)
     sources: list[str | None] = (
-        [_text(value) for value in frame["source_id"]]
-        if "source_id" in frame
-        else [None] * len(frame)
+        [_text(value) for value in frame["source_id"]] if "source_id" in frame else [None] * len(frame)
     )
     retained = [True] * len(frame)
     for digest, positions in grouped.items():
-        members = {
-            source
-            for position in positions
-            if (source := sources[position]) is not None
-        }
+        members = {source for position in positions if (source := sources[position]) is not None}
         decision = decisions.get(digest)
         if decision is None:
             if len(members) > 1:
                 raise ManagedError(
-                    f"Image overlap requires source selection or exclusion: {digest}; "
-                    f"sources={sorted(members)}"
+                    f"Image overlap requires source selection or exclusion: {digest}; sources={sorted(members)}"
                 )
             continue
         _validate_overlap_decision(digest, positions, sources, members, decision)
         for position in positions:
-            retained[position] = (
-                decision.source is not None and sources[position] == decision.source
-            )
-    return frame.iloc[
-        [position for position, keep in enumerate(retained) if keep]
-    ].copy(deep=True)
+            retained[position] = decision.source is not None and sources[position] == decision.source
+    return frame.iloc[[position for position, keep in enumerate(retained) if keep]].copy(deep=True)
 
 
 def _validate_overlap_decision(
@@ -180,12 +161,8 @@ def _validate_overlap_decision(
     decision: OverlapDecision,
 ) -> None:
     """Reject stale ownership reviews and unmapped contributors."""
-    if set(decision.members) != members or len(set(decision.members)) != len(
-        decision.members
-    ):
-        raise ManagedError(
-            f"Image overlap membership changed; review decision: {digest}"
-        )
+    if set(decision.members) != members or len(set(decision.members)) != len(decision.members):
+        raise ManagedError(f"Image overlap membership changed; review decision: {digest}")
     if any(sources[position] is None for position in positions):
         raise ManagedError(f"Image overlap contains unmapped rows: {digest}")
     if decision.source is not None and decision.source not in members:
@@ -199,17 +176,9 @@ def _cell_key(value: object) -> tuple[str, str]:
     if isinstance(value, str):
         return ("str", value)
     if isinstance(value, (bool, Integral)):
-        return (
-            ("bool", str(value))
-            if isinstance(value, bool)
-            else ("int", str(int(value)))
-        )
+        return ("bool", str(value)) if isinstance(value, bool) else ("int", str(int(value)))
     if isinstance(value, Real):
-        return (
-            ("missing", "")
-            if math.isnan(float(value))
-            else ("float", str(float(value)))
-        )
+        return ("missing", "") if math.isnan(float(value)) else ("float", str(float(value)))
     if isinstance(value, Decimal):
         return ("missing", "") if value.is_nan() else ("decimal", str(value))
     if isinstance(value, (datetime, date)):
@@ -238,11 +207,7 @@ def _image_rows(frame: pd.DataFrame, rows: list[RowKey]) -> dict[str, Counter[Ro
 
 def _classes(frame: pd.DataFrame) -> set[str]:
     """Count represented class names without introducing a background class."""
-    return {
-        name
-        for value in frame.get("instance_label", [])
-        if (name := _text(value)) is not None
-    }
+    return {name for value in frame.get("instance_label", []) if (name := _text(value)) is not None}
 
 
 def _split_counts(frame: pd.DataFrame) -> dict[str, int]:
@@ -278,9 +243,7 @@ def compare_frames(old: pd.DataFrame, new: pd.DataFrame) -> FrameComparison:
             "added": sorted(new_images.keys() - old_images.keys()),
             "removed": sorted(old_images.keys() - new_images.keys()),
             "changed": sorted(
-                name
-                for name in old_images.keys() & new_images.keys()
-                if old_images[name] != new_images[name]
+                name for name in old_images.keys() & new_images.keys() if old_images[name] != new_images[name]
             ),
         },
         "classes": {

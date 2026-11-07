@@ -86,8 +86,7 @@ source = Path("tests/conftest.py").read_text()
 hook = next(
     node
     for node in ast.parse(source).body
-    if isinstance(node, ast.FunctionDef)
-    and node.name == "pytest_collection_modifyitems"
+    if isinstance(node, ast.FunctionDef) and node.name == "pytest_collection_modifyitems"
 )
 actual = ast.get_source_segment(source, hook)
 assert actual is not None

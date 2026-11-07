@@ -25,10 +25,7 @@ def add_config_arg(parser: "argparse.ArgumentParser") -> None:
     parser.add_argument(
         "--config",
         default=None,
-        help=(
-            "Path to YAML config (default: ~/.config/cveta2/config.yaml "
-            "or CVETA2_CONFIG)."
-        ),
+        help=("Path to YAML config (default: ~/.config/cveta2/config.yaml or CVETA2_CONFIG)."),
     )
 
 

@@ -68,9 +68,7 @@ def _get_project_and_storage() -> tuple[int, str, CloudStorageInfo, CvatConfig]:
         with CvatClient(cfg) as client:
             cs_info = client.detect_project_cloud_storage(project.id)
         if cs_info is None:
-            pytest.skip(
-                f"'{project.name}' has no cloud storage (run seed_cvat.py first)"
-            )
+            pytest.skip(f"'{project.name}' has no cloud storage (run seed_cvat.py first)")
         return project.id, project.name, cs_info, cfg
     finally:
         sdk_client.close()
@@ -84,10 +82,7 @@ def _cs_info_for_host(cs_info: CloudStorageInfo) -> CloudStorageInfo:
     """
     endpoint = _env("MINIO_ENDPOINT", "")
     if not endpoint:
-        pytest.fail(
-            "MINIO_ENDPOINT is not set; "
-            'eval "$(uv run python -m tests.integration.lifecycle env)"'
-        )
+        pytest.fail('MINIO_ENDPOINT is not set; eval "$(uv run python -m tests.integration.lifecycle env)"')
     return CloudStorageInfo(
         id=cs_info.id,
         bucket=cs_info.bucket,
@@ -165,9 +160,7 @@ class TestUploadTaskAnnotationsIntegration:
                     }
                 ]
             )
-            num_shapes = client.upload_task_annotations(
-                task_id=task_id, annotations_df=ann_df
-            )
+            num_shapes = client.upload_task_annotations(task_id=task_id, annotations_df=ann_df)
         assert num_shapes == 1
         sdk_client = _make_sdk_client()
         try:
@@ -215,9 +208,7 @@ class TestFullUploadFlowIntegration:
                     },
                 ]
             )
-            num_shapes = client.upload_task_annotations(
-                task_id=task_id, annotations_df=ann_df
-            )
+            num_shapes = client.upload_task_annotations(task_id=task_id, annotations_df=ann_df)
         assert num_shapes == 2
         sdk_client = _make_sdk_client()
         try:
@@ -340,9 +331,7 @@ class TestUploadThenFetchTaskIntegration:
                 cloud_storage_id=cs_info.id,
                 segment_size=10,
             )
-            client.upload_task_annotations(
-                task_id=task_id, annotations_df=uploaded_anns
-            )
+            client.upload_task_annotations(task_id=task_id, annotations_df=uploaded_anns)
         out_dir = tmp_path / "fetch_out"
         args = argparse.Namespace(
             project=str(project_id),
@@ -397,13 +386,9 @@ class TestUploadThenFetchTaskIntegration:
         ]:
             if col not in fetched_norm.columns or col not in uploaded_norm.columns:
                 continue
-            for i, (u, f) in enumerate(
-                zip(uploaded_norm[col], fetched_norm[col], strict=True)
-            ):
+            for i, (u, f) in enumerate(zip(uploaded_norm[col], fetched_norm[col], strict=True)):
                 if isinstance(u, (int, float)) and isinstance(f, (int, float)):
-                    assert abs(float(u) - float(f)) < 1e-5, (
-                        f"row {i} {col}: uploaded {u} vs fetched {f}"
-                    )
+                    assert abs(float(u) - float(f)) < 1e-5, f"row {i} {col}: uploaded {u} vs fetched {f}"
                 else:
                     assert u == f, f"row {i} {col}: uploaded {u!r} vs fetched {f!r}"
 
@@ -416,9 +401,7 @@ class TestUploadDeletedFromCsvIntegration:
     subsequent ``fetch-task`` reports the images as deleted.
     """
 
-    def test_upload_csv_with_deleted_rows(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_upload_csv_with_deleted_rows(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from cveta2.interfaces.commands.fetch import run_fetch_task
         from cveta2.interfaces.commands.upload import run_upload
 
@@ -496,10 +479,7 @@ class TestUploadDeletedFromCsvIntegration:
             tasks = adapter.get_project_tasks(project_id)
             task = next(t for t in tasks if t.name == task_name)
             data_meta = adapter.get_task_data_meta(task.id)
-            deleted_frame_names = {
-                PurePosixPath(data_meta.frames[fid].name).name
-                for fid in data_meta.deleted_frames
-            }
+            deleted_frame_names = {PurePosixPath(data_meta.frames[fid].name).name for fid in data_meta.deleted_frames}
             assert deleted_frame_names == {deleted_name}
         finally:
             sdk_client.close()

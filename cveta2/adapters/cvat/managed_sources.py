@@ -29,18 +29,13 @@ class CvatSources:
         snapshots = []
         for task in tasks:
             if task.project_id != project_id:
-                raise ManagedError(
-                    f"CVAT returned task {task.id} outside project {project_id}"
-                )
+                raise ManagedError(f"CVAT returned task {task.id} outside project {project_id}")
             self._tasks[project_id, task.id] = task
             jobs = self._api.get_task_jobs(task.id)
             completed = (
                 task.status == "completed"
                 and bool(jobs)
-                and all(
-                    job.stage == "acceptance" and job.state == "completed"
-                    for job in jobs
-                )
+                and all(job.stage == "acceptance" and job.state == "completed" for job in jobs)
             )
             snapshots.append(
                 TaskSnapshot(
@@ -49,10 +44,7 @@ class CvatSources:
                     completed=completed,
                 )
             )
-        label_data = [
-            label.model_dump(mode="json")
-            for label in sorted(labels, key=lambda item: item.id)
-        ]
+        label_data = [label.model_dump(mode="json") for label in sorted(labels, key=lambda item: item.id)]
         return ProjectState(
             tasks=snapshots,
             labels_fingerprint=hashlib.sha256(
@@ -67,11 +59,7 @@ class CvatSources:
             raise ManagedError("Inspect the CVAT project before reading its tasks")
         labels = self._labels[project_id]
         label_names = {label.id: label.name for label in labels}
-        attr_names = {
-            attribute.id: attribute.name
-            for label in labels
-            for attribute in label.attributes
-        }
+        attr_names = {attribute.id: attribute.name for label in labels for attribute in label.attributes}
         data = self._api.get_task_data_meta(task.id)
         annotations = self._api.get_task_annotations(task.id)
         jobs = self._api.get_task_jobs(task.id)
@@ -86,36 +74,27 @@ class CvatSources:
             jobs,
         )
         current = self._api.get_task(task.id)
-        if (
-            current.project_id != project_id
-            or current.updated_date != task.updated_date
-        ):
-            raise ManagedError(
-                f"CVAT task changed during capture: {project_id}/{task.id}"
-            )
+        if current.project_id != project_id or current.updated_date != task.updated_date:
+            raise ManagedError(f"CVAT task changed during capture: {project_id}/{task.id}")
         columns = list(CSV_COLUMNS)
         empty = pd.DataFrame(columns=columns).to_csv(index=False, lineterminator="\n")
         tables = {
-            "dataset.csv": pd.DataFrame(
-                [record.to_csv_row() for record in records], columns=columns
-            ).to_csv(index=False, lineterminator="\n"),
+            "dataset.csv": pd.DataFrame([record.to_csv_row() for record in records], columns=columns).to_csv(
+                index=False, lineterminator="\n"
+            ),
             "obsolete.csv": empty,
             "in_progress.csv": empty,
-            "deleted.csv": pd.DataFrame(
-                [record.to_csv_row() for record in deleted], columns=columns
-            ).to_csv(index=False, lineterminator="\n"),
+            "deleted.csv": pd.DataFrame([record.to_csv_row() for record in deleted], columns=columns).to_csv(
+                index=False, lineterminator="\n"
+            ),
         }
         completed = (
             current.status == "completed"
             and bool(jobs)
-            and all(
-                job.stage == "acceptance" and job.state == "completed" for job in jobs
-            )
+            and all(job.stage == "acceptance" and job.state == "completed" for job in jobs)
         )
         if completed != task.completed:
-            raise ManagedError(
-                f"CVAT task completion changed during capture: {task.id}"
-            )
+            raise ManagedError(f"CVAT task completion changed during capture: {task.id}")
         return TaskSnapshot(
             id=task.id,
             updated_date=task.updated_date,

@@ -140,10 +140,7 @@ def test_old_polygon_cache_refetches_and_round_trips_without_warning_replay(
         assert fresh["instance_shape"].tolist() == ["box"]
         columns = ["bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"]
         assert tuple(fresh[columns].iloc[0]) == _BOUNDS
-        assert any(
-            "42" in warning and "100" in warning and "приближение" in warning
-            for warning in capture_logs
-        )
+        assert any("42" in warning and "100" in warning and "приближение" in warning for warning in capture_logs)
         local = CachedTaskEnvelope.model_validate_json(entry.read_bytes()).payload
         shared = CachedTaskEnvelope.model_validate_json(fake_s3.objects[key]).payload
         _assert_polygon(local)
@@ -167,7 +164,5 @@ def test_old_polygon_cache_refetches_and_round_trips_without_warning_replay(
         assert api.annotation_calls == [task.id]
         assert len(fake_s3.get_calls) == get_count + 1
         assert capture_logs == []
-        restored = TaskAnnotationCache(
-            local_dir, s3=S3CacheBackend(fake_s3, "bkt", "pfx")
-        ).get(task)
+        restored = TaskAnnotationCache(local_dir, s3=S3CacheBackend(fake_s3, "bkt", "pfx")).get(task)
         assert restored == local

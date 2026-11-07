@@ -124,12 +124,8 @@ def _translate_transport_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
     return wrapper
 
 
-_api_retry = network_retry(
-    _should_retry_read, label="CVAT API", describe=describe_error
-)
-_write_retry = network_retry(
-    _should_retry_write, label="CVAT write", describe=describe_error
-)
+_api_retry = network_retry(_should_retry_read, label="CVAT API", describe=describe_error)
+_write_retry = network_retry(_should_retry_write, label="CVAT write", describe=describe_error)
 _idempotent_write_retry = network_retry(
     _should_retry_idempotent_write,
     label="CVAT idempotent write",
@@ -146,9 +142,7 @@ class _GlobalTimeout:
     lock = threading.Lock()
 
 
-_REQUEST_TIMEOUT: ContextVar[float | None] = ContextVar(
-    "cveta2_cvat_request_timeout", default=None
-)
+_REQUEST_TIMEOUT: ContextVar[float | None] = ContextVar("cveta2_cvat_request_timeout", default=None)
 
 
 def install_global_request_timeout(timeout: float | None) -> None:
@@ -177,9 +171,7 @@ def install_request_capture() -> None:
         original_request = RESTClientObject.request
 
         @functools.wraps(original_request)
-        def request_with_timeout(
-            self: RESTClientObject, *args: object, **kwargs: object
-        ) -> object:
+        def request_with_timeout(self: RESTClientObject, *args: object, **kwargs: object) -> object:
             request_timeout = _REQUEST_TIMEOUT.get()
             if kwargs.get("_request_timeout") is None and request_timeout:
                 kwargs["_request_timeout"] = (_CONNECT_TIMEOUT, request_timeout)
@@ -196,22 +188,14 @@ def install_request_capture() -> None:
 
 def cvat_read(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Retry transient reads, translating exhausted transport failures last."""
-    return operation_context(
-        _translate_transport_errors(_api_retry(_translate_api_errors(func)))
-    )
+    return operation_context(_translate_transport_errors(_api_retry(_translate_api_errors(func))))
 
 
 def cvat_non_idempotent_write(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Retry writes only after a proven refusal, never after an ambiguous result."""
-    return operation_context(
-        _translate_transport_errors(_write_retry(_translate_api_errors(func)))
-    )
+    return operation_context(_translate_transport_errors(_write_retry(_translate_api_errors(func))))
 
 
 def cvat_idempotent_write(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """Retry transient status failures while replacing the same explicit values."""
-    return operation_context(
-        _translate_transport_errors(
-            _idempotent_write_retry(_translate_api_errors(func))
-        )
-    )
+    return operation_context(_translate_transport_errors(_idempotent_write_retry(_translate_api_errors(func))))

@@ -81,11 +81,7 @@ def clone_task_images(
     frames = download_task_frames(cvat_client, task_id, list(range(len(names))))
     keys: list[str] = []
     for frame_id, name in enumerate(names):
-        key = "/".join(
-            part
-            for part in (storage.prefix, subdirectory, f"task_{task_id}", name)
-            if part
-        )
+        key = "/".join(part for part in (storage.prefix, subdirectory, f"task_{task_id}", name) if part)
         upload_bytes_to_s3(s3_client, storage.bucket, key, frames[frame_id])
         keys.append(key)
     return keys
@@ -144,11 +140,7 @@ def remap_shapes(
         attrs = []
         for a in s.attributes or []:
             new_spec_id = attr_map.get(a.spec_id, a.spec_id)
-            attrs.append(
-                cvat_models.AttributeValRequest(
-                    spec_id=new_spec_id, value=str(a.value or "")
-                )
-            )
+            attrs.append(cvat_models.AttributeValRequest(spec_id=new_spec_id, value=str(a.value or "")))
 
         result.append(
             cvat_models.LabeledShapeRequest(
@@ -181,22 +173,14 @@ def remap_tracks(
         attrs = []
         for a in t.attributes or []:
             new_spec_id = attr_map.get(a.spec_id, a.spec_id)
-            attrs.append(
-                cvat_models.AttributeValRequest(
-                    spec_id=new_spec_id, value=str(a.value or "")
-                )
-            )
+            attrs.append(cvat_models.AttributeValRequest(spec_id=new_spec_id, value=str(a.value or "")))
 
         tracked_shapes: list[cvat_models.TrackedShapeRequest] = []
         for ts in t.shapes or []:
             ts_attrs = []
             for a in ts.attributes or []:
                 new_spec_id = attr_map.get(a.spec_id, a.spec_id)
-                ts_attrs.append(
-                    cvat_models.AttributeValRequest(
-                        spec_id=new_spec_id, value=str(a.value or "")
-                    )
-                )
+                ts_attrs.append(cvat_models.AttributeValRequest(spec_id=new_spec_id, value=str(a.value or "")))
             tracked_shapes.append(
                 cvat_models.TrackedShapeRequest(
                     type=ts.type,
@@ -228,9 +212,7 @@ def remap_tracks(
 
 
 def main() -> None:  # noqa: C901, PLR0915
-    parser = argparse.ArgumentParser(
-        description="Clone a CVAT project, moving images to S3 cloud storage."
-    )
+    parser = argparse.ArgumentParser(description="Clone a CVAT project, moving images to S3 cloud storage.")
     parser.add_argument(
         "--source",
         default="coco8-dev",
@@ -250,10 +232,7 @@ def main() -> None:  # noqa: C901, PLR0915
     parser.add_argument(
         "--s3-subdir",
         default=None,
-        help=(
-            "Subdirectory within cloud storage prefix for images "
-            "(default: dest project name)."
-        ),
+        help=("Subdirectory within cloud storage prefix for images (default: dest project name)."),
     )
     args = parser.parse_args()
 
@@ -277,26 +256,19 @@ def main() -> None:  # noqa: C901, PLR0915
         # ── Resolve source project ────────────────────────────────────
         projects = cvat.projects.list()
         matches = [
-            project
-            for project in projects
-            if (project.name or "").strip().lower() == args.source.strip().lower()
+            project for project in projects if (project.name or "").strip().lower() == args.source.strip().lower()
         ]
         if not matches:
             raise Cveta2Error(f"Ошибка: проект не найден: {args.source!r}")
         if len(matches) > 1:
             ids = ", ".join(str(project.id) for project in matches)
-            raise Cveta2Error(
-                f"Ошибка: неоднозначное имя проекта {args.source!r}; ID: {ids}"
-            )
+            raise Cveta2Error(f"Ошибка: неоднозначное имя проекта {args.source!r}; ID: {ids}")
         src_project = matches[0]
 
         src_project = cvat.projects.retrieve(src_project.id)
         src_labels = src_project.get_labels()
         src_tasks = src_project.get_tasks()
-        logger.info(
-            f"Source project: {src_project.name} (id={src_project.id}), "
-            f"{len(src_tasks)} tasks"
-        )
+        logger.info(f"Source project: {src_project.name} (id={src_project.id}), {len(src_tasks)} tasks")
 
         # ── Read cloud storage info ───────────────────────────────────
         cs_api = cvat.api_client.cloudstorages_api
@@ -332,9 +304,7 @@ def main() -> None:  # noqa: C901, PLR0915
             logger.info(f"Cloning task: {src_task.name} (id={src_task.id})...")
 
             src_meta, _ = tasks_api.retrieve_data_meta(src_task.id)
-            server_files = clone_task_images(
-                cvat, s3, cs_info, s3_subdir, task_id=src_task.id
-            )
+            server_files = clone_task_images(cvat, s3, cs_info, s3_subdir, task_id=src_task.id)
 
             # Create task with source_storage pointing at the cloud storage.
             # Without this, cveta2 fetch cannot auto-detect cloud storage
@@ -372,8 +342,7 @@ def main() -> None:  # noqa: C901, PLR0915
                 logger.warning(f"  Task {dst_task_id} data processing timed out")
 
             logger.info(
-                f"  Created task {dst_task_id} ({dst_task_obj.name}) "
-                f"with {dst_task_obj.size} cloud storage files"
+                f"  Created task {dst_task_id} ({dst_task_obj.name}) with {dst_task_obj.size} cloud storage files"
             )
 
             # Get source annotations
@@ -392,9 +361,7 @@ def main() -> None:  # noqa: C901, PLR0915
                     ),
                     action=AnnotationUpdateAction.CREATE,
                 )
-                logger.info(
-                    f"  Uploaded {len(new_shapes)} shapes, {len(new_tracks)} tracks"
-                )
+                logger.info(f"  Uploaded {len(new_shapes)} shapes, {len(new_tracks)} tracks")
 
             # Replicate deleted frames
             if deleted_frames:

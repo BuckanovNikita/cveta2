@@ -30,16 +30,10 @@ def _open(connection: "Connection | None") -> "Iterator[CvatClient]":
     if shared is not None:
         if conn.host is not None and conn.host.rstrip("/") != shared.cvat.host:
             raise Cveta2Error("Explicit host cannot override shared CVAT identity")
-        if (
-            conn.organization is not None
-            and (conn.organization or None) != shared.cvat.organization
-        ):
-            raise Cveta2Error(
-                "Explicit organization cannot override shared CVAT identity"
-            )
+        if conn.organization is not None and (conn.organization or None) != shared.cvat.organization:
+            raise Cveta2Error("Explicit organization cannot override shared CVAT identity")
         if conn.client is not None and (
-            conn.client.host.rstrip("/") != shared.cvat.host
-            or conn.client.organization != shared.cvat.organization
+            conn.client.host.rstrip("/") != shared.cvat.host or conn.client.organization != shared.cvat.organization
         ):
             raise Cveta2Error("Injected client conflicts with shared CVAT identity")
     if conn.client is not None:
@@ -64,8 +58,7 @@ def _open(connection: "Connection | None") -> "Iterator[CvatClient]":
         cfg = cfg.model_copy(update={"organization": conn.organization or None})
     if not cfg.host:
         raise MissingHostError(
-            "Хост CVAT не настроен. Передайте host= или задайте CVAT_HOST "
-            "(либо cvat.host в конфигурации)."
+            "Хост CVAT не настроен. Передайте host= или задайте CVAT_HOST (либо cvat.host в конфигурации)."
         )
     configure_data_timeout(cfg.request_timeout)
     configure_network(NetworkConfig.resolve(conn.config_path))

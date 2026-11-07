@@ -28,9 +28,7 @@ def class_lookup(classes: dict[str, ClassInfo]) -> dict[str, str]:
     return lookup
 
 
-def reconcile_classes(
-    previous: dict[str, ClassInfo], records: Sequence[ApiClass]
-) -> ClassUpdate:
+def reconcile_classes(previous: dict[str, ClassInfo], records: Sequence[ApiClass]) -> ClassUpdate:
     """Keep policy by API number while recording canonical-name transitions."""
     class_lookup(previous)
     by_number: dict[int, ApiClass] = {}
@@ -59,11 +57,7 @@ def reconcile_classes(
         if old_name != record.name:
             aliases.append(old_name)
             changes.append(ClassChange("renamed", record.number, record.name, old_name))
-        aliases = list(
-            dict.fromkeys(alias for alias in aliases if alias != record.name)
-        )
-        classes[record.name] = ClassInfo(
-            prod_id=record.number, empty=info.empty, alt_names=aliases
-        )
+        aliases = list(dict.fromkeys(alias for alias in aliases if alias != record.name))
+        classes[record.name] = ClassInfo(prod_id=record.number, empty=info.empty, alt_names=aliases)
     class_lookup(classes)
     return ClassUpdate(classes, tuple(changes))

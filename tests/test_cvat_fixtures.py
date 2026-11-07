@@ -34,9 +34,7 @@ TASK_INVARIANTS: dict[str, Callable[[RawDataMeta, RawAnnotations], bool]] = {
     ),
     "all-bboxes-moved": lambda _, ann: bool(ann.shapes),
     "all-except-first-empty": lambda _, ann: _shape_frames(ann) <= {0},
-    "frames-1-2-removed": lambda meta, _: (
-        {1, 2} <= set(meta.deleted_frames) and bool(_kept(meta))
-    ),
+    "frames-1-2-removed": lambda meta, _: {1, 2} <= set(meta.deleted_frames) and bool(_kept(meta)),
 }
 
 
@@ -52,9 +50,7 @@ def test_fixtures_load(loaded_fixtures: LoadedFixtures) -> None:
 
 
 @pytest.mark.parametrize("name", list(TASK_INVARIANTS))
-def test_each_task_satisfies_its_name(
-    loaded_fixtures: LoadedFixtures, name: str
-) -> None:
+def test_each_task_satisfies_its_name(loaded_fixtures: LoadedFixtures, name: str) -> None:
     (task,) = [t for t in loaded_fixtures.tasks if t.name.strip().lower() == name]
     meta, annotations = loaded_fixtures.task_data[task.id]
     assert TASK_INVARIANTS[name](meta, annotations)

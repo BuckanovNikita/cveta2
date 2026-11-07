@@ -45,9 +45,7 @@ def clearml_run() -> Iterator[RunSettings]:
     try:
         import clearml  # noqa: F401
     except ImportError:
-        pytest.fail(
-            "The clearml package is missing; `uv sync` installs it with the dev group"
-        )
+        pytest.fail("The clearml package is missing; `uv sync` installs it with the dev group")
     try:
         yield settings
     finally:
@@ -85,9 +83,7 @@ def class_api() -> Iterator[str]:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    worker = threading.Thread(
-        target=server.serve_forever, kwargs={"poll_interval": 0.01}
-    )
+    worker = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
     worker.start()
     try:
         yield f"http://127.0.0.1:{server.server_port}/classes"
@@ -184,12 +180,8 @@ def test_publish_finalized_exact_payload_and_preserve_parent(
     assert parent.is_final()
     assert set(parent.list_files()) == set(PAYLOAD_NAMES)
     parent_directory = Path(parent.get_local_copy(use_soft_links=False))
-    parent_bytes = {
-        name: (parent_directory / name).read_bytes() for name in PAYLOAD_NAMES
-    }
-    assert parent_bytes == {
-        name: (prepared / name).read_bytes() for name in PAYLOAD_NAMES
-    }
+    parent_bytes = {name: (parent_directory / name).read_bytes() for name in PAYLOAD_NAMES}
+    assert parent_bytes == {name: (prepared / name).read_bytes() for name in PAYLOAD_NAMES}
     assert _source_bytes(source) == original
 
     second_directory = tmp_path / "prepared-second"
@@ -208,9 +200,7 @@ def test_publish_finalized_exact_payload_and_preserve_parent(
     assert refreshed_parent.is_final()
     assert set(refreshed_parent.list_files()) == set(PAYLOAD_NAMES)
     refreshed_directory = Path(refreshed_parent.get_local_copy(use_soft_links=False))
-    assert {
-        name: (refreshed_directory / name).read_bytes() for name in PAYLOAD_NAMES
-    } == parent_bytes
+    assert {name: (refreshed_directory / name).read_bytes() for name in PAYLOAD_NAMES} == parent_bytes
     assert _source_bytes(source) == original
 
 

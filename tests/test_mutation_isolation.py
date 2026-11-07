@@ -9,9 +9,7 @@ from pathlib import Path
 def test_mutation_child_uses_process_owned_temp_directory(tmp_path: Path) -> None:
     probe = tmp_path / "test_probe.py"
     probe.write_text(
-        "import os\n"
-        "def test_root(tmp_path):\n"
-        "    assert tmp_path.parent.name == f'worker-{os.getpid()}'\n",
+        "import os\ndef test_root(tmp_path):\n    assert tmp_path.parent.name == f'worker-{os.getpid()}'\n",
         encoding="utf-8",
     )
     root = tmp_path / "mutation-temp"
@@ -28,8 +26,7 @@ def test_mutation_child_uses_process_owned_temp_directory(tmp_path: Path) -> Non
             "addopts=",
             str(probe),
         ],
-        env=os.environ
-        | {"MUTANT_UNDER_TEST": "isolation-probe", "PYTEST_DEBUG_TEMPROOT": str(root)},
+        env=os.environ | {"MUTANT_UNDER_TEST": "isolation-probe", "PYTEST_DEBUG_TEMPROOT": str(root)},
         capture_output=True,
         text=True,
         check=False,

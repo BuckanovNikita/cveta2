@@ -64,9 +64,7 @@ class _ReadMixin(_ClientBase):
         """
         logger.trace(f"Checking completed tasks against baseline task_id={cutoff}")
         tasks = self.list_project_tasks(project_id)
-        new = [
-            t for t in tasks if t.status == "completed" and t.id not in known_task_ids
-        ]
+        new = [t for t in tasks if t.status == "completed" and t.id not in known_task_ids]
         return sorted(new, key=lambda t: t.id)
 
     def get_project_labels(self, project_id: int) -> "list[LabelInfo]":
@@ -89,8 +87,7 @@ class _ReadMixin(_ClientBase):
                 annotations = source.get_task_annotations(task.id)
             except CvatApiError:
                 logger.warning(
-                    f"Не удалось получить аннотации задачи {task.id},"
-                    " подсчёт меток может быть неполным",
+                    f"Не удалось получить аннотации задачи {task.id}, подсчёт меток может быть неполным",
                 )
                 skipped.append(task.id)
                 return
@@ -141,21 +138,12 @@ class _ReadMixin(_ClientBase):
         """
         search = name.casefold()
         candidates = self.list_projects() if self.is_ready or cached is None else cached
-        matches = [
-            project for project in candidates if project.name.casefold() == search
-        ]
+        matches = [project for project in candidates if project.name.casefold() == search]
         if not matches and cached is not None and not self.is_ready:
-            matches = [
-                project
-                for project in self.list_projects()
-                if project.name.casefold() == search
-            ]
+            matches = [project for project in self.list_projects() if project.name.casefold() == search]
         if len(matches) > 1:
             ids = sorted(project.id for project in matches)
-            raise Cveta2Error(
-                f"Имя проекта {name!r} неоднозначно: id={ids}. "
-                "Укажите числовой ID проекта."
-            )
+            raise Cveta2Error(f"Имя проекта {name!r} неоднозначно: id={ids}. Укажите числовой ID проекта.")
         if matches:
             return matches[0]
         raise ProjectNotFoundError(f"Project not found: {name!r}")

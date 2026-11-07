@@ -34,9 +34,7 @@ def test_literal_text_and_containers_are_not_missing(value: object) -> None:
     assert not is_missing(value)
 
 
-@pytest.mark.parametrize(
-    "value", [True, np.bool_(0), "nan", "inf", float("inf"), {}, "x"]
-)
+@pytest.mark.parametrize("value", [True, np.bool_(0), "nan", "inf", float("inf"), {}, "x"])
 def test_non_finite_and_boolean_values_are_not_numbers(value: object) -> None:
     assert number(value) is None
     assert not integer(value)
@@ -80,16 +78,12 @@ def test_valid_full_cveta_record_retains_raw_cells_and_extra_columns() -> None:
     )
     before = frame.copy(deep=True)
     assert schema_issues(frame, "cveta2") == []
-    pd.testing.assert_frame_equal(
-        schema_for("cveta2").validate(frame, lazy=True), before
-    )
+    pd.testing.assert_frame_equal(schema_for("cveta2").validate(frame, lazy=True), before)
     pd.testing.assert_frame_equal(frame, before)
 
 
 @pytest.mark.parametrize(("shape", "width"), [("none", 100), ("deleted", 0)])
-def test_sparse_cveta_images_accept_null_annotation_metadata(
-    shape: str, width: int
-) -> None:
+def test_sparse_cveta_images_accept_null_annotation_metadata(shape: str, width: int) -> None:
     frame = pd.DataFrame(
         [
             box(
@@ -113,9 +107,7 @@ def test_sparse_cveta_images_accept_null_annotation_metadata(
 
 @pytest.mark.parametrize("label", ["cat", 0, 1.5, "001", "NA"])
 def test_clearml_accepts_text_and_numeric_labels(label: object) -> None:
-    frame = pd.DataFrame(
-        [box(instance_label=label, image_path="image.jpg", split="val")]
-    )
+    frame = pd.DataFrame([box(instance_label=label, image_path="image.jpg", split="val")])
     assert schema_issues(frame, "clearml-yolo") == []
 
 
@@ -132,9 +124,7 @@ def test_clearml_explicit_negative_needs_all_annotation_cells_blank() -> None:
     )
     assert schema_issues(pd.DataFrame([row]), "clearml-yolo") == []
     row["bbox_x_tl"] = 0
-    assert "invalid_negative" in {
-        i.code for i in schema_issues(pd.DataFrame([row]), "clearml-yolo")
-    }
+    assert "invalid_negative" in {i.code for i in schema_issues(pd.DataFrame([row]), "clearml-yolo")}
 
 
 def test_collects_all_reasons_for_one_row_by_position() -> None:
@@ -171,9 +161,7 @@ def test_row_checks_report_one_reason_with_relevant_columns() -> None:
     areas = [issue for issue in issues if issue.code == "invalid_box_area"]
     assert len(areas) == 1
     assert areas[0].columns == ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
-    assert "image_name" not in next(
-        i.columns for i in issues if i.code == "invalid_dimension"
-    )
+    assert "image_name" not in next(i.columns for i in issues if i.code == "invalid_dimension")
 
 
 @pytest.mark.parametrize(
@@ -199,16 +187,12 @@ def test_row_checks_report_one_reason_with_relevant_columns() -> None:
         ("task_name", 17, "invalid_text"),
     ],
 )
-def test_invalid_field_semantics_are_reported(
-    column: str, value: object, code: str
-) -> None:
+def test_invalid_field_semantics_are_reported(column: str, value: object, code: str) -> None:
     issues = schema_issues(pd.DataFrame([box(**{column: value})]), "cveta2")
     assert any(i.code == code and column in i.columns for i in issues)
 
 
-@pytest.mark.parametrize(
-    "value", [True, False, "TRUE", "false", 0, 1, "0", "1", None, ""]
-)
+@pytest.mark.parametrize("value", [True, False, "TRUE", "false", 0, 1, "0", "1", None, ""])
 def test_boolean_metadata_supports_native_and_csv_values(value: object) -> None:
     assert schema_issues(pd.DataFrame([box(occluded=value)]), "cveta2") == []
 
@@ -254,9 +238,7 @@ def test_empty_valid_header_has_no_row_failures() -> None:
 
 
 def test_missing_columns_do_not_prevent_other_applicable_checks() -> None:
-    issues = schema_issues(
-        pd.DataFrame([{"image_name": "", "confidence": 2}]), "cveta2"
-    )
+    issues = schema_issues(pd.DataFrame([{"image_name": "", "confidence": 2}]), "cveta2")
     assert {i.code for i in issues} >= {
         "missing_column",
         "invalid_image_name",
@@ -265,12 +247,8 @@ def test_missing_columns_do_not_prevent_other_applicable_checks() -> None:
 
 
 def test_invalid_labels_are_checked_even_when_coordinate_headers_are_missing() -> None:
-    issues = schema_issues(
-        pd.DataFrame([{"image_name": "x", "instance_label": True}]), "cveta2"
-    )
-    assert any(
-        issue.code == "invalid_label" and issue.row_position == 0 for issue in issues
-    )
+    issues = schema_issues(pd.DataFrame([{"image_name": "x", "instance_label": True}]), "cveta2")
+    assert any(issue.code == "invalid_label" and issue.row_position == 0 for issue in issues)
 
 
 def test_clearml_source_row_id_can_be_an_opaque_lexical_identifier() -> None:
@@ -290,19 +268,13 @@ def test_image_name_is_a_bare_filename(name: str) -> None:
 
 
 def test_derived_box_area_must_remain_finite() -> None:
-    issues = schema_issues(
-        pd.DataFrame([box(bbox_x_br=1e300, bbox_y_br=1e300)]), "cveta2"
-    )
+    issues = schema_issues(pd.DataFrame([box(bbox_x_br=1e300, bbox_y_br=1e300)]), "cveta2")
     assert any(issue.code == "invalid_box_area" for issue in issues)
 
 
 def test_duplicate_headers_are_reported_as_actual_column_names() -> None:
     frame = pd.DataFrame([["a.jpg", "b.jpg"]], columns=["image_name", "image_name"])
-    duplicates = [
-        issue
-        for issue in schema_issues(frame, "cveta2")
-        if issue.code == "duplicate_column"
-    ]
+    duplicates = [issue for issue in schema_issues(frame, "cveta2") if issue.code == "duplicate_column"]
     assert len(duplicates) == 1
     assert duplicates[0].columns == ("image_name",)
     assert duplicates[0].row_position is None

@@ -53,9 +53,7 @@ from cveta2.domain.managed.policies import compare_frames
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
 
 
-def _selection(
-    config_path: Path | None, project_config: Path | None
-) -> tuple[Path, ProjectConfig]:
+def _selection(config_path: Path | None, project_config: Path | None) -> tuple[Path, ProjectConfig]:
     path = get_config_path(config_path)
     return path, load_project_config(path, project_config)
 
@@ -68,25 +66,15 @@ def _definition(config: ProjectConfig, name: str) -> DatasetDefinition:
 
 
 def _registry_hash(records: list[ApiClass]) -> str:
-    content = [
-        r.model_dump(mode="json") for r in sorted(records, key=lambda r: r.number)
-    ]
-    return hashlib.sha256(
-        json.dumps(content, sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()
+    content = [r.model_dump(mode="json") for r in sorted(records, key=lambda r: r.number)]
+    return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def _parent(
     definition: DatasetDefinition,
 ) -> tuple[DatasetParent | None, DatasetMetadata | None]:
-    parent = ClearMLStore().latest(
-        definition.clearml.project, definition.clearml.dataset
-    )
-    metadata = (
-        LocalBundleFiles().read_metadata(parent.metadata_path)
-        if parent and parent.metadata_path
-        else None
-    )
+    parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
+    metadata = LocalBundleFiles().read_metadata(parent.metadata_path) if parent and parent.metadata_path else None
     return parent, metadata
 
 
@@ -103,9 +91,7 @@ def _metadata(  # noqa: PLR0913, PLR0917 - resolved policy and selected storage.
     if set(definition.empty_classes) - known:
         raise ManagedError("Shared exclusion policy contains unknown class identities")
     classes = {
-        name: info.model_copy(
-            update={"empty": info.prod_id in definition.empty_classes}
-        )
+        name: info.model_copy(update={"empty": info.prod_id in definition.empty_classes})
         for name, info in update.classes.items()
     }
     return DatasetMetadata(
@@ -134,9 +120,7 @@ def _image_roots(
                     roots.append(str(local))
                 if local := cache.for_project(key).images_root:
                     roots.append(str(local))
-    return ImageRoots(
-        local_root=list(dict.fromkeys(roots)), s3_root=definition.s3_roots
-    )
+    return ImageRoots(local_root=list(dict.fromkeys(roots)), s3_root=definition.s3_roots)
 
 
 @contextmanager
@@ -148,20 +132,15 @@ def _client(path: Path, project_config: Path | None) -> Iterator[CvatClient]:
         yield client
 
 
-def list_datasets(
-    *, config_path: Path | None = None, project_config: Path | None = None
-) -> list[dict[str, Any]]:
+def list_datasets(*, config_path: Path | None = None, project_config: Path | None = None) -> list[dict[str, Any]]:
     """Inspect local definitions with no SDK initialization."""
     _, config = _selection(config_path, project_config)
     return [
-        {"name": name, **definition.model_dump(mode="json")}
-        for name, definition in sorted(config.datasets.items())
+        {"name": name, **definition.model_dump(mode="json")} for name, definition in sorted(config.datasets.items())
     ]
 
 
-def show_dataset(
-    name: str, *, config_path: Path | None = None, project_config: Path | None = None
-) -> dict[str, Any]:
+def show_dataset(name: str, *, config_path: Path | None = None, project_config: Path | None = None) -> dict[str, Any]:
     """Show exact configured mapping and finalized parent."""
     _, config = _selection(config_path, project_config)
     definition = _definition(config, name)
@@ -180,9 +159,7 @@ def dataset_versions(
     """List finalized exact-destination versions."""
     _, config = _selection(config_path, project_config)
     definition = _definition(config, name)
-    return ClearMLStore().versions(
-        definition.clearml.project, definition.clearml.dataset
-    )
+    return ClearMLStore().versions(definition.clearml.project, definition.clearml.dataset)
 
 
 def fetch_dataset(
@@ -244,11 +221,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     definition = _definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
     parent, previous = _parent(definition)
-    if (
-        previous
-        and previous.managed
-        and previous.managed.definition.splits != definition.splits
-    ):
+    if previous and previous.managed and previous.managed.definition.splits != definition.splits:
         raise ManagedError("Split policy changed; select a new dataset lineage")
     return prepare_managed(
         config,

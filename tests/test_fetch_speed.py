@@ -52,9 +52,7 @@ def test_inventory_snapshot_precedes_filters(coco8_fixtures: "LoadedFixtures") -
     api = FakeCvatApi(fake)
     client = CvatClient(CvatConfig(), api=api)
 
-    context = client.prepare_fetch(
-        fake.project.id, completed_only=True, ignore_task_ids={fake.tasks[2].id}
-    )
+    context = client.prepare_fetch(fake.project.id, completed_only=True, ignore_task_ids={fake.tasks[2].id})
 
     assert [task.id for task in context.tasks] == [fake.tasks[0].id]
     assert context.all_task_ids == frozenset(task.id for task in fake.tasks)
@@ -66,9 +64,7 @@ def test_numeric_selection_has_no_complete_inventory(
 ) -> None:
     api = FakeCvatApi(normal_fake)
     client = CvatClient(CvatConfig(), api=api)
-    context = client.prepare_fetch(
-        normal_fake.project.id, task_selector=[normal_fake.tasks[0].id]
-    )
+    context = client.prepare_fetch(normal_fake.project.id, task_selector=[normal_fake.tasks[0].id])
     assert context.all_task_ids is None
     assert api.call_counts["get_project_tasks"] == 0
 
@@ -86,9 +82,7 @@ def test_full_fetch_prunes_from_single_complete_inventory(
     for task_id in [*(task.id for task in fake.tasks), 999]:
         cache.put(
             make_task(task_id),
-            TaskAnnotations(
-                task_id=task_id, task_name="task", annotations=[], deleted_images=[]
-            ),
+            TaskAnnotations(task_id=task_id, task_name="task", annotations=[], deleted_images=[]),
         )
     target = FetchTarget(fake.project.id, fake.project.name, tmp_path / "output")
     options = FetchOptions(completed_only=True, ignore_task_ids={fake.tasks[2].id})
@@ -104,15 +98,11 @@ def test_full_fetch_prunes_from_single_complete_inventory(
 
     assert api.call_counts["get_project_tasks"] == 1
     assert not ((tmp_path / "cache") / "task_999.json").exists()
-    assert all(
-        ((tmp_path / "cache") / f"task_{task.id}.json").exists() for task in fake.tasks
-    )
+    assert all(((tmp_path / "cache") / f"task_{task.id}.json").exists() for task in fake.tasks)
 
 
 @pytest.mark.parametrize("save_tasks", [False, True])
-def test_task_csv_effects_are_opt_in(
-    normal_fake: "LoadedFixtures", tmp_path: Path, *, save_tasks: bool
-) -> None:
+def test_task_csv_effects_are_opt_in(normal_fake: "LoadedFixtures", tmp_path: Path, *, save_tasks: bool) -> None:
     fake = normal_fake
     task_dir = tmp_path / ".tasks"
     task_dir.mkdir()
@@ -162,12 +152,8 @@ def _fetch_deps(cache: Mock, files: Mock) -> FetchDependencies:
 
 def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
     """A cached selected-task fetch delegates every file effect to its port."""
-    task = TaskInfo(
-        id=12, name="task", status="completed", updated_date="now", subset=""
-    )
-    annotations = TaskAnnotations(
-        annotations=[], deleted_images=[], task_id=12, task_name="task"
-    )
+    task = TaskInfo(id=12, name="task", status="completed", updated_date="now", subset="")
+    annotations = TaskAnnotations(annotations=[], deleted_images=[], task_id=12, task_name="task")
     client = Mock(spec=ApplicationClient)
     client.prepare_fetch.return_value = FetchContext([task], {}, {})
     client.detect_project_cloud_storage.return_value = None
@@ -178,9 +164,7 @@ def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
     files.prepare_tasks.return_value = output / ".tasks"
     deps = _fetch_deps(cache, files)
 
-    result = fetch_selected_tasks(
-        client, FetchTarget(7, "project", output), FetchOptions(), deps=deps
-    )
+    result = fetch_selected_tasks(client, FetchTarget(7, "project", output), FetchOptions(), deps=deps)
 
     assert result == TaskAnnotations.merge([annotations])
     client.fetch_one_task.assert_not_called()
@@ -192,14 +176,10 @@ def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
     cache.prune.assert_not_called()
 
 
-def test_path_resolution_scales_with_unique_images(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_path_resolution_scales_with_unique_images(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("a.jpg", "b.jpg"):
         (tmp_path / name).write_bytes(b"image")
-    records: list[AnnotationRecord] = [
-        make_bbox(image_name=name) for name in ["a.jpg", "b.jpg"] * 20
-    ]
+    records: list[AnnotationRecord] = [make_bbox(image_name=name) for name in ["a.jpg", "b.jpg"] * 20]
     result = ProjectAnnotations(annotations=records, deleted_images=[])
     original_resolve = Path.resolve
     calls: list[Path] = []
@@ -218,9 +198,7 @@ def test_path_resolution_scales_with_unique_images(
     }
 
 
-def test_dataframe_resolves_each_unique_destination_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_dataframe_resolves_each_unique_destination_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "a.jpg"
     df = pd.DataFrame({"image_name": ["a.jpg", "alias.jpg"] * 20})
     original_resolve = Path.resolve
@@ -231,9 +209,7 @@ def test_dataframe_resolves_each_unique_destination_once(
         return original_resolve(value, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", counted_resolve)
-    result = enrich_dataframe_paths(
-        df, make_cs_info(), {"a.jpg": path, "alias.jpg": path}
-    )
+    result = enrich_dataframe_paths(df, make_cs_info(), {"a.jpg": path, "alias.jpg": path})
 
     assert calls == [path]
     assert result["image_path"].tolist() == [str(path)] * 40
@@ -269,9 +245,7 @@ def test_task_summary_reports_skipped_and_incomplete_without_cache(
     complete = client.fetch_one_task(api, fake.tasks[0], context)
     assert complete is not None
     incomplete = complete.model_copy(update={"issues_complete": False})
-    monkeypatch.setattr(
-        client, "fetch_one_task", Mock(side_effect=[complete, None, incomplete])
-    )
+    monkeypatch.setattr(client, "fetch_one_task", Mock(side_effect=[complete, None, incomplete]))
     target = FetchTarget(fake.project.id, fake.project.name, tmp_path)
     deps = fetch_dependencies(target, FetchOptions(use_cache=False))
     clock = Mock(side_effect=[100.0, 110.0, 112.0, 120.0, 124.0, 130.0, 135.0, 150.0])
@@ -307,9 +281,7 @@ def test_empty_complete_inventory_prunes_every_orphan(
     cache = TaskAnnotationCache(tmp_path / "cache")
     cache.put(
         make_task(999),
-        TaskAnnotations(
-            task_id=999, task_name="old", annotations=[], deleted_images=[]
-        ),
+        TaskAnnotations(task_id=999, task_name="old", annotations=[], deleted_images=[]),
     )
     target = FetchTarget(1, "fake", tmp_path / "out")
     options = FetchOptions()
@@ -336,13 +308,9 @@ def test_numeric_project_fetch_does_not_prune_without_complete_inventory(
     cache = TaskAnnotationCache(tmp_path / "cache")
     cache.put(
         make_task(999),
-        TaskAnnotations(
-            task_id=999, task_name="other", annotations=[], deleted_images=[]
-        ),
+        TaskAnnotations(task_id=999, task_name="other", annotations=[], deleted_images=[]),
     )
-    target = FetchTarget(
-        normal_fake.project.id, normal_fake.project.name, tmp_path / "out"
-    )
+    target = FetchTarget(normal_fake.project.id, normal_fake.project.name, tmp_path / "out")
     options = FetchOptions(task_selector=[normal_fake.tasks[0].id])
     deps = fetch_dependencies(target, options)
     monkeypatch.setattr(type(deps.caches), "create", lambda *_args, **_kwargs: cache)
@@ -363,9 +331,7 @@ def test_deletion_after_inventory_is_pruned_next_run(
 ) -> None:
     api = FakeCvatApi(normal_fake)
     cache = TaskAnnotationCache(tmp_path / "cache")
-    target = FetchTarget(
-        normal_fake.project.id, normal_fake.project.name, tmp_path / "out"
-    )
+    target = FetchTarget(normal_fake.project.id, normal_fake.project.name, tmp_path / "out")
     options = FetchOptions()
     deps = fetch_dependencies(target, options)
     monkeypatch.setattr(type(deps.caches), "create", lambda *_args, **_kwargs: cache)
@@ -393,9 +359,7 @@ def test_skip_summary_never_reconstructs_a_credential_bearing_host(
     normal_fake: "LoadedFixtures", capture_logs: list[str]
 ) -> None:
     api = FakeCvatApi(normal_fake, fail_task_ids={normal_fake.tasks[0].id})
-    client = CvatClient(
-        CvatConfig(host="https://user:secret@cvat.example/?token=secret"), api=api
-    )
+    client = CvatClient(CvatConfig(host="https://user:secret@cvat.example/?token=secret"), api=api)
     context = client.prepare_fetch(normal_fake.project.id)
 
     assert client.fetch_one_task(api, context.tasks[0], context) is None
@@ -404,9 +368,7 @@ def test_skip_summary_never_reconstructs_a_credential_bearing_host(
     assert all("secret" not in message for message in capture_logs)
 
 
-def test_empty_task_summary_reports_elapsed_time(
-    tmp_path: Path, capture_info_logs: list[str]
-) -> None:
+def test_empty_task_summary_reports_elapsed_time(tmp_path: Path, capture_info_logs: list[str]) -> None:
     api = FakeCvatApi.from_tasks([])
     client = CvatClient(CvatConfig(), api=api)
     target = FetchTarget(1, "fake", tmp_path)
@@ -444,9 +406,7 @@ def test_injected_cache_incomplete_issues_remain_visible_in_totals(
     )
     cache = Mock(spec=TaskCache)
     cache.get.return_value = cached
-    target = FetchTarget(
-        normal_fake.project.id, normal_fake.project.name, Path("unused")
-    )
+    target = FetchTarget(normal_fake.project.id, normal_fake.project.name, Path("unused"))
     deps = replace(
         fetch_dependencies(target, FetchOptions()),
         clock=Mock(side_effect=[100.0, 103.0]),

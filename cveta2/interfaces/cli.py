@@ -119,8 +119,7 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
         ),
         CommandSpec(
             "upload",
-            "Create a CVAT task from dataset.csv: filter classes, "
-            "upload images to S3, create task with cloud storage.",
+            "Create a CVAT task from dataset.csv: filter classes, upload images to S3, create task with cloud storage.",
             run_upload,
             configure_upload,
         ),
@@ -138,8 +137,7 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
         ),
         CommandSpec(
             "labels",
-            "List and interactively edit project labels. "
-            "Includes safety checks before label deletion.",
+            "List and interactively edit project labels. Includes safety checks before label deletion.",
             run_labels,
             configure_labels,
         ),
@@ -243,10 +241,7 @@ class CliApp:
                 f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
                 for item in error.errors(include_input=False, include_url=False)
             )
-            sys.exit(
-                f"Некорректная конфигурация: {details}. "
-                f"Проверьте YAML и переменные окружения."
-            )
+            sys.exit(f"Некорректная конфигурация: {details}. Проверьте YAML и переменные окружения.")
 
     def run(self, argv: list[str] | None = None) -> None:
         """Run the CLI with the given arguments."""

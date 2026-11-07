@@ -50,9 +50,7 @@ def _deleted(*, image_name: str) -> DeletedImage:
     return DeletedImage(task_id=1, task_name="t", frame_id=0, image_name=image_name)
 
 
-@pytest.mark.parametrize(
-    ("factory", "shape"), [(_without_annotations, "none"), (_deleted, "deleted")]
-)
+@pytest.mark.parametrize(("factory", "shape"), [(_without_annotations, "none"), (_deleted, "deleted")])
 def test_sparse_csv_row(factory: Callable[..., ImageRecord], shape: str) -> None:
     """Bbox fields are empty and the attributes cell is still parseable JSON."""
     row = factory(image_name="img.jpg").to_csv_row()
@@ -100,9 +98,7 @@ def test_merge_multiple_tasks() -> None:
         task_id=2,
         task_name="t2",
         annotations=[make_bbox(task_id=2, image_name="b.jpg")],
-        deleted_images=[
-            DeletedImage(image_name="c.jpg", task_id=2, task_name="t2", frame_id=0)
-        ],
+        deleted_images=[DeletedImage(image_name="c.jpg", task_id=2, task_name="t2", frame_id=0)],
     )
     result = TaskAnnotations.merge([t1, t2])
 
@@ -119,9 +115,7 @@ _RECORD_FACTORIES = [make_bbox, _without_annotations, _deleted]
 _segment = st.text(alphabet="ab1_-", min_size=1, max_size=4)
 
 
-@pytest.mark.parametrize(
-    "factory", _RECORD_FACTORIES, ids=["bbox", "without_annotations", "deleted"]
-)
+@pytest.mark.parametrize("factory", _RECORD_FACTORIES, ids=["bbox", "without_annotations", "deleted"])
 @given(folders=st.lists(_segment, max_size=3), stem=_segment)
 def test_image_name_keeps_basename_and_nested_frame_path(
     factory: Callable[..., ImageRecord], folders: list[str], stem: str
@@ -149,9 +143,7 @@ def test_explicit_frame_path_is_not_overwritten() -> None:
         ),
     ],
 )
-def test_invalid_names_and_paths_are_rejected(
-    kwargs: dict[str, str], message: str
-) -> None:
+def test_invalid_names_and_paths_are_rejected(kwargs: dict[str, str], message: str) -> None:
     with pytest.raises(ValidationError, match=message):
         make_bbox(**kwargs)
 
@@ -166,9 +158,7 @@ def test_frame_path_excluded_from_csv() -> None:
     assert "frame_path" not in CSV_COLUMNS
     bbox = make_bbox(image_name="sub/img.jpg")
     assert "frame_path" not in bbox.to_csv_row()
-    deleted = DeletedImage(
-        image_name="sub/del.jpg", task_id=1, task_name="t", frame_id=0
-    )
+    deleted = DeletedImage(image_name="sub/del.jpg", task_id=1, task_name="t", frame_id=0)
     assert "frame_path" not in deleted.to_csv_row()
 
 

@@ -156,9 +156,7 @@ def run_task_mark_deleted(args: "argparse.Namespace") -> None:
             marked += client.mark_frames_deleted(task.id, set(images))
         if frames:
             marked += client.mark_frames_deleted_by_ids(task.id, frames)
-        logger.info(
-            f"Задача {task.name!r} (id={task.id}): помечено удалёнными кадров: {marked}"
-        )
+        logger.info(f"Задача {task.name!r} (id={task.id}): помечено удалёнными кадров: {marked}")
 
 
 def run_task_drop_label(args: "argparse.Namespace") -> None:
@@ -166,14 +164,10 @@ def run_task_drop_label(args: "argparse.Namespace") -> None:
     with _task_session(args) as (client, task, project_name):
         count = client.count_task_label_shapes(task.id, args.label)
         if count == 0:
-            logger.info(
-                f"В задаче {task.name!r} (id={task.id}) "
-                f"нет аннотаций с меткой {args.label!r}."
-            )
+            logger.info(f"В задаче {task.name!r} (id={task.id}) нет аннотаций с меткой {args.label!r}.")
             return
         interactive.confirm_or_exit(
-            f"Удалить {count} аннотаций с меткой {args.label!r} "
-            f"из задачи {task.name!r} (id={task.id})?",
+            f"Удалить {count} аннотаций с меткой {args.label!r} из задачи {task.name!r} (id={task.id})?",
             yes=args.yes,
             hint=_CONFIRM_HINT,
         )
@@ -189,9 +183,7 @@ def run_task_drop_label(args: "argparse.Namespace") -> None:
             prompted=prompted,
         )
         deleted = client.drop_label_annotations(task.id, args.label)
-        logger.info(
-            f"Задача {task.name!r} (id={task.id}): удалено аннотаций: {deleted}"
-        )
+        logger.info(f"Задача {task.name!r} (id={task.id}): удалено аннотаций: {deleted}")
 
 
 def run_task_delete(args: "argparse.Namespace") -> None:

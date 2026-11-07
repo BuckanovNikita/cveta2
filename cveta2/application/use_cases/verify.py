@@ -26,9 +26,7 @@ def verify_dataframe(
     """Inspect local evidence then evaluate the unchanged input table."""
     selected = options or ValidationOptions()
     inspection = inspector.inspect(frame, profile=profile, options=selected)
-    return validate_dataframe(
-        frame, profile=profile, options=selected, inspection=inspection
-    )
+    return validate_dataframe(frame, profile=profile, options=selected, inspection=inspection)
 
 
 def verify(

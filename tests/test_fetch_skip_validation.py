@@ -82,10 +82,7 @@ class PromotionApi(FakeCvatApi):
                 update={
                     "status": "completed"
                     if self.jobs[task.id]
-                    and all(
-                        job.stage == "acceptance" and job.state == "completed"
-                        for job in self.jobs[task.id]
-                    )
+                    and all(job.stage == "acceptance" and job.state == "completed" for job in self.jobs[task.id])
                     else "annotation"
                 }
             )
@@ -102,19 +99,13 @@ class PromotionApi(FakeCvatApi):
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
         self.completion_at_annotations.append(
             {
-                task_id: bool(jobs)
-                and all(
-                    job.stage == "acceptance" and job.state == "completed"
-                    for job in jobs
-                )
+                task_id: bool(jobs) and all(job.stage == "acceptance" and job.state == "completed" for job in jobs)
                 for task_id, jobs in self.jobs.items()
             }
         )
         return super().get_task_annotations(task_id)
 
-    def update_job(
-        self, job_id: int, *, stage: str | None = None, state: str | None = None
-    ) -> None:
+    def update_job(self, job_id: int, *, stage: str | None = None, state: str | None = None) -> None:
         self.update_attempts.append(job_id)
         if self.before_update is not None:
             self.before_update(job_id)
@@ -124,9 +115,7 @@ class PromotionApi(FakeCvatApi):
             super().update_job(job_id, stage=stage, state=state)
             for task_id, jobs in self.jobs.items():
                 self.jobs[task_id] = [
-                    replace(job, stage=stage or job.stage, state=state or job.state)
-                    if job.id == job_id
-                    else job
+                    replace(job, stage=stage or job.stage, state=state or job.state) if job.id == job_id else job
                     for job in jobs
                 ]
 
@@ -265,9 +254,7 @@ def test_ignored_tasks_are_never_inspected_for_promotion(
 ) -> None:
     api = PromotionApi({11: [_job(101)], 12: [_job(201)]})
     api.fail_job_reads = {12}
-    partition = _run(
-        api, tmp_path, ignore_task_ids={12}, silent_task_ids={12} if silent else None
-    )
+    partition = _run(api, tmp_path, ignore_task_ids={12}, silent_task_ids={12} if silent else None)
     assert api.job_reads == [11, 11]
     assert api.update_attempts == [101]
     assert set(partition.dataset["task_id"]) == {11}
@@ -336,9 +323,7 @@ class ConcurrentPromotionApi(PromotionApi):
 def test_worker_bound_and_barrier_precede_completed_only_and_annotations(
     tmp_path: Path,
 ) -> None:
-    api = ConcurrentPromotionApi(
-        {task_id: [_job(task_id * 10)] for task_id in [11, 12, 13, 14]}
-    )
+    api = ConcurrentPromotionApi({task_id: [_job(task_id * 10)] for task_id in [11, 12, 13, 14]})
     configure_workers(s3=1, cvat=2)
     partition = _run(api, tmp_path, completed_only=True)
     assert api.max_active == 2
@@ -407,9 +392,7 @@ def test_partial_update_failure_preserves_changes_aborts_outputs_and_can_retry(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("failed promotion must not download")
 
-    monkeypatch.setattr(
-        "cveta2.composition.client.CvatClient.download_images", forbidden
-    )
+    monkeypatch.setattr("cveta2.composition.client.CvatClient.download_images", forbidden)
     with pytest.raises(Cveta2Error) as caught:
         _run(
             api,
@@ -431,15 +414,9 @@ def test_partial_update_failure_preserves_changes_aborts_outputs_and_can_retry(
     assert set(partition.dataset["task_id"]) == {11}
 
 
-def _seed_stale_cache(
-    api: PromotionApi, root: Path, s3: FakeS3Client | None = None
-) -> tuple[Path, str]:
+def _seed_stale_cache(api: PromotionApi, root: Path, s3: FakeS3Client | None = None) -> tuple[Path, str]:
     cache_dir = get_task_cache_dir(1, root=root)
-    backend = (
-        S3CacheBackend(s3, "cache-bucket", "custom-cache", explicit_location=True)
-        if s3 is not None
-        else None
-    )
+    backend = S3CacheBackend(s3, "cache-bucket", "custom-cache", explicit_location=True) if s3 is not None else None
     cache = TaskAnnotationCache(cache_dir, s3=backend)
     task = api.get_project_tasks(1)[0].model_copy(update={"status": "completed"})
     stale = TaskAnnotations(
@@ -498,9 +475,7 @@ def test_promotion_invalidates_custom_local_and_s3_caches_before_first_patch(
     unrelated = root / "project_1" / "task_999.json"
     unrelated.write_text("other task", encoding="utf-8")
     s3.objects["other-bucket/other-key"] = b"unrelated"
-    monkeypatch.setattr(
-        "cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3
-    )
+    monkeypatch.setattr("cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3)
 
     def before_update(_job_id: int) -> None:
         assert not stale_path.exists()
@@ -524,9 +499,7 @@ def test_disabled_cache_still_invalidates_local_without_contacting_s3(
     monkeypatch: pytest.MonkeyPatch,
     disabled_by: str,
 ) -> None:
-    monkeypatch.setenv(
-        "CVETA2_DISABLE_CACHE", "true" if disabled_by == "environment" else "false"
-    )
+    monkeypatch.setenv("CVETA2_DISABLE_CACHE", "true" if disabled_by == "environment" else "false")
     api = PromotionApi({11: [_job(101)]})
     config, root = _custom_config(tmp_path, api.get_project(1))
     stale_path, _key = _seed_stale_cache(api, root)
@@ -535,17 +508,13 @@ def test_disabled_cache_still_invalidates_local_without_contacting_s3(
         pytest.fail("cache-disabled promotion must not contact S3")
 
     monkeypatch.setattr("cveta2.adapters.s3.task_cache.make_s3_client", forbidden)
-    monkeypatch.setattr(
-        "cveta2.composition.client.CvatClient.detect_project_cloud_storage", forbidden
-    )
+    monkeypatch.setattr("cveta2.composition.client.CvatClient.detect_project_cloud_storage", forbidden)
 
     def before_update(_job_id: int) -> None:
         assert not stale_path.exists()
 
     api.before_update = before_update
-    partition = _run(
-        api, tmp_path / "output", config_path=config, use_cache=disabled_by != "option"
-    )
+    partition = _run(api, tmp_path / "output", config_path=config, use_cache=disabled_by != "option")
     assert not stale_path.exists()
     assert set(partition.dataset["image_name"]) == {"11.jpg"}
 
@@ -560,9 +529,7 @@ def test_partial_mutation_failure_leaves_both_cache_layers_invalidated(
     config, root = _custom_config(tmp_path, api.get_project(1))
     s3 = FakeS3Client()
     stale_path, stale_key = _seed_stale_cache(api, root, s3)
-    monkeypatch.setattr(
-        "cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3
-    )
+    monkeypatch.setattr("cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3)
     with pytest.raises(Cveta2Error):
         _run(api, tmp_path / "output", use_cache=True, config_path=config)
     assert not stale_path.exists()
@@ -599,9 +566,7 @@ def test_invalidation_failure_aborts_before_task_mutation(
     config, root = _custom_config(tmp_path, api.get_project(1))
     s3 = FailingDeleteS3() if layer == "s3" else FakeS3Client()
     stale_path, _key = _seed_stale_cache(api, root, s3)
-    monkeypatch.setattr(
-        "cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3
-    )
+    monkeypatch.setattr("cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3)
     if layer == "local":
         original_unlink = Path.unlink
 

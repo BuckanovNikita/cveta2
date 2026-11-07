@@ -21,9 +21,7 @@ def api(number: int, name: str, *, internal_id: int = 100) -> ApiClass:
 def test_rename_chain_and_reversion_preserve_empty_history_and_inputs() -> None:
     original = {"a": ClassInfo(prod_id=7, empty=True, alt_names=["old", "old"])}
     first = reconcile_classes(original, [api(7, "b", internal_id=500)])
-    assert first.classes["b"] == ClassInfo(
-        prod_id=7, empty=True, alt_names=["old", "a"]
-    )
+    assert first.classes["b"] == ClassInfo(prod_id=7, empty=True, alt_names=["old", "a"])
     second = reconcile_classes(first.classes, [api(7, "a")])
     assert second.classes["a"].alt_names == ["old", "b"]
     assert second.changes[0].old_name == "b"
@@ -35,14 +33,10 @@ def test_rename_chain_and_reversion_preserve_empty_history_and_inputs() -> None:
 def test_added_class_defaults_and_unchanged_records() -> None:
     update = reconcile_classes({"a": ClassInfo(prod_id=1)}, [api(1, "a"), api(2, "b")])
     assert update.classes["b"] == ClassInfo(prod_id=2)
-    assert [
-        (change.kind, change.prod_id, change.name) for change in update.changes
-    ] == [("added", 2, "b")]
+    assert [(change.kind, change.prod_id, change.name) for change in update.changes] == [("added", 2, "b")]
 
 
-@pytest.mark.parametrize(
-    "records", [[api(1, "a"), api(1, "b")], [api(1, "a"), api(2, "a")], []]
-)
+@pytest.mark.parametrize("records", [[api(1, "a"), api(1, "b")], [api(1, "a"), api(2, "a")], []])
 def test_invalid_api_or_missing_identity_blocks(records: list[ApiClass]) -> None:
     with pytest.raises(UploadError):
         reconcile_classes({"a": ClassInfo(prod_id=1)}, records)

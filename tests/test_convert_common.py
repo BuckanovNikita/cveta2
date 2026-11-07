@@ -83,9 +83,7 @@ class TestCoordinateConversion:
         coords=st.lists(st.integers(0, 4000), min_size=4, max_size=4),
         size=st.tuples(st.integers(1, 4000), st.integers(1, 4000)),
     )
-    def test_pixel_yolo_roundtrip(
-        self, coords: list[int], size: tuple[int, int]
-    ) -> None:
+    def test_pixel_yolo_roundtrip(self, coords: list[int], size: tuple[int, int]) -> None:
         """Pixel -> YOLO -> pixel recovers any box on any positive image size."""
         x1, x2 = sorted(coords[:2])
         y1, y2 = sorted(coords[2:])
@@ -243,9 +241,7 @@ class TestReflinkFallback:
 class TestSizeCache:
     """Tests for _SizeCache image dimension caching."""
 
-    @pytest.mark.parametrize(
-        ("read_all", "second"), [(False, (640, 480)), (True, (320, 240))]
-    )
+    @pytest.mark.parametrize(("read_all", "second"), [(False, (640, 480)), (True, (320, 240))])
     def test_read_all_controls_measurement(
         self,
         tmp_path: Path,
@@ -264,9 +260,7 @@ class TestSizeCache:
 class TestUtf8FileHelpers:
     """Tests for the locale-independent text read/write helpers."""
 
-    def test_roundtrip_writes_utf8_bytes_and_keeps_newlines(
-        self, tmp_path: Path
-    ) -> None:
+    def test_roundtrip_writes_utf8_bytes_and_keeps_newlines(self, tmp_path: Path) -> None:
         """Content is encoded as UTF-8 with untranslated line endings.
 
         Nothing ever read the raw bytes of a label file or dataset.yaml back,
@@ -310,11 +304,7 @@ class TestBuildSearchDirs:
             isolated_config_path,
             {f"p{i}": tmp_path / name for i, name in enumerate(cache)},
         )
-        explicit = (
-            None
-            if explicit_names is None
-            else [tmp_path / name for name in explicit_names]
-        )
+        explicit = None if explicit_names is None else [tmp_path / name for name in explicit_names]
         assert _build_search_dirs(explicit) == [tmp_path / name for name in expected]
 
 
@@ -324,9 +314,7 @@ class TestFindImageByStem:
     @pytest.mark.parametrize(
         ("images", "dirs", "subdirs", "expected"),
         [
-            pytest.param(
-                ["a.jpg", "images/a.jpg"], ["."], ["images"], "a.jpg", id="flat-first"
-            ),
+            pytest.param(["a.jpg", "images/a.jpg"], ["."], ["images"], "a.jpg", id="flat-first"),
             pytest.param(["a.png", "a.jpg"], ["."], [], "a.jpg", id="extension-order"),
             pytest.param(
                 ["first/a.jpg", "second/a.jpg"],
@@ -335,12 +323,8 @@ class TestFindImageByStem:
                 "first/a.jpg",
                 id="dir-order",
             ),
-            pytest.param(
-                ["real/a.jpg"], ["gone", "real"], [], "real/a.jpg", id="missing-dir"
-            ),
-            pytest.param(
-                ["images/a.png"], ["."], ["images"], "images/a.png", id="subdir"
-            ),
+            pytest.param(["real/a.jpg"], ["gone", "real"], [], "real/a.jpg", id="missing-dir"),
+            pytest.param(["images/a.png"], ["."], ["images"], "images/a.png", id="subdir"),
             pytest.param(
                 ["images/a.jpg"],
                 ["."],
@@ -362,9 +346,7 @@ class TestFindImageByStem:
         """Flat hits, then subdirs; earlier dirs and extensions win; gaps skip."""
         for image in images:
             make_image(tmp_path / image)
-        found = _find_image_by_stem(
-            "a", [tmp_path / d for d in dirs], subdirs=subdirs or None
-        )
+        found = _find_image_by_stem("a", [tmp_path / d for d in dirs], subdirs=subdirs or None)
         assert found == (None if expected is None else tmp_path / expected)
 
 
@@ -396,9 +378,7 @@ class TestCsvRowBuilders:
 
     def test_base_row_stamps_yolo_provenance(self) -> None:
         """The full row dict is pinned, constants included."""
-        row = _make_csv_row_base(
-            "none", "img.jpg", (640, 480), split="train", frame_id=7
-        )
+        row = _make_csv_row_base("none", "img.jpg", (640, 480), split="train", frame_id=7)
         assert row == _yolo_row("none", split="train", frame_id=7)
 
     def test_box_row_rounds_coordinates_to_two_decimals(self) -> None:
@@ -471,9 +451,7 @@ class TestValidateSplits:
                 {"image_name": "b.jpg", "split": "train"},
             ]
         )
-        with pytest.raises(
-            Cveta2Error, match=r"у 1 изображений не задан split\. Примеры: a\.jpg"
-        ):
+        with pytest.raises(Cveta2Error, match=r"у 1 изображений не задан split\. Примеры: a\.jpg"):
             _validate_splits(df)
 
 

@@ -85,17 +85,13 @@ class _ResolveCase(NamedTuple):
 
 
 _RESOLVE_CASES = [
-    pytest.param(
-        _ResolveCase(["a.jpg"], ["a.jpg"], ["."], {"a.jpg": "a.jpg"}), id="flat"
-    ),
+    pytest.param(_ResolveCase(["a.jpg"], ["a.jpg"], ["."], {"a.jpg": "a.jpg"}), id="flat"),
     pytest.param(
         _ResolveCase(["sub/a.jpg"], ["sub/a.jpg"], ["."], {"sub/a.jpg": "sub/a.jpg"}),
         id="subpath-name",
     ),
     pytest.param(
-        _ResolveCase(
-            ["deep/nested/a.jpg"], ["a.jpg"], ["."], {"a.jpg": "deep/nested/a.jpg"}
-        ),
+        _ResolveCase(["deep/nested/a.jpg"], ["a.jpg"], ["."], {"a.jpg": "deep/nested/a.jpg"}),
         id="recursive-basename",
     ),
     pytest.param(
@@ -112,9 +108,7 @@ _RESOLVE_CASES = [
         id="earlier-search-dir-wins",
     ),
     pytest.param(
-        _ResolveCase(
-            ["real/a.jpg"], ["a.jpg"], ["nope", "real"], {"a.jpg": "real/a.jpg"}
-        ),
+        _ResolveCase(["real/a.jpg"], ["a.jpg"], ["nope", "real"], {"a.jpg": "real/a.jpg"}),
         id="nonexistent-search-dir-skipped",
     ),
 ]
@@ -128,16 +122,12 @@ class TestResolveImages:
         for name in case.files:
             _touch(tmp_path / name)
 
-        found, missing = resolve_images(
-            case.names, [tmp_path / d for d in case.search_dirs]
-        )
+        found, missing = resolve_images(case.names, [tmp_path / d for d in case.search_dirs])
 
         assert found == {k: tmp_path / v for k, v in case.expected.items()}
         assert missing == []
 
-    def test_duplicate_basenames_pick_lexicographic_max_and_warn(
-        self, tmp_path: Path, capture_logs: list[str]
-    ) -> None:
+    def test_duplicate_basenames_pick_lexicographic_max_and_warn(self, tmp_path: Path, capture_logs: list[str]) -> None:
         """The warning must name the searched directory and the duplicate.
 
         The directory has to be matched together with the following word:
@@ -176,9 +166,7 @@ class TestBuildServerFileMapping:
                 },
                 id="existing-images-keep-their-path-at-any-depth",
             ),
-            pytest.param(
-                [], {"new_img.jpg"}, {"new_img.jpg": _NEW}, id="new-image-month-prefix"
-            ),
+            pytest.param([], {"new_img.jpg"}, {"new_img.jpg": _NEW}, id="new-image-month-prefix"),
             pytest.param(
                 ["old.jpg"],
                 {"old.jpg", "brand_new.jpg"},
@@ -187,9 +175,7 @@ class TestBuildServerFileMapping:
             ),
         ],
     )
-    def test_maps_each_name(
-        self, listed: list[str], names: set[str], expected: dict[str, str]
-    ) -> None:
+    def test_maps_each_name(self, listed: list[str], names: set[str], expected: dict[str, str]) -> None:
         mapping, existing_keys = build_server_file_mapping(
             make_cs_info(prefix="project/images"), names, s3_client=_bucket(*listed)
         )
@@ -203,9 +189,7 @@ class TestBuildServerFileMapping:
                 assert mapping[name] == server_file
         assert existing_keys == {f"project/images/{key}" for key in listed}
 
-    def test_new_image_month_folder_is_the_utc_calendar_month(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_new_image_month_folder_is_the_utc_calendar_month(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The folder is the UTC *month*, not the local month nor the minute.
 
         The month regex matches ``%Y-%M`` (minutes) just as happily as
@@ -221,9 +205,7 @@ class TestBuildServerFileMapping:
 
         assert mapping["new_img.jpg"] == "2026-03/new_img.jpg"
 
-    def test_lists_own_bucket_over_the_storage_endpoint(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_lists_own_bucket_over_the_storage_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Without an injected client, the storage's endpoint and bucket are used."""
         cs_info = make_cs_info(
             bucket="own-bucket",
@@ -238,9 +220,7 @@ class TestBuildServerFileMapping:
         )
         factory = patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", client)
 
-        mapping, existing_keys = build_server_file_mapping(
-            cs_info, {"mine.jpg", "theirs.jpg"}
-        )
+        mapping, existing_keys = build_server_file_mapping(cs_info, {"mine.jpg", "theirs.jpg"})
 
         assert factory.endpoints == ["http://minio:9000"]
         assert existing_keys == {"project/images/mine.jpg"}
@@ -279,9 +259,7 @@ class _ExistingKeysCase(NamedTuple):
 
 _EXISTING_KEYS_CASES = [
     pytest.param(
-        _ExistingKeysCase(
-            {"upload-bucket/project/images/img.jpg": b"stale"}, set(), 1, 0
-        ),
+        _ExistingKeysCase({"upload-bucket/project/images/img.jpg": b"stale"}, set(), 1, 0),
         id="empty-argument-beats-a-populated-bucket",
     ),
     pytest.param(
@@ -302,13 +280,9 @@ class TestS3Uploader:
     test hands them over explicitly.
     """
 
-    def test_no_images_returns_zeroed_stats(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_no_images_returns_zeroed_stats(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An empty batch short-circuits before any S3 client is built."""
-        factory = patch_recording_s3(
-            monkeypatch, "cveta2.adapters.s3.upload", FakeS3Client()
-        )
+        factory = patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", FakeS3Client())
 
         stats = S3Uploader().upload(_upload_cs_info(), {}, {}, set())
 
@@ -317,9 +291,7 @@ class TestS3Uploader:
         assert stats.skipped_existing == 0
         assert factory.endpoints == []
 
-    def test_uploads_new_files_and_skips_existing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_uploads_new_files_and_skips_existing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """New files land under prefix; ones named in ``existing_keys`` are skipped.
 
         The seeded foreign-bucket copy of ``new.jpg`` and the recorded
@@ -359,9 +331,7 @@ class TestS3Uploader:
         }
         assert client.objects["upload-bucket/project/images/new.jpg"] == b"x"
 
-    def test_server_file_mapping_decides_the_key(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_server_file_mapping_decides_the_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Each image lands at its server_file, not at its bare name.
 
         The two names map into different month folders, so a version that
@@ -434,9 +404,7 @@ class TestS3Uploader:
             "bad.jpg": _touch(tmp_path / "bad.jpg"),
         }
 
-        stats = S3Uploader().upload(
-            _upload_cs_info(), images, {name: name for name in images}, set()
-        )
+        stats = S3Uploader().upload(_upload_cs_info(), images, {name: name for name in images}, set())
 
         assert stats.total == 2
         assert stats.uploaded == 1

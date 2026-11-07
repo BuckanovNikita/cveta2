@@ -62,9 +62,7 @@ class _Remote:
     def __init__(self, ledger: LocalFeedbackLedger) -> None:
         self.ledger = ledger
         self.issues: set[str] = set()
-        self.states = {
-            task: FeedbackTaskState(12, task, "0", "annotations-v1") for task in (1, 2)
-        }
+        self.states = {task: FeedbackTaskState(12, task, "0", "annotations-v1") for task in (1, 2)}
         self.creates = 0
         self.fail_before: set[int] = set()
         self.fail_after: set[int] = set()
@@ -89,12 +87,8 @@ class _Remote:
         self.states[finding.task_id] = FeedbackTaskState(
             12,
             finding.task_id,
-            str(int(current.updated_date) + 1)
-            if self.bump_time
-            else current.updated_date,
-            "annotations-v2"
-            if finding.task_id in self.edit_during
-            else current.fingerprint,
+            str(int(current.updated_date) + 1) if self.bump_time else current.updated_date,
+            "annotations-v2" if finding.task_id in self.edit_during else current.fingerprint,
         )
         if finding.task_id in self.fail_after:
             raise ManagedError("Uncertain create response")
@@ -123,14 +117,10 @@ def test_issue_writes_without_timestamp_changes_do_not_conflict(tmp_path: Path) 
     ledger = LocalFeedbackLedger(tmp_path)
     remote = _Remote(ledger)
     remote.bump_time = False
-    outcome = report_findings(
-        [_finding(frame=0), _finding(frame=1)], remote=remote, ledger=ledger
-    )
+    outcome = report_findings([_finding(frame=0), _finding(frame=1)], remote=remote, ledger=ledger)
     assert outcome.created == 2
     assert not outcome.failed
-    assert (
-        ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
-    )
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
 
 
 def test_uncertain_create_recovers_by_reads_before_freshness_validation(
@@ -146,13 +136,9 @@ def test_uncertain_create_recovers_by_reads_before_freshness_validation(
     receipt = ledger.get_receipt(finding.marker)
     assert receipt is not None
     assert not receipt.delivered
-    assert (
-        ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
-    )
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
     reconcile_pending([finding], remote=remote, ledger=ledger)
-    assert (
-        ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "1"
-    )
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "1"
     assert remote.creates == 1
     assert report_findings([finding], remote=remote, ledger=ledger).existing == 1
 
@@ -164,9 +150,7 @@ def test_real_annotation_change_is_never_acknowledged(tmp_path: Path) -> None:
     finding = _finding()
     outcome = report_findings([finding], remote=remote, ledger=ledger)
     assert len(outcome.failed) == 1
-    assert (
-        ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
-    )
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
     with pytest.raises(ManagedError, match="annotations changed"):
         reconcile_pending([finding], remote=remote, ledger=ledger)
 
@@ -197,9 +181,7 @@ def test_new_finding_cannot_hide_edit_between_same_task_deliveries(
     outcome = report_findings([_finding(frame=1)], remote=remote, ledger=ledger)
     assert len(outcome.failed) == 1
     assert remote.creates == 1
-    assert (
-        ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "1"
-    )
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "1"
 
 
 def test_preexisting_marker_does_not_create_an_issue(tmp_path: Path) -> None:
@@ -213,9 +195,7 @@ def test_preexisting_marker_does_not_create_an_issue(tmp_path: Path) -> None:
     assert not outcome.failed
 
 
-def test_checkpoint_failure_prevents_remote_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_checkpoint_failure_prevents_remote_write(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ledger = LocalFeedbackLedger(tmp_path)
     remote = _Remote(ledger)
 
@@ -297,9 +277,7 @@ def test_cvat_adapter_writes_only_a_frame_issue_and_checks_ownership() -> None:
     assert remote.issue_exists(canonical)
     api.patch_task_annotations.assert_not_called()
     api.patch_job.assert_not_called()
-    api.get_task.return_value = api.get_task.return_value.model_copy(
-        update={"project_id": 99}
-    )
+    api.get_task.return_value = api.get_task.return_value.model_copy(update={"project_id": 99})
     with pytest.raises(ManagedError, match="source project"):
         remote.create_issue(finding)
 

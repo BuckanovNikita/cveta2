@@ -24,24 +24,16 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
     ):
         command = commands.add_parser(operation)
         command.add_argument("--config", type=Path, help="Личный файл конфигурации.")
-        command.add_argument(
-            "--project-config", type=Path, help="Общий файл проектов и сопоставлений."
-        )
-        command.add_argument(
-            "--json", action="store_true", help="Вывести результат в JSON."
-        )
+        command.add_argument("--project-config", type=Path, help="Общий файл проектов и сопоставлений.")
+        command.add_argument("--json", action="store_true", help="Вывести результат в JSON.")
         if operation in {"show", "versions", "fetch", "prepare"}:
             command.add_argument("name", help="Имя набора из общего файла.")
         if operation in {"fetch", "prepare"}:
             command.add_argument("--output-dir", type=Path, required=True)
         if operation == "fetch":
-            command.add_argument(
-                "--refresh", action="store_true", help="Прочитать аннотации заново."
-            )
+            command.add_argument("--refresh", action="store_true", help="Прочитать аннотации заново.")
         if operation == "prepare":
-            command.add_argument(
-                "csv", type=Path, help="CSV после пользовательского преобразования."
-            )
+            command.add_argument("csv", type=Path, help="CSV после пользовательского преобразования.")
             command.add_argument(
                 "--source",
                 type=Path,
@@ -57,9 +49,7 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
             command.add_argument("old", help="Каталог/CSV или ID версии ClearML.")
             command.add_argument("new", help="Каталог/CSV или ID версии ClearML.")
         if operation in {"report-errors", "publish"}:
-            command.add_argument(
-                "prepared", type=Path, help="Каталог проверенной подготовки."
-            )
+            command.add_argument("prepared", type=Path, help="Каталог проверенной подготовки.")
 
 
 def run_managed(args: argparse.Namespace) -> None:
@@ -74,9 +64,7 @@ def run_managed(args: argparse.Namespace) -> None:
     elif operation == "versions":
         result = managed_datasets.dataset_versions(args.name, **options)
     elif operation == "fetch":
-        result = managed_datasets.fetch_dataset(
-            args.name, output_dir=args.output_dir, refresh=args.refresh, **options
-        )
+        result = managed_datasets.fetch_dataset(args.name, output_dir=args.output_dir, refresh=args.refresh, **options)
     elif operation == "prepare":
         prepared = managed_datasets.prepare_managed_dataset(
             args.name,
@@ -94,9 +82,7 @@ def run_managed(args: argparse.Namespace) -> None:
     elif operation == "diff":
         result = managed_datasets.compare_datasets(args.old, args.new, **options)
     elif operation == "report-errors":
-        result = managed_datasets.report_dataset_errors(
-            args.prepared, **options
-        ).model_dump(mode="json")
+        result = managed_datasets.report_dataset_errors(args.prepared, **options).model_dump(mode="json")
         sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
         if result["failed"]:
             raise SystemExit(2)

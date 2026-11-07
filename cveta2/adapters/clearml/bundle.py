@@ -91,9 +91,7 @@ def _sdk() -> _Sdk:
         # implementation types and lazy import out of the application contracts.
         return cast("_Sdk", import_module("clearml"))
     except ImportError as exc:
-        raise UploadError(
-            "Install cveta2[clearml] and configure the ClearML SDK before uploading"
-        ) from exc
+        raise UploadError("Install cveta2[clearml] and configure the ClearML SDK before uploading") from exc
 
 
 @contextmanager
@@ -114,10 +112,7 @@ def _sdk_errors(context: str, *, publication_id: str | None = None) -> Iterator[
     except Exception as exc:
         # ClearML/storage plugins expose heterogeneous backend/auth/network errors.
         # This adapter boundary can translate them; preserve the cause for diagnosis.
-        raise UploadError(
-            f"{context}; check ClearML configuration, credentials "
-            f"and connectivity ({exc})"
-        ) from exc
+        raise UploadError(f"{context}; check ClearML configuration, credentials and connectivity ({exc})") from exc
 
 
 class ClearMLStore:
@@ -140,9 +135,7 @@ class ClearMLStore:
         """List finalized nonarchived names in the exact project."""
         with _sdk_errors("Cannot list ClearML datasets"):
             rows = self._listing(_sdk().Dataset, project)
-            return sorted(
-                {name for row in rows if isinstance(name := row.get("name"), str)}
-            )
+            return sorted({name for row in rows if isinstance(name := row.get("name"), str)})
 
     def versions(self, project: str, name: str) -> list[dict[str, str | None]]:
         """List immutable finalized identities for an exact project and name."""
@@ -153,12 +146,8 @@ class ClearMLStore:
                     "id": str(row["id"]),
                     "project": project,
                     "name": name,
-                    "version": str(row["version"])
-                    if row.get("version") is not None
-                    else None,
-                    "created": str(row["created"])
-                    if row.get("created") is not None
-                    else None,
+                    "version": str(row["version"]) if row.get("version") is not None else None,
+                    "created": str(row["created"]) if row.get("created") is not None else None,
                 }
                 for row in rows
                 if row.get("name") == name and row.get("id")
@@ -170,9 +159,7 @@ class ClearMLStore:
             factory = _sdk().Dataset
             # A successful listing proves absence; never interpret a get/auth/network
             # exception as a missing dataset and accidentally create a new lineage.
-            if not any(
-                row.get("name") == name for row in self._listing(factory, project)
-            ):
+            if not any(row.get("name") == name for row in self._listing(factory, project)):
                 return None
             dataset = factory.get(
                 dataset_project=project,
@@ -181,14 +168,8 @@ class ClearMLStore:
                 auto_create=False,
                 include_archived=False,
             )
-            if (
-                dataset.project != project
-                or dataset.name != name
-                or not dataset.is_final()
-            ):
-                raise UploadError(
-                    "ClearML returned a different project/name or an unfinalized parent"
-                )
+            if dataset.project != project or dataset.name != name or not dataset.is_final():
+                raise UploadError("ClearML returned a different project/name or an unfinalized parent")
             metadata_path = None
             if "dataset.yaml" in dataset.list_files():
                 directory = dataset.get_local_copy(
@@ -198,41 +179,23 @@ class ClearMLStore:
                 )
                 metadata_path = Path(directory) / "dataset.yaml"
                 if not metadata_path.is_file():
-                    raise UploadError(
-                        "ClearML parent advertised dataset.yaml "
-                        "but its download is missing"
-                    )
-            return DatasetParent(
-                dataset.id, project, name, dataset.version, metadata_path
-            )
+                    raise UploadError("ClearML parent advertised dataset.yaml but its download is missing")
+            return DatasetParent(dataset.id, project, name, dataset.version, metadata_path)
 
     @staticmethod
     def _upload_child(child: _Dataset) -> None:
         # upload is synchronous in ClearML. Disable SDK retries and finalize's
         # implicit upload to avoid replaying mutation after uncertain failures.
         if child.upload(retries=0) is False or child.is_dirty():
-            raise UploadError(
-                f"Upload did not complete for created ClearML dataset {child.id}"
-            )
+            raise UploadError(f"Upload did not complete for created ClearML dataset {child.id}")
         if set(child.list_files()) != set(_PAYLOAD):
-            raise UploadError(
-                f"Upload lost bundle files for created ClearML dataset {child.id}"
-            )
-        if (
-            child.finalize(raise_on_error=True, auto_upload=False) is not True
-            or not child.is_final()
-        ):
-            raise UploadError(
-                f"Finalization did not complete for created ClearML dataset {child.id}"
-            )
+            raise UploadError(f"Upload lost bundle files for created ClearML dataset {child.id}")
+        if child.finalize(raise_on_error=True, auto_upload=False) is not True or not child.is_final():
+            raise UploadError(f"Finalization did not complete for created ClearML dataset {child.id}")
         if set(child.list_files()) != set(_PAYLOAD):
-            raise UploadError(
-                f"Finalized ClearML dataset {child.id} has an unexpected file manifest"
-            )
+            raise UploadError(f"Finalized ClearML dataset {child.id} has an unexpected file manifest")
 
-    def publish(
-        self, project: str, name: str, parent_id: str | None, directory: Path
-    ) -> Publication:
+    def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
         """Publish exactly three files in a new finalized child."""
         for filename in _PAYLOAD:
             if not (directory / filename).is_file():
@@ -245,32 +208,21 @@ class ClearMLStore:
                 parent_datasets=[parent_id] if parent_id is not None else [],
             )
         with _sdk_errors(
-            f"Publication failed for created ClearML dataset {child.id}; "
-            "inspect it before retrying",
+            f"Publication failed for created ClearML dataset {child.id}; inspect it before retrying",
             publication_id=child.id,
         ):
             if child.id == parent_id:
-                raise UploadError(
-                    f"ClearML returned parent {parent_id} as the child; "
-                    "refusing mutation"
-                )
+                raise UploadError(f"ClearML returned parent {parent_id} as the child; refusing mutation")
             # Public remove_files clears both regular files and external links in
             # this child only. Parent content and parent SDK instances stay intact.
             if child.list_files():
                 child.remove_files(dataset_path="*", recursive=True)
             if child.list_files():
-                raise UploadError(
-                    f"Created ClearML dataset {child.id} retained inherited entries"
-                )
+                raise UploadError(f"Created ClearML dataset {child.id} retained inherited entries")
             for filename in _PAYLOAD:
-                child.add_files(
-                    path=str(directory / filename), local_base_folder=str(directory)
-                )
+                child.add_files(path=str(directory / filename), local_base_folder=str(directory))
             if set(child.list_files()) != set(_PAYLOAD):
-                raise UploadError(
-                    f"Created ClearML dataset {child.id} "
-                    "does not contain exactly the three bundle files"
-                )
+                raise UploadError(f"Created ClearML dataset {child.id} does not contain exactly the three bundle files")
             self._upload_child(child)
             return Publication(child.id, child.version)
 
@@ -295,33 +247,17 @@ class S3Roots:
             or "\x00" in root
             or "\\" in parsed.path
             or (
-                any(
-                    part in {"", ".", ".."}
-                    for part in parsed.path.strip("/").split("/")
-                )
+                any(part in {"", ".", ".."} for part in parsed.path.strip("/").split("/"))
                 and bool(parsed.path.strip("/"))
             )
         ):
-            raise UploadError(
-                "S3 roots must be s3://bucket/prefix URLs "
-                "without credentials, query or fragment"
-            )
+            raise UploadError("S3 roots must be s3://bucket/prefix URLs without credentials, query or fragment")
         boundary = root.rstrip("/") + "/"
-        with _sdk_errors(
-            f"Cannot access S3 root {root}; "
-            "configure ClearML S3 storage and list permissions"
-        ):
-            objects = _sdk().StorageManager.list(
-                remote_url=boundary, return_full_path=True
-            )
+        with _sdk_errors(f"Cannot access S3 root {root}; configure ClearML S3 storage and list permissions"):
+            objects = _sdk().StorageManager.list(remote_url=boundary, return_full_path=True)
             if objects is None:
-                raise UploadError(
-                    f"S3 listing unavailable for {root}; "
-                    "check ClearML storage configuration"
-                )
+                raise UploadError(f"S3 listing unavailable for {root}; check ClearML storage configuration")
             # A successful empty bucket listing proves access. A nonempty prefix
             # must have an entry at its directory boundary, not a sibling prefix.
-            if parsed.path.strip("/") and not any(
-                path.startswith(boundary) for path in objects
-            ):
+            if parsed.path.strip("/") and not any(path.startswith(boundary) for path in objects):
                 raise UploadError(f"S3 root prefix does not exist or is empty: {root}")

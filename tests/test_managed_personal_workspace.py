@@ -43,9 +43,7 @@ def test_blank_shared_organization_allows_credential_save(tmp_path: Path) -> Non
 
 def test_blank_organization_is_the_same_neutral_workspace() -> None:
     """Canonical identity and hashes must not depend on null versus empty YAML."""
-    assert CvatIdentity(host="https://cvat.example", organization="") == CvatIdentity(
-        host="https://cvat.example"
-    )
+    assert CvatIdentity(host="https://cvat.example", organization="") == CvatIdentity(host="https://cvat.example")
     assert CvatConfig(organization="").organization is None
 
 
@@ -63,9 +61,7 @@ def test_empty_environment_organization_does_not_override_shared_policy(
         )
     )
     personal = tmp_path / "personal.yaml"
-    personal.write_text(
-        yaml.safe_dump({"schema_version": 1, "project_config": str(shared)})
-    )
+    personal.write_text(yaml.safe_dump({"schema_version": 1, "project_config": str(shared)}))
     monkeypatch.setenv("CVAT_ORGANIZATION", "")
     assert CvatConfig.load(personal).organization == "team"
     monkeypatch.setenv("CVAT_ORGANIZATION", "other")

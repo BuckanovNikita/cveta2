@@ -67,8 +67,7 @@ def build_server_file_mapping(
 
     resolved = _resolve_duplicate_basenames(name for _key, name in objects)
     name_to_server_file = {
-        image_name: resolved.get(image_name) or _assign_month_folder(image_name)
-        for image_name in image_names
+        image_name: resolved.get(image_name) or _assign_month_folder(image_name) for image_name in image_names
     }
     return name_to_server_file, existing_keys
 
@@ -151,8 +150,7 @@ class S3Uploader:
 
         if not to_upload:
             logger.info(
-                f"Все {stats.skipped_existing} изображений уже загружены "
-                f"в s3://{cs_info.bucket}/{cs_info.prefix}"
+                f"Все {stats.skipped_existing} изображений уже загружены в s3://{cs_info.bucket}/{cs_info.prefix}"
             )
             return stats
 

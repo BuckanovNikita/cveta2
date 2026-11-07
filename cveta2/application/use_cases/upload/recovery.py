@@ -44,24 +44,13 @@ def _verify_existing_shapes(
             {label.name: label.id for label in session.labels},
         )
     if built.unknown_images or built.unknown_labels:
-        raise Cveta2Error(
-            f"Задача {task_id}: изображения или метки не совпадают; продолжить нельзя."
-        )
+        raise Cveta2Error(f"Задача {task_id}: изображения или метки не совпадают; продолжить нельзя.")
     existing = session.api.get_task_annotations(task_id).shapes
     if existing:
-        expected = Counter(
-            (shape.type, shape.frame, shape.label_id, tuple(shape.points))
-            for shape in built.shapes
-        )
-        actual = Counter(
-            (shape.type, shape.frame, shape.label_id, tuple(shape.points))
-            for shape in existing
-        )
+        expected = Counter((shape.type, shape.frame, shape.label_id, tuple(shape.points)) for shape in built.shapes)
+        actual = Counter((shape.type, shape.frame, shape.label_id, tuple(shape.points)) for shape in existing)
         properties_match = all(
-            not shape.occluded
-            and shape.z_order == 0
-            and shape.rotation == 0
-            and not shape.attributes
+            not shape.occluded and shape.z_order == 0 and shape.rotation == 0 and not shape.attributes
             for shape in existing
         )
         if actual != expected or not properties_match:
@@ -69,9 +58,7 @@ def _verify_existing_shapes(
                 f"Задача {task_id}: аннотации не совпадают с намерением загрузки "
                 "(частичные или изменённые данные). Запись не повторяется."
             )
-        logger.info(
-            f"Задача {task_id}: подтверждены {len(existing)} аннотаций, пропускаем"
-        )
+        logger.info(f"Задача {task_id}: подтверждены {len(existing)} аннотаций, пропускаем")
         return len(existing)
     return 0
 
@@ -87,9 +74,7 @@ def _ensure_annotations(
     if resuming:
         existing = _verify_existing_shapes(task_id, staged.annotations, session)
         if existing:
-            logger.info(
-                f"Задача {task_id}: подтверждены {existing} аннотаций, пропускаем"
-            )
+            logger.info(f"Задача {task_id}: подтверждены {existing} аннотаций, пропускаем")
             return existing
     return client.upload_task_annotations(task_id, staged.annotations, session=session)
 
@@ -153,25 +138,13 @@ def _ensure_task(
         # The likeliest manual intervention: the stranded task was deleted
         # in the CVAT UI. That is the state a fresh task is for, so there is
         # nothing to warn about beyond saying what happened.
-        logger.info(
-            f"Задача {manifest.task_id} больше не существует в CVAT — создаём новую."
-        )
+        logger.info(f"Задача {manifest.task_id} больше не существует в CVAT — создаём новую.")
         return create()
     if size == expected:
-        actual_names = [
-            frame.name
-            for frame in client.open_task_session(manifest.task_id).data_meta.frames
-        ]
-        if not _frames_match(
-            actual_names, staged.task_image_names, staged.cs_info.prefix
-        ):
-            raise Cveta2Error(
-                f"Задача {manifest.task_id}: порядок или имена кадров изменены; "
-                "запись запрещена."
-            )
-        logger.info(
-            f"Продолжаем задачу {manifest.task_id}: {size} изображений уже привязаны."
-        )
+        actual_names = [frame.name for frame in client.open_task_session(manifest.task_id).data_meta.frames]
+        if not _frames_match(actual_names, staged.task_image_names, staged.cs_info.prefix):
+            raise Cveta2Error(f"Задача {manifest.task_id}: порядок или имена кадров изменены; запись запрещена.")
+        logger.info(f"Продолжаем задачу {manifest.task_id}: {size} изображений уже привязаны.")
         return manifest.task_id
     if size == 0:
         raise Cveta2Error(
@@ -185,9 +158,7 @@ def _ensure_task(
     )
 
 
-def _record_task_id(
-    manifest: UploadManifest, task_id: int, *, deps: UploadDependencies
-) -> None:
+def _record_task_id(manifest: UploadManifest, task_id: int, *, deps: UploadDependencies) -> None:
     """Persist the new task id before the long frame-attach step runs."""
     manifest.task_id = task_id
     deps.manifests.save(manifest, required=True)
@@ -205,20 +176,13 @@ def _resume_manifest(
     """
     manifest = deps.manifests.load(request.project_id, fingerprint, host=host)
     if manifest is not None:
-        if (
-            not manifest.intent_complete
-            or manifest.mapping_identity != compute_mapping_identity(manifest)
-        ):
-            raise Cveta2Error(
-                "Состояние загрузки не содержит полного намерения; "
-                "продолжение небезопасно."
-            )
+        if not manifest.intent_complete or manifest.mapping_identity != compute_mapping_identity(manifest):
+            raise Cveta2Error("Состояние загрузки не содержит полного намерения; продолжение небезопасно.")
         return manifest
     others = deps.manifests.list_for_project(request.project_id, host=host)
     if not others:
         raise Cveta2Error(
-            f"Ошибка: незавершённых загрузок для проекта "
-            f"{request.project_name!r} не найдено — нечего продолжать."
+            f"Ошибка: незавершённых загрузок для проекта {request.project_name!r} не найдено — нечего продолжать."
         )
     listed = "\n".join(f"  - {other.describe()}" for other in others)
     raise Cveta2Error(
@@ -238,9 +202,7 @@ def _fresh_manifest(
 ) -> tuple[_StagedUpload, UploadManifest]:
     """Stage images for a new upload and record what it decided."""
     existing = deps.manifests.load(request.project_id, fingerprint, host=client.host)
-    if existing is not None and (
-        existing.task_id is not None or existing.creation_pending
-    ):
+    if existing is not None and (existing.task_id is not None or existing.creation_pending):
         raise Cveta2Error(
             f"Найдена незавершённая загрузка этого набора "
             f"(задача {existing.task_id}); повторное создание запрещено. "
@@ -262,18 +224,12 @@ def _fresh_manifest(
     return staged, manifest
 
 
-def _completed_outcome(
-    request: UploadRequest, manifest: UploadManifest
-) -> UploadOutcome:
+def _completed_outcome(request: UploadRequest, manifest: UploadManifest) -> UploadOutcome:
     """Return the completed remote task without replaying stale bookkeeping."""
     if manifest.task_id is None or manifest.completed_counts is None:
-        raise Cveta2Error(
-            "Состояние завершённой загрузки повреждено; запись запрещена."
-        )
+        raise Cveta2Error("Состояние завершённой загрузки повреждено; запись запрещена.")
     shapes, issues, jobs = manifest.completed_counts
-    logger.info(
-        f"Загрузка уже завершена: задача {manifest.task_id}; запись не повторяется."
-    )
+    logger.info(f"Загрузка уже завершена: задача {manifest.task_id}; запись не повторяется.")
     return UploadOutcome(
         manifest.task_id,
         manifest.task_name,
@@ -301,11 +257,7 @@ def _frames_match(actual: list[str], intended: list[str], prefix: str) -> bool:
                 return False
             shortened = shortened or name != expected_name
         elif name != expected_name:
-            relative = (
-                expected_name.removeprefix(f"{cloud_prefix}/")
-                if cloud_prefix
-                else expected_name
-            )
+            relative = expected_name.removeprefix(f"{cloud_prefix}/") if cloud_prefix else expected_name
             if name != relative:
                 return False
     if shortened:
@@ -344,7 +296,6 @@ def _preflight_resume_target(
         manifest.cs_info.prefix,
     ):
         raise Cveta2Error(
-            f"Задача {manifest.task_id}: кадры не совпадают или привязка "
-            "ещё не завершена; запись запрещена."
+            f"Задача {manifest.task_id}: кадры не совпадают или привязка ещё не завершена; запись запрещена."
         )
     _verify_existing_shapes(manifest.task_id, request.plan.annotations, session)

@@ -37,18 +37,14 @@ def _classes(
     options: PrepareOptions,
     services: BundleServices,
 ) -> ClassUpdate:
-    update = reconcile_classes(
-        previous.classes if previous else {}, services.api.fetch(api_url)
-    )
+    update = reconcile_classes(previous.classes if previous else {}, services.api.fetch(api_url))
     decisions = []
     if previous and update.changes and not options.accept_class_changes:
         decisions.append(
             Decision(
                 "class_changes",
                 "Подтвердите изменения классов: "
-                + ", ".join(
-                    f"{c.kind}: {c.name} ({c.prod_id})" for c in update.changes
-                ),
+                + ", ".join(f"{c.kind}: {c.name} ({c.prod_id})" for c in update.changes),
             )
         )
     classes = dict(update.classes)
@@ -58,9 +54,7 @@ def _classes(
         raise UploadError(f"Неизвестные номера классов в настройках: {sorted(unknown)}")
     for name, info in classes.items():
         if info.prod_id in options.class_empty:
-            classes[name] = info.model_copy(
-                update={"empty": options.class_empty[info.prod_id]}
-            )
+            classes[name] = info.model_copy(update={"empty": options.class_empty[info.prod_id]})
         elif info.prod_id in added and not options.accept_default_classes:
             decisions.append(
                 Decision(
@@ -75,15 +69,9 @@ def _classes(
     return ClassUpdate(classes, update.changes)
 
 
-def _roots(
-    frame: pd.DataFrame, roots: ImageRoots, services: BundleServices
-) -> ImageRoots:
+def _roots(frame: pd.DataFrame, roots: ImageRoots, services: BundleServices) -> ImageRoots:
     canonical = ImageRoots(
-        local_root=list(
-            dict.fromkeys(
-                services.roots.check_local_root(root) for root in roots.local_root
-            )
-        ),
+        local_root=list(dict.fromkeys(services.roots.check_local_root(root) for root in roots.local_root)),
         s3_root=list(dict.fromkeys(roots.s3_root)),
     )
     if uncovered := services.roots.uncovered_paths(frame, canonical):
@@ -91,8 +79,7 @@ def _roots(
             (
                 Decision(
                     "local_roots",
-                    "Укажите разрешённые каталоги изображений:\n"
-                    + "\n".join(uncovered),
+                    "Укажите разрешённые каталоги изображений:\n" + "\n".join(uncovered),
                     tuple(uncovered),
                 ),
             )
@@ -103,9 +90,7 @@ def _roots(
     return canonical
 
 
-def _validate(
-    frame: pd.DataFrame, metadata: DatasetMetadata, services: BundleServices
-) -> BundleValidation:
+def _validate(frame: pd.DataFrame, metadata: DatasetMetadata, services: BundleServices) -> BundleValidation:
     inspection = services.media.inspect(
         frame,
         profile="clearml-yolo",
@@ -114,16 +99,11 @@ def _validate(
     return validate_bundle(frame, metadata, inspection=inspection)
 
 
-def _parent_metadata(
-    parent: DatasetParent | None, services: BundleServices
-) -> DatasetMetadata | None:
+def _parent_metadata(parent: DatasetParent | None, services: BundleServices) -> DatasetMetadata | None:
     if parent is None:
         return None
     if parent.metadata_path is None:
-        raise UploadError(
-            f"Родитель {parent.dataset_id} не содержит dataset.yaml. "
-            "Выберите новое имя датасета."
-        )
+        raise UploadError(f"Родитель {parent.dataset_id} не содержит dataset.yaml. Выберите новое имя датасета.")
     return services.files.read_metadata(parent.metadata_path)
 
 
@@ -138,9 +118,7 @@ def prepare_dataset(
     if not options.project.strip():
         raise UploadError("Укажите непустой проект ClearML.")
     if not options.dataset_name or not options.dataset_name.strip():
-        raise MissingDecisions(
-            (Decision("dataset_name", "Укажите имя датасета ClearML."),)
-        )
+        raise MissingDecisions((Decision("dataset_name", "Укажите имя датасета ClearML."),))
     snapshot = services.files.read_source(source)
     parent = services.datasets.latest(options.project, options.dataset_name)
     previous = _parent_metadata(parent, services)
@@ -150,9 +128,7 @@ def prepare_dataset(
     try:
         DatasetMetadata(api_url=api_url, classes={})
     except ValidationError as error:
-        raise UploadError(
-            f"Invalid preparation options or API metadata: {error}"
-        ) from error
+        raise UploadError(f"Invalid preparation options or API metadata: {error}") from error
     update = _classes(previous, api_url, options, services)
     old_roots = previous.images if previous else ImageRoots()
     roots = _roots(
@@ -208,31 +184,19 @@ def _check_bundle(bundle: StoredBundle, services: BundleServices) -> None:
     if roots != metadata.images:
         raise UploadError("Корни изображений изменились; подготовьте датасет заново.")
     retained = _validate(bundle.dataset, metadata, services)
-    if (
-        retained.blockers
-        or retained.result.structural_errors
-        or retained.result.requires_cleanup
-    ):
+    if retained.blockers or retained.result.structural_errors or retained.result.requires_cleanup:
         raise UploadError(
             "Подготовленные данные больше не проходят проверку: "
-            + "; ".join(
-                (*retained.blockers, *(i.message for i in retained.result.issues))
-            )
+            + "; ".join((*retained.blockers, *(i.message for i in retained.result.issues)))
         )
     original = _validate(bundle.source.tables.dataset, metadata, services)
     if original.blockers or original.result.structural_errors:
-        raise UploadError(
-            "Исходные данные больше не проходят проверку; подготовьте датасет заново."
-        )
+        raise UploadError("Исходные данные больше не проходят проверку; подготовьте датасет заново.")
     if original.result.requires_cleanup and not bundle.record.options.clean:
         raise UploadError("Очистка исходных данных не была разрешена.")
     tasks = derive_tasks(bundle.source.tables, original.result.clean)
-    if tasks != bundle.tasks or not services.files.payload_matches(
-        bundle, original.result.clean, tasks
-    ):
-        raise UploadError(
-            "Результат повторной проверки изменился; подготовьте датасет заново."
-        )
+    if tasks != bundle.tasks or not services.files.payload_matches(bundle, original.result.clean, tasks):
+        raise UploadError("Результат повторной проверки изменился; подготовьте датасет заново.")
 
 
 def upload_dataset(directory: Path, services: BundleServices) -> Publication:

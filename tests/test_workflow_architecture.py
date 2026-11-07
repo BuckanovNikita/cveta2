@@ -49,9 +49,7 @@ def _upload_setup() -> tuple[Mock, UploadRequest, UploadDependencies, list[str]]
     )
     manifests = Mock(spec=ManifestStore)
     manifests.load.return_value = None
-    manifests.new.side_effect = lambda **kwargs: new_manifest(
-        **kwargs, started_at="2026-10-14T00:00:00+00:00"
-    )
+    manifests.new.side_effect = lambda **kwargs: new_manifest(**kwargs, started_at="2026-10-14T00:00:00+00:00")
     events: list[str] = []
 
     def checkpoint(manifest: UploadManifest, *, required: bool = False) -> None:
@@ -82,9 +80,7 @@ def _upload_setup() -> tuple[Mock, UploadRequest, UploadDependencies, list[str]]
         return 0
 
     client.upload_task_annotations.side_effect = write_annotations
-    invalidator = Mock(
-        side_effect=lambda *_args, **_kwargs: events.append("invalidate")
-    )
+    invalidator = Mock(side_effect=lambda *_args, **_kwargs: events.append("invalidate"))
     deps = UploadDependencies(remote, files, manifests, invalidator)
     return client, request, deps, events
 

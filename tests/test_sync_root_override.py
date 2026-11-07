@@ -53,12 +53,8 @@ def _resolve(
     client: MagicMock,
     sync_root: str | None = None,
 ) -> CloudStorageInfo | None:
-    with patch(
-        "cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]
-    ):
-        _pid, _name, cs_info = resolve_project_and_cloud_storage(
-            client, "my-project", sync_root=sync_root
-        )
+    with patch("cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]):
+        _pid, _name, cs_info = resolve_project_and_cloud_storage(client, "my-project", sync_root=sync_root)
     return cs_info
 
 
@@ -140,9 +136,7 @@ def test_invalid_root_raises_cveta2_error(
     client = _make_client(_cvat_cs_info())
 
     with (
-        patch(
-            "cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]
-        ),
+        patch("cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]),
         pytest.raises(Cveta2Error, match="sync root"),
     ):
         resolve_project_and_cloud_storage(client, "my-project", sync_root="s3://")

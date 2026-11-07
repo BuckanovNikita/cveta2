@@ -46,11 +46,7 @@ def _check_nodes(node: yaml.Node, active: set[int]) -> None:
     if isinstance(node, yaml.MappingNode):
         keys: set[str] = set()
         for key, value in node.value:
-            if (
-                not isinstance(key, yaml.ScalarNode)
-                or key.tag != "tag:yaml.org,2002:str"
-                or key.value in keys
-            ):
+            if not isinstance(key, yaml.ScalarNode) or key.tag != "tag:yaml.org,2002:str" or key.value in keys:
                 raise ManagedError("Configuration mapping keys must be unique strings")
             keys.add(key.value)
             _check_nodes(value, active)
@@ -65,11 +61,7 @@ def personal_config_path(path: Path | None = None) -> Path:
     return (
         path
         if path is not None
-        else Path(
-            os.environ.get(
-                "CVETA2_CONFIG", str(Path.home() / ".config/cveta2/config.yaml")
-            )
-        )
+        else Path(os.environ.get("CVETA2_CONFIG", str(Path.home() / ".config/cveta2/config.yaml")))
     )
 
 
@@ -84,9 +76,7 @@ def read_config(path: Path, *, missing_ok: bool = False) -> dict[str, object]:
             _check_nodes(node, set())
         raw: object = yaml.safe_load(content)
     except (OSError, UnicodeError, yaml.YAMLError) as error:
-        raise ManagedError(
-            f"Cannot read configuration {path}: {type(error).__name__}"
-        ) from error
+        raise ManagedError(f"Cannot read configuration {path}: {type(error).__name__}") from error
     if raw is None:
         return {}
     if not isinstance(raw, dict):
@@ -114,44 +104,23 @@ def validate_personal(raw: dict[str, object], *, attached: bool = False) -> None
     cvat = _dict(raw.get("cvat"))
     if raw.get("schema_version") == 1:
         if set(raw) - _PERSONAL_KEYS:
-            raise ManagedError(
-                "Personal configuration contains unsupported/shared sections"
-            )
+            raise ManagedError("Personal configuration contains unsupported/shared sections")
         cache_projects = _dict(_dict(raw.get("cache")).get("projects"))
-        misplaced_cache = any(
-            set(_dict(value)) & _POLICY_KEYS for value in cache_projects.values()
-        )
-        if (
-            _mixed_policy(raw)
-            or misplaced_cache
-            or "host" in cvat
-            or "organization" in cvat
-        ):
-            raise ManagedError(
-                "Shared project policy/identity cannot be stored "
-                "in personal configuration"
-            )
+        misplaced_cache = any(set(_dict(value)) & _POLICY_KEYS for value in cache_projects.values())
+        if _mixed_policy(raw) or misplaced_cache or "host" in cvat or "organization" in cvat:
+            raise ManagedError("Shared project policy/identity cannot be stored in personal configuration")
         if set(cvat) - {"username", "password", "request_timeout"}:
             raise ManagedError("Unknown personal CVAT setting")
-    elif _mixed_policy(raw) or (
-        attached and ("host" in cvat or "organization" in cvat)
-    ):
-        raise MigrationRequired(
-            "Legacy mixed configuration requires verification: "
-            "cveta2 setup --migrate-config"
-        )
+    elif _mixed_policy(raw) or (attached and ("host" in cvat or "organization" in cvat)):
+        raise MigrationRequired("Legacy mixed configuration requires verification: cveta2 setup --migrate-config")
 
 
-def project_config_path(
-    personal_path: Path | None = None, project_path: Path | None = None
-) -> Path | None:
+def project_config_path(personal_path: Path | None = None, project_path: Path | None = None) -> Path | None:
     """Select one shared file; never overlay definitions from multiple files."""
     personal = personal_config_path(personal_path)
     raw = read_config(personal, missing_ok=True)
     explicit = project_path or (
-        Path(os.environ["CVETA2_PROJECT_CONFIG"])
-        if os.environ.get("CVETA2_PROJECT_CONFIG")
-        else None
+        Path(os.environ["CVETA2_PROJECT_CONFIG"]) if os.environ.get("CVETA2_PROJECT_CONFIG") else None
     )
     saved = raw.get("project_config")
     if saved is not None and (not isinstance(saved, str) or not saved.strip()):
@@ -163,32 +132,22 @@ def project_config_path(
             selected = personal.parent / selected
     validate_personal(raw, attached=selected is not None)
     if raw.get("schema_version") == 1 and selected is None:
-        raise ManagedError(
-            "Versioned personal configuration requires "
-            "a shared project_config reference"
-        )
+        raise ManagedError("Versioned personal configuration requires a shared project_config reference")
     return selected.expanduser().resolve() if selected is not None else None
 
 
-def load_project_config(
-    personal_path: Path | None = None, project_path: Path | None = None
-) -> ProjectConfig:
+def load_project_config(personal_path: Path | None = None, project_path: Path | None = None) -> ProjectConfig:
     """Load the one selected authoritative shared project definition."""
     path = project_config_path(personal_path, project_path)
     if path is None:
         raise ManagedError(
-            "Shared project configuration is not attached; use "
-            "setup --project-config PATH or CVETA2_PROJECT_CONFIG"
+            "Shared project configuration is not attached; use setup --project-config PATH or CVETA2_PROJECT_CONFIG"
         )
     try:
         return ProjectConfig.model_validate(read_config(path))
     except ValidationError as error:
-        fields = ", ".join(
-            ".".join(str(part) for part in issue["loc"]) for issue in error.errors()
-        )
-        raise ManagedError(
-            f"Invalid shared project configuration {path}; fields: {fields}"
-        ) from error
+        fields = ", ".join(".".join(str(part) for part in issue["loc"]) for issue in error.errors())
+        raise ManagedError(f"Invalid shared project configuration {path}; fields: {fields}") from error
 
 
 def optional_project_config(
@@ -209,9 +168,7 @@ def _yaml_bytes(data: dict[str, object]) -> bytes:
 def _stage_bytes(path: Path, content: bytes, purpose: str) -> Path:
     """Create an exclusively claimed private stage beside its destination."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(
-        dir=path.parent, prefix=f".{path.name}.{purpose}-", delete=False
-    ) as stream:
+    with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.{purpose}-", delete=False) as stream:
         temporary = Path(stream.name)
         try:
             stream.write(content)
@@ -260,17 +217,14 @@ def attach_project_config(personal_path: Path, project_path: Path) -> Path:
     try:
         ProjectConfig.model_validate(read_config(selected))
     except ValidationError as error:
-        raise ManagedError(
-            f"Invalid shared project configuration: {selected}"
-        ) from error
+        raise ManagedError(f"Invalid shared project configuration: {selected}") from error
     raw["schema_version"] = 1
     raw["project_config"] = str(selected)
     try:
         validate_personal(raw, attached=True)
     except ManagedError as error:
         raise MigrationRequired(
-            "Legacy fields require reviewed separation before attachment: "
-            "cveta2 setup --migrate-config"
+            "Legacy fields require reviewed separation before attachment: cveta2 setup --migrate-config"
         ) from error
     _private_write(personal_path, _yaml_bytes(raw), replace=True)
     return selected
@@ -287,9 +241,7 @@ def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinitio
     return result
 
 
-def write_shared_project_fields(
-    personal_path: Path, changes: dict[str, dict[str, object]]
-) -> Path:
+def write_shared_project_fields(personal_path: Path, changes: dict[str, dict[str, object]]) -> Path:
     """Explicit policy writers update shared fields; no personal shadow copies."""
     path = project_config_path(personal_path)
     if path is None:
@@ -302,9 +254,7 @@ def write_shared_project_fields(
         if project is None:
             raise ManagedError(f"Unknown shared project: {name}")
         key = next(key for key, value in projects.items() if value.id == project.id)
-        projects[key] = ProjectDefinition.model_validate(
-            {**project.model_dump(), **fields}
-        )
+        projects[key] = ProjectDefinition.model_validate({**project.model_dump(), **fields})
     updated = ProjectConfig.model_validate(
         {
             **config.model_dump(),
@@ -315,9 +265,7 @@ def write_shared_project_fields(
     # replace a read-only file through its writable parent directory.
     if path.stat().st_mode & 0o222 == 0:
         raise ManagedError(f"Shared project configuration is read-only: {path}")
-    _private_write(
-        path, _yaml_bytes(updated.model_dump()), replace=True, preserve_permissions=True
-    )
+    _private_write(path, _yaml_bytes(updated.model_dump()), replace=True, preserve_permissions=True)
     return path
 
 
@@ -337,8 +285,7 @@ class MigrationProposal:
         personal = dict(self.personal)
         cvat = _dict(personal.get("cvat"))
         personal["cvat"] = {
-            key: "<redacted>" if key in {"username", "password"} else value
-            for key, value in cvat.items()
+            key: "<redacted>" if key in {"username", "password"} else value for key, value in cvat.items()
         }
         return {
             "personal_path": str(self.personal_path),
@@ -367,12 +314,8 @@ def _cached_projects(personal_path: Path, organization: object) -> dict[str, lis
         if isinstance(projects, list):
             for value in projects:
                 project = _dict(value)
-                if isinstance(project.get("name"), str) and isinstance(
-                    project.get("id"), int
-                ):
-                    result.setdefault(str(project["name"]), []).append(
-                        cast("int", project["id"])
-                    )
+                if isinstance(project.get("name"), str) and isinstance(project.get("id"), int):
+                    result.setdefault(str(project["name"]), []).append(cast("int", project["id"]))
     return result
 
 
@@ -389,20 +332,13 @@ def _migration_projects(
     for name in sorted(names):
         ids = set(cached.get(name, []))
         if len(ids) != 1:
-            unresolved.append(
-                f"Project {name!r} requires an unambiguous cached CVAT identity"
-            )
+            unresolved.append(f"Project {name!r} requires an unambiguous cached CVAT identity")
             continue
         project_id = ids.pop()
-        key = (
-            name
-            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name)
-            else f"project-{project_id}"
-        )
+        key = name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name) else f"project-{project_id}"
         if key in projects:
             unresolved.append(
-                f"Project key collision for {name!r}: {key!r}; "
-                "review the legacy identities before migration"
+                f"Project key collision for {name!r}: {key!r}; review the legacy identities before migration"
             )
             continue
         policies = _dict(cache_projects.get(name))
@@ -442,25 +378,19 @@ def _unknown_legacy_fields(raw: dict[str, object]) -> list[str]:
     """Report unsupported nested fields instead of discarding their values."""
     paths = [
         f"cvat.{key}"
-        for key in set(_dict(raw.get("cvat")))
-        - {"host", "organization", "username", "password", "request_timeout"}
+        for key in set(_dict(raw.get("cvat"))) - {"host", "organization", "username", "password", "request_timeout"}
     ]
     cache = _dict(raw.get("cache"))
-    paths.extend(
-        f"cache.{key}" for key in set(cache) - {"images_root", "tasks_root", "projects"}
-    )
+    paths.extend(f"cache.{key}" for key in set(cache) - {"images_root", "tasks_root", "projects"})
     for name, fields in _dict(cache.get("projects")).items():
         paths.extend(
             f"cache.projects.{name}.{key}"
-            for key in set(_dict(fields))
-            - {"images_root", "tasks_root", "ignored_prefix", "task_cache_s3"}
+            for key in set(_dict(fields)) - {"images_root", "tasks_root", "ignored_prefix", "task_cache_s3"}
         )
     return sorted(paths)
 
 
-def migration_proposal(
-    personal_path: Path, project_path: Path | None = None
-) -> MigrationProposal:
+def migration_proposal(personal_path: Path, project_path: Path | None = None) -> MigrationProposal:
     """Split known legacy fields without inventing project identities."""
     personal_path = personal_path.expanduser().resolve()
     original = personal_path.read_bytes()
@@ -468,9 +398,7 @@ def migration_proposal(
     if raw.get("schema_version") == 1:
         selected = project_config_path(personal_path, project_path)
         if selected is None:
-            raise ManagedError(
-                "Versioned personal configuration has no shared reference"
-            )
+            raise ManagedError("Versioned personal configuration has no shared reference")
         return MigrationProposal(
             personal_path,
             selected,
@@ -480,18 +408,13 @@ def migration_proposal(
             (),
         )
     cvat = _dict(raw.get("cvat"))
-    unresolved = [
-        f"Unclassified legacy field remains in backup: {field}"
-        for field in _unknown_legacy_fields(raw)
-    ]
+    unresolved = [f"Unclassified legacy field remains in backup: {field}" for field in _unknown_legacy_fields(raw)]
     host = cvat.get("host") or os.environ.get("CVAT_HOST")
     if not isinstance(host, str) or not host:
         unresolved.append("CVAT host is missing")
         host = "http://unresolved.invalid"
     organization = cvat.get("organization")
-    projects = _migration_projects(
-        raw, _cached_projects(personal_path, organization), unresolved
-    )
+    projects = _migration_projects(raw, _cached_projects(personal_path, organization), unresolved)
     cache = _dict(raw.get("cache"))
     cache_projects = _dict(cache.get("projects"))
     known = {
@@ -506,43 +429,18 @@ def migration_proposal(
     }
     unknown = set(raw) - known
     if unknown:
-        unresolved.append(
-            "Unclassified legacy sections remain only in backup: "
-            + ", ".join(sorted(unknown))
-        )
-    personal = {
-        key: value
-        for key, value in raw.items()
-        if key in {"image_cache", "network", "upload"}
-    }
-    personal["cvat"] = {
-        key: value
-        for key, value in cvat.items()
-        if key in {"username", "password", "request_timeout"}
-    }
-    local_cache = {
-        key: value
-        for key, value in cache.items()
-        if key in {"images_root", "tasks_root"}
-    }
+        unresolved.append("Unclassified legacy sections remain only in backup: " + ", ".join(sorted(unknown)))
+    personal = {key: value for key, value in raw.items() if key in {"image_cache", "network", "upload"}}
+    personal["cvat"] = {key: value for key, value in cvat.items() if key in {"username", "password", "request_timeout"}}
+    local_cache = {key: value for key, value in cache.items() if key in {"images_root", "tasks_root"}}
     local_projects = {
-        name: {
-            key: value
-            for key, value in _dict(fields).items()
-            if key in {"images_root", "tasks_root"}
-        }
+        name: {key: value for key, value in _dict(fields).items() if key in {"images_root", "tasks_root"}}
         for name, fields in cache_projects.items()
     }
-    local_cache["projects"] = {
-        name: fields for name, fields in local_projects.items() if fields
-    }
+    local_cache["projects"] = {name: fields for name, fields in local_projects.items() if fields}
     if local_cache:
         personal["cache"] = local_cache
-    shared_path = (
-        (project_path or personal_path.with_name("project-config.yaml"))
-        .expanduser()
-        .resolve()
-    )
+    shared_path = (project_path or personal_path.with_name("project-config.yaml")).expanduser().resolve()
     personal.update(schema_version=1, project_config=str(shared_path))
     shared: dict[str, object] = {
         "schema_version": 1,
@@ -553,10 +451,7 @@ def migration_proposal(
     if not unresolved:
         shared = ProjectConfig.model_validate(shared).model_dump()
     if shared_path.exists() and read_config(shared_path) != shared:
-        unresolved.append(
-            "Existing shared configuration differs; "
-            "reconcile it explicitly before migration"
-        )
+        unresolved.append("Existing shared configuration differs; reconcile it explicitly before migration")
     return MigrationProposal(
         personal_path,
         shared_path,
@@ -590,9 +485,7 @@ def recover_migration(personal_path: Path) -> bool:
     current_hash = _digest(personal_path.read_bytes())
     if current_hash != journal["personal_hash"]:
         if current_hash != journal["original_hash"]:
-            raise ManagedError(
-                "Personal configuration changed during migration recovery"
-            )
+            raise ManagedError("Personal configuration changed during migration recovery")
         if _digest(staged_personal.read_bytes()) != journal["personal_hash"]:
             raise ManagedError("Migration personal stage changed")
         staged_personal.replace(personal_path)
@@ -602,9 +495,7 @@ def recover_migration(personal_path: Path) -> bool:
     return True
 
 
-def _claim_migration_journal(
-    proposal: MigrationProposal, personal_bytes: bytes, shared_bytes: bytes
-) -> None:
+def _claim_migration_journal(proposal: MigrationProposal, personal_bytes: bytes, shared_bytes: bytes) -> None:
     """Claim one approved transaction without replacing another writer's journal."""
     staged_personal = _stage_bytes(proposal.personal_path, personal_bytes, "migration")
     try:
@@ -621,15 +512,11 @@ def _claim_migration_journal(
         "original_hash": proposal.original_hash,
     }
     try:
-        _private_write(
-            _journal_path(proposal.personal_path), json.dumps(journal).encode()
-        )
+        _private_write(_journal_path(proposal.personal_path), json.dumps(journal).encode())
     except FileExistsError as error:
         staged_personal.unlink(missing_ok=True)
         staged_shared.unlink(missing_ok=True)
-        raise ManagedError(
-            "Another approved migration is active; run setup --migrate-config again"
-        ) from error
+        raise ManagedError("Another approved migration is active; run setup --migrate-config again") from error
     except OSError:
         staged_personal.unlink(missing_ok=True)
         staged_shared.unlink(missing_ok=True)
@@ -639,37 +526,26 @@ def _claim_migration_journal(
 def activate_migration(proposal: MigrationProposal) -> Path:
     """Activate only the exact approved proposal, retaining a private backup."""
     if proposal.unresolved:
-        raise ManagedError(
-            "Migration has unresolved settings: " + "; ".join(proposal.unresolved)
-        )
+        raise ManagedError("Migration has unresolved settings: " + "; ".join(proposal.unresolved))
     if recover_migration(proposal.personal_path):
         return proposal.shared_path
     original = proposal.personal_path.read_bytes()
     if _digest(original) != proposal.original_hash:
-        raise ManagedError(
-            "Configuration changed after migration preview; review again"
-        )
+        raise ManagedError("Configuration changed after migration preview; review again")
     validate_personal(proposal.personal, attached=True)
     ProjectConfig.model_validate(proposal.shared)
     shared_bytes, personal_bytes = (
         _yaml_bytes(proposal.shared),
         _yaml_bytes(proposal.personal),
     )
-    if (
-        proposal.shared_path.exists()
-        and proposal.shared_path.read_bytes() != shared_bytes
-    ):
+    if proposal.shared_path.exists() and proposal.shared_path.read_bytes() != shared_bytes:
         # Compare semantics as a pre-existing human file may use other formatting.
         if read_config(proposal.shared_path) != proposal.shared:
-            raise ManagedError(
-                "Existing shared file differs; it will not be overwritten"
-            )
+            raise ManagedError("Existing shared file differs; it will not be overwritten")
         shared_bytes = proposal.shared_path.read_bytes()
     if proposal.personal == read_config(proposal.personal_path):
         return proposal.shared_path
-    backup = proposal.personal_path.with_name(
-        f"{proposal.personal_path.name}.pre-v1-{proposal.original_hash[:12]}.bak"
-    )
+    backup = proposal.personal_path.with_name(f"{proposal.personal_path.name}.pre-v1-{proposal.original_hash[:12]}.bak")
     if backup.exists():
         if backup.read_bytes() != original:
             raise ManagedError("Migration backup conflicts")

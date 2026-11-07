@@ -84,9 +84,7 @@ class ApiResponse(Protocol):
 class ApiSession(Protocol):
     """The slice of ``clearml.backend_api.Session`` the run needs."""
 
-    def send_request(
-        self, service: str, action: str, *, json: dict[str, Any], method: str
-    ) -> ApiResponse: ...
+    def send_request(self, service: str, action: str, *, json: dict[str, Any], method: str) -> ApiResponse: ...
 
 
 def project_name(tag: str, what: str) -> str:
@@ -112,9 +110,7 @@ def deepest_first(projects: list[Project]) -> list[Project]:
 def call(session: ApiSession, action: str, body: dict[str, Any]) -> dict[str, Any]:
     response = session.send_request("projects", action, json=body, method="post")
     if not response.ok:
-        raise RunError(
-            f"projects.{action} failed: {response.status_code} {response.text[:300]}"
-        )
+        raise RunError(f"projects.{action} failed: {response.status_code} {response.text[:300]}")
     data = response.json().get("data", {})
     return data if isinstance(data, dict) else {}
 

@@ -25,9 +25,9 @@ class CacheProjectSettings(BaseModel):
     ignored_prefix: str | None = None
     task_cache_s3: str | None = None
 
-    none_if_falsy = field_validator(
-        "images_root", "tasks_root", "ignored_prefix", "task_cache_s3", mode="before"
-    )(_none_if_falsy)
+    none_if_falsy = field_validator("images_root", "tasks_root", "ignored_prefix", "task_cache_s3", mode="before")(
+        _none_if_falsy
+    )
 
 
 class IgnoredTask(BaseModel):

@@ -60,11 +60,7 @@ def _stage_images(
     """
     plan = request.plan
     upload_labels = (
-        sorted(
-            label
-            for label in plan.annotations["instance_label"].dropna().unique()
-            if str(label).strip()
-        )
+        sorted(label for label in plan.annotations["instance_label"].dropna().unique() if str(label).strip())
         if "instance_label" in plan.annotations
         else []
     )
@@ -72,9 +68,7 @@ def _stage_images(
 
     all_image_names = list(dict.fromkeys([*plan.image_names, *plan.deleted_names]))
 
-    found_images, missing = deps.files.resolve_images(
-        all_image_names, request.options.search_dirs
-    )
+    found_images, missing = deps.files.resolve_images(all_image_names, request.options.search_dirs)
     logger.info(
         f"Найдено локально: {len(found_images)}, не найдено: {len(missing)}",
     )
@@ -82,8 +76,7 @@ def _stage_images(
     cs_info = client.detect_project_cloud_storage(request.project_id)
     if cs_info is None:
         raise Cveta2Error(
-            f"Ошибка: cloud storage не найден для проекта "
-            f"{request.project_name!r} (id={request.project_id})."
+            f"Ошибка: cloud storage не найден для проекта {request.project_name!r} (id={request.project_id})."
         )
     logger.info(
         f"Cloud storage: s3://{cs_info.bucket}/{cs_info.prefix} (id={cs_info.id})",
@@ -100,16 +93,10 @@ def _stage_images(
         annotation_rows = annotation_rows.reindex(
             columns=[
                 *annotation_rows.columns,
-                *[
-                    column
-                    for column in UPLOAD_REQUIRED_COLUMNS
-                    if column not in annotation_rows
-                ],
+                *[column for column in UPLOAD_REQUIRED_COLUMNS if column not in annotation_rows],
             ]
         )
-    annotations = deps.files.enrich_dataframe_paths(
-        annotation_rows, cs_info, found_images, name_to_server_file
-    )
+    annotations = deps.files.enrich_dataframe_paths(annotation_rows, cs_info, found_images, name_to_server_file)
 
     if found_images:
         stats = deps.storage.upload(
@@ -119,9 +106,7 @@ def _stage_images(
             existing_keys,
         )
         logger.info(
-            f"S3: {stats.uploaded} загружено, "
-            f"{stats.skipped_existing} уже на S3, "
-            f"{stats.failed} ошибок",
+            f"S3: {stats.uploaded} загружено, {stats.skipped_existing} уже на S3, {stats.failed} ошибок",
         )
         if stats.failed:
             # Every name goes into server_files regardless, so a file that
@@ -135,9 +120,7 @@ def _stage_images(
 
     _warn_missing_images(missing)
     unreachable = [
-        name
-        for name in missing
-        if build_s3_key(cs_info.prefix, name_to_server_file[name]) not in existing_keys
+        name for name in missing if build_s3_key(cs_info.prefix, name_to_server_file[name]) not in existing_keys
     ]
     if unreachable:
         raise Cveta2Error(
@@ -145,9 +128,7 @@ def _stage_images(
             f"{preview_names(unreachable)}. Задача не создана."
         )
 
-    task_image_names = [
-        build_s3_key(cs_info.prefix, name_to_server_file[n]) for n in all_image_names
-    ]
+    task_image_names = [build_s3_key(cs_info.prefix, name_to_server_file[n]) for n in all_image_names]
     return _StagedUpload(
         cs_info=cs_info,
         annotations=annotations,

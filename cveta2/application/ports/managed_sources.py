@@ -82,9 +82,7 @@ class SourceFiles(Protocol):
         """Read a strict local source snapshot."""
         ...
 
-    def export(
-        self, directory: Path, snapshot: ManagedSnapshot, frame: pd.DataFrame
-    ) -> None:
+    def export(self, directory: Path, snapshot: ManagedSnapshot, frame: pd.DataFrame) -> None:
         """Write a complete candidate into a fresh destination directory."""
         ...
 

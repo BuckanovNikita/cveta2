@@ -158,9 +158,7 @@ def test_completed_only_filter(coco8_fixtures: LoadedFixtures) -> None:
         ["normal", "all-empty"],
         statuses=["completed", "annotation"],
     )
-    result = fetch_all_annotations(
-        make_fake_client(fake), fake.project.id, completed_only=True
-    )
+    result = fetch_all_annotations(make_fake_client(fake), fake.project.id, completed_only=True)
 
     # Only the "normal" (completed) task processed; "all-empty" skipped entirely
     bbox_records, without_records = split_records(result)
@@ -241,9 +239,7 @@ def test_fetch_to_partition_restore_and_three_way(
     ],
     ids=["data", "jobs"],
 )
-def test_a_5xx_task_is_skipped(
-    coco8_fixtures: LoadedFixtures, fail_methods: tuple[str, ...]
-) -> None:
+def test_a_5xx_task_is_skipped(coco8_fixtures: LoadedFixtures, fail_methods: tuple[str, ...]) -> None:
     """When one task returns 5xx, that task is skipped and others are processed."""
     fake = build_fake(
         coco8_fixtures,
@@ -252,9 +248,7 @@ def test_a_5xx_task_is_skipped(
     )
     api = FakeCvatApi(fake, fail_task_ids={fake.tasks[1].id}, fail_methods=fail_methods)
 
-    result = fetch_all_annotations(
-        CvatClient(CvatConfig(), api=api), fake.project.id, project_name="test-project"
-    )
+    result = fetch_all_annotations(CvatClient(CvatConfig(), api=api), fake.project.id, project_name="test-project")
 
     bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
     assert len(bbox_records) == 30
@@ -272,9 +266,7 @@ def test_job_position_reaches_every_record(normal_fake: LoadedFixtures) -> None:
     )
 
     assert result.annotations
-    assert {(a.job_stage, a.job_state) for a in result.annotations} == {
-        ("acceptance", "completed")
-    }
+    assert {(a.job_stage, a.job_state) for a in result.annotations} == {("acceptance", "completed")}
 
 
 @pytest.mark.parametrize(
@@ -367,9 +359,7 @@ def test_count_images_unique_and_empty() -> None:
     """count_images counts unique image names; empty/columnless frames give 0."""
     from cveta2.domain.output import count_images
 
-    df = pd.DataFrame(
-        {"image_name": ["a.jpg", "a.jpg", "b.jpg"], "instance_label": ["x", "y", "x"]}
-    )
+    df = pd.DataFrame({"image_name": ["a.jpg", "a.jpg", "b.jpg"], "instance_label": ["x", "y", "x"]})
     assert count_images(df) == 2
     assert count_images(pd.DataFrame()) == 0
     assert count_images(pd.DataFrame({"other": [1]})) == 0
@@ -463,9 +453,7 @@ def _fetched(client: CvatClient, task: TaskInfo, ctx: FetchContext) -> TaskAnnot
 
 
 def _accounting_dependencies(fake: LoadedFixtures) -> FetchDependencies:
-    return fetch_dependencies(
-        FetchTarget(fake.project.id, fake.project.name, Path("unused")), FetchOptions()
-    )
+    return fetch_dependencies(FetchTarget(fake.project.id, fake.project.name, Path("unused")), FetchOptions())
 
 
 class TestRetrieveTaskAccounting:
@@ -503,9 +491,7 @@ class TestRetrieveTaskAccounting:
         assert (stats.cache_hits, stats.hit_seconds) == (counted if cached else idle)
         assert (stats.fetched, stats.fetch_seconds) == (idle if cached else counted)
 
-    def test_a_skipped_task_has_its_own_counter(
-        self, normal_fake: LoadedFixtures
-    ) -> None:
+    def test_a_skipped_task_has_its_own_counter(self, normal_fake: LoadedFixtures) -> None:
         """A 5xx skip must not inflate the fetched count or its timer."""
         fake = normal_fake
         api = FakeCvatApi(fake, fail_task_ids={fake.tasks[0].id})
@@ -517,19 +503,14 @@ class TestRetrieveTaskAccounting:
             clock=_ScriptedClock([100.0, 102.0]).monotonic,
         )
 
-        assert (
-            _retrieve_task(client, ctx.tasks[0], ctx, _CachePolicy(), stats, deps=deps)
-            is None
-        )
+        assert _retrieve_task(client, ctx.tasks[0], ctx, _CachePolicy(), stats, deps=deps) is None
 
         assert stats.skipped_task_ids == [ctx.tasks[0].id]
         assert stats.skipped_seconds == 2.0
         assert (stats.fetched, stats.fetch_seconds) == (0, 0.0)
         assert (stats.cache_hits, stats.hit_seconds) == (0, 0.0)
 
-    def test_force_bypasses_a_populated_cache(
-        self, normal_fake: LoadedFixtures, tmp_path: Path
-    ) -> None:
+    def test_force_bypasses_a_populated_cache(self, normal_fake: LoadedFixtures, tmp_path: Path) -> None:
         """``--force`` must re-fetch even when the entry is valid."""
         fake = normal_fake
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
@@ -600,9 +581,7 @@ class TestTaskCsvDirectory:
         assert (out / ".tasks").is_dir()
         assert len(partition.dataset) > 0
 
-    def test_a_skipped_task_does_not_end_the_loop(
-        self, coco8_fixtures: LoadedFixtures, tmp_path: Path
-    ) -> None:
+    def test_a_skipped_task_does_not_end_the_loop(self, coco8_fixtures: LoadedFixtures, tmp_path: Path) -> None:
         """A 5xx on the *first* task must not discard every task after it.
 
         Every existing skip scenario failed the last task, where abandoning
@@ -655,25 +634,18 @@ class TestTaskCsvDirectory:
         """
         fake = build_fake(coco8_fixtures, ["all-removed"], statuses=["completed"])
         shapeless = fake._replace(
-            task_data={
-                task_id: (meta, RawAnnotations())
-                for task_id, (meta, _) in fake.task_data.items()
-            }
+            task_data={task_id: (meta, RawAnnotations()) for task_id, (meta, _) in fake.task_data.items()}
         )
         out = tmp_path / "out"
 
-        partition = _fetch_project(
-            FakeCvatApi(shapeless), shapeless, out, FetchOptions()
-        )
+        partition = _fetch_project(FakeCvatApi(shapeless), shapeless, out, FetchOptions())
 
         assert {d.image_name for d in partition.deleted_images} == set(_IMAGE_NAMES)
         deleted = read_dataset_csv(out / "deleted.csv", set(CSV_COLUMNS))
         assert set(deleted["image_name"]) == set(_IMAGE_NAMES)
         assert len(read_dataset_csv(out / "dataset.csv", set(CSV_COLUMNS))) == 0
 
-    def test_the_saved_per_task_csv_holds_that_task_s_rows(
-        self, normal_fake: LoadedFixtures, tmp_path: Path
-    ) -> None:
+    def test_the_saved_per_task_csv_holds_that_task_s_rows(self, normal_fake: LoadedFixtures, tmp_path: Path) -> None:
         """``--save-tasks`` writes real rows in the canonical column order.
 
         Existing tests only asserted the file exists, which an empty frame or
@@ -708,9 +680,7 @@ class TestFetchCoreImageForwarding:
     def _bucket(self, monkeypatch: pytest.MonkeyPatch) -> None:
         objects = {f"data/proj/{name}": b"IMG" for name in _IMAGE_NAMES}
         s3 = FakeS3Client(objects, keyed_by_bucket=False)
-        monkeypatch.setattr(
-            "cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3
-        )
+        monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3)
 
     def test_the_given_storage_is_what_gets_downloaded_from(
         self,
@@ -730,9 +700,7 @@ class TestFetchCoreImageForwarding:
 
         fetch_project(
             CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
-            FetchTarget(
-                fake.project.id, fake.project.name, tmp_path / "out", self._STORAGE
-            ),
+            FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", self._STORAGE),
             FetchOptions(images_dir=images),
         )
 
@@ -750,9 +718,7 @@ class TestFetchCoreImageForwarding:
         images = tmp_path / "images"
 
         fetch_project(
-            CvatClient(
-                CvatConfig(), api=FakeCvatApi(fake, cloud_storage=self._STORAGE)
-            ),
+            CvatClient(CvatConfig(), api=FakeCvatApi(fake, cloud_storage=self._STORAGE)),
             FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
             FetchOptions(images_dir=images),
         )
@@ -784,9 +750,7 @@ class TestFetchCoreImageForwarding:
 
         fetch_project(
             CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
-            FetchTarget(
-                fake.project.id, fake.project.name, tmp_path / "out", self._STORAGE
-            ),
+            FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", self._STORAGE),
             FetchOptions(
                 images_dir=images,
                 config_path=config_path,
@@ -811,25 +775,19 @@ def _one_frame_connection(
             project=ProjectInfo(id=1, name="audit-project"),
             tasks=[task],
             labels=[],
-            task_data={
-                task.id: (RawDataMeta([RawFrame(frame_name, 20, 20)]), RawAnnotations())
-            },
+            task_data={task.id: (RawDataMeta([RawFrame(frame_name, 20, 20)]), RawAnnotations())},
         )
     )
     config = tmp_path / "config.yaml"
     config.write_text(f"cache:\n  tasks_root: {tmp_path / 'cache'}\n", encoding="utf-8")
-    return cveta2.Connection(
-        client=CvatClient(CvatConfig(), api=api), config_path=config
-    ), api
+    return cveta2.Connection(client=CvatClient(CvatConfig(), api=api), config_path=config), api
 
 
 @pytest.mark.parametrize(
     "frame_name",
     ["/images/nested/a.jpg", "images/nested/a.jpg", "a.jpg", "stale/a.jpg"],
 )
-def test_downloaded_paths_survive_csv_and_cache_hit(
-    tmp_path: Path, frame_name: str
-) -> None:
+def test_downloaded_paths_survive_csv_and_cache_hit(tmp_path: Path, frame_name: str) -> None:
     connection, api = _one_frame_connection(tmp_path, make_task(), frame_name)
     storage = make_cs_info(bucket="bucket", prefix="images")
     s3 = FakeS3Client({"bucket/images/nested/a.jpg": b"image"})
@@ -863,9 +821,7 @@ def test_downloaded_paths_survive_csv_and_cache_hit(
 # ---------------------------------------------------------------------------
 
 
-def _fetch_with_jobs(
-    tmp_path: Path, jobs: list[RawJob], **api_returns: object
-) -> PartitionResult:
+def _fetch_with_jobs(tmp_path: Path, jobs: list[RawJob], **api_returns: object) -> PartitionResult:
     """Fetch the one-frame project with *jobs* and patched API answers."""
     connection, api = _one_frame_connection(tmp_path, make_task(status="annotation"))
     with ExitStack() as stack:
@@ -883,9 +839,7 @@ def _fetch_with_jobs(
 
 @pytest.mark.parametrize("reverse", [False, True])
 @pytest.mark.parametrize("unfinished_type", ["annotation", "ground_truth"])
-def test_overlapping_jobs_never_promote_unfinished_task(
-    tmp_path: Path, unfinished_type: str, *, reverse: bool
-) -> None:
+def test_overlapping_jobs_never_promote_unfinished_task(tmp_path: Path, unfinished_type: str, *, reverse: bool) -> None:
     finished_type = "ground_truth" if unfinished_type == "annotation" else "annotation"
     jobs = [
         RawJob(1, 0, 0, "annotation", "new", type=unfinished_type),
@@ -1015,9 +969,7 @@ def test_concurrent_fetch_produces_the_same_dataset_as_a_serial_one(
     assert sorted(parallel_api.annotation_calls) == sorted(t.id for t in fake.tasks)
 
 
-def test_a_failing_task_still_aborts_the_whole_fetch(
-    coco8_fixtures: LoadedFixtures, tmp_path: Path
-) -> None:
+def test_a_failing_task_still_aborts_the_whole_fetch(coco8_fixtures: LoadedFixtures, tmp_path: Path) -> None:
     """Concurrency must not turn a fatal error into a partial dataset."""
     fake = build_fake(
         coco8_fixtures,

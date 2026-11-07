@@ -38,9 +38,7 @@ def validate(rows: Any, *, profile: Any = "clearml-yolo", **kwargs: Any) -> Any:
 
 
 def test_malformed_box_quarantines_whole_image_without_synthetic_background() -> None:
-    result = validate(
-        [row(bbox_x_br="bad"), row(bbox_x_tl=20, bbox_x_br=30), row("b.jpg")]
-    )
+    result = validate([row(bbox_x_br="bad"), row(bbox_x_tl=20, bbox_x_br=30), row("b.jpg")])
     assert result.clean_row_positions == (2,)
     assert result.broken_row_positions == (0, 1)
     reason = next(i for i in result.reasons_for(1) if i.code == "image_quarantined")
@@ -66,9 +64,7 @@ def test_outside_bounds_is_recoverable_whole_image_rejection() -> None:
     from cveta2.composition.verification import DatasetWarning, validate_dataframe
 
     with pytest.warns(DatasetWarning, match="reject"):
-        result = validate_dataframe(
-            pd.DataFrame([row(bbox_x_br=110), row()]), profile="clearml-yolo"
-        )
+        result = validate_dataframe(pd.DataFrame([row(bbox_x_br=110), row()]), profile="clearml-yolo")
     assert result.clean.empty
     assert any(i.code == "out_of_bounds" for i in result.reasons_for(0))
 
@@ -83,9 +79,7 @@ def test_cveta_history_and_missing_task_ids_are_separate_per_image() -> None:
 
 
 def test_cveta_malformed_annotation_quarantines_only_its_task() -> None:
-    result = validate(
-        [row(task_id=1, bbox_x_br=0), row(task_id=1), row(task_id=2)], profile="cveta2"
-    )
+    result = validate([row(task_id=1, bbox_x_br=0), row(task_id=1), row(task_id=2)], profile="cveta2")
     assert result.clean_row_positions == (2,)
 
 
@@ -114,9 +108,7 @@ def test_missing_dimensions_reports_unavailable_bounds() -> None:
 
 
 def test_mixed_negative_and_annotations_quarantines_image() -> None:
-    empty = row(
-        instance_label="", bbox_x_tl="", bbox_y_tl="", bbox_x_br="", bbox_y_br=""
-    )
+    empty = row(instance_label="", bbox_x_tl="", bbox_y_tl="", bbox_x_br="", bbox_y_br="")
     result = validate([empty, row()])
     assert result.clean.empty
     assert any(i.code == "mixed_image_kinds" for i in result.issues)
@@ -130,9 +122,7 @@ def test_mixed_negative_and_annotations_quarantines_image() -> None:
         ({"image_width": 200}, "dimension_conflict"),
     ],
 )
-def test_image_identity_conflicts_quarantine_every_owner(
-    overrides: Any, code: Any
-) -> None:
+def test_image_identity_conflicts_quarantine_every_owner(overrides: Any, code: Any) -> None:
     result = validate([row(), row(**overrides)])
     assert result.clean.empty
     assert any(i.code == code for i in result.issues)
@@ -203,9 +193,7 @@ def test_cveta_rotation_warns_and_still_uses_axis_aligned_iou() -> None:
 def test_cleanup_is_idempotent_and_never_mutates_input() -> None:
     from cveta2.composition.verification import ValidationOptions, validate_dataframe
 
-    frame = pd.DataFrame(
-        [row(), row(), row("b.jpg", bbox_x_br=-1), row("b.jpg"), row("c.jpg")]
-    )
+    frame = pd.DataFrame([row(), row(), row("b.jpg", bbox_x_br=-1), row("b.jpg"), row("c.jpg")])
     original = frame.copy(deep=True)
     options = ValidationOptions(emit_warnings=False)
     first = validate_dataframe(frame, profile="clearml-yolo", options=options)
@@ -221,9 +209,7 @@ def test_media_dimensions_are_used_and_mismatch_quarantines(tmp_path: Any) -> No
     from cveta2.composition.verification import ValidationOptions, validate_dataframe
 
     Image.new("RGB", (20, 30)).save(tmp_path / "a.jpg")
-    options = ValidationOptions(
-        check_images=True, base_dir=tmp_path, emit_warnings=False
-    )
+    options = ValidationOptions(check_images=True, base_dir=tmp_path, emit_warnings=False)
     frame = pd.DataFrame([row(image_width=20, image_height=30, bbox_x_br=21)])
     result = validate_dataframe(frame, profile="clearml-yolo", options=options)
     assert result.is_valid
@@ -240,12 +226,8 @@ def test_warning_emission_can_be_disabled() -> None:
     assert not seen
 
 
-@pytest.mark.parametrize(
-    ("right", "expected"), [(98.999, (0, 1)), (99, (0,)), (99.001, (0,))]
-)
-def test_default_iou_boundary_is_inclusive_at_point_99(
-    right: Any, expected: Any
-) -> None:
+@pytest.mark.parametrize(("right", "expected"), [(98.999, (0, 1)), (99, (0,)), (99.001, (0,))])
+def test_default_iou_boundary_is_inclusive_at_point_99(right: Any, expected: Any) -> None:
     result = validate([row(bbox_x_br=100), row(bbox_x_br=right)])
     assert result.clean_row_positions == expected
 
@@ -275,12 +257,8 @@ def test_cveta_uncomparable_extra_cells_warn_without_rejecting_negative_rows() -
         "bbox_x_br": "",
         "bbox_y_br": "",
     }
-    result = validate(
-        [row(**empty, extra=Opaque()), row(**empty, extra=Opaque())], profile="cveta2"
-    )
+    result = validate([row(**empty, extra=Opaque()), row(**empty, extra=Opaque())], profile="cveta2")
     assert result.is_valid
     assert result.clean_row_positions == (0, 1)
-    assert any(
-        issue.code == "exact_comparison_unavailable" for issue in result.warnings
-    )
+    assert any(issue.code == "exact_comparison_unavailable" for issue in result.warnings)
     assert "full_row_duplicates" in result.skipped_checks

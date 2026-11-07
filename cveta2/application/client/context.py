@@ -98,10 +98,7 @@ class _TaskContext:
             task_updated_date=task.updated_date,
             subset=task.subset,
             task_completed=(
-                all(
-                    (job.stage, job.state) == (COMPLETED_JOB_STAGE, COMPLETED_JOB_STATE)
-                    for job in jobs
-                )
+                all((job.stage, job.state) == (COMPLETED_JOB_STAGE, COMPLETED_JOB_STATE) for job in jobs)
                 if jobs is not None and jobs
                 else None
             ),

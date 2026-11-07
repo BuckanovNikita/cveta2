@@ -42,21 +42,15 @@ from cveta2.interfaces.commands.doctor import (
     ],
     ids=["env-fallback", "empty-host", "no-credentials", "bad-cache", "good-cache"],
 )
-def test_check_config(
-    tmp_path: Path, cfg: CvatConfig, cache_dir: str | None, *, expected: bool
-) -> None:
+def test_check_config(tmp_path: Path, cfg: CvatConfig, cache_dir: str | None, *, expected: bool) -> None:
     (tmp_path / "ok").mkdir()
-    ic_cfg = ImageCacheConfig(
-        projects={"proj": tmp_path / cache_dir} if cache_dir else {}
-    )
+    ic_cfg = ImageCacheConfig(projects={"proj": tmp_path / cache_dir} if cache_dir else {})
     with (
         patch(
             "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch(
-            "cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg
-        ),
+        patch("cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg),
         patch(
             "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ic_cfg,
@@ -97,9 +91,7 @@ def test_check_aws_credentials(access_key: str | None, *, expected: bool) -> Non
         mock_session.get_credentials.return_value = None
     else:
         creds = mock_session.get_credentials.return_value
-        creds.get_frozen_credentials.return_value = SimpleNamespace(
-            access_key=access_key
-        )
+        creds.get_frozen_credentials.return_value = SimpleNamespace(access_key=access_key)
     mock_boto3 = MagicMock()
     mock_boto3.Session.return_value = mock_session
     with patch.dict("sys.modules", {"boto3": mock_boto3}):
@@ -146,9 +138,7 @@ def test_scan_permissions_fix_repairs_whole_tree(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.getuid() == 0, reason="root ignores directory permissions")
-def test_scan_permissions_unreadable_subdir_is_reported(
-    tmp_path: Path, capture_logs: list[str]
-) -> None:
+def test_scan_permissions_unreadable_subdir_is_reported(tmp_path: Path, capture_logs: list[str]) -> None:
     """A directory we cannot list is still named, and its subtree is flagged."""
     tmp_path.chmod(0o775)
     blocked = tmp_path / "blocked"
@@ -212,9 +202,7 @@ def test_collect_cache_roots_skips_missing_and_nested(tmp_path: Path) -> None:
     with (
         patch(
             "cveta2.interfaces.commands.doctor.ImageCacheConfig.load",
-            return_value=ImageCacheConfig(
-                projects={"proj": nested, "gone": tmp_path / "nope"}
-            ),
+            return_value=ImageCacheConfig(projects={"proj": nested, "gone": tmp_path / "nope"}),
         ),
         patch(
             "cveta2.interfaces.commands.doctor.CacheConfig.load",
@@ -236,9 +224,7 @@ def test_collect_cache_roots_skips_missing_and_nested(tmp_path: Path) -> None:
 
 
 def test_check_cache_permissions_no_roots_is_ok() -> None:
-    with patch(
-        "cveta2.interfaces.commands.doctor.collect_cache_roots", return_value={}
-    ):
+    with patch("cveta2.interfaces.commands.doctor.collect_cache_roots", return_value={}):
         assert check_cache_permissions() is True
 
 
@@ -257,9 +243,7 @@ def test_check_cache_permissions_fixes_owned_paths(tmp_path: Path) -> None:
     assert stat.S_IMODE(img.stat().st_mode) == 0o660
 
 
-def test_check_cache_permissions_lists_users_that_must_run_doctor(
-    tmp_path: Path, capture_logs: list[str]
-) -> None:
+def test_check_cache_permissions_lists_users_that_must_run_doctor(tmp_path: Path, capture_logs: list[str]) -> None:
     """Paths owned by someone else are reported, naming every other owner.
 
     Creating a file owned by another user needs root, so the *current* user
@@ -276,9 +260,7 @@ def test_check_cache_permissions_lists_users_that_must_run_doctor(
             "cveta2.interfaces.commands.doctor.collect_cache_roots",
             return_value={"cache.images_root": tmp_path},
         ),
-        patch(
-            "cveta2.interfaces.commands.doctor.os.getuid", return_value=os.getuid() + 1
-        ),
+        patch("cveta2.interfaces.commands.doctor.os.getuid", return_value=os.getuid() + 1),
     ):
         assert check_cache_permissions(fix=True) is False
 
@@ -286,9 +268,7 @@ def test_check_cache_permissions_lists_users_that_must_run_doctor(
     assert any(real_owner in m and "doctor --cache" in m for m in capture_logs)
 
 
-def test_check_cache_permissions_reports_own_unfixable_paths(
-    tmp_path: Path, capture_logs: list[str]
-) -> None:
+def test_check_cache_permissions_reports_own_unfixable_paths(tmp_path: Path, capture_logs: list[str]) -> None:
     """A chmod that fails leaves the path broken instead of claiming success."""
     img = tmp_path / "a.jpg"
     img.write_text("data", encoding="utf-8")
@@ -328,9 +308,7 @@ def test_check_one_stat_failure_silently_skips() -> None:
         (True, 0o775, False),
     ],
 )
-def test_check_one_requires_group_access(
-    tmp_path: Path, mode: int, *, is_dir: bool, broken: bool
-) -> None:
+def test_check_one_requires_group_access(tmp_path: Path, mode: int, *, is_dir: bool, broken: bool) -> None:
     path = tmp_path / "entry"
     if is_dir:
         path.mkdir()
@@ -347,9 +325,7 @@ def test_check_one_requires_group_access(
 # ---------------------------------------------------------------------------
 
 
-def test_log_broken_summary_counts_owners_and_truncates(
-    tmp_path: Path, capture_logs: list[str]
-) -> None:
+def test_log_broken_summary_counts_owners_and_truncates(tmp_path: Path, capture_logs: list[str]) -> None:
     items: list[tuple[Path, str]] = []
     for i in range(15):
         f = tmp_path / f"f{i}.txt"

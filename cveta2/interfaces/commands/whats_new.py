@@ -47,21 +47,13 @@ def run_whats_new(args: "argparse.Namespace") -> None:
             {"-p": project_cli_spec(client, project_name), "-d": args.dataset},
             prompted=prompted,
         )
-        tasks = client.list_new_completed_tasks(
-            project_id, baseline.cutoff, baseline.known_task_ids
-        )
+        tasks = client.list_new_completed_tasks(project_id, baseline.cutoff, baseline.known_task_ids)
 
     logger.info(f"Задача отсечки (из {dataset_path}): task_id={baseline.cutoff}")
     if not tasks:
-        logger.info(
-            f"Новых завершённых задач в проекте {project_name!r} "
-            f"после task_id={baseline.cutoff} не найдено"
-        )
+        logger.info(f"Новых завершённых задач в проекте {project_name!r} после task_id={baseline.cutoff} не найдено")
         return
 
-    logger.info(
-        f"Проект {project_name!r}: {len(tasks)} задач(а) завершено "
-        f"после task_id={baseline.cutoff}:"
-    )
+    logger.info(f"Проект {project_name!r}: {len(tasks)} задач(а) завершено после task_id={baseline.cutoff}:")
     for task in tasks:
         logger.info(f"id={task.id} {task.name} (updated {task.updated_date})")

@@ -66,9 +66,7 @@ class DatasetMetadata(BaseModel):
     api_url: str
     classes: dict[str, ClassInfo]
     images: ImageRoots = Field(default_factory=ImageRoots)
-    managed: ManagedMetadata | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    managed: ManagedMetadata | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("api_url")
     @staticmethod
@@ -96,9 +94,7 @@ class TaskManifest(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
     included: list[int]
     obsolete: list[int]
-    managed: ManagedSnapshot | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
+    managed: ManagedSnapshot | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 @dataclass(frozen=True)

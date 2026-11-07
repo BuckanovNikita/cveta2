@@ -53,9 +53,7 @@ S3_TRANSFER_ERRORS: "Final" = (
 # S3's throttle and transient-fault codes.  SlowDown is S3's 429, and
 # without it a large parallel transfer dies with a raw traceback the moment
 # the bucket pushes back.
-_RETRYABLE_S3_CODES: "Final" = frozenset(
-    {"SlowDown", "RequestTimeout", "RequestTimeTooSkewed", "InternalError", "503"}
-)
+_RETRYABLE_S3_CODES: "Final" = frozenset({"SlowDown", "RequestTimeout", "RequestTimeTooSkewed", "InternalError", "503"})
 
 
 def run_s3_transfers(
@@ -82,9 +80,7 @@ def run_s3_transfers(
         unit=unit,
     )
     failures = [
-        (item, outcome)
-        for item, outcome in zip(items, outcomes, strict=True)
-        if isinstance(outcome, Exception)
+        (item, outcome) for item, outcome in zip(items, outcomes, strict=True) if isinstance(outcome, Exception)
     ]
     for item, error in failures:
         logger.opt(exception=error).error(f"Не удалось загрузить {describe(item)}")
@@ -114,9 +110,7 @@ s3_retry = network_retry(_should_retry_s3, label="S3")
 _S3_CONNECT_TIMEOUT = 10.0
 
 
-_DATA_TIMEOUT: "ContextVar[float | None]" = ContextVar(
-    "cveta2_s3_data_timeout", default=None
-)
+_DATA_TIMEOUT: "ContextVar[float | None]" = ContextVar("cveta2_s3_data_timeout", default=None)
 
 
 _MIN_POOL_SIZE: "Final" = 10
@@ -157,9 +151,7 @@ def make_s3_client(endpoint_url: "str | None" = None) -> "S3Client":
     data_timeout = _DATA_TIMEOUT.get()
     if data_timeout:
         options["read_timeout"] = data_timeout
-    client: S3Client = boto3.Session().client(
-        "s3", endpoint_url=endpoint_url, config=Config(**options)
-    )
+    client: S3Client = boto3.Session().client("s3", endpoint_url=endpoint_url, config=Config(**options))
     return client
 
 
@@ -315,7 +307,5 @@ def list_s3_objects(
         desc="Listing S3 prefixes",
         unit="prefix",
     )
-    objects = [
-        pair for listing in listings if isinstance(listing, list) for pair in listing
-    ]
+    objects = [pair for listing in listings if isinstance(listing, list) for pair in listing]
     return sorted([*objects, *root_objects])

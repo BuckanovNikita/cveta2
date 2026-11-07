@@ -130,9 +130,7 @@ def convert_to_yolo(
         ctx.link_mode,
         images_processed,
         files=files,
-        box_images=set(
-            box_df[["image_name", "split"]].itertuples(index=False, name=None)
-        ),
+        box_images=set(box_df[["image_name", "split"]].itertuples(index=False, name=None)),
     )
     files.prune_yolo_output(ctx)
     _write_dataset_yaml(ctx.output_dir, ctx.splits, ctx.label_map, files)
@@ -274,10 +272,7 @@ def _from_yolo_predictions(  # noqa: PLR0913
         frame_id += 1
 
     if missing_images:
-        logger.warning(
-            f"Не найдены изображения для {len(missing_images)} файлов: "
-            f"{preview_names(missing_images)}"
-        )
+        logger.warning(f"Не найдены изображения для {len(missing_images)} файлов: {preview_names(missing_images)}")
 
     files.write_conversion_csv(rows, output_path)
 

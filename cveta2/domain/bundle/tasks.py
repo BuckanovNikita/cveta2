@@ -28,12 +28,7 @@ def _task_id(value: object) -> int:
 
 def _finished(explicit: object, stage: object, state: object) -> bool:
     if is_missing(explicit):
-        return (
-            isinstance(stage, str)
-            and stage == "acceptance"
-            and isinstance(state, str)
-            and state == "completed"
-        )
+        return isinstance(stage, str) and stage == "acceptance" and isinstance(state, str) and state == "completed"
     if isinstance(explicit, (bool, np.bool_)):
         return bool(explicit)
     if isinstance(explicit, str):
@@ -101,7 +96,6 @@ def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
     obsolete = sorted(
         task
         for task in completed
-        if task not in included
-        and all(latest.get(image, -1) > task for image in represented[task])
+        if task not in included and all(latest.get(image, -1) > task for image in represented[task])
     )
     return TaskManifest(included=included, obsolete=obsolete)

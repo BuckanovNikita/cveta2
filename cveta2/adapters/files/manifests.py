@@ -28,10 +28,7 @@ def get_upload_manifest_dir(project_id: int, *, host: str) -> Path:
 
 def save_manifest(manifest: UploadManifest, *, required: bool = False) -> None:
     """Persist recovery state; required checkpoints stop writes on failure."""
-    target = (
-        get_upload_manifest_dir(manifest.project_id, host=manifest.host)
-        / f"{manifest.fingerprint}.json"
-    )
+    target = get_upload_manifest_dir(manifest.project_id, host=manifest.host) / f"{manifest.fingerprint}.json"
     try:
         replace_shared_bytes(target, manifest.model_dump_json().encode())
     except OSError as e:
@@ -42,14 +39,11 @@ def save_manifest(manifest: UploadManifest, *, required: bool = False) -> None:
                 "не выполнена; проверьте сохранённое состояние перед продолжением."
             ) from e
         logger.warning(
-            f"Не удалось сохранить состояние загрузки ({e}) — "
-            f"команда --resume для этого запуска будет недоступна."
+            f"Не удалось сохранить состояние загрузки ({e}) — команда --resume для этого запуска будет недоступна."
         )
 
 
-def load_manifest(
-    project_id: int, fingerprint: str, *, host: str
-) -> UploadManifest | None:
+def load_manifest(project_id: int, fingerprint: str, *, host: str) -> UploadManifest | None:
     """Return the manifest for *fingerprint*, or None when absent or stale."""
     path = get_upload_manifest_dir(project_id, host=host) / f"{fingerprint}.json"
     manifest = _read_manifest(path)
@@ -60,9 +54,7 @@ def load_manifest(
         or manifest.project_id != project_id
         or manifest.fingerprint != fingerprint
     ):
-        logger.warning(
-            f"Состояние загрузки {path} относится к другой загрузке — игнорируем."
-        )
+        logger.warning(f"Состояние загрузки {path} относится к другой загрузке — игнорируем.")
         return None
     return manifest
 
@@ -72,10 +64,7 @@ def list_manifests(project_id: int, *, host: str) -> list[UploadManifest]:
     directory = get_upload_manifest_dir(project_id, host=host)
     if not directory.is_dir():
         return []
-    found = [
-        load_manifest(project_id, path.stem, host=host)
-        for path in sorted(directory.glob("*.json"))
-    ]
+    found = [load_manifest(project_id, path.stem, host=host) for path in sorted(directory.glob("*.json"))]
     return sorted(
         (m for m in found if m is not None),
         key=lambda m: m.started_at,
@@ -83,9 +72,7 @@ def list_manifests(project_id: int, *, host: str) -> list[UploadManifest]:
     )
 
 
-def delete_manifest(
-    project_id: int, fingerprint: str, *, host: str, task_id: int | None = None
-) -> None:
+def delete_manifest(project_id: int, fingerprint: str, *, host: str, task_id: int | None = None) -> None:
     """Drop the manifest once its upload has finished."""
     path = get_upload_manifest_dir(project_id, host=host) / f"{fingerprint}.json"
     try:

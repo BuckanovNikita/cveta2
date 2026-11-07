@@ -93,9 +93,7 @@ def test_transport_failures_repeat_only_for_reads() -> None:
 
 
 class TestS3Predicate:
-    @pytest.mark.parametrize(
-        "code", ["SlowDown", "RequestTimeout", "InternalError", "503"]
-    )
+    @pytest.mark.parametrize("code", ["SlowDown", "RequestTimeout", "InternalError", "503"])
     def test_throttle_and_transient_codes_are_retried(self, code: str) -> None:
         assert _should_retry_s3(_client_error(code))
 
@@ -189,9 +187,7 @@ class TestTransportErrorsLeaveTheAdapterTranslated:
         self,
     ) -> None:
         configure_retries(attempts=2, max_wait=0.01)
-        boom = urllib3.exceptions.ReadTimeoutError(
-            urllib3.HTTPConnectionPool("cvat.example"), "/api", "Read timed out"
-        )
+        boom = urllib3.exceptions.ReadTimeoutError(urllib3.HTTPConnectionPool("cvat.example"), "/api", "Read timed out")
         client = MagicMock()
         client.api_client.tasks_api.retrieve_annotations.side_effect = boom
 
@@ -290,21 +286,15 @@ class _FakeRetryState:
 
 class TestBackoff:
     @given(retry_after=st.floats(0, 7200), max_wait=st.floats(0.01, 600))
-    def test_retry_after_is_honoured_up_to_max_wait(
-        self, retry_after: float, max_wait: float
-    ) -> None:
+    def test_retry_after_is_honoured_up_to_max_wait(self, retry_after: float, max_wait: float) -> None:
         """A server-named delay beats our curve, but an hour must not hang the run."""
         configure_retries(attempts=3, max_wait=max_wait)
-        state = _FakeRetryState(
-            CvatApiError("busy", status_code=503, retry_after=retry_after)
-        )
+        state = _FakeRetryState(CvatApiError("busy", status_code=503, retry_after=retry_after))
 
         assert _backoff(state) == min(retry_after, max_wait)  # type: ignore[arg-type]
 
     @given(attempt=st.integers(1, 30), max_wait=st.floats(0.01, 600))
-    def test_backoff_without_a_header_stays_within_max_wait(
-        self, attempt: int, max_wait: float
-    ) -> None:
+    def test_backoff_without_a_header_stays_within_max_wait(self, attempt: int, max_wait: float) -> None:
         configure_retries(attempts=8, max_wait=max_wait)
         wait = _backoff(_FakeRetryState(ConnectionError("reset"), attempt))  # type: ignore[arg-type]
 
@@ -340,9 +330,7 @@ class TestRetryAfterParsing:
         [None, {}, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}],
         ids=["no_headers", "no_retry_after", "http_date_form"],
     )
-    def test_an_absent_or_unparseable_header_leaves_retry_after_unset(
-        self, headers: dict[str, str] | None
-    ) -> None:
+    def test_an_absent_or_unparseable_header_leaves_retry_after_unset(self, headers: dict[str, str] | None) -> None:
         """Falling back to the normal backoff beats guessing a delay."""
 
         @_translate_api_errors

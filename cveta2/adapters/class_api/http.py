@@ -23,9 +23,7 @@ def _public_http(url: str) -> None:
     except ValueError as exc:
         raise UploadError("Class API URL is malformed") from exc
     if not valid or credentials:
-        raise UploadError(
-            "Class API requires an HTTP(S) URL without embedded credentials"
-        )
+        raise UploadError("Class API requires an HTTP(S) URL without embedded credentials")
 
 
 class _PublicRedirect(HTTPRedirectHandler):
@@ -60,22 +58,14 @@ class HttpClassApi:
             url, headers={"Accept": "application/json"}, method="GET"
         )
         try:
-            with build_opener(_PublicRedirect()).open(
-                request, timeout=self.timeout
-            ) as response:
+            with build_opener(_PublicRedirect()).open(request, timeout=self.timeout) as response:
                 body = response.read()
         except HTTPError as exc:
-            raise UploadError(
-                f"Class API returned HTTP {exc.code}; check the public endpoint"
-            ) from exc
+            raise UploadError(f"Class API returned HTTP {exc.code}; check the public endpoint") from exc
         except (URLError, OSError, HTTPException, ValueError) as exc:
-            raise UploadError(
-                "Class API request failed; check its URL, connectivity and timeout"
-            ) from exc
+            raise UploadError("Class API request failed; check its URL, connectivity and timeout") from exc
         try:
             value: object = json.loads(body)
             return TypeAdapter(list[ApiClass]).validate_python(value, strict=True)
         except (ValueError, UnicodeError, ValidationError) as exc:
-            raise UploadError(
-                "Class API must return a JSON list of valid class definitions"
-            ) from exc
+            raise UploadError("Class API must return a JSON list of valid class definitions") from exc

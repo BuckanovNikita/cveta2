@@ -160,12 +160,8 @@ class _ImageRecordBase(BaseModel):
     """
 
     capture_frame_path = model_validator(mode="before")(_capture_frame_path)
-    validate_image_name = field_validator(
-        "image_name", mode="before", check_fields=False
-    )(_validate_image_name)
-    validate_image_path = field_validator(
-        "image_path", mode="before", check_fields=False
-    )(_validate_image_path)
+    validate_image_name = field_validator("image_name", mode="before", check_fields=False)(_validate_image_name)
+    validate_image_path = field_validator("image_path", mode="before", check_fields=False)(_validate_image_path)
 
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Return a row matching ``CSV_COLUMNS``; absent fields become None."""
@@ -219,9 +215,7 @@ class BBoxAnnotation(_ImageRecordBase):
 # Canonical CSV column order shared by all AnnotationRecord variants.
 # Inferred from BBoxAnnotation (full schema); every to_csv_row() must use these
 # keys.  ``frame_path`` is internal (kept in cache JSON, not written to CSV).
-CSV_COLUMNS: tuple[str, ...] = tuple(
-    name for name in BBoxAnnotation.model_fields if name != "frame_path"
-)
+CSV_COLUMNS: tuple[str, ...] = tuple(name for name in BBoxAnnotation.model_fields if name != "frame_path")
 
 
 _EMPTY_ATTRIBUTES_JSON = json.dumps({})

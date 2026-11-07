@@ -38,9 +38,7 @@ def test_task_indices_by_names(base_fixtures: LoadedFixtures) -> None:
 def test_build_keeps_names_and_statuses_and_numbers_repeats(
     base_fixtures: LoadedFixtures,
 ) -> None:
-    config = FakeProjectConfig(
-        task_indices=[0, 1, 0], task_id_start=200, project_name="three-tasks"
-    )
+    config = FakeProjectConfig(task_indices=[0, 1, 0], task_id_start=200, project_name="three-tasks")
     result = build_fake_project(base_fixtures, config)
     base = base_fixtures.tasks
     assert result.project.name == "three-tasks"
@@ -62,9 +60,7 @@ def test_build_random_count_and_id_order(base_fixtures: LoadedFixtures) -> None:
     assert len(result.task_data) == 5
     shuffled = build_fake_project(
         base_fixtures,
-        FakeProjectConfig(
-            task_indices=[0, 1], task_id_order="random", task_id_start=400, seed=123
-        ),
+        FakeProjectConfig(task_indices=[0, 1], task_id_order="random", task_id_start=400, seed=123),
     )
     assert {t.id for t in shuffled.tasks} == {400, 401}
 

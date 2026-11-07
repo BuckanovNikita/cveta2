@@ -52,15 +52,11 @@ class DatasetFiles(Protocol):
         """Persist unpartitioned annotations and deleted images."""
         ...
 
-    def write_partition_csvs(
-        self, partition: PartitionResult, output_dir: Path
-    ) -> None:
+    def write_partition_csvs(self, partition: PartitionResult, output_dir: Path) -> None:
         """Persist all dataset partitions."""
         ...
 
-    def write_dataset_and_deleted(
-        self, result: ProjectAnnotations, output_dir: Path
-    ) -> None:
+    def write_dataset_and_deleted(self, result: ProjectAnnotations, output_dir: Path) -> None:
         """Persist annotations and deleted images."""
         ...
 

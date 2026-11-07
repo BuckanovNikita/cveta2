@@ -56,15 +56,10 @@ def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata
             }
         )
     frame = pd.DataFrame(rows)
-    raw = frame.drop(
-        columns=[c for c in frame if isinstance(c, str) and c.startswith("source_")]
-    )
+    raw = frame.drop(columns=[c for c in frame if isinstance(c, str) and c.startswith("source_")])
     tables = {
         "dataset.csv": raw.to_csv(index=False),
-        **{
-            name: raw.iloc[0:0].to_csv(index=False)
-            for name in ("obsolete.csv", "in_progress.csv", "deleted.csv")
-        },
+        **{name: raw.iloc[0:0].to_csv(index=False) for name in ("obsolete.csv", "in_progress.csv", "deleted.csv")},
     }
     config = ProjectConfig(
         cvat=CvatIdentity(host="https://cvat.example"),
@@ -85,11 +80,7 @@ def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata
                 name="main",
                 type="cvat",
                 project_id=7,
-                tasks={
-                    "11": TaskSnapshot(
-                        id=11, updated_date="time", completed=True, tables=tables
-                    )
-                },
+                tasks={"11": TaskSnapshot(id=11, updated_date="time", completed=True, tables=tables)},
                 tables=tables,
             )
         ],
@@ -100,9 +91,7 @@ def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata
     )
     source = tmp_path / "source"
     source.mkdir()
-    (source / "source-snapshot.yaml").write_text(
-        yaml.safe_dump(snapshot.model_dump(mode="json"))
-    )
+    (source / "source-snapshot.yaml").write_text(yaml.safe_dump(snapshot.model_dump(mode="json")))
     transformed = tmp_path / "transformed.csv"
     frame.to_csv(transformed, index=False)
     metadata = DatasetMetadata(
@@ -140,13 +129,8 @@ def test_prepare_binds_inputs_and_exact_three_file_payload(tmp_path: Path) -> No
     files = LocalManagedPreparationFiles()
     loaded = files.load_prepared(summary.directory)
     assert set(loaded.payload) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
-    assert (
-        loaded.record.input_hash == hashlib.sha256(transformed.read_bytes()).hexdigest()
-    )
-    assert (
-        loaded.record.source_hash
-        == hashlib.sha256((source / "source-snapshot.yaml").read_bytes()).hexdigest()
-    )
+    assert loaded.record.input_hash == hashlib.sha256(transformed.read_bytes()).hexdigest()
+    assert loaded.record.source_hash == hashlib.sha256((source / "source-snapshot.yaml").read_bytes()).hexdigest()
     assert loaded.tasks is not None
     assert loaded.tasks.included == [11]
     assert loaded.tasks.managed is not None
@@ -185,10 +169,7 @@ def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
     assert result.report["unmapped_errors"] == 1
     issues = result.report["issues"]
     assert isinstance(issues, list)
-    assert any(
-        isinstance(issue, dict) and issue.get("code") == "media_missing"
-        for issue in issues
-    )
+    assert any(isinstance(issue, dict) and issue.get("code") == "media_missing" for issue in issues)
     loaded = LocalManagedPreparationFiles().load_prepared(result.directory)
     assert len(loaded.record.image_hashes) == 2
     assert str(tmp_path / "images" / "missing.png") not in loaded.record.image_hashes

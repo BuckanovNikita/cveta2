@@ -54,9 +54,7 @@ def upload_annotation_mask(annotations: pd.DataFrame) -> pd.Series:
     """Select labelled, nondeleted rows without changing values or row identity."""
     if "instance_label" not in annotations:
         return pd.Series(data=False, index=annotations.index)
-    labelled = annotations["instance_label"].notna() & annotations[
-        "instance_label"
-    ].astype(str).str.strip().ne("")
+    labelled = annotations["instance_label"].notna() & annotations["instance_label"].astype(str).str.strip().ne("")
     if "instance_shape" in annotations:
         labelled &= annotations["instance_shape"].ne("deleted")
     return labelled
@@ -82,9 +80,7 @@ def validate_upload_boxes(annotations: pd.DataFrame) -> None:
             f"строка {index!s}, изображение {row.get('image_name', '?')!r}"
             for index, row in annotations.loc[invalid].iterrows()
         )
-        raise Cveta2Error(
-            f"Неполный или некорректный bbox: {details}. Загрузка не начата."
-        )
+        raise Cveta2Error(f"Неполный или некорректный bbox: {details}. Загрузка не начата.")
 
 
 def compute_fingerprint(  # noqa: PLR0913
@@ -111,17 +107,12 @@ def compute_fingerprint(  # noqa: PLR0913
         columns = sorted(
             column
             for column in annotations.columns
-            if column not in {"image_path", "s3_uri", "s3_path", "image_url"}
-            and annotations[column].notna().any()
+            if column not in {"image_path", "s3_uri", "s3_path", "image_url"} and annotations[column].notna().any()
         )
         records: list[str] = []
         for row in annotations[columns].to_dict("records"):
             normalized = {
-                column: None
-                if pd.isna(value)
-                else float(value)
-                if column in BBOX_COLUMNS
-                else value
+                column: None if pd.isna(value) else float(value) if column in BBOX_COLUMNS else value
                 for column, value in row.items()
             }
             records.append(
@@ -134,17 +125,13 @@ def compute_fingerprint(  # noqa: PLR0913
                 )
             )
         intent["annotations"] = sorted(records)
-    return hashlib.sha256(
-        json.dumps(intent, sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(intent, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def normalize_upload_host(host: str) -> str:
     """Canonical server identity, preserving a case-sensitive deployment path."""
     url = urlsplit(host)
-    return urlunsplit(
-        (url.scheme.lower(), url.netloc.lower(), url.path.rstrip("/"), "", "")
-    )
+    return urlunsplit((url.scheme.lower(), url.netloc.lower(), url.path.rstrip("/"), "", ""))
 
 
 def compute_mapping_identity(manifest: UploadManifest) -> str:

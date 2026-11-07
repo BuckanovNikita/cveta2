@@ -30,10 +30,7 @@ def split_deleted_rows(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     deleted_mask = df["instance_shape"] == "deleted"
     names: list[str] = list(df.loc[deleted_mask, "image_name"].dropna().unique())
     if names:
-        logger.info(
-            f"Найдено удалённых изображений: {len(names)} "
-            f"({int(deleted_mask.sum())} строк)"
-        )
+        logger.info(f"Найдено удалённых изображений: {len(names)} ({int(deleted_mask.sum())} строк)")
     df_normal: pd.DataFrame = df[~deleted_mask]
     return df_normal, names
 
@@ -80,15 +77,10 @@ def build_upload_plan(
         exclude_names=exclude_names,
     )
     image_names: list[str] = list(filtered["image_name"].dropna().unique())
-    deleted_names = [
-        name for name in deleted_names if name not in (exclude_names or set())
-    ]
+    deleted_names = [name for name in deleted_names if name not in (exclude_names or set())]
     if not image_names and not deleted_names:
         raise Cveta2Error(_NOTHING_TO_UPLOAD)
-    logger.info(
-        f"Изображений для загрузки: {len(image_names)} "
-        f"({len(filtered)} строк аннотаций)"
-    )
+    logger.info(f"Изображений для загрузки: {len(image_names)} ({len(filtered)} строк аннотаций)")
     return UploadPlan(
         annotations=filtered,
         image_names=image_names,

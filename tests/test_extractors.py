@@ -119,9 +119,7 @@ def test_all_except_first_empty(
     coco8_label_maps: tuple[dict[int, str], dict[int, str]],
 ) -> None:
     """all-except-first-empty: only frame 0 produces annotations."""
-    ctx, annotations = _ctx_for(
-        "all-except-first-empty", coco8_tasks_by_name, coco8_label_maps
-    )
+    ctx, annotations = _ctx_for("all-except-first-empty", coco8_tasks_by_name, coco8_label_maps)
     result = _collect_shapes(annotations.shapes, ctx)
 
     assert len(result) == 8  # known from fixture: 8 shapes all on frame 0
@@ -230,9 +228,7 @@ def test_polygon_bounds_use_every_vertex_without_clipping(
 ) -> None:
     """A polygon becomes the unrotated box spanning all of its vertices."""
     points = [coord for vertex in vertices for coord in vertex]
-    result = _collect_shapes(
-        [make_raw_shape(id=73, type="polygon", points=points)], _make_ctx()
-    )
+    result = _collect_shapes([make_raw_shape(id=73, type="polygon", points=points)], _make_ctx())
 
     xs = [x for x, _ in vertices]
     ys = [y for _, y in vertices]
@@ -251,11 +247,7 @@ def test_polygon_bounds_use_every_vertex_without_clipping(
 def test_polygon_approximation_is_reported_once(capture_logs: list[str]) -> None:
     """The warning identifies the task and the shape that was approximated."""
     _collect_shapes(
-        [
-            make_raw_shape(
-                id=73, type="polygon", points=[12, 30.5, 90.75, 10.25, 40, 80]
-            )
-        ],
+        [make_raw_shape(id=73, type="polygon", points=[12, 30.5, 90.75, 10.25, 40, 80])],
         _make_ctx(),
     )
 
@@ -331,9 +323,7 @@ def test_malformed_polygon_is_diagnosed_and_counted(
     reason: str,
     capture_logs: list[str],
 ) -> None:
-    result = _collect_shapes(
-        [make_raw_shape(id=73, type="polygon", points=points)], _make_ctx()
-    )
+    result = _collect_shapes([make_raw_shape(id=73, type="polygon", points=points)], _make_ctx())
 
     assert result == []
     assert len(capture_logs) == 2
@@ -367,9 +357,7 @@ def test_mixed_task_keeps_valid_shapes_and_counts_only_malformed_polygons(
         result[0].bbox_x_br,
         result[0].bbox_y_br,
     ) == (5, 6, 7, 8)
-    summaries = [
-        message for message in capture_logs if "пропущено полигонов" in message.lower()
-    ]
+    summaries = [message for message in capture_logs if "пропущено полигонов" in message.lower()]
     assert len(summaries) == 1
     assert "100" in summaries[0]
     assert "пропущено полигонов: 2" in summaries[0].lower()

@@ -56,9 +56,7 @@ def build_upload_shapes(
     unknown are counted/collected in the returned result instead of being
     uploaded.
     """
-    has_annotation = annotations_df["instance_label"].notna() & annotations_df[
-        list(BBOX_COLUMNS)
-    ].notna().all(axis=1)
+    has_annotation = annotations_df["instance_label"].notna() & annotations_df[list(BBOX_COLUMNS)].notna().all(axis=1)
     result = ShapeBuildResult()
     for row in annotations_df[has_annotation].to_dict("records"):
         img_name = str(row["image_name"])
@@ -138,9 +136,7 @@ def _select_new_issue_rows(annotations_df: pd.DataFrame) -> pd.DataFrame:
     for column in _ISSUE_COLUMNS:
         df[column] = df[column].fillna("").astype(str).str.strip()
     new_rows: pd.DataFrame = df[(df["issue_state"] == "new") & (df["issue_text"] != "")]
-    dedup_key = ["image_name", "issue_text"] + [
-        col for col in BBOX_COLUMNS if col in new_rows.columns
-    ]
+    dedup_key = ["image_name", "issue_text"] + [col for col in BBOX_COLUMNS if col in new_rows.columns]
     deduped: pd.DataFrame = new_rows.drop_duplicates(subset=dedup_key)
     return deduped
 
@@ -157,9 +153,7 @@ def _issues_not_yet_on_task(
     positions: dict[tuple[int, str], list[list[float]]] = {}
     for stored in existing:
         if stored.comments:
-            positions.setdefault((stored.frame, stored.comments[0]), []).append(
-                stored.position
-            )
+            positions.setdefault((stored.frame, stored.comments[0]), []).append(stored.position)
     pending: list[NewIssue] = []
     for issue in built:
         candidates = positions.get((issue.frame, issue.message), [])
@@ -169,8 +163,7 @@ def _issues_not_yet_on_task(
                 for index, position in enumerate(candidates)
                 if len(position) == len(issue.position)
                 and all(
-                    math.isclose(a, b, rel_tol=0, abs_tol=1e-5)
-                    for a, b in zip(position, issue.position, strict=True)
+                    math.isclose(a, b, rel_tol=0, abs_tol=1e-5) for a, b in zip(position, issue.position, strict=True)
                 )
             ),
             None,

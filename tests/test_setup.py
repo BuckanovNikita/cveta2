@@ -21,9 +21,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _args(
-    config_path: Path, *, reset: bool = False, list_only: bool = False
-) -> argparse.Namespace:
+def _args(config_path: Path, *, reset: bool = False, list_only: bool = False) -> argparse.Namespace:
     """Build a setup-command Namespace mirroring the CLI parser defaults."""
     return argparse.Namespace(config=str(config_path), reset=reset, list_only=list_only)
 
@@ -83,9 +81,7 @@ def test_setup_commands_refuse_non_interactive_with_wizard_hint(
     assert str(excinfo.value).endswith(hint)
 
 
-def test_setup_cache_reads_projects_beside_custom_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_cache_reads_projects_beside_custom_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "profile" / "config.yaml"
     config_path.parent.mkdir()
     seen: list[Path] = []
@@ -114,9 +110,7 @@ def run_setup_with_inputs(
     return prompts
 
 
-def test_setup_empty_org_confirmed_saves_none(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_empty_org_confirmed_saves_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     prompts = run_setup_with_inputs(monkeypatch, config_path, ["", "", "y", "user1"])
 
@@ -127,13 +121,9 @@ def test_setup_empty_org_confirmed_saves_none(
     assert not any("необязательно" in prompt for prompt in prompts)
 
 
-def test_setup_empty_org_rejected_reprompts_until_slug(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_empty_org_rejected_reprompts_until_slug(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
-    prompts = run_setup_with_inputs(
-        monkeypatch, config_path, ["", "", "n", "acme", "user1"]
-    )
+    prompts = run_setup_with_inputs(monkeypatch, config_path, ["", "", "n", "acme", "user1"])
 
     saved = CvatConfig.from_file(config_path)
     assert saved.organization == "acme"
@@ -141,9 +131,7 @@ def test_setup_empty_org_rejected_reprompts_until_slug(
     assert len(slug_prompts) == 2
 
 
-def test_setup_direct_org_slug_accepted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_direct_org_slug_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     prompts = run_setup_with_inputs(monkeypatch, config_path, ["", "acme", "user1"])
 
@@ -152,9 +140,7 @@ def test_setup_direct_org_slug_accepted(
     assert not any("нет организации" in prompt for prompt in prompts)
 
 
-def test_setup_existing_org_kept_on_enter(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_existing_org_kept_on_enter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = write_config_yaml(
         tmp_path / "config.yaml",
         cvat={
@@ -171,9 +157,7 @@ def test_setup_existing_org_kept_on_enter(
     assert not any("нет организации" in prompt for prompt in prompts)
 
 
-def test_setup_rerun_keeps_existing_request_timeout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_rerun_keeps_existing_request_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = write_config_yaml(
         tmp_path / "config.yaml",
         cvat={
@@ -238,9 +222,7 @@ def test_setup_cache_root_applied_to_all_without_per_project_prompts(
 
 
 @pytest.mark.usefixtures("two_projects")
-def test_setup_cache_root_rejected_falls_back_to_per_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_cache_root_rejected_falls_back_to_per_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {})
     root = tmp_path / "cache"
@@ -257,9 +239,7 @@ def test_setup_cache_root_rejected_falls_back_to_per_project(
 
 
 @pytest.mark.usefixtures("two_projects")
-def test_setup_cache_no_root_keeps_per_project_flow(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_cache_no_root_keeps_per_project_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {})
     custom = tmp_path / "custom-alpha"
@@ -307,9 +287,7 @@ def test_setup_cache_root_apply_overrides_existing_paths_with_reset(
 
 
 @pytest.mark.usefixtures("two_projects")
-def test_setup_cache_saves_tasks_root_and_project_settings(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_setup_cache_saves_tasks_root_and_project_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {})
     root = tmp_path / "cache"

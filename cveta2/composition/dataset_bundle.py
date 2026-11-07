@@ -30,9 +30,7 @@ def bundle_services() -> BundleServices:
     )
 
 
-def prepare_dataset(
-    source: Path, directory: Path, options: PrepareOptions
-) -> PreparedDataset:
+def prepare_dataset(source: Path, directory: Path, options: PrepareOptions) -> PreparedDataset:
     """Prepare local review evidence using runtime configuration."""
     return prepare(source, directory, options, bundle_services())
 

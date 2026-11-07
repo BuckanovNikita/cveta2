@@ -40,9 +40,7 @@ class TestConfigPathFromArgs:
         args = argparse.Namespace(config=str(tmp_path / "custom.yaml"))
         assert config_path_from_args(args) == tmp_path / "custom.yaml"
 
-    def test_absent_flag_falls_back_to_the_default_path(
-        self, isolated_config_path: Path
-    ) -> None:
+    def test_absent_flag_falls_back_to_the_default_path(self, isolated_config_path: Path) -> None:
         """Commands that never declare ``--config`` must still resolve.
 
         The lookup goes through ``getattr(args, "config", None)``: dropping
@@ -56,18 +54,14 @@ class TestRequireHost:
     def test_configured_host_passes(self) -> None:
         require_host(CvatConfig(host="http://localhost:8080"))
 
-    def test_missing_host_error_names_the_config_file(
-        self, isolated_config_path: Path
-    ) -> None:
+    def test_missing_host_error_names_the_config_file(self, isolated_config_path: Path) -> None:
         """The error has to say which file to edit.
 
         Both mutants of the raise — ``MissingHostError(None)`` and
         ``format(config_path=None)`` — still raise, but drop the one piece
         of actionable information the message carries.
         """
-        with pytest.raises(
-            MissingHostError, match=re.escape(str(isolated_config_path))
-        ):
+        with pytest.raises(MissingHostError, match=re.escape(str(isolated_config_path))):
             require_host(CvatConfig())
 
 
@@ -133,9 +127,7 @@ class TestResolveProject:
         def _pick(picker_client: CvatClient) -> tuple[int, str]:
             return (9, "picked") if picker_client is client else (0, "wrong")
 
-        with patch(
-            "cveta2.interfaces.commands._helpers.select_project", side_effect=_pick
-        ):
+        with patch("cveta2.interfaces.commands._helpers.select_project", side_effect=_pick):
             assert resolve_project(client, None) == (9, "picked")
 
     def test_explicit_spec_skips_the_picker(self) -> None:
@@ -163,9 +155,7 @@ class TestResolveProjectAndCloudStorage:
             "cveta2.interfaces.commands._helpers.resolve_project",
             return_value=(7, "proj"),
         ):
-            project_id, name, cs_info = resolve_project_and_cloud_storage(
-                client, "proj"
-            )
+            project_id, name, cs_info = resolve_project_and_cloud_storage(client, "proj")
 
         assert (project_id, name) == (7, "proj")
         assert cs_info is not None

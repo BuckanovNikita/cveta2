@@ -73,12 +73,8 @@ class TestResolveLabels:
         ("labels_arg", "dataset", "has_deleted", "expected"),
         [
             # ``all`` selects every dataset label, sorted and deduplicated.
-            pytest.param(
-                ["all"], ["person", "car", "person"], False, ["car", "person"], id="all"
-            ),
-            pytest.param(
-                ["all"], ["all", "car"], False, ["all"], id="literal-all-wins"
-            ),
+            pytest.param(["all"], ["person", "car", "person"], False, ["car", "person"], id="all"),
+            pytest.param(["all"], ["all", "car"], False, ["all"], id="literal-all-wins"),
             # NaN is never offered verbatim; the sentinel stands for it.
             pytest.param(
                 ["all"],
@@ -105,9 +101,7 @@ class TestResolveLabels:
         has_deleted: bool,  # noqa: FBT001
         expected: list[str],
     ) -> None:
-        resolved = _resolve_labels(
-            labels_arg, _labels_df(*dataset), has_deleted=has_deleted
-        )
+        resolved = _resolve_labels(labels_arg, _labels_df(*dataset), has_deleted=has_deleted)
         assert resolved == expected
 
     @pytest.mark.parametrize(
@@ -153,14 +147,10 @@ class TestResolveLabels:
                 id="labels",
             ),
             # The extra choice shows a caption but returns the sentinel.
-            pytest.param(
-                ["car", None], False, [("car", "car"), _NO_ANNOTATION], id="unannotated"
-            ),
+            pytest.param(["car", None], False, [("car", "car"), _NO_ANNOTATION], id="unannotated"),
             pytest.param([None, None], False, [_NO_ANNOTATION], id="only-unannotated"),
             # ``has_deleted`` only rescues the *empty* case.
-            pytest.param(
-                ["car"], True, [("car", "car")], id="deleted-rows-still-prompt"
-            ),
+            pytest.param(["car"], True, [("car", "car")], id="deleted-rows-still-prompt"),
         ],
     )
     def test_picker_offers_the_dataset_labels(
@@ -171,9 +161,7 @@ class TestResolveLabels:
     ) -> None:
         picked = [choices[-1][1]]
         with patch(_SELECT_MANY, return_value=picked) as picker:
-            resolved = _resolve_labels(
-                None, _labels_df(*dataset), has_deleted=has_deleted
-            )
+            resolved = _resolve_labels(None, _labels_df(*dataset), has_deleted=has_deleted)
 
         assert resolved == picked
         offered = picker.call_args.args[1]
@@ -205,10 +193,7 @@ class TestResolveTaskName:
             assert _resolve_task_name(None) == "t1"
 
         assert prompt.call_args.kwargs["allow_empty"] is False
-        assert (
-            prompt.call_args.kwargs["history_key"]
-            == upload_command._TASK_NAME_HISTORY_KEY
-        )
+        assert prompt.call_args.kwargs["history_key"] == upload_command._TASK_NAME_HISTORY_KEY
 
 
 _RICH_DATASET = (
@@ -295,9 +280,7 @@ def test_run_upload_prompts_project_then_name_then_labels(tmp_path: Path) -> Non
             "cveta2.interfaces.commands.upload._resolve_task_name",
             side_effect=fake_task_name,
         ),
-        patch(
-            "cveta2.interfaces.commands.upload._select_labels", side_effect=fake_labels
-        ),
+        patch("cveta2.interfaces.commands.upload._select_labels", side_effect=fake_labels),
     ):
         _run_upload_capturing(_upload_args(_write_dataset(tmp_path)), calls=calls)
 
@@ -306,9 +289,7 @@ def test_run_upload_prompts_project_then_name_then_labels(tmp_path: Path) -> Non
 
 @pytest.mark.usefixtures("isolated_config")
 def test_run_upload_rejects_unknown_cli_labels(tmp_path: Path) -> None:
-    args = _upload_args(
-        _write_dataset(tmp_path), project="proj", name="t1", labels=["bicycle"]
-    )
+    args = _upload_args(_write_dataset(tmp_path), project="proj", name="t1", labels=["bicycle"])
     with pytest.raises(Cveta2Error, match="bicycle"):
         _run_upload_capturing(args, project_spec="proj")
 
@@ -335,9 +316,7 @@ def test_run_upload_uploads_a_dataset_of_only_deleted_rows(tmp_path: Path) -> No
     assert run.request.plan.image_names == []
 
 
-def test_run_upload_assembles_the_whole_request(
-    tmp_path: Path, isolated_config_path: Path
-) -> None:
+def test_run_upload_assembles_the_whole_request(tmp_path: Path, isolated_config_path: Path) -> None:
     """Everything ``run_upload`` hands to :func:`upload_cvat_dataset`.
 
     ``resolve_project`` is faked on the spec, so a dropped spec shows up in
@@ -392,9 +371,7 @@ def test_run_upload_assembles_the_whole_request(
 
 
 @pytest.mark.usefixtures("isolated_config")
-def test_run_upload_echoes_every_flag_it_was_given(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_run_upload_echoes_every_flag_it_was_given(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """The echoed command must be a faithful, re-runnable invocation.
 
     Parsing it back with ``shlex.split`` is what a shell would do, and it
@@ -472,9 +449,7 @@ class TestRunUploadPromptedPredicate:
         """Each disjunct of ``prompted`` must stand on its own."""
         args = _upload_args(csv, project=project, name=name, labels=labels)
         with (
-            patch(
-                "cveta2.interfaces.commands.upload._select_labels", return_value=["car"]
-            ),
+            patch("cveta2.interfaces.commands.upload._select_labels", return_value=["car"]),
             patch(
                 "cveta2.interfaces.commands.upload._resolve_task_name",
                 return_value="t1",
@@ -482,10 +457,7 @@ class TestRunUploadPromptedPredicate:
         ):
             _run_upload_capturing(args, project_spec=project, project=(1, "proj"))
 
-        assert (
-            capsys.readouterr().out
-            == f"cveta2 upload -p proj -d {csv} --labels car --name t1\n"
-        )
+        assert capsys.readouterr().out == f"cveta2 upload -p proj -d {csv} --labels car --name t1\n"
 
     @pytest.mark.parametrize("labels", [["car"], []], ids=["all-given", "empty-labels"])
     @pytest.mark.usefixtures("isolated_config")

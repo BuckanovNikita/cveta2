@@ -216,13 +216,10 @@ def _interactive_recolor(
     default_color = old_label.color or ""
 
     new_color = interactive.text(
-        f"Новый цвет для {old_label.name!r} (текущий: {default_color or 'не задан'}, "
-        "Enter — отмена):",
+        f"Новый цвет для {old_label.name!r} (текущий: {default_color or 'не задан'}, Enter — отмена):",
         hint="Pass --list to view labels non-interactively.",
         on_cancel="none",
-        validate=lambda val: (
-            True if not val.strip() else _validate_hex_color(val.strip())
-        ),
+        validate=lambda val: True if not val.strip() else _validate_hex_color(val.strip()),
         history_key="label-color",
     )
 
@@ -246,10 +243,7 @@ def _log_label_usage(selected_labels: "list[LabelInfo]", usage: dict[int, int]) 
         count = usage.get(label.id, 0)
         if count > 0:
             has_annotations = True
-            logger.warning(
-                f"Метка {label.name!r} (id={label.id}): "
-                f"{count} аннотаций будет УНИЧТОЖЕНО"
-            )
+            logger.warning(f"Метка {label.name!r} (id={label.id}): {count} аннотаций будет УНИЧТОЖЕНО")
         else:
             logger.info(f"Метка {label.name!r} (id={label.id}): 0 аннотаций")
     return has_annotations
@@ -257,10 +251,7 @@ def _log_label_usage(selected_labels: "list[LabelInfo]", usage: dict[int, int]) 
 
 def _confirm_destructive_delete(selected_labels: "list[LabelInfo]") -> bool:
     """Confirm deletion that destroys annotations by re-typing the label names."""
-    logger.warning(
-        "ВНИМАНИЕ: удаление меток НЕОБРАТИМО уничтожит все "
-        "аннотации (shapes), использующие эти метки!"
-    )
+    logger.warning("ВНИМАНИЕ: удаление меток НЕОБРАТИМО уничтожит все аннотации (shapes), использующие эти метки!")
     names_to_confirm = ", ".join(lbl.name for lbl in selected_labels)
     confirm = interactive.text(
         f"Для подтверждения введите имена меток через запятую ({names_to_confirm}):",
@@ -274,10 +265,7 @@ def _confirm_destructive_delete(selected_labels: "list[LabelInfo]") -> bool:
     expected = {lbl.name.strip() for lbl in selected_labels}
     entered = {s.strip() for s in confirm.split(",")}
     if entered != expected:
-        logger.warning(
-            f"Введённые имена не совпадают. "
-            f"Ожидалось: {names_to_confirm}. Удаление отменено."
-        )
+        logger.warning(f"Введённые имена не совпадают. Ожидалось: {names_to_confirm}. Удаление отменено.")
         return False
     return True
 
@@ -299,9 +287,7 @@ def _interactive_delete(
     labels: "list[LabelInfo]",
 ) -> "list[LabelInfo]":
     """Select labels to delete with annotation-count safety checks."""
-    selected_ids = interactive.select_labels(
-        labels, message="Выберите метки для удаления:"
-    )
+    selected_ids = interactive.select_labels(labels, message="Выберите метки для удаления:")
     if not selected_ids:
         return labels
 
@@ -312,9 +298,7 @@ def _interactive_delete(
     has_annotations = _log_label_usage(selected_labels, usage)
 
     confirmed = (
-        _confirm_destructive_delete(selected_labels)
-        if has_annotations
-        else _confirm_simple_delete(selected_labels)
+        _confirm_destructive_delete(selected_labels) if has_annotations else _confirm_simple_delete(selected_labels)
     )
     if not confirmed:
         return labels

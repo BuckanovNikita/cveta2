@@ -80,10 +80,7 @@ def configure_upload(parser: "argparse.ArgumentParser") -> None:
         "--in-progress",
         type=str,
         default=None,
-        help=(
-            "Path to in_progress.csv — images listed there "
-            "will be excluded from the upload."
-        ),
+        help=("Path to in_progress.csv — images listed there will be excluded from the upload."),
     )
     parser.add_argument(
         "--image-dir",
@@ -142,9 +139,7 @@ def _select_labels(df: "pd.DataFrame", *, has_deleted: bool = False) -> list[str
             raise Cveta2Error(_NO_LABELS_ERROR)
         logger.info("В CSV только удалённые кадры — выбор классов пропущен")
         return []
-    choices: list[interactive.Choice] = [
-        interactive.Choice(title=label, value=label) for label in all_labels
-    ]
+    choices: list[interactive.Choice] = [interactive.Choice(title=label, value=label) for label in all_labels]
     if has_no_annotation:
         choices.append(
             interactive.Choice(
@@ -160,8 +155,7 @@ def _select_labels(df: "pd.DataFrame", *, has_deleted: bool = False) -> list[str
     )
     selected = [str(v) for v in raw or []]
     logger.info(
-        f"Выбрано классов: {len(selected)}: "
-        f"{', '.join(_LABEL_DISPLAY.get(s, s) for s in selected)}",
+        f"Выбрано классов: {len(selected)}: {', '.join(_LABEL_DISPLAY.get(s, s) for s in selected)}",
     )
     return selected
 
@@ -195,8 +189,7 @@ def _resolve_labels(
     unknown = sorted(set(labels_arg) - available)
     if unknown:
         raise Cveta2Error(
-            f"Ошибка: метки не найдены в dataset.csv: {', '.join(unknown)}.\n"
-            f"Доступные: {', '.join(sorted(available))}"
+            f"Ошибка: метки не найдены в dataset.csv: {', '.join(unknown)}.\nДоступные: {', '.join(sorted(available))}"
         )
     return list(labels_arg)
 
@@ -229,9 +222,7 @@ def run_upload(args: "argparse.Namespace") -> None:
     with open_client() as client:
         project_id, project_name = resolve_project(client, args.project)
         task_name = _resolve_task_name(args.name)
-        selected = _resolve_labels(
-            args.labels, df_normal, has_deleted=bool(deleted_names)
-        )
+        selected = _resolve_labels(args.labels, df_normal, has_deleted=bool(deleted_names))
         echo_if_prompted(
             "upload",
             {
@@ -255,9 +246,7 @@ def run_upload(args: "argparse.Namespace") -> None:
             exclude_names=exclude_names,
         )
         options = UploadOptions(
-            search_dirs=build_search_dirs(
-                [args.image_dir] if args.image_dir else None, project_name
-            ),
+            search_dirs=build_search_dirs([args.image_dir] if args.image_dir else None, project_name),
             segment_size=upload_cfg.images_per_job,
             image_quality=upload_cfg.image_quality,
             mark_all_deleted=args.mark_all_deleted,

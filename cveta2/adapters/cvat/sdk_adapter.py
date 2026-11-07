@@ -83,12 +83,8 @@ class SdkCvatApiAdapter:
     @cvat_read
     def list_organizations(self) -> list[OrganizationInfo]:
         """Return all organizations the user is a member of."""
-        raw = get_paginated_collection(
-            self.client.api_client.organizations_api.list_endpoint
-        )
-        return [
-            OrganizationInfo(slug=str(o.slug), name=str(o.name or o.slug)) for o in raw
-        ]
+        raw = get_paginated_collection(self.client.api_client.organizations_api.list_endpoint)
+        return [OrganizationInfo(slug=str(o.slug), name=str(o.name or o.slug)) for o in raw]
 
     def set_organization(self, org: str | None) -> None:
         """Scope subsequent requests to *org* (``None`` = personal workspace)."""
@@ -136,11 +132,7 @@ class SdkCvatApiAdapter:
             # during deserialization.  Work around by re-fetching the raw JSON
             # and building RawDataMeta manually (skipping SDK parsing).
             _, response = tasks_api.retrieve_data_meta(task_id, _parse_response=False)
-            body = (
-                response.read()
-                if hasattr(response, "read")
-                else getattr(response, "data", b"")
-            )
+            body = response.read() if hasattr(response, "read") else getattr(response, "data", b"")
             data = json.loads(body.decode("utf-8"))
             return data_meta_from_dict(data)
 

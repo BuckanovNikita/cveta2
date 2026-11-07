@@ -18,9 +18,7 @@ class _Body(Protocol):
 class S3CsvSources:
     """Use the normal S3 credential chain and explicitly injected endpoint."""
 
-    def __init__(
-        self, client: S3Client | None = None, *, endpoint_url: str | None = None
-    ) -> None:
+    def __init__(self, client: S3Client | None = None, *, endpoint_url: str | None = None) -> None:
         """Defer client creation until an S3 source is actually requested."""
         self._client = client
         self._endpoint_url = endpoint_url
@@ -43,9 +41,7 @@ class S3CsvSources:
             content=content,
             content_hash=hashlib.sha256(content).hexdigest(),
             etag=value if isinstance(value := response.get("ETag"), str) else None,
-            version_id=value
-            if isinstance(value := response.get("VersionId"), str)
-            else None,
+            version_id=value if isinstance(value := response.get("VersionId"), str) else None,
         )
 
     def read_object(self, uri: str) -> S3Object:

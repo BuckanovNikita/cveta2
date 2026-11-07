@@ -8,29 +8,21 @@ from cveta2.domain.bundle.models import Publication
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
 
 
-def list_datasets(
-    *, config_path: Path | None = None, project_config: Path | None = None
-) -> list[dict[str, Any]]:
+def list_datasets(*, config_path: Path | None = None, project_config: Path | None = None) -> list[dict[str, Any]]:
     """List locally configured dataset mappings without network access."""
     return managed.list_datasets(config_path=config_path, project_config=project_config)
 
 
-def show_dataset(
-    name: str, *, config_path: Path | None = None, project_config: Path | None = None
-) -> dict[str, Any]:
+def show_dataset(name: str, *, config_path: Path | None = None, project_config: Path | None = None) -> dict[str, Any]:
     """Show resolved source policy and latest exact ClearML parent."""
-    return managed.show_dataset(
-        name, config_path=config_path, project_config=project_config
-    )
+    return managed.show_dataset(name, config_path=config_path, project_config=project_config)
 
 
 def dataset_versions(
     name: str, *, config_path: Path | None = None, project_config: Path | None = None
 ) -> list[dict[str, str | None]]:
     """List finalized versions in the exact configured destination."""
-    return managed.dataset_versions(
-        name, config_path=config_path, project_config=project_config
-    )
+    return managed.dataset_versions(name, config_path=config_path, project_config=project_config)
 
 
 def fetch_dataset(
@@ -81,9 +73,7 @@ def compare_datasets(
     project_config: Path | None = None,
 ) -> dict[str, Any]:
     """Compare local candidates or immutable ClearML dataset identities."""
-    return managed.compare_datasets(
-        old, new, config_path=config_path, project_config=project_config
-    )
+    return managed.compare_datasets(old, new, config_path=config_path, project_config=project_config)
 
 
 def report_dataset_errors(
@@ -93,9 +83,7 @@ def report_dataset_errors(
     project_config: Path | None = None,
 ) -> FeedbackOutcome:
     """Deliver only findings traced to original CVAT source frames."""
-    return managed.report_dataset_errors(
-        prepared, config_path=config_path, project_config=project_config
-    )
+    return managed.report_dataset_errors(prepared, config_path=config_path, project_config=project_config)
 
 
 def publish_dataset(
@@ -105,6 +93,4 @@ def publish_dataset(
     project_config: Path | None = None,
 ) -> Publication:
     """Recheck and publish accepted data after traceable feedback completes."""
-    return managed.publish_dataset(
-        prepared, config_path=config_path, project_config=project_config
-    )
+    return managed.publish_dataset(prepared, config_path=config_path, project_config=project_config)

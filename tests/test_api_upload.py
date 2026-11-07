@@ -76,9 +76,7 @@ class TestUploadApi:
             pinned: dict[str, str] | None = None,
         ) -> tuple[dict[str, str], set[str]]:
             mapping = dict(pinned) if pinned is not None else {n: n for n in names}
-            return mapping, {
-                build_s3_key(cs_info.prefix, sf) for sf in mapping.values()
-            }
+            return mapping, {build_s3_key(cs_info.prefix, sf) for sf in mapping.values()}
 
         monkeypatch.setattr(
             "cveta2.adapters.s3.upload.S3UploadStorage.mapping",
@@ -89,9 +87,7 @@ class TestUploadApi:
             staticmethod(_RecordingUploader().upload),
         )
 
-    def test_unknown_labels_raise_mismatch_end_to_end(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_unknown_labels_raise_mismatch_end_to_end(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         """The error names the project, which is the only use of that argument."""
         fake = normal_fake
         dataset = write_dataset_csv(
@@ -111,9 +107,7 @@ class TestUploadApi:
 
         assert fake.project.name in str(excinfo.value)
 
-    def test_empty_after_filtering_raises(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_empty_after_filtering_raises(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         fake = normal_fake
         dataset = write_dataset_csv(
             tmp_path / "dataset.csv",
@@ -130,9 +124,7 @@ class TestUploadApi:
                 connection=fake_connection(fake),
             )
 
-    def test_full_upload_reports_and_creates_the_task(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_full_upload_reports_and_creates_the_task(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         """One default run pins the whole request/result translation.
 
         ``labels=None`` derives the label list *and* turns on unannotated
@@ -185,9 +177,7 @@ class TestUploadApi:
         ("include_unannotated", "expected"),
         [
             pytest.param(False, ["images/a.jpg", "images/d.jpg"], id="default-drops"),
-            pytest.param(
-                True, ["images/a.jpg", "images/c.jpg", "images/d.jpg"], id="included"
-            ),
+            pytest.param(True, ["images/a.jpg", "images/c.jpg", "images/d.jpg"], id="included"),
         ],
     )
     def test_explicit_labels_and_unannotated_frames(
@@ -200,9 +190,7 @@ class TestUploadApi:
     ) -> None:
         """``include_unannotated`` defaults to False on both sides."""
         fake = normal_fake
-        api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
+        api, connection = _scoped(fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images"))
 
         result = cveta2.upload(
             self._dataset(tmp_path),
@@ -216,17 +204,11 @@ class TestUploadApi:
         assert api.writes.created_tasks[0].server_files == expected
         assert result.images == len(expected)
 
-    def test_exclude_in_progress_removes_listed_frames(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_exclude_in_progress_removes_listed_frames(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         """``exclude_in_progress`` is stringified before reaching the reader."""
         fake = normal_fake
-        api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
-        in_progress = write_dataset_csv(
-            tmp_path / "in_progress.csv", [csv_row("a.jpg", label="person")]
-        )
+        api, connection = _scoped(fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images"))
+        in_progress = write_dataset_csv(tmp_path / "in_progress.csv", [csv_row("a.jpg", label="person")])
 
         cveta2.upload(
             self._dataset(tmp_path),
@@ -242,14 +224,10 @@ class TestUploadApi:
             "images/d.jpg",
         ]
 
-    def test_mark_all_deleted_and_complete_are_forwarded(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_mark_all_deleted_and_complete_are_forwarded(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         """Both default to False in ``UploadOptions``; only True is visible."""
         fake = normal_fake
-        api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
+        api, connection = _scoped(fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images"))
 
         result = cveta2.upload(
             self._dataset(tmp_path),
@@ -265,17 +243,13 @@ class TestUploadApi:
             (result.task_id, "acceptance", "completed"),
         ]
 
-    def test_image_dirs_are_searched_for_local_files(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_image_dirs_are_searched_for_local_files(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         """``image_dirs`` only matters through ``build_search_dirs``."""
         fake = normal_fake
         local = tmp_path / "local"
         local.mkdir()
         (local / "a.jpg").write_bytes(b"jpeg")
-        _api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
+        _api, connection = _scoped(fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images"))
 
         cveta2.upload(
             self._dataset(tmp_path),
@@ -300,9 +274,7 @@ class TestUploadApi:
         cached = tmp_path / "cached"
         cached.mkdir()
         (cached / "b.jpg").write_bytes(b"jpeg")
-        config = write_config_yaml(
-            tmp_path / "images.yaml", image_cache={fake.project.name: str(cached)}
-        )
+        config = write_config_yaml(tmp_path / "images.yaml", image_cache={fake.project.name: str(cached)})
         _api, connection = _scoped(
             fake,
             cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images"),
@@ -318,13 +290,9 @@ class TestUploadApi:
 
         assert [sorted(call) for call in _RecordingUploader.calls] == [["b.jpg"]]
 
-    def test_dataframe_input_is_accepted(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_dataframe_input_is_accepted(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         fake = normal_fake
-        api, connection = _scoped(
-            fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images")
-        )
+        api, connection = _scoped(fake, cloud_storage=make_cs_info(cs_id=7, bucket="b", prefix="images"))
         df = pd.read_csv(self._dataset(tmp_path))
 
         cveta2.upload(
@@ -362,9 +330,7 @@ class TestUploadResumeWiring:
                 jobs=0,
             )
 
-        monkeypatch.setattr(
-            import_module("cveta2.interfaces.api.upload"), "upload_cvat_dataset", record
-        )
+        monkeypatch.setattr(import_module("cveta2.interfaces.api.upload"), "upload_cvat_dataset", record)
         cveta2.upload(
             dataset,
             project=fake.project.id,
@@ -381,9 +347,7 @@ class TestUploadResumeWiring:
 
         There is no file to name, and ``str(df)`` would dump the frame.
         """
-        request = self._capture(
-            monkeypatch, normal_fake, pd.DataFrame([csv_row("a.jpg", label="cat")])
-        )
+        request = self._capture(monkeypatch, normal_fake, pd.DataFrame([csv_row("a.jpg", label="cat")]))
 
         assert request.resume is False
         assert request.dataset_path == ""
@@ -398,9 +362,7 @@ class TestUploadResumeWiring:
         csv = tmp_path / "dataset.csv"
         csv.write_text("image_name,instance_label\na.jpg,cat\n", encoding="utf-8")
 
-        request = self._capture(
-            monkeypatch, normal_fake, csv, resume=True, labels=["cat"]
-        )
+        request = self._capture(monkeypatch, normal_fake, csv, resume=True, labels=["cat"])
 
         assert request.resume is True
         assert request.labels == ("cat",)

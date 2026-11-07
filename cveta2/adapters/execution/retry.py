@@ -74,9 +74,7 @@ def _backoff(retry_state: RetryCallState) -> float:
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     if isinstance(exc, CvatApiError) and exc.retry_after is not None:
         return min(exc.retry_after, RetryPolicy.max_wait)
-    jittered = wait_exponential_jitter(
-        initial=_INITIAL_BACKOFF, max=RetryPolicy.max_wait, jitter=_JITTER
-    )
+    jittered = wait_exponential_jitter(initial=_INITIAL_BACKOFF, max=RetryPolicy.max_wait, jitter=_JITTER)
     return jittered(retry_state)
 
 

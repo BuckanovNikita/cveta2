@@ -33,9 +33,7 @@ def source_definition_hash(config: ProjectConfig, definition: DatasetDefinition)
             if source.type == "cvat" and source.project is not None
         },
     }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def _ignored_task_ids(project: ProjectDefinition) -> set[int]:
@@ -90,9 +88,7 @@ def _cvat_source(  # noqa: PLR0913
         else:
             captured = reader.read_task(project.id, live)
             if captured.id != live.id or captured.updated_date != live.updated_date:
-                raise ManagedError(
-                    f"Task changed during fetch: {source.name}/{live.id}"
-                )
+                raise ManagedError(f"Task changed during fetch: {source.name}/{live.id}")
             fetched.append(live.id)
         tasks[str(live.id)] = captured
     return SourceSnapshot(
@@ -132,9 +128,7 @@ def fetch_sources(  # noqa: PLR0913
         or previous.registry_hash != registry_hash
         or previous.definition_hash != definition_hash
     )
-    old_sources = (
-        {source.name: source for source in previous.sources} if previous else {}
-    )
+    old_sources = {source.name: source for source in previous.sources} if previous else {}
     sources: list[SourceSnapshot] = []
     for source in definition.sources:
         if source.type == "cvat":

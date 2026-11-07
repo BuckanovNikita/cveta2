@@ -125,18 +125,14 @@ class LocalFeedbackLedger:
         ledger = self._load()
         stored = ledger.receipts.get(finding.marker)
         if stored is None or stored.fingerprint != state.fingerprint:
-            raise ManagedError(
-                "Cannot acknowledge feedback without matching source facts"
-            )
+            raise ManagedError("Cannot acknowledge feedback without matching source facts")
         if (
             stored.source_id != finding.source_id
             or stored.project_id != state.project_id
             or stored.task_id != state.task_id
             or stored.frame_id != finding.frame_id
         ):
-            raise ManagedError(
-                "Feedback acknowledgement has conflicting source ownership"
-            )
+            raise ManagedError("Feedback acknowledgement has conflicting source ownership")
         ledger.receipts[finding.marker] = stored.model_copy(
             update={
                 "after_date": state.updated_date,
@@ -165,18 +161,12 @@ class LocalFeedbackLedger:
                 ]
                 visited = {updated}
                 for _ in transitions:
-                    matching = [
-                        receipt
-                        for receipt in transitions
-                        if receipt.before_date == updated
-                    ]
+                    matching = [receipt for receipt in transitions if receipt.before_date == updated]
                     if not matching:
                         break
                     dates = {receipt.after_date for receipt in matching}
                     if len(dates) != 1:
-                        raise ManagedError(
-                            "Ambiguous feedback timestamp acknowledgements"
-                        )
+                        raise ManagedError("Ambiguous feedback timestamp acknowledgements")
                     after = matching[0].after_date
                     if after is None or after in visited:
                         break

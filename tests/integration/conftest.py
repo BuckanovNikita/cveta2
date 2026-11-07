@@ -77,9 +77,7 @@ def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Run]:
         refusal = ""
     if refusal:
         pytest.fail(refusal, pytrace=False)
-    os.environ[LIVE_EXPORTED_VARIABLE] = json.dumps(
-        sorted(set(os.environ) - set(saved) | set(run.exported))
-    )
+    os.environ[LIVE_EXPORTED_VARIABLE] = json.dumps(sorted(set(os.environ) - set(saved) | set(run.exported)))
     try:
         yield run
     finally:
@@ -150,14 +148,10 @@ def find_seeded_project(adapter: CvatApiPort) -> ProjectInfo:
     name = seeded_project_name()
     matches = [p for p in adapter.list_projects() if p.name == name]
     if not matches:
-        pytest.skip(
-            f"project '{name}' not found "
-            "(run `uv run python -m tests.integration.lifecycle up` first)"
-        )
+        pytest.skip(f"project '{name}' not found (run `uv run python -m tests.integration.lifecycle up` first)")
     if len(matches) > 1:
         ids = ", ".join(str(p.id) for p in matches)
         pytest.fail(
-            f"{len(matches)} projects named '{name}' (ids {ids}); "
-            "run cvat_stand.py cleanup --tag and seed again"
+            f"{len(matches)} projects named '{name}' (ids {ids}); run cvat_stand.py cleanup --tag and seed again"
         )
     return matches[0]

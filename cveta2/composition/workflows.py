@@ -25,9 +25,7 @@ from cveta2.domain.partition import PartitionResult
 from cveta2.domain.storage import CloudStorageInfo
 
 
-def fetch_dependencies(
-    target: fetch.FetchTarget, options: fetch.FetchOptions
-) -> fetch.FetchDependencies:
+def fetch_dependencies(target: fetch.FetchTarget, options: fetch.FetchOptions) -> fetch.FetchDependencies:
     """Resolve settings and assemble fetch effect dependencies."""
     return fetch.FetchDependencies(
         caches=AnnotationCacheFactory(),
@@ -35,35 +33,25 @@ def fetch_dependencies(
         runner=run_concurrent,
         clock=time.monotonic,
         lock_factory=threading.Lock,
-        cache_settings=CacheConfig.load(options.config_path).for_project(
-            target.project_name
-        ),
+        cache_settings=CacheConfig.load(options.config_path).for_project(target.project_name),
         cache_enabled=not is_cache_disabled(),
         cvat_workers=Workers.cvat,
     )
 
 
-def fetch_project(
-    client: ApplicationClient, target: fetch.FetchTarget, options: fetch.FetchOptions
-) -> PartitionResult:
+def fetch_project(client: ApplicationClient, target: fetch.FetchTarget, options: fetch.FetchOptions) -> PartitionResult:
     """Run a project fetch using configured production adapters."""
-    return fetch.fetch_project(
-        client, target, options, deps=fetch_dependencies(target, options)
-    )
+    return fetch.fetch_project(client, target, options, deps=fetch_dependencies(target, options))
 
 
 def fetch_selected_tasks(
     client: ApplicationClient, target: fetch.FetchTarget, options: fetch.FetchOptions
 ) -> ProjectAnnotations:
     """Fetch selected tasks using configured production adapters."""
-    return fetch.fetch_selected_tasks(
-        client, target, options, deps=fetch_dependencies(target, options)
-    )
+    return fetch.fetch_selected_tasks(client, target, options, deps=fetch_dependencies(target, options))
 
 
-def load_ignore_sets(
-    project_name: str, config_path: Path | None = None
-) -> tuple[set[int] | None, set[int] | None]:
+def load_ignore_sets(project_name: str, config_path: Path | None = None) -> tuple[set[int] | None, set[int] | None]:
     """Resolve ignored and silent task IDs from project configuration."""
     ignore_cfg = IgnoreConfig.load(config_path)
     ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
@@ -81,9 +69,7 @@ def invalidate_local_entry(
 ) -> None:
     """Invalidate local state and the enabled remote cache mirror."""
     settings = CacheConfig.load().for_project(project_name)
-    cache = AnnotationCacheFactory().create(
-        project_id, cs_info, settings, local_only=is_cache_disabled()
-    )
+    cache = AnnotationCacheFactory().create(project_id, cs_info, settings, local_only=is_cache_disabled())
     cache.invalidate(task_id)
 
 
@@ -97,9 +83,7 @@ def upload_dependencies() -> upload.UploadDependencies:
     )
 
 
-def upload_cvat_dataset(
-    client: ApplicationClient, request: upload.UploadRequest
-) -> upload.UploadOutcome:
+def upload_cvat_dataset(client: ApplicationClient, request: upload.UploadRequest) -> upload.UploadOutcome:
     """Run an upload using configured production adapters."""
     return upload.upload_dataset(client, request, deps=upload_dependencies())
 
@@ -135,12 +119,8 @@ def project_cloud_storage(
     config_path: Path | None = None,
 ) -> CloudStorageInfo | None:
     """Resolve project storage and configured sync-root overrides."""
-    configured_root = (
-        None if root else SyncRootsConfig.load(config_path).get_root(project_name)
-    )
-    return resolve.project_cloud_storage(
-        client, project_id, project_name, root, configured_root=configured_root
-    )
+    configured_root = None if root else SyncRootsConfig.load(config_path).get_root(project_name)
+    return resolve.project_cloud_storage(client, project_id, project_name, root, configured_root=configured_root)
 
 
 def apply_sync_root_override(
@@ -151,20 +131,12 @@ def apply_sync_root_override(
     config_path: Path | None = None,
 ) -> CloudStorageInfo | None:
     """Apply explicit or configured project storage root policy."""
-    configured_root = (
-        None
-        if explicit_root
-        else SyncRootsConfig.load(config_path).get_root(project_name)
-    )
-    return resolve.apply_sync_root_override(
-        project_name, cs_info, explicit_root, configured_root=configured_root
-    )
+    configured_root = None if explicit_root else SyncRootsConfig.load(config_path).get_root(project_name)
+    return resolve.apply_sync_root_override(project_name, cs_info, explicit_root, configured_root=configured_root)
 
 
 def resolved_task(
     client: ApplicationClient, project_id: int, project_name: str, task: int | str
 ) -> AbstractContextManager[TaskInfo]:
     """Resolve a task and invalidate its cache on context exit."""
-    return task_ops.resolved_task(
-        client, project_id, project_name, task, invalidate=invalidate_local_entry
-    )
+    return task_ops.resolved_task(client, project_id, project_name, task, invalidate=invalidate_local_entry)

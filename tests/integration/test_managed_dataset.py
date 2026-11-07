@@ -142,9 +142,7 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
                                 },
                             ],
                             "clearml": {
-                                "project": project_name(
-                                    clearml_run.tag, "managed-dataset"
-                                ),
+                                "project": project_name(clearml_run.tag, "managed-dataset"),
                                 "dataset": f"{clearml_run.tag}-{uuid4().hex[:8]}",
                             },
                             "api_url": class_api,
@@ -179,9 +177,7 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
         for name in transformed["image_name"]:
             color = tuple(hashlib.sha256(str(name).encode()).digest()[:3])
             Image.new("RGB", (32, 32), color).save(images / str(name))
-        transformed["image_path"] = transformed["image_name"].map(
-            lambda name: str(images / str(name))
-        )
+        transformed["image_path"] = transformed["image_name"].map(lambda name: str(images / str(name)))
         transformed["instance_label"] = "cat"
         transformed["instance_shape"] = "box"
         transformed["image_width"] = 32
@@ -212,17 +208,10 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             **options,
         )
         assert summary.ready, summary.report
-        assert (
-            json.loads((prepared / "preparation.json").read_bytes())["parent_id"]
-            is None
-        )
-        record = ManagedRecord.model_validate_json(
-            (prepared / "preparation.json").read_bytes()
-        )
+        assert json.loads((prepared / "preparation.json").read_bytes())["parent_id"] is None
+        record = ManagedRecord.model_validate_json((prepared / "preparation.json").read_bytes())
         finding = next(
-            finding
-            for finding in record.findings
-            if finding.task_id == bad_task and finding.frame_id == bad_frame
+            finding for finding in record.findings if finding.task_id == bad_task and finding.frame_id == bad_frame
         )
         first_feedback = api.report_dataset_errors(prepared, **options)
         assert first_feedback.created >= 1
@@ -238,13 +227,10 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             adapter = SdkCvatApiAdapter(sdk)
             marker = f"[{finding.marker}]"
             assert any(
-                issue.frame == bad_frame
-                and any(marker in comment for comment in issue.comments)
+                issue.frame == bad_frame and any(marker in comment for comment in issue.comments)
                 for issue in adapter.get_task_issues(bad_task)
             )
-            current_tasks = {
-                task.id: task for task in adapter.get_project_tasks(project.id)
-            }
+            current_tasks = {task.id: task for task in adapter.get_project_tasks(project.id)}
         finally:
             sdk.close()
         publication = api.publish_dataset(prepared, **options)
@@ -252,22 +238,15 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
         assert remote.is_final()
         assert set(remote.list_files()) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
         local = Path(remote.get_local_copy(use_soft_links=False))
-        assert (local / "tasks.yaml").read_bytes() == (
-            prepared / "tasks.yaml"
-        ).read_bytes()
-        assert {
-            item.type
-            for item in LocalSourceFiles().read_snapshot(local / "tasks.yaml").sources
-        } == {"cvat", "s3-csv"}
+        assert (local / "tasks.yaml").read_bytes() == (prepared / "tasks.yaml").read_bytes()
+        assert {item.type for item in LocalSourceFiles().read_snapshot(local / "tasks.yaml").sources} == {
+            "cvat",
+            "s3-csv",
+        }
         clean_rows = pd.read_csv(local / "dataset.csv", keep_default_na=False)
         assert len(clean_rows) == len(transformed) - 1
         assert bad_image not in set(clean_rows["image_name"])
-        completed_ids = {
-            task.id
-            for item in snapshot.sources
-            for task in item.tasks.values()
-            if task.completed
-        }
+        completed_ids = {task.id for item in snapshot.sources for task in item.tasks.values() if task.completed}
         assert len(completed_ids) >= 2
         # Issue writes may advance one task's timestamp. Its reviewed snapshot
         # may conservatively trigger one refetch; unchanged tasks must be reused.
@@ -275,8 +254,7 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             task.id
             for item in snapshot.sources
             for task in item.tasks.values()
-            if task.completed
-            and current_tasks[task.id].updated_date == task.updated_date
+            if task.completed and current_tasks[task.id].updated_date == task.updated_date
         }
         assert unchanged_completed_ids - {bad_task}
         annotation_reads: list[int] = []

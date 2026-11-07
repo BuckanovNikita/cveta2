@@ -84,9 +84,7 @@ class TestBuildS3Key:
             ("", "img.jpg"),
         ],
     )
-    def test_key_round_trips_back_to_the_frame_name(
-        self, prefix: str, name: str
-    ) -> None:
+    def test_key_round_trips_back_to_the_frame_name(self, prefix: str, name: str) -> None:
         """The two helpers are inverses — including across a sibling prefix.
 
         ``build_s3_key`` used to skip the join whenever the frame name merely
@@ -230,9 +228,7 @@ class TestRunS3Transfers:
         assert (ok, failed) == (2, 2)
         assert seen == ["good1", "bad1", "good2", "bad2"]
 
-    def test_progress_bar_carries_the_callers_labels(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_progress_bar_carries_the_callers_labels(self, capsys: pytest.CaptureFixture[str]) -> None:
         """*desc* and *unit* exist only to label the bar, so only it can show them.
 
         Dropping either argument leaves the counts untouched and shows the
@@ -267,9 +263,7 @@ class TestRunS3Transfers:
             if item == "bad":
                 raise error
 
-        ok, failed = run_s3_transfers(
-            ["bad", "good"], transfer, str, desc="d", unit="u"
-        )
+        ok, failed = run_s3_transfers(["bad", "good"], transfer, str, desc="d", unit="u")
 
         assert (ok, failed) == (1, 1)
 
@@ -357,9 +351,7 @@ def test_pick_latest_duplicate(
         ),
     ],
 )
-def test_names_with_basename_fallback(
-    pairs: list[tuple[str, str]], expected: dict[str, str]
-) -> None:
+def test_names_with_basename_fallback(pairs: list[tuple[str, str]], expected: dict[str, str]) -> None:
     assert names_with_basename_fallback(pairs) == expected
 
 
@@ -401,9 +393,7 @@ class TestListS3Objects:
             ),
         ],
     )
-    def test_the_listing_is_filtered_server_side(
-        self, keys: list[str], prefix: str, expected: tuple[str, str]
-    ) -> None:
+    def test_the_listing_is_filtered_server_side(self, keys: list[str], prefix: str, expected: tuple[str, str]) -> None:
         """Bucket and prefix are sent under their S3 parameter names."""
         s3 = PagedFakeS3Client([keys])
 
@@ -438,9 +428,7 @@ class TestListS3Objects:
             ),
         ],
     )
-    def test_names(
-        self, objects: dict[str, bytes], prefix: str, expected: list[tuple[str, str]]
-    ) -> None:
+    def test_names(self, objects: dict[str, bytes], prefix: str, expected: list[tuple[str, str]]) -> None:
         s3 = FakeS3Client(objects, keyed_by_bucket=False)
         assert list_s3_objects(s3, "test-bucket", prefix) == expected
 

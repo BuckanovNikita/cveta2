@@ -32,20 +32,14 @@ def _check_aws_credentials() -> "bool":
 
     resolved = creds.get_frozen_credentials()
     if not resolved.access_key:
-        logger.error(
-            "AWS: credentials found but access key is empty. "
-            "Check your ~/.aws/credentials or env vars."
-        )
+        logger.error("AWS: credentials found but access key is empty. Check your ~/.aws/credentials or env vars.")
         return False
 
     # Show which credential source is active (without leaking secrets)
     key_preview = resolved.access_key[:4] + "…" + resolved.access_key[-4:]
     profile = session.profile_name or "(default)"
     region = session.region_name or "(not set)"
-    logger.info(
-        f"AWS: credentials OK — "
-        f"profile={profile}, region={region}, access_key={key_preview}"
-    )
+    logger.info(f"AWS: credentials OK — profile={profile}, region={region}, access_key={key_preview}")
     return True
 
 

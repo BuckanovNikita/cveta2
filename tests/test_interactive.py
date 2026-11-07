@@ -87,9 +87,7 @@ def test_cancel_none_returns_none(name: str) -> None:
     ("name", "answer", "expected"),
     [("select_one", "one", "one"), ("select_many", ["one"], ["one"])],
 )
-def test_select_passes_message_and_choices_and_returns_the_answer(
-    name: str, answer: object, expected: object
-) -> None:
+def test_select_passes_message_and_choices_and_returns_the_answer(name: str, answer: object, expected: object) -> None:
     target, _ = _PROMPTS[name]
     choices = _choices()
     select = getattr(primitives, name)
@@ -101,9 +99,7 @@ def test_select_passes_message_and_choices_and_returns_the_answer(
 
 @pytest.mark.usefixtures("interactive")
 @pytest.mark.parametrize("name", ["text", "path"])
-def test_history_key_reaches_the_prompt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str
-) -> None:
+def test_history_key_reaches_the_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: str) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     target, prompt = _PROMPTS[name]
     with patch(target, return_value="/x") as ask:
@@ -136,9 +132,7 @@ class TestText:
     @pytest.mark.usefixtures("interactive")
     def test_empty_disallowed_exits_with_the_empty_message(self) -> None:
         with patch(_ASK_TEXT, return_value=""), pytest.raises(SystemExit) as excinfo:
-            primitives.text(
-                "Имя:", hint=_HINT, allow_empty=False, empty_message="нет имени"
-            )
+            primitives.text("Имя:", hint=_HINT, allow_empty=False, empty_message="нет имени")
         assert excinfo.value.code == "нет имени"
 
     @pytest.mark.usefixtures("interactive")
@@ -153,9 +147,7 @@ class TestText:
 
 
 class TestPromptHistory:
-    def test_history_for_creates_dir_and_points_into_it(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_history_for_creates_dir_and_points_into_it(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         history = history_for("task-name")
         expected_dir = tmp_path / "cveta2" / "prompt_history"
@@ -170,9 +162,7 @@ class TestPromptHistory:
             history = history_for("k")
         assert history.filename == str(tmp_path / "elsewhere" / "prompt_history" / "k")
 
-    def test_noninteractive_raises_before_history(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_noninteractive_raises_before_history(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         with pytest.raises(InteractiveModeRequiredError):
@@ -181,12 +171,8 @@ class TestPromptHistory:
 
 
 @pytest.mark.usefixtures("interactive")
-@pytest.mark.parametrize(
-    ("answer", "expected"), [(None, False), (True, True), (False, False)]
-)
-def test_confirm_returns_the_answer_and_enter_means_no(
-    *, answer: bool | None, expected: bool
-) -> None:
+@pytest.mark.parametrize(("answer", "expected"), [(None, False), (True, True), (False, False)])
+def test_confirm_returns_the_answer_and_enter_means_no(*, answer: bool | None, expected: bool) -> None:
     """A cancelled confirm counts as no; Enter defaults to no."""
     with patch(_ASK_CONFIRM, return_value=answer) as ask:
         assert primitives.confirm("Удалить?", hint=_HINT) is expected
@@ -212,17 +198,13 @@ class TestConfirmOrExit:
             patch(_ASK_CONFIRM, return_value=False),
             pytest.raises(SystemExit) as excinfo,
         ):
-            primitives.confirm_or_exit(
-                "Удалить?", yes=False, hint=_HINT, on_no="прервано"
-            )
+            primitives.confirm_or_exit("Удалить?", yes=False, hint=_HINT, on_no="прервано")
         assert excinfo.value.code == "прервано"
 
 
 class TestPath:
     @pytest.mark.usefixtures("interactive")
-    def test_expands_user_and_resolves(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_expands_user_and_resolves(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
         with patch(_ASK_TEXT, return_value="~/sub/../file.txt"):
@@ -241,15 +223,11 @@ class TestSelectMany:
         ("empty_message", "code"),
         [("ничего", "ничего"), (None, primitives._NOTHING_SELECTED)],
     )
-    def test_empty_disallowed_exits_with_the_empty_message(
-        self, empty_message: str | None, code: str
-    ) -> None:
+    def test_empty_disallowed_exits_with_the_empty_message(self, empty_message: str | None, code: str) -> None:
         def select() -> list[object] | None:
             if empty_message is None:
                 return primitives.select_many("Выберите:", [], hint=_HINT)
-            return primitives.select_many(
-                "Выберите:", [], hint=_HINT, empty_message=empty_message
-            )
+            return primitives.select_many("Выберите:", [], hint=_HINT, empty_message=empty_message)
 
         with (
             patch(_ASK_CHECKBOX, return_value=[]),
@@ -261,9 +239,7 @@ class TestSelectMany:
     @pytest.mark.usefixtures("interactive")
     def test_empty_allowed_returns_empty(self) -> None:
         with patch(_ASK_CHECKBOX, return_value=[]):
-            result = primitives.select_many(
-                "Выберите:", [], hint=_HINT, on_cancel="none", allow_empty=True
-            )
+            result = primitives.select_many("Выберите:", [], hint=_HINT, on_cancel="none", allow_empty=True)
         assert result == []
 
 

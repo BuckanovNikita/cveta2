@@ -63,9 +63,7 @@ def convert_label(label: "cvat_models.Label") -> LabelInfo:
     """Convert an SDK label to :class:`LabelInfo`."""
     raw_attrs = label.attributes or []
     attrs = [LabelAttributeInfo(id=a.id, name=a.name or "") for a in raw_attrs]
-    return LabelInfo(
-        id=label.id, name=label.name, attributes=attrs, color=label.color or ""
-    )
+    return LabelInfo(id=label.id, name=label.name, attributes=attrs, color=label.color or "")
 
 
 def _raw_frame(name: object, width: object, height: object) -> RawFrame:
@@ -80,27 +78,18 @@ def _raw_frame(name: object, width: object, height: object) -> RawFrame:
 def convert_data_meta(data_meta: "cvat_models.DataMetaRead") -> RawDataMeta:
     """Convert SDK data-meta (frames + deleted frame ids) to :class:`RawDataMeta`."""
     frames = [_raw_frame(f.name, f.width, f.height) for f in (data_meta.frames or [])]
-    return RawDataMeta(
-        frames=frames, deleted_frames=list(data_meta.deleted_frames or [])
-    )
+    return RawDataMeta(frames=frames, deleted_frames=list(data_meta.deleted_frames or []))
 
 
 def data_meta_from_dict(data: dict[str, Any]) -> RawDataMeta:
     """Build RawDataMeta from API response dict when SDK deserialization fails."""
-    frames = [
-        _raw_frame(f.get("name"), f.get("width"), f.get("height"))
-        for f in (data.get("frames") or [])
-    ]
-    return RawDataMeta(
-        frames=frames, deleted_frames=list(data.get("deleted_frames") or [])
-    )
+    frames = [_raw_frame(f.get("name"), f.get("width"), f.get("height")) for f in (data.get("frames") or [])]
+    return RawDataMeta(frames=frames, deleted_frames=list(data.get("deleted_frames") or []))
 
 
 def convert_annotations(labeled_data: "cvat_models.LabeledData") -> RawAnnotations:
     """Convert SDK labeled data to :class:`RawAnnotations`."""
-    return RawAnnotations(
-        shapes=[convert_shape(s) for s in (labeled_data.shapes or [])]
-    )
+    return RawAnnotations(shapes=[convert_shape(s) for s in (labeled_data.shapes or [])])
 
 
 def convert_shape(shape: "cvat_models.LabeledShape") -> RawShape:
@@ -127,9 +116,7 @@ def convert_attributes(
     """Convert SDK attribute values to :class:`RawAttribute` list."""
     if not raw_attrs:
         return []
-    return [
-        RawAttribute(spec_id=a.spec_id, value=str(a.value or "")) for a in raw_attrs
-    ]
+    return [RawAttribute(spec_id=a.spec_id, value=str(a.value or "")) for a in raw_attrs]
 
 
 def extract_creator_username(item: object) -> str:

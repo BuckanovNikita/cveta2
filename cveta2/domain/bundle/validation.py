@@ -50,10 +50,7 @@ def _training_media_issues(inspection: MediaInspection) -> list[Issue]:
                 "training_image_format",
                 f"Unsupported native training image extension: {path.suffix}",
             )
-        elif (
-            fact.image_format is not None
-            and fact.image_format.lower() not in _NATIVE_EXTENSIONS | {"jpeg2000"}
-        ):
+        elif fact.image_format is not None and fact.image_format.lower() not in _NATIVE_EXTENSIONS | {"jpeg2000"}:
             failure = (
                 "training_image_format",
                 f"Unsupported decoded image format: {fact.image_format}",
@@ -75,9 +72,7 @@ def _training_media_issues(inspection: MediaInspection) -> list[Issue]:
     return issues
 
 
-def _canonicalize_classes(
-    frame: pd.DataFrame, metadata: DatasetMetadata
-) -> tuple[pd.DataFrame, list[Issue]]:
+def _canonicalize_classes(frame: pd.DataFrame, metadata: DatasetMetadata) -> tuple[pd.DataFrame, list[Issue]]:
     lookup = class_lookup(metadata.classes)
     working = frame.copy(deep=True)
     issues: list[Issue] = []
@@ -113,9 +108,7 @@ def _canonicalize_classes(
                     issues.append(
                         Issue(
                             code="class_canonicalized",
-                            message=(
-                                f"Canonicalized class {label!r} to {canonical!r}."
-                            ),
+                            message=(f"Canonicalized class {label!r} to {canonical!r}."),
                             severity="warning",
                             row_position=position,
                             columns=("instance_label",),
@@ -134,29 +127,15 @@ def _prepare_policy(
     if frame.columns.is_unique:
         if "image_path" in frame:
             for value in frame["image_path"]:
-                if (
-                    not isinstance(value, str)
-                    or not value
-                    or "\x00" in value
-                    or not PurePath(value).is_absolute()
-                ):
-                    raise UploadError(
-                        f"Upload image_path must be an absolute local path: {value!r}"
-                    )
+                if not isinstance(value, str) or not value or "\x00" in value or not PurePath(value).is_absolute():
+                    raise UploadError(f"Upload image_path must be an absolute local path: {value!r}")
         if "split" not in frame or any(
-            not isinstance(value, str) or value not in {"train", "val", "test"}
-            for value in frame.get("split", [])
+            not isinstance(value, str) or value not in {"train", "val", "test"} for value in frame.get("split", [])
         ):
-            blockers.append(
-                "Every input row must have a valid train, val or test split assignment."
-            )
+            blockers.append("Every input row must have a valid train, val or test split assignment.")
         if "image_name" in frame:
             for position, name in enumerate(frame["image_name"]):
-                key = (
-                    name
-                    if isinstance(name, str) and name
-                    else f"\x00unidentified:{position}"
-                )
+                key = name if isinstance(name, str) and name else f"\x00unidentified:{position}"
                 groups[key].append(position)
         working, issues = _canonicalize_classes(frame, metadata)
     return working, issues, blockers, groups
@@ -177,14 +156,8 @@ def validate_bundle(
         options=ValidationOptions(check_images=True, emit_warnings=False),
         inspection=inspection,
     )
-    issues.extend(
-        _training_media_issues(inspection) if not core.structural_errors else []
-    )
-    direct = {
-        issue.row_position
-        for issue in issues
-        if issue.severity == "error" and issue.row_position is not None
-    }
+    issues.extend(_training_media_issues(inspection) if not core.structural_errors else [])
+    direct = {issue.row_position for issue in issues if issue.severity == "error" and issue.row_position is not None}
     quarantined: set[int] = set()
     for positions in groups.values():
         triggers = tuple(position for position in positions if position in direct)
@@ -201,23 +174,12 @@ def validate_bundle(
                 if position not in direct
             )
     rejected = set(core.broken_row_positions) | quarantined
-    kept_offsets = [
-        offset
-        for offset, position in enumerate(core.clean_row_positions)
-        if position not in rejected
-    ]
+    kept_offsets = [offset for offset, position in enumerate(core.clean_row_positions) if position not in rejected]
     clean = core.clean.iloc[kept_offsets].copy(deep=True)
-    clean_positions = tuple(
-        position for position in core.clean_row_positions if position not in rejected
-    )
+    clean_positions = tuple(position for position in core.clean_row_positions if position not in rejected)
     broken_positions = tuple(sorted(rejected))
     broken_image_positions = sorted(
-        {
-            position
-            for positions in groups.values()
-            if rejected.intersection(positions)
-            for position in positions
-        }
+        {position for positions in groups.values() if rejected.intersection(positions) for position in positions}
         | rejected
     )
     if core.structural_errors:
@@ -230,10 +192,7 @@ def validate_bundle(
             for split in ("train", "val")
             if not clean["split"].eq(split).any()
         )
-        if not any(
-            not is_missing(label)
-            for label in clean.loc[clean["split"].eq("train"), "instance_label"]
-        ):
+        if not any(not is_missing(label) for label in clean.loc[clean["split"].eq("train"), "instance_label"]):
             blockers.append("At least one valid training box is required.")
     result = ValidationResult(
         profile=core.profile,
@@ -244,9 +203,7 @@ def validate_bundle(
         issues=tuple(
             sorted(
                 (*core.issues, *issues),
-                key=lambda issue: (
-                    -1 if issue.row_position is None else issue.row_position
-                ),
+                key=lambda issue: -1 if issue.row_position is None else issue.row_position,
             )
         ),
         input_row_count=len(frame),

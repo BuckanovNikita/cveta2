@@ -25,22 +25,14 @@ from cveta2.domain.verification.models import (
 def read_csv_bytes(content: bytes, *, source: str = "<memory>") -> pd.DataFrame:
     """Parse one captured byte snapshot without lexical inference."""
     try:
-        reader = csv.reader(
-            io.StringIO(content.decode("utf-8-sig"), newline=""), strict=True
-        )
+        reader = csv.reader(io.StringIO(content.decode("utf-8-sig"), newline=""), strict=True)
         header = next(reader, None)
-        if (
-            not header
-            or any(not value for value in header)
-            or len(header) != len(set(header))
-        ):
+        if not header or any(not value for value in header) or len(header) != len(set(header)):
             raise DatasetInputError("CSV must have unique, nonempty column names.")
         rows: list[list[str]] = []
         for record, row in enumerate(reader, start=2):
             if len(row) != len(header):
-                raise DatasetInputError(
-                    f"CSV record {record} has {len(row)} cells; expected {len(header)}."
-                )
+                raise DatasetInputError(f"CSV record {record} has {len(row)} cells; expected {len(header)}.")
             rows.append(row)
     except (UnicodeError, csv.Error) as error:
         raise DatasetInputError(f"Cannot read CSV {source}: {error}") from error
@@ -100,18 +92,12 @@ def write_report(
 ) -> None:
     """Write diagnostics and explicitly requested clean output in a new directory."""
     destination = Path(directory)
-    names = (
-        ("broken.csv", "report.json", "clean.csv")
-        if cleanup
-        else ("broken.csv", "report.json")
-    )
+    names = ("broken.csv", "report.json", "clean.csv") if cleanup else ("broken.csv", "report.json")
     if cleanup and result.structural_errors:
         raise DatasetInputError("Structural errors cannot be cleaned away.")
     targets = [destination / name for name in names]
     if input_path is not None and destination.resolve() == input_path.resolve().parent:
-        raise DatasetInputError(
-            "Reports require a new directory separate from the input."
-        )
+        raise DatasetInputError("Reports require a new directory separate from the input.")
     destination.mkdir(parents=True, exist_ok=False)
     report = report_dict(result)
     metadata = _metadata_names(list(result.broken.columns))
@@ -120,11 +106,7 @@ def write_report(
         if issue.row_position is not None:
             by_row[issue.row_position].append(issue)
     structural_issues = (
-        [
-            issue
-            for issue in result.issues
-            if issue.row_position is None and issue.severity == "error"
-        ]
+        [issue for issue in result.issues if issue.row_position is None and issue.severity == "error"]
         if result.structural_errors
         else []
     )
@@ -150,9 +132,7 @@ def write_report(
         staging = Path(temporary)
         result.clean.to_csv(staging / "clean.csv", index=False, encoding="utf-8")
         broken.to_csv(staging / "broken.csv", index=False, encoding="utf-8")
-        (staging / "report.json").write_text(
-            json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        (staging / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         for target in targets:
             os.link(staging / target.name, target)
 
@@ -185,9 +165,7 @@ class LocalVerificationFiles:
             effective = options.model_copy(update={"base_dir": base_dir})
             frame = read_csv(source)
         except (OSError, RuntimeError, ValueError) as error:
-            raise DatasetInputError(
-                f"Cannot load verification input {source}: {error}"
-            ) from error
+            raise DatasetInputError(f"Cannot load verification input {source}: {error}") from error
         return LoadedVerification(frame, source, effective)
 
     def persist(
@@ -202,9 +180,7 @@ class LocalVerificationFiles:
         try:
             write_report(result, directory, cleanup=cleanup, input_path=input_path)
         except (OSError, RuntimeError, ValueError) as error:
-            raise DatasetInputError(
-                f"Cannot write verification output: {error}"
-            ) from error
+            raise DatasetInputError(f"Cannot write verification output: {error}") from error
 
     def warn(self, result: ValidationResult) -> None:
         """Render optional dataset warnings."""

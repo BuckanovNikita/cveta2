@@ -93,9 +93,7 @@ class TestResolveTaskSelector:
         )
         wanted = selectors(fake)
 
-        result = _resolve_task_selector(
-            wanted, make_fake_client(fake), fake.project.id, None
-        )
+        result = _resolve_task_selector(wanted, make_fake_client(fake), fake.project.id, None)
 
         assert result == wanted
 
@@ -187,9 +185,7 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2), make_task(3)])
         options = _FetchAnnotationsOptions(task_selector=["2", 3])
 
-        result, all_task_ids = _select_tasks_for_fetch(
-            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-        )
+        result, all_task_ids = _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert [t.id for t in result] == [2, 3]
         assert all_task_ids is None
@@ -201,9 +197,7 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=[2, "2"])
 
-        result, all_task_ids = _select_tasks_for_fetch(
-            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-        )
+        result, all_task_ids = _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert [t.id for t in result] == [2]
         assert all_task_ids is None
@@ -211,14 +205,10 @@ class TestSelectTasksForFetch:
 
     def test_completed_only_still_applies(self) -> None:
         """The status filter runs on the id path as it does on the listing."""
-        api = FakeCvatApi.from_tasks(
-            [make_task(1, status="completed"), make_task(2, status="annotation")]
-        )
+        api = FakeCvatApi.from_tasks([make_task(1, status="completed"), make_task(2, status="annotation")])
         options = _FetchAnnotationsOptions(task_selector=[1, 2], completed_only=True)
 
-        result, all_task_ids = _select_tasks_for_fetch(
-            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-        )
+        result, all_task_ids = _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert [t.id for t in result] == [1]
         assert all_task_ids is None
@@ -244,9 +234,7 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=["alpha"])
 
-        result, all_task_ids = _select_tasks_for_fetch(
-            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-        )
+        result, all_task_ids = _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert [t.id for t in result] == [1]
         assert all_task_ids == frozenset({1, 2})
@@ -258,9 +246,7 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(1, name="alpha"), make_task(2)])
         options = _FetchAnnotationsOptions(task_selector=[2, "alpha"])
 
-        result, all_task_ids = _select_tasks_for_fetch(
-            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-        )
+        result, all_task_ids = _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert {t.id for t in result} == {1, 2}
         assert all_task_ids == frozenset({1, 2})
@@ -277,9 +263,7 @@ class TestSelectTasksForFetch:
         api = FakeCvatApi.from_tasks([make_task(7, name="12345")])
         options = _FetchAnnotationsOptions(task_selector=["12345"])
 
-        result, all_task_ids = _select_tasks_for_fetch(
-            api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-        )
+        result, all_task_ids = _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert [t.id for t in result] == [7]
         assert all_task_ids == frozenset({7})
@@ -296,9 +280,7 @@ class TestSelectTasksForFetch:
         options = _FetchAnnotationsOptions(task_selector=[1])
 
         with pytest.raises(CvatApiError) as excinfo:
-            _select_tasks_for_fetch(
-                api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-            )
+            _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert excinfo.value.status_code == 500
         assert api.call_counts["get_project_tasks"] == 0
@@ -309,9 +291,7 @@ class TestSelectTasksForFetch:
         options = _FetchAnnotationsOptions(task_selector=[1])
 
         with pytest.raises(TaskNotFoundError):
-            _select_tasks_for_fetch(
-                api, _PROJECT_ID + 1, options, runner=run_concurrent, max_workers=1
-            )
+            _select_tasks_for_fetch(api, _PROJECT_ID + 1, options, runner=run_concurrent, max_workers=1)
 
         assert api.call_counts["get_project_tasks"] == 1
 
@@ -326,9 +306,7 @@ class TestSelectTasksForFetch:
         options = _FetchAnnotationsOptions(task_selector=[2], ignore_task_ids={2})
 
         with pytest.raises(TaskNotFoundError):
-            _select_tasks_for_fetch(
-                api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1
-            )
+            _select_tasks_for_fetch(api, _PROJECT_ID, options, runner=run_concurrent, max_workers=1)
 
         assert api.call_counts["get_project_tasks"] == 1
 
@@ -368,9 +346,7 @@ class TestFilterTasksSilent:
         ]
 
     @pytest.mark.parametrize("silent", [False, True], ids=["loud", "silent"])
-    def test_ignored_task_is_filtered_and_warned_unless_silent(
-        self, capture_logs: list[str], *, silent: bool
-    ) -> None:
+    def test_ignored_task_is_filtered_and_warned_unless_silent(self, capture_logs: list[str], *, silent: bool) -> None:
         options = _FetchAnnotationsOptions(
             ignore_task_ids={2},
             silent_task_ids={2} if silent else None,
@@ -414,9 +390,7 @@ class TestIgnoredTaskSilent:
             (IgnoredTask(id=5, name="t5", silent=False), {}),
         ],
     )
-    def test_serialize_silent(
-        self, entry: IgnoredTask, expected: dict[str, object]
-    ) -> None:
+    def test_serialize_silent(self, entry: IgnoredTask, expected: dict[str, object]) -> None:
         """The saved ignore entry includes ``silent`` only when True."""
         raw = IgnoreConfig(projects={"p": [entry]})._to_raw()
         assert isinstance(raw, dict)
@@ -524,11 +498,7 @@ class TestIgnoreConfigEntries:
 
     def test_remove_task_keeps_the_project_while_entries_remain(self) -> None:
         """The project key is deleted only once its last entry is gone."""
-        cfg = IgnoreConfig(
-            projects={
-                "proj": [IgnoredTask(id=1, name="a"), IgnoredTask(id=2, name="b")]
-            }
-        )
+        cfg = IgnoreConfig(projects={"proj": [IgnoredTask(id=1, name="a"), IgnoredTask(id=2, name="b")]})
 
         assert cfg.remove_task("proj", 1) is True
         assert cfg.get_ignored_tasks("proj") == [2]

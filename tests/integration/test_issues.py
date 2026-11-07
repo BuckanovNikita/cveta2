@@ -70,9 +70,7 @@ def _resolve_issue_via_sdk(issue_id: int) -> None:
         sdk_client.close()
 
 
-def _fetch_frame_records(
-    cfg: CvatConfig, project_id: int, task_name: str, frame_id: int
-) -> list[AnnotationRecord]:
+def _fetch_frame_records(cfg: CvatConfig, project_id: int, task_name: str, frame_id: int) -> list[AnnotationRecord]:
     with CvatClient(cfg) as client:
         result = fetch_all_annotations(client, project_id, task_selector=[task_name])
     return [r for r in result.annotations if r.frame_id == frame_id]
@@ -195,9 +193,7 @@ class TestUploadIssuesFromCsvIntegration:
         finally:
             sdk_client.close()
 
-    def test_same_text_on_two_bboxes_creates_two_issues(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_same_text_on_two_bboxes_creates_two_issues(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         from cveta2.interfaces.commands.upload import run_upload
 
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()

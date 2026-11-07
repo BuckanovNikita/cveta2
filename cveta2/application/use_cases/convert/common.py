@@ -34,10 +34,7 @@ class _SizeCache:
             return self._files.image_size(img_path)
         if self._cached is None:
             self._cached = self._files.image_size(img_path)
-            logger.debug(
-                f"Размер изображений (по первому файлу): "
-                f"{self._cached[0]}x{self._cached[1]}"
-            )
+            logger.debug(f"Размер изображений (по первому файлу): {self._cached[0]}x{self._cached[1]}")
         return self._cached
 
 
@@ -74,9 +71,7 @@ def prepare_export(  # noqa: PLR0913
     search_dirs = [Path(directory) for directory in image_dirs or ()]
     found, missing = files.resolve_images(set(df["image_name"].unique()), search_dirs)
     if missing:
-        logger.warning(
-            f"Не найдено {len(missing)} изображений: {preview_names(missing)}"
-        )
+        logger.warning(f"Не найдено {len(missing)} изображений: {preview_names(missing)}")
 
     splits = sorted(df["split"].unique())
     logger.info(f"Сплиты: {splits}")

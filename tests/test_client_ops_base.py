@@ -241,9 +241,7 @@ class TestConnectionFailures:
         ):
             pass
 
-        assert (
-            str(caught.value) == f"Не удалось подключиться к CVAT ({CFG.host}): {boom}"
-        )
+        assert str(caught.value) == f"Не удалось подключиться к CVAT ({CFG.host}): {boom}"
         assert caught.value.__cause__ is boom
 
     def test_a_transport_error_inside_the_block_is_not_rewrapped(self) -> None:
@@ -293,9 +291,7 @@ class TestTaskWriteSessionReuse:
     @staticmethod
     def _api() -> MagicMock:
         api = MagicMock(spec=CvatApiPort)
-        api.get_task_data_meta.return_value = RawDataMeta(
-            frames=[RawFrame(name="a.jpg", width=640, height=480)]
-        )
+        api.get_task_data_meta.return_value = RawDataMeta(frames=[RawFrame(name="a.jpg", width=640, height=480)])
         api.get_task_labels.return_value = [LabelInfo(id=9, name="cat")]
         api.get_task_jobs.return_value = [RawJob(id=3, start_frame=0, stop_frame=0)]
         return api
@@ -338,12 +334,8 @@ def test_public_client_resolves_late_environment_and_worker_changes(
     api.get_project_labels.return_value = []
     api.get_task_jobs.return_value = [RawJob(id=9, start_frame=0, stop_frame=0)]
     api.get_task_labels.return_value = [LabelInfo(id=2, name="car")]
-    api.get_task_data_meta.return_value = RawDataMeta(
-        frames=[RawFrame(name="a.jpg", width=100, height=100)]
-    )
-    runner = MagicMock(
-        side_effect=lambda items, work, **_kwargs: list(map(work, items))
-    )
+    api.get_task_data_meta.return_value = RawDataMeta(frames=[RawFrame(name="a.jpg", width=100, height=100)])
+    runner = MagicMock(side_effect=lambda items, work, **_kwargs: list(map(work, items)))
     monkeypatch.setattr("cveta2.composition.client.run_concurrent", runner)
     monkeypatch.delenv("CVETA2_RAISE_ON_FAILURE", raising=False)
     prior = Workers.s3, Workers.cvat
@@ -374,9 +366,7 @@ def test_public_client_observes_mutable_config_before_owned_session(
     from cveta2.client import CvatClient as PublicCvatClient
     from cveta2.config import CvatConfig
 
-    cfg = CvatConfig(
-        host="https://old.example", organization="old", username="u", password="p"
-    )
+    cfg = CvatConfig(host="https://old.example", organization="old", username="u", password="p")
     api = MagicMock(spec=CvatApiPort)
     api.get_project_tasks.return_value = []
     api.get_project_labels.return_value = []

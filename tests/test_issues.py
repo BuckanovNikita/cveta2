@@ -64,9 +64,7 @@ def _make_shape(shape_id: int, frame: int) -> RawShape:
 
 
 def _make_data_meta(num_frames: int) -> RawDataMeta:
-    frames = [
-        RawFrame(name=f"img_{i}.jpg", width=640, height=480) for i in range(num_frames)
-    ]
+    frames = [RawFrame(name=f"img_{i}.jpg", width=640, height=480) for i in range(num_frames)]
     return RawDataMeta(frames=frames)
 
 
@@ -150,8 +148,7 @@ class TestBuildFrameIssues:
             states.append("resolved" if issue.resolved else "open")
 
         assert _build_frame_issues(issues) == {
-            frame: (" | ".join(texts), " | ".join(states))
-            for frame, (texts, states) in expected.items()
+            frame: (" | ".join(texts), " | ".join(states)) for frame, (texts, states) in expected.items()
         }
 
     def test_from_raw_builds_frame_issues(self) -> None:
@@ -229,9 +226,7 @@ class TestFetchedRecordsCarryIssueColumns:
         assert without[0].issue_text == "решённая"
         assert without[0].issue_state == "resolved"
 
-    def test_fetch_one_task_survives_issues_api_failure(
-        self, capture_logs: list[str]
-    ) -> None:
+    def test_fetch_one_task_survives_issues_api_failure(self, capture_logs: list[str]) -> None:
         task = _make_task()
         fixtures = LoadedFixtures(
             project=ProjectInfo(id=1, name="p"),
@@ -271,9 +266,7 @@ class TestCreateTaskIssues:
     def test_frame_to_job_resolution_across_two_jobs(self) -> None:
         api = _api_for_issue_creation(200, _TWO_JOBS)
         client = _client_with_api(api)
-        df = pd.DataFrame(
-            [_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")]
-        )
+        df = pd.DataFrame([_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")])
 
         created = client.create_task_issues(7, df)
 
@@ -316,9 +309,7 @@ class TestCreateTaskIssues:
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
         row = _issue_row("img_0.jpg", "same")
-        df = pd.DataFrame(
-            [{**row, "instance_label": "person"}, {**row, "instance_label": "car"}]
-        )
+        df = pd.DataFrame([{**row, "instance_label": "person"}, {**row, "instance_label": "car"}])
 
         assert client.create_task_issues(7, df) == 1
         assert api.create_issue.call_count == 1
@@ -346,17 +337,13 @@ class TestCreateTaskIssues:
     def test_unknown_image_skipped_with_warning(self, capture_logs: list[str]) -> None:
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
-        df = pd.DataFrame(
-            [_issue_row("img_0.jpg", "ok"), _issue_row("ghost.jpg", "no")]
-        )
+        df = pd.DataFrame([_issue_row("img_0.jpg", "ok"), _issue_row("ghost.jpg", "no")])
 
         assert client.create_task_issues(7, df) == 1
         assert api.create_issue.call_count == 1
         assert any("ghost.jpg" in msg for msg in capture_logs)
 
-    def test_frame_without_job_skipped_with_warning(
-        self, capture_logs: list[str]
-    ) -> None:
+    def test_frame_without_job_skipped_with_warning(self, capture_logs: list[str]) -> None:
         jobs = [RawJob(id=201, start_frame=0, stop_frame=0)]
         api = _api_for_issue_creation(2, jobs)
         client = _client_with_api(api)
@@ -412,21 +399,15 @@ class TestCreateTaskIssues:
         """
         api = _api_for_issue_creation(1, _TWO_JOBS)
         client = _client_with_api(api)
-        df = pd.DataFrame(
-            [_issue_row("img_0.jpg", "  плохой бокс  ", issue_state="  new  ")]
-        )
+        df = pd.DataFrame([_issue_row("img_0.jpg", "  плохой бокс  ", issue_state="  new  ")])
 
         assert client.create_task_issues(7, df) == 1
         assert api.create_issue.call_args.args[0].message == "плохой бокс"
 
-    def test_csv_roundtrip_empty_state_read_as_nan_is_handled(
-        self, tmp_path: Path
-    ) -> None:
+    def test_csv_roundtrip_empty_state_read_as_nan_is_handled(self, tmp_path: Path) -> None:
         bbox = make_bbox()
         csv_path = tmp_path / "dataset.csv"
-        pd.DataFrame([bbox.to_csv_row()]).to_csv(
-            csv_path, index=False, encoding="utf-8"
-        )
+        pd.DataFrame([bbox.to_csv_row()]).to_csv(csv_path, index=False, encoding="utf-8")
         loaded = pd.read_csv(csv_path)
         assert loaded["issue_state"].isna().all()
         assert loaded["issue_text"].isna().all()
@@ -447,17 +428,13 @@ class TestGetTaskIssuesAdapter:
     def test_converts_issues_and_comments_in_order(self) -> None:
         sdk = MagicMock()
         issue = SimpleNamespace(id=7, frame=3, resolved=False, position=[1, 2, 3, 4])
-        sdk.api_client.issues_api.list_endpoint.call_with_http_info.return_value = (
-            _single_page([issue])
-        )
+        sdk.api_client.issues_api.list_endpoint.call_with_http_info.return_value = _single_page([issue])
         comments = [
             SimpleNamespace(message="первый"),
             SimpleNamespace(message=None),
             SimpleNamespace(message="третий"),
         ]
-        sdk.api_client.comments_api.list_endpoint.call_with_http_info.return_value = (
-            _single_page(comments)
-        )
+        sdk.api_client.comments_api.list_endpoint.call_with_http_info.return_value = _single_page(comments)
         adapter = SdkCvatApiAdapter(sdk)
 
         result = adapter.get_task_issues(42)
@@ -471,20 +448,14 @@ class TestGetTaskIssuesAdapter:
                 position=[1.0, 2.0, 3.0, 4.0],
             )
         ]
-        issues_call = (
-            sdk.api_client.issues_api.list_endpoint.call_with_http_info.call_args
-        )
+        issues_call = sdk.api_client.issues_api.list_endpoint.call_with_http_info.call_args
         assert issues_call.kwargs["task_id"] == 42
-        comments_call = (
-            sdk.api_client.comments_api.list_endpoint.call_with_http_info.call_args
-        )
+        comments_call = sdk.api_client.comments_api.list_endpoint.call_with_http_info.call_args
         assert comments_call.kwargs["issue_id"] == 7
 
     def test_no_issues_returns_empty_list(self) -> None:
         sdk = MagicMock()
-        sdk.api_client.issues_api.list_endpoint.call_with_http_info.return_value = (
-            _single_page([])
-        )
+        sdk.api_client.issues_api.list_endpoint.call_with_http_info.return_value = _single_page([])
         adapter = SdkCvatApiAdapter(sdk)
 
         assert adapter.get_task_issues(42) == []
@@ -501,9 +472,7 @@ class TestIssueCreationFailure:
         api = _api_for_issue_creation(200, _TWO_JOBS)
         api.create_issue.side_effect = CvatApiError("nope", status_code=500)
         client = _client_with_api(api)
-        df = pd.DataFrame(
-            [_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")]
-        )
+        df = pd.DataFrame([_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")])
 
         with pytest.raises(CvatApiError):
             client.create_task_issues(7, df)
@@ -511,9 +480,7 @@ class TestIssueCreationFailure:
 
 def _new_issue(*, frame: int, message: str) -> NewIssue:
     """Build an issue carrying only the fields the resume diff compares."""
-    return NewIssue(
-        frame=frame, job_id=201, position=[1.0, 2.0, 3.0, 4.0], message=message
-    )
+    return NewIssue(frame=frame, job_id=201, position=[1.0, 2.0, 3.0, 4.0], message=message)
 
 
 class TestIssuesNotYetOnTask:
@@ -532,21 +499,13 @@ class TestIssuesNotYetOnTask:
             ([], False),
         ],
     )
-    def test_bbox_identity_tolerates_only_small_roundtrip_error(
-        self, position: list[float], *, matched: bool
-    ) -> None:
-        existing = [
-            RawIssue(id=1, frame=5, resolved=False, comments=["a"], position=position)
-        ]
+    def test_bbox_identity_tolerates_only_small_roundtrip_error(self, position: list[float], *, matched: bool) -> None:
+        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["a"], position=position)]
         built = [_new_issue(frame=5, message="a")]
         assert _issues_not_yet_on_task(existing, built) == ([] if matched else built)
 
     def test_each_existing_issue_is_consumed_only_once(self) -> None:
-        existing = [
-            RawIssue(
-                id=1, frame=5, resolved=False, comments=["a"], position=[1, 2, 3, 4]
-            )
-        ]
+        existing = [RawIssue(id=1, frame=5, resolved=False, comments=["a"], position=[1, 2, 3, 4])]
         issue = _new_issue(frame=5, message="a")
         assert _issues_not_yet_on_task(existing, [issue, issue]) == [issue]
 
@@ -561,9 +520,7 @@ class TestIssuesNotYetOnTask:
                 position=[100_000.00005, 2, 100_001, 4],
             )
         ]
-        issue = NewIssue(
-            frame=5, job_id=201, message="a", position=[100_000, 2, 100_001, 4]
-        )
+        issue = NewIssue(frame=5, job_id=201, message="a", position=[100_000, 2, 100_001, 4])
         assert _issues_not_yet_on_task(existing, [issue]) == [issue]
 
     @pytest.mark.parametrize(
@@ -580,11 +537,7 @@ class TestIssuesNotYetOnTask:
         self, comments: list[str], frame: int, message: str, *, matched: bool
     ) -> None:
         """One comment per frame; a reply is no proof a separate issue exists."""
-        existing = [
-            RawIssue(
-                id=1, frame=5, resolved=False, comments=comments, position=[1, 2, 3, 4]
-            )
-        ]
+        existing = [RawIssue(id=1, frame=5, resolved=False, comments=comments, position=[1, 2, 3, 4])]
         built = [_new_issue(frame=frame, message=message)]
 
         assert _issues_not_yet_on_task(existing, built) == ([] if matched else built)
@@ -609,16 +562,12 @@ class TestSkipExistingIssues:
             )
         ]
         client = _client_with_api(api)
-        df = pd.DataFrame(
-            [_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")]
-        )
+        df = pd.DataFrame([_issue_row("img_5.jpg", "первая"), _issue_row("img_150.jpg", "вторая")])
 
         created = client.create_task_issues(7, df, skip_existing=True)
 
         assert created == 1
-        assert [c.args[0].message for c in api.create_issue.call_args_list] == [
-            "вторая"
-        ]
+        assert [c.args[0].message for c in api.create_issue.call_args_list] == ["вторая"]
 
     def test_a_normal_upload_does_not_read_the_issues_back(self) -> None:
         """A fresh task has none, so the extra request would buy nothing."""

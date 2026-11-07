@@ -48,10 +48,7 @@ def _collect_shapes(
                 x_tl, y_tl, x_br, y_br = _polygon_bounds(shape.points)
             except ValueError as error:
                 skipped_polygons += 1
-                logger.warning(
-                    f"Задача {ctx.task_id}, аннотация {shape.id}: "
-                    f"полигон пропущен: {error}"
-                )
+                logger.warning(f"Задача {ctx.task_id}, аннотация {shape.id}: полигон пропущен: {error}")
                 continue
             rotation = 0.0
             logger.warning(
@@ -94,10 +91,7 @@ def _collect_shapes(
                 annotation_id=shape.id,
                 issue_text=issue_text,
                 issue_state=issue_state,
-                attributes={
-                    ctx.attr_names.get(a.spec_id, str(a.spec_id)): a.value
-                    for a in shape.attributes
-                },
+                attributes={ctx.attr_names.get(a.spec_id, str(a.spec_id)): a.value for a in shape.attributes},
             ),
         )
     if skipped_polygons:

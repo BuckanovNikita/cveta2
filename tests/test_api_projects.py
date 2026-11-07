@@ -38,12 +38,8 @@ class TestS3SyncApi:
 
     @staticmethod
     def _fake_bucket(monkeypatch: pytest.MonkeyPatch) -> FakeS3Client:
-        s3 = FakeS3Client(
-            {"raw/a.jpg": b"A", "synced/sub/b.jpg": b"B"}, keyed_by_bucket=False
-        )
-        monkeypatch.setattr(
-            "cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3
-        )
+        s3 = FakeS3Client({"raw/a.jpg": b"A", "synced/sub/b.jpg": b"B"}, keyed_by_bucket=False)
+        monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3)
         return s3
 
     def test_explicit_root_overrides_the_project_prefix(
@@ -60,9 +56,7 @@ class TestS3SyncApi:
         """
         self._fake_bucket(monkeypatch)
         target = tmp_path / "images"
-        _api, connection = _scoped(
-            normal_fake, cloud_storage=make_cs_info(bucket="bkt", prefix="raw")
-        )
+        _api, connection = _scoped(normal_fake, cloud_storage=make_cs_info(bucket="bkt", prefix="raw"))
 
         stats = cveta2.s3_sync(
             normal_fake.project.id,
@@ -95,9 +89,7 @@ class TestS3SyncApi:
             tmp_path / "sync.yaml",
             project_ids={normal_fake.project.name: normal_fake.project.id},
             sync_roots={normal_fake.project.name: "synced"},
-            cache={
-                "projects": {normal_fake.project.name: {"ignored_prefix": "synced/sub"}}
-            },
+            cache={"projects": {normal_fake.project.name: {"ignored_prefix": "synced/sub"}}},
         )
         _api, connection = _scoped(
             normal_fake,
@@ -125,9 +117,7 @@ class TestS3SyncApi:
         self._fake_bucket(monkeypatch)
         _api, connection = _scoped(normal_fake)
 
-        stats = cveta2.s3_sync(
-            normal_fake.project.id, tmp_path / "images", connection=connection
-        )
+        stats = cveta2.s3_sync(normal_fake.project.id, tmp_path / "images", connection=connection)
 
         assert stats.total == 0
 
@@ -184,12 +174,8 @@ class TestMergeApi:
 
 
 class TestWhatsNewApi:
-    def test_lists_tasks_newer_than_dataset(
-        self, coco8_fixtures: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
-        fake = build_fake(
-            coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"]
-        )
+    def test_lists_tasks_newer_than_dataset(self, coco8_fixtures: "LoadedFixtures", tmp_path: "Path") -> None:
+        fake = build_fake(coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"])
         old_task, new_task = fake.tasks
         dataset = write_dataset_csv(
             tmp_path / "dataset.csv",
@@ -208,9 +194,7 @@ class TestWhatsNewApi:
         assert {t.id for t in result.tasks} == {new_task.id}
         assert result.cutoff == old_task.id
 
-    def test_error_names_the_dataset_file(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_error_names_the_dataset_file(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         """The CSV path is passed to ``compute_baseline`` only for this message."""
         dataset = write_dataset_csv(
             tmp_path / "dataset.csv",
@@ -224,9 +208,7 @@ class TestWhatsNewApi:
 
 
 class TestIgnoreApi:
-    def test_remove_name_resolves_remote_identity(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_remove_name_resolves_remote_identity(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         task = normal_fake.tasks[0]
         project = normal_fake.project
         config = write_split_config_yaml(
@@ -235,14 +217,10 @@ class TestIgnoreApi:
             ignore={project.name: [{"id": task.id, "name": task.name}]},
         )
         _api, connection = _scoped(normal_fake, config_path=config)
-        assert (
-            cveta2.ignore(project.id, remove=[task.name], connection=connection) == []
-        )
+        assert cveta2.ignore(project.id, remove=[task.name], connection=connection) == []
         assert IgnoreConfig.load(config).get_ignored_entries(project.name) == []
 
-    def test_unknown_id_requires_remote_resolution(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_unknown_id_requires_remote_resolution(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         config = write_split_config_yaml(
             tmp_path / "ignore.yaml",
             project_ids={normal_fake.project.name: normal_fake.project.id},
@@ -250,9 +228,7 @@ class TestIgnoreApi:
         )
         _api, connection = _scoped(normal_fake, config_path=config)
         with pytest.raises(TaskNotFoundError):
-            cveta2.ignore(
-                normal_fake.project.id, remove=[999999], connection=connection
-            )
+            cveta2.ignore(normal_fake.project.id, remove=[999999], connection=connection)
 
     @pytest.mark.parametrize("selector", [999999, "999999"])
     def test_remove_stored_id_without_remote_task(
@@ -269,25 +245,13 @@ class TestIgnoreApi:
             "list_project_tasks",
             side_effect=AssertionError("remote task lookup"),
         ):
-            assert (
-                cveta2.ignore(
-                    normal_fake.project.id, remove=[selector], connection=connection
-                )
-                == []
-            )
-        assert (
-            IgnoreConfig.load(config).get_ignored_entries(normal_fake.project.name)
-            == []
-        )
+            assert cveta2.ignore(normal_fake.project.id, remove=[selector], connection=connection) == []
+        assert IgnoreConfig.load(config).get_ignored_entries(normal_fake.project.name) == []
 
-    def test_add_list_remove_roundtrip(
-        self, normal_fake: "LoadedFixtures", test_config: "Path"
-    ) -> None:
+    def test_add_list_remove_roundtrip(self, normal_fake: "LoadedFixtures", test_config: "Path") -> None:
         fake = normal_fake
         task = fake.tasks[0]
-        config = write_split_config_yaml(
-            test_config, project_ids={fake.project.name: fake.project.id}
-        )
+        config = write_split_config_yaml(test_config, project_ids={fake.project.name: fake.project.id})
         _api, connection = _scoped(fake, config_path=config)
 
         added = cveta2.ignore(
@@ -297,16 +261,12 @@ class TestIgnoreApi:
             silent=True,
             connection=connection,
         )
-        assert [(e.id, e.description, e.silent) for e in added] == [
-            (task.id, "broken", True)
-        ]
+        assert [(e.id, e.description, e.silent) for e in added] == [(task.id, "broken", True)]
 
         listed = cveta2.ignore(fake.project.id, connection=connection)
         assert [e.id for e in listed] == [task.id]
 
-        remaining = cveta2.ignore(
-            fake.project.id, remove=[task.id], connection=connection
-        )
+        remaining = cveta2.ignore(fake.project.id, remove=[task.id], connection=connection)
         assert remaining == []
 
     def test_add_defaults_persist_to_the_connection_config(
@@ -336,9 +296,7 @@ class TestIgnoreApi:
         assert persisted.get_ignored_entries(fake.project.name) == [
             IgnoredTask(id=task.id, name=task.name, description="", silent=False)
         ]
-        assert persisted.get_ignored_entries("other-project") == [
-            IgnoredTask(id=99, name="keep-me")
-        ]
+        assert persisted.get_ignored_entries("other-project") == [IgnoredTask(id=99, name="keep-me")]
 
 
 class TestLabelsApi:
@@ -349,9 +307,7 @@ class TestLabelsApi:
 
         assert labels == fake.labels
 
-    def test_get_labels_queries_the_resolved_project(
-        self, normal_fake: "LoadedFixtures"
-    ) -> None:
+    def test_get_labels_queries_the_resolved_project(self, normal_fake: "LoadedFixtures") -> None:
         """The shared fake serves labels for any id; this one does not."""
         _api, connection = _scoped(normal_fake)
 
@@ -359,9 +315,7 @@ class TestLabelsApi:
 
         assert labels == normal_fake.labels
 
-    def test_update_labels_forwards_every_operation(
-        self, normal_fake: "LoadedFixtures"
-    ) -> None:
+    def test_update_labels_forwards_every_operation(self, normal_fake: "LoadedFixtures") -> None:
         """``update_labels`` had no test at all — all of it was unexecuted.
 
         The four operations produce four distinguishable patches, so one

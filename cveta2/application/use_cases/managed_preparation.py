@@ -36,20 +36,12 @@ def _integer(value: object) -> int | None:
     """Interpret explicit CSV identity without guessing invalid source values."""
     try:
         number = Decimal(str(value))
-        return (
-            int(number)
-            if number.is_finite()
-            and number >= 0
-            and number == number.to_integral_value()
-            else None
-        )
+        return int(number) if number.is_finite() and number >= 0 and number == number.to_integral_value() else None
     except InvalidOperation:
         return None
 
 
-def _origin(
-    row: dict[str, object], captured: CapturedManagedInput
-) -> tuple[str, int, int, int] | None:
+def _origin(row: dict[str, object], captured: CapturedManagedInput) -> tuple[str, int, int, int] | None:
     """Attest an explicit source reference against original per-task frame rows."""
     source_id = row.get("source_id")
     if not isinstance(source_id, str):
@@ -93,9 +85,7 @@ def _feedback(
     result = []
     for origin, frame_findings in sorted(grouped.items()):
         codes = sorted({code for code, _message in frame_findings})
-        marker = hashlib.sha256(
-            json.dumps([*origin, codes], ensure_ascii=False).encode()
-        ).hexdigest()
+        marker = hashlib.sha256(json.dumps([*origin, codes], ensure_ascii=False).encode()).hexdigest()
         result.append(
             FeedbackFinding(
                 source_id=origin[0],
@@ -159,15 +149,9 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         previous.update(parent_metadata.managed.assignments)
     files.check_roots(captured.frame, metadata)
     image_hashes = files.image_hashes(captured.frame)
-    frame = resolve_overlaps(
-        captured.frame, image_hashes.identities, definition.overlaps
-    )
-    split_frame, assignments = assign_splits(
-        frame, definition.splits, image_hashes.identities, previous
-    )
-    replacements = (
-        int((frame["split"] != split_frame["split"]).sum()) if "split" in frame else 0
-    )
+    frame = resolve_overlaps(captured.frame, image_hashes.identities, definition.overlaps)
+    split_frame, assignments = assign_splits(frame, definition.splits, image_hashes.identities, previous)
+    replacements = int((frame["split"] != split_frame["split"]).sum()) if "split" in frame else 0
     inspection = media.inspect(
         split_frame,
         profile="clearml-yolo",
@@ -187,13 +171,9 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         if path in image_hashes.readable
     }
     accepted_assignments = {
-        digest: value
-        for digest, value in assignments.items()
-        if not digest.startswith("unreadable:")
+        digest: value for digest, value in assignments.items() if not digest.startswith("unreadable:")
     }
-    prepared_snapshot = snapshot.model_copy(
-        update={"assignments": accepted_assignments, "image_hashes": actual_hashes}
-    )
+    prepared_snapshot = snapshot.model_copy(update={"assignments": accepted_assignments, "image_hashes": actual_hashes})
     prepared_metadata = metadata.model_copy(
         update={
             "managed": ManagedMetadata(
@@ -206,11 +186,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         }
     )
     tasks = tasks.model_copy(update={"managed": prepared_snapshot})
-    payload = (
-        files.payload_bytes(validation.result.clean, prepared_metadata, tasks)
-        if ready
-        else {}
-    )
+    payload = files.payload_bytes(validation.result.clean, prepared_metadata, tasks) if ready else {}
     record = ManagedRecord(
         name=name,
         definition_hash=definition_hash,
@@ -219,9 +195,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         registry_hash=registry_hash,
         source_hash=hashlib.sha256(captured.source_content).hexdigest(),
         input_hash=hashlib.sha256(captured.input_content).hexdigest(),
-        payload_hashes={
-            key: hashlib.sha256(value).hexdigest() for key, value in payload.items()
-        },
+        payload_hashes={key: hashlib.sha256(value).hexdigest() for key, value in payload.items()},
         image_hashes=actual_hashes,
         snapshot=prepared_snapshot,
         findings=findings,
@@ -235,7 +209,5 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         unmapped=unmapped,
         split_replacements=replacements,
     )
-    files.persist(
-        directory, captured, record, payload, report, validation.broken_images
-    )
+    files.persist(directory, captured, record, payload, report, validation.broken_images)
     return PreparationSummary(directory=directory, ready=ready, report=report)

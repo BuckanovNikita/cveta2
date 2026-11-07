@@ -18,9 +18,7 @@ def _positions(client: CvatClient, task_id: int) -> dict[int, tuple[str, str]]:
     return {job.id: (job.stage, job.state) for job in client.api.get_task_jobs(task_id)}
 
 
-def _assert_csv_membership(
-    output: Path, owned_ids: set[int], accepted: set[int]
-) -> None:
+def _assert_csv_membership(output: Path, owned_ids: set[int], accepted: set[int]) -> None:
     exported_ids: set[int] = set()
     for filename in ("dataset.csv", "obsolete.csv"):
         rows = pd.read_csv(output / filename)
@@ -54,30 +52,20 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
                     segment_size=1,
                 )
                 task_ids.append(task_id)
-                jobs = sorted(
-                    client.api.get_task_jobs(task_id), key=lambda job: job.start_frame
-                )
+                jobs = sorted(client.api.get_task_jobs(task_id), key=lambda job: job.start_frame)
                 assert len(jobs) == 2
                 for job, (stage, state) in zip(jobs, job_positions, strict=True):
                     client.api.update_job(job.id, stage=stage, state=state)
 
             initial = {task_id: _positions(client, task_id) for task_id in task_ids}
-            ignored = IgnoreConfig(
-                projects={
-                    project_name: [
-                        IgnoredTask(id=task_ids[3], name="ignored", silent=True)
-                    ]
-                }
-            )
+            ignored = IgnoreConfig(projects={project_name: [IgnoredTask(id=task_ids[3], name="ignored", silent=True)]})
             connection = cveta2.Connection(client=client)
             with (
                 patch(
                     "cveta2.adapters.config.settings.IgnoreConfig.load",
                     return_value=ignored,
                 ),
-                patch.object(
-                    client.api, "update_job", wraps=client.api.update_job
-                ) as updates,
+                patch.object(client.api, "update_job", wraps=client.api.update_job) as updates,
             ):
                 # Omit the new keyword: the ordinary fetch must never accept jobs.
                 cveta2.fetch(
@@ -89,9 +77,7 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
                     connection=connection,
                 )
                 updates.assert_not_called()
-                assert {
-                    task_id: _positions(client, task_id) for task_id in task_ids
-                } == initial
+                assert {task_id: _positions(client, task_id) for task_id in task_ids} == initial
                 _assert_csv_membership(tmp_path / "default", set(task_ids), set())
 
                 cveta2.fetch(
@@ -109,26 +95,16 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
                     for job_id, position in initial[task_id].items()
                     if position == ("annotation", "completed")
                 }
-                owned_jobs = {
-                    job_id for task_jobs in initial.values() for job_id in task_jobs
-                }
-                actual_jobs = [
-                    call.args[0]
-                    for call in updates.call_args_list
-                    if call.args[0] in owned_jobs
-                ]
+                owned_jobs = {job_id for task_jobs in initial.values() for job_id in task_jobs}
+                actual_jobs = [call.args[0] for call in updates.call_args_list if call.args[0] in owned_jobs]
                 assert set(actual_jobs) == expected_jobs
                 assert len(actual_jobs) == len(expected_jobs)
                 for task_id in task_ids[:2]:
-                    assert set(_positions(client, task_id).values()) == {
-                        ("acceptance", "completed")
-                    }
+                    assert set(_positions(client, task_id).values()) == {("acceptance", "completed")}
                     assert client.api.get_task(task_id).status == "completed"
                 for task_id in task_ids[2:]:
                     assert _positions(client, task_id) == initial[task_id]
-                _assert_csv_membership(
-                    tmp_path / "promoted", set(task_ids), set(task_ids[:2])
-                )
+                _assert_csv_membership(tmp_path / "promoted", set(task_ids), set(task_ids[:2]))
 
                 updates.reset_mock()
                 cveta2.fetch(
@@ -141,9 +117,7 @@ def test_skip_validation_promotes_and_exports_completed_tasks(tmp_path: Path) ->
                     connection=connection,
                 )
                 updates.assert_not_called()
-                _assert_csv_membership(
-                    tmp_path / "rerun", set(task_ids), set(task_ids[:2])
-                )
+                _assert_csv_membership(tmp_path / "rerun", set(task_ids), set(task_ids[:2]))
         finally:
             for task_id in reversed(task_ids):
                 client.delete_task(task_id)

@@ -96,12 +96,8 @@ def task_set_status(
     if stage is None and state is None:
         raise Cveta2Error(STAGE_OR_STATE_REQUIRED)
     if stage is not None and stage not in JOB_STAGES:
-        raise Cveta2Error(
-            f"Недопустимый stage {stage!r}; допустимые: {_JOB_STAGES_HINT}."
-        )
+        raise Cveta2Error(f"Недопустимый stage {stage!r}; допустимые: {_JOB_STAGES_HINT}.")
     if state is not None and state not in JOB_STATES:
-        raise Cveta2Error(
-            f"Недопустимый state {state!r}; допустимые: {_JOB_STATES_HINT}."
-        )
+        raise Cveta2Error(f"Недопустимый state {state!r}; допустимые: {_JOB_STATES_HINT}.")
     with _resolved_task(connection, project, task) as (c, task_info):
         return c.set_task_jobs_status(task_info.id, stage=stage, state=state)

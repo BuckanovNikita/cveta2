@@ -63,9 +63,7 @@ def test_clean_requires_output_directory(tmp_path: Path) -> None:
     assert caught.value.code == 2
 
 
-def test_environment_disables_bundle_prompts_on_a_terminal(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_environment_disables_bundle_prompts_on_a_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     missing = MissingDecisions((Decision("dataset_name", "Choose a dataset name"),))

@@ -40,9 +40,7 @@ class PrepareOptions(BaseModel):
 class Decision:
     """A missing user choice that an incoming interface may collect."""
 
-    kind: Literal[
-        "dataset_name", "api_url", "class_empty", "class_changes", "local_roots"
-    ]
+    kind: Literal["dataset_name", "api_url", "class_empty", "class_changes", "local_roots"]
     message: str
     choices: tuple[str, ...] = ()
     class_id: int | None = None

@@ -21,8 +21,7 @@ def pick_latest_duplicate(context: str, name: str, candidates: Sequence[_T]) -> 
     winner = max(candidates, key=str)
     if len(candidates) > 1:
         logger.warning(
-            f"Дубликаты в {context} для {name!r}: "
-            f"{sorted(str(c) for c in candidates)} — используем {winner!r}"
+            f"Дубликаты в {context} для {name!r}: {sorted(str(c) for c in candidates)} — используем {winner!r}"
         )
     return winner
 
@@ -123,8 +122,7 @@ def _validate_relative_key(value: str, *, original: str) -> str:
     parts = value.split("/")
     if not value or any(part in {"", ".", ".."} for part in parts):
         raise Cveta2Error(
-            f"Небезопасный путь изображения {original!r}: "
-            f"путь должен оставаться внутри настроенного корня хранилища"
+            f"Небезопасный путь изображения {original!r}: путь должен оставаться внутри настроенного корня хранилища"
         )
     return PurePosixPath(*parts).as_posix()
 
@@ -137,8 +135,7 @@ def _canonical_frame_key(prefix: str, frame_ref: str) -> str:
             prefix_dir = f"{prefix.rstrip('/')}/"
             if unrooted != prefix.rstrip("/") and not unrooted.startswith(prefix_dir):
                 raise Cveta2Error(
-                    f"Абсолютный путь изображения {frame_ref!r} находится вне "
-                    f"настроенного корня {prefix!r}"
+                    f"Абсолютный путь изображения {frame_ref!r} находится вне настроенного корня {prefix!r}"
                 )
         key = unrooted
     else:

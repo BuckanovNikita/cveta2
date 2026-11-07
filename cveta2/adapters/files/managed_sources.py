@@ -54,9 +54,7 @@ def _integer(value: object, column: str) -> int:
     try:
         parsed = Decimal(str(value))
     except InvalidOperation as error:
-        raise ManagedError(
-            f"Invalid {column} in CVAT source evidence: {value!r}"
-        ) from error
+        raise ManagedError(f"Invalid {column} in CVAT source evidence: {value!r}") from error
     if not parsed.is_finite() or parsed != parsed.to_integral_value() or parsed < 0:
         raise ManagedError(f"Invalid {column} in CVAT source evidence: {value!r}")
     return int(parsed)
@@ -65,14 +63,10 @@ def _integer(value: object, column: str) -> int:
 def _typed_rows(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy(deep=True)
     if "task_id" in result:
-        result["task_id"] = result["task_id"].map(
-            lambda value: _integer(value, "task_id")
-        )
+        result["task_id"] = result["task_id"].map(lambda value: _integer(value, "task_id"))
     if "task_completed" in result:
         result["task_completed"] = result["task_completed"].map(
-            lambda value: (
-                value.casefold() == "true" if isinstance(value, str) and value else None
-            )
+            lambda value: value.casefold() == "true" if isinstance(value, str) and value else None
         )
     return result
 
@@ -108,16 +102,9 @@ class LocalSourceFiles:
                     "job_state",
                 }
                 if missing := required - set(table.columns):
-                    raise ManagedError(
-                        f"CVAT source table lacks required columns: {sorted(missing)}"
-                    )
-                if not table.empty and (
-                    "task_id" not in table
-                    or any(value != task.id for value in table["task_id"])
-                ):
-                    raise ManagedError(
-                        f"Task source evidence has mismatching task identity: {task.id}"
-                    )
+                    raise ManagedError(f"CVAT source table lacks required columns: {sorted(missing)}")
+                if not table.empty and ("task_id" not in table or any(value != task.id for value in table["task_id"])):
+                    raise ManagedError(f"Task source evidence has mismatching task identity: {task.id}")
                 if name == "deleted.csv":
                     deleted.extend(_deleted_records(table))
                 else:
@@ -145,13 +132,9 @@ class LocalSourceFiles:
         frame = read_csv_bytes(content, source=source)
         missing = set(ANNOTATION_COLUMNS) - set(frame.columns)
         if missing:
-            raise ManagedError(
-                f"S3 annotation CSV lacks required columns: {sorted(missing)}"
-            )
+            raise ManagedError(f"S3 annotation CSV lacks required columns: {sorted(missing)}")
         if conflicts := set(PROVENANCE_COLUMNS).intersection(frame.columns):
-            raise ManagedError(
-                f"Source CSV contains reserved provenance columns: {sorted(conflicts)}"
-            )
+            raise ManagedError(f"Source CSV contains reserved provenance columns: {sorted(conflicts)}")
         empty = _csv(frame.iloc[0:0])
         return {
             "dataset.csv": content.decode("utf-8-sig"),
@@ -166,26 +149,18 @@ class LocalSourceFiles:
             raise ManagedError(f"Incomplete tables in source {snapshot.name}")
         frame = _table(snapshot.tables["dataset.csv"], snapshot.name)
         if conflicts := set(PROVENANCE_COLUMNS).intersection(frame.columns):
-            raise ManagedError(
-                f"Source {snapshot.name} contains reserved fields: {sorted(conflicts)}"
-            )
+            raise ManagedError(f"Source {snapshot.name} contains reserved fields: {sorted(conflicts)}")
         frame["source_id"] = snapshot.name
-        frame["source_project_id"] = (
-            "" if snapshot.project_id is None else str(snapshot.project_id)
-        )
+        frame["source_project_id"] = "" if snapshot.project_id is None else str(snapshot.project_id)
         for target, column in (
             ("source_task_id", "task_id"),
             ("source_frame_id", "frame_id"),
         ):
-            frame[target] = (
-                frame[column] if snapshot.type == "cvat" and column in frame else ""
-            )
+            frame[target] = frame[column] if snapshot.type == "cvat" and column in frame else ""
         occurrences: dict[str, int] = {}
         identities = []
         for record in frame.to_dict(orient="records"):
-            digest = hashlib.sha256(
-                json.dumps(record, sort_keys=True, ensure_ascii=False).encode()
-            ).hexdigest()
+            digest = hashlib.sha256(json.dumps(record, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             offset = occurrences.get(digest, 0)
             occurrences[digest] = offset + 1
             identities.append(f"{snapshot.name}:{digest}:{offset}")
@@ -203,13 +178,9 @@ class LocalSourceFiles:
                 parsed = parsed["managed"]
             return ManagedSnapshot.model_validate(parsed)
         except (OSError, ValidationError) as error:
-            raise ManagedError(
-                f"Cannot read managed source snapshot: {source}"
-            ) from error
+            raise ManagedError(f"Cannot read managed source snapshot: {source}") from error
 
-    def export(
-        self, directory: Path, snapshot: ManagedSnapshot, frame: pd.DataFrame
-    ) -> None:
+    def export(self, directory: Path, snapshot: ManagedSnapshot, frame: pd.DataFrame) -> None:
         """Write all evidence first and the completion snapshot last."""
         if directory.exists() or directory.is_symlink():
             raise ManagedError(f"Candidate directory already exists: {directory}")
@@ -220,18 +191,14 @@ class LocalSourceFiles:
                 raise ManagedError(f"Incomplete source tables: {source.name}")
         directory.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with TemporaryDirectory(
-                prefix=".cveta2-source-", dir=directory.parent
-            ) as temporary:
+            with TemporaryDirectory(prefix=".cveta2-source-", dir=directory.parent) as temporary:
                 staged = Path(temporary)
                 (staged / "dataset.csv").write_text(_csv(frame), encoding="utf-8")
                 for source in snapshot.sources:
                     target = staged / "sources" / source.name
                     target.mkdir(parents=True)
                     for name in TABLE_NAMES:
-                        (target / name).write_text(
-                            source.tables[name], encoding="utf-8"
-                        )
+                        (target / name).write_text(source.tables[name], encoding="utf-8")
                 (staged / "source-snapshot.yaml").write_text(
                     yaml.safe_dump(
                         snapshot.model_dump(mode="json"),
@@ -247,10 +214,6 @@ class LocalSourceFiles:
                     for name in TABLE_NAMES:
                         os.link(staged / "sources" / source.name / name, target / name)
                 os.link(staged / "dataset.csv", directory / "dataset.csv")
-                os.link(
-                    staged / "source-snapshot.yaml", directory / "source-snapshot.yaml"
-                )
+                os.link(staged / "source-snapshot.yaml", directory / "source-snapshot.yaml")
         except OSError as error:
-            raise ManagedError(
-                f"Cannot export managed source candidate: {directory}"
-            ) from error
+            raise ManagedError(f"Cannot export managed source candidate: {directory}") from error

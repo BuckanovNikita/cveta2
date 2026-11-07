@@ -307,10 +307,7 @@ def test_count_label_usage_continues_past_a_failing_task(
     counts = CvatClient(CvatConfig(), api=api).count_label_usage(1)
 
     assert counts == {2: 2}
-    assert any(
-        "Пропущено задач при подсчёте меток: [10]" in message
-        for message in capture_logs
-    )
+    assert any("Пропущено задач при подсчёте меток: [10]" in message for message in capture_logs)
 
 
 # ---------------------------------------------------------------------------
@@ -650,14 +647,10 @@ def test_recolor_label_without_color() -> None:
     """Recolor a label that has no color set."""
     labels = [LabelInfo(id=10, name="fish", attributes=[], color="")]
     mock_client = MagicMock()
-    mock_client.get_project_labels.return_value = [
-        LabelInfo(id=10, name="fish", attributes=[], color="#abcdef")
-    ]
+    mock_client.get_project_labels.return_value = [LabelInfo(id=10, name="fish", attributes=[], color="#abcdef")]
 
     with _patch_prompts(select_label=10, text="#abcdef"):
         result = _interactive_recolor(mock_client, 1, labels)
 
-    mock_client.update_project_labels.assert_called_once_with(
-        1, recolor={10: "#abcdef"}
-    )
+    mock_client.update_project_labels.assert_called_once_with(1, recolor={10: "#abcdef"})
     assert len(result) == 1

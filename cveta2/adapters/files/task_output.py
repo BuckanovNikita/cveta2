@@ -28,9 +28,7 @@ class LocalWorkflowFiles(LocalDatasetFiles):
         """Remove temporary task CSV outputs with best-effort cleanup."""
         shutil.rmtree(tasks_dir, ignore_errors=True)
 
-    def write_task_csv(
-        self, task: TaskInfo, result: TaskAnnotations, tasks_dir: Path
-    ) -> None:
+    def write_task_csv(self, task: TaskInfo, result: TaskAnnotations, tasks_dir: Path) -> None:
         """Write one nonempty task annotation CSV."""
         rows = result.to_csv_rows()
         if not rows:
@@ -38,9 +36,7 @@ class LocalWorkflowFiles(LocalDatasetFiles):
         task_csv = tasks_dir / f"task_{task.id}.csv"
         task_df = pd.DataFrame(rows)
         task_df.to_csv(task_csv, **CSV_WRITE_OPTIONS)
-        logger.trace(
-            f"Task {task.name!r} (id={task.id}): {format_counts(task_df)} → {task_csv}"
-        )
+        logger.trace(f"Task {task.name!r} (id={task.id}): {format_counts(task_df)} → {task_csv}")
 
     def read_exclude_names(self, in_progress_path: str | None) -> set[str]:
         """Read excluded frame names from the optional CSV."""
@@ -53,8 +49,5 @@ class LocalWorkflowFiles(LocalDatasetFiles):
         if "image_name" not in ip_df.columns:
             return set()
         names: set[str] = set(ip_df["image_name"].dropna().unique())
-        logger.info(
-            f"Исключено {len(names)} изображений "
-            f"({len(ip_df)} строк) из in_progress.csv"
-        )
+        logger.info(f"Исключено {len(names)} изображений ({len(ip_df)} строк) из in_progress.csv")
         return names

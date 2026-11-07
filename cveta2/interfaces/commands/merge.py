@@ -28,10 +28,7 @@ def configure_merge(parser: "argparse.ArgumentParser") -> None:
         "--deleted",
         type=str,
         default=None,
-        help=(
-            "Path to deleted.csv — images listed there "
-            "will be removed from the merged result."
-        ),
+        help=("Path to deleted.csv — images listed there will be removed from the merged result."),
     )
     parser.add_argument(
         "--output",
@@ -42,10 +39,7 @@ def configure_merge(parser: "argparse.ArgumentParser") -> None:
     parser.add_argument(
         "--by-task",
         action="store_true",
-        help=(
-            "Resolve conflicts by task_id instead "
-            "of argument order (requires task_id column)."
-        ),
+        help=("Resolve conflicts by task_id instead of argument order (requires task_id column)."),
     )
 
 

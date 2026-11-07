@@ -112,11 +112,7 @@ def _resolve_listed_image(raw: str, list_path: Path, dataset_root: Path) -> Path
 def _images_from_split_source(source: Path, dataset_root: Path) -> list[Path]:
     """Expand one YOLO split directory, image, or image-list file."""
     if source.is_dir():
-        return sorted(
-            path
-            for path in source.rglob("*")
-            if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS
-        )
+        return sorted(path for path in source.rglob("*") if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS)
     if source.is_file() and source.suffix.lower() == ".txt":
         images: list[Path] = []
         for line in read_text_utf8(source).splitlines():
@@ -137,10 +133,7 @@ def _split_images(raw_split: object, dataset_root: Path) -> list[Path]:
     seen: set[Path] = set()
     for entry in entries:
         if not isinstance(entry, (str, Path)):
-            raise Cveta2Error(
-                f"Ошибка: путь split должен быть строкой или списком строк, "
-                f"получено {entry!r}"
-            )
+            raise Cveta2Error(f"Ошибка: путь split должен быть строкой или списком строк, получено {entry!r}")
         source = Path(entry).expanduser()
         if not source.is_absolute():
             source = dataset_root / source
@@ -157,13 +150,9 @@ def _prune_yolo_output(ctx: ExportContext) -> None:
     """Remove files for images and splits absent from the current export."""
     expected_images: set[Path] = set()
     expected_labels: set[Path] = set()
-    for name, split in ctx.df[["image_name", "split"]].itertuples(
-        index=False, name=None
-    ):
+    for name, split in ctx.df[["image_name", "split"]].itertuples(index=False, name=None):
         expected_images.add(ctx.output_dir / "images" / split / name)
-        expected_labels.add(
-            ctx.output_dir / "labels" / split / f"{Path(name).stem}.txt"
-        )
+        expected_labels.add(ctx.output_dir / "labels" / split / f"{Path(name).stem}.txt")
     for directory, expected, suffixes in (
         ("images", expected_images, _IMAGE_EXTENSIONS),
         ("labels", expected_labels, (".txt",)),
@@ -184,10 +173,7 @@ def _prune_yolo_output(ctx: ExportContext) -> None:
 def _coco_owned_paths(ctx: ExportContext) -> set[Path]:
     """Validate prior export metadata and destination paths before any writes."""
     owned: set[Path] = set()
-    if any(
-        path.is_symlink()
-        for path in (ctx.output_dir.absolute(), *ctx.output_dir.absolute().parents)
-    ):
+    if any(path.is_symlink() for path in (ctx.output_dir.absolute(), *ctx.output_dir.absolute().parents)):
         raise Cveta2Error(f"Ошибка: каталог COCO является ссылкой: {ctx.output_dir}")
     for split in ("train", "valid", "test"):
         directory = ctx.output_dir / split
@@ -199,20 +185,12 @@ def _coco_owned_paths(ctx: ExportContext) -> set[Path]:
         if not metadata.exists():
             continue
         owned.update(_owned_split_files(directory, metadata))
-    for name, split in ctx.df[["image_name", "split"]].itertuples(
-        index=False, name=None
-    ):
+    for name, split in ctx.df[["image_name", "split"]].itertuples(index=False, name=None):
         if name == "_annotations.coco.json":
-            raise Cveta2Error(
-                f"Ошибка: имя изображения совпадает с метаданными COCO: {name}"
-            )
+            raise Cveta2Error(f"Ошибка: имя изображения совпадает с метаданными COCO: {name}")
         destination = ctx.output_dir / ("valid" if split == "val" else split) / name
-        if (
-            destination.exists() or destination.is_symlink()
-        ) and destination not in owned:
-            raise Cveta2Error(
-                f"Ошибка: путь не принадлежит предыдущему экспорту COCO: {destination}"
-            )
+        if (destination.exists() or destination.is_symlink()) and destination not in owned:
+            raise Cveta2Error(f"Ошибка: путь не принадлежит предыдущему экспорту COCO: {destination}")
     return owned
 
 
@@ -221,9 +199,7 @@ def _owned_split_files(directory: Path, metadata: Path) -> set[Path]:
     try:
         data = json.loads(read_text_utf8(metadata))
     except (json.JSONDecodeError, UnicodeError, OSError) as exc:
-        raise Cveta2Error(
-            f"Ошибка: не удалось прочитать метаданные COCO {metadata}: {exc}"
-        ) from exc
+        raise Cveta2Error(f"Ошибка: не удалось прочитать метаданные COCO {metadata}: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("images"), list):
         raise Cveta2Error(f"Ошибка: неоднозначные метаданные COCO: {metadata}")
     owned: set[Path] = {metadata}
@@ -251,9 +227,7 @@ def _owned_split_files(directory: Path, metadata: Path) -> set[Path]:
 def _prune_coco_output(ctx: ExportContext, owned: set[Path]) -> None:
     """Remove only previously declared files absent from this export."""
     expected: set[Path] = set()
-    for name, split in ctx.df[["image_name", "split"]].itertuples(
-        index=False, name=None
-    ):
+    for name, split in ctx.df[["image_name", "split"]].itertuples(index=False, name=None):
         directory = ctx.output_dir / ("valid" if split == "val" else split)
         expected.add(directory / name)
         expected.add(directory / "_annotations.coco.json")

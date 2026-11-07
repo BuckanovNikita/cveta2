@@ -18,11 +18,7 @@ def test_bad_coordinate_reason_explains_required_value() -> None:
             "bbox_y_br": [10],
         }
     )
-    result = validate_dataframe(
-        frame, profile="clearml-yolo", options=ValidationOptions(emit_warnings=False)
-    )
-    reason = next(
-        issue for issue in result.reasons_for(0) if issue.code == "invalid_coordinate"
-    )
+    result = validate_dataframe(frame, profile="clearml-yolo", options=ValidationOptions(emit_warnings=False))
+    reason = next(issue for issue in result.reasons_for(0) if issue.code == "invalid_coordinate")
     assert "finite number" in reason.message
     assert "bbox_x_tl" in reason.message

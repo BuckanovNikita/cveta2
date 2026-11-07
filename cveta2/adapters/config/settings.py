@@ -67,9 +67,7 @@ def require_interactive(hint: str) -> None:
 
     """
     if is_interactive_disabled():
-        raise InteractiveModeRequiredError(
-            f"Interactive prompt required but CVETA2_NO_INTERACTIVE=true. {hint}"
-        )
+        raise InteractiveModeRequiredError(f"Interactive prompt required but CVETA2_NO_INTERACTIVE=true. {hint}")
 
 
 def get_config_path(config_path: Path | None = None) -> Path:
@@ -152,10 +150,7 @@ def _shared_section(section: str, personal: object, shared: ProjectConfig) -> ob
     """Supply policy exclusively from shared data while keeping local paths."""
     aliases = shared_projects_by_name(shared)
     if section == "image_cache" and isinstance(personal, dict):
-        return {
-            aliases[name].name or name if name in aliases else name: value
-            for name, value in personal.items()
-        }
+        return {aliases[name].name or name if name in aliases else name: value for name, value in personal.items()}
     if section == "sync_roots":
         return {
             _project_alias(key, shared): value.sync_root
@@ -163,11 +158,7 @@ def _shared_section(section: str, personal: object, shared: ProjectConfig) -> ob
             if value.sync_root is not None
         }
     if section == "ignore":
-        return {
-            _project_alias(key, shared): value.ignore
-            for key, value in shared.projects.items()
-            if value.ignore
-        }
+        return {_project_alias(key, shared): value.ignore for key, value in shared.projects.items() if value.ignore}
     if section == "cache":
         result = dict(personal) if isinstance(personal, dict) else {}
         projects = dict(result.get("projects", {}))
@@ -188,9 +179,7 @@ def _shared_section(section: str, personal: object, shared: ProjectConfig) -> ob
     return personal
 
 
-def _split_cache_policy(
-    values: dict[str, object], shared: ProjectConfig
-) -> dict[str, dict[str, object]]:
+def _split_cache_policy(values: dict[str, object], shared: ProjectConfig) -> dict[str, dict[str, object]]:
     """Remove shared fields from serialized local cache values."""
     changes: dict[str, dict[str, object]] = {}
     projects = values.get("projects", {})
@@ -199,33 +188,21 @@ def _split_cache_policy(
         for name, fields in projects.items():
             if not isinstance(fields, dict):
                 continue
-            policy = {
-                key: fields.pop(key)
-                for key in ("ignored_prefix", "task_cache_s3")
-                if key in fields
-            }
+            policy = {key: fields.pop(key) for key in ("ignored_prefix", "task_cache_s3") if key in fields}
             if policy:
                 selected_project = aliases.get(name)
                 if selected_project is None:
                     raise ManagedError(f"Unknown shared project: {name}")
-                changed = {
-                    key: value
-                    for key, value in policy.items()
-                    if value != getattr(selected_project, key)
-                }
+                changed = {key: value for key, value in policy.items() if value != getattr(selected_project, key)}
                 if changed:
                     changes[name] = changed
     values["projects"] = (
-        {name: fields for name, fields in projects.items() if fields}
-        if isinstance(projects, dict)
-        else {}
+        {name: fields for name, fields in projects.items() if fields} if isinstance(projects, dict) else {}
     )
     return changes
 
 
-def _save_shared_section(
-    path: Path, section: str, serialized: object, shared: ProjectConfig
-) -> object:
+def _save_shared_section(path: Path, section: str, serialized: object, shared: ProjectConfig) -> object:
     """Route explicit policy edits to shared storage; local saves do not shadow it."""
     changes: dict[str, dict[str, object]] = {}
     values = dict(serialized) if isinstance(serialized, dict) else {}
@@ -237,9 +214,7 @@ def _save_shared_section(
             raise ManagedError(f"Unknown shared projects: {sorted(unknown)}")
         for key, project in shared.projects.items():
             name = _project_alias(key, shared)
-            value = values.get(
-                name, values.get(key, None if field == "sync_root" else [])
-            )
+            value = values.get(name, values.get(key, None if field == "sync_root" else []))
             if value != getattr(project, field):
                 changes[name] = {field: value}
     elif section == "cache":
@@ -281,9 +256,7 @@ class SectionConfig(BaseModel):
         return self._dump() or None
 
     @classmethod
-    def load(
-        cls, config_path: Path | None = None, *, project_path: Path | None = None
-    ) -> "Self":
+    def load(cls, config_path: Path | None = None, *, project_path: Path | None = None) -> "Self":
         """Load this section from the config YAML (defaults when absent)."""
         path = get_config_path(config_path)
         personal = _load_raw_yaml(path)
@@ -302,26 +275,20 @@ class SectionConfig(BaseModel):
         serialized = self._to_raw()
         shared = optional_project_config(path)
         if shared is not None:
-            serialized = _save_shared_section(
-                path, self.section_key, serialized, shared
-            )
+            serialized = _save_shared_section(path, self.section_key, serialized, shared)
             if self.section_key in {"sync_roots", "ignore"}:
                 return path
         elif self.section_key in {"sync_roots", "ignore"} and serialized:
             raise MigrationRequired(
-                "Project policy requires shared configuration; "
-                "attach it with setup --project-config"
+                "Project policy requires shared configuration; attach it with setup --project-config"
             )
         elif self.section_key == "cache" and isinstance(serialized, dict):
             projects = serialized.get("projects", {})
             if isinstance(projects, dict) and any(
-                isinstance(fields, dict)
-                and set(fields) & {"ignored_prefix", "task_cache_s3"}
+                isinstance(fields, dict) and set(fields) & {"ignored_prefix", "task_cache_s3"}
                 for fields in projects.values()
             ):
-                raise MigrationRequired(
-                    "Shared cache policy requires a shared project configuration"
-                )
+                raise MigrationRequired("Shared cache policy requires a shared project configuration")
         if serialized is None:
             existing.pop(self.section_key, None)
         else:
@@ -350,8 +317,7 @@ def _parse_timeout_env(raw: str | None) -> float | None:
         return float(raw)
     except ValueError:
         logger.warning(
-            f"Некорректное значение CVETA2_DATA_TIMEOUT={raw!r} — "
-            f"ожидается число секунд; таймаут не применяется."
+            f"Некорректное значение CVETA2_DATA_TIMEOUT={raw!r} — ожидается число секунд; таймаут не применяется."
         )
         return None
 
@@ -415,9 +381,7 @@ class CvatConfig(BaseModel):
             username=override.username or self.username,
             password=override.password or self.password,
             request_timeout=(
-                override.request_timeout
-                if override.request_timeout is not None
-                else self.request_timeout
+                override.request_timeout if override.request_timeout is not None else self.request_timeout
             ),
         )
         # This model method owns source provenance for both model instances.
@@ -425,9 +389,7 @@ class CvatConfig(BaseModel):
         return merged
 
     @classmethod
-    def load(
-        cls, config_path: Path | None = None, *, project_path: Path | None = None
-    ) -> "CvatConfig":
+    def load(cls, config_path: Path | None = None, *, project_path: Path | None = None) -> "CvatConfig":
         """Merge preset, file, and env: preset < file < env."""
         preset_data = _load_preset_data()
         preset_cfg = cls._from_cvat_section(preset_data)
@@ -438,16 +400,10 @@ class CvatConfig(BaseModel):
         if shared is not None:
             identity = shared.cvat
             if (env_cfg.host and env_cfg.host != identity.host) or (
-                env_cfg.organization is not None
-                and env_cfg.organization != identity.organization
+                env_cfg.organization is not None and env_cfg.organization != identity.organization
             ):
-                raise ManagedError(
-                    "CVAT identity environment overrides conflict "
-                    "with shared project configuration"
-                )
-            file_cfg = file_cfg.model_copy(
-                update={"host": identity.host, "organization": identity.organization}
-            )
+                raise ManagedError("CVAT identity environment overrides conflict with shared project configuration")
+            file_cfg = file_cfg.model_copy(update={"host": identity.host, "organization": identity.organization})
             env_cfg = env_cfg.model_copy(update={"host": "", "organization": None})
         return preset_cfg.merge(file_cfg).merge(env_cfg)
 
@@ -456,16 +412,9 @@ class CvatConfig(BaseModel):
         existing_data = _load_raw_yaml(path)
 
         shared = optional_project_config(path)
-        if shared is not None and (
-            self.host != shared.cvat.host
-            or self.organization != shared.cvat.organization
-        ):
-            raise ManagedError(
-                "CVAT identity must be changed in shared project configuration"
-            )
-        cvat_data: dict[str, str | float] = (
-            {} if shared is not None else {"host": self.host}
-        )
+        if shared is not None and (self.host != shared.cvat.host or self.organization != shared.cvat.organization):
+            raise ManagedError("CVAT identity must be changed in shared project configuration")
+        cvat_data: dict[str, str | float] = {} if shared is not None else {"host": self.host}
         if self.organization and shared is None:
             cvat_data["organization"] = self.organization
         if self.username:
@@ -476,9 +425,7 @@ class CvatConfig(BaseModel):
             cvat_data["request_timeout"] = self.request_timeout
 
         output: dict[str, object] = {"cvat": cvat_data}
-        output.update(
-            (key, value) for key, value in existing_data.items() if key != "cvat"
-        )
+        output.update((key, value) for key, value in existing_data.items() if key != "cvat")
         _write_raw_yaml(path, output)
         logger.info(f"Config saved to {path}")
         return path
@@ -553,19 +500,14 @@ class CacheConfig(SectionConfig):
     tasks_root: Path | None = None
     projects: dict[str, CacheProjectSettings] = Field(default_factory=dict)
 
-    none_if_falsy = field_validator("images_root", "tasks_root", mode="before")(
-        _none_if_falsy
-    )
+    none_if_falsy = field_validator("images_root", "tasks_root", mode="before")(_none_if_falsy)
 
     @field_validator("projects", mode="before")
     @classmethod
     def _drop_non_mapping_projects(cls, value: object) -> object:
         if not isinstance(value, dict):
             return {}
-        return {
-            str(k): v if isinstance(v, (dict, CacheProjectSettings)) else {}
-            for k, v in value.items()
-        }
+        return {str(k): v if isinstance(v, (dict, CacheProjectSettings)) else {} for k, v in value.items()}
 
     def _to_raw(self) -> object | None:
         data = self._dump()
@@ -591,19 +533,12 @@ class CacheConfig(SectionConfig):
 
 def cache_dir_for_project(root: Path, project_name: str) -> Path:
     """Return a contained cache component, percent-encoding unsafe characters."""
-    safe = (
-        project_name.replace("%", "%25")
-        .replace("/", "%2F")
-        .replace("\\", "%5C")
-        .replace("\x00", "%00")
-    )
+    safe = project_name.replace("%", "%25").replace("/", "%2F").replace("\\", "%5C").replace("\x00", "%00")
     if safe in {"", ".", ".."}:
         safe = "%empty" if not safe else safe.replace(".", "%2E")
     destination = root / safe
     if not destination.resolve().is_relative_to(root.resolve()):
-        raise Cveta2Error(
-            f"Путь кэша проекта {project_name!r} выходит за корень {root}"
-        )
+        raise Cveta2Error(f"Путь кэша проекта {project_name!r} выходит за корень {root}")
     return destination
 
 
@@ -681,10 +616,7 @@ class IgnoreConfig(_ProjectsSection):
         for project_name, entries in value.items():
             if not isinstance(entries, list):
                 continue
-            parsed = [
-                item if isinstance(item, IgnoredTask) else _parse_ignore_entry(item)
-                for item in entries
-            ]
+            parsed = [item if isinstance(item, IgnoredTask) else _parse_ignore_entry(item) for item in entries]
             cleaned = [entry for entry in parsed if entry is not None]
             if cleaned:
                 projects[str(project_name)] = cleaned
@@ -719,11 +651,7 @@ class IgnoreConfig(_ProjectsSection):
         entries = self.projects.setdefault(project_name, [])
         if any(e.id == task_id for e in entries):
             return False
-        entries.append(
-            IgnoredTask(
-                id=task_id, name=task_name, description=description, silent=silent
-            )
-        )
+        entries.append(IgnoredTask(id=task_id, name=task_name, description=description, silent=silent))
         return True
 
     def remove_task(self, project_name: str, task_id: int) -> bool:
@@ -752,9 +680,7 @@ def _parse_ignore_entry(raw: object) -> IgnoredTask | None:
                 silent=bool(raw.get("silent")),
             )
         except (TypeError, ValueError) as e:
-            logger.warning(
-                f"Пропущена некорректная запись ignore (id={raw.get('id')!r}): {e}"
-            )
+            logger.warning(f"Пропущена некорректная запись ignore (id={raw.get('id')!r}): {e}")
             return None
     if isinstance(raw, int):
         return IgnoredTask(id=raw, name="")
@@ -796,9 +722,7 @@ class NetworkConfig(SectionConfig):
     retry_max_wait: float = Field(default=30.0, gt=0)
 
     @classmethod
-    def resolve(
-        cls, config_path: Path | None = None, *, project_path: Path | None = None
-    ) -> "NetworkConfig":
+    def resolve(cls, config_path: Path | None = None, *, project_path: Path | None = None) -> "NetworkConfig":
         """Load the section, then let environment variables override it.
 
         ``SectionConfig.load`` reads the config file only; these knobs are
@@ -809,8 +733,7 @@ class NetworkConfig(SectionConfig):
         return cls(
             s3_workers=_parse_int_env("CVETA2_S3_WORKERS") or base.s3_workers,
             cvat_workers=_parse_int_env("CVETA2_CVAT_WORKERS") or base.cvat_workers,
-            retry_attempts=_parse_int_env("CVETA2_RETRY_ATTEMPTS", minimum=2)
-            or base.retry_attempts,
+            retry_attempts=_parse_int_env("CVETA2_RETRY_ATTEMPTS", minimum=2) or base.retry_attempts,
             retry_max_wait=base.retry_max_wait,
         )
 
@@ -827,15 +750,10 @@ def _parse_int_env(name: str, minimum: int = 1) -> int | None:
     try:
         value = int(raw)
     except ValueError:
-        logger.warning(
-            f"Некорректное значение {name}={raw!r} — ожидается целое число; "
-            f"значение игнорируется."
-        )
+        logger.warning(f"Некорректное значение {name}={raw!r} — ожидается целое число; значение игнорируется.")
         return None
     if value < minimum:
-        logger.warning(
-            f"Значение {name}={value} должно быть не меньше {minimum}; игнорируется."
-        )
+        logger.warning(f"Значение {name}={value} должно быть не меньше {minimum}; игнорируется.")
         return None
     return value
 

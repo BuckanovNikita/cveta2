@@ -41,9 +41,7 @@ from tests.helpers import make_raw_shape, make_task
 
 
 def _meta(*names: str) -> RawDataMeta:
-    return RawDataMeta(
-        frames=[RawFrame(name=name, width=100, height=100) for name in names]
-    )
+    return RawDataMeta(frames=[RawFrame(name=name, width=100, height=100) for name in names])
 
 
 class TestBuildNameToFrame:
@@ -291,9 +289,7 @@ class TestBuildTaskIssues:
         # The job covers frame 3 but not the frame "unmapped.jpg" sits on.
         jobs = [RawJob(id=7, start_frame=3, stop_frame=3)]
 
-        result = build_task_issues(
-            pd.DataFrame(rows), {"a.jpg": 3, "unmapped.jpg": 50}, jobs
-        )
+        result = build_task_issues(pd.DataFrame(rows), {"a.jpg": 3, "unmapped.jpg": 50}, jobs)
 
         assert len(result.issues) == 1
         assert result.unknown_images == ["unknown.jpg"]
@@ -330,15 +326,11 @@ class TestTaskToRecords:
             ],
         )
         jobs = [
-            RawJob(
-                id=1, start_frame=0, stop_frame=0, stage="acceptance", state="completed"
-            ),
+            RawJob(id=1, start_frame=0, stop_frame=0, stage="acceptance", state="completed"),
             RawJob(id=2, start_frame=1, stop_frame=1, stage="annotation", state="new"),
         ]
 
-        records, _deleted = task_to_records(
-            task, meta, RawAnnotations(), {}, {}, None, jobs
-        )
+        records, _deleted = task_to_records(task, meta, RawAnnotations(), {}, {}, None, jobs)
 
         positions = {r.image_name: (r.job_stage, r.job_state) for r in records}
         assert positions == {
@@ -351,9 +343,7 @@ class TestTaskToRecords:
         task = make_task(5, subset="train", updated="2026-02-02")
         meta = RawDataMeta(frames=[RawFrame(name="orphan.jpg", width=10, height=20)])
 
-        records, _deleted = task_to_records(
-            task, meta, RawAnnotations(), {}, {}, None, []
-        )
+        records, _deleted = task_to_records(task, meta, RawAnnotations(), {}, {}, None, [])
 
         assert [(r.job_stage, r.job_state) for r in records] == [("", "")]
 
@@ -365,13 +355,9 @@ class TestTaskToRecords:
         would let an unfinished task pass as complete.
         """
         task = make_task(3, status="completed", subset="train", updated="2026-02-02")
-        jobs = [
-            RawJob(id=1, start_frame=0, stop_frame=99, stage="annotation", state="new")
-        ]
+        jobs = [RawJob(id=1, start_frame=0, stop_frame=99, stage="annotation", state="new")]
 
-        _records, deleted = task_to_records(
-            task, self._meta_with_deleted(), RawAnnotations(), {}, {}, None, jobs
-        )
+        _records, deleted = task_to_records(task, self._meta_with_deleted(), RawAnnotations(), {}, {}, None, jobs)
 
         assert deleted == [
             DeletedImage(
@@ -433,9 +419,7 @@ class TestTaskToRecords:
         meta = RawDataMeta(frames=[RawFrame(name="plain.jpg", width=10, height=20)])
         issues = [RawIssue(id=5, frame=0, resolved=False, comments=["look here"])]
 
-        records, _deleted = task_to_records(
-            task, meta, RawAnnotations(), {}, {}, issues
-        )
+        records, _deleted = task_to_records(task, meta, RawAnnotations(), {}, {}, issues)
 
         assert records[0].issue_text == "look here"
         assert records[0].issue_state == "open"
@@ -446,9 +430,7 @@ class TestTaskToRecords:
         meta = RawDataMeta(frames=[RawFrame(name="a.jpg", width=10, height=20)])
         shape = make_raw_shape(attributes=[RawAttribute(spec_id=10, value="red")])
 
-        records, _deleted = task_to_records(
-            task, meta, RawAnnotations(shapes=[shape]), {1: "car"}, {10: "color"}
-        )
+        records, _deleted = task_to_records(task, meta, RawAnnotations(shapes=[shape]), {1: "car"}, {10: "color"})
 
         annotation = records[0]
         assert isinstance(annotation, BBoxAnnotation)
@@ -466,9 +448,7 @@ class TestTaskToRecords:
         )
         shape = make_raw_shape(frame=0, label_id=1)
 
-        records, _deleted = task_to_records(
-            task, meta, RawAnnotations(shapes=[shape]), {1: "car"}, {}
-        )
+        records, _deleted = task_to_records(task, meta, RawAnnotations(shapes=[shape]), {1: "car"}, {})
 
         without = [r for r in records if isinstance(r, ImageWithoutAnnotations)]
         assert [r.image_name for r in without] == ["empty.jpg"]
@@ -524,13 +504,9 @@ def test_selected_tasks_use_injected_execution_and_settings() -> None:
     tasks = {i: _completed_task(i) for i in (12, 3)}
     api.get_task.side_effect = tasks.__getitem__
     api.get_project_labels.return_value = []
-    runner = MagicMock(
-        side_effect=lambda items, work, **_kwargs: list(map(work, items))
-    )
+    runner = MagicMock(side_effect=lambda items, work, **_kwargs: list(map(work, items)))
     client = ApplicationClient(
-        ClientSettings(
-            host="https://example.test", cvat_workers=4, raise_on_failure=True
-        ),
+        ClientSettings(host="https://example.test", cvat_workers=4, raise_on_failure=True),
         images=MagicMock(spec=ImageReadPort),
         runner=runner,
         api=api,
@@ -556,9 +532,7 @@ def test_image_port_receives_storage_and_prefix_without_local_io() -> None:
     storage = CloudStorageInfo(id=2, bucket="bucket", prefix="raw", endpoint_url="")
     annotations = ProjectAnnotations(annotations=[], deleted_images=[])
     target = Path("unmaterialized/output")
-    client = ApplicationClient(
-        ClientSettings(), images=images, runner=MagicMock(), api=api
-    )
+    client = ApplicationClient(ClientSettings(), images=images, runner=MagicMock(), api=api)
 
     assert (
         client.download_images(
@@ -571,15 +545,11 @@ def test_image_port_receives_storage_and_prefix_without_local_io() -> None:
         is images.download.return_value
     )
     assert (
-        client.sync_project_images(
-            7, target, project_cloud_storage=storage, ignored_prefix="raw"
-        )
+        client.sync_project_images(7, target, project_cloud_storage=storage, ignored_prefix="raw")
         is images.sync.return_value
     )
 
-    images.download.assert_called_once_with(
-        annotations, target, project_cloud_storage=storage, ignored_prefix="raw"
-    )
+    images.download.assert_called_once_with(annotations, target, project_cloud_storage=storage, ignored_prefix="raw")
     images.sync.assert_called_once_with(storage, target, ignored_prefix="raw")
     api.get_project_cloud_storage.assert_not_called()
 

@@ -30,9 +30,7 @@ _EMPTY_STORAGE = make_cs_info(bucket="other-bucket", prefix="nothing-here")
 def _bucket(monkeypatch: pytest.MonkeyPatch, objects: dict[str, bytes]) -> FakeS3Client:
     """Serve *objects* (bare S3 keys) to every ``make_s3_client`` caller."""
     s3 = FakeS3Client(objects, keyed_by_bucket=False)
-    monkeypatch.setattr(
-        "cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3
-    )
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3)
     return s3
 
 
@@ -44,9 +42,7 @@ def _client(detected: object = None) -> tuple[CvatClient, MagicMock]:
 
 
 def _one_image(name: str = "img.jpg") -> ProjectAnnotations:
-    return ProjectAnnotations(
-        annotations=[make_bbox(image_name=name)], deleted_images=[]
-    )
+    return ProjectAnnotations(annotations=[make_bbox(image_name=name)], deleted_images=[])
 
 
 class TestDownloadImagesStorageResolution:

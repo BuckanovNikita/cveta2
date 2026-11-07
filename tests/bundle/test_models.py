@@ -21,9 +21,7 @@ def test_api_uses_distinct_number_and_id_and_rejects_boolean_identity() -> None:
         ApiClass.model_validate({**record, "number": True})
 
 
-def test_metadata_preserves_unicode_and_rejects_secret_urls_and_unknown_fields() -> (
-    None
-):
+def test_metadata_preserves_unicode_and_rejects_secret_urls_and_unknown_fields() -> None:
     metadata = DatasetMetadata(
         api_url="https://example.org/classes",
         classes={"Царапина": ClassInfo(prod_id=93, alt_names=["Старое имя"])},
@@ -31,9 +29,7 @@ def test_metadata_preserves_unicode_and_rejects_secret_urls_and_unknown_fields()
     )
     assert metadata.model_dump()["classes"]["Царапина"]["alt_names"] == ["Старое имя"]
     with pytest.raises(ValidationError):
-        DatasetMetadata.model_validate(
-            {**metadata.model_dump(), "api_url": "https://user:secret@host/api"}
-        )
+        DatasetMetadata.model_validate({**metadata.model_dump(), "api_url": "https://user:secret@host/api"})
     with pytest.raises(ValidationError):
         ClassInfo.model_validate({"prod_id": 93, "empty": "false"})
     with pytest.raises(ValidationError):

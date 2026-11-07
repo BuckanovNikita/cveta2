@@ -42,9 +42,7 @@ def fake(coco8_fixtures: LoadedFixtures) -> LoadedFixtures:
 @pytest.fixture(autouse=True)
 def shared_ignore_config(test_config: Path, fake: LoadedFixtures) -> None:
     """Policy-command tests attach an explicit shared project definition."""
-    write_split_config_yaml(
-        test_config, project_ids={fake.project.name: fake.project.id}
-    )
+    write_split_config_yaml(test_config, project_ids={fake.project.name: fake.project.id})
 
 
 def _run(fake: LoadedFixtures, *argv: str) -> None:
@@ -66,13 +64,9 @@ class TestAdd:
         _run(fake, "--add", str(task.id), "--description", "дубликаты", "--silent")
 
         entries = IgnoreConfig.load().get_ignored_entries(fake.project.name)
-        assert [(e.id, e.name, e.description, e.silent) for e in entries] == [
-            (task.id, task.name, "дубликаты", True)
-        ]
+        assert [(e.id, e.name, e.description, e.silent) for e in entries] == [(task.id, task.name, "дубликаты", True)]
 
-    def test_add_defaults_are_not_silent_and_carry_no_description(
-        self, fake: LoadedFixtures
-    ) -> None:
+    def test_add_defaults_are_not_silent_and_carry_no_description(self, fake: LoadedFixtures) -> None:
         _run(fake, "--add", str(fake.tasks[0].id))
 
         entry = IgnoreConfig.load().get_ignored_entries(fake.project.name)[0]
@@ -93,22 +87,16 @@ class TestAdd:
 
         assert any("уже в ignore-списке" in line for line in capture_logs)
         entries = IgnoreConfig.load().get_ignored_entries(fake.project.name)
-        assert [(e.id, e.description, e.silent) for e in entries] == [
-            (task.id, "", False)
-        ]
+        assert [(e.id, e.description, e.silent) for e in entries] == [(task.id, "", False)]
 
-    def test_a_task_can_be_named_instead_of_numbered(
-        self, fake: LoadedFixtures
-    ) -> None:
+    def test_a_task_can_be_named_instead_of_numbered(self, fake: LoadedFixtures) -> None:
         task = fake.tasks[0]
 
         _run(fake, "--add", task.name)
 
         assert IgnoreConfig.load().get_ignored_tasks(fake.project.name) == [task.id]
 
-    def test_an_unknown_selector_is_rejected_before_anything_is_written(
-        self, fake: LoadedFixtures
-    ) -> None:
+    def test_an_unknown_selector_is_rejected_before_anything_is_written(self, fake: LoadedFixtures) -> None:
         with pytest.raises(TaskNotFoundError):
             _run(fake, "--add", "no-such-task")
 

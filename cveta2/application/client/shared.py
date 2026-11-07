@@ -70,10 +70,7 @@ def _log_task_5xx_skip(
     """Log 5xx error and ignore-command hint for a skipped task."""
     # Transport diagnostics already contain the sanitized endpoint. Rebuilding
     # a link from the configured host could expose URL credentials or queries.
-    logger.error(
-        f"Ошибка CVAT (HTTP {e.status_code}), "
-        f"задача #{task.id} {task.name!r} пропущена: {e}"
-    )
+    logger.error(f"Ошибка CVAT (HTTP {e.status_code}), задача #{task.id} {task.name!r} пропущена: {e}")
     if ctx.project_name:
         logger.info(
             f"Чтобы пропустить задачу при следующем запуске: "
@@ -81,6 +78,5 @@ def _log_task_5xx_skip(
         )
     else:
         logger.info(
-            f"Чтобы пропустить задачу при следующем запуске: "
-            f"cveta2 ignore --project <имя_проекта> --add {task.id}"
+            f"Чтобы пропустить задачу при следующем запуске: cveta2 ignore --project <имя_проекта> --add {task.id}"
         )

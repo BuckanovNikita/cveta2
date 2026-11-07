@@ -74,18 +74,12 @@ class TestRunTaskCommands:
 
     @pytest.mark.usefixtures("test_config")
     def test_status_passes_mapped_state_to_client(self) -> None:
-        task = TaskInfo(
-            id=42, name="task-a", status="annotation", subset="", updated_date=""
-        )
+        task = TaskInfo(id=42, name="task-a", status="annotation", subset="", updated_date="")
         client = _mock_client_with_task(task)
-        args = parse_cli_args(
-            "task", "status", "-p", "1", "-t", "task-a", "--state", "in-progress"
-        )
+        args = parse_cli_args("task", "status", "-p", "1", "-t", "task-a", "--state", "in-progress")
         with patch_cli_client(client):
             run_task_status(args)
-        client.set_task_jobs_status.assert_called_once_with(
-            42, stage=None, state="in progress"
-        )
+        client.set_task_jobs_status.assert_called_once_with(42, stage=None, state="in progress")
 
 
 # ---------------------------------------------------------------------------
@@ -131,9 +125,7 @@ _CONTEXT_REQUIRED_CALLS: list[tuple[str, Callable[[CvatClient], object]]] = [
     _CONTEXT_REQUIRED_CALLS,
     ids=[name for name, _call in _CONTEXT_REQUIRED_CALLS],
 )
-def test_write_method_outside_context_names_itself(
-    method_name: str, call: Callable[[CvatClient], object]
-) -> None:
+def test_write_method_outside_context_names_itself(method_name: str, call: Callable[[CvatClient], object]) -> None:
     """The context-manager error must name the method the caller invoked.
 
     Only ``test_update_labels_requires_context_manager`` covered this, and it
@@ -247,9 +239,7 @@ class TestMarkFramesDeletedByIds:
         assert client.mark_frames_deleted_by_ids(7, [1]) == 0
         api.set_deleted_frames.assert_not_called()
 
-    def test_skips_unknown_frame_ids_with_warning(
-        self, capture_logs: list[str]
-    ) -> None:
+    def test_skips_unknown_frame_ids_with_warning(self, capture_logs: list[str]) -> None:
         api = _api_with_frames("a.jpg", "b.jpg", "c.jpg", deleted=[0])
         client = _client_with_api(api)
 

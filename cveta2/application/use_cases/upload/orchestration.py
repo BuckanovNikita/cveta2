@@ -51,9 +51,7 @@ def _push_to_cvat(
         )
 
     if options.mark_all_deleted:
-        client.mark_frames_deleted(
-            task_id, {*plan.image_names, *plan.deleted_names}, session=session
-        )
+        client.mark_frames_deleted(task_id, {*plan.image_names, *plan.deleted_names}, session=session)
     elif plan.deleted_names:
         client.mark_frames_deleted(task_id, set(plan.deleted_names), session=session)
 
@@ -63,9 +61,7 @@ def _push_to_cvat(
     return task_id, num_shapes, num_issues
 
 
-def upload_dataset(
-    client: CvatClient, request: UploadRequest, *, deps: UploadDependencies
-) -> UploadOutcome:
+def upload_dataset(client: CvatClient, request: UploadRequest, *, deps: UploadDependencies) -> UploadOutcome:
     """Run the full upload chain: S3 → task → annotations → issues → deleted.
 
     Validates labels, uploads missing images to the project cloud storage,
@@ -91,21 +87,16 @@ def upload_dataset(
             return _completed_outcome(request, manifest)
         if manifest.creation_pending and manifest.task_id is None:
             raise Cveta2Error(
-                "Результат создания задачи неизвестен; проверьте CVAT вручную. "
-                "Новая задача не создаётся."
+                "Результат создания задачи неизвестен; проверьте CVAT вручную. Новая задача не создаётся."
             )
         current_storage = client.detect_project_cloud_storage(request.project_id)
         if current_storage != manifest.cs_info:
-            raise Cveta2Error(
-                "Cloud storage проекта изменён; продолжение запрещено до записи."
-            )
+            raise Cveta2Error("Cloud storage проекта изменён; продолжение запрещено до записи.")
         if manifest.task_id is not None:
             _preflight_resume_target(client, request, manifest)
         staged = _stage_images(client, request, manifest.name_to_server_file, deps=deps)
     else:
-        existing = deps.manifests.load(
-            request.project_id, fingerprint, host=client.host
-        )
+        existing = deps.manifests.load(request.project_id, fingerprint, host=client.host)
         if existing is not None and existing.completed_counts is not None:
             deps.manifests.delete(
                 request.project_id,
@@ -116,9 +107,7 @@ def upload_dataset(
             return _completed_outcome(request, existing)
         staged, manifest = _fresh_manifest(client, request, fingerprint, deps=deps)
 
-    task_id, num_shapes, num_issues = _push_to_cvat(
-        client, request, staged, manifest, deps=deps
-    )
+    task_id, num_shapes, num_issues = _push_to_cvat(client, request, staged, manifest, deps=deps)
 
     deps.invalidate(request.project_id, task_id, request.project_name)
 
@@ -135,9 +124,7 @@ def upload_dataset(
     )
     manifest.completed_counts = (num_shapes, num_issues, num_jobs)
     deps.manifests.save(manifest)
-    deps.manifests.delete(
-        request.project_id, fingerprint, host=client.host, task_id=task_id
-    )
+    deps.manifests.delete(request.project_id, fingerprint, host=client.host, task_id=task_id)
     logger.info(
         f"Задача создана: id={outcome.task_id}, "
         f"имя={outcome.task_name!r}, "

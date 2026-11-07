@@ -43,9 +43,7 @@ class CvatClient(ApplicationClient):
             ),
             images=S3ImageReader(),
             runner=run_concurrent,
-            session_factory=lambda: open_sdk_api(
-                self._cfg.require_credentials(), self._client_factory
-            ),
+            session_factory=lambda: open_sdk_api(self._cfg.require_credentials(), self._client_factory),
             api=api,
         )
 
@@ -110,6 +108,4 @@ class CvatClient(ApplicationClient):
     ) -> int:
         """Refresh the worker policy before creating task review issues."""
         self._refresh_runtime_settings()
-        return super().create_task_issues(
-            task_id, annotations_df, session=session, skip_existing=skip_existing
-        )
+        return super().create_task_issues(task_id, annotations_df, session=session, skip_existing=skip_existing)

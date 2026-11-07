@@ -57,10 +57,7 @@ def _scan_organizations(client: "CvatClient") -> list[OrgProjects]:
             projects=[],
         )
     ]
-    pages.extend(
-        OrgProjects(slug=org.slug, name=org.name, projects=[])
-        for org in client.list_organizations()
-    )
+    pages.extend(OrgProjects(slug=org.slug, name=org.name, projects=[]) for org in client.list_organizations())
     scanned: list[OrgProjects] = []
     for page in pages:
         client.set_organization(page.slug or None)
@@ -144,10 +141,7 @@ def _ask_project_page(
 def select_project_name(names: list[str]) -> str:
     """Select a project by name from a known-names list.  Exits on cancel."""
     if not names:
-        sys.exit(
-            "Нет известных проектов. "
-            "Укажите --project или запустите cveta2 fetch для заполнения кэша."
-        )
+        sys.exit("Нет известных проектов. Укажите --project или запустите cveta2 fetch для заполнения кэша.")
     choices = [Choice(title=name, value=name) for name in names]
     answer = primitives.select_one("Выберите проект:", choices, hint=_PROJECT_NAME_HINT)
     return str(answer)
@@ -201,9 +195,7 @@ def pick_tasks(tasks: "list[TaskInfo]", *, message: str) -> "list[TaskInfo]":
 def select_label(labels: "list[LabelInfo]", *, message: str) -> int | None:
     """Pick a single label by display name.  Returns its id or ``None``."""
     sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
-    choices = [
-        Choice(title=lbl.format_display(), value=lbl.id) for lbl in sorted_labels
-    ]
+    choices = [Choice(title=lbl.format_display(), value=lbl.id) for lbl in sorted_labels]
     answer = primitives.select_one(
         message,
         choices,
@@ -216,9 +208,7 @@ def select_label(labels: "list[LabelInfo]", *, message: str) -> int | None:
 def select_labels(labels: "list[LabelInfo]", *, message: str) -> list[int]:
     """Pick multiple labels by display name.  Returns ids (``[]`` on cancel)."""
     sorted_labels = sorted(labels, key=lambda lbl: lbl.name)
-    choices = [
-        Choice(title=lbl.format_display(), value=lbl.id) for lbl in sorted_labels
-    ]
+    choices = [Choice(title=lbl.format_display(), value=lbl.id) for lbl in sorted_labels]
     answer = primitives.select_many(
         message,
         choices,

@@ -36,9 +36,7 @@ class SdkClientFactory(Protocol):
     client.
     """
 
-    def __call__(
-        self, **kwargs: str | tuple[str, str]
-    ) -> "AbstractContextManager[CvatSdkClient]":
+    def __call__(self, **kwargs: str | tuple[str, str]) -> "AbstractContextManager[CvatSdkClient]":
         """Construct the SDK context manager for the resolved credentials."""
         ...
 
@@ -77,10 +75,7 @@ def open_sdk_api(
     try:
         sdk_cm = operation_context(_translate_api_errors(factory))(**kwargs)
     except _TRANSPORT_ERRORS as e:
-        msg = (
-            f"Не удалось подключиться к CVAT ({_safe_endpoint(cfg.host)}): "
-            f"{describe_error(e)}"
-        )
+        msg = f"Не удалось подключиться к CVAT ({_safe_endpoint(cfg.host)}): {describe_error(e)}"
         raise CvatApiError(msg, diagnostics=exception_diagnostics(e)) from e
     with sdk_cm as sdk_client:
         if cfg.organization:

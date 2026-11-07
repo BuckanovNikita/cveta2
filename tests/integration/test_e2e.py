@@ -133,18 +133,12 @@ class TestRealClientFetchAnnotations:
             project = find_seeded_project(adapter)
             result = fetch_all_annotations(client, project.id)
 
-            bbox_records = [
-                a for a in result.annotations if isinstance(a, BBoxAnnotation)
-            ]
-            without_records = [
-                a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)
-            ]
+            bbox_records = [a for a in result.annotations if isinstance(a, BBoxAnnotation)]
+            without_records = [a for a in result.annotations if isinstance(a, ImageWithoutAnnotations)]
 
             assert len(bbox_records) > 0
             assert len(result.annotations) > 0
-            all_frame_ids = {a.frame_id for a in bbox_records} | {
-                w.frame_id for w in without_records
-            }
+            all_frame_ids = {a.frame_id for a in bbox_records} | {w.frame_id for w in without_records}
             assert len(all_frame_ids) > 0
 
             rows = result.to_csv_rows()
@@ -160,9 +154,7 @@ def _complete_task_jobs(task_id: int) -> None:
     """Move every job of *task_id* to acceptance/completed via the raw SDK."""
     sdk_client = _make_sdk_client()
     try:
-        jobs = get_paginated_collection(
-            sdk_client.api_client.jobs_api.list_endpoint, task_id=task_id
-        )
+        jobs = get_paginated_collection(sdk_client.api_client.jobs_api.list_endpoint, task_id=task_id)
         for job in jobs:
             sdk_client.api_client.jobs_api.partial_update(
                 int(job.id),
@@ -175,9 +167,7 @@ def _complete_task_jobs(task_id: int) -> None:
         sdk_client.close()
 
 
-def _task_updated_date(
-    adapter: SdkCvatApiAdapter, project_id: int, task_name: str
-) -> str:
+def _task_updated_date(adapter: SdkCvatApiAdapter, project_id: int, task_name: str) -> str:
     """Read one task's live ``updated_date`` straight from CVAT."""
     tasks = adapter.get_project_tasks(project_id)
     return next(t for t in tasks if t.name == task_name).updated_date
@@ -186,9 +176,7 @@ def _task_updated_date(
 class TestFetchTaskCacheLive:
     """Live round-trip of the task-annotation cache across two fetches."""
 
-    def test_second_fetch_served_from_cache(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_second_fetch_served_from_cache(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         project_id, project_name, cs_info, cfg = _get_project_and_storage()
         task_name = "integration-cache-roundtrip-test"
         with CvatClient(cfg) as client:
@@ -289,8 +277,7 @@ class TestFetchTaskCacheLive:
                 try:
                     after_date = _task_updated_date(adapter, project_id, task_name)
                     assert after_date != before_date, (
-                        "the premise of this change: a project label edit must "
-                        "bump the task's updated_date"
+                        "the premise of this change: a project label edit must bump the task's updated_date"
                     )
 
                     fetch_selected_tasks(
@@ -298,19 +285,13 @@ class TestFetchTaskCacheLive:
                         FetchTarget(project_id, project_name, tmp_path / "after", None),
                         options,
                     )
-                    assert spy.call_count == 2, (
-                        "an advanced task updated_date must invalidate the cache"
-                    )
+                    assert spy.call_count == 2, "an advanced task updated_date must invalidate the cache"
                 finally:
                     # The seeded project is shared with every other test here,
                     # one of which pins its exact label count.
                     client.update_project_labels(
                         project_id,
-                        delete=[
-                            lbl.id
-                            for lbl in adapter.get_project_labels(project_id)
-                            if lbl.name == probe
-                        ],
+                        delete=[lbl.id for lbl in adapter.get_project_labels(project_id) if lbl.name == probe],
                     )
         finally:
             sdk_client.close()

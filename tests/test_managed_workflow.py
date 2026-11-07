@@ -75,12 +75,7 @@ class FakeCvat:
         ]
 
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
-        return RawDataMeta(
-            [
-                RawFrame(name=f"task{task_id}-{frame}.png", width=32, height=32)
-                for frame in range(12)
-            ]
-        )
+        return RawDataMeta([RawFrame(name=f"task{task_id}-{frame}.png", width=32, height=32) for frame in range(12)])
 
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
         self.annotation_reads.append(task_id)
@@ -147,9 +142,7 @@ class FakeS3:
 
     def read_object(self, uri: str) -> S3Object:
         assert uri == "s3://annotations/imported.csv"
-        return S3Object(
-            self.content, hashlib.sha256(self.content).hexdigest(), "opaque", "v1"
-        )
+        return S3Object(self.content, hashlib.sha256(self.content).hexdigest(), "opaque", "v1")
 
 
 class FakeClearML:
@@ -172,9 +165,7 @@ class FakeClearML:
             self.root / self.latest_id / "dataset.yaml",
         )
 
-    def publish(
-        self, project: str, name: str, parent_id: str | None, directory: Path
-    ) -> Publication:
+    def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
         assert project == "CV/combined"
         assert name == "annotations"
         assert parent_id == self.latest_id
@@ -197,8 +188,7 @@ class FakeClearML:
 
     def versions(self, _project: str, _name: str) -> list[dict[str, str | None]]:
         return [
-            {"id": dataset_id, "version": str(index)}
-            for index, dataset_id in enumerate(self.publications, start=1)
+            {"id": dataset_id, "version": str(index)} for index, dataset_id in enumerate(self.publications, start=1)
         ]
 
 
@@ -227,11 +217,7 @@ def workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workflow:
     images = tmp_path / "images"
     images.mkdir()
     cvat = FakeCvat()
-    names = [
-        frame.name
-        for task in cvat.tasks
-        for frame in cvat.get_task_data_meta(task).frames
-    ]
+    names = [frame.name for task in cvat.tasks for frame in cvat.get_task_data_meta(task).frames]
     names += [f"external-{index}.png" for index in range(6)]
     for name in names:
         color = tuple(hashlib.sha256(name.encode()).digest()[:3])
@@ -313,13 +299,10 @@ def _prepare(workflow: Workflow, tmp_path: Path, *, bad: bool = False) -> Path:
     result = api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
     assert result["rows"] == 30
     transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
-    transformed["image_path"] = transformed["image_name"].map(
-        lambda name: str(workflow.images / name)
-    )
+    transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
     if bad:
         transformed.loc[
-            transformed["source_id"].eq("main")
-            & transformed["source_frame_id"].astype(str).eq("0"),
+            transformed["source_id"].eq("main") & transformed["source_frame_id"].astype(str).eq("0"),
             "bbox_x_br",
         ] = 1
     output = tmp_path / "transformed.csv"
@@ -358,9 +341,7 @@ def test_setup_attach_and_cli_list_never_modify_shared_config(
     assert workflow.cvat.annotation_reads == []
 
 
-def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(
-    workflow: Workflow, tmp_path: Path
-) -> None:
+def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workflow: Workflow, tmp_path: Path) -> None:
     assert workflow.clearml.latest_id is None
     prepared = _prepare(workflow, tmp_path)
     assert workflow.clearml.publications == []
@@ -368,29 +349,25 @@ def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(
     assert json.loads((prepared / "preparation.json").read_bytes())["parent_id"] is None
     result = api.publish_dataset(prepared, **workflow.options)
     assert result.dataset_id == "version-1"
-    assert {
-        path.name for path in (workflow.clearml.root / result.dataset_id).iterdir()
-    } == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
+    assert {path.name for path in (workflow.clearml.root / result.dataset_id).iterdir()} == {
+        "dataset.csv",
+        "dataset.yaml",
+        "tasks.yaml",
+    }
     source = workflow.clearml.read_snapshot(result.dataset_id)
     assert {item.type for item in source.sources} == {"cvat", "s3-csv"}
     workflow.cvat.annotation_reads.clear()
-    reused = api.fetch_dataset(
-        "combined", output_dir=tmp_path / "again", **workflow.options
-    )
+    reused = api.fetch_dataset("combined", output_dir=tmp_path / "again", **workflow.options)
     assert workflow.cvat.annotation_reads == []
     assert reused["sources"][0]["reused"] == [101]
     assert reused["sources"][1]["reused"] == [102]
     assert len(api.dataset_versions("combined", **workflow.options)) == 1
-    compared = api.compare_datasets(
-        str(prepared), result.dataset_id, **workflow.options
-    )
+    compared = api.compare_datasets(str(prepared), result.dataset_id, **workflow.options)
     assert compared["rows"]["added"] == 0
     assert compared["rows"]["removed"] == 0
 
 
-def test_feedback_retry_and_own_timestamp_change_allow_clean_publication(
-    workflow: Workflow, tmp_path: Path
-) -> None:
+def test_feedback_retry_and_own_timestamp_change_allow_clean_publication(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path, bad=True)
     workflow.cvat.advance_issue_timestamp = True
     first = api.report_dataset_errors(prepared, **workflow.options)
@@ -406,9 +383,7 @@ def test_feedback_retry_and_own_timestamp_change_allow_clean_publication(
     assert len(final) == 29
 
 
-def test_feedback_failure_blocks_remote_publication(
-    workflow: Workflow, tmp_path: Path
-) -> None:
+def test_feedback_failure_blocks_remote_publication(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path, bad=True)
     workflow.cvat.fail_issues = True
     with pytest.raises(ManagedError, match=r"feedback|Feedback"):
@@ -419,9 +394,7 @@ def test_feedback_failure_blocks_remote_publication(
 
 
 @pytest.mark.parametrize("change", ["definition", "parent", "cvat", "s3", "image"])
-def test_stale_prerequisites_prevent_publication(
-    workflow: Workflow, tmp_path: Path, change: str
-) -> None:
+def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path, change: str) -> None:
     prepared = _prepare(workflow, tmp_path)
     if change == "definition":
         definition = yaml.safe_load(workflow.shared.read_text())
@@ -434,9 +407,7 @@ def test_stale_prerequisites_prevent_publication(
         shutil.copy(prepared / "dataset.yaml", target / "dataset.yaml")
         workflow.clearml.latest_id = "competing"
     elif change == "cvat":
-        workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(
-            update={"updated_date": "edited"}
-        )
+        workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
     elif change == "s3":
         workflow.s3.content += b"\n"
     else:

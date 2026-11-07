@@ -8,7 +8,5 @@ from cveta2.application.client.task_ops import _TaskOpsMixin
 from cveta2.application.client.write import _WriteMixin
 
 
-class ApplicationClient(
-    _FetchMixin, _ImageMixin, _WriteMixin, _TaskOpsMixin, _ReadMixin, _ClientBase
-):
+class ApplicationClient(_FetchMixin, _ImageMixin, _WriteMixin, _TaskOpsMixin, _ReadMixin, _ClientBase):
     """CVAT orchestration independent of configuration discovery and SDKs."""

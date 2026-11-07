@@ -125,9 +125,7 @@ def test_projects_cache_sits_next_to_the_given_config_file(tmp_path: Path) -> No
     ],
     ids=["plain", "slash", "backslash", "nul", "all_three"],
 )
-def test_cache_dir_for_project_sanitizes_path_separators(
-    tmp_path: Path, project_name: str, expected_dir: str
-) -> None:
+def test_cache_dir_for_project_sanitizes_path_separators(tmp_path: Path, project_name: str, expected_dir: str) -> None:
     """Each of the three replacements is pinned by a name containing its char.
 
     No test called this helper at all, so every search/replacement literal was
@@ -170,9 +168,7 @@ def test_image_cache_falls_back_to_the_per_project_images_root(
 
 def test_image_cache_unconfigured_project_resolves_to_none(tmp_path: Path) -> None:
     """Neither section configured — the caller must get None, not a bare root."""
-    config_path = write_config_yaml(
-        tmp_path / "custom.yaml", cvat={"host": "http://localhost:8080"}
-    )
+    config_path = write_config_yaml(tmp_path / "custom.yaml", cvat={"host": "http://localhost:8080"})
 
     assert resolve_images_cache_dir("proj", config_path) is None
 
@@ -218,9 +214,7 @@ def test_require_credentials_names_the_config_file_actually_read(
     user who hits this error, and telling them to edit
     ``~/.config/cveta2/config.yaml`` sends them to a file nothing reads.
     """
-    with pytest.raises(
-        MissingCredentialsError, match=re.escape(str(isolated_config_path))
-    ):
+    with pytest.raises(MissingCredentialsError, match=re.escape(str(isolated_config_path))):
         CvatConfig().require_credentials()
 
 
@@ -252,9 +246,7 @@ def test_upload_section_round_trips_non_default_values(tmp_path: Path) -> None:
         pytest.param({"image_quality": -1}, id="negative-quality"),
     ],
 )
-def test_unusable_upload_settings_are_rejected_at_load(
-    tmp_path: Path, section: dict[str, int]
-) -> None:
+def test_unusable_upload_settings_are_rejected_at_load(tmp_path: Path, section: dict[str, int]) -> None:
     """A bad value fails naming the setting, not deep inside the upload.
 
     ``images_per_job`` reaches CVAT as ``segment_size`` and divides the
@@ -285,9 +277,7 @@ def test_saving_an_all_default_section_removes_it(tmp_path: Path) -> None:
 
     UploadConfig().save(config_path)
 
-    assert yaml.safe_load(config_path.read_bytes()) == {
-        "cvat": {"host": "http://localhost:8080"}
-    }
+    assert yaml.safe_load(config_path.read_bytes()) == {"cvat": {"host": "http://localhost:8080"}}
 
 
 def test_saving_an_all_default_section_absent_from_the_file_is_a_no_op(
@@ -298,15 +288,11 @@ def test_saving_an_all_default_section_absent_from_the_file_is_a_no_op(
     ``existing.pop(key, None)`` — the default is what makes this safe, and no
     earlier test removed a section from a file that did not contain it.
     """
-    config_path = write_config_yaml(
-        tmp_path / "custom.yaml", cvat={"host": "http://localhost:8080"}
-    )
+    config_path = write_config_yaml(tmp_path / "custom.yaml", cvat={"host": "http://localhost:8080"})
 
     UploadConfig().save(config_path)
 
-    assert yaml.safe_load(config_path.read_bytes()) == {
-        "cvat": {"host": "http://localhost:8080"}
-    }
+    assert yaml.safe_load(config_path.read_bytes()) == {"cvat": {"host": "http://localhost:8080"}}
 
 
 def test_malformed_yaml_is_reported_as_domain_error(tmp_path: Path) -> None:

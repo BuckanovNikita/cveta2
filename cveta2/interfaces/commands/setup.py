@@ -40,9 +40,7 @@ from cveta2.interfaces.commands._parsers import add_config_arg, add_list_arg
 def configure_setup(parser: "argparse.ArgumentParser") -> None:
     """Declare personal setup and attach-only shared configuration options."""
     add_config_arg(parser)
-    parser.add_argument(
-        "--project-config", type=Path, help="Общий YAML проектов и соответствий."
-    )
+    parser.add_argument("--project-config", type=Path, help="Общий YAML проектов и соответствий.")
     parser.add_argument(
         "--migrate-config",
         action="store_true",
@@ -56,10 +54,7 @@ def configure_setup_cache(parser: "argparse.ArgumentParser") -> None:
     parser.add_argument(
         "--reset",
         action="store_true",
-        help=(
-            "Re-ask path for every project using cache_root/project_name "
-            "as default (ignore existing paths)."
-        ),
+        help=("Re-ask path for every project using cache_root/project_name as default (ignore existing paths)."),
     )
     add_list_arg(parser, "List current image cache paths and exit.")
 
@@ -73,9 +68,7 @@ def _run_migration(config_path: Path, project_path: Path | None) -> None:
     proposal = migration_proposal(config_path, project_path)
     logger.info(json.dumps(proposal.preview(), ensure_ascii=False, indent=2))
     if proposal.unresolved:
-        raise Cveta2Error(
-            "Сначала устраните неоднозначные настройки из отчёта миграции."
-        )
+        raise Cveta2Error("Сначала устраните неоднозначные настройки из отчёта миграции.")
     if primitives.confirm(
         "Подтвердить показанное разделение конфигурации?",
         hint=wizard.SETUP_HINT,
@@ -100,11 +93,7 @@ def run_setup(args: "argparse.Namespace") -> None:
         return
     require_interactive(wizard.SETUP_HINT)
     shared = optional_project_config(config_path)
-    existing = (
-        CvatConfig.load(config_path)
-        if shared is not None
-        else CvatConfig.from_file(config_path)
-    )
+    existing = CvatConfig.load(config_path) if shared is not None else CvatConfig.from_file(config_path)
 
     if shared is None:
         host_default = existing.host or "https://app.cvat.ai"
@@ -135,18 +124,13 @@ def run_setup(args: "argparse.Namespace") -> None:
 
 def _offer_shared_attachment(config_path: Path) -> None:
     """Offer a shared path without silently moving newly saved identity fields."""
-    project_path = primitives.path(
-        "Общий YAML проектов (пусто — пропустить): ", hint=wizard.SETUP_HINT
-    )
+    project_path = primitives.path("Общий YAML проектов (пусто — пропустить): ", hint=wizard.SETUP_HINT)
     if project_path is not None:
         # Legacy host/org must first move through the reviewed migration.
         proposal = migration_proposal(config_path, project_path)
         logger.info(json.dumps(proposal.preview(), ensure_ascii=False, indent=2))
         if proposal.unresolved:
-            raise Cveta2Error(
-                "Общая конфигурация отличается; выполните "
-                "setup --migrate-config после согласования."
-            )
+            raise Cveta2Error("Общая конфигурация отличается; выполните setup --migrate-config после согласования.")
         if primitives.confirm(
             "Подтвердить разделение и подключение?",
             hint=wizard.SETUP_HINT,
@@ -171,9 +155,7 @@ def run_setup_cache(args: "argparse.Namespace") -> None:
     image_cache = ImageCacheConfig.load(config_path)
     cache_root = wizard.prompt_cache_root()
 
-    if _setup_image_cache_dirs(
-        projects, image_cache, cache_root, config_path, reset=args.reset
-    ):
+    if _setup_image_cache_dirs(projects, image_cache, cache_root, config_path, reset=args.reset):
         logger.info("Пути кэширования изображений обновлены.")
 
     if _setup_cache_settings(projects, cache_root, config_path):
@@ -190,9 +172,7 @@ def _setup_image_cache_dirs(
     reset: bool,
 ) -> bool:
     """Interactive ``image_cache`` stage; returns True when saved."""
-    if cache_root is not None and _apply_root_to_all_projects(
-        projects, image_cache, cache_root, reset=reset
-    ):
+    if cache_root is not None and _apply_root_to_all_projects(projects, image_cache, cache_root, reset=reset):
         image_cache.save(config_path)
         return True
 
@@ -201,9 +181,7 @@ def _setup_image_cache_dirs(
 
     changed = False
     for project in projects:
-        default_path = _default_cache_path(
-            project, image_cache, cache_root, reset=reset
-        )
+        default_path = _default_cache_path(project, image_cache, cache_root, reset=reset)
         changed |= _prompt_project_cache_dir(project, image_cache, default_path)
 
     if changed:
@@ -245,9 +223,7 @@ def _prompt_project_cache_settings(cache_cfg: CacheConfig, name: str) -> bool:
     task_cache_s3 = wizard.prompt_task_cache_s3(name, current.task_cache_s3)
     if ignored == current.ignored_prefix and task_cache_s3 == current.task_cache_s3:
         return False
-    cache_cfg.projects[name] = current.model_copy(
-        update={"ignored_prefix": ignored, "task_cache_s3": task_cache_s3}
-    )
+    cache_cfg.projects[name] = current.model_copy(update={"ignored_prefix": ignored, "task_cache_s3": task_cache_s3})
     return True
 
 
@@ -284,8 +260,7 @@ def _apply_root_to_all_projects(
 ) -> bool:
     """Show derived paths for all projects; assign them all on confirmation."""
     defaults = {
-        project.name: _default_cache_path(project, image_cache, cache_root, reset=reset)
-        for project in projects
+        project.name: _default_cache_path(project, image_cache, cache_root, reset=reset) for project in projects
     }
     for name, path in defaults.items():
         logger.info(f"  {name} -> {path}")
@@ -318,9 +293,7 @@ def _prompt_project_cache_dir(
     default_path: "Path | None",
 ) -> bool:
     """Prompt for one project's cache dir; update config. Return True if changed."""
-    resolved = wizard.prompt_project_cache_dir(
-        f"  {project.name} (id={project.id})", default_path
-    )
+    resolved = wizard.prompt_project_cache_dir(f"  {project.name} (id={project.id})", default_path)
     if resolved is not None:
         image_cache.set_cache_dir(project.name, resolved)
         logger.info(f"    → {resolved}")
@@ -345,8 +318,6 @@ def _ensure_projects_list(config_path: "Path") -> "list[ProjectInfo]":
         org = client.organization or ""
 
     if projects:
-        update_org_projects(
-            org, org or PERSONAL_WORKSPACE_TITLE, projects, projects_cache_path
-        )
+        update_org_projects(org, org or PERSONAL_WORKSPACE_TITLE, projects, projects_cache_path)
         logger.info(f"Загружено проектов: {len(projects)}")
     return projects

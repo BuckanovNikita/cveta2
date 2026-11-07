@@ -69,13 +69,8 @@ def _fake_client_class(stand: Stand) -> type:
 
     def create_project(spec: dict[str, Any]) -> Any:
         stand.projects.append(spec)
-        labels = [
-            SimpleNamespace(id=1000 + i, name=label["name"])
-            for i, label in enumerate(spec["labels"])
-        ]
-        return SimpleNamespace(
-            id=len(stand.projects), name=spec["name"], get_labels=lambda: labels
-        )
+        labels = [SimpleNamespace(id=1000 + i, name=label["name"]) for i, label in enumerate(spec["labels"])]
+        return SimpleNamespace(id=len(stand.projects), name=spec["name"], get_labels=lambda: labels)
 
     def create_task(
         spec: dict[str, Any],
@@ -98,12 +93,8 @@ def _fake_client_class(stand: Stand) -> type:
 
         return SimpleNamespace(id=task_id, update_annotations=update_annotations)
 
-    def partial_update_data_meta(
-        task_id: int, patched_data_meta_write_request: Any
-    ) -> None:
-        stand.deleted_frames[task_id] = list(
-            patched_data_meta_write_request.deleted_frames
-        )
+    def partial_update_data_meta(task_id: int, patched_data_meta_write_request: Any) -> None:
+        stand.deleted_frames[task_id] = list(patched_data_meta_write_request.deleted_frames)
 
     class FakeClient:
         def __init__(self, url: str, *, check_server_version: bool = True) -> None:
@@ -122,8 +113,7 @@ def _fake_client_class(stand: Stand) -> type:
             )
             self.projects = SimpleNamespace(
                 list=lambda: [
-                    SimpleNamespace(id=i, name=name)
-                    for i, name in enumerate(stand.existing_projects, start=900)
+                    SimpleNamespace(id=i, name=name) for i, name in enumerate(stand.existing_projects, start=900)
                 ],
                 create=create_project,
             )
@@ -167,16 +157,12 @@ def images_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def logs() -> Iterator[list[str]]:
     records: list[str] = []
-    handle = logger.add(
-        lambda m: records.append(str(m).rstrip("\n")), format="{message}"
-    )
+    handle = logger.add(lambda m: records.append(str(m).rstrip("\n")), format="{message}")
     yield records
     logger.remove(handle)
 
 
-def _stubbed_s3(
-    settings: seed_cvat.SeedSettings, keys: list[str], *, create_error: str = ""
-) -> tuple[Any, Stubber]:
+def _stubbed_s3(settings: seed_cvat.SeedSettings, keys: list[str], *, create_error: str = "") -> tuple[Any, Stubber]:
     s3: Any = seed_cvat.make_bucket_client(settings)
     stubber = Stubber(s3)
     if create_error:
@@ -199,9 +185,7 @@ def _stubbed_s3(
 
 class TestSettings:
     @pytest.mark.usefixtures("stand")
-    def test_every_missing_variable_is_named_at_once(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_every_missing_variable_is_named_at_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("MINIO_REGION")
         monkeypatch.setenv("MINIO_BUCKET", "  ")
         with pytest.raises(seed_cvat.SeedError) as error:
@@ -231,9 +215,7 @@ class TestBucket:
         )
 
     @pytest.mark.usefixtures("stand")
-    def test_creates_the_bucket_and_uploads_the_images_flat(
-        self, images_dir: Path
-    ) -> None:
+    def test_creates_the_bucket_and_uploads_the_images_flat(self, images_dir: Path) -> None:
         settings = seed_cvat.SeedSettings.from_env()
         s3, stubber = _stubbed_s3(settings, seed_cvat.IMAGE_NAMES)
         with stubber:
@@ -243,18 +225,14 @@ class TestBucket:
     @pytest.mark.usefixtures("stand")
     def test_a_bucket_this_key_owns_is_reused(self, images_dir: Path) -> None:
         settings = seed_cvat.SeedSettings.from_env()
-        s3, stubber = _stubbed_s3(
-            settings, seed_cvat.IMAGE_NAMES, create_error="BucketAlreadyOwnedByYou"
-        )
+        s3, stubber = _stubbed_s3(settings, seed_cvat.IMAGE_NAMES, create_error="BucketAlreadyOwnedByYou")
         with stubber:
             seed_cvat.seed_bucket(settings, s3, images_dir)
         stubber.assert_no_pending_responses()
 
     @pytest.mark.usefixtures("stand")
     @pytest.mark.parametrize("code", ["BucketAlreadyExists", "AccessDenied"])
-    def test_somebody_elses_bucket_or_a_denied_key_is_an_error(
-        self, images_dir: Path, code: str
-    ) -> None:
+    def test_somebody_elses_bucket_or_a_denied_key_is_an_error(self, images_dir: Path, code: str) -> None:
         settings = seed_cvat.SeedSettings.from_env()
         s3, stubber = _stubbed_s3(settings, [], create_error=code)
         with stubber, pytest.raises(seed_cvat.SeedError) as error:
@@ -262,9 +240,7 @@ class TestBucket:
         assert code in str(error.value)
 
     @pytest.mark.usefixtures("stand")
-    def test_missing_images_are_reported_before_anything_is_created(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_images_are_reported_before_anything_is_created(self, tmp_path: Path) -> None:
         settings = seed_cvat.SeedSettings.from_env()
         s3, stubber = _stubbed_s3(settings, [])
         with stubber, pytest.raises(seed_cvat.SeedError) as error:
@@ -291,9 +267,7 @@ class TestProject:
         assert storage.display_name == f"{TAG} minio"
         assert storage.resource == TAG
         assert (storage.key, storage.secret_key) == ("cveta2", "minio-secret")
-        assert "endpoint_url=http%3A%2F%2Fminio.minio.svc%3A9000" in (
-            storage.specific_attributes
-        )
+        assert "endpoint_url=http%3A%2F%2Fminio.minio.svc%3A9000" in (storage.specific_attributes)
         assert "region_name=us-east-1" in storage.specific_attributes
 
         (project,) = stand.projects
@@ -323,9 +297,7 @@ class TestProject:
         annotated = {task_id for task_id, _, _ in stand.annotations}
         assert 102 not in annotated, "all-empty carries no shapes"
         assert all(count > 0 for _, count, _ in stand.annotations)
-        assert {action for _, _, action in stand.annotations} == {
-            AnnotationUpdateAction.CREATE
-        }
+        assert {action for _, _, action in stand.annotations} == {AnnotationUpdateAction.CREATE}
         assert stand.deleted_frames == {
             103: [0, 1, 2, 3, 4, 5, 6, 7],
             104: [7],
@@ -400,14 +372,11 @@ class TestMain:
     ) -> None:
         handshake = ssl.SSLCertVerificationError(
             1,
-            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
-            "unable to get local issuer certificate",
+            "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate",
         )
 
         def untrusted_s3_error() -> BotocoreSSLError:
-            error = BotocoreSSLError(
-                endpoint_url="https://s3.k8s.docker.internal/bucket", error=handshake
-            )
+            error = BotocoreSSLError(endpoint_url="https://s3.k8s.docker.internal/bucket", error=handshake)
             if not raised_while_handling:
                 return error
             # botocore raises its SSLError inside the urllib3 handler, so the
@@ -428,9 +397,7 @@ class TestMain:
                 raise AssertionError("no upload after a failed bucket")
 
         monkeypatch.setattr(seed_cvat, "IMAGES_DIR", images_dir)
-        monkeypatch.setattr(
-            seed_cvat, "make_bucket_client", lambda _settings: UntrustedS3()
-        )
+        monkeypatch.setattr(seed_cvat, "make_bucket_client", lambda _settings: UntrustedS3())
         monkeypatch.setattr(sys, "argv", ["seed_cvat.py"])
         assert seed_cvat.main() == 1
         assert logs[-1].startswith("TLS verification of https://s3.k8s")

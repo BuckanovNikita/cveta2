@@ -47,29 +47,19 @@ class CvatFeedback:
         labels = self._api.get_project_labels(finding.project_id)
         after = self._task(finding)
         if after.updated_date != task.updated_date or after != task:
-            raise ManagedError(
-                "CVAT task changed while checking feedback prerequisites"
-            )
+            raise ManagedError("CVAT task changed while checking feedback prerequisites")
         payload = {
             "task": task.model_dump(mode="json", exclude={"updated_date"}),
             "data": asdict(data),
-            "annotations": [
-                asdict(shape)
-                for shape in sorted(annotations.shapes, key=lambda item: item.id)
-            ],
+            "annotations": [asdict(shape) for shape in sorted(annotations.shapes, key=lambda item: item.id)],
             "jobs": [asdict(job) for job in sorted(jobs, key=lambda item: item.id)],
-            "labels": [
-                label.model_dump(mode="json")
-                for label in sorted(labels, key=lambda item: item.id)
-            ],
+            "labels": [label.model_dump(mode="json") for label in sorted(labels, key=lambda item: item.id)],
         }
         return FeedbackTaskState(
             project_id=finding.project_id,
             task_id=task.id,
             updated_date=task.updated_date,
-            fingerprint=hashlib.sha256(
-                json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
-            ).hexdigest(),
+            fingerprint=hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
         )
 
     def issue_exists(self, finding: FeedbackFinding) -> bool:
@@ -77,8 +67,7 @@ class CvatFeedback:
         self._task(finding)
         token = _marker(finding)
         return any(
-            issue.frame == finding.frame_id
-            and any(token in message for message in issue.comments)
+            issue.frame == finding.frame_id and any(token in message for message in issue.comments)
             for issue in self._api.get_task_issues(finding.task_id)
         )
 
@@ -88,8 +77,7 @@ class CvatFeedback:
         jobs = [
             job
             for job in self._api.get_task_jobs(finding.task_id)
-            if job.type == "annotation"
-            and job.start_frame <= finding.frame_id <= job.stop_frame
+            if job.type == "annotation" and job.start_frame <= finding.frame_id <= job.stop_frame
         ]
         if len(jobs) != 1:
             raise ManagedError("Feedback frame has no unique annotation job")

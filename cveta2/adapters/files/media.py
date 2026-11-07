@@ -18,9 +18,7 @@ from cveta2.domain.verification.models import (
 _URI_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 
-def resolve_image_path(
-    name: str, value: object, options: ValidationOptions
-) -> Path | None:
+def resolve_image_path(name: str, value: object, options: ValidationOptions) -> Path | None:
     """Resolve explicitly local paths; roots fill only absent path cells."""
     if isinstance(value, (str, Path)) and str(value):
         raw = str(value)
@@ -63,14 +61,10 @@ def _decode(
         return (width, height), image_format, None, None
 
 
-def inspect_images(
-    frame: pd.DataFrame, *, profile: Profile, options: ValidationOptions
-) -> MediaInspection:
+def inspect_images(frame: pd.DataFrame, *, profile: Profile, options: ValidationOptions) -> MediaInspection:
     """Resolve every row and decode each canonical file once when requested."""
     facts: list[MediaRowFact] = []
-    cache: dict[
-        Path, tuple[tuple[int, int] | None, str | None, str | None, str | None]
-    ] = {}
+    cache: dict[Path, tuple[tuple[int, int] | None, str | None, str | None, str | None]] = {}
     if not frame.columns.is_unique or "image_name" not in frame:
         return MediaInspection()
     for position, row in enumerate(frame.to_dict(orient="records")):
@@ -115,10 +109,7 @@ def inspect_images(
                 issues.append(
                     Issue(
                         code="media_unreadable",
-                        message=(
-                            "No local image path is available; remote "
-                            "URIs are not read."
-                        ),
+                        message=("No local image path is available; remote URIs are not read."),
                         row_position=position,
                         columns=("image_path",),
                     )
@@ -151,8 +142,6 @@ def inspect_images(
 class LocalMediaInspector:
     """Inject filesystem inspection into application orchestration."""
 
-    def inspect(
-        self, frame: pd.DataFrame, *, profile: Profile, options: ValidationOptions
-    ) -> MediaInspection:
+    def inspect(self, frame: pd.DataFrame, *, profile: Profile, options: ValidationOptions) -> MediaInspection:
         """Read canonical path and optional decoded image facts."""
         return inspect_images(frame, profile=profile, options=options)

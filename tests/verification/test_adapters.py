@@ -48,9 +48,7 @@ def test_ambiguous_csv_snapshot_raises_library_error(text: str) -> None:
 def test_clipping_requires_explicit_cleanup_and_preserves_input(tmp_path: Path) -> None:
     frame = pd.DataFrame([row(right=21)])
     original = frame.copy(deep=True)
-    result = verify_dataframe(
-        frame, profile="clearml-yolo", options=ValidationOptions(emit_warnings=False)
-    )
+    result = verify_dataframe(frame, profile="clearml-yolo", options=ValidationOptions(emit_warnings=False))
     assert result.is_valid
     assert result.requires_cleanup
     assert report_dict(result)["requires_cleanup"] is True
@@ -70,9 +68,7 @@ def test_structural_errors_cannot_be_cleaned_away(tmp_path: Path) -> None:
     assert not (tmp_path / "output").exists()
 
 
-def test_decode_cache_and_orientation_facts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_decode_cache_and_orientation_facts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     exif = Image.Exif()
     exif[274] = 6
     image_path = tmp_path / "a.jpg"
@@ -88,9 +84,7 @@ def test_decode_cache_and_orientation_facts(
 
     monkeypatch.setattr(Image, "open", counted_open)
     frame = pd.DataFrame([row(str(image_path)), row(str(alias))])
-    facts = inspect_images(
-        frame, profile="clearml-yolo", options=ValidationOptions(check_images=True)
-    )
+    facts = inspect_images(frame, profile="clearml-yolo", options=ValidationOptions(check_images=True))
     assert opened == [image_path]
     assert [fact.size for fact in facts.rows] == [(20, 30), (20, 30)]
     assert [fact.image_format for fact in facts.rows] == ["JPEG", "JPEG"]
@@ -124,9 +118,7 @@ def test_pure_validation_never_resolves_filesystem_or_emits_warnings(
     assert result.is_valid
 
 
-@pytest.mark.parametrize(
-    "uri", ["https://example.org/a.jpg", "s3://bucket/a.jpg", "file:///a.jpg"]
-)
+@pytest.mark.parametrize("uri", ["https://example.org/a.jpg", "s3://bucket/a.jpg", "file:///a.jpg"])
 def test_remote_media_is_reported_without_network(uri: str) -> None:
     facts = inspect_images(
         pd.DataFrame([row(uri)]),
@@ -178,12 +170,8 @@ def test_truncated_jpeg_is_decoded_and_rejected(tmp_path: Path) -> None:
 
 
 def test_deleted_cveta_rows_do_not_decode_missing_images(tmp_path: Path) -> None:
-    frame = pd.DataFrame(
-        [{**row(str(tmp_path / "a.jpg")), "instance_shape": "deleted"}]
-    )
-    facts = inspect_images(
-        frame, profile="cveta2", options=ValidationOptions(check_images=True)
-    )
+    frame = pd.DataFrame([{**row(str(tmp_path / "a.jpg")), "instance_shape": "deleted"}])
+    facts = inspect_images(frame, profile="cveta2", options=ValidationOptions(check_images=True))
     assert not facts.rows[0].issues
     assert facts.rows[0].size is None
 
@@ -211,9 +199,7 @@ def test_broken_report_keeps_original_rows_and_collision_free_metadata(
     tmp_path: Path,
 ) -> None:
     frame = pd.DataFrame([{**row(right=0), "__validator_row_position": "keep"}])
-    result = verify_dataframe(
-        frame, profile="clearml-yolo", options=ValidationOptions(emit_warnings=False)
-    )
+    result = verify_dataframe(frame, profile="clearml-yolo", options=ValidationOptions(emit_warnings=False))
     write_report(result, tmp_path / "report", cleanup=True)
     broken = pd.read_csv(tmp_path / "report" / "broken.csv", keep_default_na=False)
     assert broken.iloc[0]["__validator_row_position"] == "keep"
@@ -264,9 +250,7 @@ def test_application_csv_workflow_uses_injected_file_and_media_ports() -> None:
     frame = pd.DataFrame([row()])
 
     class Files:
-        def load(
-            self, path: str | Path, options: ValidationOptions
-        ) -> LoadedVerification:
+        def load(self, path: str | Path, options: ValidationOptions) -> LoadedVerification:
             assert path == "input.csv"
             assert options.base_dir is None
             events.append("load")
@@ -291,9 +275,7 @@ def test_application_csv_workflow_uses_injected_file_and_media_ports() -> None:
             events.append("warn")
 
     class Inspector:
-        def inspect(
-            self, actual: pd.DataFrame, *, profile: Profile, options: ValidationOptions
-        ) -> MediaInspection:
+        def inspect(self, actual: pd.DataFrame, *, profile: Profile, options: ValidationOptions) -> MediaInspection:
             assert actual is frame
             assert profile == "clearml-yolo"
             assert options is context
@@ -301,9 +283,7 @@ def test_application_csv_workflow_uses_injected_file_and_media_ports() -> None:
             return MediaInspection()
 
     result = verify(
-        VerificationRequest(
-            "input.csv", profile="clearml-yolo", output_dir="output", cleanup=True
-        ),
+        VerificationRequest("input.csv", profile="clearml-yolo", output_dir="output", cleanup=True),
         files=Files(),
         inspector=Inspector(),
     )

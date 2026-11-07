@@ -94,15 +94,9 @@ def test_nullable_explicit_completion_keeps_overrides_and_legacy_fallback() -> N
         {
             "image_name": ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"],
             "task_id": [1, 1, 2, 3, 4],
-            "job_stage": pd.Series(
-                ["acceptance", pd.NA, pd.NA, "acceptance", "acceptance"], dtype="string"
-            ),
-            "job_state": pd.Series(
-                ["completed", pd.NA, pd.NA, "completed", "completed"], dtype="string"
-            ),
-            "task_completed": pd.Series(
-                [pd.NA, pd.NA, True, False, pd.NA], dtype="boolean"
-            ),
+            "job_stage": pd.Series(["acceptance", pd.NA, pd.NA, "acceptance", "acceptance"], dtype="string"),
+            "job_state": pd.Series(["completed", pd.NA, pd.NA, "completed", "completed"], dtype="string"),
+            "task_completed": pd.Series([pd.NA, pd.NA, True, False, pd.NA], dtype="boolean"),
         }
     )
 
@@ -154,9 +148,7 @@ def test_empty_dataframe_keeps_column_order() -> None:
 
 # One record per annotation row or deletion: (image, task_id, job finished).
 _Record = tuple[str, int, bool]
-_RECORDS = st.tuples(
-    st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]), st.integers(1, 5), st.booleans()
-)
+_RECORDS = st.tuples(st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]), st.integers(1, 5), st.booleans())
 
 
 def _expected_partition(
@@ -218,9 +210,7 @@ def _status(done: bool) -> str:  # noqa: FBT001 - maps a drawn flag
 @example(rows=[("a.jpg", 1, True)], deletions=[("a.jpg", 2, True)] * 2)
 # An unfinished job seen only through a deletion record holds its task back.
 @example(rows=[("a.jpg", 1, True)], deletions=[("gone.jpg", 1, False)])
-def test_partition_matches_specification(
-    rows: list[_Record], deletions: list[_Record]
-) -> None:
+def test_partition_matches_specification(rows: list[_Record], deletions: list[_Record]) -> None:
     """Every row lands in exactly the part the specification assigns.
 
     Task dates are deliberately reversed against task ids: only the id orders
@@ -228,14 +218,10 @@ def test_partition_matches_specification(
     scramble the partition.
     """
     frame = _df(
-        [
-            _row(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done))
-            for image, task, done in rows
-        ]
+        [_row(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in rows]
     ).assign(row=range(len(rows)))
     records = [
-        make_deleted(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done))
-        for image, task, done in deletions
+        make_deleted(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in deletions
     ]
 
     result = partition_annotations_df(frame, records)
@@ -246,9 +232,7 @@ def test_partition_matches_specification(
         "obsolete": set(result.obsolete["row"]),
         "in_progress": set(result.in_progress["row"]),
     } == parts
-    assert len(result.dataset) + len(result.obsolete) + len(result.in_progress) == len(
-        rows
-    )
+    assert len(result.dataset) + len(result.obsolete) + len(result.in_progress) == len(rows)
     assert [(d.image_name, d.task_id) for d in result.deleted_images] == deleted
 
 
@@ -266,19 +250,14 @@ def test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort() -> None:
         _row("contested.jpg", 1, tie),
         _row("contested.jpg", 2, tie),
     ]
-    rows += [
-        _row(f"filler{i % 5}.jpg", 10 + i, f"2026-03-{(i % 3) + 1:02d}T10:00:00")
-        for i in range(14)
-    ]
+    rows += [_row(f"filler{i % 5}.jpg", 10 + i, f"2026-03-{(i % 3) + 1:02d}T10:00:00") for i in range(14)]
     deleted = [make_deleted("contested.jpg", 2, tie)]
 
     result = partition_annotations_df(_df(rows), deleted)
 
     assert [d.image_name for d in result.deleted_images] == ["contested.jpg"]
     assert "contested.jpg" not in set(result.dataset["image_name"])
-    contested_obsolete = result.obsolete[
-        result.obsolete["image_name"] == "contested.jpg"
-    ]
+    contested_obsolete = result.obsolete[result.obsolete["image_name"] == "contested.jpg"]
     assert len(contested_obsolete) == 2
 
 
@@ -329,9 +308,7 @@ def _job_row(
     stage: str,
     state: str,
 ) -> dict[str, object]:
-    return csv_row(
-        image, task_id=task_id, updated=updated, job_stage=stage, job_state=state
-    )
+    return csv_row(image, task_id=task_id, updated=updated, job_stage=stage, job_state=state)
 
 
 @pytest.mark.parametrize(

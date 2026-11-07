@@ -29,9 +29,7 @@ from tests.helpers import (
 def _s3_sync_client() -> MagicMock:
     client = mock_client_ctx()
     client.detect_project_cloud_storage.return_value = MagicMock()
-    client.sync_project_images.return_value = DownloadStats(
-        downloaded=5, cached=10, failed=0, total=15
-    )
+    client.sync_project_images.return_value = DownloadStats(downloaded=5, cached=10, failed=0, total=15)
     return client
 
 
@@ -130,15 +128,11 @@ def test_s3_sync_uses_canonical_project_settings(
     )
     fake = FakeCvatApi.from_tasks([], project_name="Dataset")
     client = CvatClient(CvatConfig(), api=fake)
-    sync = MagicMock(
-        return_value=DownloadStats(downloaded=1, cached=0, failed=0, total=1)
-    )
+    sync = MagicMock(return_value=DownloadStats(downloaded=1, cached=0, failed=0, total=1))
 
     with (
         patch_cli_client(client),
-        patch.object(
-            client, "detect_project_cloud_storage", return_value=make_cs_info()
-        ),
+        patch.object(client, "detect_project_cloud_storage", return_value=make_cs_info()),
         patch.object(client, "sync_project_images", sync),
     ):
         CliApp().run(["s3-sync", "-p", spec])
@@ -151,6 +145,4 @@ def test_s3_sync_uses_canonical_project_settings(
     assert kwargs["ignored_prefix"] == "raw"
     assert kwargs["project_cloud_storage"].bucket == "override"
     assert kwargs["project_cloud_storage"].prefix == "raw/data"
-    assert fake.organization_calls == (
-        [spec.split("/", maxsplit=1)[0] or None] if "/" in spec else []
-    )
+    assert fake.organization_calls == ([spec.split("/", maxsplit=1)[0] or None] if "/" in spec else [])

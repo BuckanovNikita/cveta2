@@ -106,9 +106,7 @@ class SeedSettings(BaseModel):
 
     @classmethod
     def from_env(cls) -> SeedSettings:
-        values = {
-            field: os.environ.get(env, "").strip() for field, env in ENV_KEYS.items()
-        }
+        values = {field: os.environ.get(env, "").strip() for field, env in ENV_KEYS.items()}
         missing = [ENV_KEYS[field] for field, value in values.items() if not value]
         if missing:
             raise SeedError(
@@ -165,9 +163,7 @@ def collect_image_paths(images_dir: Path) -> list[Path]:
                 f"missing images directory {directory}; "
                 "uv run python -m tests.integration.lifecycle up downloads coco8 first"
             )
-        paths.extend(
-            p for p in sorted(directory.iterdir()) if p.suffix.lower() in IMAGE_SUFFIXES
-        )
+        paths.extend(p for p in sorted(directory.iterdir()) if p.suffix.lower() in IMAGE_SUFFIXES)
     if not paths:
         raise SeedError(f"no images under {images_dir}")
     return paths
@@ -229,25 +225,17 @@ def _load_project_labels() -> list[dict[str, Any]]:
 
 def _load_task_fixtures() -> list[dict[str, Any]]:
     tasks_dir = FIXTURES_DIR / "tasks"
-    return [
-        json.loads(path.read_text(encoding="utf-8"))
-        for path in sorted(tasks_dir.glob("*.json"))
-    ]
+    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(tasks_dir.glob("*.json"))]
 
 
 def _refuse_existing_project(client: CvatClient, name: str) -> None:
     existing = [p for p in client.projects.list() if p.name == name]
     if existing:
         ids = ", ".join(str(p.id) for p in existing)
-        raise SeedError(
-            f"project '{name}' already exists (id {ids}); "
-            "run cvat_stand.py cleanup --tag first"
-        )
+        raise SeedError(f"project '{name}' already exists (id {ids}); run cvat_stand.py cleanup --tag first")
 
 
-def _create_project(
-    client: CvatClient, name: str, labels: list[dict[str, Any]], cloud_storage_id: int
-) -> CvatProject:
+def _create_project(client: CvatClient, name: str, labels: list[dict[str, Any]], cloud_storage_id: int) -> CvatProject:
     """Create the run's coco8-dev project with labels and cloud storage source."""
     project_spec = {
         "name": name,
@@ -280,9 +268,7 @@ def _build_label_id_map(
     return mapping
 
 
-def _shapes_for(
-    shapes_raw: list[dict[str, Any]], label_id_map: dict[int, int]
-) -> list[Any]:
+def _shapes_for(shapes_raw: list[dict[str, Any]], label_id_map: dict[int, int]) -> list[Any]:
     return [
         cvat_models.LabeledShapeRequest(
             type=cvat_models.ShapeType(s["type"]),
@@ -319,9 +305,7 @@ def _create_task(
     )
     logger.info(f"Created task: {task_name} (id={task.id})")
 
-    shapes = _shapes_for(
-        task_fixture.get("annotations", {}).get("shapes", []), label_id_map
-    )
+    shapes = _shapes_for(task_fixture.get("annotations", {}).get("shapes", []), label_id_map)
     if shapes:
         task.update_annotations(
             cvat_models.PatchedLabeledDataRequest(shapes=shapes),
@@ -356,9 +340,7 @@ def seed_project(client: CvatClient, settings: SeedSettings) -> int:
     """Cloud storage, project and tasks of this run; returns the project id."""
     fixture_labels = _load_project_labels()
     task_fixtures = _load_task_fixtures()
-    logger.info(
-        f"Loaded {len(fixture_labels)} labels, {len(task_fixtures)} task fixtures"
-    )
+    logger.info(f"Loaded {len(fixture_labels)} labels, {len(task_fixtures)} task fixtures")
     _refuse_existing_project(client, settings.project_name)
     cs_id = _register_cloud_storage(client, settings)
     project = _create_project(client, settings.project_name, fixture_labels, cs_id)
@@ -394,10 +376,7 @@ def open_stand(settings: SeedSettings) -> Client:
 def main() -> int:
     try:
         settings = SeedSettings.from_env()
-        logger.info(
-            f"CVAT host: {settings.cvat_host}, organization: "
-            f"{settings.cvat_organization}"
-        )
+        logger.info(f"CVAT host: {settings.cvat_host}, organization: {settings.cvat_organization}")
         logger.info(
             f"MinIO endpoint: {settings.minio_endpoint} "
             f"(for CVAT: {settings.minio_endpoint_for_cvat}), "
@@ -420,9 +399,7 @@ def main() -> int:
     except SeedError as error:
         logger.error(str(error))
         return 1
-    logger.info(
-        f"Seeding complete: project '{settings.project_name}' (id={project_id})"
-    )
+    logger.info(f"Seeding complete: project '{settings.project_name}' (id={project_id})")
     return 0
 
 

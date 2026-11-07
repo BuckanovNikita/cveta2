@@ -32,15 +32,11 @@ def short_retries() -> Iterator[None]:
         configure_retries(*previous)
 
 
-def _download_a(
-    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, client: FakeS3Client
-) -> DownloadStats:
+def _download_a(tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, client: FakeS3Client) -> DownloadStats:
     """Download the single frame ``a.jpg`` from ``bucket/images`` via *client*."""
     monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
     return ImageDownloader(tmp_path).download(
-        ProjectAnnotations(
-            annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]
-        ),
+        ProjectAnnotations(annotations=[make_bbox(image_name="a.jpg")], deleted_images=[]),
         make_cs_info(bucket="bucket", prefix="images"),
     )
 
@@ -152,9 +148,7 @@ def test_object_disappearing_after_listing_counts_once(
     assert client.attempts == (1 if listing_first else 2)
 
 
-def test_missing_code_during_body_read_is_not_a_missing_key(
-    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_code_during_body_read_is_not_a_missing_key(tmp_path: "Path", monkeypatch: pytest.MonkeyPatch) -> None:
     class FailedBody:
         def read(self) -> bytes:
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "Body")
@@ -212,9 +206,7 @@ def test_direct_failures_missing_keys_and_fallback_failures_accumulate(
         ],
         deleted_images=[],
     )
-    stats = ImageDownloader(tmp_path).download(
-        annotations, make_cs_info(bucket="bucket", prefix="images")
-    )
+    stats = ImageDownloader(tmp_path).download(annotations, make_cs_info(bucket="bucket", prefix="images"))
     assert (stats.total, stats.downloaded, stats.failed, stats.cached) == (5, 1, 4, 0)
     assert (tmp_path / "nested/good.jpg").read_bytes() == b"image"
     assert annotations.annotations[0].s3_image_path == "images/broken1.jpg"
@@ -237,9 +229,7 @@ def test_listing_full_canonical_key_precedes_basename_fallback(
         annotations=[make_bbox(image_name="a.jpg", frame_path="nested/a.jpg")],
         deleted_images=[],
     )
-    stats = ImageDownloader(tmp_path).download(
-        annotations, make_cs_info(bucket="bucket", prefix="images")
-    )
+    stats = ImageDownloader(tmp_path).download(annotations, make_cs_info(bucket="bucket", prefix="images"))
     assert stats.downloaded == 1
     assert annotations.annotations[0].s3_image_path == "images/images/nested/a.jpg"
     assert (tmp_path / "images/nested/a.jpg").read_bytes() == b"correct"

@@ -75,9 +75,7 @@ def _frame(side: str, rows: list[_Row]) -> pd.DataFrame:
     )
 
 
-def _expected_labels(
-    old: list[_Row], new: list[_Row], deleted: set[str], *, by_task: bool
-) -> list[str]:
+def _expected_labels(old: list[_Row], new: list[_Row], deleted: set[str], *, by_task: bool) -> list[str]:
     """Each surviving image keeps every row of exactly one side."""
     labels: list[str] = []
     for image in {r[0] for r in old} | {r[0] for r in new}:
@@ -85,9 +83,7 @@ def _expected_labels(
             continue
         old_ids = [task for name, task, _ in old if name == image]
         new_ids = [task for name, task, _ in new if name == image]
-        old_wins = not new_ids or (
-            by_task and bool(old_ids) and max(old_ids) > max(new_ids)
-        )
+        old_wins = not new_ids or (by_task and bool(old_ids) and max(old_ids) > max(new_ids))
         side, rows = ("old", old) if old_wins else ("new", new)
         labels += [f"{side}{i}" for i, r in enumerate(rows) if r[0] == image]
     return sorted(labels)
@@ -104,9 +100,7 @@ def _expected_labels(
 @example(old=[("a.jpg", 1, "train")], new=[], deleted=set(), by_task=False)
 @example(old=[], new=[("a.jpg", 1, None)], deleted=set(), by_task=True)
 # Default mode ignores task ids: new wins although old holds the later task.
-@example(
-    old=[("a.jpg", 3, "train")], new=[("a.jpg", 1, None)], deleted=set(), by_task=False
-)
+@example(old=[("a.jpg", 3, "train")], new=[("a.jpg", 1, None)], deleted=set(), by_task=False)
 # By-task mode: the later task wins, deleted images stay out even then.
 @example(
     old=[("a.jpg", 3, None), ("b.jpg", 3, "val")],
@@ -124,22 +118,16 @@ def _expected_labels(
 def test_merge_keeps_one_side_per_image_and_fills_split_from_old(
     old: list[_Row], new: list[_Row], deleted: set[str], *, by_task: bool
 ) -> None:
-    merged = _merge_datasets(
-        _frame("old", old), _frame("new", new), deleted, by_task=by_task
-    )
+    merged = _merge_datasets(_frame("old", old), _frame("new", new), deleted, by_task=by_task)
 
-    assert sorted(merged["instance_label"]) == _expected_labels(
-        old, new, deleted, by_task=by_task
-    )
+    assert sorted(merged["instance_label"]) == _expected_labels(old, new, deleted, by_task=by_task)
     assert merged.index.equals(pd.RangeIndex(len(merged)))
     first_old_split: dict[str, str] = {}
     for image, _, split in old:
         if split is not None:
             first_old_split.setdefault(image, split)
     sources = {"old": old, "new": new}
-    for label, image, split in merged[
-        ["instance_label", "image_name", "split"]
-    ].itertuples(index=False):
+    for label, image, split in merged[["instance_label", "image_name", "split"]].itertuples(index=False):
         own = sources[label[:3]][int(label[3:])][2]
         expected = own if own is not None else first_old_split.get(image)
         assert (split if pd.notna(split) else None) == expected
@@ -215,9 +203,7 @@ class TestPropagateSplits:
     ],
     ids=["unusable-old", "unusable-new", "both-unusable", "numeric-not-text"],
 )
-def test_resolve_by_task_edge_ids(
-    old_id: object, new_id: object, *, new_wins: bool
-) -> None:
+def test_resolve_by_task_edge_ids(old_id: object, new_id: object, *, new_wins: bool) -> None:
     old = make_df([_trow("a.jpg", task_id=old_id)])
     new = make_df([_trow("a.jpg", task_id=new_id)])
 
@@ -249,18 +235,14 @@ class TestReadDeletedNames:
         ],
         ids=["csv", "legacy-text", "blank-lines"],
     )
-    def test_reads_names(
-        self, tmp_path: Path, name: str, content: str, expected: set[str]
-    ) -> None:
+    def test_reads_names(self, tmp_path: Path, name: str, content: str, expected: set[str]) -> None:
         path = tmp_path / name
         path.write_text(content, encoding="utf-8")
 
         assert _read_deleted_names(path) == expected
 
     @pytest.mark.parametrize("content", [None, 'image_name\n"unterminated,quote\n'])
-    def test_unreadable_file_error_names_the_file(
-        self, tmp_path: Path, content: str | None
-    ) -> None:
+    def test_unreadable_file_error_names_the_file(self, tmp_path: Path, content: str | None) -> None:
         path = tmp_path / "deleted.csv"
         if content is not None:
             path.write_text(content, encoding="utf-8")
@@ -275,22 +257,14 @@ class TestReadDeletedNames:
 
 
 @pytest.mark.parametrize(("by_task", "label"), [(False, "new"), (True, "old")])
-def test_merge_use_case_works_through_the_files_port(
-    *, by_task: bool, label: str
-) -> None:
+def test_merge_use_case_works_through_the_files_port(*, by_task: bool, label: str) -> None:
     """Paths are only handed to the port; the merged frame is what is saved."""
-    old = pd.DataFrame(
-        [{"image_name": "same.jpg", "task_id": 9, "instance_label": "old"}]
-    )
-    new = pd.DataFrame(
-        [{"image_name": "same.jpg", "task_id": 2, "instance_label": "new"}]
-    )
+    old = pd.DataFrame([{"image_name": "same.jpg", "task_id": 9, "instance_label": "old"}])
+    new = pd.DataFrame([{"image_name": "same.jpg", "task_id": 2, "instance_label": "new"}])
     writes: list[tuple[pd.DataFrame, Path]] = []
     reads: list[bool] = []
 
-    def read_dataset_csv(
-        path: Path, _columns: object, *, require_task_id_column: bool
-    ) -> pd.DataFrame:
+    def read_dataset_csv(path: Path, _columns: object, *, require_task_id_column: bool) -> pd.DataFrame:
         reads.append(require_task_id_column)
         return old if path.name == "old.csv" else new
 
@@ -319,9 +293,7 @@ def test_merge_use_case_works_through_the_files_port(
 class TestMergeDatasetsIO:
     """Tests for merge_datasets with real temp files."""
 
-    def test_nested_output_gets_merged_rows_with_propagated_split(
-        self, tmp_path: Path
-    ) -> None:
+    def test_nested_output_gets_merged_rows_with_propagated_split(self, tmp_path: Path) -> None:
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "runs" / "2026-01" / "merged.csv"
@@ -348,21 +320,13 @@ class TestMergeDatasetsIO:
 
         assert set(pd.read_csv(out_path)["image_name"]) == {"b.jpg", "c.jpg"}
 
-    @pytest.mark.parametrize(
-        ("by_task", "label"), [(None, "new_label"), (True, "old_label")]
-    )
-    def test_by_task_flag_decides_the_winner(
-        self, tmp_path: Path, label: str, *, by_task: bool | None
-    ) -> None:
+    @pytest.mark.parametrize(("by_task", "label"), [(None, "new_label"), (True, "old_label")])
+    def test_by_task_flag_decides_the_winner(self, tmp_path: Path, label: str, *, by_task: bool | None) -> None:
         old_path = tmp_path / "old.csv"
         new_path = tmp_path / "new.csv"
         out_path = tmp_path / "merged.csv"
-        write_dataset_csv(
-            old_path, [_trow("a.jpg", task_id=_ID_NEW, label="old_label")]
-        )
-        write_dataset_csv(
-            new_path, [_trow("a.jpg", task_id=_ID_OLD, label="new_label")]
-        )
+        write_dataset_csv(old_path, [_trow("a.jpg", task_id=_ID_NEW, label="old_label")])
+        write_dataset_csv(new_path, [_trow("a.jpg", task_id=_ID_OLD, label="new_label")])
 
         if by_task is None:  # the flag left at its default
             merge_datasets(old_path, new_path, out_path)
@@ -372,23 +336,15 @@ class TestMergeDatasetsIO:
         assert pd.read_csv(out_path).iloc[0]["instance_label"] == label
 
     @pytest.mark.parametrize("missing", ["old", "new"])
-    def test_by_task_missing_column_names_the_file(
-        self, tmp_path: Path, missing: str
-    ) -> None:
+    def test_by_task_missing_column_names_the_file(self, tmp_path: Path, missing: str) -> None:
         """--by-task validates both CSVs before any id is compared."""
         paths = {"old": tmp_path / "old.csv", "new": tmp_path / "new.csv"}
         for side, path in paths.items():
-            row = (
-                _no_task_id_row("a.jpg")
-                if side == missing
-                else _trow("a.jpg", task_id=_ID_NEW)
-            )
+            row = _no_task_id_row("a.jpg") if side == missing else _trow("a.jpg", task_id=_ID_NEW)
             write_dataset_csv(path, [row])
 
         with pytest.raises(Cveta2Error, match=re.escape(str(paths[missing]))):
-            merge_datasets(
-                paths["old"], paths["new"], tmp_path / "merged.csv", by_task=True
-            )
+            merge_datasets(paths["old"], paths["new"], tmp_path / "merged.csv", by_task=True)
 
 
 # ---------------------------------------------------------------------------

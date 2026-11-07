@@ -107,9 +107,7 @@ class FakeS3Client:
             contents.append({"Key": key_part, "Size": len(value)})
         response: dict[str, Any] = {"Contents": contents, "IsTruncated": False}
         if folders:
-            response["CommonPrefixes"] = [
-                {"Prefix": folder} for folder in sorted(folders)
-            ]
+            response["CommonPrefixes"] = [{"Prefix": folder} for folder in sorted(folders)]
         return response
 
     def upload_file(self, filename: str, bucket: str, key: str) -> None:
@@ -159,11 +157,7 @@ class PagedFakeS3Client(FakeS3Client):
         return self._page(int(token or 0), kwargs.get("Prefix", ""))
 
     def _page(self, index: int, prefix: str) -> dict[str, Any]:
-        contents = [
-            {"Key": key, "Size": len(key)}
-            for key in self._pages[index]
-            if key.startswith(prefix)
-        ]
+        contents = [{"Key": key, "Size": len(key)} for key in self._pages[index] if key.startswith(prefix)]
         response: dict[str, Any] = {"Contents": contents} if contents else {}
         has_more = index + 1 < len(self._pages)
         self._expected_token = str(index + 1) if has_more else None

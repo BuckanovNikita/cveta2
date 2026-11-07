@@ -163,10 +163,7 @@ def _decorated_out(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     if len(node.decorator_list) > 1:
         return True
     decorator = node.decorator_list[0]
-    return not (
-        isinstance(decorator, ast.Name)
-        and decorator.id in {"staticmethod", "classmethod"}
-    )
+    return not (isinstance(decorator, ast.Name) and decorator.id in {"staticmethod", "classmethod"})
 
 
 def _span(node: ast.stmt) -> range:
@@ -183,9 +180,7 @@ def _functions(tree: ast.Module) -> Iterator[tuple[str, str, range]]:
                 yield node.name, f"x_{node.name}", _span(node)
         elif isinstance(node, ast.ClassDef) and not node.decorator_list:
             for member in node.body:
-                if isinstance(
-                    member, ast.FunctionDef | ast.AsyncFunctionDef
-                ) and not _decorated_out(member):
+                if isinstance(member, ast.FunctionDef | ast.AsyncFunctionDef) and not _decorated_out(member):
                     yield (
                         f"{node.name}.{member.name}",
                         f"x{CLASS_SEPARATOR}{node.name}{CLASS_SEPARATOR}{member.name}",
@@ -217,17 +212,12 @@ def narrow_scope(pyproject: Path, files: Sequence[str]) -> None:
         msg = "pyproject.toml has no [tool.mutmut] table."
         raise MutationError(msg)
     if re.search(r"^only_mutate\s*=", text, flags=re.MULTILINE):
-        msg = (
-            "pyproject.toml sets [tool.mutmut].only_mutate; the scope is "
-            "derived from the change, remove the setting."
-        )
+        msg = "pyproject.toml sets [tool.mutmut].only_mutate; the scope is derived from the change, remove the setting."
         raise MutationError(msg)
     scope = ", ".join(json.dumps(name) for name in files)
     # Git change detection would compare against a repository this copy is not.
     addition = f"\nonly_mutate = [{scope}]\nuse_git_change_detection = false\n"
-    pyproject.write_text(
-        text[: header.end()] + addition + text[header.end() :], encoding="utf-8"
-    )
+    pyproject.write_text(text[: header.end()] + addition + text[header.end() :], encoding="utf-8")
 
 
 def child_env(workspace: Path) -> dict[str, str]:
@@ -305,11 +295,7 @@ def run_mutmut(
         stderr=subprocess.STDOUT,
         start_new_session=True,
     ) as process:
-        timer = (
-            threading.Timer(budget_seconds, _stop_group, (process, spent))
-            if budget_seconds > 0
-            else None
-        )
+        timer = threading.Timer(budget_seconds, _stop_group, (process, spent)) if budget_seconds > 0 else None
         if timer is not None:
             timer.start()
         try:
@@ -451,9 +437,7 @@ def run(args: argparse.Namespace) -> int:
         env = child_env(workspace)
         mutmut_args = [*(["--max-children", str(args.max_children)]
                          if args.max_children else []), *globs]  # fmt: skip
-        status, tail = run_mutmut(
-            binary, workspace, env, mutmut_args, args.budget_seconds
-        )
+        status, tail = run_mutmut(binary, workspace, env, mutmut_args, args.budget_seconds)
         if status is None:
             print(f"Budget: mutmut stopped after {args.budget_seconds} s "
                   "(--budget-seconds); unjudged mutants count as not run.")  # fmt: skip
@@ -476,9 +460,7 @@ def run(args: argparse.Namespace) -> int:
             text=True,
         ).stdout
         functions = [name for t in targets for name in t.names]
-        escaped = report(
-            parse_results(results), functions, ShowFn(binary, workspace, env)
-        )
+        escaped = report(parse_results(results), functions, ShowFn(binary, workspace, env))
         if not escaped:
             return 0
         print()
@@ -498,18 +480,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Mutation-test the functions a change touches (advisory).",
     )
-    parser.add_argument(
-        "files", nargs="*", help="cveta2/ files to mutate whole instead of the diff"
-    )
+    parser.add_argument("files", nargs="*", help="cveta2/ files to mutate whole instead of the diff")
     parser.add_argument(
         "--base",
         default="HEAD",
         help="diff the staged tree against the merge base with REV (default HEAD)",
     )
     parser.add_argument("--keep", action="store_true", help="keep the workspace")
-    parser.add_argument(
-        "--strict", action="store_true", help="exit 1 when a mutant survives"
-    )
+    parser.add_argument("--strict", action="store_true", help="exit 1 when a mutant survives")
     parser.add_argument("--max-children", type=int, help="mutmut worker count")
     parser.add_argument(
         "--max-functions",

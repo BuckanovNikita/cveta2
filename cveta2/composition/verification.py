@@ -44,9 +44,7 @@ def verify_dataframe(
 ) -> ValidationResult:
     """Validate a DataFrame using local evidence and optional diagnostic warnings."""
     selected = options or ValidationOptions()
-    result = run_verification(
-        frame, inspector=LocalMediaInspector(), profile=profile, options=selected
-    )
+    result = run_verification(frame, inspector=LocalMediaInspector(), profile=profile, options=selected)
     if selected.emit_warnings:
         emit_result_warnings(result)
     return result

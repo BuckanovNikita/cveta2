@@ -63,9 +63,7 @@ class TestLocation:
     def test_host_normalization_preserves_deployment_path(self) -> None:
         """Canonical identity retains path case and strips only URL decorations."""
         assert (
-            normalize_upload_host(
-                "HTTP://Example.TEST/TeamX///?session=ignored#fragment"
-            )
+            normalize_upload_host("HTTP://Example.TEST/TeamX///?session=ignored#fragment")
             == "http://example.test/TeamX"
         )
 
@@ -81,9 +79,7 @@ class TestLocation:
         save_manifest(original)
         assert load_manifest(PROJECT_ID, "abc123", host="HTTP://FAKE-CVAT/") == original
 
-    def test_manifests_live_under_the_xdg_cache_root(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_manifests_live_under_the_xdg_cache_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Land under XDG_CACHE_HOME, not in a developer's real cache."""
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
 
@@ -94,13 +90,9 @@ class TestLocation:
 
     def test_projects_do_not_share_a_directory(self) -> None:
         """Keep projects apart: `--resume` lists candidates by project."""
-        assert get_upload_manifest_dir(1, host=HOST) != get_upload_manifest_dir(
-            2, host=HOST
-        )
+        assert get_upload_manifest_dir(1, host=HOST) != get_upload_manifest_dir(2, host=HOST)
 
-    def test_the_default_root_is_the_home_cache(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_the_default_root_is_the_home_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
 
         directory = get_upload_manifest_dir(PROJECT_ID, host=HOST)
@@ -195,13 +187,9 @@ class TestListing:
 
     def test_an_unreadable_entry_does_not_hide_the_readable_ones(self) -> None:
         save_manifest(_manifest(fingerprint="good"))
-        (get_upload_manifest_dir(PROJECT_ID, host=HOST) / "broken.json").write_text(
-            "not json", encoding="utf-8"
-        )
+        (get_upload_manifest_dir(PROJECT_ID, host=HOST) / "broken.json").write_text("not json", encoding="utf-8")
 
-        assert [m.fingerprint for m in list_manifests(PROJECT_ID, host=HOST)] == [
-            "good"
-        ]
+        assert [m.fingerprint for m in list_manifests(PROJECT_ID, host=HOST)] == ["good"]
 
 
 class TestDelete:
@@ -244,9 +232,7 @@ class TestFingerprint:
 
     def test_the_deleted_and_annotated_lists_are_not_interchangeable(self) -> None:
         """They land in different places in the task, so they cannot collide."""
-        assert compute_fingerprint(["a.jpg"], [], []) != compute_fingerprint(
-            [], ["a.jpg"], []
-        )
+        assert compute_fingerprint(["a.jpg"], [], []) != compute_fingerprint([], ["a.jpg"], [])
 
 
 def test_started_at_is_timezone_aware() -> None:

@@ -74,9 +74,7 @@ MODULE = "uv run python -m tests.integration.lifecycle"
 COCO8_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco8.zip"
 # curl exit statuses that mean the TLS handshake or certificate check failed:
 # the stand answered, this machine does not trust it.
-TLS_CURL_STATUSES = frozenset(
-    {35, 51, 53, 54, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90, 91}
-)
+TLS_CURL_STATUSES = frozenset({35, 51, 53, 54, 58, 59, 60, 64, 66, 77, 80, 82, 83, 90, 91})
 TLS_REMEDY = (
     "This is a certificate-trust problem, not a stand that is down: the stands serve",
     "https://<name>.k8s.docker.internal with a certificate from the k8s-infra CA.",
@@ -146,9 +144,7 @@ def child_env() -> dict[str, str]:
     return environ
 
 
-def call(
-    command: Sequence[str], *, cwd: Path | None = None, capture: bool = False
-) -> subprocess.CompletedProcess[str]:
+def call(command: Sequence[str], *, cwd: Path | None = None, capture: bool = False) -> subprocess.CompletedProcess[str]:
     """Run a child and, if this process is interrupted, let the child finish first.
 
     ``subprocess.run`` kills its child on any exception, so Ctrl-C or SIGTERM
@@ -210,8 +206,7 @@ def find_skill_dir() -> Path | None:
         if not (Path(explicit) / "scripts" / "infra.py").is_file():
             fail(
                 f"K8S_INFRA_SKILL_DIR={explicit} has no scripts/infra.py;",
-                "point it at k8s-infra/skills/k8s-infra of a checkout that "
-                "carries the run contract.",
+                "point it at k8s-infra/skills/k8s-infra of a checkout that carries the run contract.",
             )
         return Path(explicit)
     home = Path(child_env().get("HOME", "~")).expanduser()
@@ -235,11 +230,9 @@ class Run:
         skill_dir = find_skill_dir()
         if skill_dir is None:
             fail(
-                "the k8s-infra skill was not found under ~/.agents/skills or "
-                "~/.claude/skills,",
+                "the k8s-infra skill was not found under ~/.agents/skills or ~/.claude/skills,",
                 "or the installed one predates the run contract (no scripts/infra.py).",
-                "Install or update it, or export "
-                "K8S_INFRA_SKILL_DIR=<k8s-infra>/skills/k8s-infra.",
+                "Install or update it, or export K8S_INFRA_SKILL_DIR=<k8s-infra>/skills/k8s-infra.",
             )
         self.skill_dir = skill_dir
         self.tag = ""
@@ -262,9 +255,7 @@ class Run:
             MINIO_CONSOLE=minio.get("S3_CONSOLE", ""),
         )
         self._stand_env("clearml")
-        self._export(
-            INTEGRATION_SKILL_DIR=str(self.skill_dir), INTEGRATION_PROJECT=PROJECT
-        )
+        self._export(INTEGRATION_SKILL_DIR=str(self.skill_dir), INTEGRATION_PROJECT=PROJECT)
 
     # -- environment ------------------------------------------------------
 
@@ -272,22 +263,17 @@ class Run:
         os.environ.update(values)
         self.exported.update(values)
 
-    def helper(
-        self, stand: str, *args: str, capture: bool = False
-    ) -> subprocess.CompletedProcess[str]:
+    def helper(self, stand: str, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
         """Run a k8s-infra helper as project cveta2."""
         script = self.skill_dir / "scripts" / f"{stand}.py"
-        return call(
-            ["python3", str(script), "--project", PROJECT, *args], capture=capture
-        )
+        return call(["python3", str(script), "--project", PROJECT, *args], capture=capture)
 
     def _stand_env(self, stand: str) -> dict[str, str]:
         completed = self.helper(stand, "env", capture=True)
         if completed.returncode != 0:
             fail(
                 f"{stand}.py --project {PROJECT} env failed (see above);",
-                f"the cveta2 {stand} Secret is missing or the cluster is not "
-                "reachable.",
+                f"the cveta2 {stand} Secret is missing or the cluster is not reachable.",
             )
         values = parse_exports(completed.stdout, f"{stand}.py env")
         for key in REQUIRED_KEYS[stand]:
@@ -337,15 +323,11 @@ class Run:
         elif self.tag_file.is_file():
             tag = self._read_tag_file()
         if tag and not valid_tag(tag):
-            fail(
-                f"run tag '{tag}' is not lowercase [a-z0-9-]; "
-                "mint it with infra.py newtag."
-            )
+            fail(f"run tag '{tag}' is not lowercase [a-z0-9-]; mint it with infra.py newtag.")
         preset = os.environ.get("INTEGRATION_RUN_TAG", "")
         if preset and tag and preset != tag:
             fail(
-                f"INTEGRATION_RUN_TAG={preset} is set in the shell but the tag is "
-                "derived now;",
+                f"INTEGRATION_RUN_TAG={preset} is set in the shell but the tag is derived now;",
                 "unset it and export INFRA_RUN_TAG=<tag> to run under an explicit tag.",
             )
         self._set_tag(tag)
@@ -392,10 +374,7 @@ class Run:
         )
         tag = minted.stdout.strip()
         if minted.returncode != 0 or not valid_tag(tag):
-            fail(
-                f"infra.py newtag --project {PROJECT} --slug {TAG_SLUG} did not "
-                "mint a tag (see above)."
-            )
+            fail(f"infra.py newtag --project {PROJECT} --slug {TAG_SLUG} did not mint a tag (see above).")
         self.tag_file.write_text(f"{tag}\n", encoding="utf-8")
         self._set_tag(tag)
 
@@ -434,9 +413,7 @@ class Run:
         # slot do. The cloud storage points at the bucket, so CVAT goes first.
         log(f"Removing the previous '{self.tag}' run from organization {org}")
         self._require(
-            self.uv_python(
-                "tests/integration/cvat_stand.py", "cleanup", "--tag", self.tag
-            ),
+            self.uv_python("tests/integration/cvat_stand.py", "cleanup", "--tag", self.tag),
             "cvat_stand.py cleanup",
         )
         log(
@@ -448,24 +425,15 @@ class Run:
             "minio.py cleanup",
         )
         self._ensure_coco8_images()
-        log(
-            f"Seeding bucket '{self.tag}' and project "
-            f"'{os.environ['CVAT_INTEGRATION_PROJECT']}'"
-        )
+        log(f"Seeding bucket '{self.tag}' and project '{os.environ['CVAT_INTEGRATION_PROJECT']}'")
         self._require(self.uv_python("tests/integration/seed_cvat.py"), "seed_cvat.py")
         log("Done.")
-        log(
-            f"CVAT:          {host}  (organization {org}, project "
-            f"'{os.environ['CVAT_INTEGRATION_PROJECT']}')"
-        )
+        log(f"CVAT:          {host}  (organization {org}, project '{os.environ['CVAT_INTEGRATION_PROJECT']}')")
         log(
             f"MinIO bucket:  {self.tag} at {os.environ['MINIO_ENDPOINT']}  "
             f"(for CVAT: {os.environ['MINIO_ENDPOINT_FOR_CVAT']})"
         )
-        log(
-            "MinIO console: "
-            f"{os.environ.get('MINIO_CONSOLE') or 'not published by the Secret'}"
-        )
+        log(f"MinIO console: {os.environ.get('MINIO_CONSOLE') or 'not published by the Secret'}")
         log(f"ClearML:       {os.environ['CLEARML_API_HOST']}  (the shared stand)")
         log("Run live tests:         uv run pytest tests/integration")
         log(f"Tear down:              {MODULE} stop")
@@ -505,40 +473,24 @@ class Run:
         if self.uv_python("tests/integration/cvat_stand.py", "cleanup", "--tag", tag):
             warn(f"WARNING: the CVAT data of tag '{tag}' could not be removed.")
             warn("         Retry once the stand is reachable:")
-            warn(
-                "         uv run python tests/integration/cvat_stand.py cleanup "
-                f"--tag '{tag}'"
-            )
+            warn(f"         uv run python tests/integration/cvat_stand.py cleanup --tag '{tag}'")
             failed = True
-        log(
-            f"Removing bucket '{tag}' of '{tag}' from MinIO at "
-            f"{os.environ['MINIO_ENDPOINT']}"
-        )
+        log(f"Removing bucket '{tag}' of '{tag}' from MinIO at {os.environ['MINIO_ENDPOINT']}")
         if self.helper("minio", "cleanup", "--prefix", tag).returncode:
             warn(f"WARNING: bucket '{tag}' could not be removed.")
             warn("         Retry once the stand is reachable:")
-            warn(
-                f'         python3 "{self.skill_dir}/scripts/minio.py" --project '
-                f"{PROJECT} cleanup --prefix '{tag}'"
-            )
+            warn(f"         python3 \"{self.skill_dir}/scripts/minio.py\" --project {PROJECT} cleanup --prefix '{tag}'")
             failed = True
-        log(
-            f"Removing '{tag}' projects from ClearML at "
-            f"{os.environ['CLEARML_API_HOST']}"
-        )
+        log(f"Removing '{tag}' projects from ClearML at {os.environ['CLEARML_API_HOST']}")
         if self.helper("clearml", "cleanup", "--prefix", tag).returncode:
             warn(f"WARNING: the ClearML projects of tag '{tag}' could not be removed.")
             warn("         Retry once the stand is reachable:")
             warn(
-                f'         python3 "{self.skill_dir}/scripts/clearml.py" --project '
-                f"{PROJECT} cleanup --prefix '{tag}'"
+                f"         python3 \"{self.skill_dir}/scripts/clearml.py\" --project {PROJECT} cleanup --prefix '{tag}'"
             )
             failed = True
         if failed:
-            warn(
-                f"ERROR: run '{tag}' is not fully torn down; the .run-tag file "
-                "stays for the retry."
-            )
+            warn(f"ERROR: run '{tag}' is not fully torn down; the .run-tag file stays for the retry.")
             return 1
         self.release_run_tag()
         log("Done")
@@ -587,13 +539,10 @@ def _curl(name: str, url: str) -> str | None:
     to zero answers 503). A TLS failure or another HTTP error (404, 401) is a
     problem waiting cannot fix.
     """
-    status, out = _quiet(
-        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url]
-    )
+    status, out = _quiet(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url])
     if status in TLS_CURL_STATUSES:
         fail(
-            f"TLS verification of the {name} stand at {url} failed "
-            f"(curl exit {status}).",
+            f"TLS verification of the {name} stand at {url} failed (curl exit {status}).",
             *TLS_REMEDY,
         )
     if status in DOWN_CURL_STATUSES:
@@ -621,12 +570,7 @@ def probe(root: Path) -> "Run | str":
     LifecycleError, because waiting would not fix it.
     """
     skill_dir = find_skill_dir()
-    if (
-        skill_dir is not None
-        and _quiet(["kubectl", "--context", "docker-desktop", "get", "--raw=/readyz"])[
-            0
-        ]
-    ):
+    if skill_dir is not None and _quiet(["kubectl", "--context", "docker-desktop", "get", "--raw=/readyz"])[0]:
         return "the docker-desktop cluster does not answer"
     run = Run(root)
     room, _ = _quiet(["python3", str(run.skill_dir / "scripts" / "infra.py"), "room"])
@@ -646,8 +590,7 @@ def probe(root: Path) -> "Run | str":
         fail(
             "the ClearML stand answers but does not authenticate the cveta2 identity",
             f"(clearml.py --project {PROJECT} whoami failed, see above).",
-            "A certificate or SSL error in that output is a trust problem, "
-            "not a refused identity:",
+            "A certificate or SSL error in that output is a trust problem, not a refused identity:",
             *TLS_REMEDY,
             "Diagnose the stand and the Secret with the k8s-infra skill.",
         )
@@ -678,17 +621,11 @@ def wait_for_stands(
         result = check()
         if not isinstance(result, str):
             if last_notice is not None:
-                notify(
-                    f"Стенды снова доступны (ожидание {_minutes(now() - started)}); "
-                    "продолжаю."
-                )
+                notify(f"Стенды снова доступны (ожидание {_minutes(now() - started)}); продолжаю.")
             return result
         elapsed = now() - started
         if timeout is not None and elapsed >= timeout:
-            fail(
-                f"Стенды не восстановились за {int(timeout)} с "
-                f"({WAIT_TIMEOUT_VARIABLE}): {result}."
-            )
+            fail(f"Стенды не восстановились за {int(timeout)} с ({WAIT_TIMEOUT_VARIABLE}): {result}.")
         if last_notice is None:
             notify(
                 f"Стенды недоступны: {result}. Похоже, они остановлены; жду "
@@ -746,11 +683,7 @@ def finish(run: "Run") -> int:
     """Keep the main slot or an explicitly kept run; stop everything else."""
     if not keep_data(run):
         return run.stop()
-    reason = (
-        f"it is the durable slot '{run.tag}' (main)"
-        if run.on_main()
-        else "INTEGRATION_KEEP_DATA=1"
-    )
+    reason = f"it is the durable slot '{run.tag}' (main)" if run.on_main() else "INTEGRATION_KEEP_DATA=1"
     log(f"keeping run '{run.tag}' for inspection: {reason}")
     log(f"    remove everything with {MODULE} stop")
     return 0
@@ -786,9 +719,7 @@ def _dispatch(command: str, root: Path) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog=MODULE, description="Integration-run lifecycle on the shared stands."
-    )
+    parser = argparse.ArgumentParser(prog=MODULE, description="Integration-run lifecycle on the shared stands.")
     parser.add_argument(
         "--repo-root",
         type=Path,

@@ -17,9 +17,7 @@ from tests.api_helpers import _scoped
 
 
 class TestTaskOpsApi:
-    def test_delete_removes_the_resolved_task(
-        self, normal_fake: "LoadedFixtures"
-    ) -> None:
+    def test_delete_removes_the_resolved_task(self, normal_fake: "LoadedFixtures") -> None:
         api, connection = _scoped(normal_fake)
         task = normal_fake.tasks[0]
 
@@ -27,24 +25,18 @@ class TestTaskOpsApi:
 
         assert api.writes.deleted_tasks == [task.id]
 
-    def test_drop_label_deletes_only_that_labels_shapes(
-        self, normal_fake: "LoadedFixtures"
-    ) -> None:
+    def test_drop_label_deletes_only_that_labels_shapes(self, normal_fake: "LoadedFixtures") -> None:
         api, connection = _scoped(normal_fake)
         task = normal_fake.tasks[0]
         label = next(lbl for lbl in normal_fake.labels if lbl.name == "bowl")
         expected = _shapes_with_label(normal_fake, task.id, label.id)
 
-        removed = cveta2.task_drop_label(
-            normal_fake.project.id, task.id, "bowl", connection=connection
-        )
+        removed = cveta2.task_drop_label(normal_fake.project.id, task.id, "bowl", connection=connection)
 
         assert removed == len(expected)
         assert {s.label_id for s in api.writes.deleted_shapes[task.id]} == {label.id}
 
-    def test_mark_deleted_requires_frames_or_images(
-        self, normal_fake: "LoadedFixtures"
-    ) -> None:
+    def test_mark_deleted_requires_frames_or_images(self, normal_fake: "LoadedFixtures") -> None:
         _api, connection = _scoped(normal_fake)
 
         with pytest.raises(Cveta2Error, match="frame"):
@@ -73,16 +65,12 @@ class TestTaskOpsApi:
         api, connection = _scoped(normal_fake)
         task = normal_fake.tasks[0]
 
-        marked = cveta2.task_mark_deleted(
-            normal_fake.project.id, task.id, frames=[3], connection=connection
-        )
+        marked = cveta2.task_mark_deleted(normal_fake.project.id, task.id, frames=[3], connection=connection)
 
         assert marked == 1
         assert api.writes.deleted_frames[task.id] == [3]
 
-    def test_mark_deleted_sums_disjoint_names_and_ids(
-        self, normal_fake: "LoadedFixtures"
-    ) -> None:
+    def test_mark_deleted_sums_disjoint_names_and_ids(self, normal_fake: "LoadedFixtures") -> None:
         """Disjoint sets make the total distinguish sum from either half."""
         api, connection = _scoped(normal_fake)
         task = normal_fake.tasks[0]
@@ -113,9 +101,7 @@ class TestTaskSetStatusApi:
         with pytest.raises(Cveta2Error, match="stage"):
             cveta2.task_set_status(1, 1)
 
-    def test_stage_and_state_reach_every_job(
-        self, normal_fake: "LoadedFixtures"
-    ) -> None:
+    def test_stage_and_state_reach_every_job(self, normal_fake: "LoadedFixtures") -> None:
         """Both must be non-None at once to tell the two keywords apart."""
         api, connection = _scoped(normal_fake)
         task = normal_fake.tasks[0]
@@ -159,8 +145,6 @@ class TestTaskSetStatusApi:
         assert api.writes.job_updates == [(task.id, None, "rejected")]
 
 
-def _shapes_with_label(
-    fixtures: "LoadedFixtures", task_id: int, label_id: int
-) -> "list[RawShape]":
+def _shapes_with_label(fixtures: "LoadedFixtures", task_id: int, label_id: int) -> "list[RawShape]":
     _meta, annotations = fixtures.task_data[task_id]
     return [s for s in annotations.shapes if s.label_id == label_id]

@@ -53,13 +53,8 @@ class ManagedPublicationServices:
 
 def registry_fingerprint(records: list[ApiClass]) -> str:
     """Compare complete class records independent of registry response order."""
-    content = [
-        record.model_dump(mode="json")
-        for record in sorted(records, key=lambda record: record.number)
-    ]
-    return hashlib.sha256(
-        json.dumps(content, sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()
+    content = [record.model_dump(mode="json") for record in sorted(records, key=lambda record: record.number)]
+    return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def _check_sources(
@@ -70,21 +65,13 @@ def _check_sources(
     """Metadata checks never download unchanged CVAT task annotations."""
     for source in snapshot.sources:
         if source.type == "s3-csv":
-            if (
-                source.uri is None
-                or services.s3.read_object(source.uri).content_hash
-                != source.content_hash
-            ):
+            if source.uri is None or services.s3.read_object(source.uri).content_hash != source.content_hash:
                 raise ManagedError(f"S3 source changed; fetch again: {source.name}")
             continue
         if source.project_id is None:
             raise ManagedError("Managed CVAT source lacks project identity")
         project = next(
-            (
-                project
-                for project in config.projects.values()
-                if project.id == source.project_id
-            ),
+            (project for project in config.projects.values() if project.id == source.project_id),
             None,
         )
         if project is None:
@@ -92,19 +79,12 @@ def _check_sources(
         ignored = {entry.get("id") for entry in project.ignore}
         state = services.cvat.inspect_project(source.project_id)
         live = {str(task.id): task for task in state.tasks if task.id not in ignored}
-        if state.labels_fingerprint != source.labels_fingerprint or set(live) != set(
-            source.tasks
-        ):
+        if state.labels_fingerprint != source.labels_fingerprint or set(live) != set(source.tasks):
             raise ManagedError(f"CVAT source changed; fetch again: {source.name}")
         for key, old in source.tasks.items():
             current = live[key]
-            if (
-                current.updated_date != old.updated_date
-                or current.completed != old.completed
-            ):
-                raise ManagedError(
-                    f"CVAT task changed; fetch again: {source.name}/{old.id}"
-                )
+            if current.updated_date != old.updated_date or current.completed != old.completed:
+                raise ManagedError(f"CVAT task changed; fetch again: {source.name}/{old.id}")
 
 
 def _check_prepared(
@@ -117,9 +97,7 @@ def _check_prepared(
     if record.definition_hash != definition_fingerprint(config, record.name):
         raise ManagedError("Shared dataset policy changed; prepare again")
     definition = config.datasets[record.name]
-    parent = services.remote.latest(
-        definition.clearml.project, definition.clearml.dataset
-    )
+    parent = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (parent.dataset_id if parent else None) != record.parent_id:
         raise ManagedError("Latest ClearML parent changed; fetch and prepare again")
     if parent is not None and parent.version != record.parent_version:
@@ -128,15 +106,11 @@ def _check_prepared(
     if registry_fingerprint(records) != record.registry_hash:
         raise ManagedError("Class registry changed; fetch and prepare again")
     reconcile_pending(record.findings, remote=services.feedback, ledger=services.ledger)
-    _check_sources(
-        config, services.ledger.effective_snapshot(record.snapshot), services
-    )
+    _check_sources(config, services.ledger.effective_snapshot(record.snapshot), services)
     _check_media(loaded, services)
 
 
-def _check_media(
-    loaded: LoadedManagedPreparation, services: ManagedPublicationServices
-) -> None:
+def _check_media(loaded: LoadedManagedPreparation, services: ManagedPublicationServices) -> None:
     """Revalidate immutable clean bytes against current local media and roots."""
     record = loaded.record
     if loaded.metadata is None:
@@ -160,9 +134,7 @@ def _check_media(
         raise ManagedError("Prepared payload no longer passes training validation")
 
 
-def report_prepared(
-    config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices
-) -> FeedbackOutcome:
+def report_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> FeedbackOutcome:
     """Resume traceable frame feedback without changing immutable payload bytes."""
     loaded = services.files.load_prepared(directory)
     _check_prepared(config, loaded, services)
@@ -175,9 +147,7 @@ def report_prepared(
     )
 
 
-def publish_prepared(
-    config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices
-) -> Publication:
+def publish_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> Publication:
     """Publish only a ready, fresh, feedback-complete stable three-file snapshot."""
     loaded = services.files.load_prepared(directory)
     if not loaded.record.ready or set(loaded.payload) != {
@@ -185,9 +155,7 @@ def publish_prepared(
         "dataset.yaml",
         "tasks.yaml",
     }:
-        raise ManagedError(
-            "Preparation is not ready; review diagnostics and accept cleanup"
-        )
+        raise ManagedError("Preparation is not ready; review diagnostics and accept cleanup")
     _check_prepared(config, loaded, services)
     unmapped = loaded.report.get("unmapped_errors", 0)
     outcome = report_findings(
@@ -197,17 +165,11 @@ def publish_prepared(
         unmapped=unmapped if isinstance(unmapped, int) else 0,
     )
     if outcome.failed:
-        raise ManagedError(
-            "CVAT feedback delivery failed; retry report-errors before publication"
-        )
+        raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")
     # Recheck sources after feedback, acknowledging only proven issue-only writes.
-    _check_sources(
-        config, services.ledger.effective_snapshot(loaded.record.snapshot), services
-    )
+    _check_sources(config, services.ledger.effective_snapshot(loaded.record.snapshot), services)
     definition = config.datasets[loaded.record.name]
-    latest = services.remote.latest(
-        definition.clearml.project, definition.clearml.dataset
-    )
+    latest = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (latest.dataset_id if latest else None) != loaded.record.parent_id:
         raise ManagedError("ClearML parent changed during feedback; prepare again")
     with services.files.stage_payload(loaded.payload) as staging:

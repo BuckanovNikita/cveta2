@@ -18,9 +18,7 @@ class FetchFiles(Protocol):
         """Create and return the task CSV output directory."""
         ...
 
-    def write_task_csv(
-        self, task: TaskInfo, result: TaskAnnotations, tasks_dir: Path
-    ) -> None:
+    def write_task_csv(self, task: TaskInfo, result: TaskAnnotations, tasks_dir: Path) -> None:
         """Write one nonempty task annotation CSV."""
         ...
 
@@ -42,15 +40,11 @@ class FetchFiles(Protocol):
         """Write the optional unpartitioned fetch output."""
         ...
 
-    def write_partition_csvs(
-        self, partition: PartitionResult, output_dir: Path
-    ) -> None:
+    def write_partition_csvs(self, partition: PartitionResult, output_dir: Path) -> None:
         """Write all partition and deletion outputs."""
         ...
 
-    def write_dataset_and_deleted(
-        self, result: ProjectAnnotations, output_dir: Path
-    ) -> None:
+    def write_dataset_and_deleted(self, result: ProjectAnnotations, output_dir: Path) -> None:
         """Write selected-task annotation and deletion outputs."""
         ...
 
@@ -72,9 +66,7 @@ class UploadFiles(Protocol):
         """Read excluded frame names from the optional CSV."""
         ...
 
-    def resolve_images(
-        self, image_names: Iterable[str], search_dirs: list[Path]
-    ) -> tuple[dict[str, Path], list[str]]:
+    def resolve_images(self, image_names: Iterable[str], search_dirs: list[Path]) -> tuple[dict[str, Path], list[str]]:
         """Find local named images in ordered search directories."""
         ...
 

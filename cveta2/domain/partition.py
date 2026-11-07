@@ -24,13 +24,9 @@ class PartitionResult:
 
 def _rows_are_finished(frame: "pd.DataFrame") -> "pd.Series[bool]":
     """Use explicit task completion, falling back to legacy per-job columns."""
-    finished = (frame["job_stage"] == COMPLETED_JOB_STAGE) & (
-        frame["job_state"] == COMPLETED_JOB_STATE
-    )
+    finished = (frame["job_stage"] == COMPLETED_JOB_STAGE) & (frame["job_state"] == COMPLETED_JOB_STATE)
     if "task_completed" in frame:
-        finished = finished.where(
-            frame["task_completed"].isna(), frame["task_completed"].eq(other=True)
-        )
+        finished = finished.where(frame["task_completed"].isna(), frame["task_completed"].eq(other=True))
     # Nullable pandas columns propagate unknown comparisons as pd.NA. An
     # unknown legacy position is unfinished evidence, not an ignorable row.
     return finished.fillna(value=False)
@@ -114,12 +110,8 @@ def _latest_row_per_image(df: "pd.DataFrame") -> "pd.DataFrame":
     ``sort_values`` path only delivers for frames small enough to stay in
     insertion sort.
     """
-    ordered = df.assign(_row_order=list(range(len(df)))).sort_values(
-        ["task_id", "_row_order"], ascending=[False, True]
-    )
-    latest: pd.DataFrame = ordered.drop_duplicates(
-        subset=["image_name"], keep="first"
-    ).drop(columns="_row_order")
+    ordered = df.assign(_row_order=list(range(len(df)))).sort_values(["task_id", "_row_order"], ascending=[False, True])
+    latest: pd.DataFrame = ordered.drop_duplicates(subset=["image_name"], keep="first").drop(columns="_row_order")
     return latest
 
 
@@ -135,9 +127,7 @@ def _latest_task_per_image(
     ``image_name``.
     """
     latest_from_df = (
-        df[["image_name", "task_id"]]
-        .assign(_is_deleted=0)
-        .drop_duplicates(subset=["image_name", "task_id"])
+        df[["image_name", "task_id"]].assign(_is_deleted=0).drop_duplicates(subset=["image_name", "task_id"])
     )
 
     registry = _deleted_registry_frame(deleted_images)
@@ -146,9 +136,7 @@ def _latest_task_per_image(
         [registry[latest_from_df.columns], latest_from_df],
         ignore_index=True,
     )
-    latest_per_image: pd.DataFrame = _latest_row_per_image(combined).set_index(
-        "image_name"
-    )
+    latest_per_image: pd.DataFrame = _latest_row_per_image(combined).set_index("image_name")
     return latest_per_image
 
 
@@ -159,9 +147,9 @@ def _split_completed(
     if completed_non_deleted.empty:
         return completed_non_deleted.copy(), completed_non_deleted.copy()
 
-    latest_completed = _latest_row_per_image(completed_non_deleted)[
-        ["image_name", "task_id"]
-    ].rename(columns={"task_id": "_latest_task_id"})
+    latest_completed = _latest_row_per_image(completed_non_deleted)[["image_name", "task_id"]].rename(
+        columns={"task_id": "_latest_task_id"}
+    )
     # is_latest is applied positionally below, so the merge must preserve row
     # order. image_name is the only column the two frames share and every key
     # matches, which is also why on=/how= cannot change the outcome here.
@@ -188,8 +176,7 @@ def _filter_deleted_images(
     filtered = [
         img
         for img in deleted_images
-        if img.image_name in latest_deleted_task
-        and img.task_id == latest_deleted_task[img.image_name]
+        if img.image_name in latest_deleted_task and img.task_id == latest_deleted_task[img.image_name]
     ]
     seen: set[str] = set()
     unique: list[DeletedImage] = []
@@ -222,17 +209,11 @@ def partition_annotations_df(
          **dataset** and the rest to **obsolete**.
     """
     if df.empty:
-        df = df.reindex(
-            columns=df.columns.union(
-                ["image_name", "task_id", "job_stage", "job_state"], sort=False
-            )
-        )
+        df = df.reindex(columns=df.columns.union(["image_name", "task_id", "job_stage", "job_state"], sort=False))
 
     latest_per_image = _latest_task_per_image(df, deleted_images)
 
-    deleted_image_names: set[str] = set(
-        latest_per_image.index[latest_per_image["_is_deleted"] == 1]
-    )
+    deleted_image_names: set[str] = set(latest_per_image.index[latest_per_image["_is_deleted"] == 1])
 
     unique_deleted = _filter_deleted_images(
         deleted_images,

@@ -88,8 +88,7 @@ class ValidationResult:
     def requires_cleanup(self) -> bool:
         """Whether rejected records or proposed repairs require explicit acceptance."""
         return bool(self.broken_row_positions) or any(
-            issue.code in {"bbox_clipped", "class_canonicalized"}
-            for issue in self.issues
+            issue.code in {"bbox_clipped", "class_canonicalized"} for issue in self.issues
         )
 
     @property

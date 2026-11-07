@@ -44,17 +44,12 @@ def _attach_shared_fixture(path: Path, names: tuple[str, ...] = ()) -> None:
         "organizations": [
             {
                 "slug": cvat.get("organization", ""),
-                "projects": [
-                    {"id": index, "name": name}
-                    for index, name in enumerate(sorted(projects), start=1)
-                ],
+                "projects": [{"id": index, "name": name} for index, name in enumerate(sorted(projects), start=1)],
             }
         ]
     }
     (path.parent / "projects.yaml").write_text(yaml.safe_dump(cache), encoding="utf-8")
-    activate_migration(
-        migration_proposal(path, path.with_name(path.stem + "-shared.yaml"))
-    )
+    activate_migration(migration_proposal(path, path.with_name(path.stem + "-shared.yaml")))
 
 
 def test_load_config_with_image_cache(tmp_path: Path) -> None:
@@ -72,9 +67,7 @@ def test_load_config_with_image_cache(tmp_path: Path) -> None:
 
 
 def test_load_config_without_image_cache(tmp_path: Path) -> None:
-    cfg_path = write_config_yaml(
-        tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
-    )
+    cfg_path = write_config_yaml(tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"})
     ic = ImageCacheConfig.load(cfg_path)
     assert ic.projects == {}
 
@@ -142,9 +135,7 @@ def test_load_config_with_sync_roots(tmp_path: Path) -> None:
 
 
 def test_load_config_without_sync_roots(tmp_path: Path) -> None:
-    cfg_path = write_config_yaml(
-        tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
-    )
+    cfg_path = write_config_yaml(tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"})
     cfg = SyncRootsConfig.load(cfg_path)
     assert cfg.projects == {}
 
@@ -155,9 +146,7 @@ def test_sync_roots_missing_file(tmp_path: Path) -> None:
 
 
 def test_load_config_invalid_section(tmp_path: Path) -> None:
-    cfg_path = write_config_yaml(
-        tmp_path / "config.yaml", sync_roots=["not", "a", "dict"]
-    )
+    cfg_path = write_config_yaml(tmp_path / "config.yaml", sync_roots=["not", "a", "dict"])
     with pytest.raises(MigrationRequired):
         SyncRootsConfig.load(cfg_path)
 
@@ -199,16 +188,11 @@ def test_save_load_round_trip_preserves_other_sections(tmp_path: Path) -> None:
     assert CvatConfig.load(cfg_path).host == "http://localhost:8080"
     assert data["image_cache"]["proj-a"] == "/data/a"
     assert "sync_roots" not in data
-    assert (
-        load_project_config(cfg_path).projects["proj-a"].sync_root
-        == "s3://custom/images"
-    )
+    assert load_project_config(cfg_path).projects["proj-a"].sync_root == "s3://custom/images"
 
 
 def test_save_empty_config_removes_section(tmp_path: Path) -> None:
-    cfg_path = write_config_yaml(
-        tmp_path / "config.yaml", sync_roots={"proj": "old/root"}
-    )
+    cfg_path = write_config_yaml(tmp_path / "config.yaml", sync_roots={"proj": "old/root"})
 
     _attach_shared_fixture(cfg_path)
     SyncRootsConfig().save(cfg_path)
@@ -271,9 +255,7 @@ def test_user_config_overrides_preset(
     """User config file values override the preset."""
     _clear_cvat_env(monkeypatch)
 
-    cfg_path = write_config_yaml(
-        tmp_path / "config.yaml", cvat={"host": "https://custom-cvat.example.com"}
-    )
+    cfg_path = write_config_yaml(tmp_path / "config.yaml", cvat={"host": "https://custom-cvat.example.com"})
 
     cfg = CvatConfig.load(config_path=cfg_path)
     assert cfg.host == "https://custom-cvat.example.com"
@@ -288,9 +270,7 @@ def test_env_overrides_all(
     for var in ("CVAT_ORGANIZATION", "CVAT_USERNAME", "CVAT_PASSWORD"):
         monkeypatch.delenv(var, raising=False)
 
-    cfg_path = write_config_yaml(
-        tmp_path / "config.yaml", cvat={"host": "https://file-cvat.example.com"}
-    )
+    cfg_path = write_config_yaml(tmp_path / "config.yaml", cvat={"host": "https://file-cvat.example.com"})
 
     cfg = CvatConfig.load(config_path=cfg_path)
     assert cfg.host == "https://env-cvat.example.com"
@@ -364,9 +344,7 @@ def test_load_cache_config_resolves_overrides(tmp_path: Path) -> None:
 
 
 def test_cache_config_missing_section_and_file(tmp_path: Path) -> None:
-    cfg_path = write_config_yaml(
-        tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"}
-    )
+    cfg_path = write_config_yaml(tmp_path / "config.yaml", cvat={"host": "http://localhost:8080"})
     assert CacheConfig.load(cfg_path).for_project("x") == CacheProjectSettings()
     missing = CacheConfig.load(tmp_path / "nonexistent.yaml")
     assert missing.images_root is None
@@ -393,9 +371,7 @@ def test_setup_save_preserves_cache_section(tmp_path: Path) -> None:
     cfg_path = tmp_path / "config.yaml"
     _write_cache_yaml(cfg_path)
 
-    CvatConfig(host="http://localhost:8080", username="updated-user").save_to_file(
-        cfg_path
-    )
+    CvatConfig(host="http://localhost:8080", username="updated-user").save_to_file(cfg_path)
 
     reloaded = CacheConfig.load(cfg_path)
     assert reloaded.images_root == Path("/mnt/datasets")
@@ -433,9 +409,7 @@ def test_save_cache_config_omits_projects_when_every_entry_is_default(
     without it the unset ``tasks_root`` would be written back as ``null``.
     """
     cfg_path = tmp_path / "custom.yaml"
-    CacheConfig(
-        images_root=Path("/root"), projects={"empty": CacheProjectSettings()}
-    ).save(cfg_path)
+    CacheConfig(images_root=Path("/root"), projects={"empty": CacheProjectSettings()}).save(cfg_path)
 
     raw = yaml.safe_load(cfg_path.read_bytes())
     assert raw["cache"] == {"images_root": "/root"}
@@ -487,9 +461,7 @@ def test_merge_prefers_a_set_override_and_keeps_the_base_otherwise(
     assert base.merge(override).model_dump()[field] == "from-override"
 
 
-def test_load_prefers_an_explicit_path_over_the_env_override(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_prefers_an_explicit_path_over_the_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``CvatConfig.load(config_path=...)`` must not read ``CVETA2_CONFIG``.
 
     Every earlier test wrote its config to ``tmp_path/"config.yaml"``, which is
@@ -499,29 +471,19 @@ def test_load_prefers_an_explicit_path_over_the_env_override(
     _clear_cvat_env(monkeypatch)
     monkeypatch.setenv(
         "CVETA2_CONFIG",
-        str(
-            write_config_yaml(
-                tmp_path / "env.yaml", cvat={"host": "https://from-env-var.example"}
-            )
-        ),
+        str(write_config_yaml(tmp_path / "env.yaml", cvat={"host": "https://from-env-var.example"})),
     )
-    explicit = write_config_yaml(
-        tmp_path / "explicit.yaml", cvat={"host": "https://from-argument.example"}
-    )
+    explicit = write_config_yaml(tmp_path / "explicit.yaml", cvat={"host": "https://from-argument.example"})
 
     assert CvatConfig.load(config_path=explicit).host == "https://from-argument.example"
 
 
-def test_section_load_and_save_prefer_an_explicit_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_section_load_and_save_prefer_an_explicit_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The same argument-over-env rule for the generic section load/save."""
     env_path = write_config_yaml(tmp_path / "env.yaml", sync_roots={"p": "env/root"})
     _attach_shared_fixture(env_path)
     monkeypatch.setenv("CVETA2_CONFIG", str(env_path))
-    explicit = write_config_yaml(
-        tmp_path / "explicit.yaml", sync_roots={"p": "explicit/root"}
-    )
+    explicit = write_config_yaml(tmp_path / "explicit.yaml", sync_roots={"p": "explicit/root"})
 
     _attach_shared_fixture(explicit)
     assert SyncRootsConfig.load(explicit).get_root("p") == "explicit/root"
@@ -642,9 +604,7 @@ def test_save_to_file_leaves_the_image_cache_section_alone(
 
     CvatConfig(host="https://new.example").save_to_file(cfg_path)
 
-    assert ImageCacheConfig.load(cfg_path).get_cache_dir("proj") == Path(
-        "/data/existing"
-    )
+    assert ImageCacheConfig.load(cfg_path).get_cache_dir("proj") == Path("/data/existing")
 
 
 # ---------------------------------------------------------------------------
@@ -664,9 +624,7 @@ def test_network_defaults_keep_cvat_below_s3() -> None:
     assert network.retry_attempts > 1
 
 
-def test_network_section_is_read_from_the_config_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_network_section_is_read_from_the_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Every field comes from the file, and the explicit path wins over env."""
     monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "env.yaml"))
     explicit = write_config_yaml(
@@ -686,9 +644,7 @@ def test_network_section_is_read_from_the_config_file(
     assert (network.retry_attempts, network.retry_max_wait) == (9, 90.0)
 
 
-def test_environment_overrides_the_config_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_environment_overrides_the_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """These are the knobs to turn for one run on a rate-limited link."""
     cfg_path = write_config_yaml(
         tmp_path / "config.yaml",
@@ -774,9 +730,7 @@ def test_a_worker_count_below_one_is_reported_not_swallowed(
     [{"s3_workers": 0}, {"cvat_workers": -1}, {"retry_attempts": 1}],
     ids=["no_s3_workers", "negative_cvat_workers", "retry_attempts_too_low"],
 )
-def test_worker_counts_that_cannot_work_are_rejected_at_load(
-    tmp_path: Path, section: dict[str, int]
-) -> None:
+def test_worker_counts_that_cannot_work_are_rejected_at_load(tmp_path: Path, section: dict[str, int]) -> None:
     """Zero workers is a hang and one attempt is no retry at all.
 
     Rejecting at load names the setting; accepting it produces a run that

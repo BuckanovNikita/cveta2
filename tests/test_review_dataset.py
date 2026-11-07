@@ -45,12 +45,8 @@ def test_literal_deletion_names(tmp_path: Path, name: str) -> None:
 
 @pytest.mark.parametrize("export", [convert_to_yolo, convert_to_coco])
 @pytest.mark.parametrize("split", [None, "validation", "../outside", "TRAIN"])
-def test_export_rejects_every_invalid_split(
-    tmp_path: Path, export: Any, split: str | None
-) -> None:
-    csv = write_convert_csv(
-        tmp_path, [csv_row("a.jpg", split="train"), csv_row("b.jpg", split=split)]
-    )
+def test_export_rejects_every_invalid_split(tmp_path: Path, export: Any, split: str | None) -> None:
+    csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train"), csv_row("b.jpg", split=split)])
     output = tmp_path / "output"
     with pytest.raises(Cveta2Error) as error:
         export(csv, output)
@@ -69,9 +65,7 @@ def test_export_rejects_every_invalid_split(
     [(convert_to_yolo, "images/train/a.jpg"), (convert_to_coco, "train/a.jpg")],
 )
 @pytest.mark.parametrize("mode", ["copy", "hardlink", "symlink", "auto", "reflink"])
-def test_repeat_export_refreshes_bytes(
-    tmp_path: Path, export: Any, relative: str, mode: str
-) -> None:
+def test_repeat_export_refreshes_bytes(tmp_path: Path, export: Any, relative: str, mode: str) -> None:
     images = tmp_path / "source"
     source = images / "a.jpg"
     make_image(source)
@@ -136,9 +130,7 @@ def test_coco_rejects_unsafe_previous_metadata(tmp_path: Path, name: object) -> 
 
 
 def test_invalid_export_input_preserves_existing_destination(tmp_path: Path) -> None:
-    csv = write_convert_csv(
-        tmp_path, [csv_row("a.jpg", split="train", image_width="bad")]
-    )
+    csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train", image_width="bad")])
     output = tmp_path / "output"
     output.mkdir()
     (output / "sentinel").write_text("keep")
@@ -168,9 +160,7 @@ def test_yaml_syntax_error_is_contextual(tmp_path: Path, *, names_mode: bool) ->
     path = tmp_path / ("names.yaml" if names_mode else "dataset.yaml")
     path.write_text("names: [cat\n")
     with pytest.raises(Cveta2Error, match=path.name):
-        convert_from_yolo(
-            tmp_path, tmp_path / "out.csv", names_file=path if names_mode else None
-        )
+        convert_from_yolo(tmp_path, tmp_path / "out.csv", names_file=path if names_mode else None)
 
 
 @pytest.mark.parametrize(
@@ -186,14 +176,10 @@ def test_yaml_syntax_error_is_contextual(tmp_path: Path, *, names_mode: bool) ->
         "0 .5 .5 .2 .2 1.1",
     ],
 )
-def test_yolo_invalid_numeric_rows_preserve_valid_sibling(
-    tmp_path: Path, bad: str
-) -> None:
+def test_yolo_invalid_numeric_rows_preserve_valid_sibling(tmp_path: Path, bad: str) -> None:
     path = tmp_path / "a.txt"
     path.write_text(bad + "\n0 .5 .5 .2 .2 .9\n")
-    assert _parse_label_file(path, files=LocalConversionFiles()) == [
-        [0, 0.5, 0.5, 0.2, 0.2, 0.9]
-    ]
+    assert _parse_label_file(path, files=LocalConversionFiles()) == [[0, 0.5, 0.5, 0.2, 0.2, 0.9]]
 
 
 def test_clone_uses_each_tasks_frame_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,9 +211,7 @@ def test_clone_uses_each_tasks_frame_order(monkeypatch: pytest.MonkeyPatch) -> N
     client = MagicMock()
     client.__enter__.return_value = client
     client.projects.list.return_value = [source]
-    client.projects.retrieve.side_effect = lambda project_id: (
-        source if project_id == 1 else destination
-    )
+    client.projects.retrieve.side_effect = lambda project_id: source if project_id == 1 else destination
     client.projects.create.return_value = destination
     api = client.api_client.tasks_api
     api.retrieve_data_meta.side_effect = lambda task_id: (metadata[task_id], None)
@@ -257,9 +241,7 @@ def test_clone_uses_each_tasks_frame_order(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(clone, "make_client", lambda **_: client)
     monkeypatch.setattr(clone.time, "sleep", lambda _: None)
     s3 = MagicMock()
-    monkeypatch.setattr(
-        clone.boto3, "Session", lambda: SimpleNamespace(client=lambda *_, **__: s3)
-    )
+    monkeypatch.setattr(clone.boto3, "Session", lambda: SimpleNamespace(client=lambda *_, **__: s3))
     monkeypatch.setattr(sys, "argv", ["clone", "--source", "source"])
     clone.main()
     requests = [call.kwargs["data_request"] for call in api.create_data.call_args_list]
@@ -310,9 +292,7 @@ def test_clone_empty_project_is_safe(monkeypatch: pytest.MonkeyPatch) -> None:
     client.api_client.tasks_api.create.assert_not_called()
 
 
-def test_internal_reader_failure_is_not_hidden(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_internal_reader_failure_is_not_hidden(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "dataset.csv"
     path.write_text("image_name\na.jpg\n")
 
@@ -379,9 +359,7 @@ def test_coco_rejects_symlink_cleanup_parent(tmp_path: Path) -> None:
         '{"images": [{"file_name": "a.jpg"}, {"file_name": "a.jpg"}]}',
     ],
 )
-def test_coco_rejects_corrupt_or_ambiguous_metadata(
-    tmp_path: Path, content: str
-) -> None:
+def test_coco_rejects_corrupt_or_ambiguous_metadata(tmp_path: Path, content: str) -> None:
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
     output = tmp_path / "output"
     metadata = output / "train/_annotations.coco.json"
@@ -400,9 +378,7 @@ def test_yolo_warning_identifies_line(tmp_path: Path, capture_logs: list[str]) -
     assert f"{path}:2" in capture_logs[0]
 
 
-def test_yaml_internal_failure_is_not_hidden(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_yaml_internal_failure_is_not_hidden(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import yaml
 
     path = tmp_path / "dataset.yaml"
@@ -417,9 +393,7 @@ def test_yaml_internal_failure_is_not_hidden(
 
 
 @pytest.mark.parametrize("name", ["_annotations.coco.json", "bad\x00.jpg"])
-def test_coco_rejects_reserved_or_invalid_current_name_before_writes(
-    tmp_path: Path, name: str
-) -> None:
+def test_coco_rejects_reserved_or_invalid_current_name_before_writes(tmp_path: Path, name: str) -> None:
     csv = write_convert_csv(tmp_path, [csv_row("placeholder.jpg", split="train")])
     # Build malformed bytes directly: pandas versions differ on writing NUL cells.
     csv.write_bytes(csv.read_bytes().replace(b"placeholder.jpg", name.encode("utf-8")))
@@ -435,9 +409,7 @@ def test_coco_rejects_reserved_or_invalid_current_name_before_writes(
     assert sentinel.read_bytes() == b"keep"
 
 
-def test_csv_reader_stops_after_first_eof(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_csv_reader_stops_after_first_eof(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import io
 
     class BoundedEofStream(io.BytesIO):
@@ -457,9 +429,7 @@ def test_csv_reader_stops_after_first_eof(
     path.write_bytes(content)
     original_open = Path.open
 
-    def open_owned_stream(
-        file: Path, mode: str = "r", *args: Any, **kwargs: Any
-    ) -> Any:
+    def open_owned_stream(file: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
         if file == path and mode == "rb":
             return BoundedEofStream(content)
         return original_open(file, mode, *args, **kwargs)
@@ -488,20 +458,14 @@ def test_deleted_invalid_utf8_has_source_context(tmp_path: Path) -> None:
 def test_yolo_numeric_endpoints_are_accepted(tmp_path: Path, line: str) -> None:
     path = tmp_path / "endpoints.txt"
     path.write_text(line + "\n")
-    assert _parse_label_file(path, files=LocalConversionFiles()) == [
-        [float(value) for value in line.split()]
-    ]
+    assert _parse_label_file(path, files=LocalConversionFiles()) == [[float(value) for value in line.split()]]
 
 
-@pytest.mark.parametrize(
-    "line", ["0 .5 .5 1.01 .5", "0 .5 .5 .5 1.01", "0 -.01 .5 .5 .5", "0 .5 -.01 .5 .5"]
-)
+@pytest.mark.parametrize("line", ["0 .5 .5 1.01 .5", "0 .5 .5 .5 1.01", "0 -.01 .5 .5 .5", "0 .5 -.01 .5 .5"])
 def test_yolo_out_of_domain_siblings_are_skipped(tmp_path: Path, line: str) -> None:
     path = tmp_path / "outside.txt"
     path.write_text(line + "\n0 .5 .5 .5 .5\n")
-    assert _parse_label_file(path, files=LocalConversionFiles()) == [
-        [0, 0.5, 0.5, 0.5, 0.5]
-    ]
+    assert _parse_label_file(path, files=LocalConversionFiles()) == [[0, 0.5, 0.5, 0.5, 0.5]]
 
 
 @pytest.mark.parametrize("names", [{0: " "}, {0: "cat", 1: "cat"}])
@@ -543,9 +507,7 @@ def test_dataset_root_type_error_has_context(tmp_path: Path) -> None:
         "bbox_y_br",
     ],
 )
-def test_export_missing_columns_rejected_before_output(
-    tmp_path: Path, export: Any, column: str
-) -> None:
+def test_export_missing_columns_rejected_before_output(tmp_path: Path, export: Any, column: str) -> None:
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
     df = pd.read_csv(csv)
     df.drop(columns=[column]).to_csv(csv, index=False)
@@ -560,9 +522,7 @@ def test_export_missing_columns_rejected_before_output(
 @pytest.mark.parametrize("shape", ["none", "box"])
 @pytest.mark.parametrize("column", ["image_width", "image_height"])
 @pytest.mark.parametrize("value", [0, -1, 0.5, "bad", "inf", "nan"])
-def test_export_row_dimensions_are_validated(
-    shape: str, column: str, value: Any
-) -> None:
+def test_export_row_dimensions_are_validated(shape: str, column: str, value: Any) -> None:
     row = csv_row("dimension.jpg", shape=shape, split="train")
     row[column] = value
     csv = Path("dimension-source.csv")
@@ -573,9 +533,7 @@ def test_export_row_dimensions_are_validated(
 
 
 @pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
-def test_export_dimensions_are_validated_before_output(
-    tmp_path: Path, export: Any
-) -> None:
+def test_export_dimensions_are_validated_before_output(tmp_path: Path, export: Any) -> None:
     csv = write_convert_csv(
         tmp_path,
         [csv_row("dimension.jpg", shape="none", split="train", image_width=0)],
@@ -592,11 +550,7 @@ def test_export_dimensions_are_validated_before_output(
 def test_export_accepts_one_pixel_dimensions(tmp_path: Path, export: Any) -> None:
     csv = write_convert_csv(
         tmp_path,
-        [
-            csv_row(
-                "one.jpg", shape="none", split="train", image_width=1, image_height=1
-            )
-        ],
+        [csv_row("one.jpg", shape="none", split="train", image_width=1, image_height=1)],
     )
     output = tmp_path / "out"
     export(csv, output)
@@ -605,9 +559,7 @@ def test_export_accepts_one_pixel_dimensions(tmp_path: Path, export: Any) -> Non
 
 @pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
 @pytest.mark.parametrize("name", [None, "nested/a.jpg", "..", "a\\b.jpg"])
-def test_export_invalid_names_have_context_without_output(
-    tmp_path: Path, export: Any, name: str | None
-) -> None:
+def test_export_invalid_names_have_context_without_output(tmp_path: Path, export: Any, name: str | None) -> None:
     row = csv_row("placeholder.jpg", split="train")
     row["image_name"] = name
     csv = write_convert_csv(tmp_path, [row])
@@ -635,9 +587,7 @@ def test_export_invalid_boxes_have_context_without_output(
     tmp_path: Path, export: Any, coords: tuple[Any, Any, Any, Any]
 ) -> None:
     row = csv_row("box.jpg", split="train")
-    for key, value in zip(
-        ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"), coords, strict=True
-    ):
+    for key, value in zip(("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"), coords, strict=True):
         row[key] = value
     csv = write_convert_csv(tmp_path, [row])
     output = tmp_path / "out"
@@ -667,9 +617,7 @@ def test_export_valid_box_axes_are_independent(tmp_path: Path, export: Any) -> N
 
 
 @pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
-def test_export_missing_label_has_context_without_output(
-    tmp_path: Path, export: Any
-) -> None:
+def test_export_missing_label_has_context_without_output(tmp_path: Path, export: Any) -> None:
     row = csv_row("unlabelled.jpg", split="train")
     row["instance_label"] = None
     csv = write_convert_csv(tmp_path, [row])
@@ -682,9 +630,7 @@ def test_export_missing_label_has_context_without_output(
 
 
 @pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
-def test_invalid_link_mode_identified_before_output(
-    tmp_path: Path, export: Any
-) -> None:
+def test_invalid_link_mode_identified_before_output(tmp_path: Path, export: Any) -> None:
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
     output = tmp_path / "out"
     with pytest.raises(Cveta2Error) as error:
@@ -694,9 +640,7 @@ def test_invalid_link_mode_identified_before_output(
 
 
 @pytest.mark.parametrize("split", ["val", "test"])
-def test_coco_repeated_retained_split_preserves_current_output(
-    tmp_path: Path, split: str
-) -> None:
+def test_coco_repeated_retained_split_preserves_current_output(tmp_path: Path, split: str) -> None:
     images = tmp_path / "source"
     make_image(images / "a.jpg")
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split=split)])
@@ -705,12 +649,7 @@ def test_coco_repeated_retained_split_preserves_current_output(
     convert_to_coco(csv, output, image_dirs=[images], link_mode="copy")
     directory = output / ("valid" if split == "val" else split)
     assert (directory / "a.jpg").read_bytes() == (images / "a.jpg").read_bytes()
-    assert (
-        json.loads((directory / "_annotations.coco.json").read_text())["images"][0][
-            "file_name"
-        ]
-        == "a.jpg"
-    )
+    assert json.loads((directory / "_annotations.coco.json").read_text())["images"][0]["file_name"] == "a.jpg"
 
 
 def test_coco_removes_owned_test_split_even_without_train_metadata(
@@ -729,9 +668,7 @@ def test_coco_removes_owned_test_split_even_without_train_metadata(
 
 @pytest.mark.parametrize("split", ["train", "valid"])
 @pytest.mark.parametrize("dangling", [False, True])
-def test_coco_unowned_image_collision_rejected_with_context(
-    tmp_path: Path, split: str, *, dangling: bool
-) -> None:
+def test_coco_unowned_image_collision_rejected_with_context(tmp_path: Path, split: str, *, dangling: bool) -> None:
     output = tmp_path / "out"
     directory = output / split
     directory.mkdir(parents=True)
@@ -740,26 +677,16 @@ def test_coco_unowned_image_collision_rejected_with_context(
         destination.symlink_to(tmp_path / "absent.jpg")
     else:
         destination.write_bytes(b"unrelated")
-    csv = write_convert_csv(
-        tmp_path, [csv_row("a.jpg", split="val" if split == "valid" else split)]
-    )
+    csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="val" if split == "valid" else split)])
     with pytest.raises(Cveta2Error) as error:
         convert_to_coco(csv, output)
     assert str(destination) in str(error.value)
     assert not (directory / "_annotations.coco.json").exists()
-    assert (
-        destination.is_symlink()
-        if dangling
-        else destination.read_bytes() == b"unrelated"
-    )
+    assert destination.is_symlink() if dangling else destination.read_bytes() == b"unrelated"
 
 
-@pytest.mark.parametrize(
-    "kind", ["split-file", "split-symlink", "metadata-symlink", "root-symlink"]
-)
-def test_coco_unsafe_destination_types_rejected_with_context(
-    tmp_path: Path, kind: str
-) -> None:
+@pytest.mark.parametrize("kind", ["split-file", "split-symlink", "metadata-symlink", "root-symlink"])
+def test_coco_unsafe_destination_types_rejected_with_context(tmp_path: Path, kind: str) -> None:
     output = tmp_path / "out"
     output.mkdir()
     directory = output / "test"
@@ -817,12 +744,8 @@ def test_coco_prunes_missing_owned_image_without_error(tmp_path: Path) -> None:
 def test_csv_reader_guard_is_collected_before_real_reader() -> None:
     import subprocess
 
-    real_reader = (
-        "tests/test_output.py::test_read_dataset_csv_blank_file_names_the_path"
-    )
-    bounded_reader = (
-        "tests/test_review_dataset.py::test_csv_reader_stops_after_first_eof"
-    )
+    real_reader = "tests/test_output.py::test_read_dataset_csv_blank_file_names_the_path"
+    bounded_reader = "tests/test_review_dataset.py::test_csv_reader_stops_after_first_eof"
     # Explicit node order models mutmut's unordered caller set; collection must
     # retain both tests while putting finite-EOF verification ahead of real IO.
     result = subprocess.run(  # noqa: S603 - fixed pytest nodes and current interpreter
@@ -846,9 +769,5 @@ def test_csv_reader_guard_is_collected_before_real_reader() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    nodeids = [
-        line
-        for line in result.stdout.splitlines()
-        if line in {real_reader, bounded_reader}
-    ]
+    nodeids = [line for line in result.stdout.splitlines() if line in {real_reader, bounded_reader}]
     assert nodeids == [bounded_reader, real_reader]

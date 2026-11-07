@@ -66,9 +66,7 @@ class TestJobPositionDecidesCompletion:
                 segment_size=_IMAGES_PER_JOB,
             )
             try:
-                jobs = sorted(
-                    client.api.get_task_jobs(task_id), key=lambda j: j.start_frame
-                )
+                jobs = sorted(client.api.get_task_jobs(task_id), key=lambda j: j.start_frame)
                 assert len(jobs) == 2, (
                     f"expected the task to split into two jobs, got {len(jobs)} — "
                     f"segment_size={_IMAGES_PER_JOB} over {_TASK_IMAGES} images"
@@ -80,9 +78,7 @@ class TestJobPositionDecidesCompletion:
 
                     fetched = _fetch_task_rows(client, task_id)
                     df = pd.DataFrame(fetched.to_csv_rows())
-                    our_verdict = task_id in completed_task_ids(
-                        df, fetched.deleted_images
-                    )
+                    our_verdict = task_id in completed_task_ids(df, fetched.deleted_images)
                     cvat_status = client.api.get_task(task_id).status
 
                     assert our_verdict == (cvat_status == "completed"), (
@@ -106,25 +102,16 @@ class TestJobPositionDecidesCompletion:
                 segment_size=_IMAGES_PER_JOB,
             )
             try:
-                jobs = sorted(
-                    client.api.get_task_jobs(task_id), key=lambda j: j.start_frame
-                )
+                jobs = sorted(client.api.get_task_jobs(task_id), key=lambda j: j.start_frame)
                 client.api.update_job(jobs[0].id, stage="acceptance", state="completed")
                 client.api.update_job(jobs[1].id, stage="annotation", state="new")
 
                 fetched = _fetch_task_rows(client, task_id)
-                by_frame = {
-                    record.frame_id: (record.job_stage, record.job_state)
-                    for record in fetched.annotations
-                }
+                by_frame = {record.frame_id: (record.job_stage, record.job_state) for record in fetched.annotations}
 
                 assert by_frame, "the fetch returned no rows to check"
                 for frame, position in by_frame.items():
-                    expected = (
-                        ("acceptance", "completed")
-                        if frame <= jobs[0].stop_frame
-                        else ("annotation", "new")
-                    )
+                    expected = ("acceptance", "completed") if frame <= jobs[0].stop_frame else ("annotation", "new")
                     assert position == expected, f"frame {frame}"
             finally:
                 client.delete_task(task_id)

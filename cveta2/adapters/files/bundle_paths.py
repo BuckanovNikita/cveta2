@@ -12,15 +12,8 @@ from cveta2.domain.verification.cells import is_missing
 
 def absolute_image_path(value: object) -> Path:
     """Require an explicit absolute local path before resolving symlinks."""
-    if (
-        not isinstance(value, str)
-        or not value
-        or "\x00" in value
-        or not Path(value).is_absolute()
-    ):
-        raise UploadError(
-            f"Upload image_path must be an absolute local path: {value!r}"
-        )
+    if not isinstance(value, str) or not value or "\x00" in value or not Path(value).is_absolute():
+        raise UploadError(f"Upload image_path must be an absolute local path: {value!r}")
     try:
         return Path(value).resolve()
     except (OSError, RuntimeError, ValueError) as error:
@@ -50,9 +43,7 @@ def _s3_parts(value: str, *, root: bool = False) -> tuple[str, tuple[str, ...]]:
         or parsed.path.startswith("//")
         or any(part in {"", ".", ".."} for part in parts)
     ):
-        raise UploadError(
-            f"Expected an S3 bucket/prefix without traversal or credentials: {value!r}"
-        )
+        raise UploadError(f"Expected an S3 bucket/prefix without traversal or credentials: {value!r}")
     return parsed.netloc, parts
 
 
@@ -102,19 +93,11 @@ class LocalRoots:
                 raise UploadError(f"S3 image path must be a string: {value!r}")
             if value.startswith("s3://"):
                 bucket, key = _s3_parts(value)
-                matches = {
-                    owner
-                    for owner, prefix in approved
-                    if bucket == owner and key[: len(prefix)] == prefix
-                }
+                matches = {owner for owner, prefix in approved if bucket == owner and key[: len(prefix)] == prefix}
             else:
                 # Existing cveta2 exports use bucket-relative object keys. Resolve
                 # only through approved prefixes and reject ambiguous buckets.
                 _, key = _s3_parts(f"s3://placeholder/{value}")
-                matches = {
-                    owner for owner, prefix in approved if key[: len(prefix)] == prefix
-                }
+                matches = {owner for owner, prefix in approved if key[: len(prefix)] == prefix}
             if len(matches) != 1:
-                raise UploadError(
-                    f"S3 image path is outside approved S3 roots: {value!r}"
-                )
+                raise UploadError(f"S3 image path is outside approved S3 roots: {value!r}")

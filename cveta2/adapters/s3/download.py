@@ -91,9 +91,7 @@ class ImageDownloader:
     subfolders are preserved.
     """
 
-    def __init__(
-        self, target_dir: "Path", ignored_prefix: "str | None" = None
-    ) -> "None":
+    def __init__(self, target_dir: "Path", ignored_prefix: "str | None" = None) -> "None":
         """Store the target directory and optional S3 prefix to strip."""
         self._target_dir = target_dir
         self._ignored_prefix = ignored_prefix
@@ -118,9 +116,7 @@ class ImageDownloader:
         stats = DownloadStats(total=len(image_tasks))
         pending = self._filter_cached(image_tasks, stats, project_cloud_storage)
         if not pending:
-            logger.info(
-                f"Все {stats.cached} изображений уже загружены в {self._target_dir}"
-            )
+            logger.info(f"Все {stats.cached} изображений уже загружены в {self._target_dir}")
             return stats
 
         ensure_shared_dir(self._target_dir)
@@ -188,9 +184,7 @@ class ImageDownloader:
             unit="img",
         )
         pending: dict[str, str] = {}
-        for (image_name, frame_ref), is_cached in zip(
-            entries, cached_flags, strict=True
-        ):
+        for (image_name, frame_ref), is_cached in zip(entries, cached_flags, strict=True):
             if is_cached is True:
                 stats.cached += 1
             else:
@@ -223,9 +217,7 @@ class ImageDownloader:
                 )
                 for name, frame in pending.items()
             ]
-            absent = _download_image_batch(
-                s3_client, project_cloud_storage.bucket, direct, stats
-            )
+            absent = _download_image_batch(s3_client, project_cloud_storage.bucket, direct, stats)
             resolved = {t.name: t.key for t in direct if t.name not in absent}
             pending = {name: pending[name] for name in absent}
             if not pending:
@@ -250,15 +242,10 @@ class ImageDownloader:
                 f"{', '.join(missing[:_MISSING_PREVIEW_LIMIT])}"
                 f"{'...' if len(missing) > _MISSING_PREVIEW_LIMIT else ''}"
             )
-        vanished = _download_image_batch(
-            s3_client, project_cloud_storage.bucket, to_download, stats
-        )
+        vanished = _download_image_batch(s3_client, project_cloud_storage.bucket, to_download, stats)
         if vanished:
             stats.failed += len(vanished)
-            logger.warning(
-                "Объекты исчезли с S3 после listing: "
-                f"{', '.join(vanished[:_MISSING_PREVIEW_LIMIT])}"
-            )
+            logger.warning(f"Объекты исчезли с S3 после listing: {', '.join(vanished[:_MISSING_PREVIEW_LIMIT])}")
         return resolved | name_to_key
 
     def _resolve_s3_keys(
@@ -277,11 +264,7 @@ class ImageDownloader:
         for image_name, frame_ref in pending.items():
             canonical = _canonical_frame_key(project_cloud_storage.prefix, frame_ref)
             relative = strip_key_prefix(canonical, project_cloud_storage.prefix)
-            s3_key = (
-                name_to_key.get(relative)
-                or name_to_key.get(canonical)
-                or name_to_key.get(image_name)
-            )
+            s3_key = name_to_key.get(relative) or name_to_key.get(canonical) or name_to_key.get(image_name)
             if s3_key is not None:
                 resolved[image_name] = s3_key
         return resolved
@@ -362,9 +345,7 @@ def _download_image_batch(
     for transfer, outcome in zip(transfers, outcomes, strict=True):
         if isinstance(outcome, _ImageTransferError):
             stats.failed += 1
-            logger.error(
-                f"Не удалось загрузить {transfer.name} (key={transfer.key}): {outcome}"
-            )
+            logger.error(f"Не удалось загрузить {transfer.name} (key={transfer.key}): {outcome}")
         elif outcome is False:
             missing.append(transfer.name)
         else:
@@ -398,9 +379,7 @@ class S3Syncer:
     the S3 keys below that prefix instead of below the storage prefix.
     """
 
-    def __init__(
-        self, target_dir: "Path", ignored_prefix: "str | None" = None
-    ) -> "None":
+    def __init__(self, target_dir: "Path", ignored_prefix: "str | None" = None) -> "None":
         """Store the target directory and optional S3 prefix to strip."""
         self._target_dir = target_dir
         self._ignored_prefix = ignored_prefix
@@ -423,23 +402,18 @@ class S3Syncer:
         for key, name in objects:
             _validate_relative_key(key, original=key)
             local_name = _local_name_from_key(key, local_root, original=key)
-            destination = _confined_destination(
-                self._target_dir, local_name, original=key
-            )
+            destination = _confined_destination(self._target_dir, local_name, original=key)
             resolved = destination.resolve()
             if resolved in destinations:
                 raise Cveta2Error(
-                    f"Объекты S3 {destinations[resolved]!r} и {key!r} "
-                    f"имеют одно назначение {destination}"
+                    f"Объекты S3 {destinations[resolved]!r} и {key!r} имеют одно назначение {destination}"
                 )
             destinations[resolved] = key
             transfers.append(Transfer(name=name, key=key, path=destination))
         # A file destination cannot also be a parent of another destination.
         for destination in destinations:
             if any(parent in destinations for parent in destination.parents):
-                raise Cveta2Error(
-                    f"Конфликт назначений S3: {destination} вложен в другой файл"
-                )
+                raise Cveta2Error(f"Конфликт назначений S3: {destination} вложен в другой файл")
         to_download = [t for t in transfers if not t.path.is_file()]
         stats.cached = stats.total - len(to_download)
 

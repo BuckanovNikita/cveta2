@@ -28,6 +28,4 @@ def _build_label_maps(
 
 def build_name_to_frame(data_meta: "RawDataMeta") -> dict[str, int]:
     """Build frame-name -> frame-index mapping (with basename fallback)."""
-    return names_with_basename_fallback(
-        (frame.name, idx) for idx, frame in enumerate(data_meta.frames)
-    )
+    return names_with_basename_fallback((frame.name, idx) for idx, frame in enumerate(data_meta.frames))

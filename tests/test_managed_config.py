@@ -86,11 +86,7 @@ def legacy(path: Path) -> Path:
     """Supply real identities for legacy name mappings through the discovery cache."""
     write(
         path.parent / "projects.yaml",
-        {
-            "organizations": [
-                {"slug": "team", "projects": [{"id": 7, "name": "Main project"}]}
-            ]
-        },
+        {"organizations": [{"slug": "team", "projects": [{"id": 7, "name": "Main project"}]}]},
     )
     return write(
         path,
@@ -118,9 +114,7 @@ def legacy(path: Path) -> Path:
     )
 
 
-def test_selection_precedence_and_relative_saved_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_selection_precedence_and_relative_saved_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Selection chooses one file, not a merge, and saved paths are anchored."""
     saved = shared(tmp_path / "saved.yaml")
     env = shared(tmp_path / "env.yaml", "https://env.example")
@@ -136,17 +130,13 @@ def test_selection_precedence_and_relative_saved_path(
         load_project_config(cfg)
 
 
-def test_attach_is_noninteractive_and_does_not_modify_shared(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_attach_is_noninteractive_and_does_not_modify_shared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Attach-only setup does not prompt for credentials or write shared data."""
     target = shared(tmp_path / "shared.yaml")
     cfg = write(tmp_path / "personal.yaml", {"network": {"s3_workers": 2}})
     before = target.read_bytes()
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-    setup.run_setup(
-        argparse.Namespace(config=str(cfg), project_config=target, migrate_config=False)
-    )
+    setup.run_setup(argparse.Namespace(config=str(cfg), project_config=target, migrate_config=False))
     assert target.read_bytes() == before
     assert read_config(cfg)["project_config"] == str(target)
     assert read_config(cfg)["network"] == {"s3_workers": 2}
@@ -160,9 +150,7 @@ def test_attach_is_noninteractive_and_does_not_modify_shared(
         {"cache": {"projects": {"main": {"ignored_prefix": "bad"}}}},
     ],
 )
-def test_personal_cannot_override_shared(
-    tmp_path: Path, fields: dict[str, object]
-) -> None:
+def test_personal_cannot_override_shared(tmp_path: Path, fields: dict[str, object]) -> None:
     """Shared ownership is enforced before resolving effective settings."""
     target = shared(tmp_path / "shared.yaml")
     cfg = write(
@@ -173,9 +161,7 @@ def test_personal_cannot_override_shared(
         CvatConfig.load(cfg)
 
 
-def test_shared_identity_and_policy_readers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_shared_identity_and_policy_readers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing readers receive shared policies and personal credentials/local paths."""
     target = shared(tmp_path / "shared.yaml")
     cfg = personal(tmp_path / "personal.yaml", target)
@@ -265,16 +251,12 @@ def test_ambiguous_identity_and_existing_shared_conflict_block(tmp_path: Path) -
     assert target.read_bytes() == before
 
 
-def test_migration_cancel_and_stale_preview(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_migration_cancel_and_stale_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Cancel is no-op; approval cannot activate a proposal of changed bytes."""
     cfg = legacy(tmp_path / "personal.yaml")
     original = cfg.read_bytes()
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: False)
-    setup.run_setup(
-        argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None)
-    )
+    setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None))
     assert cfg.read_bytes() == original
     assert not (tmp_path / "project-config.yaml").exists()
     proposal = migration_proposal(cfg)
@@ -283,9 +265,7 @@ def test_migration_cancel_and_stale_preview(
         activate_migration(proposal)
 
 
-def test_interrupted_approved_activation_recovers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_interrupted_approved_activation_recovers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A journal allows shared-first activation to resume after interruption."""
     cfg = legacy(tmp_path / "personal.yaml")
     proposal = migration_proposal(cfg)
@@ -333,9 +313,7 @@ def test_unclassified_nested_fields_require_review(tmp_path: Path) -> None:
         activate_migration(proposal)
 
 
-def test_recovery_after_shared_activation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_recovery_after_shared_activation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the original personal file recoverable if its final switch fails."""
     cfg = legacy(tmp_path / "personal.yaml")
     proposal = migration_proposal(cfg)
@@ -391,9 +369,7 @@ def test_shared_policy_edits_preserve_permissions(tmp_path: Path, mode: int) -> 
     assert load_project_config(cfg).projects["main"].sync_root == "s3://bucket/revised"
 
 
-def test_explicit_shared_path_without_saved_reference(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_explicit_shared_path_without_saved_reference(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """All explicit loaders use the same selected file without environment edits."""
     target = shared(tmp_path / "shared.yaml")
     cfg = write(
@@ -409,23 +385,14 @@ def test_explicit_shared_path_without_saved_reference(
     monkeypatch.delenv("CVETA2_PROJECT_CONFIG", raising=False)
     before = cfg.read_bytes()
     assert CvatConfig.load(cfg, project_path=target).host == "https://cvat.example"
-    assert ImageCacheConfig.load(cfg, project_path=target).get_cache_dir(
-        "Main project"
-    ) == Path("/local/images")
-    assert (
-        CacheConfig.load(cfg, project_path=target)
-        .for_project("Main project")
-        .task_cache_s3
-        == "s3://bucket/cache"
-    )
+    assert ImageCacheConfig.load(cfg, project_path=target).get_cache_dir("Main project") == Path("/local/images")
+    assert CacheConfig.load(cfg, project_path=target).for_project("Main project").task_cache_s3 == "s3://bucket/cache"
     assert NetworkConfig.resolve(cfg, project_path=target).cvat_workers == 2
     assert cfg.read_bytes() == before
     assert "CVETA2_PROJECT_CONFIG" not in os.environ
 
 
-def test_concurrent_journal_is_not_overwritten(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_concurrent_journal_is_not_overwritten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A transaction racing after preview cannot overwrite another journal."""
     cfg = legacy(tmp_path / "personal.yaml")
     proposal = migration_proposal(cfg)
@@ -441,9 +408,7 @@ def test_concurrent_journal_is_not_overwritten(
     ) -> None:
         if path == journal:
             path.write_bytes(b"another transaction")
-        original_write(
-            path, content, replace=replace, preserve_permissions=preserve_permissions
-        )
+        original_write(path, content, replace=replace, preserve_permissions=preserve_permissions)
 
     monkeypatch.setattr(project_config, "_private_write", racing_write)
     with pytest.raises(ManagedError, match="Another approved migration"):
@@ -458,17 +423,13 @@ def test_concurrent_journal_is_not_overwritten(
 # ---------------------------------------------------------------------------
 
 
-def _legacy_registry(
-    tmp_path: Path, names: dict[str, int], ignore: dict[str, object] | None = None
-) -> Path:
+def _legacy_registry(tmp_path: Path, names: dict[str, int], ignore: dict[str, object] | None = None) -> Path:
     path = tmp_path / "personal.yaml"
     path.write_text(
         yaml.safe_dump(
             {
                 "cvat": {"host": "https://cvat.example"},
-                "sync_roots": {
-                    name: f"s3://bucket/{identity}" for name, identity in names.items()
-                },
+                "sync_roots": {name: f"s3://bucket/{identity}" for name, identity in names.items()},
                 "ignore": ignore or {},
             }
         )
@@ -479,10 +440,7 @@ def _legacy_registry(
                 "organizations": [
                     {
                         "slug": "",
-                        "projects": [
-                            {"id": identity, "name": name}
-                            for name, identity in names.items()
-                        ],
+                        "projects": [{"id": identity, "name": name} for name, identity in names.items()],
                     }
                 ]
             }
@@ -506,16 +464,12 @@ def test_migration_key_collision_requires_review_without_losing_active_policy(
 
 
 @pytest.mark.parametrize("legacy_key", ["sync_roots", "ignore", "unknown_section"])
-def test_attachment_validates_final_versioned_bytes_before_write(
-    tmp_path: Path, legacy_key: str
-) -> None:
+def test_attachment_validates_final_versioned_bytes_before_write(tmp_path: Path, legacy_key: str) -> None:
     """Empty obsolete sections must not become invalid version-one state."""
     personal = tmp_path / "personal.yaml"
     personal.write_text(yaml.safe_dump({"cvat": {"username": "alice"}, legacy_key: {}}))
     shared = tmp_path / "shared.yaml"
-    shared.write_text(
-        yaml.safe_dump({"schema_version": 1, "cvat": {"host": "https://cvat.example"}})
-    )
+    shared.write_text(yaml.safe_dump({"schema_version": 1, "cvat": {"host": "https://cvat.example"}}))
     original = personal.read_bytes()
     with pytest.raises(MigrationRequired):
         attach_project_config(personal, shared)
@@ -547,13 +501,9 @@ def test_numeric_string_ignore_entries_survive_reviewed_migration(
 
 
 @pytest.mark.parametrize("kind", ["sync", "ignore", "cache"])
-def test_shared_policy_writers_reject_unknown_registry_keys(
-    tmp_path: Path, kind: str
-) -> None:
+def test_shared_policy_writers_reject_unknown_registry_keys(tmp_path: Path, kind: str) -> None:
     """A rejected edit names the unknown source and leaves both files untouched."""
-    personal = write_split_config_yaml(
-        tmp_path / "personal.yaml", project_ids={"Friendly project": 7}
-    )
+    personal = write_split_config_yaml(tmp_path / "personal.yaml", project_ids={"Friendly project": 7})
     shared = personal.with_name("personal-projects.yaml")
     before = personal.read_bytes(), shared.read_bytes()
     config: SyncRootsConfig | IgnoreConfig | CacheConfig
@@ -563,9 +513,7 @@ def test_shared_policy_writers_reject_unknown_registry_keys(
         config = IgnoreConfig()
         config.add_task("unknown-project", 42, "ignored")
     else:
-        config = CacheConfig(
-            projects={"unknown-project": CacheProjectSettings(ignored_prefix="raw/")}
-        )
+        config = CacheConfig(projects={"unknown-project": CacheProjectSettings(ignored_prefix="raw/")})
     with pytest.raises(ManagedError, match="unknown-project"):
         config.save(personal)
     assert (personal.read_bytes(), shared.read_bytes()) == before
@@ -573,9 +521,7 @@ def test_shared_policy_writers_reject_unknown_registry_keys(
 
 def test_shared_policy_writers_accept_registry_key_alias(tmp_path: Path) -> None:
     """Both shared policy types accept stable keys when display names differ."""
-    personal = write_split_config_yaml(
-        tmp_path / "personal.yaml", project_ids={"Friendly project": 7}
-    )
+    personal = write_split_config_yaml(tmp_path / "personal.yaml", project_ids={"Friendly project": 7})
     SyncRootsConfig(projects={"project-7": "s3://bucket/new"}).save(personal)
     ignored = IgnoreConfig()
     ignored.add_task("project-7", 42, "ignored")
@@ -671,9 +617,7 @@ def test_global_cache_save_still_rejects_ambiguous_shared_project_names(
         },
         datasets={},
     )
-    personal = write_config_yaml(
-        tmp_path / "personal.yaml", schema_version=1, project_config=str(shared)
-    )
+    personal = write_config_yaml(tmp_path / "personal.yaml", schema_version=1, project_config=str(shared))
     personal_before, shared_before = personal.read_bytes(), shared.read_bytes()
     with pytest.raises(ManagedError, match="Collision"):
         CacheConfig(images_root=tmp_path / "local-images").save(personal)
@@ -729,16 +673,12 @@ def test_shared_loader_accepts_only_matching_environment_organization(
     ("host", "organization"),
     [("https://different.example", "team"), ("https://shared.example", "other")],
 )
-def test_shared_credentials_save_refuses_either_identity_change(
-    tmp_path: Path, host: str, organization: str
-) -> None:
+def test_shared_credentials_save_refuses_either_identity_change(tmp_path: Path, host: str, organization: str) -> None:
     """A host-only or organization-only mismatch must refuse before writing."""
     path = shared_personal(tmp_path / "personal.yaml")
     original = path.read_bytes()
     with pytest.raises(ManagedError) as error:
-        CvatConfig(host=host, organization=organization, username="new").save_to_file(
-            path
-        )
+        CvatConfig(host=host, organization=organization, username="new").save_to_file(path)
     assert str(error.value)
     assert path.read_bytes() == original
     assert load_project_config(path).cvat.host == "https://shared.example"
@@ -769,12 +709,8 @@ def test_shared_credentials_save_omits_identity_and_preserves_local_settings(
     assert CvatConfig.load(path).organization == "team"
 
 
-@pytest.mark.parametrize(
-    "section", ["sync", "ignore", "ignored_prefix", "task_cache_s3"]
-)
-def test_new_policy_save_requires_attached_shared_file(
-    tmp_path: Path, section: str
-) -> None:
+@pytest.mark.parametrize("section", ["sync", "ignore", "ignored_prefix", "task_cache_s3"])
+def test_new_policy_save_requires_attached_shared_file(tmp_path: Path, section: str) -> None:
     """Policy writers cannot manufacture a fresh personal policy section."""
     path = tmp_path / "personal.yaml"
     config: SyncRootsConfig | IgnoreConfig | CacheConfig
@@ -811,9 +747,7 @@ def test_unattached_local_cache_save_preserves_only_supported_nonempty_fields(
         "images_root": "/local/root",
         "projects": {"kept": {"images_root": "/local/kept"}},
     }
-    assert CacheConfig.load(path).projects == {
-        "kept": CacheProjectSettings(images_root=Path("/local/kept"))
-    }
+    assert CacheConfig.load(path).projects == {"kept": CacheProjectSettings(images_root=Path("/local/kept"))}
 
 
 def test_empty_local_cache_save_does_not_invent_policy_or_raise(tmp_path: Path) -> None:

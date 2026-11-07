@@ -25,17 +25,13 @@ def _frame() -> pd.DataFrame:
     )
 
 
-def test_split_defaults_replace_input_and_stay_stable_across_order_and_versions() -> (
-    None
-):
+def test_split_defaults_replace_input_and_stay_stable_across_order_and_versions() -> None:
     """Adding or removing other images cannot rebalance published assignments."""
     frame = _frame()
     original = frame.copy(deep=True)
     hashes = dict(zip(frame["image_path"], ["aaa", "bbb", "ccc"], strict=True))
     split, assignments = assign_splits(frame, SplitPolicy(), hashes)
-    reverse, reverse_assignments = assign_splits(
-        frame.iloc[::-1], SplitPolicy(), hashes
-    )
+    reverse, reverse_assignments = assign_splits(frame.iloc[::-1], SplitPolicy(), hashes)
     assert assignments == reverse_assignments
     assert dict(zip(split["image_name"], split["split"], strict=True)) == dict(
         zip(reverse["image_name"], reverse["split"], strict=True)
@@ -43,9 +39,7 @@ def test_split_defaults_replace_input_and_stay_stable_across_order_and_versions(
     pd.testing.assert_frame_equal(frame, original)
     preserved = dict(assignments, removed="test")
     next_frame = frame.iloc[:1].copy()
-    changed_seed, next_assignments = assign_splits(
-        next_frame, SplitPolicy(seed=100), hashes, preserved
-    )
+    changed_seed, next_assignments = assign_splits(next_frame, SplitPolicy(seed=100), hashes, preserved)
     assert next_assignments == preserved
     assert changed_seed["split"].iloc[0] == split["split"].iloc[0]
 
@@ -60,9 +54,7 @@ def test_split_groups_identical_content_and_approximates_default_targets() -> No
     assert 0.17 < counts["val"] / len(frame) < 0.23
     assert 0.17 < counts["test"] / len(frame) < 0.23
     doubled = pd.DataFrame({"image_path": ["/a.jpg", "/b.jpg"]})
-    same, _ = assign_splits(
-        doubled, SplitPolicy(), {"/a.jpg": "same", "/b.jpg": "same"}
-    )
+    same, _ = assign_splits(doubled, SplitPolicy(), {"/a.jpg": "same", "/b.jpg": "same"})
     assert len(set(same["split"])) == 1
     assert len(assignments) == len(frame)
 
@@ -107,9 +99,7 @@ def test_overlapping_content_requires_exact_membership_and_explicit_source() -> 
     with pytest.raises(ManagedError, match="overlap"):
         resolve_overlaps(frame, hashes, {})
     with pytest.raises(ManagedError, match="membership"):
-        resolve_overlaps(
-            frame, hashes, {"same": OverlapDecision(source="first", members=["first"])}
-        )
+        resolve_overlaps(frame, hashes, {"same": OverlapDecision(source="first", members=["first"])})
     original = frame.copy(deep=True)
     result = resolve_overlaps(
         frame,

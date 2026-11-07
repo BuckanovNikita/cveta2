@@ -68,15 +68,11 @@ def test_incomplete_boxes_stop_direct_and_service_writes(column: str) -> None:
     df.loc[0, column] = None
     api = MagicMock(spec=CvatApiPort)
     client = CvatClient(CvatConfig(), api=api)
-    session = TaskWriteSession(
-        api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")]
-    )
+    session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
     with pytest.raises(Cveta2Error, match=r"a\.jpg"):
         client.upload_task_annotations(99, df, session=session)
     api.put_task_shapes.assert_not_called()
-    request = UploadRequest(
-        1, "project", "task", UploadPlan(df, ["a.jpg"], []), UploadOptions()
-    )
+    request = UploadRequest(1, "project", "task", UploadPlan(df, ["a.jpg"], []), UploadOptions())
     service_client = MagicMock()
     with pytest.raises(Cveta2Error, match=r"a\.jpg"):
         upload_cvat_dataset(service_client, request)
@@ -115,9 +111,7 @@ def test_conflicting_shape_readback_never_appends() -> None:
             )
         ]
     )
-    session = TaskWriteSession(
-        api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")]
-    )
+    session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
     staged = _StagedUpload(MagicMock(), rows(), ["a.jpg"], {"a.jpg": "a.jpg"})
     with pytest.raises(Cveta2Error):
         _ensure_annotations(client, 99, staged, session, resuming=True)
@@ -128,9 +122,7 @@ def test_conflicting_shape_readback_never_appends() -> None:
 def test_empty_and_deleted_records_are_valid(shape: str | None) -> None:
     api = MagicMock(spec=CvatApiPort)
     client = CvatClient(CvatConfig(), api=api)
-    df = pd.DataFrame(
-        [{"image_name": "a.jpg", "instance_label": None, "instance_shape": shape}]
-    )
+    df = pd.DataFrame([{"image_name": "a.jpg", "instance_label": None, "instance_shape": shape}])
     assert client.upload_task_annotations(99, df) == 0
     assert api.mock_calls == []
 
@@ -146,15 +138,13 @@ def test_empty_and_deleted_records_are_valid(shape: str | None) -> None:
         ("issue_state", "new"),
     ],
 )
-def test_complete_identity_detects_semantic_row_changes(
-    column: str, value: str | int
-) -> None:
+def test_complete_identity_detects_semantic_row_changes(column: str, value: str | int) -> None:
     original = rows()
     edited = rows()
     edited[column] = value
-    assert compute_fingerprint(
-        ["a.jpg"], [], ["car"], annotations=original
-    ) != compute_fingerprint(["a.jpg"], [], ["car"], annotations=edited)
+    assert compute_fingerprint(["a.jpg"], [], ["car"], annotations=original) != compute_fingerprint(
+        ["a.jpg"], [], ["car"], annotations=edited
+    )
 
 
 def test_identity_preserves_frame_order_but_normalizes_bbox_numbers() -> None:
@@ -163,12 +153,8 @@ def test_identity_preserves_frame_order_but_normalizes_bbox_numbers() -> None:
     for column in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
         integer_boxes[column] = integer_boxes[column].astype(int)
     first = compute_fingerprint(["a.jpg", "b.jpg"], [], [], annotations=original)
-    assert first == compute_fingerprint(
-        ["a.jpg", "b.jpg"], [], [], annotations=integer_boxes
-    )
-    assert first != compute_fingerprint(
-        ["b.jpg", "a.jpg"], [], [], annotations=original
-    )
+    assert first == compute_fingerprint(["a.jpg", "b.jpg"], [], [], annotations=integer_boxes)
+    assert first != compute_fingerprint(["b.jpg", "a.jpg"], [], [], annotations=original)
 
 
 @pytest.mark.parametrize(
@@ -190,9 +176,7 @@ def test_changed_options_reject_resume_before_external_calls(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     request = make_request(image_names=["a.jpg"])
     with monkeypatch.context() as boundary:
@@ -204,12 +188,8 @@ def test_changed_options_reject_resume_before_external_calls(
         with pytest.raises(CvatApiError):
             upload_cvat_dataset(client, request)
     stage = MagicMock()
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
-    )
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.recovery._stage_images", stage
-    )
+    monkeypatch.setattr("cveta2.application.use_cases.upload.orchestration._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload.recovery._stage_images", stage)
     changed = replace(
         request,
         resume=True,
@@ -236,9 +216,7 @@ def test_cleanup_failure_preserves_success_and_prevents_future_writes(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     original = Path.unlink
 
@@ -251,30 +229,15 @@ def test_cleanup_failure_preserves_success_and_prevents_future_writes(
     first = upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
     manifest = list_manifests(7, host=client.host)[0]
     assert manifest.completed_counts is not None
-    assert any(
-        f"задачу {first.task_id} " in message and "устаревшее" in message
-        for message in capture_logs
-    )
+    assert any(f"задачу {first.task_id} " in message and "устаревшее" in message for message in capture_logs)
     stage = MagicMock()
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
-    )
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.recovery._stage_images", stage
-    )
+    monkeypatch.setattr("cveta2.application.use_cases.upload.orchestration._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload.recovery._stage_images", stage)
     for resuming in (True, False):
         capture_logs.clear()
-        assert (
-            upload_cvat_dataset(
-                client, make_request(image_names=["a.jpg"], resume=resuming)
-            )
-            == first
-        )
+        assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=resuming)) == first
         # Each recovery names the task whose stale manifest it could not remove.
-        assert any(
-            f"задачу {first.task_id} " in message and "устаревшее" in message
-            for message in capture_logs
-        )
+        assert any(f"задачу {first.task_id} " in message and "устаревшее" in message for message in capture_logs)
     stage.assert_not_called()
 
 
@@ -302,9 +265,7 @@ def test_changed_remote_directory_with_same_basename_rejects_before_staging(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     request = make_request(image_names=["a.jpg"])
     outcome = upload_cvat_dataset(client, request)
@@ -312,12 +273,8 @@ def test_changed_remote_directory_with_same_basename_rejects_before_staging(
     remote = RawDataMeta(frames=[RawFrame("different/a.jpg", 640, 480)])
     monkeypatch.setattr(client.api, "get_task_data_meta", lambda _task_id: remote)
     stage = MagicMock()
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
-    )
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.recovery._stage_images", stage
-    )
+    monkeypatch.setattr("cveta2.application.use_cases.upload.orchestration._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload.recovery._stage_images", stage)
     with pytest.raises(Cveta2Error, match="кадры"):
         upload_cvat_dataset(client, replace(request, resume=True))
     stage.assert_not_called()
@@ -334,9 +291,7 @@ def test_deletion_only_request_resumes_without_shape_columns(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["d.jpg"]))
     request = make_request(image_names=[], deleted_names=["d.jpg"])
     first = upload_cvat_dataset(client, request)
@@ -421,10 +376,7 @@ def test_active_project_name_query_returns_current_unique_identity() -> None:
     current = ProjectInfo(id=202, name="SAME")
     api.list_projects.return_value = [current]
     client = CvatClient(CvatConfig(), api=api)
-    assert (
-        client.find_project_by_name("same", cached=[ProjectInfo(id=101, name="same")])
-        == current
-    )
+    assert client.find_project_by_name("same", cached=[ProjectInfo(id=101, name="same")]) == current
 
 
 @pytest.mark.parametrize("checkpoint", ["initial", "pending", "created"])
@@ -444,9 +396,7 @@ def test_required_manifest_checkpoints_fail_closed(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     from cveta2.adapters.files.shared import replace_shared_bytes
 
@@ -454,13 +404,7 @@ def test_required_manifest_checkpoints_fail_closed(
 
     def denied(path: Path, data: bytes) -> None:
         state = json.loads(data)
-        stage = (
-            "created"
-            if state["task_id"] is not None
-            else "pending"
-            if state["creation_pending"]
-            else "initial"
-        )
+        stage = "created" if state["task_id"] is not None else "pending" if state["creation_pending"] else "initial"
         if stage == checkpoint:
             raise PermissionError("simulated required checkpoint denial")
         original(path, data)
@@ -476,9 +420,7 @@ def test_required_manifest_checkpoints_fail_closed(
         assert manifest.task_id is None
         monkeypatch.setattr(upload_manifest, "replace_shared_bytes", original)
         with pytest.raises(Cveta2Error, match="неизвестен"):
-            upload_cvat_dataset(
-                client, make_request(image_names=["a.jpg"], resume=True)
-            )
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=True))
         assert len(client.api.writes.created_tasks) == 1
         assert client.get_task_size(1) == 0
 
@@ -527,9 +469,7 @@ def test_deleted_labelled_rows_never_create_shapes(*, complete_box: bool) -> Non
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations()
     client = CvatClient(CvatConfig(), api=api)
-    session = TaskWriteSession(
-        api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")]
-    )
+    session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
     assert client.upload_task_annotations(99, deleted, session=session) == 0
     assert _verify_existing_shapes(99, deleted, session) == 0
     api.put_task_shapes.assert_not_called()
@@ -565,9 +505,7 @@ def test_shape_recovery_rejects_each_conflicting_property(shape: RawShape) -> No
 
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations(shapes=[shape])
-    session = TaskWriteSession(
-        api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")]
-    )
+    session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
     with pytest.raises(Cveta2Error, match=r"99.*аннотации"):
         _verify_existing_shapes(99, rows(), session)
     api.put_task_shapes.assert_not_called()
@@ -581,33 +519,19 @@ def test_shape_attributes_conflict_with_default_upload_intent() -> None:
     api.get_task_annotations.return_value = RawAnnotations(
         shapes=[replace(_stored_box(), attributes=[RawAttribute(5, "changed")])]
     )
-    session = TaskWriteSession(
-        api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")]
-    )
+    session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
     with pytest.raises(Cveta2Error, match="99"):
         _verify_existing_shapes(99, rows(), session)
 
 
-@pytest.mark.parametrize(
-    ("input_count", "remote_count"), [(2, 1), (1, 2), (0, 1), (2, 2)]
-)
-def test_shape_recovery_preserves_duplicate_multiplicity(
-    input_count: int, remote_count: int
-) -> None:
+@pytest.mark.parametrize(("input_count", "remote_count"), [(2, 1), (1, 2), (0, 1), (2, 2)])
+def test_shape_recovery_preserves_duplicate_multiplicity(input_count: int, remote_count: int) -> None:
     from cveta2.application.use_cases.upload import _verify_existing_shapes
 
     api = MagicMock(spec=CvatApiPort)
-    api.get_task_annotations.return_value = RawAnnotations(
-        shapes=[_stored_box()] * remote_count
-    )
-    session = TaskWriteSession(
-        api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")]
-    )
-    annotations = (
-        pd.concat([rows()] * input_count, ignore_index=True)
-        if input_count
-        else pd.DataFrame()
-    )
+    api.get_task_annotations.return_value = RawAnnotations(shapes=[_stored_box()] * remote_count)
+    session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
+    annotations = pd.concat([rows()] * input_count, ignore_index=True) if input_count else pd.DataFrame()
     if input_count == remote_count:
         assert _verify_existing_shapes(99, annotations, session) == remote_count
     else:
@@ -643,9 +567,7 @@ def test_request_identity_binds_every_input_component(change: str) -> None:
     modified = {
         "box": replace(first, plan=replace(first.plan, annotations=edited_rows)),
         "task": replace(first, task_name="different"),
-        "image_order": replace(
-            first, plan=replace(first.plan, image_names=["b.jpg", "a.jpg"])
-        ),
+        "image_order": replace(first, plan=replace(first.plan, image_names=["b.jpg", "a.jpg"])),
         "deletion": replace(first, plan=replace(first.plan, deleted_names=["d.jpg"])),
         "labels": replace(first, labels=("person",)),
     }
@@ -658,9 +580,9 @@ def test_local_lookup_properties_do_not_change_annotation_intent(column: str) ->
     edited = rows()
     original[column] = "old-path"
     edited[column] = "new-path"
-    assert compute_fingerprint(
-        ["a.jpg"], [], [], annotations=original
-    ) == compute_fingerprint(["a.jpg"], [], [], annotations=edited)
+    assert compute_fingerprint(["a.jpg"], [], [], annotations=original) == compute_fingerprint(
+        ["a.jpg"], [], [], annotations=edited
+    )
 
 
 def test_fingerprint_normalizes_missing_columns_and_ordered_mappings() -> None:
@@ -669,12 +591,8 @@ def test_fingerprint_normalizes_missing_columns_and_ordered_mappings() -> None:
     edited["unused"] = None
     assert compute_fingerprint(
         ["a.jpg"], [], [], annotations=original, options={"complete": True, "size": 20}
-    ) == compute_fingerprint(
-        ["a.jpg"], [], [], annotations=edited, options={"size": 20, "complete": True}
-    )
-    assert compute_fingerprint([], [], []) == compute_fingerprint(
-        [], [], [], task_name=""
-    )
+    ) == compute_fingerprint(["a.jpg"], [], [], annotations=edited, options={"size": 20, "complete": True})
+    assert compute_fingerprint([], [], []) == compute_fingerprint([], [], [], task_name="")
 
 
 def test_fingerprint_accepts_semantic_timestamp_scalars() -> None:
@@ -762,9 +680,7 @@ def test_ambiguous_replacement_create_cannot_reuse_the_old_missing_id(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     request = make_request(image_names=["a.jpg"])
     with _dies_attaching_frames(client), pytest.raises(_InterruptedRunError):
@@ -779,9 +695,7 @@ def test_ambiguous_replacement_create_cannot_reuse_the_old_missing_id(
 
         assert isinstance(spec, UploadTaskSpec)
         original(spec)
-        raise CvatApiError(
-            "503 after replacement was created", status_code=503, retry_after=0
-        )
+        raise CvatApiError("503 after replacement was created", status_code=503, retry_after=0)
 
     monkeypatch.setattr(client.api, "create_task", applied_then_unavailable)
     with pytest.raises(CvatApiError, match="503"):
@@ -806,15 +720,11 @@ def test_ensure_task_guard_reports_known_identity_and_never_replays(state: str) 
     client = MagicMock(spec=CvatClient)
     api = MagicMock(spec=CvatApiPort)
     client.get_task.return_value.project_id = 999 if state == "project" else 7
-    client.get_task_size.return_value = (
-        0 if state == "empty" else 1 if state == "partial" else 2
-    )
+    client.get_task_size.return_value = 0 if state == "empty" else 1 if state == "partial" else 2
     client.open_task_session.return_value = TaskWriteSession(
         api,
         77,
-        _data_meta=RawDataMeta(
-            [RawFrame("different/a.jpg", 640, 480), RawFrame("images/b.jpg", 640, 480)]
-        ),
+        _data_meta=RawDataMeta([RawFrame("different/a.jpg", 640, 480), RawFrame("images/b.jpg", 640, 480)]),
     )
     manifest = _manifest(task_id=None if state == "pending" else 77)
     manifest.creation_pending = state == "pending"
@@ -857,9 +767,7 @@ def test_completed_recovery_cleans_the_exact_stale_manifest(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     original = Path.unlink
 
@@ -873,18 +781,9 @@ def test_completed_recovery_cleans_the_exact_stale_manifest(
         first = upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
     assert len(list_manifests(7, host=client.host)) == 1
     stage = MagicMock()
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
-    )
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.recovery._stage_images", stage
-    )
-    assert (
-        upload_cvat_dataset(
-            client, make_request(image_names=["a.jpg"], resume=resuming)
-        )
-        == first
-    )
+    monkeypatch.setattr("cveta2.application.use_cases.upload.orchestration._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload.recovery._stage_images", stage)
+    assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=resuming)) == first
     assert list_manifests(7, host=client.host) == []
     stage.assert_not_called()
 
@@ -900,9 +799,7 @@ def test_changed_cloud_storage_rejects_before_staging(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     request = make_request(image_names=["a.jpg"])
     first = upload_cvat_dataset(client, request)
@@ -913,12 +810,8 @@ def test_changed_cloud_storage_rejects_before_staging(
         lambda _project: make_cs_info(bucket="different"),
     )
     stage = MagicMock()
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.orchestration._stage_images", stage
-    )
-    monkeypatch.setattr(
-        "cveta2.application.use_cases.upload.recovery._stage_images", stage
-    )
+    monkeypatch.setattr("cveta2.application.use_cases.upload.orchestration._stage_images", stage)
+    monkeypatch.setattr("cveta2.application.use_cases.upload.recovery._stage_images", stage)
     with pytest.raises(Cveta2Error, match="Cloud storage"):
         upload_cvat_dataset(client, replace(request, resume=True))
     stage.assert_not_called()
@@ -941,14 +834,10 @@ def test_fresh_manifest_preserves_pending_false_identity_state(
         seeded_bucket,
     )
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     request = make_request(image_names=["a.jpg"])
-    manifest = _manifest(
-        fingerprint=request_fingerprint(request), task_id=77 if known_task else None
-    )
+    manifest = _manifest(fingerprint=request_fingerprint(request), task_id=77 if known_task else None)
     manifest.host = client.host
     manifest.creation_pending = False
     save_manifest(manifest)
@@ -999,9 +888,7 @@ def test_missing_label_column_means_no_annotation_writes() -> None:
     validate_upload_boxes(frame_only)
     api = MagicMock(spec=CvatApiPort)
     api.get_task_annotations.return_value = RawAnnotations(shapes=[])
-    session = TaskWriteSession(
-        api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")]
-    )
+    session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
     client = CvatClient(CvatConfig(), api=api)
     assert client.upload_task_annotations(99, frame_only, session=session) == 0
     assert _verify_existing_shapes(99, frame_only, session) == 0
@@ -1014,9 +901,7 @@ def test_blank_labels_are_ignored_during_image_staging(
     from cveta2.application.use_cases.upload import _stage_images
     from tests.test_upload_service import make_client, make_s3, seeded_bucket
 
-    client = make_client(
-        cloud_storage=make_cs_info(bucket="test-bucket", prefix="images")
-    )
+    client = make_client(cloud_storage=make_cs_info(bucket="test-bucket", prefix="images"))
     make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
     request = UploadRequest(
         7,
@@ -1039,9 +924,7 @@ def test_completion_save_failure_warns_without_reclassifying_success(
     from cveta2.adapters.files import manifests as upload_manifest
     from cveta2.adapters.files.manifests import new_manifest, save_manifest
 
-    manifest = new_manifest(
-        "", "identity", 7, "task", make_cs_info(), {}, [], host="http://cvat.invalid"
-    )
+    manifest = new_manifest("", "identity", 7, "task", make_cs_info(), {}, [], host="http://cvat.invalid")
 
     def denied(_path: Path, _data: bytes) -> None:
         raise PermissionError("completion bookkeeping denied")
@@ -1057,9 +940,7 @@ def test_preflight_unknown_task_identity_is_actionable_before_reads() -> None:
     from tests.test_upload_service import make_request
 
     client = MagicMock()
-    manifest = new_manifest(
-        "", "identity", 7, "task", make_cs_info(), {}, [], host="http://cvat.invalid"
-    )
+    manifest = new_manifest("", "identity", 7, "task", make_cs_info(), {}, [], host="http://cvat.invalid")
     with pytest.raises(Cveta2Error, match=r"(?i)id.*неизвестен"):
         _preflight_resume_target(client, make_request(image_names=[]), manifest)
     assert client.mock_calls == []

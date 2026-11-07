@@ -94,9 +94,7 @@ def fetch_project(
     if options.skip_validation:
         started = deps.clock()
         _promote_completed_annotations(client, target, options, deps=deps)
-        logger.info(
-            f"Принятие завершённой разметки: прошло {deps.clock() - started:.1f} с"
-        )
+        logger.info(f"Принятие завершённой разметки: прошло {deps.clock() - started:.1f} с")
     result = _fetch_core(client, target, options, prune_cache=True, deps=deps)
 
     if options.raw:
@@ -108,9 +106,7 @@ def fetch_project(
     df = pd.DataFrame(result.to_csv_rows(), columns=list(CSV_COLUMNS))
     partition = partition_annotations_df(df, result.deleted_images)
     deps.files.write_partition_csvs(partition, output_dir)
-    logger.info(
-        f"Партиционирование и запись CSV: прошло {deps.clock() - started:.1f} с"
-    )
+    logger.info(f"Партиционирование и запись CSV: прошло {deps.clock() - started:.1f} с")
     logger.info(f"Выгрузка завершена: прошло {deps.clock() - fetch_started:.1f} с")
 
     return partition
@@ -127,9 +123,7 @@ def _promote_completed_annotations(
     try:
         tasks = client.list_project_tasks(target.project_id)
     except Cveta2Error as error:
-        raise Cveta2Error(
-            f"Не удалось получить задачи проекта {target.project_id}: {error}"
-        ) from error
+        raise Cveta2Error(f"Не удалось получить задачи проекта {target.project_id}: {error}") from error
     tasks = [t for t in tasks if t.id not in (options.ignore_task_ids or set())]
     settings = deps.cache_settings
     cache = _build_task_cache(client, target.project_id, options, settings, deps=deps)
@@ -162,13 +156,8 @@ def _promote_task(
     try:
         jobs = client.api.get_task_jobs(task.id)
     except Cveta2Error as error:
-        raise Cveta2Error(
-            f"Не удалось получить jobs задачи {task.id}: {error}"
-        ) from error
-    if not jobs or any(
-        job.state != "completed" or job.stage not in {"annotation", "acceptance"}
-        for job in jobs
-    ):
+        raise Cveta2Error(f"Не удалось получить jobs задачи {task.id}: {error}") from error
+    if not jobs or any(job.state != "completed" or job.stage not in {"annotation", "acceptance"} for job in jobs):
         return
     pending = [job for job in jobs if job.stage == "annotation"]
     if not pending:
@@ -178,16 +167,12 @@ def _promote_task(
         # when CVAT leaves updated_date unchanged. A failed delete precedes writes.
         cache.invalidate(task.id, strict=True)
     except (Cveta2Error, OSError) as error:
-        raise Cveta2Error(
-            f"Не удалось очистить кэш задачи {task.id}: {error}"
-        ) from error
+        raise Cveta2Error(f"Не удалось очистить кэш задачи {task.id}: {error}") from error
     try:
         for job in pending:
             client.api.update_job(job.id, stage="acceptance", state="completed")
     except Cveta2Error as error:
-        raise Cveta2Error(
-            f"Не удалось принять job {job.id} задачи {task.id}: {error}"
-        ) from error
+        raise Cveta2Error(f"Не удалось принять job {job.id} задачи {task.id}: {error}") from error
 
 
 def fetch_selected_tasks(
@@ -226,10 +211,7 @@ def _fetch_core(
         task_selector=options.task_selector,
         project_name=project_name,
     )
-    logger.info(
-        f"Отбор задач: {len(ctx.tasks)} к загрузке; "
-        f"прошло {deps.clock() - started:.1f} с"
-    )
+    logger.info(f"Отбор задач: {len(ctx.tasks)} к загрузке; прошло {deps.clock() - started:.1f} с")
 
     started = deps.clock()
     cache_settings = deps.cache_settings
@@ -262,9 +244,7 @@ def _fetch_core(
             project_cloud_storage=target.cs_info,
             ignored_prefix=cache_settings.ignored_prefix,
         )
-        logger.info(
-            f"Изображения: {stats.summary()}; прошло {deps.clock() - started:.1f} с"
-        )
+        logger.info(f"Изображения: {stats.summary()}; прошло {deps.clock() - started:.1f} с")
     started = deps.clock()
     deps.files.populate_record_paths(
         result,
@@ -295,9 +275,7 @@ def _build_task_cache(
     """
     if not options.use_cache or not deps.cache_enabled:
         return None
-    return deps.caches.create(
-        project_id, client.detect_project_cloud_storage(project_id), cache_settings
-    )
+    return deps.caches.create(project_id, client.detect_project_cloud_storage(project_id), cache_settings)
 
 
 @dataclass(frozen=True)
@@ -373,8 +351,7 @@ class _FetchStats:
         )
         if self.skipped_task_ids:
             logger.warning(
-                f"Пропущены задачи ({len(self.skipped_task_ids)}): "
-                f"{sorted(self.skipped_task_ids)}; выгрузка неполная"
+                f"Пропущены задачи ({len(self.skipped_task_ids)}): {sorted(self.skipped_task_ids)}; выгрузка неполная"
             )
         if self.degraded_task_ids:
             logger.warning(

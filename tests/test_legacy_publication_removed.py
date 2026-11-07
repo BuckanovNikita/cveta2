@@ -43,10 +43,7 @@ def test_legacy_config_requires_review_without_rewriting(tmp_path: Path) -> None
     from cveta2.adapters.config.settings import CacheConfig
 
     config = tmp_path / "config.yaml"
-    original = (
-        b"clearml:\n  enabled: true\n  projects:\n"
-        b"    P: {clearml_project: p, clearml_dataset: d}\n"
-    )
+    original = b"clearml:\n  enabled: true\n  projects:\n    P: {clearml_project: p, clearml_dataset: d}\n"
     config.write_bytes(original)
     with pytest.raises(MigrationRequired, match="setup --migrate-config"):
         CacheConfig.load(config)

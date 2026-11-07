@@ -65,16 +65,12 @@ def _task(  # noqa: PLR0913
         "job_state": "completed" if completed else "in progress",
     }
     blank = pd.DataFrame(columns=list(CSV_COLUMNS)).to_csv(index=False)
-    tables = dict.fromkeys(
-        ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv"), blank
-    )
+    tables = dict.fromkeys(("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv"), blank)
     if not empty:
-        tables["deleted.csv" if deleted else "dataset.csv"] = pd.DataFrame(
-            [record], columns=list(CSV_COLUMNS)
-        ).to_csv(index=False)
-    return TaskSnapshot(
-        id=task_id, updated_date=date, completed=completed, tables=tables
-    )
+        tables["deleted.csv" if deleted else "dataset.csv"] = pd.DataFrame([record], columns=list(CSV_COLUMNS)).to_csv(
+            index=False
+        )
+    return TaskSnapshot(id=task_id, updated_date=date, completed=completed, tables=tables)
 
 
 class _Cvat:
@@ -85,10 +81,7 @@ class _Cvat:
 
     def inspect_project(self, project_id: int) -> ProjectState:
         return ProjectState(
-            [
-                task.model_copy(update={"tables": {}})
-                for task in self.projects[project_id]
-            ],
+            [task.model_copy(update={"tables": {}}) for task in self.projects[project_id]],
             self.labels[project_id],
         )
 
@@ -107,9 +100,7 @@ class _S3:
 
     def read_object(self, _uri: str) -> S3Object:
         self.reads += 1
-        return S3Object(
-            self.content, hashlib.sha256(self.content).hexdigest(), "opaque-etag", "v1"
-        )
+        return S3Object(self.content, hashlib.sha256(self.content).hexdigest(), "opaque-etag", "v1")
 
 
 def _config(*, supplemental: bool = False) -> tuple[ProjectConfig, DatasetDefinition]:
@@ -222,9 +213,7 @@ def test_reopened_tasks_leave_training_and_empty_task_evidence_is_reusable() -> 
     assert reader.downloads == [(12, 1)]
     assert second.sources[0].reused == [2]
     assert not second.sources[0].tasks["1"].completed
-    assert (
-        len(read_csv_bytes(second.sources[0].tables["in_progress.csv"].encode())) == 1
-    )
+    assert len(read_csv_bytes(second.sources[0].tables["in_progress.csv"].encode())) == 1
 
 
 def test_deletion_wins_same_task_ties_and_is_source_local() -> None:
@@ -257,9 +246,7 @@ def test_s3_changes_replace_source_and_reject_malformed_or_reserved_csv() -> Non
     s3.content = b"image_name\ninvalid.jpg\n"
     with pytest.raises(ManagedError, match="required columns"):
         _fetch(config, definition, reader, s3=s3)
-    s3.content = b"source_id," + _S3().content.replace(
-        b"\nextra.jpg,", b"\nforged,extra.jpg,"
-    )
+    s3.content = b"source_id," + _S3().content.replace(b"\nextra.jpg,", b"\nforged,extra.jpg,")
     with pytest.raises(ManagedError, match="reserved"):
         _fetch(config, definition, reader, s3=s3)
 
@@ -301,10 +288,7 @@ def test_s3_adapter_captures_opaque_etag_and_content_without_images() -> None:
     assert captured.content_hash == hashlib.sha256(content).hexdigest()
     assert captured.etag == '"multipart-2"'
     client.get_object.assert_called_once_with(Bucket="bucket", Key="data.csv")
-    assert (
-        client.method_calls == client.get_object.call_args_list
-        or len(client.method_calls) == 1
-    )
+    assert client.method_calls == client.get_object.call_args_list or len(client.method_calls) == 1
 
 
 def test_cvat_adapter_metadata_inspection_does_not_download_annotations() -> None:
@@ -364,10 +348,7 @@ def test_cvat_adapter_jobs_and_capture_completion_use_the_same_rule() -> None:
     assert not inspected.completed
     captured = adapter.read_task(12, inspected)
     assert not captured.completed
-    assert (
-        LocalSourceFiles().project_tables([captured])["dataset.csv"].count("image.jpg")
-        == 0
-    )
+    assert LocalSourceFiles().project_tables([captured])["dataset.csv"].count("image.jpg") == 0
     api.get_task_jobs.return_value = [
         RawJob(
             id=1,
@@ -407,9 +388,7 @@ def test_published_snapshot_reads_exact_id_and_rejects_missing_files(
     factory.get.return_value = dataset
     monkeypatch.setattr(managed_sources, "_factory", lambda: factory)
     assert ClearMLSources().read_snapshot("pinned") == snapshot
-    factory.get.assert_called_with(
-        dataset_id="pinned", only_completed=True, auto_create=False
-    )
+    factory.get.assert_called_with(dataset_id="pinned", only_completed=True, auto_create=False)
     with pytest.raises(Cveta2Error, match="required payload"):
         ClearMLSources().read_files("pinned", ("dataset.csv",))
     dataset.id = "wrong"

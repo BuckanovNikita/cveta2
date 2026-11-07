@@ -22,10 +22,7 @@ class DownloadStats(BaseModel):
 
     def summary(self) -> str:
         """Render the counters as the one-line log summary shared by every run."""
-        return (
-            f"{self.downloaded} загружено, {self.cached} из кэша, "
-            f"{self.failed} ошибок (всего {self.total})"
-        )
+        return f"{self.downloaded} загружено, {self.cached} из кэша, {self.failed} ошибок (всего {self.total})"
 
 
 class UploadStats(BaseModel):

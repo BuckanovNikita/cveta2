@@ -37,9 +37,7 @@ def test_request_timeout_must_be_finite_and_non_negative(value: float | None) ->
             CvatConfig(request_timeout=value)
 
 
-def test_selected_config_credential_hint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_selected_config_credential_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     selected = tmp_path / "selected.yaml"
     selected.write_text("cvat:\n  host: https://cvat.example\n")
     monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "ambient.yaml"))
@@ -128,9 +126,7 @@ def test_yaml_diagnostic_uses_only_category_and_available_location(
     with pytest.raises(Cveta2Error) as caught:
         CvatConfig.from_file(config)
 
-    assert str(caught.value) == (
-        f"Ошибка чтения YAML-конфигурации {config}: {type(error).__name__}{location}."
-    )
+    assert str(caught.value) == (f"Ошибка чтения YAML-конфигурации {config}: {type(error).__name__}{location}.")
     assert caught.value.__cause__ is error
 
 
@@ -180,9 +176,7 @@ def test_stale_ignore_cli_removes_without_task_listing(
 
     monkeypatch.setattr(ignore, "open_client", open_client)
     monkeypatch.setattr(ignore, "_resolve_project", lambda *_args: (1, "project"))
-    ignore.run_ignore(
-        argparse.Namespace(project="project", remove=["99"], add=None, list_only=False)
-    )
+    ignore.run_ignore(argparse.Namespace(project="project", remove=["99"], add=None, list_only=False))
     assert IgnoreConfig.load().get_ignored_tasks("project") == []
 
 
@@ -207,13 +201,10 @@ def test_doctor_optional_failure_succeeds(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.parametrize(("credentials", "code"), [(True, 0), (False, 1)])
-def test_doctor_subprocess_exit_contract(
-    tmp_path: Path, code: int, *, credentials: bool
-) -> None:
+def test_doctor_subprocess_exit_contract(tmp_path: Path, code: int, *, credentials: bool) -> None:
     config = tmp_path / "doctor.yaml"
     config.write_text(
-        "cvat:\n  host: https://cvat.example\n"
-        + ("  username: user\n  password: pass\n" if credentials else "")
+        "cvat:\n  host: https://cvat.example\n" + ("  username: user\n  password: pass\n" if credentials else "")
     )
     environment = {
         **os.environ,
@@ -247,9 +238,7 @@ def test_doctor_required_unavailable_and_optional_unavailable(
     from cveta2.domain.errors import Cveta2Error
     from cveta2.interfaces.commands import doctor
 
-    monkeypatch.setattr(
-        doctor, "check_config", Mock(side_effect=PermissionError("denied"))
-    )
+    monkeypatch.setattr(doctor, "check_config", Mock(side_effect=PermissionError("denied")))
     monkeypatch.setattr(
         doctor,
         "check_aws_credentials",
@@ -262,9 +251,7 @@ def test_doctor_required_unavailable_and_optional_unavailable(
 
 
 @pytest.mark.parametrize("raw", ["-1", "nan", "inf"])
-def test_invalid_environment_timeout_rejected(
-    monkeypatch: pytest.MonkeyPatch, raw: str
-) -> None:
+def test_invalid_environment_timeout_rejected(monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
     monkeypatch.setenv("CVETA2_DATA_TIMEOUT", raw)
     with pytest.raises(ValidationError):
         CvatConfig.from_env()
@@ -273,8 +260,7 @@ def test_invalid_environment_timeout_rejected(
 def test_doctor_malformed_optional_image_cache_subprocess(tmp_path: Path) -> None:
     config = tmp_path / "doctor.yaml"
     config.write_text(
-        "cvat:\n  host: https://cvat.example\n  username: user\n  password: pass\n"
-        "image_cache:\n  project: 123\n"
+        "cvat:\n  host: https://cvat.example\n  username: user\n  password: pass\nimage_cache:\n  project: 123\n"
     )
     environment = {
         **os.environ,
@@ -301,9 +287,7 @@ def test_doctor_malformed_optional_image_cache_subprocess(tmp_path: Path) -> Non
 
 def test_doctor_optional_validation_failure_subprocess(tmp_path: Path) -> None:
     config = tmp_path / "doctor.yaml"
-    config.write_text(
-        "cvat:\n  host: https://cvat.example\n  username: user\n  password: pass\n"
-    )
+    config.write_text("cvat:\n  host: https://cvat.example\n  username: user\n  password: pass\n")
     script = """
 from cveta2.adapters.config.settings import ImageCacheConfig
 from cveta2.interfaces.cli import main

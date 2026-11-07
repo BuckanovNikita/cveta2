@@ -35,12 +35,8 @@ _CACHE_FLAGS: dict[str, tuple[bool, bool]] = {
 }
 
 # Fixed user-facing prose contains no policy; keep it outside mutation targets.
-_ERR_IMAGES_DIR_CONFLICT = (
-    "Параметры несовместимы: передан images_dir= при download_images=False."
-)
-_ERR_PROJECT_UNRESOLVED = (
-    "Не удалось определить проект: передайте project= или укажите задачи числовыми ID."
-)
+_ERR_IMAGES_DIR_CONFLICT = "Параметры несовместимы: передан images_dir= при download_images=False."
+_ERR_PROJECT_UNRESOLVED = "Не удалось определить проект: передайте project= или укажите задачи числовыми ID."
 
 
 def _cache_flags(cache: "CacheMode") -> tuple[bool, bool]:
@@ -48,9 +44,7 @@ def _cache_flags(cache: "CacheMode") -> tuple[bool, bool]:
     try:
         return _CACHE_FLAGS[cache]
     except KeyError:
-        raise Cveta2Error(
-            f"Недопустимое значение cache={cache!r}; допустимые: use, refresh, off."
-        ) from None
+        raise Cveta2Error(f"Недопустимое значение cache={cache!r}; допустимые: use, refresh, off.") from None
 
 
 def _resolve_fetch_target(
@@ -67,9 +61,7 @@ def _resolve_fetch_target(
     a bare name here would lose the sync-root and TUI paths.
     """
     project_id, project_name = resolve_project_spec(client, project)
-    cs_info = project_cloud_storage(
-        client, project_id, project_name, config_path=config_path
-    )
+    cs_info = project_cloud_storage(client, project_id, project_name, config_path=config_path)
     ignore_set, silent_set = load_ignore_sets(project_name, config_path)
     target = FetchTarget(project_id, project_name, output_dir, cs_info)
     return target, ignore_set, silent_set
@@ -139,9 +131,7 @@ def fetch(  # noqa: PLR0913
     use_cache, force = _cache_flags(cache)
     config_path = _config_path(connection)
     with _open(connection) as c:
-        resolved, ignore_set, silent_set = _resolve_fetch_target(
-            c, project, Path(output_dir), config_path
-        )
+        resolved, ignore_set, silent_set = _resolve_fetch_target(c, project, Path(output_dir), config_path)
         options = FetchOptions(
             completed_only=completed_only,
             skip_validation=skip_validation,
@@ -150,9 +140,7 @@ def fetch(  # noqa: PLR0913
             use_cache=use_cache,
             force=force,
             save_tasks=save_tasks,
-            images_dir=_resolve_images_dir(
-                images_dir, download_images, resolved.project_name, config_path
-            ),
+            images_dir=_resolve_images_dir(images_dir, download_images, resolved.project_name, config_path),
             raw=raw,
             config_path=config_path,
         )
@@ -189,9 +177,7 @@ def fetch_task(  # noqa: PLR0913
             project = infer_project_from_tasks(c, tasks)
             if project is None:
                 raise Cveta2Error(_ERR_PROJECT_UNRESOLVED)
-        resolved, ignore_set, silent_set = _resolve_fetch_target(
-            c, project, Path(output_dir), config_path
-        )
+        resolved, ignore_set, silent_set = _resolve_fetch_target(c, project, Path(output_dir), config_path)
         options = FetchOptions(
             completed_only=completed_only,
             task_selector=list(tasks),
@@ -200,9 +186,7 @@ def fetch_task(  # noqa: PLR0913
             use_cache=use_cache,
             force=force,
             save_tasks=save_tasks,
-            images_dir=_resolve_images_dir(
-                images_dir, download_images, resolved.project_name, config_path
-            ),
+            images_dir=_resolve_images_dir(images_dir, download_images, resolved.project_name, config_path),
             config_path=config_path,
         )
         result = fetch_selected_tasks(c, resolved, options)

@@ -22,8 +22,7 @@ def untrusted_certificate_error() -> MaxRetryError:
     """
     handshake = ssl.SSLCertVerificationError(
         1,
-        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
-        "unable to get local issuer certificate",
+        "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate",
     )
     wrapped = Urllib3SSLError(handshake)
     try:

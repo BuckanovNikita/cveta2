@@ -139,9 +139,7 @@ def _select_tasks_for_fetch(
     is a no-op, and an ignored id never reaches here (it is one of the
     cases that falls back).
     """
-    selected = _resolve_selected_tasks_by_id(
-        api, project_id, options, runner=runner, max_workers=max_workers
-    )
+    selected = _resolve_selected_tasks_by_id(api, project_id, options, runner=runner, max_workers=max_workers)
     all_task_ids = None
     if selected is None:
         selected = api.get_project_tasks(project_id)
@@ -221,9 +219,7 @@ class _FetchMixin(_ClientBase):
             )
         if matches:
             return matches[0]
-        raise TaskNotFoundError(
-            f"Task not found: {s!r}. Available tasks: {_format_task_choices(tasks)}"
-        )
+        raise TaskNotFoundError(f"Task not found: {s!r}. Available tasks: {_format_task_choices(tasks)}")
 
     @staticmethod
     def resolve_task_selectors(
@@ -286,15 +282,12 @@ class _FetchMixin(_ClientBase):
             issues = api.get_task_issues(task.id)
         except CvatApiError as e:
             logger.warning(
-                f"Не удалось получить issues задачи {task.id}: {e} — "
-                f"колонки issue_text/issue_state останутся пустыми"
+                f"Не удалось получить issues задачи {task.id}: {e} — колонки issue_text/issue_state останутся пустыми"
             )
             issues = []
             issues_complete = False
 
-        records, deleted = task_to_records(
-            task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues, jobs
-        )
+        records, deleted = task_to_records(task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues, jobs)
         return TaskAnnotations(
             task_id=task.id,
             task_name=task.name,

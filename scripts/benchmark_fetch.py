@@ -169,9 +169,7 @@ class _CountedFiles(LocalWorkflowFiles):
         self._record("prepare_tasks")
         return super().prepare_tasks(output_dir)
 
-    def write_task_csv(
-        self, task: TaskInfo, result: TaskAnnotations, tasks_dir: Path
-    ) -> None:
+    def write_task_csv(self, task: TaskInfo, result: TaskAnnotations, tasks_dir: Path) -> None:
         self._record("task_csv_writes")
         super().write_task_csv(task, result, tasks_dir)
 
@@ -211,28 +209,21 @@ def _fixtures(workload: Workload) -> LoadedFixtures:
     data: dict[int, tuple[RawDataMeta, RawAnnotations]] = {}
     for index, task in enumerate(tasks):
         image_ids = range(index, workload.images, workload.tasks)
-        frames = [
-            RawFrame(name=f"image-{image_id:05}.jpg", width=640, height=480)
-            for image_id in image_ids
-        ]
+        frames = [RawFrame(name=f"image-{image_id:05}.jpg", width=640, height=480) for image_id in image_ids]
         shapes = [
             _shape(frame, frame * workload.boxes_per_image + box + 1)
             for frame in range(len(frames))
             for box in range(workload.boxes_per_image)
         ]
         data[task.id] = (RawDataMeta(frames=frames), RawAnnotations(shapes=shapes))
-    return LoadedFixtures(
-        ProjectInfo(id=1, name="benchmark"), tasks, [LabelInfo(id=1, name="box")], data
-    )
+    return LoadedFixtures(ProjectInfo(id=1, name="benchmark"), tasks, [LabelInfo(id=1, name="box")], data)
 
 
 def _csv_digest(directory: Path, root: Path) -> str:
     digest = hashlib.sha256()
     for name in _CSV_NAMES:
         digest.update(name.encode())
-        digest.update(
-            (directory / name).read_bytes().replace(str(root).encode(), b"<ROOT>")
-        )
+        digest.update((directory / name).read_bytes().replace(str(root).encode(), b"<ROOT>"))
     return digest.hexdigest()
 
 
@@ -242,25 +233,18 @@ def _measure(workload: Workload, options: argparse.Namespace) -> dict[str, objec
         return _run_workload(workload, options, root)
 
 
-def _run_workload(
-    workload: Workload, options: argparse.Namespace, root: Path
-) -> dict[str, object]:
+def _run_workload(workload: Workload, options: argparse.Namespace, root: Path) -> dict[str, object]:
     delay = options.latency_ms / 1000.0
     api = _TimedCvat(_fixtures(workload), delay)
     object_prefix = "images/legacy" if workload.fallback else "images"
     payload = b"x" * workload.image_bytes
     s3 = _TimedS3(
-        {
-            f"{object_prefix}/image-{index:05}.jpg": payload
-            for index in range(workload.images)
-        },
+        {f"{object_prefix}/image-{index:05}.jpg": payload for index in range(workload.images)},
         delay,
     )
     files = _CountedFiles()
     client = ApplicationClient(
-        ClientSettings(
-            host="https://benchmark.invalid", cvat_workers=options.cvat_workers
-        ),
+        ClientSettings(host="https://benchmark.invalid", cvat_workers=options.cvat_workers),
         images=S3ImageReader(),
         runner=run_concurrent,
         api=api,
@@ -331,19 +315,13 @@ def main() -> int:
     parser.add_argument("--latency-ms", type=float, default=2.0)
     parser.add_argument("--s3-workers", type=int, default=4)
     parser.add_argument("--cvat-workers", type=int, default=2)
-    parser.add_argument(
-        "--workload", choices=[case.name for case in WORKLOADS], action="append"
-    )
+    parser.add_argument("--workload", choices=[case.name for case in WORKLOADS], action="append")
     options = parser.parse_args()
     if options.repetitions < 1 or options.latency_ms < 0:
         parser.error("repetitions must be positive and latency nonnegative")
     configure_workers(s3=options.s3_workers, cvat=options.cvat_workers)
     logger.remove()
-    selected = [
-        case
-        for case in WORKLOADS
-        if not options.workload or case.name in options.workload
-    ]
+    selected = [case for case in WORKLOADS if not options.workload or case.name in options.workload]
     records: list[dict[str, object]] = []
     for case in selected:
         samples = [_measure(case, options) for _ in range(options.repetitions)]
@@ -361,9 +339,7 @@ def main() -> int:
         raise RuntimeError("Cannot identify the imported fetch implementation")
     report = {
         "label": options.label,
-        "imported_fetch_sha256": hashlib.sha256(
-            Path(source_path).read_bytes()
-        ).hexdigest(),
+        "imported_fetch_sha256": hashlib.sha256(Path(source_path).read_bytes()).hexdigest(),
         "configuration": {
             "repetitions": options.repetitions,
             "latency_ms": options.latency_ms,

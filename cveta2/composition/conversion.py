@@ -94,9 +94,7 @@ def merge_datasets(
     by_task: bool = False,
 ) -> pd.DataFrame:
     """Compose production dependencies and merge dataset CSVs."""
-    return merge(
-        old, new, output, deleted=deleted, by_task=by_task, files=LocalDatasetFiles()
-    )
+    return merge(old, new, output, deleted=deleted, by_task=by_task, files=LocalDatasetFiles())
 
 
 def compute_baseline(df: pd.DataFrame, path: Path) -> WhatsNewBaseline:

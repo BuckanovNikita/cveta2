@@ -108,9 +108,7 @@ def _imports(node: ast.Import | ast.ImportFrom) -> list[tuple[str, str]]:
     return [(a.asname or a.name, f"{node.module or ''}.{a.name}") for a in node.names]
 
 
-def _import_context(
-    tree: ast.Module, module: str, *, inner: bool
-) -> tuple[dict[str, str], list[str]]:
+def _import_context(tree: ast.Module, module: str, *, inner: bool) -> tuple[dict[str, str], list[str]]:
     aliases: dict[str, str] = {}
     violations: list[str] = []
     for node in ast.walk(tree):
@@ -118,20 +116,13 @@ def _import_context(
             continue
         for local, name in _imports(node):
             aliases[local] = name
-            if inner and (
-                name.split(".")[0] in EFFECT_IMPORTS
-                or name.startswith("urllib.request")
-            ):
+            if inner and (name.split(".")[0] in EFFECT_IMPORTS or name.startswith("urllib.request")):
                 violations.append(f"{module}:{node.lineno}: effect import {name}")
         root_import = (
-            node.module == "cveta2"
-            if isinstance(node, ast.ImportFrom)
-            else any(a.name == "cveta2" for a in node.names)
+            node.module == "cveta2" if isinstance(node, ast.ImportFrom) else any(a.name == "cveta2" for a in node.names)
         )
         if root_import:
-            violations.append(
-                f"{module}:{node.lineno}: canonical import of public root"
-            )
+            violations.append(f"{module}:{node.lineno}: canonical import of public root")
     return aliases, violations
 
 
@@ -161,9 +152,7 @@ def _path_annotation(annotation: ast.expr | None, aliases: dict[str, str]) -> bo
 
 def _effect_aliases(tree: ast.Module, aliases: dict[str, str]) -> set[str]:
     paths = {
-        node.arg
-        for node in ast.walk(tree)
-        if isinstance(node, ast.arg) and _path_annotation(node.annotation, aliases)
+        node.arg for node in ast.walk(tree) if isinstance(node, ast.arg) and _path_annotation(node.annotation, aliases)
     }
     for node in ast.walk(tree):
         if (
@@ -184,9 +173,7 @@ def _effect_aliases(tree: ast.Module, aliases: dict[str, str]) -> set[str]:
     return paths
 
 
-def _effect_call(
-    call: ast.Call, aliases: dict[str, str], paths: set[str]
-) -> str | None:
+def _effect_call(call: ast.Call, aliases: dict[str, str], paths: set[str]) -> str | None:
     name = _qualified(call.func, aliases)
     leaf = name.rsplit(".", 1)[-1]
     if name in EFFECT_CALLS or leaf in FILE_METHODS | PANDAS_IO:
@@ -214,9 +201,7 @@ def inspect_source(source: str, module: str) -> list[str]:
     if inner:
         paths = _effect_aliases(tree, aliases)
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and (
-                effect := _effect_call(node, aliases, paths)
-            ):
+            if isinstance(node, ast.Call) and (effect := _effect_call(node, aliases, paths)):
                 violations.append(f"{module}:{node.lineno}: external effect {effect}")
     return violations
 

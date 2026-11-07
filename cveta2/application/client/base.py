@@ -50,9 +50,7 @@ class _ClientBase:
             # DI api provided -- nothing to open.
             return self
         if self._session_factory is None:
-            raise RuntimeError(
-                "A CVAT session factory is required to open a connection"
-            )
+            raise RuntimeError("A CVAT session factory is required to open a connection")
         self._exit_stack = ExitStack()
         self._persistent_api = self._exit_stack.enter_context(self._session_factory())
         return self
@@ -116,9 +114,6 @@ class _ClientBase:
         """
         api = self._api or self._persistent_api
         if api is None:
-            msg = (
-                f"{method_name}() requires a context manager. "
-                f"Use: with CvatClient(cfg) as client: ..."
-            )
+            msg = f"{method_name}() requires a context manager. Use: with CvatClient(cfg) as client: ..."
             raise RuntimeError(msg)
         return api

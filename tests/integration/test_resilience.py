@@ -78,15 +78,10 @@ def test_a_parallel_fetch_survives_rate_limiting(tmp_path: Path) -> None:
         )
 
     assert expected_tasks > 0
-    assert (
-        len(partition.dataset) + len(partition.obsolete) + len(partition.in_progress)
-        > 0
-    )
+    assert len(partition.dataset) + len(partition.obsolete) + len(partition.in_progress) > 0
 
 
-def _upload_request(
-    project_id: int, project_name: str, names: list[str], *, resume: bool
-) -> UploadRequest:
+def _upload_request(project_id: int, project_name: str, names: list[str], *, resume: bool) -> UploadRequest:
     """One upload of *names*, annotated so there are shapes to double."""
     rows = [
         {
@@ -103,9 +98,7 @@ def _upload_request(
         project_id=project_id,
         project_name=project_name,
         task_name="integration-resume-test",
-        plan=UploadPlan(
-            annotations=pd.DataFrame(rows), image_names=names, deleted_names=[]
-        ),
+        plan=UploadPlan(annotations=pd.DataFrame(rows), image_names=names, deleted_names=[]),
         # No search dirs: the seeded images are already on S3, so staging
         # has nothing to transfer and the test needs no host-side MinIO
         # route. The point here is the CVAT half of the upload.
@@ -156,16 +149,12 @@ def test_resume_continues_a_killed_upload_without_duplicating_it() -> None:
         finally:
             client.api.attach_task_data = original  # type: ignore[method-assign]
 
-        fingerprint = request_fingerprint(
-            _upload_request(project_id, project_name, names, resume=False)
-        )
+        fingerprint = request_fingerprint(_upload_request(project_id, project_name, names, resume=False))
         stranded = load_manifest(project_id, fingerprint, host=client.host)
         assert stranded is not None
         assert stranded.task_id is not None
 
-        outcome = upload_cvat_dataset(
-            client, _upload_request(project_id, project_name, names, resume=True)
-        )
+        outcome = upload_cvat_dataset(client, _upload_request(project_id, project_name, names, resume=True))
 
     assert outcome.images == len(names)
     # The manifest is the run's own record; CVAT is the judge of the rest.

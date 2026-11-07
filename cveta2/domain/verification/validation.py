@@ -34,23 +34,15 @@ _CLIP_LIMIT = 10
 def _group_rows(frame: pd.DataFrame) -> tuple[list[tuple[int, ...]], list[Issue]]:
     groups: dict[tuple[str, int | None], list[int]] = defaultdict(list)
     scope_states: dict[str, set[bool]] = defaultdict(set)
-    tasks: Sequence[object] = (
-        frame["task_id"].tolist() if "task_id" in frame else [None] * len(frame)
-    )
-    for position, (name, task) in enumerate(
-        zip(frame["image_name"], tasks, strict=True)
-    ):
+    tasks: Sequence[object] = frame["task_id"].tolist() if "task_id" in frame else [None] * len(frame)
+    for position, (name, task) in enumerate(zip(frame["image_name"], tasks, strict=True)):
         # Unidentifiable rows cannot be joined to a known image by guesswork.
         key = name if isinstance(name, str) and name else f"\x00unidentified:{position}"
         task_id = None
         if not is_missing(task) and number(task) is not None:
             try:
                 parsed = Decimal(str(task))
-                if (
-                    parsed.is_finite()
-                    and parsed >= 0
-                    and parsed == parsed.to_integral_value()
-                ):
+                if parsed.is_finite() and parsed >= 0 and parsed == parsed.to_integral_value():
                     task_id = int(parsed)
             except InvalidOperation:
                 # The schema reports malformed IDs; keep unscoped evidence separate.
@@ -65,10 +57,7 @@ def _group_rows(frame: pd.DataFrame) -> tuple[list[tuple[int, ...]], list[Issue]
                 code="unscoped_task",
                 severity="warning",
                 columns=("task_id",),
-                message=(
-                    f"{mixed} image(s) mix task IDs and missing "
-                    f"IDs; unscoped rows stay separate."
-                ),
+                message=(f"{mixed} image(s) mix task IDs and missing IDs; unscoped rows stay separate."),
             )
         )
     return [tuple(rows) for rows in groups.values()], issues
@@ -89,18 +78,14 @@ def _identity_issues(  # noqa: C901
 ) -> list[Issue]:
     issues: list[Issue] = []
     # Values used in consistency checks have already passed individual schema checks.
-    positions_to_group = {
-        position: index for index, rows in enumerate(groups) for position in rows
-    }
+    positions_to_group = {position: index for index, rows in enumerate(groups) for position in rows}
     columns = ("image_name", "image_path", "split", "instance_label", "instance_shape")
     name_paths: dict[object, tuple[str, int]] = {}
     name_splits: dict[object, tuple[object, int]] = {}
     paths: dict[str, tuple[str, int]] = {}
     kinds: dict[int, tuple[str, int]] = {}
 
-    def conflict(
-        code: str, positions: tuple[int, int], column: str, message: str
-    ) -> None:
+    def conflict(code: str, positions: tuple[int, int], column: str, message: str) -> None:
         for position, other in (positions, positions[::-1]):
             issues.append(
                 Issue(
@@ -130,9 +115,7 @@ def _identity_issues(  # noqa: C901
         fact = facts.get(pos)
         resolved = fact.canonical_path if fact is not None else None
         if fact is not None:
-            issues.extend(
-                issue for issue in fact.issues if not issue.code.startswith("media_")
-            )
+            issues.extend(issue for issue in fact.issues if not issue.code.startswith("media_"))
         # cveta2 historical tasks may carry different assignments; training
         # ownership is global.
         owner_key: object = image_name if profile == "clearml-yolo" else group
@@ -174,16 +157,13 @@ def _dimension_issues(
     """Constrain bounds with every supplied dimension, even unpaired axes."""
     issues: list[Issue] = []
     for group in groups:
-        for axis, columns in enumerate(
-            (("image_width", "width"), ("image_height", "height"))
-        ):
+        for axis, columns in enumerate((("image_width", "width"), ("image_height", "height"))):
             owner: tuple[float, int] | None = None
             for position in group:
                 values = [
                     parsed
                     for column in columns
-                    if column in frame
-                    and (parsed := number(frame.loc[position, column])) is not None
+                    if column in frame and (parsed := number(frame.loc[position, column])) is not None
                 ]
                 if not values:
                     continue
@@ -193,10 +173,7 @@ def _dimension_issues(
                             code="dimension_conflict",
                             row_position=position,
                             columns=columns,
-                            message=(
-                                "Alternative declarations of the same "
-                                "image dimension disagree."
-                            ),
+                            message=("Alternative declarations of the same image dimension disagree."),
                         )
                     )
                 if owner is None:
@@ -209,24 +186,17 @@ def _dimension_issues(
                                 row_position=current,
                                 columns=columns,
                                 related_rows=(other,),
-                                message=(
-                                    "Rows for the image declare different dimensions."
-                                ),
+                                message=("Rows for the image declare different dimensions."),
                             )
                         )
                 measured = sizes.get(position)
-                if measured is not None and any(
-                    value != measured[axis] for value in values
-                ):
+                if measured is not None and any(value != measured[axis] for value in values):
                     issues.append(
                         Issue(
                             code="image_dimension_mismatch",
                             row_position=position,
                             columns=columns,
-                            message=(
-                                f"Declared image dimension disagrees with "
-                                f"measured size {measured}."
-                            ),
+                            message=(f"Declared image dimension disagrees with measured size {measured}."),
                         )
                     )
     return issues
@@ -239,13 +209,9 @@ def _bounds_issues(  # noqa: C901, PLR0912
     sizes: dict[int, tuple[int, int]],
     profile: Profile,
 ) -> tuple[list[Issue], bool, bool, dict[int, tuple[float, float]]]:
-    issues = (
-        _dimension_issues(frame, groups, sizes) if profile == "clearml-yolo" else []
-    )
+    issues = _dimension_issues(frame, groups, sizes) if profile == "clearml-yolo" else []
     effective_sizes: dict[int, tuple[float, float]] = {}
-    positions_to_group = {
-        position: index for index, rows in enumerate(groups) for position in rows
-    }
+    positions_to_group = {position: index for index, rows in enumerate(groups) for position in rows}
     owners: dict[int, tuple[tuple[float, float], int]] = {}
     columns = (
         *BOX_COLUMNS,
@@ -292,19 +258,12 @@ def _bounds_issues(  # noqa: C901, PLR0912
                         )
                     )
         measured = sizes.get(pos)
-        if (
-            profile == "cveta2"
-            and measured is not None
-            and any(d != measured for d in dimensions)
-        ):
+        if profile == "cveta2" and measured is not None and any(d != measured for d in dimensions):
             issues.append(
                 Issue(
                     code="image_dimension_mismatch",
                     row_position=pos,
-                    message=(
-                        f"Declared image dimensions disagree with "
-                        f"measured size {measured}."
-                    ),
+                    message=(f"Declared image dimensions disagree with measured size {measured}."),
                 )
             )
         effective = measured if measured is not None else declared
@@ -348,10 +307,7 @@ def _bounds_issues(  # noqa: C901, PLR0912
                 code="rotation_ignored",
                 severity="warning",
                 columns=("rotation",),
-                message=(
-                    f"IoU uses stored axis-aligned coordinates "
-                    f"for {rotated} rotated box(es)."
-                ),
+                message=(f"IoU uses stored axis-aligned coordinates for {rotated} rotated box(es)."),
             )
         )
     return issues, checked, bool(unchecked), effective_sizes
@@ -366,16 +322,10 @@ def _repair_bounds(
     """Apply eligible repairs to a private positional frame."""
     blocked, _ = _quarantine(
         groups,
-        [
-            issue
-            for issue in issues
-            if issue.code not in {"negative_coordinate", "out_of_bounds"}
-        ],
+        [issue for issue in issues if issue.code not in {"negative_coordinate", "out_of_bounds"}],
     )
     candidates = {
-        issue.row_position
-        for issue in issues
-        if issue.code == "out_of_bounds" and issue.row_position is not None
+        issue.row_position for issue in issues if issue.code == "out_of_bounds" and issue.row_position is not None
     }
     repairs: dict[int, Issue] = {}
     converted_columns: set[str] = set()
@@ -383,9 +333,7 @@ def _repair_bounds(
         width, height = sizes[position]
         original = tuple(frame.loc[position, column] for column in BOX_COLUMNS)
         # Candidates have already passed finite-coordinate and positive-geometry checks.
-        left, top, right, bottom = cast(
-            "tuple[float, float, float, float]", tuple(map(number, original))
-        )
+        left, top, right, bottom = cast("tuple[float, float, float, float]", tuple(map(number, original)))
         overflow = (
             max(0, -left),
             max(0, -top),
@@ -403,9 +351,7 @@ def _repair_bounds(
         if not valid_box_geometry(clipped, "clearml-yolo"):
             continue
         changed = []
-        for column, old, numeric, new in zip(
-            BOX_COLUMNS, original, (left, top, right, bottom), clipped, strict=True
-        ):
+        for column, old, numeric, new in zip(BOX_COLUMNS, original, (left, top, right, bottom), clipped, strict=True):
             if numeric == new:
                 continue
             # Object storage avoids coercing untouched cells when changing one
@@ -415,9 +361,7 @@ def _repair_bounds(
                     frame[column] = frame[column].astype(object)
                 converted_columns.add(column)
             boundary = int(new)
-            frame.loc[position, column] = (
-                str(boundary) if isinstance(old, str) else boundary
-            )
+            frame.loc[position, column] = str(boundary) if isinstance(old, str) else boundary
             changed.append(column)
         final_coordinates = tuple(frame.loc[position, column] for column in BOX_COLUMNS)
         repairs[position] = Issue(
@@ -434,9 +378,7 @@ def _repair_bounds(
     return repairs
 
 
-def _class_groups(
-    frame: pd.DataFrame, groups: list[tuple[int, ...]]
-) -> list[tuple[int, ...]]:
+def _class_groups(frame: pd.DataFrame, groups: list[tuple[int, ...]]) -> list[tuple[int, ...]]:
     """Partition images by their accepted label values, without class remapping."""
     result: list[tuple[int, ...]] = []
     for group in groups:
@@ -448,14 +390,8 @@ def _class_groups(
     return result
 
 
-def _quarantine(
-    groups: list[tuple[int, ...]], issues: list[Issue]
-) -> tuple[set[int], list[Issue]]:
-    directly_broken = {
-        i.row_position
-        for i in issues
-        if i.severity == "error" and i.row_position is not None
-    }
+def _quarantine(groups: list[tuple[int, ...]], issues: list[Issue]) -> tuple[set[int], list[Issue]]:
+    directly_broken = {i.row_position for i in issues if i.severity == "error" and i.row_position is not None}
     rejected: set[int] = set()
     additions: list[Issue] = []
     for group in groups:
@@ -489,16 +425,12 @@ def _finish(  # noqa: PLR0913, PLR0917
     repaired_frame: pd.DataFrame | None = None,
     repairs: dict[int, Issue] | None = None,
 ) -> ValidationResult:
-    clean_positions = tuple(
-        position for position in range(len(frame)) if position not in rejected
-    )
+    clean_positions = tuple(position for position in range(len(frame)) if position not in rejected)
     broken_positions = tuple(sorted(rejected))
     clean = frame.iloc[list(clean_positions)].copy(deep=True)
     broken = frame.iloc[list(broken_positions)].copy(deep=True)
     if repaired_frame is not None and repairs:
-        output_positions = {
-            position: offset for offset, position in enumerate(clean_positions)
-        }
+        output_positions = {position: offset for offset, position in enumerate(clean_positions)}
         converted_columns: set[str] = set()
         for position, repair in repairs.items():
             if position not in output_positions:
@@ -514,16 +446,8 @@ def _finish(  # noqa: PLR0913, PLR0917
                 ] = repaired_frame.loc[position, column]
             issues.append(repair)
     issues.sort(key=lambda i: -1 if i.row_position is None else i.row_position)
-    names = (
-        frame["image_name"]
-        if "image_name" in frame and frame.columns.is_unique
-        else pd.Series(dtype=str)
-    )
-    clean_names = (
-        clean["image_name"]
-        if "image_name" in clean and clean.columns.is_unique
-        else pd.Series(dtype=str)
-    )
+    names = frame["image_name"] if "image_name" in frame and frame.columns.is_unique else pd.Series(dtype=str)
+    clean_names = clean["image_name"] if "image_name" in clean and clean.columns.is_unique else pd.Series(dtype=str)
     return ValidationResult(
         profile=profile,
         clean=clean,
@@ -559,9 +483,7 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
     working = frame.reset_index(drop=True).copy(deep=True)
     checked = ["schema"]
     skipped: list[str] = []
-    if not frame.columns.is_unique or any(
-        not isinstance(c, str) or not c for c in frame.columns
-    ):
+    if not frame.columns.is_unique or any(not isinstance(c, str) or not c for c in frame.columns):
         issues = [
             Issue(
                 code="invalid_header",
@@ -578,9 +500,7 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
             structural=True,
         )
     if profile == "clearml-yolo":
-        working = working.loc[
-            :, [column for column in CLEARML_COLUMNS if column in working]
-        ]
+        working = working.loc[:, [column for column in CLEARML_COLUMNS if column in working]]
     field_issues = schema_issues(working, profile)
     issues = field_issues.copy()
     extras = sorted(set(frame.columns) - set(KNOWN_COLUMNS))
@@ -590,15 +510,10 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
                 code="unknown_columns",
                 severity="warning",
                 columns=tuple(extras),
-                message=(
-                    f"Unknown columns are preserved without "
-                    f"field validation: {', '.join(extras)}."
-                ),
+                message=(f"Unknown columns are preserved without field validation: {', '.join(extras)}."),
             )
         )
-    if any(
-        issue.severity == "error" and issue.row_position is None for issue in issues
-    ):
+    if any(issue.severity == "error" and issue.row_position is None for issue in issues):
         return _finish(
             frame,
             profile,
@@ -621,25 +536,15 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
     issues.extend(grouping_issues)
     initially_rejected, _ = _quarantine(
         groups,
-        [
-            issue
-            for issue in issues
-            if profile != "clearml-yolo" or issue.code != "negative_coordinate"
-        ],
+        [issue for issue in issues if profile != "clearml-yolo" or issue.code != "negative_coordinate"],
     )
     eligible_groups = [group for group in groups if group[0] not in initially_rejected]
     eligible = working.drop(index=list(initially_rejected))
-    issues.extend(
-        _identity_issues(
-            eligible, eligible_groups, profile, inspection or MediaInspection()
-        )
-    )
+    issues.extend(_identity_issues(eligible, eligible_groups, profile, inspection or MediaInspection()))
     checked.append("image_identity")
     sizes: dict[int, tuple[int, int]] = {}
     if selected.check_images:
-        facts = {
-            fact.row_position: fact for fact in (inspection or MediaInspection()).rows
-        }
+        facts = {fact.row_position: fact for fact in (inspection or MediaInspection()).rows}
         for position in eligible.index:
             fact = facts.get(int(position))
             if fact is None:
@@ -653,15 +558,11 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
             else:
                 if fact.size is not None:
                     sizes[int(position)] = fact.size
-                issues.extend(
-                    issue for issue in fact.issues if issue.code.startswith("media_")
-                )
+                issues.extend(issue for issue in fact.issues if issue.code.startswith("media_"))
         checked.append("image_files")
     else:
         skipped.append("image_files")
-    bounds, did_check, did_skip, effective_sizes = _bounds_issues(
-        eligible, eligible_groups, sizes, profile
-    )
+    bounds, did_check, did_skip, effective_sizes = _bounds_issues(eligible, eligible_groups, sizes, profile)
     issues.extend(bounds)
     if did_check:
         checked.append("upper_image_bounds")
@@ -695,14 +596,10 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
     if profile == "clearml-yolo":
         retained_groups = _class_groups(duplicate_frame, retained_groups)
         duplicate_frame = duplicate_frame.loc[:, list(required_columns(profile))]
-    duplicate_issues = find_duplicates(
-        duplicate_frame, retained_groups, iou_threshold=selected.iou_threshold
-    )
+    duplicate_issues = find_duplicates(duplicate_frame, retained_groups, iou_threshold=selected.iou_threshold)
     issues.extend(duplicate_issues)
     rejected.update(
-        issue.row_position
-        for issue in duplicate_issues
-        if issue.row_position is not None and issue.severity == "error"
+        issue.row_position for issue in duplicate_issues if issue.row_position is not None and issue.severity == "error"
     )
     if any(issue.code == "exact_comparison_unavailable" for issue in duplicate_issues):
         skipped.append("full_row_duplicates")

@@ -268,21 +268,15 @@ class TestConvertAnnotations:
     """No test called ``convert_annotations`` at all before these."""
 
     def test_converts_every_shape(self) -> None:
-        labeled_data = SimpleNamespace(
-            shapes=[make_sdk_shape(id=3, frame=1), make_sdk_shape(id=4, frame=2)]
-        )
+        labeled_data = SimpleNamespace(shapes=[make_sdk_shape(id=3, frame=1), make_sdk_shape(id=4, frame=2)])
         result = convert_annotations(labeled_data)
         assert [(s.id, s.frame) for s in result.shapes] == [(3, 1), (4, 2)]
 
     def test_none_shapes_becomes_empty_list(self) -> None:
         """A task with no annotations must yield an empty list, never ``None``."""
-        assert convert_annotations(SimpleNamespace(shapes=None)) == RawAnnotations(
-            shapes=[]
-        )
+        assert convert_annotations(SimpleNamespace(shapes=None)) == RawAnnotations(shapes=[])
 
-    def test_adapter_warns_when_tracks_are_ignored(
-        self, capture_logs: list[str]
-    ) -> None:
+    def test_adapter_warns_when_tracks_are_ignored(self, capture_logs: list[str]) -> None:
         client = MagicMock()
         client.api_client.tasks_api.retrieve_annotations.return_value = (
             SimpleNamespace(shapes=[], tracks=[object(), object()]),
@@ -368,9 +362,7 @@ class TestConvertTask:
         ``getattr``: dropping its default turns this case into an
         ``AttributeError`` instead of ``project_id=None``.
         """
-        task = SimpleNamespace(
-            id=1, name=None, status=None, subset=None, updated_date=None
-        )
+        task = SimpleNamespace(id=1, name=None, status=None, subset=None, updated_date=None)
         assert convert_task(task) == TaskInfo(
             id=1,
             name="",

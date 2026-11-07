@@ -173,9 +173,7 @@ class TestResolveTaskSelectors:
         with pytest.raises(TaskNotFoundError) as exc_info:
             CvatClient.resolve_task_selectors(tasks, ["ghost"])
 
-        assert str(exc_info.value) == (
-            "Task not found: 'ghost'. Available tasks: 'alpha' (id=1), 'beta' (id=2)"
-        )
+        assert str(exc_info.value) == ("Task not found: 'ghost'. Available tasks: 'alpha' (id=1), 'beta' (id=2)")
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +217,7 @@ class TestFetchOneTask:
         assert annotation.attributes == {"colour": "red"}
 
     @pytest.mark.parametrize(("status", "skipped"), [(599, True), (600, False)])
-    def test_the_skip_window_ends_below_600(
-        self, status: int, *, skipped: bool
-    ) -> None:
+    def test_the_skip_window_ends_below_600(self, status: int, *, skipped: bool) -> None:
         """600 is the exclusive upper bound of the "server error" range.
 
         A 500 cannot tell ``< 600`` from ``<= 600``; only statuses on both

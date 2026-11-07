@@ -69,14 +69,8 @@ class _ImageMixin(_ReadMixin):
             project_cloud_storage = self.detect_project_cloud_storage(project_id)
         cs_info = project_cloud_storage
         if cs_info is None:
-            logger.warning(
-                f"Проект {project_id}: cloud storage не найден — "
-                f"пропускаем синхронизацию."
-            )
+            logger.warning(f"Проект {project_id}: cloud storage не найден — пропускаем синхронизацию.")
             return DownloadStats(total=0)
 
-        logger.info(
-            f"Проект {project_id}: синхронизация из "
-            f"s3://{cs_info.bucket}/{cs_info.prefix} → {target_dir}"
-        )
+        logger.info(f"Проект {project_id}: синхронизация из s3://{cs_info.bucket}/{cs_info.prefix} → {target_dir}")
         return self._images.sync(cs_info, target_dir, ignored_prefix=ignored_prefix)

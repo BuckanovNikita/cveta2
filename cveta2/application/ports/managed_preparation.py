@@ -69,9 +69,7 @@ class ManagedPreparationFiles(Protocol):
         """Validate configured roots and transformed source path coverage."""
         ...
 
-    def payload_bytes(
-        self, frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest
-    ) -> dict[str, bytes]:
+    def payload_bytes(self, frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest) -> dict[str, bytes]:
         """Serialize the exact three-file publication payload."""
         ...
 
@@ -103,8 +101,6 @@ class ManagedPreparationFiles(Protocol):
         """Verify record/input/source/payload hashes and reject symlink inputs."""
         ...
 
-    def stage_payload(
-        self, payload: Mapping[str, bytes]
-    ) -> AbstractContextManager[Path]:
+    def stage_payload(self, payload: Mapping[str, bytes]) -> AbstractContextManager[Path]:
         """Hold a stable private copy until the publication attempt completes."""
         ...

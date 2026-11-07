@@ -62,10 +62,7 @@ def configure_convert(parser: "argparse.ArgumentParser") -> None:
         "--link-mode",
         choices=["reflink", "hardlink", "symlink", "copy", "auto"],
         default="auto",
-        help=(
-            "How to place images in YOLO output "
-            "(default: auto — reflink with copy fallback)."
-        ),
+        help=("How to place images in YOLO output (default: auto — reflink with copy fallback)."),
     )
     parser.add_argument(
         "--image-dir",

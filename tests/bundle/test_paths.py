@@ -25,19 +25,15 @@ def test_roots_resolve_symlinks_and_use_path_boundaries(tmp_path: Path) -> None:
     ]
     roots = LocalRoots()
     assert roots.check_local_root(str(root)) == str(root.resolve())
-    assert roots.uncovered_paths(
-        pd.DataFrame({"image_path": paths}), ImageRoots(local_root=[str(root)])
-    ) == [str(outside / "bad.png")]
+    assert roots.uncovered_paths(pd.DataFrame({"image_path": paths}), ImageRoots(local_root=[str(root)])) == [
+        str(outside / "bad.png")
+    ]
 
 
-@pytest.mark.parametrize(
-    "value", ["relative.png", "", None, "s3://bucket/a.png", "bad\x00path"]
-)
+@pytest.mark.parametrize("value", ["relative.png", "", None, "s3://bucket/a.png", "bad\x00path"])
 def test_malformed_or_relative_image_paths_block(value: object) -> None:
     with pytest.raises(UploadError):
-        LocalRoots().uncovered_paths(
-            pd.DataFrame({"image_path": [value]}), ImageRoots()
-        )
+        LocalRoots().uncovered_paths(pd.DataFrame({"image_path": [value]}), ImageRoots())
 
 
 def test_every_root_is_checked(tmp_path: Path) -> None:
@@ -51,9 +47,7 @@ def test_every_root_is_checked(tmp_path: Path) -> None:
 def test_s3_roots_are_independent_and_boundary_checked() -> None:
     checks = LocalRoots()
     roots = ImageRoots(s3_root=["s3://bucket/prefix"])
-    checks.check_s3_paths(
-        pd.DataFrame({"s3_image_path": ["", None, "s3://bucket/prefix/a.png"]}), roots
-    )
+    checks.check_s3_paths(pd.DataFrame({"s3_image_path": ["", None, "s3://bucket/prefix/a.png"]}), roots)
     for value in [
         "s3://bucket/prefix-other/a.png",
         "s3://other/prefix/a.png",
@@ -82,9 +76,7 @@ def test_bucket_relative_keys_resolve_only_to_one_approved_bucket() -> None:
     checks = LocalRoots()
     frame = pd.DataFrame({"s3_image_path": ["prefix/a.png"]})
     checks.check_s3_paths(frame, ImageRoots(s3_root=["s3://bucket/prefix"]))
-    checks.check_s3_paths(
-        frame, ImageRoots(s3_root=["s3://bucket/prefix", "s3://bucket/prefix/a.png"])
-    )
+    checks.check_s3_paths(frame, ImageRoots(s3_root=["s3://bucket/prefix", "s3://bucket/prefix/a.png"]))
     with pytest.raises(UploadError, match="outside approved"):
         checks.check_s3_paths(
             frame,
@@ -125,9 +117,7 @@ def test_one_trailing_root_separator_preserves_key_boundaries(root: str) -> None
     )
 
 
-def test_unreadable_unused_root_is_rejected(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_unreadable_unused_root_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = tmp_path / "unused"
     root.mkdir()
     original = os.scandir

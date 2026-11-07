@@ -111,12 +111,11 @@ def test_to_coco_structure(
             coco = json.loads((split_dir / "_annotations.coco.json").read_text())
             names = sorted(name for name, (s, _) in export.items() if s == split)
             assert sorted(p.name for p in split_dir.glob("*.jpg")) == names
-            assert [
-                (im["file_name"], im["width"], im["height"]) for im in coco["images"]
-            ] == [(name, 640, 480) for name in names]
+            assert [(im["file_name"], im["width"], im["height"]) for im in coco["images"]] == [
+                (name, 640, 480) for name in names
+            ]
             assert coco["categories"] == [
-                {"id": i, "name": label, "supercategory": "none"}
-                for i, label in enumerate(labels, start=1)
+                {"id": i, "name": label, "supercategory": "none"} for i, label in enumerate(labels, start=1)
             ]
             image_ids = {im["id"]: im["file_name"] for im in coco["images"]}
             assert len(image_ids) == len(names)
@@ -188,8 +187,6 @@ class TestToCoco:
 
         out_dir = tmp_path / "deep" / "nested" / "coco_out"
         for _ in range(2):
-            convert_to_coco(
-                csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy"
-            )
+            convert_to_coco(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
 
         assert (out_dir / "train" / "_annotations.coco.json").is_file()

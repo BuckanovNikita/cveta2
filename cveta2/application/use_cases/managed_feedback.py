@@ -29,9 +29,7 @@ def _same_facts(before: FeedbackTaskState, after: FeedbackTaskState) -> bool:
     )
 
 
-def reconcile_pending(
-    findings: list[FeedbackFinding], *, remote: CvatFeedback, ledger: FeedbackLedger
-) -> None:
+def reconcile_pending(findings: list[FeedbackFinding], *, remote: CvatFeedback, ledger: FeedbackLedger) -> None:
     """Acknowledge uncertain own writes by reads only, before freshness checks.
 
     A marker and unchanged annotation-relevant facts are both required. Mere
@@ -45,9 +43,7 @@ def reconcile_pending(
             raise ManagedError("Feedback marker belongs to different source evidence")
         state = remote.inspect(finding)
         if state.fingerprint != receipt.fingerprint:
-            raise ManagedError(
-                f"Source annotations changed during feedback: {finding.task_id}"
-            )
+            raise ManagedError(f"Source annotations changed during feedback: {finding.task_id}")
         if remote.issue_exists(finding):
             ledger.complete(finding, state)
 
@@ -64,27 +60,19 @@ def _known_delivery(
     if not _receipt_matches(receipt, finding):
         raise ManagedError("Feedback marker belongs to different source evidence")
     if receipt.fingerprint != before.fingerprint:
-        raise ManagedError(
-            f"Source annotations changed during feedback: {finding.task_id}"
-        )
+        raise ManagedError(f"Source annotations changed during feedback: {finding.task_id}")
     if receipt.delivered:
         if not remote.issue_exists(finding):
-            raise ManagedError(
-                "Previously acknowledged CVAT issue disappeared; prepare again"
-            )
+            raise ManagedError("Previously acknowledged CVAT issue disappeared; prepare again")
         # Later findings on this same task may have advanced its time. Do not
         # widen this receipt to acknowledge any unrelated timestamp changes.
         return True
     if before.updated_date != receipt.before_date and not remote.issue_exists(finding):
-        raise ManagedError(
-            f"Unacknowledged task change during feedback: {finding.task_id}"
-        )
+        raise ManagedError(f"Unacknowledged task change during feedback: {finding.task_id}")
     return False
 
 
-def _deliver(
-    finding: FeedbackFinding, *, remote: CvatFeedback, ledger: FeedbackLedger
-) -> bool:
+def _deliver(finding: FeedbackFinding, *, remote: CvatFeedback, ledger: FeedbackLedger) -> bool:
     """Return True for a new issue and False for an already-present marker."""
     before = remote.inspect(finding)
     receipt = ledger.get_receipt(finding.marker)
@@ -100,13 +88,9 @@ def _deliver(
     remote.create_issue(finding)
     after = remote.inspect(finding)
     if not _same_facts(before, after):
-        raise ManagedError(
-            f"Source annotations changed while reporting task {finding.task_id}"
-        )
+        raise ManagedError(f"Source annotations changed while reporting task {finding.task_id}")
     if not remote.issue_exists(finding):
-        raise ManagedError(
-            f"Created CVAT issue was not confirmed for task {finding.task_id}"
-        )
+        raise ManagedError(f"Created CVAT issue was not confirmed for task {finding.task_id}")
     ledger.complete(finding, after)
     return True
 
@@ -126,12 +110,8 @@ def report_findings(
         try:
             was_created = _deliver(finding, remote=remote, ledger=ledger)
         except Cveta2Error as error:
-            failed.append(
-                f"{finding.source_id}/{finding.task_id}/{finding.frame_id}: {error}"
-            )
+            failed.append(f"{finding.source_id}/{finding.task_id}/{finding.frame_id}: {error}")
             continue
         created += int(was_created)
         existing += int(not was_created)
-    return FeedbackOutcome(
-        created=created, existing=existing, unmapped=unmapped, failed=failed
-    )
+    return FeedbackOutcome(created=created, existing=existing, unmapped=unmapped, failed=failed)

@@ -160,9 +160,7 @@ class _TaskOpsMixin(_ClientBase):
             logger.info(f"В задаче {task_id} нет аннотаций с меткой {label!r}")
             return 0
         api.delete_shapes(task_id, shapes)
-        logger.info(
-            f"Удалено {len(shapes)} аннотаций с меткой {label!r} из задачи {task_id}"
-        )
+        logger.info(f"Удалено {len(shapes)} аннотаций с меткой {label!r} из задачи {task_id}")
         return len(shapes)
 
     @staticmethod
@@ -180,10 +178,7 @@ class _TaskOpsMixin(_ClientBase):
         label_ids = {lbl.id for lbl in task_labels if lbl.name == label}
         if not label_ids:
             available = ", ".join(sorted(str(lbl.name) for lbl in task_labels))
-            raise Cveta2Error(
-                f"Метка {label!r} не найдена в задаче {task_id}. "
-                f"Доступные метки: {available}"
-            )
+            raise Cveta2Error(f"Метка {label!r} не найдена в задаче {task_id}. Доступные метки: {available}")
         annotations = api.get_task_annotations(task_id)
         return [s for s in annotations.shapes if s.label_id in label_ids]
 
@@ -249,10 +244,7 @@ class _TaskOpsMixin(_ClientBase):
             desc="Updating jobs",
             unit="job",
         )
-        logger.info(
-            f"Задача {task_id}: обновлено {len(jobs)} job(s) "
-            f"(stage={stage or '-'}, state={state or '-'})"
-        )
+        logger.info(f"Задача {task_id}: обновлено {len(jobs)} job(s) (stage={stage or '-'}, state={state or '-'})")
         return len(jobs)
 
     def complete_task(self, task_id: int) -> int:

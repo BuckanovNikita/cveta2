@@ -80,9 +80,7 @@ def test_build_data_request_pins_cloud_storage_and_caching() -> None:
 
 def test_build_new_shapes_payload_omits_shape_ids() -> None:
     """New shapes must carry no ``id``: an id turns a create into an update."""
-    payload = build_new_shapes_payload(
-        [NewShape(frame=2, label_id=9, points=[1.0, 2.0, 3.0, 4.0])]
-    )
+    payload = build_new_shapes_payload([NewShape(frame=2, label_id=9, points=[1.0, 2.0, 3.0, 4.0])])
     assert payload.to_dict() == {
         "shapes": [
             {
@@ -152,9 +150,7 @@ class TestBuildLabelPatchRequest:
     """
 
     def test_no_id_creates_a_label_by_name(self) -> None:
-        assert _build_label_patch_request(LabelPatch(name="car")).to_dict() == {
-            "name": "car"
-        }
+        assert _build_label_patch_request(LabelPatch(name="car")).to_dict() == {"name": "car"}
 
     def test_deleted_wins_over_a_name_change(self) -> None:
         """The overlapping input that pins the branch *order*.
@@ -185,12 +181,8 @@ class TestBuildLabelPatchRequest:
 
 
 def test_build_labels_patch_request_wraps_every_patch() -> None:
-    request = build_labels_patch_request(
-        [LabelPatch(name="car"), LabelPatch(id=5, deleted=True)]
-    )
-    assert request.to_dict() == {
-        "labels": [{"name": "car"}, {"id": 5, "deleted": True}]
-    }
+    request = build_labels_patch_request([LabelPatch(name="car"), LabelPatch(id=5, deleted=True)])
+    assert request.to_dict() == {"labels": [{"name": "car"}, {"id": 5, "deleted": True}]}
 
 
 class TestBuildJobPatchRequest:

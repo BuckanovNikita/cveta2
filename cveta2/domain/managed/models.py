@@ -51,12 +51,7 @@ class CvatIdentity(StrictModel):
     def public_host(cls, value: str) -> str:
         """Keep credentials out of the shared server identity."""
         parts = urlsplit(value)
-        if (
-            parts.scheme not in {"http", "https"}
-            or not parts.hostname
-            or parts.username
-            or parts.password
-        ):
+        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
             raise ValueError("CVAT host must be HTTP(S) without credentials")
         return value.rstrip("/")
 
@@ -73,9 +68,7 @@ class ProjectDefinition(StrictModel):
 
     @field_validator("ignore")
     @classmethod
-    def ignored_tasks(
-        cls, values: list[dict[str, JsonValue]]
-    ) -> list[dict[str, JsonValue]]:
+    def ignored_tasks(cls, values: list[dict[str, JsonValue]]) -> list[dict[str, JsonValue]]:
         """Validate shared exclusion records before any source is contacted."""
         for entry in values:
             task_id = entry.get("id")
@@ -84,11 +77,7 @@ class ProjectDefinition(StrictModel):
                 or isinstance(task_id, bool)
                 or not isinstance(task_id, int)
                 or task_id < 0
-                or any(
-                    not isinstance(entry[key], str)
-                    for key in ("name", "description")
-                    if key in entry
-                )
+                or any(not isinstance(entry[key], str) for key in ("name", "description") if key in entry)
                 or ("silent" in entry and not isinstance(entry["silent"], bool))
             ):
                 raise ValueError("Invalid shared ignored-task record")
@@ -120,10 +109,7 @@ class SourceDefinition(StrictModel):
                 or parts.fragment
                 or not parts.path.endswith(".csv")
                 or "\x00" in (self.uri or "")
-                or any(
-                    p in {"", ".", ".."}
-                    for p in parts.path.removeprefix("/").split("/")
-                )
+                or any(p in {"", ".", ".."} for p in parts.path.removeprefix("/").split("/"))
             ):
                 raise ValueError("S3 source requires an exact s3://bucket/key.csv URI")
         return self
@@ -147,11 +133,7 @@ class SplitPolicy(StrictModel):
     @model_validator(mode="after")
     def total(self) -> Self:
         """Require a complete probability distribution and usable train/val."""
-        if (
-            abs(self.train + self.val + self.test - 1) > _SPLIT_TOLERANCE
-            or not self.train
-            or not self.val
-        ):
+        if abs(self.train + self.val + self.test - 1) > _SPLIT_TOLERANCE or not self.train or not self.val:
             raise ValueError("Splits must sum to one with positive train and val")
         return self
 
@@ -179,12 +161,7 @@ class DatasetDefinition(StrictModel):
     def public_class_api(cls, value: str) -> str:
         """Do not permit credential-bearing endpoints in portable policy."""
         parts = urlsplit(value)
-        if (
-            parts.scheme not in {"http", "https"}
-            or not parts.hostname
-            or parts.username
-            or parts.password
-        ):
+        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
             raise ValueError("Class API must be HTTP(S) without embedded credentials")
         return value
 
@@ -209,9 +186,7 @@ class ProjectConfig(StrictModel):
     @model_validator(mode="after")
     def references(self) -> Self:
         """Reject unknown project references and duplicate destination pairs."""
-        destinations = [
-            (d.clearml.project, d.clearml.dataset) for d in self.datasets.values()
-        ]
+        destinations = [(d.clearml.project, d.clearml.dataset) for d in self.datasets.values()]
         if len(destinations) != len(set(destinations)):
             raise ValueError("ClearML destination pairs must be unique")
         ids = [p.id for p in self.projects.values()]
@@ -261,9 +236,7 @@ class ManagedSnapshot(StrictModel):
     registry_hash: str
     parent_id: str | None = None
     sources: list[SourceSnapshot]
-    assignments: dict[str, Literal["train", "val", "test"]] = Field(
-        default_factory=dict
-    )
+    assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)
     image_hashes: dict[str, str] = Field(default_factory=dict)
 
 
@@ -275,9 +248,7 @@ class ManagedMetadata(StrictModel):
     definition_hash: str
     definition: DatasetDefinition
     cvat: CvatIdentity
-    assignments: dict[str, Literal["train", "val", "test"]] = Field(
-        default_factory=dict
-    )
+    assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)
 
 
 def definition_fingerprint(config: ProjectConfig, name: str) -> str:
@@ -296,6 +267,4 @@ def definition_fingerprint(config: ProjectConfig, name: str) -> str:
         "dataset": definition.model_dump(mode="json"),
         "projects": projects,
     }
-    return hashlib.sha256(
-        json.dumps(content, sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()
+    return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()

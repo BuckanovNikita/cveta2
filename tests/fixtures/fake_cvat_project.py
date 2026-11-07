@@ -44,9 +44,7 @@ class FakeProjectConfig(BaseModel):
     task_indices: list[int] | None = None
 
     # Number of tasks when task_indices is None (random sample with replacement).
-    count: int = Field(
-        default=1, ge=1, description="Number of tasks when task_indices not set"
-    )
+    count: int = Field(default=1, ge=1, description="Number of tasks when task_indices not set")
 
     # Order of assigned task ids: "asc" (100, 101, ...) or "random" (shuffle).
     task_id_order: Literal["asc", "random"] = "asc"
@@ -142,9 +140,7 @@ def task_indices_by_names(
     for n in names:
         key = (n or "").strip().lower()
         if key not in name_to_index:
-            raise ValueError(
-                f"No base task with name {n!r}; known: {list(name_to_index)}"
-            )
+            raise ValueError(f"No base task with name {n!r}; known: {list(name_to_index)}")
         out.append(name_to_index[key])
     return out
 

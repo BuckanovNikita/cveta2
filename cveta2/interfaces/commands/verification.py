@@ -30,9 +30,7 @@ def configure_verify(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Декодировать локальные изображения.",
     )
-    parser.add_argument(
-        "--image-root", type=Path, help="Каталог для пустых image_path."
-    )
+    parser.add_argument("--image-root", type=Path, help="Каталог для пустых image_path.")
     parser.add_argument(
         "--iou-threshold",
         type=float,
@@ -104,8 +102,7 @@ def configure_upload_dataset(parser: argparse.ArgumentParser) -> None:
 
 def _summary(result: ValidationResult) -> None:
     logger.info(
-        f"Проверка: {result.input_row_count} строк; "
-        f"допустимых {len(result.clean)}, отклонённых {len(result.broken)}."
+        f"Проверка: {result.input_row_count} строк; допустимых {len(result.clean)}, отклонённых {len(result.broken)}."
     )
     for issue in result.issues:
         row = f" строка {issue.row_position}" if issue.row_position is not None else ""
@@ -115,11 +112,7 @@ def _summary(result: ValidationResult) -> None:
 def _prepare(args: argparse.Namespace) -> None:
     if not args.project:
         raise Cveta2Error("Для --bundle укажите --project.")
-    if (
-        args.check_images
-        or args.image_root is not None
-        or args.iou_threshold != ValidationOptions().iou_threshold
-    ):
+    if args.check_images or args.image_root is not None or args.iou_threshold != ValidationOptions().iou_threshold:
         raise Cveta2Error(
             "Параметры --check-images, --image-root и изменённый --iou-threshold "
             "относятся к проверке CSV; bundle всегда проверяет изображения."
@@ -137,16 +130,10 @@ def _prepare(args: argparse.Namespace) -> None:
     )
     while True:
         try:
-            result = prepare_dataset(
-                args.input, output_dir=args.output_dir, options=options
-            )
+            result = prepare_dataset(args.input, output_dir=args.output_dir, options=options)
             break
         except MissingDecisions as error:
-            if (
-                args.non_interactive
-                or is_interactive_disabled()
-                or not sys.stdin.isatty()
-            ):
+            if args.non_interactive or is_interactive_disabled() or not sys.stdin.isatty():
                 raise
             options = collect_decisions(options, error.decisions)
     _summary(result.validation.result)
@@ -154,14 +141,9 @@ def _prepare(args: argparse.Namespace) -> None:
         logger.info(blocker)
     logger.info(f"Отчёт: {result.directory}")
     if not result.ready:
-        logger.info(
-            "Набор не готов к публикации; исправьте исходные данные "
-            "или явно разрешите очистку."
-        )
+        logger.info("Набор не готов к публикации; исправьте исходные данные или явно разрешите очистку.")
         raise SystemExit(1)
-    logger.info(
-        f"Набор подготовлен. После проверки: cveta2 upload-dataset {result.directory}"
-    )
+    logger.info(f"Набор подготовлен. После проверки: cveta2 upload-dataset {result.directory}")
 
 
 def _validate_arguments(args: argparse.Namespace) -> None:
@@ -214,10 +196,7 @@ def run_upload_dataset(args: argparse.Namespace) -> None:
     """Report success only after the adapter proves remote finalization."""
     try:
         result = upload_dataset(args.prepared_dir)
-        logger.info(
-            f"Опубликован датасет {result.dataset_id}, "
-            f"версия {result.version or 'назначена сервером'}."
-        )
+        logger.info(f"Опубликован датасет {result.dataset_id}, версия {result.version or 'назначена сервером'}.")
     except (KeyboardInterrupt, UploadCancelled) as error:
         logger.info(f"Публикация отменена: {error}")
         raise SystemExit(1) from error

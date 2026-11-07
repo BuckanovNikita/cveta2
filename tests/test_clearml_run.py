@@ -50,16 +50,12 @@ class FakeSession(BaseModel):
     failing_action: str | None = None
     requests: list[tuple[str, dict[str, Any]]] = []
 
-    def send_request(
-        self, service: str, action: str, *, json: dict[str, Any], method: str
-    ) -> Response:
+    def send_request(self, service: str, action: str, *, json: dict[str, Any], method: str) -> Response:
         assert service == "projects"
         assert method == "post"
         self.requests.append((action, json))
         if action == self.failing_action:
-            return Response(
-                ok=False, status_code=403, text="user has no permission for this"
-            )
+            return Response(ok=False, status_code=403, text="user has no permission for this")
         if action == "get_all":
             start = json["page"] * json["page_size"]
             page = self.projects[start : start + json["page_size"]]
@@ -72,9 +68,7 @@ class FakeSession(BaseModel):
 
 
 def stand(*names: str) -> FakeSession:
-    return FakeSession(
-        projects=[{"id": f"id{i}", "name": name} for i, name in enumerate(names)]
-    )
+    return FakeSession(projects=[{"id": f"id{i}", "name": name} for i, name in enumerate(names)])
 
 
 class TestSettings:
@@ -105,9 +99,7 @@ class TestNames:
             ("", False),
         ],
     )
-    def test_ownership_is_the_first_token_of_the_first_path_element(
-        self, name: str, *, owned: bool
-    ) -> None:
+    def test_ownership_is_the_first_token_of_the_first_path_element(self, name: str, *, owned: bool) -> None:
         assert clearml_run.owned_by_run(name, TAG) is owned
 
     def test_sub_projects_come_before_their_parents(self) -> None:
@@ -160,9 +152,7 @@ class TestDeleteRunProjects:
         assert body["page"] == 0
         assert body["page_size"] == clearml_run.PAGE_SIZE
 
-    def test_a_full_page_is_followed_by_the_next(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_full_page_is_followed_by_the_next(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(clearml_run, "PAGE_SIZE", 2)
         session = stand(f"{TAG} a", f"{TAG} b", f"{TAG} c")
         deleted = clearml_run.delete_run_projects(session, TAG)
@@ -177,9 +167,7 @@ class TestDeleteRunProjects:
             clearml_run.delete_run_projects(session, TAG)
 
 
-@pytest.mark.parametrize(
-    "module", ["tests.integration.clearml_run", "tests.integration.test_clearml"]
-)
+@pytest.mark.parametrize("module", ["tests.integration.clearml_run", "tests.integration.test_clearml"])
 def test_the_sdk_is_never_imported_at_module_level(module: str) -> None:
     """Importing ``clearml`` logs in to the configured server; collection must not."""
     probe = f"import sys, {module}; sys.exit('clearml' in sys.modules)"

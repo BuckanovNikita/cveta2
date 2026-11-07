@@ -17,9 +17,7 @@ from cveta2.domain.verification.models import (
 class MediaInspector(Protocol):
     """Supply immutable media and path evidence without policy decisions."""
 
-    def inspect(
-        self, frame: pd.DataFrame, *, profile: Profile, options: ValidationOptions
-    ) -> MediaInspection:
+    def inspect(self, frame: pd.DataFrame, *, profile: Profile, options: ValidationOptions) -> MediaInspection:
         """Inspect positional rows using explicit options."""
         ...
 

@@ -46,9 +46,7 @@ class TestSplitProjectSpec:
             ("  acme / alpha ", ("acme", "alpha")),
         ],
     )
-    def test_split(
-        self, spec: int | str, expected: tuple[str | None, int | str]
-    ) -> None:
+    def test_split(self, spec: int | str, expected: tuple[str | None, int | str]) -> None:
         assert split_project_spec(spec) == expected
 
     def test_empty_project_part_raises(self) -> None:
@@ -81,9 +79,7 @@ class TestResolveProjectSpecWithOrg:
         self,
     ) -> None:
         client = CvatClient(CvatConfig())
-        assert resolve_project_spec(
-            client, "ALPHA", cached=[ProjectInfo(id=77, name="Alpha")]
-        ) == (77, "Alpha")
+        assert resolve_project_spec(client, "ALPHA", cached=[ProjectInfo(id=77, name="Alpha")]) == (77, "Alpha")
 
     def test_resolves_name_within_org(self) -> None:
         client, api = _fake_client(project_name="alpha")
@@ -170,9 +166,7 @@ class TestResolveProjectSpecWithOrg:
 class TestResolveProjectFromArgsWithOrg:
     def test_org_spec_switches_session_and_resolves(self) -> None:
         client, api = _fake_client(project_name="alpha", organization="default-org")
-        with patch(
-            "cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]
-        ) as load_cache:
+        with patch("cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]) as load_cache:
             assert resolve_project_from_args(client, "acme/alpha") == (1, "alpha")
         assert api.organization == "acme"
         assert load_cache.call_args.kwargs == {"org": "acme"}
@@ -185,9 +179,7 @@ class TestResolveProjectFromArgsWithOrg:
         exactly once and look up ``al/pha``, never org ``al`` / project ``pha``.
         """
         client, api = _fake_client(project_name="al/pha", organization="default-org")
-        with patch(
-            "cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]
-        ):
+        with patch("cveta2.interfaces.commands._helpers.load_projects_cache", return_value=[]):
             assert resolve_project_from_args(client, "acme/al/pha") == (1, "al/pha")
         assert api.organization_calls == ["acme"]
 

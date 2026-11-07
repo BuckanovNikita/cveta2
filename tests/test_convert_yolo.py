@@ -39,14 +39,10 @@ _TWO_BOXES = "0 0.5 0.5 0.2 0.2\n1 0.25 0.25 0.1 0.1\n"
 class TestConversionRegressions:
     """Exercise filesystem and CSV contracts across complete conversions."""
 
-    def test_reexport_reuses_current_image_when_source_is_unavailable(
-        self, tmp_path: Path
-    ) -> None:
+    def test_reexport_reuses_current_image_when_source_is_unavailable(self, tmp_path: Path) -> None:
         images = tmp_path / "source"
         make_image(images / "a.jpg")
-        csv_path = write_convert_csv(
-            tmp_path, [csv_row("a.jpg", label="cat", split="train")]
-        )
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
         output = tmp_path / "yolo"
         convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
         (images / "a.jpg").unlink()
@@ -69,24 +65,13 @@ class TestConversionRegressions:
 
         convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
 
-        assert (
-            len(
-                _parse_label_file(
-                    output / "labels/train/a.txt", files=LocalConversionFiles()
-                )
-            )
-            == 1
-        )
+        assert len(_parse_label_file(output / "labels/train/a.txt", files=LocalConversionFiles())) == 1
 
     @pytest.mark.parametrize("source", ["directory", "image", "list", "link-dir"])
-    def test_symlink_images_keep_dataset_labels(
-        self, tmp_path: Path, source: str
-    ) -> None:
+    def test_symlink_images_keep_dataset_labels(self, tmp_path: Path, source: str) -> None:
         images = tmp_path / "source"
         make_image(images / "a.jpg")
-        csv_path = write_convert_csv(
-            tmp_path, [csv_row("a.jpg", label="cat", split="train")]
-        )
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
         output = tmp_path / "yolo"
         convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="symlink")
         config_path = output / "dataset.yaml"
@@ -120,10 +105,7 @@ class TestConversionRegressions:
             make_image(images / name)
         csv_path = write_convert_csv(
             tmp_path,
-            [
-                csv_row(name, label="cat", split="train")
-                for name in ("negative.jpg", "removed.jpg", "moved.jpg")
-            ],
+            [csv_row(name, label="cat", split="train") for name in ("negative.jpg", "removed.jpg", "moved.jpg")],
         )
         output = tmp_path / "yolo"
         convert_to_yolo(csv_path, output, image_dirs=[images], link_mode=link_mode)
@@ -142,16 +124,12 @@ class TestConversionRegressions:
         convert_to_yolo(csv_path, output, image_dirs=[images], link_mode=link_mode)
 
         assert (output / "labels/train/negative.txt").read_text() == ""
-        assert {
-            p.relative_to(output).as_posix() for p in output.glob("images/*/*.jpg")
-        } == {
+        assert {p.relative_to(output).as_posix() for p in output.glob("images/*/*.jpg")} == {
             "images/train/negative.jpg",
             "images/val/moved.jpg",
             "images/train/new.jpg",
         }
-        assert {
-            p.relative_to(output).as_posix() for p in output.glob("labels/*/*.txt")
-        } == {
+        assert {p.relative_to(output).as_posix() for p in output.glob("labels/*/*.txt")} == {
             "labels/train/negative.txt",
             "labels/val/moved.txt",
             "labels/train/new.txt",
@@ -166,16 +144,12 @@ class TestConversionRegressions:
         assert result.loc["new.jpg", "instance_label"] == "dog"
 
     @pytest.mark.parametrize("linked_directory", ["images", "images/train"])
-    def test_reexport_never_prunes_source_directory_symlinks(
-        self, tmp_path: Path, linked_directory: str
-    ) -> None:
+    def test_reexport_never_prunes_source_directory_symlinks(self, tmp_path: Path, linked_directory: str) -> None:
         images = tmp_path / "source"
         nested = images / "train" if linked_directory == "images" else images
         make_image(nested / "a.jpg")
         make_image(nested / "unselected.jpg")
-        csv_path = write_convert_csv(
-            tmp_path, [csv_row("a.jpg", label="cat", split="train")]
-        )
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
         output = tmp_path / "yolo"
         link = output / linked_directory
         link.parent.mkdir(parents=True)
@@ -201,9 +175,7 @@ class TestParseLabelFile:
                 [[0.0, 0.5, 0.5, 0.3, 0.4], [1.0, 0.1, 0.2, 0.3, 0.4]],
                 id="standard",
             ),
-            pytest.param(
-                "0 0.5 0.5 0.3 0.4 0.95\n", [[0.0, 0.5, 0.5, 0.3, 0.4, 0.95]], id="conf"
-            ),
+            pytest.param("0 0.5 0.5 0.3 0.4 0.95\n", [[0.0, 0.5, 0.5, 0.3, 0.4, 0.95]], id="conf"),
             pytest.param(None, [], id="missing"),
             pytest.param("", [], id="empty"),
             pytest.param(
@@ -213,9 +185,7 @@ class TestParseLabelFile:
             ),
         ],
     )
-    def test_parses_well_formed_lines(
-        self, tmp_path: Path, text: str | None, expected: list[list[float]]
-    ) -> None:
+    def test_parses_well_formed_lines(self, tmp_path: Path, text: str | None, expected: list[list[float]]) -> None:
         p = tmp_path / "label.txt"
         if text is not None:
             p.write_text(text)
@@ -241,16 +211,12 @@ class TestParseLabelFile:
         p = tmp_path / "label.txt"
         p.write_text("\n".join([*bad_lines, "1 0.1 0.2 0.3 0.4"]) + "\n")
 
-        assert _parse_label_file(p, files=LocalConversionFiles()) == [
-            [1.0, 0.1, 0.2, 0.3, 0.4]
-        ]
+        assert _parse_label_file(p, files=LocalConversionFiles()) == [[1.0, 0.1, 0.2, 0.3, 0.4]]
         assert capture_logs[-1].endswith(": 2")
         assert f"{p}:1" in capture_logs[0]
         assert f"{p}:2" in capture_logs[1]
 
-    def test_well_formed_file_warns_nothing(
-        self, tmp_path: Path, capture_logs: list[str]
-    ) -> None:
+    def test_well_formed_file_warns_nothing(self, tmp_path: Path, capture_logs: list[str]) -> None:
         """Neither a 5-field box nor a 6-field prediction line is reported.
 
         The 6-field line pins the ``>`` in the extra-fields guard: with only
@@ -262,9 +228,7 @@ class TestParseLabelFile:
         assert len(_parse_label_file(p, files=LocalConversionFiles())) == 2
         assert capture_logs == []
 
-    def test_extra_fields_are_kept_but_counted_in_a_warning(
-        self, tmp_path: Path, capture_logs: list[str]
-    ) -> None:
+    def test_extra_fields_are_kept_but_counted_in_a_warning(self, tmp_path: Path, capture_logs: list[str]) -> None:
         """A segmentation/OBB line is still returned whole, and reported.
 
         Such lines used to be read silently as boxes made of the first two
@@ -286,21 +250,14 @@ class TestParseLabelFile:
         assert str(p) in capture_logs[0]
         assert capture_logs[0].endswith(": 2; учтены только class xc yc w h [conf]")
 
-    def test_extra_fields_and_skipped_lines_are_counted_apart(
-        self, tmp_path: Path, capture_logs: list[str]
-    ) -> None:
+    def test_extra_fields_and_skipped_lines_are_counted_apart(self, tmp_path: Path, capture_logs: list[str]) -> None:
         """Each warning carries its own count; a bad long line counts once.
 
         A non-numeric 9-field line is a skipped line, not an extra-fields
         line, so it must not inflate the second counter.
         """
         p = tmp_path / "label.txt"
-        p.write_text(
-            "0 0.5 0.5 0.3\n"
-            "x y z w h a b c d\n"
-            "0 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n"
-            "1 0.5 0.5 0.3 0.4\n"
-        )
+        p.write_text("0 0.5 0.5 0.3\nx y z w h a b c d\n0 0.1 0.1 0.9 0.1 0.9 0.9 0.1 0.9\n1 0.5 0.5 0.3 0.4\n")
 
         assert len(_parse_label_file(p, files=LocalConversionFiles())) == 2
         assert [m.split(": ", 1)[0] for m in capture_logs[2:]] == [
@@ -329,9 +286,7 @@ class TestToYolo:
 
         out_dir = tmp_path / "deep" / "nested" / "yolo_out"
         for _ in range(2):
-            convert_to_yolo(
-                csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy"
-            )
+            convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
 
         assert sorted(p.name for p in out_dir.iterdir()) == [
             "dataset.yaml",
@@ -359,9 +314,7 @@ class TestToYolo:
             )
 
     @pytest.mark.parametrize(("shape", "label_text"), [("box", None), ("none", "")])
-    def test_missing_image_still_writes_labels(
-        self, tmp_path: Path, shape: str, label_text: str | None
-    ) -> None:
+    def test_missing_image_still_writes_labels(self, tmp_path: Path, shape: str, label_text: str | None) -> None:
         """A CSV row whose image is absent from disk is labelled but not copied."""
         img_dir = tmp_path / "images"
         img_dir.mkdir()
@@ -450,9 +403,7 @@ class TestFromYoloDataset:
         """Prediction mode: bare .txt files with confidence field."""
         pred_dir = tmp_path / "preds"
         pred_dir.mkdir()
-        (pred_dir / "img1.txt").write_text(
-            "0 0.5 0.5 0.3 0.4 0.95\n1 0.2 0.3 0.1 0.2 0.87\n"
-        )
+        (pred_dir / "img1.txt").write_text("0 0.5 0.5 0.3 0.4 0.95\n1 0.2 0.3 0.1 0.2 0.87\n")
 
         img_dir = tmp_path / "imgs"
         make_image(img_dir / "img1.jpg")
@@ -559,17 +510,14 @@ def test_csv_to_yolo_to_csv_roundtrip(
             assert (out / "images" / split / image).is_file()
         roundtrip = work / "roundtrip.csv"
         convert_from_yolo(out, roundtrip)
-        result = pd.read_csv(
-            roundtrip, dtype={"instance_label": str}, keep_default_na=False
-        )
+        result = pd.read_csv(roundtrip, dtype={"instance_label": str}, keep_default_na=False)
 
     labels = sorted({row[2] for row in expected})
     assert config["names"] == dict(enumerate(labels))
     assert config["path"] == str(out.resolve())
     splits = {split for split, _ in export.values()}
     assert {key: config.get(key) for key in ("train", "val", "test")} == {
-        key: f"images/{key}" if key in splits else None
-        for key in ("train", "val", "test")
+        key: f"images/{key}" if key in splits else None for key in ("train", "val", "test")
     }
     actual = sorted(
         result[
@@ -638,9 +586,7 @@ class TestFromYoloDatasetRows:
         df = pd.read_csv(out)
         assert df["frame_id"].tolist() == [0, 0, 1, 1, 2, 2]
         assert df["annotation_id"].tolist() == [1, 2, 3, 4, 5, 6]
-        assert (
-            df["image_name"].tolist() == ["a.jpg"] * 2 + ["b.jpg"] * 2 + ["c.jpg"] * 2
-        )
+        assert df["image_name"].tolist() == ["a.jpg"] * 2 + ["b.jpg"] * 2 + ["c.jpg"] * 2
         assert df["instance_label"].tolist() == ["cat", "dog"] * 3
         assert df["split"].tolist() == ["train"] * 6
 
@@ -704,9 +650,7 @@ class TestFromYoloDatasetRows:
         assert df["image_width"].tolist() == widths
         assert df["image_height"].tolist() == heights
 
-    def test_non_positive_image_size_names_the_image(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_non_positive_image_size_names_the_image(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A degenerate image size aborts, naming the offending file.
 
         Real images always report positive dimensions, so the guard was never
@@ -716,9 +660,7 @@ class TestFromYoloDatasetRows:
         make_image(root / "images" / "train" / "flat.jpg")
         _write_yolo_label(root, "train", "flat", "0 0.5 0.5 0.2 0.2\n")
         _write_yolo_yaml(root, {0: "cat"}, ["train"])
-        monkeypatch.setattr(
-            LocalConversionFiles, "image_size", staticmethod(lambda _path: (0, 10))
-        )
+        monkeypatch.setattr(LocalConversionFiles, "image_size", staticmethod(lambda _path: (0, 10)))
 
         with pytest.raises(Cveta2Error, match=r"'flat\.jpg' \(0x10\)"):
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
@@ -769,16 +711,12 @@ class TestFromYoloDatasetSplits:
 
         assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg"]
 
-    def test_split_list_combines_directories_and_list_files(
-        self, tmp_path: Path
-    ) -> None:
+    def test_split_list_combines_directories_and_list_files(self, tmp_path: Path) -> None:
         root = tmp_path / "ds"
         self._labelled(root, "train", "a")
         self._labelled(root, "val", "b")
         list_file = root / "selected.txt"
-        list_file.write_text(
-            "./images/val/b.jpg\nimages/train/a.jpg\n", encoding="utf-8"
-        )
+        list_file.write_text("./images/val/b.jpg\nimages/train/a.jpg\n", encoding="utf-8")
         (root / "dataset.yaml").write_text(
             yaml.dump(
                 {
@@ -795,15 +733,11 @@ class TestFromYoloDatasetSplits:
 
         assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg", "b.jpg"]
 
-    def test_missing_first_listed_image_does_not_hide_later_image(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_first_listed_image_does_not_hide_later_image(self, tmp_path: Path) -> None:
         root = tmp_path / "ds"
         self._labelled(root, "train", "present")
         listing = root / "train.txt"
-        listing.write_text(
-            "images/train/missing.jpg\nimages/train/present.jpg\n", encoding="utf-8"
-        )
+        listing.write_text("images/train/missing.jpg\nimages/train/present.jpg\n", encoding="utf-8")
         (root / "dataset.yaml").write_text(
             yaml.dump({"train": "train.txt", "names": {0: "cat"}}),
             encoding="utf-8",
@@ -828,18 +762,13 @@ class TestFromYoloDatasetSplits:
         root = tmp_path / "dataset"
         listing = tmp_path / "lists" / "train.txt"
         listing.parent.mkdir()
-        assert (
-            _resolve_listed_image("./a.jpg", listing, root)
-            == (listing.parent / "a.jpg").resolve()
-        )
+        assert _resolve_listed_image("./a.jpg", listing, root) == (listing.parent / "a.jpg").resolve()
 
     def test_empty_dataset_root_uses_yaml_directory(self, tmp_path: Path) -> None:
         yaml_path = tmp_path / "config" / "dataset.yaml"
         assert _resolve_dataset_root(yaml_path, "") == yaml_path.parent.resolve()
 
-    def test_label_path_without_images_directory_uses_txt_suffix(
-        self, tmp_path: Path
-    ) -> None:
+    def test_label_path_without_images_directory_uses_txt_suffix(self, tmp_path: Path) -> None:
         image = tmp_path / "photos" / "a.JPG"
         assert _label_path_for_image(image) == tmp_path / "photos" / "a.txt"
 
@@ -915,9 +844,7 @@ class TestFromYoloDatasetSplits:
         """
         root = tmp_path / "ds"
         self._labelled(root, "train", "a")
-        (root / "dataset.yaml").write_text(
-            f"train: images/train\n{names_value}", encoding="utf-8"
-        )
+        (root / "dataset.yaml").write_text(f"train: images/train\n{names_value}", encoding="utf-8")
 
         with pytest.raises(
             Cveta2Error,
@@ -945,9 +872,7 @@ class TestFromYoloPredictions:
         path.write_text(yaml.dump({"names": names}), encoding="utf-8")
         return path
 
-    def test_ids_are_sequential_and_images_come_from_the_subdir(
-        self, tmp_path: Path
-    ) -> None:
+    def test_ids_are_sequential_and_images_come_from_the_subdir(self, tmp_path: Path) -> None:
         """Images live in ``<input>/images``; ids count frames and boxes.
 
         Prediction fixtures always put images in a separate --image-dir, so
@@ -971,9 +896,7 @@ class TestFromYoloPredictions:
         df = pd.read_csv(out)
         assert df["frame_id"].tolist() == [0, 0, 1, 1, 2, 2]
         assert df["annotation_id"].tolist() == [1, 2, 3, 4, 5, 6]
-        assert (
-            df["image_name"].tolist() == ["a.jpg"] * 2 + ["b.jpg"] * 2 + ["c.jpg"] * 2
-        )
+        assert df["image_name"].tolist() == ["a.jpg"] * 2 + ["b.jpg"] * 2 + ["c.jpg"] * 2
         assert df["image_width"].tolist() == [640] * 6
         assert df["split"].isna().all()
 
@@ -1017,9 +940,7 @@ class TestFromYoloPredictions:
         assert df["image_name"].tolist() == ["b.jpg"]
         assert df["frame_id"].tolist() == [0]
 
-    def test_missing_image_is_collected_and_the_walk_continues(
-        self, tmp_path: Path, capture_logs: list[str]
-    ) -> None:
+    def test_missing_image_is_collected_and_the_walk_continues(self, tmp_path: Path, capture_logs: list[str]) -> None:
         """A .txt with no matching image is reported, later files still load.
 
         Nothing produced a missing image here, so the ``missing_images`` list
@@ -1091,9 +1012,7 @@ class TestFromYoloPredictions:
         make_image(pred_dir / "images" / "a.jpg", 640, 480)
         make_image(pred_dir / "images" / "b.jpg", 320, 240)
         for stem in ("a", "b"):
-            (pred_dir / f"{stem}.txt").write_text(
-                "0 0.5 0.5 0.2 0.2\n", encoding="utf-8"
-            )
+            (pred_dir / f"{stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
 
         out = tmp_path / "out.csv"
         convert_from_yolo(
@@ -1107,16 +1026,12 @@ class TestFromYoloPredictions:
         assert df["image_width"].tolist() == [640, 320]
         assert df["image_height"].tolist() == [480, 240]
 
-    def test_non_positive_image_size_names_the_image(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_non_positive_image_size_names_the_image(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A degenerate image size aborts, naming the offending file."""
         pred_dir = tmp_path / "preds"
         make_image(pred_dir / "images" / "flat.jpg")
         (pred_dir / "flat.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
-        monkeypatch.setattr(
-            LocalConversionFiles, "image_size", staticmethod(lambda _path: (0, 10))
-        )
+        monkeypatch.setattr(LocalConversionFiles, "image_size", staticmethod(lambda _path: (0, 10)))
 
         with pytest.raises(Cveta2Error, match=r"'flat\.jpg' \(0x10\)"):
             convert_from_yolo(pred_dir, tmp_path / "out.csv", read_all_sizes=False)
@@ -1130,12 +1045,8 @@ class TestLoadClassNamesYaml:
         with pytest.raises(Cveta2Error, match="файл имён классов не найден"):
             _load_class_names_yaml(tmp_path / "nope.yaml")
 
-    @pytest.mark.parametrize(
-        "document", [{"names": {0: "cat", 1: "dog"}}, {0: "cat", 1: "dog"}]
-    )
-    def test_names_mapping_forms(
-        self, tmp_path: Path, document: dict[object, object]
-    ) -> None:
+    @pytest.mark.parametrize("document", [{"names": {0: "cat", 1: "dog"}}, {0: "cat", 1: "dog"}])
+    def test_names_mapping_forms(self, tmp_path: Path, document: dict[object, object]) -> None:
         """Both ``{names: {...}}`` and a bare ``{0: cat}`` document are accepted."""
         path = tmp_path / "names.yaml"
         path.write_text(yaml.dump(document), encoding="utf-8")
@@ -1148,9 +1059,7 @@ class TestLoadClassNamesYaml:
             pytest.param("names: [cat, 7]\n", id="non-string-name"),
         ],
     )
-    def test_invalid_names_document_is_rejected(
-        self, tmp_path: Path, document: str
-    ) -> None:
+    def test_invalid_names_document_is_rejected(self, tmp_path: Path, document: str) -> None:
         """A non-mapping document or a non-string class name names the file.
 
         Asserted on the function, not through the CSV: ``pd.read_csv`` would
@@ -1162,9 +1071,7 @@ class TestLoadClassNamesYaml:
             _load_class_names_yaml(path)
 
     @pytest.mark.parametrize("document", ["names: 3\n", "names: null\n"])
-    def test_scalar_names_value_is_rejected(
-        self, tmp_path: Path, document: str
-    ) -> None:
+    def test_scalar_names_value_is_rejected(self, tmp_path: Path, document: str) -> None:
         """A mapping whose ``names`` is a scalar aborts, naming the file.
 
         A bare scalar document is also rejected (see the test above); the
@@ -1172,7 +1079,5 @@ class TestLoadClassNamesYaml:
         """
         path = tmp_path / "names.yaml"
         path.write_text(document, encoding="utf-8")
-        with pytest.raises(
-            Cveta2Error, match=r"names в .*names\.yaml должен быть списком или словарём"
-        ):
+        with pytest.raises(Cveta2Error, match=r"names в .*names\.yaml должен быть списком или словарём"):
             _load_class_names_yaml(path)

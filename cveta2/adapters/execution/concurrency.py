@@ -80,26 +80,18 @@ def run_concurrent(  # noqa: PLR0913
     sequential path — and the tracebacks it produces — unchanged.
     """
     if max_workers <= 1:
-        return [
-            _capture(work, item, catch)
-            for item in tqdm(items, desc=desc, unit=unit, leave=False)
-        ]
+        return [_capture(work, item, catch) for item in tqdm(items, desc=desc, unit=unit, leave=False)]
 
     outcomes: dict[int, _R | Exception] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        pending = {
-            pool.submit(copy_context().run, work, item): index
-            for index, item in enumerate(items)
-        }
+        pending = {pool.submit(copy_context().run, work, item): index for index, item in enumerate(items)}
         try:
             with tqdm(total=len(items), desc=desc, unit=unit, leave=False) as bar:
                 for future in as_completed(pending):
                     error = future.exception()
                     if error is not None and not isinstance(error, catch):
                         raise error
-                    outcomes[pending[future]] = (
-                        error if error is not None else future.result()
-                    )
+                    outcomes[pending[future]] = error if error is not None else future.result()
                     bar.update(1)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)

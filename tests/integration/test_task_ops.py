@@ -41,9 +41,7 @@ class TestMarkFramesDeletedByIdsIntegration:
     def test_mark_frames_deleted_by_ids(self) -> None:
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         with CvatClient(cfg) as client:
-            task_id = _create_task(
-                client, project_id, cs_info.id, "integration-task-ops-mark-by-id", 3
-            )
+            task_id = _create_task(client, project_id, cs_info.id, "integration-task-ops-mark-by-id", 3)
             marked = client.mark_frames_deleted_by_ids(task_id, [0, 2, 99])
         assert marked == 2
         sdk_client = _make_sdk_client()
@@ -61,9 +59,7 @@ class TestDropLabelAnnotationsIntegration:
     def test_drop_label_keeps_other_labels(self) -> None:
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         with CvatClient(cfg) as client:
-            task_id = _create_task(
-                client, project_id, cs_info.id, "integration-task-ops-drop-label", 2
-            )
+            task_id = _create_task(client, project_id, cs_info.id, "integration-task-ops-drop-label", 2)
             ann_df = pd.DataFrame(
                 [
                     {
@@ -84,9 +80,7 @@ class TestDropLabelAnnotationsIntegration:
                     },
                 ]
             )
-            uploaded = client.upload_task_annotations(
-                task_id=task_id, annotations_df=ann_df
-            )
+            uploaded = client.upload_task_annotations(task_id=task_id, annotations_df=ann_df)
             assert uploaded == 2
             assert client.count_task_label_shapes(task_id, "person") == 1
             deleted = client.drop_label_annotations(task_id, "person")
@@ -105,9 +99,7 @@ class TestDropLabelAnnotationsIntegration:
     def test_drop_unknown_label_raises(self) -> None:
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         with CvatClient(cfg) as client:
-            task_id = _create_task(
-                client, project_id, cs_info.id, "integration-task-ops-drop-unknown", 1
-            )
+            task_id = _create_task(client, project_id, cs_info.id, "integration-task-ops-drop-unknown", 1)
             with pytest.raises(Cveta2Error, match="no-such-label"):
                 client.drop_label_annotations(task_id, "no-such-label")
 
@@ -118,12 +110,8 @@ class TestSetTaskJobsStatusIntegration:
     def test_status_update_reflected_on_jobs(self) -> None:
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         with CvatClient(cfg) as client:
-            task_id = _create_task(
-                client, project_id, cs_info.id, "integration-task-ops-status", 2
-            )
-            num_jobs = client.set_task_jobs_status(
-                task_id, stage="validation", state="in progress"
-            )
+            task_id = _create_task(client, project_id, cs_info.id, "integration-task-ops-status", 2)
+            num_jobs = client.set_task_jobs_status(task_id, stage="validation", state="in progress")
         assert num_jobs >= 1
         sdk_client = _make_sdk_client()
         try:
@@ -141,9 +129,7 @@ class TestDeleteTaskIntegration:
     def test_delete_task_removes_it(self) -> None:
         project_id, _project_name, cs_info, cfg = _get_project_and_storage()
         with CvatClient(cfg) as client:
-            task_id = _create_task(
-                client, project_id, cs_info.id, "integration-task-ops-delete", 1
-            )
+            task_id = _create_task(client, project_id, cs_info.id, "integration-task-ops-delete", 1)
             task_ids_before = {t.id for t in client.list_project_tasks(project_id)}
             assert task_id in task_ids_before
             client.delete_task(task_id)

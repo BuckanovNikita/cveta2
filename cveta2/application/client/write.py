@@ -60,14 +60,9 @@ class _WriteMixin(_ClientBase):
         api = self._require_api("update_project_labels")
 
         patches: list[LabelPatch] = [LabelPatch(name=name) for name in (add or [])]
-        patches.extend(
-            LabelPatch(id=lid, name=new_name)
-            for lid, new_name in (rename or {}).items()
-        )
+        patches.extend(LabelPatch(id=lid, name=new_name) for lid, new_name in (rename or {}).items())
         patches.extend(LabelPatch(id=lid, deleted=True) for lid in (delete or []))
-        patches.extend(
-            LabelPatch(id=lid, color=color) for lid, color in (recolor or {}).items()
-        )
+        patches.extend(LabelPatch(id=lid, color=color) for lid, color in (recolor or {}).items())
         if not patches:
             return
         api.patch_project_labels(project_id, patches)
@@ -186,14 +181,9 @@ class _WriteMixin(_ClientBase):
 
         built = build_upload_shapes(annotations_df, name_to_frame, label_name_to_id)
         for label_name in dict.fromkeys(built.unknown_labels):
-            logger.warning(
-                f"Метка {label_name!r} не найдена в задаче {task_id} — пропускаем"
-            )
+            logger.warning(f"Метка {label_name!r} не найдена в задаче {task_id} — пропускаем")
         if built.unknown_images:
-            logger.warning(
-                f"{built.unknown_images} аннотаций пропущено: "
-                f"изображение не найдено в задаче"
-            )
+            logger.warning(f"{built.unknown_images} аннотаций пропущено: изображение не найдено в задаче")
 
         if built.shapes:
             api.put_task_shapes(task_id, built.shapes)
@@ -248,9 +238,7 @@ class _WriteMixin(_ClientBase):
             pending = _issues_not_yet_on_task(api.get_task_issues(task_id), pending)
             already = len(built.issues) - len(pending)
             if already:
-                logger.info(
-                    f"Задача {task_id}: {already} issues уже созданы, пропускаем"
-                )
+                logger.info(f"Задача {task_id}: {already} issues уже созданы, пропускаем")
         self._runner(
             pending,
             api.create_issue,
@@ -267,8 +255,6 @@ class _WriteMixin(_ClientBase):
         )
         for reason, names in skipped:
             if names:
-                logger.warning(
-                    f"Issues пропущены: {reason} в задаче {task_id}: {names}"
-                )
+                logger.warning(f"Issues пропущены: {reason} в задаче {task_id}: {names}")
         logger.info(f"Создано issues: {len(pending)} в задаче {task_id}")
         return len(pending)

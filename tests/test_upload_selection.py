@@ -81,9 +81,7 @@ def test_write_and_resume_keep_selected_row_order_and_multiplicity() -> None:
         (0, 7, [1, 2, 3, 4]),
     ]
     stored = make_raw_shape(label_id=7, points=[1, 2, 3, 4])
-    api.get_task_annotations.return_value = RawAnnotations(
-        shapes=[stored, replace(stored, frame=1), stored]
-    )
+    api.get_task_annotations.return_value = RawAnnotations(shapes=[stored, replace(stored, frame=1), stored])
     api.put_task_shapes.reset_mock()
 
     assert _verify_existing_shapes(99, frame, session) == 3

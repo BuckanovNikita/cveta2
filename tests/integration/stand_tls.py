@@ -32,9 +32,7 @@ class StandTlsError(RuntimeError):
 
 def _linked_errors(error: BaseException) -> list[BaseException]:
     linked: list[BaseException] = [
-        candidate
-        for candidate in (error.__cause__, error.__context__)
-        if candidate is not None
+        candidate for candidate in (error.__cause__, error.__context__) if candidate is not None
     ]
     # getattr: urllib3's MaxRetryError keeps the underlying failure in `reason`,
     # and urllib3/requests/botocore wrappers keep it in `args`; neither is a

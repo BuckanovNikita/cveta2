@@ -56,9 +56,7 @@ def _propagate_splits(
     merged.loc[mask, "split"] = merged.loc[mask, "image_name"].map(old_splits)
 
     if mask.any():
-        logger.info(
-            f"Пропагация split: заполнено {int(mask.sum())} строк из old-датасета"
-        )
+        logger.info(f"Пропагация split: заполнено {int(mask.sum())} строк из old-датасета")
 
     return merged
 
@@ -101,17 +99,11 @@ def _merge_datasets(
     new_images: set[str] = set(new["image_name"].dropna().unique())
     common_images = old_images & new_images
 
-    keep_from_new, keep_from_old = _split_winners(
-        old, new, common_images, by_task=by_task
-    )
+    keep_from_new, keep_from_old = _split_winners(old, new, common_images, by_task=by_task)
 
-    old_keep_mask = old["image_name"].isin(
-        (old_images - common_images - deleted) | (keep_from_old - deleted)
-    )
+    old_keep_mask = old["image_name"].isin((old_images - common_images - deleted) | (keep_from_old - deleted))
     new_keep_mask = new["image_name"].isin((new_images - deleted) - keep_from_old)
-    merged: pd.DataFrame = pd.concat(
-        [old[old_keep_mask], new[new_keep_mask]], ignore_index=True
-    )
+    merged: pd.DataFrame = pd.concat([old[old_keep_mask], new[new_keep_mask]], ignore_index=True)
     merged = _propagate_splits(merged, old, new, common_images)
 
     logger.info(

@@ -119,8 +119,7 @@ def _login(settings: StandSettings) -> Client:
     except ApiException as exc:
         client.close()
         raise StandError(
-            f"login as '{settings.username}' at {settings.host} failed: "
-            f"{exc.status} {exc.body}; {SECRET_HINT}"
+            f"login as '{settings.username}' at {settings.host} failed: {exc.status} {exc.body}; {SECRET_HINT}"
         ) from exc
     except (OSError, Urllib3Error) as exc:
         client.close()
@@ -143,9 +142,7 @@ def _list_pages(fetch: Callable[[int], object]) -> Iterator[object]:
 
 def _member_organization_slugs(client: Client) -> set[str]:
     api = client.api_client.organizations_api
-    organizations = _list_pages(
-        lambda page: api.list(page=page, page_size=PAGE_SIZE)[0]
-    )
+    organizations = _list_pages(lambda page: api.list(page=page, page_size=PAGE_SIZE)[0])
     return {str(org.slug) for org in organizations}  # type: ignore[attr-defined]
 
 
@@ -156,8 +153,7 @@ def _verify_identity(client: Client, settings: StandSettings) -> None:
         slugs = _member_organization_slugs(client)
     except ApiException as exc:
         raise StandError(
-            f"{settings.host} rejected the logged-in user '{settings.username}': "
-            f"{exc.status} {exc.body}; {SECRET_HINT}"
+            f"{settings.host} rejected the logged-in user '{settings.username}': {exc.status} {exc.body}; {SECRET_HINT}"
         ) from exc
     if str(me.username) != settings.username:
         raise StandError(
@@ -223,9 +219,7 @@ def list_cloud_storages(client: Client) -> list[Listing]:
             owner=_owner_name(storage),
             created=storage.created_date,  # type: ignore[attr-defined]
         )
-        for storage in _list_pages(
-            lambda page: api.list(page=page, page_size=PAGE_SIZE)[0]
-        )
+        for storage in _list_pages(lambda page: api.list(page=page, page_size=PAGE_SIZE)[0])
     ]
 
 
@@ -264,9 +258,7 @@ def cmd_ls(_: argparse.Namespace) -> int:
         logger.info(f"{item.kind:<8}{item.id:>6}  {item.age():>7}  {item.name}")
     for task in sorted(tasks, key=lambda i: i.created):
         where = f"in project {task.project_id}" if task.project_id else "standalone"
-        logger.info(
-            f"{task.kind:<8}{task.id:>6}  {task.age():>7}  {task.name}  ({where})"
-        )
+        logger.info(f"{task.kind:<8}{task.id:>6}  {task.age():>7}  {task.name}  ({where})")
     return 0
 
 
@@ -279,11 +271,7 @@ def _tagged_and_owned(tag: str, settings: StandSettings) -> Callable[[Listing], 
 def _doomed(client: Client, selected: Callable[[Listing], bool]) -> list[Listing]:
     projects = [p for p in list_projects(client) if selected(p)]
     doomed_project_ids = {p.id for p in projects}
-    tasks = [
-        t
-        for t in list_tasks(client)
-        if selected(t) and t.project_id not in doomed_project_ids
-    ]
+    tasks = [t for t in list_tasks(client) if selected(t) and t.project_id not in doomed_project_ids]
     storages = [s for s in list_cloud_storages(client) if selected(s)]
     return projects + tasks + storages
 
@@ -304,10 +292,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     try:
         items = _doomed(client, selected)
         if not items:
-            logger.info(
-                f"nothing of '{args.tag}' owned by {settings.username} in "
-                f"organization {settings.organization}"
-            )
+            logger.info(f"nothing of '{args.tag}' owned by {settings.username} in organization {settings.organization}")
             return 0
         verb = "would delete" if args.dry_run else "deleting"
         for item in items:
@@ -322,32 +307,22 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     if remaining:
         names = ", ".join(f"{i.kind} {i.id} '{i.name}'" for i in remaining)
         raise StandError(f"cleanup left {len(remaining)} item(s) behind: {names}")
-    logger.info(
-        f"deleted {len(items)} item(s) from organization {settings.organization}"
-    )
+    logger.info(f"deleted {len(items)} item(s) from organization {settings.organization}")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)
     verify = commands.add_parser(
         "verify",
         help="log in as the integration user and prove its organization membership",
     )
     verify.set_defaults(run=cmd_verify)
-    ls = commands.add_parser(
-        "ls", help="projects, tasks and cloud storages the integration user owns"
-    )
+    ls = commands.add_parser("ls", help="projects, tasks and cloud storages the integration user owns")
     ls.set_defaults(run=cmd_ls)
-    cleanup = commands.add_parser(
-        "cleanup", help="delete one run's objects owned by the integration user"
-    )
-    cleanup.add_argument(
-        "--tag", required=True, help="delete objects named '<tag> ...' (this run's)"
-    )
+    cleanup = commands.add_parser("cleanup", help="delete one run's objects owned by the integration user")
+    cleanup.add_argument("--tag", required=True, help="delete objects named '<tag> ...' (this run's)")
     cleanup.add_argument("--dry-run", action="store_true", help="list without deleting")
     cleanup.set_defaults(run=cmd_cleanup)
     return parser

@@ -87,10 +87,7 @@ def check_config() -> bool:
 
     # --- Config file existence ---
     if not config_path.is_file():
-        logger.warning(
-            f"Config file not found: {config_path}. "
-            "Run 'cveta2 setup' or set env variables."
-        )
+        logger.warning(f"Config file not found: {config_path}. Run 'cveta2 setup' or set env variables.")
         cfg = CvatConfig.from_env()
     else:
         logger.info(f"Config file: {config_path}")
@@ -99,9 +96,7 @@ def check_config() -> bool:
     problems: list[str] = []
 
     if not cfg.host:
-        problems.append(
-            "'host' is not configured (set CVAT_HOST or cvat.host in config)"
-        )
+        problems.append("'host' is not configured (set CVAT_HOST or cvat.host in config)")
 
     has_password = bool(cfg.username and cfg.password)
     if not has_password:
@@ -110,19 +105,14 @@ def check_config() -> bool:
     try:
         ic_cfg = ImageCacheConfig.load()
     except (ValidationError, Cveta2Error, OSError) as error:
-        logger.warning(
-            f"doctor: необязательная проверка image_cache недоступна: {error}"
-        )
+        logger.warning(f"doctor: необязательная проверка image_cache недоступна: {error}")
         ic_cfg = ImageCacheConfig()
     if not ic_cfg.projects:
         logger.info("image_cache: no projects configured (optional)")
     else:
         for proj_name, proj_dir in ic_cfg.projects.items():
             if not proj_dir.is_dir():
-                logger.warning(
-                    f"image_cache.{proj_name}: необязательный каталог "
-                    f"отсутствует: {proj_dir}"
-                )
+                logger.warning(f"image_cache.{proj_name}: необязательный каталог отсутствует: {proj_dir}")
             else:
                 logger.info(f"image_cache.{proj_name}: {proj_dir} — OK")
 
@@ -147,8 +137,7 @@ def collect_cache_roots(config_path: Path | None = None) -> dict[str, Path]:
     another one is dropped too — the outer walk already covers it.
     """
     labelled: dict[str, Path] = {
-        f"image_cache.{name}": path
-        for name, path in ImageCacheConfig.load(config_path).projects.items()
+        f"image_cache.{name}": path for name, path in ImageCacheConfig.load(config_path).projects.items()
     }
     cache_cfg = CacheConfig.load(config_path)
     if cache_cfg.images_root is not None:
@@ -162,9 +151,7 @@ def collect_cache_roots(config_path: Path | None = None) -> dict[str, Path]:
             labelled[f"cache.projects.{name}.tasks_root"] = settings.tasks_root
     labelled["cache_dir"] = default_cache_base()
 
-    existing = [
-        (label, path.resolve()) for label, path in labelled.items() if path.is_dir()
-    ]
+    existing = [(label, path.resolve()) for label, path in labelled.items() if path.is_dir()]
     existing.sort(key=lambda item: len(item[1].parts))
     roots: dict[str, Path] = {}
     for label, path in existing:
@@ -190,18 +177,13 @@ def check_cache_permissions(*, fix: bool = False) -> bool:
         logger.info("doctor: no cache directories to check permissions for")
         return True
 
-    logger.info(
-        f"doctor: {'fixing' if fix else 'checking'} cache group permissions in "
-        f"{len(roots)} location(s) …"
-    )
+    logger.info(f"doctor: {'fixing' if fix else 'checking'} cache group permissions in {len(roots)} location(s) …")
     unfixed: Counter[str] = Counter()
 
     for label, root in roots.items():
         result = _scan_permissions(root, fix=fix)
         if result.fixed:
-            logger.info(
-                f"{label} ({root}): granted group access to {result.fixed} path(s)"
-            )
+            logger.info(f"{label} ({root}): granted group access to {result.fixed} path(s)")
         broken = result.broken
         if broken:
             unfixed.update(owner for _, owner in broken)
@@ -237,31 +219,20 @@ def _scan_permissions(root_dir: Path, *, fix: bool = False) -> "_ScanResult":
     result = _ScanResult()
 
     def record_unreadable(error: OSError) -> None:
-        logger.warning(
-            f"doctor: cannot read {error.filename} ({error}) — "
-            f"directory contents not checked"
-        )
+        logger.warning(f"doctor: cannot read {error.filename} ({error}) — directory contents not checked")
         if error.filename is not None:
-            _check_one(
-                Path(error.filename), is_dir=True, out=result.broken_dirs, fix=fix
-            )
+            _check_one(Path(error.filename), is_dir=True, out=result.broken_dirs, fix=fix)
 
     for root, _dirs, files in os.walk(root_dir, onerror=record_unreadable):
         root_path = Path(root)
-        result.fixed += _check_one(
-            root_path, is_dir=True, out=result.broken_dirs, fix=fix
-        )
+        result.fixed += _check_one(root_path, is_dir=True, out=result.broken_dirs, fix=fix)
         for fname in files:
-            result.fixed += _check_one(
-                root_path / fname, is_dir=False, out=result.broken_files, fix=fix
-            )
+            result.fixed += _check_one(root_path / fname, is_dir=False, out=result.broken_files, fix=fix)
 
     return result
 
 
-def _check_one(
-    path: Path, *, is_dir: bool, out: "_BrokenList", fix: bool = False
-) -> bool:
+def _check_one(path: Path, *, is_dir: bool, out: "_BrokenList", fix: bool = False) -> bool:
     """Grant group access to *path* when asked and allowed; else record it.
 
     Returns ``True`` when the path was repaired.  A path that already
@@ -273,19 +244,11 @@ def _check_one(
         logger.debug(f"doctor: cannot stat {path}: {e}")
         return False
 
-    need = (
-        (stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP)
-        if is_dir
-        else (stat.S_IRGRP | stat.S_IWGRP)
-    )
+    need = (stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP) if is_dir else (stat.S_IRGRP | stat.S_IWGRP)
     if (st.st_mode & need) == need:
         return False
 
-    if (
-        fix
-        and st.st_uid == os.getuid()
-        and _grant_group_access(path, st.st_mode | need)
-    ):
+    if fix and st.st_uid == os.getuid() and _grant_group_access(path, st.st_mode | need):
         return True
 
     out.append((path, _owner_name(st.st_uid)))
@@ -319,9 +282,7 @@ def _log_broken_summary(
 ) -> None:
     """Log a compact summary of permission problems for one cache root."""
     owner_counts = Counter(owner for _, owner in broken_dirs + broken_files)
-    owners_str = ", ".join(
-        f"{owner} ({cnt} items)" for owner, cnt in owner_counts.items()
-    )
+    owners_str = ", ".join(f"{owner} ({cnt} items)" for owner, cnt in owner_counts.items())
 
     logger.warning(
         f"{label} ({root_dir}): "
@@ -344,19 +305,10 @@ def _log_users_to_notify(unfixed: Counter[str], *, fix: bool) -> None:
     me = _owner_name(os.getuid())
     mine = unfixed.pop(me, 0)
     if mine and fix:
-        logger.warning(
-            f"{mine} path(s) you own could not be repaired — see the errors above"
-        )
+        logger.warning(f"{mine} path(s) you own could not be repaired — see the errors above")
     elif mine:
-        logger.warning(
-            f"{mine} path(s) you own can be repaired here: run 'cveta2 doctor --cache'"
-        )
+        logger.warning(f"{mine} path(s) you own can be repaired here: run 'cveta2 doctor --cache'")
     if not unfixed:
         return
-    owners_str = ", ".join(
-        f"{owner} ({cnt} items)" for owner, cnt in sorted(unfixed.items())
-    )
-    logger.warning(
-        f"These users own the remaining paths and must run "
-        f"'cveta2 doctor --cache' themselves: {owners_str}"
-    )
+    owners_str = ", ".join(f"{owner} ({cnt} items)" for owner, cnt in sorted(unfixed.items()))
+    logger.warning(f"These users own the remaining paths and must run 'cveta2 doctor --cache' themselves: {owners_str}")

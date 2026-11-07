@@ -115,9 +115,7 @@ def test_resume_after_injected_post_write_failure() -> None:
             return_value=_cs_info_for_host(storage),
         ):
             with (
-                patch.object(
-                    client, "upload_task_annotations", side_effect=applied_then_failed
-                ),
+                patch.object(client, "upload_task_annotations", side_effect=applied_then_failed),
                 pytest.raises(CvatApiError, match="injected"),
             ):
                 upload_cvat_dataset(client, request)
@@ -147,9 +145,7 @@ def test_clone_real_task_specific_frames(monkeypatch: pytest.MonkeyPatch) -> Non
     source = sdk.projects.create({"name": source_name, "labels": [{"name": "person"}]})
     try:
         with CvatClient(cfg) as client:
-            for index, names in enumerate(
-                (list(reversed(IMAGE_NAMES[:2])), IMAGE_NAMES[2:5])
-            ):
+            for index, names in enumerate((list(reversed(IMAGE_NAMES[:2])), IMAGE_NAMES[2:5])):
                 task_id = client.create_upload_task(
                     project_id=source.id,
                     name=f"review-source-{index}",
@@ -182,11 +178,7 @@ def test_clone_real_task_specific_frames(monkeypatch: pytest.MonkeyPatch) -> Non
             ],
         )
         helper.main()
-        destination = next(
-            project
-            for project in sdk.projects.list()
-            if project.name == destination_name
-        )
+        destination = next(project for project in sdk.projects.list() if project.name == destination_name)
         source_tasks = {task.name: task for task in source.get_tasks()}
         cloned = destination.get_tasks()
         assert len(cloned) == 2
@@ -201,9 +193,7 @@ def test_clone_real_task_specific_frames(monkeypatch: pytest.MonkeyPatch) -> Non
                 )
             expected = adapter.get_task_annotations(original_task.id).shapes
             actual = adapter.get_task_annotations(task.id).shapes
-            assert [(s.frame, s.points) for s in actual] == [
-                (s.frame, s.points) for s in expected
-            ]
+            assert [(s.frame, s.points) for s in actual] == [(s.frame, s.points) for s in expected]
     finally:
         for project in sdk.projects.list():
             if project.name in {source_name, destination_name}:

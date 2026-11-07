@@ -68,12 +68,7 @@ class TestOrdering:
         assert results == list(range(6))
 
     def test_an_empty_batch_is_not_an_error(self) -> None:
-        assert (
-            run_concurrent(
-                [], lambda n: n, max_workers=4, catch=(), desc="t", unit="item"
-            )
-            == []
-        )
+        assert run_concurrent([], lambda n: n, max_workers=4, catch=(), desc="t", unit="item") == []
 
 
 class TestFailurePolicy:
@@ -130,15 +125,11 @@ class TestFailurePolicy:
             time.sleep(_HOLD_A_WORKER)
 
         with pytest.raises(ValueError, match="boom"):
-            run_concurrent(
-                items, work, max_workers=2, catch=(OSError,), desc="t", unit="item"
-            )
+            run_concurrent(items, work, max_workers=2, catch=(OSError,), desc="t", unit="item")
 
         assert executed < set(items[1:])
 
-    def test_an_interrupt_while_waiting_cancels_the_queued_work(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_an_interrupt_while_waiting_cancels_the_queued_work(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Ctrl+C must abort the batch, not drain every queued item first.
 
         The inline path stops at once. The pool's `__exit__` would instead run

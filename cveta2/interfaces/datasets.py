@@ -60,9 +60,7 @@ def verify(
     clean: bool = False,
 ) -> ValidationResult:
     """Inspect a CSV; export corrected rows only when clean is explicitly true."""
-    return verify_csv(
-        path, profile=profile, options=options, output_dir=output_dir, cleanup=clean
-    )
+    return verify_csv(path, profile=profile, options=options, output_dir=output_dir, cleanup=clean)
 
 
 def verify_dataframe(
@@ -75,9 +73,7 @@ def verify_dataframe(
     return verify_frame(frame, profile=profile, options=options)
 
 
-def prepare_dataset(
-    source: str | Path, *, output_dir: str | Path, options: PrepareOptions
-) -> PreparedDataset:
+def prepare_dataset(source: str | Path, *, output_dir: str | Path, options: PrepareOptions) -> PreparedDataset:
     """Prepare local evidence; missing choices raise structured MissingDecisions."""
     return prepare_bundle(Path(source), Path(output_dir), options)
 

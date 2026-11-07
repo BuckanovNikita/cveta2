@@ -41,9 +41,7 @@ def test_read_exclude_names_without_a_path_is_empty(value: str | None) -> None:
     ],
     ids=["valid", "leading_zeros", "na_literal", "no_image_name_column"],
 )
-def test_read_exclude_names_reads_the_image_name_column(
-    tmp_path: Path, content: str, expected: set[str]
-) -> None:
+def test_read_exclude_names_reads_the_image_name_column(tmp_path: Path, content: str, expected: set[str]) -> None:
     csv = tmp_path / "in_progress.csv"
     csv.write_text(content, encoding="utf-8")
     assert read_exclude_names(str(csv)) == expected
@@ -182,9 +180,7 @@ def test_build_upload_plan_raises_when_empty() -> None:
 
 def test_excluding_every_deleted_frame_leaves_nothing_to_upload() -> None:
     with pytest.raises(Cveta2Error):
-        build_upload_plan(
-            _empty_df(), ["busy.jpg"], labels=[], exclude_names={"busy.jpg"}
-        )
+        build_upload_plan(_empty_df(), ["busy.jpg"], labels=[], exclude_names={"busy.jpg"})
 
 
 # ---------------------------------------------------------------------------
@@ -214,14 +210,10 @@ def test_filter_frames_by_labels(
             "instance_label": ["Edge", "Other", "Other", None],
         }
     )
-    result = filter_frames_by_labels(
-        frames, labels, include_unannotated=unannotated, exclude_names=exclude
-    )
+    result = filter_frames_by_labels(frames, labels, include_unannotated=unannotated, exclude_names=exclude)
     rows = [
         (name, None if pd.isna(label) else label)
-        for name, label in zip(
-            result["image_name"], result["instance_label"], strict=True
-        )
+        for name, label in zip(result["image_name"], result["instance_label"], strict=True)
     ]
     assert rows == expected
 
@@ -326,9 +318,7 @@ def test_build_search_dirs(  # noqa: PLR0913, PLR0917
     dirs["root"] = cache_dir_for_project(root, "proj")
     cfg_path = tmp_path / "config.yaml"
     if config is not None:
-        cfg_path.write_text(
-            config.format(explicit=dirs["explicit"], root=root), encoding="utf-8"
-        )
+        cfg_path.write_text(config.format(explicit=dirs["explicit"], root=root), encoding="utf-8")
     ambient = tmp_path / "nonexistent.yaml" if explicit_config_path else cfg_path
     monkeypatch.setenv("CVETA2_CONFIG", str(ambient))
     choices: dict[str, list[str] | str] = {
@@ -337,9 +327,7 @@ def test_build_search_dirs(  # noqa: PLR0913, PLR0917
     }
     arg = choices.get(image_dir or "")
 
-    result = build_search_dirs(
-        arg, "proj", config_path=cfg_path if explicit_config_path else None
-    )
+    result = build_search_dirs(arg, "proj", config_path=cfg_path if explicit_config_path else None)
 
     assert result == ([] if expected is None else [dirs[expected].resolve()])
     assert any("Не указан --image-dir" in m for m in capture_logs) is warns
@@ -409,18 +397,14 @@ def test_local_frame_path_without_cloud_storage_is_relative_to_cache(
     cached.write_bytes(b"image")
     record = make_bbox(image_name="a.jpg", frame_path="/nested/a.jpg")
 
-    populate_record_paths(
-        ProjectAnnotations(annotations=[record], deleted_images=[]), None, tmp_path
-    )
+    populate_record_paths(ProjectAnnotations(annotations=[record], deleted_images=[]), None, tmp_path)
 
     assert record.image_path == str(cached)
     assert record.s3_image_path is None
 
 
 @pytest.mark.parametrize("escape", ["dotdot_key", "cache_symlink"])
-def test_invalid_resolved_path_reports_the_original_frame_name(
-    tmp_path: Path, escape: str
-) -> None:
+def test_invalid_resolved_path_reports_the_original_frame_name(tmp_path: Path, escape: str) -> None:
     cache = tmp_path / "cache"
     cache.mkdir()
     if escape == "dotdot_key":

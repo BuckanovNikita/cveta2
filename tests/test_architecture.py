@@ -9,9 +9,7 @@ from grimp import ImportGraph
 PACKAGE = Path(__file__).parents[1] / "cveta2"
 
 
-@pytest.mark.parametrize(
-    "layer", ["domain", "application", "adapters", "composition", "interfaces"]
-)
+@pytest.mark.parametrize("layer", ["domain", "application", "adapters", "composition", "interfaces"])
 def test_canonical_layers_are_explicit_packages(layer: str) -> None:
     assert (PACKAGE / layer / "__init__.py").is_file()
 
@@ -39,19 +37,13 @@ def test_canonical_layers_are_explicit_packages(layer: str) -> None:
 def test_inner_effect_negative_fixtures(source: str, fragment: str) -> None:
     from tests.architecture_effects import inspect_source
 
-    assert any(
-        fragment in item for item in inspect_source(source, "cveta2.application.probe")
-    )
+    assert any(fragment in item for item in inspect_source(source, "cveta2.application.probe"))
 
 
 def test_pure_lexical_paths_and_dataframe_transforms_are_allowed() -> None:
     from tests.architecture_effects import inspect_source
 
-    source = (
-        "from pathlib import Path\n"
-        "x = Path('root') / 'image.jpg'\n"
-        "y = str(x).replace('a', 'b')"
-    )
+    source = "from pathlib import Path\nx = Path('root') / 'image.jpg'\ny = str(x).replace('a', 'b')"
     assert inspect_source(source, "cveta2.domain.probe") == []
 
 
@@ -64,9 +56,7 @@ def test_canonical_effect_ownership() -> None:
 def _contracts() -> list[dict[str, Any]]:
     import tomllib
 
-    parsed = tomllib.loads((PACKAGE.parent / "pyproject.toml").read_text())["tool"][
-        "importlinter"
-    ]["contracts"]
+    parsed = tomllib.loads((PACKAGE.parent / "pyproject.toml").read_text())["tool"]["importlinter"]["contracts"]
     return cast("list[dict[str, Any]]", parsed)
 
 
@@ -84,12 +74,7 @@ def _check_contract(config: dict[str, Any], graph: ImportGraph) -> bool:
 
     classes: dict[
         str,
-        type[
-            LayersContract
-            | ForbiddenContract
-            | ProtectedContract
-            | AcyclicSiblingsContract
-        ],
+        type[LayersContract | ForbiddenContract | ProtectedContract | AcyclicSiblingsContract],
     ] = {
         "layers": LayersContract,
         "forbidden": ForbiddenContract,
@@ -156,9 +141,7 @@ def _synthetic_graph() -> ImportGraph:
         ("cveta2.application.use_cases.fetch", "questionary"),
     ],
 )
-def test_import_contracts_reject_outward_or_sdk_edges(
-    importer: str, imported: str
-) -> None:
+def test_import_contracts_reject_outward_or_sdk_edges(importer: str, imported: str) -> None:
     graph = _synthetic_graph()
     graph.add_import(importer=importer, imported=imported)
     assert any(not _check_contract(config, graph) for config in _contracts())
@@ -179,12 +162,8 @@ def test_import_contracts_accept_inward_edges() -> None:
 
 def test_import_contracts_reject_transitive_outward_path() -> None:
     graph = _synthetic_graph()
-    graph.add_import(
-        importer="cveta2.application.client.base", imported="cveta2.domain.models"
-    )
-    graph.add_import(
-        importer="cveta2.domain.models", imported="cveta2.adapters.s3.utils"
-    )
+    graph.add_import(importer="cveta2.application.client.base", imported="cveta2.domain.models")
+    graph.add_import(importer="cveta2.domain.models", imported="cveta2.adapters.s3.utils")
     assert not _check_contract(_contracts()[0], graph)
 
 
@@ -273,10 +252,7 @@ def test_aliased_and_typed_effect_calls_are_rejected(source: str) -> None:
         ("local", "def fetch():\n    import cvat_sdk\n"),
         (
             "typeonly",
-            (
-                "from typing import TYPE_CHECKING\n"
-                "if TYPE_CHECKING:\n    import cvat_sdk\n"
-            ),
+            ("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import cvat_sdk\n"),
         ),
     ],
 )
@@ -319,14 +295,10 @@ def test_grimp_collects_local_and_type_only_sdk_imports(
         ("cveta2.api", "cveta2.composition.conversion", "convert_to_yolo"),
     ],
 )
-def test_public_facades_preserve_canonical_identity(
-    public: str, canonical: str, name: str
-) -> None:
+def test_public_facades_preserve_canonical_identity(public: str, canonical: str, name: str) -> None:
     from importlib import import_module
 
-    assert getattr(import_module(public), name) is getattr(
-        import_module(canonical), name
-    )
+    assert getattr(import_module(public), name) is getattr(import_module(canonical), name)
 
 
 def test_new_runtime_packages_do_not_use_future_annotations() -> None:

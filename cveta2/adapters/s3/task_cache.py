@@ -160,9 +160,7 @@ class S3CacheBackend:
             _s3_delete_object(self._s3, self._bucket, self._entry_key(task_id))
         except (ClientError, BotoCoreError, OSError) as e:
             if strict:
-                raise Cveta2Error(
-                    f"Не удалось удалить S3-кэш задачи {task_id}: {e}"
-                ) from e
+                raise Cveta2Error(f"Не удалось удалить S3-кэш задачи {task_id}: {e}") from e
             self._disable(e)
 
     def _entry_key(self, task_id: int) -> str:
@@ -175,10 +173,7 @@ class S3CacheBackend:
     def _disable(self, error: Exception) -> None:
         """Log one Russian warning and stop using S3 for the rest of the run."""
         self._disabled = True
-        logger.warning(
-            f"S3-кэш аннотаций недоступен ({error}) — до конца запуска "
-            f"используется только локальный кэш."
-        )
+        logger.warning(f"S3-кэш аннотаций недоступен ({error}) — до конца запуска используется только локальный кэш.")
 
 
 class TaskAnnotationCache:
@@ -227,10 +222,7 @@ class TaskAnnotationCache:
         except OSError as error:
             if strict:
                 raise
-            logger.warning(
-                f"Не удалось удалить локальный кэш задачи {task_id}: {error} — "
-                f"запись не используется"
-            )
+            logger.warning(f"Не удалось удалить локальный кэш задачи {task_id}: {error} — запись не используется")
 
     def invalidate(self, task_id: int, *, strict: bool = False) -> None:
         """Remove the entry for *task_id* from every layer, S3 included.
@@ -319,9 +311,7 @@ class AnnotationCacheFactory:
         """Build a project cache, optionally restricting it to local files."""
         return TaskAnnotationCache(
             get_task_cache_dir(project_id, root=settings.tasks_root),
-            s3=S3CacheBackend.from_cloud_storage(
-                cs_info, task_cache_s3=settings.task_cache_s3
-            )
+            s3=S3CacheBackend.from_cloud_storage(cs_info, task_cache_s3=settings.task_cache_s3)
             if not local_only
             else None,
         )

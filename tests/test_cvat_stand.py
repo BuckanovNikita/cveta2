@@ -33,9 +33,7 @@ TAG = "cveta2-claude-20260905-integration-k3x9"
 CREATED = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
 
-def item(
-    id_: int, name: str, owner: str | None, project_id: int | None = None
-) -> SimpleNamespace:
+def item(id_: int, name: str, owner: str | None, project_id: int | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         id=id_,
         name=name,
@@ -104,22 +102,14 @@ def fake_client_class(stand: Stand) -> type:
                         None,
                     )
                 ),
-                organizations_api=_paged(
-                    lambda: [SimpleNamespace(slug=s) for s in stand.organizations]
-                ),
-                server_api=SimpleNamespace(
-                    retrieve_about=lambda: (SimpleNamespace(version="2.30.0"), None)
-                ),
+                organizations_api=_paged(lambda: [SimpleNamespace(slug=s) for s in stand.organizations]),
+                server_api=SimpleNamespace(retrieve_about=lambda: (SimpleNamespace(version="2.30.0"), None)),
                 cloudstorages_api=SimpleNamespace(
                     list=_paged(lambda: stand.storages).list,
                     destroy=lambda id_: stand.destroy("storage", id_),
                 ),
-                projects_api=SimpleNamespace(
-                    destroy=lambda id_: stand.destroy("project", id_)
-                ),
-                tasks_api=SimpleNamespace(
-                    destroy=lambda id_: stand.destroy("task", id_)
-                ),
+                projects_api=SimpleNamespace(destroy=lambda id_: stand.destroy("project", id_)),
+                tasks_api=SimpleNamespace(destroy=lambda id_: stand.destroy("task", id_)),
             )
             self.projects = SimpleNamespace(list=lambda: list(stand.projects))
             self.tasks = SimpleNamespace(list=lambda: list(stand.tasks))
@@ -150,9 +140,7 @@ def stand(monkeypatch: pytest.MonkeyPatch) -> Stand:
 @pytest.fixture
 def logs() -> Iterator[list[str]]:
     records: list[str] = []
-    handle = logger.add(
-        lambda m: records.append(str(m).rstrip("\n")), format="{message}"
-    )
+    handle = logger.add(lambda m: records.append(str(m).rstrip("\n")), format="{message}")
     yield records
     logger.remove(handle)
 
@@ -195,9 +183,7 @@ class TestSettings:
 
 
 class TestVerify:
-    def test_member_passes_with_one_login(
-        self, stand: Stand, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_member_passes_with_one_login(self, stand: Stand, monkeypatch: pytest.MonkeyPatch) -> None:
         assert run(monkeypatch, "verify") == 0
         assert stand.logins == [(USER, PASSWORD)]
         assert stand.closed == 1
@@ -270,9 +256,7 @@ class TestLs:
 
 
 class TestCleanup:
-    def test_deletes_this_tag_and_this_owner_only(
-        self, stand: Stand, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_deletes_this_tag_and_this_owner_only(self, stand: Stand, monkeypatch: pytest.MonkeyPatch) -> None:
         seeded(stand)
         assert run(monkeypatch, "cleanup", "--tag", TAG) == 0
         assert stand.destroyed == [("project", 1), ("task", 11), ("storage", 20)]
@@ -287,24 +271,18 @@ class TestCleanup:
         assert run(monkeypatch, "cleanup", "--tag", "cveta2-main") == 0
         assert stand.destroyed == [("project", 4)]
 
-    def test_a_prefix_of_the_tag_reaches_nothing(
-        self, stand: Stand, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_prefix_of_the_tag_reaches_nothing(self, stand: Stand, monkeypatch: pytest.MonkeyPatch) -> None:
         seeded(stand)
         assert run(monkeypatch, "cleanup", "--tag", "cveta2") == 0
         assert stand.destroyed == []
 
-    def test_dry_run_destroys_nothing(
-        self, stand: Stand, monkeypatch: pytest.MonkeyPatch, logs: list[str]
-    ) -> None:
+    def test_dry_run_destroys_nothing(self, stand: Stand, monkeypatch: pytest.MonkeyPatch, logs: list[str]) -> None:
         seeded(stand)
         assert run(monkeypatch, "cleanup", "--tag", TAG, "--dry-run") == 0
         assert stand.destroyed == []
         assert len([line for line in logs if line.startswith("would delete")]) == 3
 
-    def test_leftovers_fail_the_run(
-        self, stand: Stand, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_leftovers_fail_the_run(self, stand: Stand, monkeypatch: pytest.MonkeyPatch) -> None:
         seeded(stand)
         stand.sticky = True
         assert run(monkeypatch, "cleanup", "--tag", TAG) == 1
@@ -321,9 +299,7 @@ class TestParser:
         ],
         ids=["bare-cleanup", "stale-hours", "bootstrap"],
     )
-    def test_retired_and_incomplete_commands_are_rejected(
-        self, argv: list[str]
-    ) -> None:
+    def test_retired_and_incomplete_commands_are_rejected(self, argv: list[str]) -> None:
         with pytest.raises(SystemExit) as exit_info:
             cvat_stand.build_parser().parse_args(argv)
         assert exit_info.value.code == 2

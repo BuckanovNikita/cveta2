@@ -45,16 +45,12 @@ def test_yolo_export_uses_port_and_preserves_utf8_label_order() -> None:
         prune_yolo_output=lambda _ctx: None,
         resolved_output_dir=lambda path: path,
     )
-    result = convert_to_yolo(
-        "/missing/data.csv", "/output", files=files, link_mode="copy"
-    )
+    result = convert_to_yolo("/missing/data.csv", "/output", files=files, link_mode="copy")
     assert result == Path("/output")
     assert output[Path("/output/labels/train/кошка.txt")] == (
         "0 0.200000 0.200000 0.200000 0.200000\n1 0.200000 0.200000 0.200000 0.200000\n"
     )
-    assert materialized == [
-        (Path("/input/кошка.jpg"), Path("/output/images/train/кошка.jpg"), "copy")
-    ]
+    assert materialized == [(Path("/input/кошка.jpg"), Path("/output/images/train/кошка.jpg"), "copy")]
     assert "zebra" in output[Path("/output/dataset.yaml")]
 
 
@@ -104,9 +100,7 @@ def test_yolo_dataset_import_does_not_discover_image_cache_config(
     (source / "dataset.yaml").write_text("names: {0: cat}\n", encoding="utf-8")
 
     def unexpected_load() -> ImageCacheConfig:
-        raise AssertionError(
-            "Dataset imports do not use configured prediction search directories"
-        )
+        raise AssertionError("Dataset imports do not use configured prediction search directories")
 
     monkeypatch.setattr(ImageCacheConfig, "load", unexpected_load)
     output = tmp_path / "output.csv"

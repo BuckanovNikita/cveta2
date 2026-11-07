@@ -31,9 +31,7 @@ _SUMMARY_LIMIT = 512
 _ENDPOINT_LIMIT = 1024
 _HEADER_LIMIT = 128
 _BODY_LIMIT = 4096
-_RESOURCE_NAMES = frozenset(
-    {"project_id", "task_id", "job_id", "issue_id", "cloud_storage_id", "org_id"}
-)
+_RESOURCE_NAMES = frozenset({"project_id", "task_id", "job_id", "issue_id", "cloud_storage_id", "org_id"})
 _QUERY_NAMES = _RESOURCE_NAMES | {"page", "page_size"}
 _SECRET_NAMES = frozenset(
     {
@@ -88,15 +86,9 @@ class _Operation:
     resource_ids: tuple[tuple[str, int], ...]
 
 
-_OPERATION: ContextVar[_Operation | None] = ContextVar(
-    "cveta2_cvat_operation", default=None
-)
-_REQUEST_FAILURE: ContextVar[CvatRequestDiagnostics | None] = ContextVar(
-    "cveta2_cvat_request_failure", default=None
-)
-_REQUEST_ACTIVE: ContextVar[bool] = ContextVar(
-    "cveta2_cvat_request_active", default=False
-)
+_OPERATION: ContextVar[_Operation | None] = ContextVar("cveta2_cvat_operation", default=None)
+_REQUEST_FAILURE: ContextVar[CvatRequestDiagnostics | None] = ContextVar("cveta2_cvat_request_failure", default=None)
+_REQUEST_ACTIVE: ContextVar[bool] = ContextVar("cveta2_cvat_request_active", default=False)
 
 
 def operation_context(func: Callable[_P, _R]) -> Callable[_P, _R]:
@@ -107,9 +99,7 @@ def operation_context(func: Callable[_P, _R]) -> Callable[_P, _R]:
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         values = signature.bind(*args, **kwargs).arguments
         ids = tuple(
-            (name, value)
-            for name, value in values.items()
-            if name in _RESOURCE_NAMES and isinstance(value, int)
+            (name, value) for name, value in values.items() if name in _RESOURCE_NAMES and isinstance(value, int)
         )
         token = _OPERATION.set(_Operation(func.__name__, ids))
         try:
@@ -138,20 +128,12 @@ def _safe_endpoint(url: str, fields: object = None) -> str:
     # Keep the network location, never URL credentials or fragments. Query
     # values are restricted to numeric pagination/resource identifiers.
     authority = parts.netloc.rsplit("@", 1)[-1]
-    allowed = [
-        (key, value)
-        for key, value in _query_items(url, fields)
-        if key in _QUERY_NAMES and value.isdecimal()
-    ]
+    allowed = [(key, value) for key, value in _query_items(url, fields) if key in _QUERY_NAMES and value.isdecimal()]
     path = re.sub(r"[\x00-\x20\x7f]", "", parts.path)
-    return urlunsplit((parts.scheme, authority, path, urlencode(allowed), ""))[
-        :_ENDPOINT_LIMIT
-    ]
+    return urlunsplit((parts.scheme, authority, path, urlencode(allowed), ""))[:_ENDPOINT_LIMIT]
 
 
-def _safe_text(
-    value: str, limit: int = _SUMMARY_LIMIT, *, secrets: tuple[str, ...] = ()
-) -> str:
+def _safe_text(value: str, limit: int = _SUMMARY_LIMIT, *, secrets: tuple[str, ...] = ()) -> str:
     value = _URL.sub(lambda match: _safe_endpoint(match.group()), value)
     value = _AUTH.sub(r"\1 [redacted]", value)
     value = _CREDENTIAL.sub(r"\1=[redacted]", value)
@@ -161,17 +143,11 @@ def _safe_text(
     return " ".join(value.split())[:limit]
 
 
-def _response_summary(
-    data: object, content_type: str, secrets: tuple[str, ...] = ()
-) -> str:
+def _response_summary(data: object, content_type: str, secrets: tuple[str, ...] = ()) -> str:
     if not isinstance(data, (str, bytes)):
         return ""
     sample = data[:_BODY_LIMIT]
-    text = (
-        sample.decode("utf-8", errors="replace")
-        if isinstance(sample, bytes)
-        else sample
-    )
+    text = sample.decode("utf-8", errors="replace") if isinstance(sample, bytes) else sample
     if "html" in content_type.lower() or re.search(r"(?i)</?[a-z!][^>]*>", text):
         return "HTML-ответ скрыт"
     if "json" in content_type.lower():
@@ -210,9 +186,7 @@ def _request_secrets(url: str, request: Mapping[str, object]) -> tuple[str, ...]
             payload = None
         if isinstance(payload, dict):
             values.extend(
-                value
-                for key, value in payload.items()
-                if key.lower() in _SECRET_NAMES and isinstance(value, str)
+                value for key, value in payload.items() if key.lower() in _SECRET_NAMES and isinstance(value, str)
             )
     return tuple(sorted({value for value in values if value}, key=len, reverse=True))
 
@@ -231,10 +205,7 @@ def _header_secrets(headers: object) -> list[str]:
             values.append(value)
             # Component fallback also handles malformed cookies rejected by
             # SimpleCookie. These transient values never enter diagnostics.
-            values.extend(
-                component.partition("=")[2].strip().strip('"')
-                for component in value.split(";")
-            )
+            values.extend(component.partition("=")[2].strip().strip('"') for component in value.split(";"))
             cookie = SimpleCookie()
             try:
                 cookie.load(value)
@@ -253,9 +224,7 @@ def _resource_ids(endpoint: str) -> tuple[tuple[str, int], ...]:
         if kind in _PATH_RESOURCES and value.isdecimal():
             ids[_PATH_RESOURCES[kind]] = int(value)
     ids.update(
-        (key, int(value))
-        for key, value in parse_qsl(parts.query)
-        if key in _RESOURCE_NAMES and value.isdecimal()
+        (key, int(value)) for key, value in parse_qsl(parts.query) if key in _RESOURCE_NAMES and value.isdecimal()
     )
     return tuple(sorted(ids.items()))
 
@@ -266,9 +235,7 @@ def _capture(
     request: Mapping[str, object],
     response: urllib3.BaseHTTPResponse | None,
 ) -> CvatRequestDiagnostics:
-    endpoint = _safe_endpoint(
-        url, request.get("fields") if method in {"GET", "HEAD"} else None
-    )
+    endpoint = _safe_endpoint(url, request.get("fields") if method in {"GET", "HEAD"} else None)
     secrets = _request_secrets(url, request)
     status = 0
     request_ids: tuple[tuple[str, str], ...] = ()
@@ -287,9 +254,7 @@ def _capture(
         # Reading .data can consume an unbounded streaming response. SDK REST
         # errors normally preload; otherwise omit the body instead of reading it.
         data = response._body if isinstance(response, urllib3.HTTPResponse) else None  # noqa: SLF001
-        summary = _response_summary(
-            data, response.headers.get("Content-Type", ""), secrets
-        )
+        summary = _response_summary(data, response.headers.get("Content-Type", ""), secrets)
     operation = _OPERATION.get()
     return CvatRequestDiagnostics(
         operation=operation.name if operation else "cvat_request",
@@ -320,8 +285,7 @@ def format_diagnostics(diagnostic: CvatRequestDiagnostics) -> str:
         context += f"; {diagnostic.response_summary}"
     if diagnostic.status_code in {502, 503, 504}:
         return context + (
-            ". Проверьте proxy/ingress и доступность backend; "
-            "источник сбоя по одному статусу не установлен."
+            ". Проверьте proxy/ingress и доступность backend; источник сбоя по одному статусу не установлен."
         )
     return context + ". Проверьте логи backend CVAT по времени и ID запроса."
 
@@ -372,9 +336,7 @@ def install_pool_capture(manager: urllib3.PoolManager) -> None:
         forward = cast("Callable[..., urllib3.BaseHTTPResponse]", original)
 
         @functools.wraps(original)
-        def request(
-            method: str, url: str, *args: object, **kwargs: object
-        ) -> urllib3.BaseHTTPResponse:
+        def request(method: str, url: str, *args: object, **kwargs: object) -> urllib3.BaseHTTPResponse:
             pool = manager.connection_from_url(url)
             supplied = cast("Retry | bool | int | None", kwargs.get("retries"))
             policy = Retry.from_int(supplied, default=pool.retries)

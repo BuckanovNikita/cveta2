@@ -84,18 +84,14 @@ def _validate_splits(df: pd.DataFrame) -> None:
     if not missing_split.empty:
         bad_images = sorted(missing_split["image_name"].unique())
         raise Cveta2Error(
-            f"Ошибка: у {len(bad_images)} изображений "
-            f"не задан split. Примеры: {preview_names(bad_images)}"
+            f"Ошибка: у {len(bad_images)} изображений не задан split. Примеры: {preview_names(bad_images)}"
         )
 
     unsupported = df[~df["split"].isin(["train", "val", "test"])]
     if not unsupported.empty:
         values = sorted(str(value) for value in unsupported["split"].unique())
         names = sorted(str(value) for value in unsupported["image_name"].unique())
-        raise Cveta2Error(
-            f"Ошибка: недопустимый split {values}: {preview_names(names)}. "
-            "Допустимы train, val, test."
-        )
+        raise Cveta2Error(f"Ошибка: недопустимый split {values}: {preview_names(names)}. Допустимы train, val, test.")
 
 
 def _validate_export_rows(df: pd.DataFrame, csv_path: Path) -> None:
@@ -112,9 +108,7 @@ def _validate_export_rows(df: pd.DataFrame, csv_path: Path) -> None:
         }
     missing = required - set(df.columns)
     if missing:
-        raise Cveta2Error(
-            f"Ошибка: в {csv_path} отсутствуют столбцы: {sorted(missing)}"
-        )
+        raise Cveta2Error(f"Ошибка: в {csv_path} отсутствуют столбцы: {sorted(missing)}")
     for _, row in df.iterrows():
         name = row["image_name"]
         if (
@@ -125,24 +119,14 @@ def _validate_export_rows(df: pd.DataFrame, csv_path: Path) -> None:
             or "\\" in name
             or "\x00" in name
         ):
-            raise Cveta2Error(
-                f"Ошибка: некорректное имя изображения в {csv_path}: {name!r}"
-            )
+            raise Cveta2Error(f"Ошибка: некорректное имя изображения в {csv_path}: {name!r}")
         try:
-            dimensions = [
-                float(row[column]) for column in ("image_width", "image_height")
-            ]
+            dimensions = [float(row[column]) for column in ("image_width", "image_height")]
         except (ValueError, TypeError) as exc:
+            raise Cveta2Error(f"Ошибка: некорректный размер {name!r} в {csv_path}") from exc
+        if any(not math.isfinite(value) or value <= 0 or not value.is_integer() for value in dimensions):
             raise Cveta2Error(
-                f"Ошибка: некорректный размер {name!r} в {csv_path}"
-            ) from exc
-        if any(
-            not math.isfinite(value) or value <= 0 or not value.is_integer()
-            for value in dimensions
-        ):
-            raise Cveta2Error(
-                f"Ошибка: некорректный размер {name!r} "
-                f"({dimensions[0]:g}x{dimensions[1]:g}) в {csv_path}"
+                f"Ошибка: некорректный размер {name!r} ({dimensions[0]:g}x{dimensions[1]:g}) в {csv_path}"
             )
         if row["instance_shape"] == "box":
             _validate_export_box(row, csv_path)
@@ -154,17 +138,10 @@ def _validate_export_box(row: pd.Series, csv_path: Path) -> None:
     if not isinstance(row["instance_label"], str) or not row["instance_label"]:
         raise Cveta2Error(f"Ошибка: не задан класс {name!r} в {csv_path}")
     try:
-        coords = [
-            float(row[column])
-            for column in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")
-        ]
+        coords = [float(row[column]) for column in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br")]
     except (ValueError, TypeError) as exc:
         raise Cveta2Error(f"Ошибка: некорректный bbox {name!r} в {csv_path}") from exc
-    if (
-        any(not math.isfinite(value) for value in coords)
-        or coords[2] <= coords[0]
-        or coords[3] <= coords[1]
-    ):
+    if any(not math.isfinite(value) for value in coords) or coords[2] <= coords[0] or coords[3] <= coords[1]:
         raise Cveta2Error(f"Ошибка: некорректный bbox {name!r} в {csv_path}")
 
 
@@ -282,9 +259,7 @@ def _parse_label_text(text: str, path: Path) -> list[list[float]]:
             valid = False
         if not valid:
             skipped += 1
-            logger.warning(
-                f"Пропущена некорректная строка {path}:{line_number}: {line!r}"
-            )
+            logger.warning(f"Пропущена некорректная строка {path}:{line_number}: {line!r}")
             continue
         rows.append(fields)
         if len(parts) > _YOLO_CONF_FIELDS:
@@ -314,8 +289,7 @@ def _normalize_class_names(names: object, source: Path) -> dict[int, str]:
     result: dict[int, str] = {}
     for key, name in entries.items():
         if isinstance(key, bool) or not (
-            isinstance(key, int)
-            or (isinstance(key, str) and key.isascii() and key.isdecimal())
+            isinstance(key, int) or (isinstance(key, str) and key.isascii() and key.isdecimal())
         ):
             raise Cveta2Error(f"Ошибка: некорректный ID класса {key!r} в {source}")
         class_id = int(key)
@@ -326,9 +300,7 @@ def _normalize_class_names(names: object, source: Path) -> dict[int, str]:
             or not name.strip()
             or name in result.values()
         ):
-            raise Cveta2Error(
-                f"Ошибка: некорректный names в {source}: {key!r}: {name!r}"
-            )
+            raise Cveta2Error(f"Ошибка: некорректный names в {source}: {key!r}: {name!r}")
         result[class_id] = name
     return result
 
@@ -393,9 +365,7 @@ def yolo_label_text(group: pd.DataFrame, label_map: dict[str, int], name_s: str)
             img_w,
             img_h,
         )
-        lines.append(
-            f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {yolo.w:.6f} {yolo.h:.6f}"
-        )
+        lines.append(f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {yolo.w:.6f} {yolo.h:.6f}")
     return "\n".join(lines) + "\n"
 
 
@@ -409,9 +379,7 @@ class _YamlDumpOptions(TypedDict):
 _YAML_DUMP: _YamlDumpOptions = {"default_flow_style": False, "allow_unicode": False}
 
 
-def yolo_dataset_text(
-    output_dir: Path, splits: list[str], label_map: dict[str, int]
-) -> str:
+def yolo_dataset_text(output_dir: Path, splits: list[str], label_map: dict[str, int]) -> str:
     """Format ultralytics metadata from a resolved output root and split values."""
     names_dict = {v: k for k, v in label_map.items()}
     yaml_data: dict[str, object] = {"path": str(output_dir)}
@@ -422,16 +390,12 @@ def yolo_dataset_text(
     return yaml.dump(yaml_data, **_YAML_DUMP)
 
 
-def coco_split_data(
-    split_df: pd.DataFrame, label_map: dict[str, int]
-) -> dict[str, list[dict[str, object]]]:
+def coco_split_data(split_df: pd.DataFrame, label_map: dict[str, int]) -> dict[str, list[dict[str, object]]]:
     """Build deterministic COCO image, annotation and category records."""
     images_list: list[dict[str, object]] = []
     image_id_map: dict[str, int] = {}
     first_rows = split_df.groupby("image_name").first()
-    for img_id, image_name in enumerate(
-        sorted(split_df["image_name"].unique()), start=1
-    ):
+    for img_id, image_name in enumerate(sorted(split_df["image_name"].unique()), start=1):
         name_s = str(image_name)
         first_row = first_rows.loc[image_name]
         image_id_map[name_s] = img_id
@@ -451,11 +415,7 @@ def coco_split_data(
         name_s = str(row["image_name"])
         if name_s not in image_id_map:
             continue
-        coco = _pixel_to_coco(
-            PixelBox(
-                row["bbox_x_tl"], row["bbox_y_tl"], row["bbox_x_br"], row["bbox_y_br"]
-            )
-        )
+        coco = _pixel_to_coco(PixelBox(row["bbox_x_tl"], row["bbox_y_tl"], row["bbox_x_br"], row["bbox_y_br"]))
         ann_id += 1
         annotations_list.append(
             {

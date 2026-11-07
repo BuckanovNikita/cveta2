@@ -33,10 +33,7 @@ def configure_ignore(parser: "argparse.ArgumentParser") -> None:
     """Declare the ``ignore`` command arguments."""
     add_project_arg(
         parser,
-        help_text=(
-            "Project name (as used in config). "
-            "If omitted, interactive project selection is shown."
-        ),
+        help_text=("Project name (as used in config). If omitted, interactive project selection is shown."),
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -58,9 +55,7 @@ def configure_ignore(parser: "argparse.ArgumentParser") -> None:
         action="store_true",
         default=False,
         dest="list_only",
-        help=(
-            "List ignored tasks for all projects. Does not require a CVAT connection."
-        ),
+        help=("List ignored tasks for all projects. Does not require a CVAT connection."),
     )
     parser.add_argument(
         "--description",
@@ -117,13 +112,10 @@ def run_ignore(args: "argparse.Namespace") -> None:
             silent = args.silent
             resolved = _resolve_selectors(client, project_id, args.add)
             for task in resolved:
-                added = ignore_cfg.add_task(
-                    project_name, task.id, task.name, description, silent=silent
-                )
+                added = ignore_cfg.add_task(project_name, task.id, task.name, description, silent=silent)
                 if added:
                     logger.info(
-                        f"Задача {task.name!r} (id={task.id}) добавлена "
-                        f"в ignore-список проекта {project_name!r}"
+                        f"Задача {task.name!r} (id={task.id}) добавлена в ignore-список проекта {project_name!r}"
                     )
                 else:
                     logger.warning(
@@ -135,36 +127,23 @@ def run_ignore(args: "argparse.Namespace") -> None:
             return
 
         if args.remove:
-            stored = {
-                entry.id: entry
-                for entry in ignore_cfg.get_ignored_entries(project_name)
-            }
-            stored_ids = {
-                int(selector) for selector in args.remove if selector.isdigit()
-            } & stored.keys()
-            removal_entries: list[IgnoredTask | TaskInfo] = [
-                stored[task_id] for task_id in sorted(stored_ids)
-            ]
+            stored = {entry.id: entry for entry in ignore_cfg.get_ignored_entries(project_name)}
+            stored_ids = {int(selector) for selector in args.remove if selector.isdigit()} & stored.keys()
+            removal_entries: list[IgnoredTask | TaskInfo] = [stored[task_id] for task_id in sorted(stored_ids)]
             remaining = [
-                selector
-                for selector in args.remove
-                if not selector.isdigit() or int(selector) not in stored_ids
+                selector for selector in args.remove if not selector.isdigit() or int(selector) not in stored_ids
             ]
             if remaining:
-                removal_entries.extend(
-                    _resolve_selectors(client, project_id, remaining)
-                )
+                removal_entries.extend(_resolve_selectors(client, project_id, remaining))
             for entry in removal_entries:
                 removed = ignore_cfg.remove_task(project_name, entry.id)
                 if removed:
                     logger.info(
-                        f"Задача {entry.name!r} (id={entry.id}) удалена "
-                        f"из ignore-списка проекта {project_name!r}"
+                        f"Задача {entry.name!r} (id={entry.id}) удалена из ignore-списка проекта {project_name!r}"
                     )
                 else:
                     logger.warning(
-                        f"Задача {entry.name!r} (id={entry.id}) не найдена "
-                        f"в ignore-списке проекта {project_name!r}"
+                        f"Задача {entry.name!r} (id={entry.id}) не найдена в ignore-списке проекта {project_name!r}"
                     )
             ignore_cfg.save()
             return
@@ -293,9 +272,7 @@ def _interactive_add(
         logger.info("Нет доступных задач для добавления.")
         return False
 
-    selected = interactive.pick_tasks(
-        tasks, message="Выберите задачи для добавления в ignore-список:"
-    )
+    selected = interactive.pick_tasks(tasks, message="Выберите задачи для добавления в ignore-список:")
     if not selected:
         return False
 
@@ -314,9 +291,7 @@ def _interactive_add(
     )
 
     for task in selected:
-        ignore_cfg.add_task(
-            project_name, task.id, task.name, description, silent=silent
-        )
+        ignore_cfg.add_task(project_name, task.id, task.name, description, silent=silent)
         logger.info(f"Задача {task.name!r} (id={task.id}) добавлена")
     echo_cli_command(
         "ignore",

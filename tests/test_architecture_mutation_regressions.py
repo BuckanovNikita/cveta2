@@ -23,9 +23,7 @@ def test_sync_root_composition_uses_selected_config_and_preserves_storage(
 ) -> None:
     """The chosen config and project resolve the root before pure application."""
     default_config = tmp_path / "default.yaml"
-    write_split_config_yaml(
-        default_config, project_ids={"chosen": 1}, sync_roots={"chosen": "wrong/prefix"}
-    )
+    write_split_config_yaml(default_config, project_ids={"chosen": 1}, sync_roots={"chosen": "wrong/prefix"})
     monkeypatch.setenv("CVETA2_CONFIG", str(default_config))
     selected_config = tmp_path / "selected.yaml"
     write_split_config_yaml(
@@ -36,9 +34,7 @@ def test_sync_root_composition_uses_selected_config_and_preserves_storage(
             "other": "wrong/project",
         },
     )
-    storage = CloudStorageInfo(
-        id=7, bucket="original-bucket", prefix="old", endpoint_url="https://s3.test"
-    )
+    storage = CloudStorageInfo(id=7, bucket="original-bucket", prefix="old", endpoint_url="https://s3.test")
 
     resolved = apply_sync_root_override("chosen", storage, config_path=selected_config)
 
@@ -54,9 +50,7 @@ def test_sync_root_composition_uses_selected_config_and_preserves_storage(
 
 def test_explicit_sync_root_avoids_configuration_loading() -> None:
     """Explicit roots remain usable when configuration cannot be read."""
-    storage = CloudStorageInfo(
-        id=7, bucket="original-bucket", prefix="old", endpoint_url="https://s3.test"
-    )
+    storage = CloudStorageInfo(id=7, bucket="original-bucket", prefix="old", endpoint_url="https://s3.test")
     with patch(
         "cveta2.composition.workflows.SyncRootsConfig.load",
         side_effect=AssertionError("explicit roots must not load configuration"),
@@ -74,9 +68,7 @@ def test_explicit_sync_root_avoids_configuration_loading() -> None:
 def test_task_context_preserves_identity_for_exit_invalidation() -> None:
     """The selected project name must reach config-backed cache invalidation."""
     client = MagicMock(spec=ApplicationClient)
-    task = TaskInfo(
-        id=5, name="task", project_id=7, status="completed", subset="", updated_date=""
-    )
+    task = TaskInfo(id=5, name="task", project_id=7, status="completed", subset="", updated_date="")
     storage = CloudStorageInfo(id=2, bucket="bucket", prefix="raw", endpoint_url="")
     client.list_project_tasks.return_value = [task]
     client.resolve_task_selectors.return_value = [task]

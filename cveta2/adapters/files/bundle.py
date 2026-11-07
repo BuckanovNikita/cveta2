@@ -71,24 +71,16 @@ def _tables(content: dict[str, bytes]) -> FetchTables:
         frame = read_csv_bytes(content[name], source=name)
         missing = {"task_id", "image_name"} - set(frame.columns)
         if missing:
-            raise UploadError(
-                f"Source {name} lacks required columns: {sorted(missing)}"
-            )
+            raise UploadError(f"Source {name} lacks required columns: {sorted(missing)}")
         tables.append(frame)
     return FetchTables(*tables)
 
 
-def _payload(
-    frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest
-) -> dict[str, bytes]:
+def _payload(frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest) -> dict[str, bytes]:
     return {
         "dataset.csv": frame.to_csv(index=False, lineterminator="\n").encode("utf-8"),
-        "dataset.yaml": yaml.safe_dump(
-            metadata.model_dump(), allow_unicode=True, sort_keys=False
-        ).encode("utf-8"),
-        "tasks.yaml": yaml.safe_dump(
-            tasks.model_dump(), allow_unicode=True, sort_keys=False
-        ).encode("utf-8"),
+        "dataset.yaml": yaml.safe_dump(metadata.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8"),
+        "tasks.yaml": yaml.safe_dump(tasks.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8"),
     }
 
 
@@ -102,9 +94,7 @@ def _regular_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def _read_bound(
-    directory: Path, names: tuple[str, ...], expected: dict[str, str]
-) -> dict[str, bytes]:
+def _read_bound(directory: Path, names: tuple[str, ...], expected: dict[str, str]) -> dict[str, bytes]:
     if set(expected) != set(names):
         raise UploadError("Invalid prepared file inventory; prepare again.")
     content = {name: _regular_bytes(directory / name) for name in names}
@@ -122,9 +112,7 @@ class LocalBundleFiles:
             content = {name: _regular_bytes(directory / name) for name in SOURCE_NAMES}
             return SourceSnapshot(directory.resolve(), content, _tables(content))
         except OSError as error:
-            raise UploadError(
-                f"Cannot read fetch output {directory}: {error}"
-            ) from error
+            raise UploadError(f"Cannot read fetch output {directory}: {error}") from error
 
     def read_metadata(self, path: Path) -> DatasetMetadata:
         """Read strict metadata from the latest finalized parent."""
@@ -138,12 +126,8 @@ class LocalBundleFiles:
         try:
             self._save(directory, draft)
         except OSError as error:
-            raise UploadError(
-                f"Cannot create preparation {directory}: {error}"
-            ) from error
-        return PreparedDataset(
-            directory, draft.ready, draft.validation, draft.metadata, draft.tasks
-        )
+            raise UploadError(f"Cannot create preparation {directory}: {error}") from error
+        return PreparedDataset(directory, draft.ready, draft.validation, draft.metadata, draft.tasks)
 
     @staticmethod
     def _save(directory: Path, draft: BundleDraft) -> None:
@@ -161,16 +145,12 @@ class LocalBundleFiles:
             class_changes=[asdict(change) for change in draft.changes],
             broken_image_rows=len(draft.validation.broken_images),
         )
-        with TemporaryDirectory(
-            prefix=".cveta2-prepare-", dir=directory.parent
-        ) as temporary:
+        with TemporaryDirectory(prefix=".cveta2-prepare-", dir=directory.parent) as temporary:
             staged = Path(temporary)
             (staged / "sources").mkdir()
             for name, content in draft.source.content.items():
                 (staged / "sources" / name).write_bytes(content)
-            draft.validation.broken_images.to_csv(
-                staged / "broken-images.csv", index=False
-            )
+            draft.validation.broken_images.to_csv(staged / "broken-images.csv", index=False)
             (staged / "report.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
@@ -211,47 +191,29 @@ class LocalBundleFiles:
         """Read/hash once, then hold a stable local payload until publication ends."""
         try:
             record_bytes = _regular_bytes(directory / "preparation.json")
-            expected_record_hash = _regular_bytes(
-                directory / "preparation.sha256"
-            ).strip()
-            actual_record_hash = (
-                hashlib.sha256(record_bytes).hexdigest().encode("ascii")
-            )
+            expected_record_hash = _regular_bytes(directory / "preparation.sha256").strip()
+            actual_record_hash = hashlib.sha256(record_bytes).hexdigest().encode("ascii")
             if actual_record_hash != expected_record_hash:
-                raise UploadError(
-                    "Preparation record changed (hash mismatch); prepare again."
-                )
+                raise UploadError("Preparation record changed (hash mismatch); prepare again.")
             record = PreparedRecord.model_validate_json(record_bytes)
             if not record.options.project.strip() or not record.options.dataset_name:
                 raise UploadError("Prepared destination is incomplete; prepare again.")
             if (directory / "sources").is_symlink():
                 raise UploadError("Prepared source directory must not be a symlink.")
-            source = _read_bound(
-                directory / "sources", SOURCE_NAMES, record.source_hashes
-            )
+            source = _read_bound(directory / "sources", SOURCE_NAMES, record.source_hashes)
             payload = _read_bound(directory, PAYLOAD_NAMES, record.payload_hashes)
-            metadata = DatasetMetadata.model_validate(
-                _yaml(payload["dataset.yaml"], "dataset.yaml")
-            )
-            tasks = TaskManifest.model_validate(
-                _yaml(payload["tasks.yaml"], "tasks.yaml")
-            )
+            metadata = DatasetMetadata.model_validate(_yaml(payload["dataset.yaml"], "dataset.yaml"))
+            tasks = TaskManifest.model_validate(_yaml(payload["tasks.yaml"], "tasks.yaml"))
             dataset = read_csv_bytes(payload["dataset.csv"], source="dataset.csv")
             captured = SourceSnapshot(directory.resolve(), source, _tables(source))
             with TemporaryDirectory(prefix="cveta2-publish-") as temporary:
                 staging = Path(temporary)
                 for name, content in payload.items():
                     (staging / name).write_bytes(content)
-                yield StoredBundle(
-                    staging, captured, record, metadata, tasks, dataset, payload
-                )
+                yield StoredBundle(staging, captured, record, metadata, tasks, dataset, payload)
         except (OSError, ValidationError) as error:
-            raise UploadError(
-                f"Cannot read prepared bundle {directory}: {error}"
-            ) from error
+            raise UploadError(f"Cannot read prepared bundle {directory}: {error}") from error
 
-    def payload_matches(
-        self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest
-    ) -> bool:
+    def payload_matches(self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest) -> bool:
         """Require deterministic derivation to equal the bytes actually reviewed."""
         return _payload(frame, bundle.metadata, tasks) == bundle.payload

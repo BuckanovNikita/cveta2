@@ -59,10 +59,7 @@ def test_legacy_completion_fallback_and_conflicting_evidence() -> None:
     )
     assert derive_tasks(tables(legacy), legacy.iloc[[1]]).obsolete == [1]
     unfinished = frame((1, "z", "false"))
-    assert (
-        derive_tasks(tables(legacy, deleted=unfinished), legacy.iloc[[1]]).obsolete
-        == []
-    )
+    assert derive_tasks(tables(legacy, deleted=unfinished), legacy.iloc[[1]]).obsolete == []
 
 
 def test_completion_unknown_disqualifies_task_and_cannot_supersede() -> None:
@@ -78,9 +75,7 @@ def test_strict_task_ids_reject_ambiguous_provenance(invalid: object) -> None:
 
 def test_included_are_sorted_unique_and_must_have_source_provenance() -> None:
     source = tables(frame(("10", "a", "true"), ("2", "b", "true")))
-    assert derive_tasks(
-        source, frame(("10", "a", True), ("2", "b", True), ("10", "a", True))
-    ).included == [
+    assert derive_tasks(source, frame(("10", "a", True), ("2", "b", True), ("10", "a", True))).included == [
         2,
         10,
     ]

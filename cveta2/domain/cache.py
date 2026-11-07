@@ -39,9 +39,7 @@ class CachedTaskEnvelope(BaseModel):
     payload: TaskAnnotations
 
 
-def _validate_envelope(
-    raw: bytes, task: TaskInfo, source: str
-) -> CachedTaskEnvelope | None:
+def _validate_envelope(raw: bytes, task: TaskInfo, source: str) -> CachedTaskEnvelope | None:
     """Parse *raw* and return the envelope when it matches the live *task*.
 
     Every rejection is logged with its reason so cache misses stay
@@ -64,8 +62,7 @@ def _validate_envelope(
         return None
     if envelope.task_id != task.id:
         logger.info(
-            f"{source}: запись задачи {task.id} принадлежит задаче "
-            f"{envelope.task_id} — задача будет загружена заново"
+            f"{source}: запись задачи {task.id} принадлежит задаче {envelope.task_id} — задача будет загружена заново"
         )
         return None
     if envelope.task_updated_date != task.updated_date:

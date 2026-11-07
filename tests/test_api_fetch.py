@@ -55,9 +55,7 @@ class TestImagesDirResolution:
         with pytest.raises(Cveta2Error, match="несовместимы"):
             _images_dir(tmp_path, "proj", None, download=False)
 
-    def test_explicit_dir_wins_and_is_made_absolute(
-        self, tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_explicit_dir_wins_and_is_made_absolute(self, tmp_path: "Path", monkeypatch: pytest.MonkeyPatch) -> None:
         """Only a returned path shows that ``images_dir`` reached ``Path()``.
 
         The pre-existing tests all took the error branch, where the
@@ -77,28 +75,20 @@ class TestImagesDirResolution:
         or nulling either one lands on the final ``raise`` instead.
         """
         cache_dir = tmp_path / "cached-images"
-        config = write_config_yaml(
-            tmp_path / "explicit.yaml", image_cache={"proj": str(cache_dir)}
-        )
+        config = write_config_yaml(tmp_path / "explicit.yaml", image_cache={"proj": str(cache_dir)})
 
         assert _images_dir(None, "proj", config, download=True) == cache_dir
 
     def test_project_without_image_cache_raises(self, tmp_path: "Path") -> None:
-        config = write_config_yaml(
-            tmp_path / "explicit.yaml", image_cache={"proj": str(tmp_path)}
-        )
+        config = write_config_yaml(tmp_path / "explicit.yaml", image_cache={"proj": str(tmp_path)})
 
         with pytest.raises(Cveta2Error, match="image_cache"):
             _images_dir(None, "other", config, download=True)
 
 
 class TestFetchApi:
-    def test_fetch_writes_csvs_and_returns_dataset(
-        self, coco8_fixtures: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
-        fake = build_fake(
-            coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"]
-        )
+    def test_fetch_writes_csvs_and_returns_dataset(self, coco8_fixtures: "LoadedFixtures", tmp_path: "Path") -> None:
+        fake = build_fake(coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"])
         out = tmp_path / "out"
 
         result = cveta2.fetch(
@@ -134,9 +124,7 @@ class TestFetchApi:
             tmp_path / "team.yaml",
             clearml={
                 "enabled": True,
-                "projects": {
-                    fake.project.name: {"clearml_project": "p", "clearml_dataset": "d"}
-                },
+                "projects": {fake.project.name: {"clearml_project": "p", "clearml_dataset": "d"}},
             },
         )
         original = config.read_bytes()
@@ -158,9 +146,7 @@ class TestFetchApi:
         assert config.read_bytes() == original
         assert not (tmp_path / "out").exists()
 
-    def test_raw_and_save_tasks_reach_the_pipeline(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_raw_and_save_tasks_reach_the_pipeline(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         """``raw=`` and ``save_tasks=`` must survive as far as FetchOptions.
 
         ``FetchOptions`` defaults both to False, so a dropped keyword is
@@ -181,9 +167,7 @@ class TestFetchApi:
         assert (out / "raw.csv").exists()
         assert (out / ".tasks" / f"task_{fake.tasks[0].id}.csv").exists()
 
-    def test_fetch_task_writes_csvs_matching_dataframe(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_fetch_task_writes_csvs_matching_dataframe(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         fake = normal_fake
         out = tmp_path / "out"
 
@@ -201,9 +185,7 @@ class TestFetchApi:
         assert list(pd.read_csv(out / "dataset.csv").columns) == list(CSV_COLUMNS)
         assert len(df) == len(pd.read_csv(out / "dataset.csv"))
 
-    def test_fetch_task_infers_project_from_task_id(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_fetch_task_infers_project_from_task_id(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         fake = normal_fake
         out = tmp_path / "out"
 
@@ -228,13 +210,9 @@ class TestFetchApi:
                 connection=fake_connection(normal_fake),
             )
 
-    def test_fetch_task_selects_only_the_named_tasks(
-        self, coco8_fixtures: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_fetch_task_selects_only_the_named_tasks(self, coco8_fixtures: "LoadedFixtures", tmp_path: "Path") -> None:
         """``task_selector`` defaults to None (= every task) in FetchOptions."""
-        fake = build_fake(
-            coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"]
-        )
+        fake = build_fake(coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"])
         wanted = fake.tasks[1]
 
         df = cveta2.fetch_task(
@@ -269,9 +247,7 @@ class TestFetchApi:
         assert list(df.columns) == list(CSV_COLUMNS)
         assert len(df) == 0
 
-    def test_fetch_task_writes_the_requested_output_dir(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_fetch_task_writes_the_requested_output_dir(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         out = tmp_path / "nested" / "out"
 
         cveta2.fetch_task(
@@ -285,9 +261,7 @@ class TestFetchApi:
         assert (out / "dataset.csv").exists()
         assert (out / ".tasks" / f"task_{normal_fake.tasks[0].id}.csv").exists()
 
-    def test_fetch_by_project_name(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_fetch_by_project_name(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         fake = normal_fake
 
         result = cveta2.fetch(
@@ -299,9 +273,7 @@ class TestFetchApi:
 
         assert not result.dataset.empty
 
-    def test_invalid_cache_mode_raises(
-        self, normal_fake: "LoadedFixtures", tmp_path: "Path"
-    ) -> None:
+    def test_invalid_cache_mode_raises(self, normal_fake: "LoadedFixtures", tmp_path: "Path") -> None:
         with pytest.raises(Cveta2Error, match="cache"):
             cveta2.fetch(
                 normal_fake.project.id,
@@ -337,9 +309,7 @@ def _run_entry(
     (``fetch`` partitions them, ``fetch_task`` returns one frame).
     """
     if entry == "fetch":
-        result = cveta2.fetch(
-            fake.project.id, output_dir, connection=connection, **options
-        )
+        result = cveta2.fetch(fake.project.id, output_dir, connection=connection, **options)
         return result.dataset, _fetched_task_ids(result)
     df = cveta2.fetch_task(
         [task.name for task in fake.tasks],
@@ -351,9 +321,7 @@ def _run_entry(
     return df, set(df["task_id"].dropna().astype(int).unique())
 
 
-def _ignore_config(
-    tmp_path: "Path", fake: "LoadedFixtures", ignored: "TaskInfo", *, silent: bool
-) -> "Path":
+def _ignore_config(tmp_path: "Path", fake: "LoadedFixtures", ignored: "TaskInfo", *, silent: bool) -> "Path":
     entry: dict[str, object] = {"id": ignored.id, "name": ignored.name}
     if silent:
         entry["silent"] = True
@@ -380,9 +348,7 @@ class TestFetchEntryPoints:
         done, ongoing = fake.tasks
         connection = fake_connection(fake)
 
-        _df, every = _run_entry(
-            entry, fake, tmp_path / "all", connection, download_images=False
-        )
+        _df, every = _run_entry(entry, fake, tmp_path / "all", connection, download_images=False)
         _df, only_done = _run_entry(
             entry,
             fake,
@@ -420,9 +386,7 @@ class TestFetchEntryPoints:
             config_path=config,
         )
 
-        df, _ids = _run_entry(
-            entry, fake, tmp_path / "out", connection, download_images=False
-        )
+        df, _ids = _run_entry(entry, fake, tmp_path / "out", connection, download_images=False)
 
         assert not df.empty
         assert _s3_prefixes(df) == {"synced"}
@@ -439,9 +403,7 @@ class TestFetchEntryPoints:
         images_dir.mkdir()
         for frame in fake.task_data[fake.tasks[0].id][0].frames:
             (images_dir / frame.name).write_bytes(b"jpeg")
-        config = write_config_yaml(
-            tmp_path / "cache.yaml", image_cache={fake.project.name: str(images_dir)}
-        )
+        config = write_config_yaml(tmp_path / "cache.yaml", image_cache={fake.project.name: str(images_dir)})
         _api, connection = _scoped(fake, config_path=config)
 
         df, _ids = _run_entry(entry, fake, tmp_path / "out", connection)
@@ -453,9 +415,7 @@ class TestFetchEntryPoints:
         self, normal_fake: "LoadedFixtures", tmp_path: "Path", entry: str
     ) -> None:
         with pytest.raises(Cveta2Error, match="image_cache"):
-            _run_entry(
-                entry, normal_fake, tmp_path / "out", fake_connection(normal_fake)
-            )
+            _run_entry(entry, normal_fake, tmp_path / "out", fake_connection(normal_fake))
 
     def test_images_dir_with_download_disabled_raises(
         self, normal_fake: "LoadedFixtures", tmp_path: "Path", entry: str
@@ -486,23 +446,17 @@ class TestFetchEntryPoints:
         resolving the selector, so asking for it fails. ``silent`` has no
         effect other than suppressing the warning.
         """
-        fake = build_fake(
-            coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"]
-        )
+        fake = build_fake(coco8_fixtures, ["normal", "all-empty"], statuses=["completed", "completed"])
         kept, ignored = fake.tasks
         config = _ignore_config(tmp_path, fake, ignored, silent=silent)
         _api, connection = _scoped(fake, config_path=config)
 
         if entry == "fetch":
-            _df, ids = _run_entry(
-                entry, fake, tmp_path / "out", connection, download_images=False
-            )
+            _df, ids = _run_entry(entry, fake, tmp_path / "out", connection, download_images=False)
             assert ids == {kept.id}
         else:
             with pytest.raises(TaskNotFoundError, match=re.escape(ignored.name)):
-                _run_entry(
-                    entry, fake, tmp_path / "out", connection, download_images=False
-                )
+                _run_entry(entry, fake, tmp_path / "out", connection, download_images=False)
 
         warned = [m for m in capture_logs if "ignore-списка" in m]
         assert bool(warned) is not silent
@@ -633,9 +587,7 @@ def _s3_prefixes(df: pd.DataFrame) -> set[str]:
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_fetch_forwards_skip_validation(
-    normal_fake: "LoadedFixtures", tmp_path: "Path", *, enabled: bool
-) -> None:
+def test_fetch_forwards_skip_validation(normal_fake: "LoadedFixtures", tmp_path: "Path", *, enabled: bool) -> None:
     """The public keyword opts into the service's promotion preflight."""
     with patch("cveta2.interfaces.api.fetch.fetch_project") as service:
         cveta2.fetch(

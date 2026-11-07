@@ -19,10 +19,7 @@ SETUP_HINT = (
     "Configure via env vars (CVAT_HOST, CVAT_USERNAME, CVAT_PASSWORD) "
     "or edit the config file directly."
 )
-CACHE_HINT = (
-    "The 'setup-cache' command is fully interactive. "
-    "Edit the config file directly to set image_cache paths."
-)
+CACHE_HINT = "The 'setup-cache' command is fully interactive. Edit the config file directly to set image_cache paths."
 
 
 def _prompt_with_default(
@@ -48,16 +45,12 @@ def _prompt_with_default(
 
 def prompt_host(default: str) -> str:
     """Ask for the CVAT host, defaulting to *default*."""
-    return _prompt_with_default(
-        "Хост CVAT", default, hint=SETUP_HINT, history_key="cvat-host"
-    )
+    return _prompt_with_default("Хост CVAT", default, hint=SETUP_HINT, history_key="cvat-host")
 
 
 def prompt_username(default: str) -> str:
     """Ask for the CVAT username, defaulting to *default*."""
-    return _prompt_with_default(
-        "Имя пользователя", default, hint=SETUP_HINT, history_key="cvat-username"
-    )
+    return _prompt_with_default("Имя пользователя", default, hint=SETUP_HINT, history_key="cvat-username")
 
 
 def prompt_password() -> str:
@@ -143,14 +136,10 @@ def prompt_task_cache_s3(project_name: str, default: str | None) -> str | None:
 
 def confirm_apply_to_all() -> bool:
     """Ask whether to apply the derived cache paths to all projects."""
-    return primitives.confirm(
-        "Применить ко всем проектам?", default=True, hint=CACHE_HINT
-    )
+    return primitives.confirm("Применить ко всем проектам?", default=True, hint=CACHE_HINT)
 
 
 def prompt_project_cache_dir(label: str, default_path: "Path | None") -> "Path | None":
     """Ask for one project's cache dir.  ``None`` keeps the current value."""
     shown = str(default_path) if default_path is not None else "не задан"
-    return primitives.path(
-        f"{label} [{shown}]: ", hint=CACHE_HINT, history_key="project-cache-dir"
-    )
+    return primitives.path(f"{label} [{shown}]: ", hint=CACHE_HINT, history_key="project-cache-dir")

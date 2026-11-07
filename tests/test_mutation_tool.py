@@ -171,15 +171,11 @@ def test_decorated_functions_and_classes_are_not_targets() -> None:
 
 def test_changed_decorator_line_selects_its_function() -> None:
     source = "@staticmethod\ndef f():\n    return 1\n"
-    assert [t.qualname for t in mutation.targets_for("cveta2/m.py", source, {1})] == [
-        "f"
-    ]
+    assert [t.qualname for t in mutation.targets_for("cveta2/m.py", source, {1})] == ["f"]
 
 
 def test_package_init_globs_cover_both_module_spellings() -> None:
-    targets = mutation.targets_for(
-        "cveta2/pkg/__init__.py", "def f():\n    return 1\n", None
-    )
+    targets = mutation.targets_for("cveta2/pkg/__init__.py", "def f():\n    return 1\n", None)
     assert targets[0].names == ("cveta2.pkg.__init__.x_f", "cveta2.pkg.x_f")
 
 
@@ -214,9 +210,7 @@ def test_narrow_scope_refuses_a_checked_in_scope(tmp_path: Path) -> None:
 # -- end to end ------------------------------------------------------------
 
 
-def test_clean_index_runs_nothing(
-    repo: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_clean_index_runs_nothing(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert mutation.main([]) == 0
     assert "nothing to do" in capsys.readouterr().out
     assert _calls(repo) == []
@@ -339,9 +333,7 @@ def test_user_diff_prefix_configuration_cannot_hide_a_change(repo: Path) -> None
 def test_base_uses_the_merge_base_not_the_moving_branch_tip(repo: Path) -> None:
     _git(repo, "branch", "-q", "work")
     _stage(repo, MODULE.replace("x + 1", "x + 9"))
-    _git(
-        repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "main moves"
-    )
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "main moves")
     _git(repo, "checkout", "-q", "work")
     _stage(repo, MODULE.replace("x * 2", "x * 3"))
     # alpha changed only on the other branch; it must not count as changed here.
@@ -369,15 +361,11 @@ def test_no_selected_mutant_is_not_reported_as_all_killed(
     assert "was killed" not in out
 
 
-def test_a_custom_index_file_is_honoured(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_custom_index_file_is_honoured(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A partial or `commit -a` commit hands hooks its own GIT_INDEX_FILE."""
     alternate = repo / ".git" / "alternate-index"
     shutil.copyfile(repo / ".git" / "index", alternate)
-    (repo / "cveta2" / "mod.py").write_text(
-        MODULE.replace("x * 2", "x * 3"), encoding="utf-8"
-    )
+    (repo / "cveta2" / "mod.py").write_text(MODULE.replace("x * 2", "x * 3"), encoding="utf-8")
     monkeypatch.setenv("GIT_INDEX_FILE", str(alternate))
     _git(repo, "add", "cveta2/mod.py")
     assert mutation.changed_lines("HEAD") == {"cveta2/mod.py": {6}}
@@ -447,9 +435,7 @@ def test_the_budget_interrupts_mutmut_and_its_children(
         pytest.fail("mutmut's forked child outlived the budget")
 
 
-def test_child_env_drops_stand_and_git_variables(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_child_env_drops_stand_and_git_variables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Mutmut children must reach neither a shared stand nor the real git index."""
     dropped = {
         "CVAT_INTEGRATION_HOST",

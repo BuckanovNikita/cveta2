@@ -60,9 +60,7 @@ class Store:
     def latest(self, _project: str, _name: str) -> DatasetParent | None:
         return self.parent
 
-    def publish(
-        self, _project: str, _name: str, _parent_id: str | None, directory: Path
-    ) -> Publication:
+    def publish(self, _project: str, _name: str, _parent_id: str | None, directory: Path) -> Publication:
         self.directory = directory
         self.calls += 1
         self.published = {p.name: p.read_bytes() for p in directory.iterdir()}
@@ -138,18 +136,14 @@ def scenario(
     return source, options, services, store, classes
 
 
-def test_preparation_copies_four_sources_and_publishes_exact_payload(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_preparation_copies_four_sources_and_publishes_exact_payload(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     original = {p.name: p.read_bytes() for p in source.iterdir()}
     prepared = tmp_path / "prepared"
     result = prepare_dataset(source, prepared, options, services)
     assert result.ready
     assert store.calls == 0
-    assert {
-        p.name: p.read_bytes() for p in (prepared / "sources").iterdir()
-    } == original
+    assert {p.name: p.read_bytes() for p in (prepared / "sources").iterdir()} == original
     assert (prepared / "preparation.json").is_file()
     assert upload_dataset(prepared, services).dataset_id == "child"
     assert set(store.published) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
@@ -168,9 +162,7 @@ def test_preparation_copies_four_sources_and_publishes_exact_payload(
         "sources/deleted.csv",
     ],
 )
-def test_modified_bound_files_block_before_remote_creation(
-    scenario: Scenario, tmp_path: Path, relative: str
-) -> None:
+def test_modified_bound_files_block_before_remote_creation(scenario: Scenario, tmp_path: Path, relative: str) -> None:
     source, options, services, store, _classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
@@ -205,22 +197,16 @@ def test_missing_retained_image_blocks(scenario: Scenario, tmp_path: Path) -> No
     assert store.calls == 0
 
 
-def test_missing_class_decisions_are_structured_and_prompt_free(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_missing_class_decisions_are_structured_and_prompt_free(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     options = options.model_copy(update={"accept_default_classes": False})
     with pytest.raises(MissingDecisions) as caught:
         prepare_dataset(source, tmp_path / "prepared", options, services)
-    assert any(
-        d.kind == "class_empty" and d.class_id == 7 for d in caught.value.decisions
-    )
+    assert any(d.kind == "class_empty" and d.class_id == 7 for d in caught.value.decisions)
     assert store.calls == 0
 
 
-def test_report_only_does_not_create_uploadable_cleaned_bundle(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_report_only_does_not_create_uploadable_cleaned_bundle(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     path = source / "dataset.csv"
     original = path.read_text()
@@ -247,12 +233,8 @@ def test_existing_destination_is_preserved(scenario: Scenario, tmp_path: Path) -
     assert (directory / "owned.txt").read_text() == "keep"
 
 
-@pytest.mark.parametrize(
-    "filename", ["dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv"]
-)
-def test_header_only_sources_require_evidence_columns(
-    scenario: Scenario, tmp_path: Path, filename: str
-) -> None:
+@pytest.mark.parametrize("filename", ["dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv"])
+def test_header_only_sources_require_evidence_columns(scenario: Scenario, tmp_path: Path, filename: str) -> None:
     source, options, services, store, _classes = scenario
     (source / filename).write_text("unexpected\n")
     with pytest.raises(UploadError, match=r"column|header"):
@@ -260,9 +242,7 @@ def test_header_only_sources_require_evidence_columns(
     assert store.calls == 0
 
 
-def test_invalid_api_configuration_is_a_library_error(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_invalid_api_configuration_is_a_library_error(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     with pytest.raises(UploadError, match=r"API|metadata|URL"):
         prepare_dataset(
@@ -275,9 +255,7 @@ def test_invalid_api_configuration_is_a_library_error(
 
 
 @pytest.mark.parametrize("field", ["project", "parent_id", "clean"])
-def test_record_decision_edits_are_detected(
-    scenario: Scenario, tmp_path: Path, field: str
-) -> None:
+def test_record_decision_edits_are_detected(scenario: Scenario, tmp_path: Path, field: str) -> None:
     source, options, services, store, _classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
@@ -299,16 +277,11 @@ def test_publication_uses_captured_bytes_after_reviewed_files_change(
     source, options, services, store, classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
-    expected = {
-        name: (prepared / name).read_bytes()
-        for name in ("dataset.csv", "dataset.yaml", "tasks.yaml")
-    }
+    expected = {name: (prepared / name).read_bytes() for name in ("dataset.csv", "dataset.yaml", "tasks.yaml")}
 
     def mutate_after_staging(_url: str) -> list[ApiClass]:
         (prepared / "dataset.csv").write_bytes(b"changed after stable capture")
-        (prepared / "sources" / "dataset.csv").write_bytes(
-            b"changed source after capture"
-        )
+        (prepared / "sources" / "dataset.csv").write_bytes(b"changed source after capture")
         return classes.records
 
     monkeypatch.setattr(classes, "fetch", mutate_after_staging)
@@ -326,9 +299,7 @@ def test_private_stage_is_removed_on_publication_failure(
     prepare_dataset(source, prepared, options, services)
     stages: list[Path] = []
 
-    def fail_publish(
-        _project: str, _name: str, _parent: str | None, directory: Path
-    ) -> Publication:
+    def fail_publish(_project: str, _name: str, _parent: str | None, directory: Path) -> Publication:
         stages.append(directory)
         assert directory.is_dir()
         raise UploadError("child creation failed")
@@ -351,11 +322,7 @@ def test_new_parent_during_validation_blocks_final_publication(
     def latest(_project: str, _name: str) -> DatasetParent | None:
         nonlocal checks
         checks += 1
-        return (
-            None
-            if checks == 1
-            else DatasetParent("new", "inspection", "training", "2", None)
-        )
+        return None if checks == 1 else DatasetParent("new", "inspection", "training", "2", None)
 
     monkeypatch.setattr(store, "latest", latest)
     with pytest.raises(UploadError, match="parent changed"):
@@ -364,9 +331,7 @@ def test_new_parent_during_validation_blocks_final_publication(
     assert store.calls == 0
 
 
-def test_unavailable_s3_root_blocks_preparation_and_upload(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_unavailable_s3_root_blocks_preparation_and_upload(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
@@ -382,9 +347,7 @@ def test_unavailable_s3_root_blocks_preparation_and_upload(
     "artifact",
     ["preparation.json", "preparation.sha256", "dataset.csv", "sources/dataset.csv"],
 )
-def test_symlinked_prepared_artifacts_are_rejected(
-    scenario: Scenario, tmp_path: Path, artifact: str
-) -> None:
+def test_symlinked_prepared_artifacts_are_rejected(scenario: Scenario, tmp_path: Path, artifact: str) -> None:
     source, options, services, store, _classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
@@ -397,9 +360,7 @@ def test_symlinked_prepared_artifacts_are_rejected(
     assert store.calls == 0
 
 
-def test_symlinked_source_directory_is_rejected(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_symlinked_source_directory_is_rejected(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
@@ -411,24 +372,18 @@ def test_symlinked_source_directory_is_rejected(
 
 
 @pytest.mark.parametrize("text", ["{malformed", "{}", '{"format_version":2}'])
-def test_malformed_record_blocks_even_with_matching_digest(
-    scenario: Scenario, tmp_path: Path, text: str
-) -> None:
+def test_malformed_record_blocks_even_with_matching_digest(scenario: Scenario, tmp_path: Path, text: str) -> None:
     source, options, services, store, _classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
     (prepared / "preparation.json").write_bytes(text.encode())
-    (prepared / "preparation.sha256").write_text(
-        hashlib.sha256(text.encode()).hexdigest()
-    )
+    (prepared / "preparation.sha256").write_text(hashlib.sha256(text.encode()).hexdigest())
     with pytest.raises(UploadError, match="Cannot read prepared"):
         upload_dataset(prepared, services)
     assert store.calls == 0
 
 
-def test_invalid_file_inventory_blocks_even_with_matching_record_digest(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_invalid_file_inventory_blocks_even_with_matching_record_digest(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     prepared = tmp_path / "prepared"
     prepare_dataset(source, prepared, options, services)
@@ -482,17 +437,13 @@ def test_failed_preparation_never_leaves_uploadable_marker(
     assert store.calls == 0
 
 
-def test_source_cleanup_authorization_is_rechecked(
-    scenario: Scenario, tmp_path: Path
-) -> None:
+def test_source_cleanup_authorization_is_rechecked(scenario: Scenario, tmp_path: Path) -> None:
     source, options, services, store, _classes = scenario
     source_csv = source / "dataset.csv"
     original = source_csv.read_text()
     source_csv.write_text(original + original.splitlines()[1] + "\n")
     prepared = tmp_path / "prepared"
-    prepare_dataset(
-        source, prepared, options.model_copy(update={"clean": True}), services
-    )
+    prepare_dataset(source, prepared, options.model_copy(update={"clean": True}), services)
     # Exercise the semantic authorization check independently from checksum rejection.
     record = json.loads((prepared / "preparation.json").read_bytes())
     record["options"]["clean"] = False

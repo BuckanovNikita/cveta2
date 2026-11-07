@@ -25,9 +25,7 @@ def _polygon_connection(*, deleted: bool, malformed: bool) -> cveta2.Connection:
     shape = make_raw_shape(
         id=73,
         type="polygon",
-        points=[12.0, 30.5, 90.75, 10.25, 40.5, 80.0][:-1]
-        if malformed
-        else [12.0, 30.5, 90.75, 10.25, 40.5, 80.0],
+        points=[12.0, 30.5, 90.75, 10.25, 40.5, 80.0][:-1] if malformed else [12.0, 30.5, 90.75, 10.25, 40.5, 80.0],
         rotation=37.0,
     )
     api = FakeCvatApi(
@@ -44,9 +42,7 @@ def _polygon_connection(*, deleted: bool, malformed: bool) -> cveta2.Connection:
                     RawAnnotations([shape]),
                 )
             },
-            issues={
-                task.id: [RawIssue(9, 0, resolved=False, comments=["Check outline"])]
-            },
+            issues={task.id: [RawIssue(9, 0, resolved=False, comments=["Check outline"])]},
         )
     )
     return cveta2.Connection(client=CvatClient(CvatConfig(), api=api))
@@ -108,9 +104,7 @@ def test_polygon_box_survives_fetch_with_existing_deletion_semantics(
 
 
 @pytest.mark.parametrize("selected", [False, True], ids=["fetch", "fetch-task"])
-def test_rejected_polygon_retains_unannotated_frame(
-    tmp_path: Path, *, selected: bool
-) -> None:
+def test_rejected_polygon_retains_unannotated_frame(tmp_path: Path, *, selected: bool) -> None:
     """Rejecting malformed geometry preserves the frame and its issues."""
     connection = _polygon_connection(deleted=False, malformed=True)
     if selected:

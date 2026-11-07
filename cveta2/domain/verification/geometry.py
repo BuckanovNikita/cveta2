@@ -37,10 +37,7 @@ def _canonical(value: object) -> Hashable:  # noqa: C901, PLR0911, PLR0912
             pd.DataFrame,
             _canonical(value.index),
             _canonical(value.columns),
-            tuple(
-                tuple(_canonical(cell) for cell in row)
-                for row in value.itertuples(index=False, name=None)
-            ),
+            tuple(tuple(_canonical(cell) for cell in row) for row in value.itertuples(index=False, name=None)),
         )
     if isinstance(value, pd.Index):
         return (
@@ -55,9 +52,7 @@ def _canonical(value: object) -> Hashable:  # noqa: C901, PLR0911, PLR0912
     if isinstance(value, dict):
         return (
             dict,
-            frozenset(
-                (_canonical(key), _canonical(cell)) for key, cell in value.items()
-            ),
+            frozenset((_canonical(key), _canonical(cell)) for key, cell in value.items()),
         )
     if isinstance(value, (set, frozenset)):
         return (type(value), frozenset(_canonical(cell) for cell in value))
@@ -80,18 +75,14 @@ def _ious(box: NDArray[np.float64], others: NDArray[np.float64]) -> NDArray[np.f
     scales = np.maximum(box[2:], others[:, 2:])
     box_min, box_max = box[:2] / scales, box[2:] / scales
     other_min, other_max = others[:, :2] / scales, others[:, 2:] / scales
-    intersections = np.maximum(
-        0, np.minimum(box_max, other_max) - np.maximum(box_min, other_min)
-    )
+    intersections = np.maximum(0, np.minimum(box_max, other_max) - np.maximum(box_min, other_min))
     intersection_areas = intersections[:, 0] * intersections[:, 1]
     box_lengths = box_max - box_min
     other_lengths = other_max - other_min
     box_areas = box_lengths[:, 0] * box_lengths[:, 1]
     areas = other_lengths[:, 0] * other_lengths[:, 1]
     unions = box_areas + areas - intersection_areas
-    overlaps: NDArray[np.float64] = np.divide(
-        intersection_areas, unions, out=np.zeros_like(unions), where=unions > 0
-    )
+    overlaps: NDArray[np.float64] = np.divide(intersection_areas, unions, out=np.zeros_like(unions), where=unions > 0)
     return overlaps
 
 
@@ -111,9 +102,7 @@ def _overlap(
     return positions[match], float(overlaps[match])
 
 
-def find_class_conflicts(
-    frame: pd.DataFrame, groups: list[tuple[int, ...]], *, iou_threshold: float
-) -> list[Issue]:
+def find_class_conflicts(frame: pd.DataFrame, groups: list[tuple[int, ...]], *, iou_threshold: float) -> list[Issue]:
     """Report both endpoints of every overlapping cross-class pair per image.
 
     ``frame`` uses original row positions as its index and already-valid labels
@@ -141,9 +130,7 @@ def find_class_conflicts(
             boxed_positions.append(position)
             boxed_labels.append(labels[offset])
         for first, position in enumerate(boxed_positions):
-            overlaps = _ious(
-                group_boxes[first], group_boxes[first + 1 : len(boxed_positions)]
-            )
+            overlaps = _ious(group_boxes[first], group_boxes[first + 1 : len(boxed_positions)])
             for raw_match in np.flatnonzero(overlaps >= iou_threshold):
                 match = int(raw_match)
                 second = first + 1 + match
@@ -152,8 +139,7 @@ def find_class_conflicts(
                 other_position = boxed_positions[second]
                 iou = float(overlaps[match])
                 message = (
-                    f"Overlapping boxes have conflicting classes "
-                    f"{boxed_labels[first]!r} and {boxed_labels[second]!r}."
+                    f"Overlapping boxes have conflicting classes {boxed_labels[first]!r} and {boxed_labels[second]!r}."
                 )
                 for endpoint, related in (
                     (position, other_position),
@@ -185,16 +171,12 @@ def find_duplicates(  # noqa: C901, PLR0912
     column_arrays = None
     columns = list(frame.columns)
     box_offsets = [columns.index(column) for column in BOX_COLUMNS]
-    shape_offset = (
-        columns.index("instance_shape") if "instance_shape" in frame else None
-    )
+    shape_offset = columns.index("instance_shape") if "instance_shape" in frame else None
     for group in groups:
         if len(group) <= 1:
             continue
         if column_arrays is None:
-            column_arrays = [
-                frame[column].to_numpy(copy=False) for column in frame.columns
-            ]
+            column_arrays = [frame[column].to_numpy(copy=False) for column in frame.columns]
         positions = sorted(group)
         offsets = frame.index.get_indexer(pd.Index(positions))
         seen: dict[tuple[Hashable, ...], int] = {}
@@ -203,9 +185,7 @@ def find_duplicates(  # noqa: C901, PLR0912
         for position, raw_offset in zip(positions, offsets, strict=True):
             offset = int(raw_offset)
             try:
-                key: tuple[Hashable, ...] | None = tuple(
-                    _canonical(column[offset]) for column in column_arrays
-                )
+                key: tuple[Hashable, ...] | None = tuple(_canonical(column[offset]) for column in column_arrays)
                 hash(key)
             except (TypeError, ValueError, RecursionError) as error:
                 key = None
@@ -232,11 +212,7 @@ def find_duplicates(  # noqa: C901, PLR0912
                     )
                 )
                 continue
-            shape = (
-                column_arrays[shape_offset][offset]
-                if shape_offset is not None
-                else None
-            )
+            shape = column_arrays[shape_offset][offset] if shape_offset is not None else None
             if isinstance(shape, str) and shape == "deleted":
                 if key is not None:
                     seen[key] = position

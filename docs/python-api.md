@@ -17,9 +17,7 @@ print(len(result.obsolete))  # устаревшие строки тоже дос
 result = cveta2.fetch("my-project", output_dir="out", cache="refresh")
 
 # Принять завершённую разметку в CVAT и выгрузить завершённые задачи
-result = cveta2.fetch(
-    "my-project", output_dir="out", skip_validation=True, completed_only=True
-)
+result = cveta2.fetch("my-project", output_dir="out", skip_validation=True, completed_only=True)
 
 # Выгрузка отдельных задач (по ID или имени) — DataFrame без разбиения
 df = cveta2.fetch_task([456, "Партия 3"], output_dir="out", project="my-project")
@@ -47,9 +45,7 @@ cveta2.merge("old/dataset.csv", "new/dataset.csv", "merged.csv")
 news = cveta2.whats_new("my-project", "out/dataset.csv")
 for task in news.tasks:  # news.cutoff — task_id отсечки (int)
     print(task.id, task.name)
-stats = cveta2.s3_sync(
-    "my-project", "/mnt/data/my-project"
-)  # синхронизация изображений из S3
+stats = cveta2.s3_sync("my-project", "/mnt/data/my-project")  # синхронизация изображений из S3
 labels = cveta2.get_labels("my-project")
 cveta2.update_labels("my-project", add=["cat", "dog"])
 
@@ -124,11 +120,7 @@ with CvatClient() as client:
     # Только конкретные задачи — по ID или имени (список)
     ctx = client.prepare_fetch(123, task_selector=[456, "Партия 3"])
 
-    per_task = [
-        r
-        for task in ctx.tasks
-        if (r := CvatClient.fetch_one_task(client.api, task, ctx)) is not None
-    ]
+    per_task = [r for task in ctx.tasks if (r := CvatClient.fetch_one_task(client.api, task, ctx)) is not None]
     result = TaskAnnotations.merge(per_task)
 
     # result.annotations — список BBoxAnnotation и ImageWithoutAnnotations
@@ -261,18 +253,10 @@ with CvatClient() as client:
     # и все изображения попадут в счётчик ошибок.
     ctx = client.prepare_fetch(project_id)
     result = TaskAnnotations.merge(
-        [
-            r
-            for task in ctx.tasks
-            if (r := CvatClient.fetch_one_task(client.api, task, ctx)) is not None
-        ]
+        [r for task in ctx.tasks if (r := CvatClient.fetch_one_task(client.api, task, ctx)) is not None]
     )
-    stats = client.download_images(
-        result, Path("/mnt/data/my-project"), project_id=project_id
-    )
-    print(
-        f"Загружено: {stats.downloaded}, из кэша: {stats.cached}, ошибок: {stats.failed}"
-    )
+    stats = client.download_images(result, Path("/mnt/data/my-project"), project_id=project_id)
+    print(f"Загружено: {stats.downloaded}, из кэша: {stats.cached}, ошибок: {stats.failed}")
 
     # Синхронизировать все изображения из S3 (без привязки к аннотациям)
     cs_info = client.detect_project_cloud_storage(project_id)
@@ -427,9 +411,7 @@ options = {
 definitions = cveta2.list_datasets(**options)
 resolved = cveta2.show_dataset("combined", **options)
 versions = cveta2.dataset_versions("combined", **options)
-fetched = cveta2.fetch_dataset(
-    "combined", output_dir=Path("fetched"), refresh=False, **options
-)
+fetched = cveta2.fetch_dataset("combined", output_dir=Path("fetched"), refresh=False, **options)
 # Пользователь сам выполняет внешний скрипт и создаёт transformed.csv.
 prepared = cveta2.prepare_managed_dataset(
     "combined",
@@ -439,9 +421,7 @@ prepared = cveta2.prepare_managed_dataset(
     clean=True,
     **options,
 )
-changes = cveta2.compare_datasets(
-    "fetched/dataset.csv", "prepared/dataset.csv", **options
-)
+changes = cveta2.compare_datasets("fetched/dataset.csv", "prepared/dataset.csv", **options)
 # Только после проверки и разрешения на оба внешних действия:
 if prepared.ready:
     feedback = cveta2.report_dataset_errors(Path("prepared"), **options)

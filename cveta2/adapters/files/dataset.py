@@ -62,14 +62,9 @@ def read_dataset_csv(
         raise Cveta2Error(f"Ошибка: не удалось прочитать CSV {path}: {e}") from e
     missing = required_columns - set(df.columns)
     if missing:
-        raise Cveta2Error(
-            f"Ошибка: в {path} отсутствуют обязательные столбцы: "
-            f"{', '.join(sorted(missing))}"
-        )
+        raise Cveta2Error(f"Ошибка: в {path} отсутствуют обязательные столбцы: {', '.join(sorted(missing))}")
     if require_task_id_column and "task_id" not in df.columns:
-        raise Cveta2Error(
-            f"Ошибка: --by-task требует столбец 'task_id' в {path}, но он отсутствует."
-        )
+        raise Cveta2Error(f"Ошибка: --by-task требует столбец 'task_id' в {path}, но он отсутствует.")
     logger.info(f"Загружен {path}: {len(df)} строк")
     return df
 
@@ -100,9 +95,7 @@ def populate_record_paths(
         if cs_info is not None:
             record.s3_image_path = key
         if images_dir is not None:
-            local_rel = _local_name_from_key(
-                key, ignored_prefix or prefix, original=frame_ref
-            )
+            local_rel = _local_name_from_key(key, ignored_prefix or prefix, original=frame_ref)
             if local_rel not in resolved:
                 local = _confined_destination(images_dir, local_rel, original=frame_ref)
                 resolved[local_rel] = str(local.resolve()) if local.exists() else None
@@ -122,15 +115,11 @@ def enrich_dataframe_paths(
     df["s3_image_path"] = df["image_name"].map(
         lambda name: build_s3_key(
             cs_info.prefix,
-            name_to_server_file[name]
-            if name_to_server_file and name in name_to_server_file
-            else name,
+            name_to_server_file[name] if name_to_server_file and name in name_to_server_file else name,
         )
     )
     resolved = {path: str(path.resolve()) for path in set(found_images.values())}
-    df["image_path"] = df["image_name"].map(
-        lambda name: resolved[found_images[name]] if name in found_images else None
-    )
+    df["image_path"] = df["image_name"].map(lambda name: resolved[found_images[name]] if name in found_images else None)
     return df
 
 
@@ -138,9 +127,7 @@ def save_csv(df: pd.DataFrame, path: Path) -> None:
     """Write *df* to *path* and log its ``CSV_LABELS`` name with row counts."""
     path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(path, **CSV_WRITE_OPTIONS)
-    logger.info(
-        f"{CSV_LABELS.get(path.name, path.name)} saved to {path} ({format_counts(df)})"
-    )
+    logger.info(f"{CSV_LABELS.get(path.name, path.name)} saved to {path} ({format_counts(df)})")
 
 
 def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
@@ -152,9 +139,7 @@ def write_raw_csv(result: ProjectAnnotations, output_dir: Path) -> None:
     save_csv(raw_df, output_dir / "raw.csv")
 
 
-def _write_deleted_csv(
-    deleted_images: Sequence[DeletedImage], output_dir: Path
-) -> None:
+def _write_deleted_csv(deleted_images: Sequence[DeletedImage], output_dir: Path) -> None:
     """Write deleted.csv with full CSV columns (empty frame when no rows)."""
     deleted_rows = [img.to_csv_row() for img in deleted_images]
     deleted_df = pd.DataFrame(deleted_rows, columns=list(CSV_COLUMNS))

@@ -26,10 +26,7 @@ def split_project_spec(project: int | str) -> tuple[str | None, int | str]:
     org, _, name = spec.partition("/")
     name = name.strip()
     if not name:
-        raise Cveta2Error(
-            f"Некорректная спецификация проекта {spec!r}: "
-            f"ожидается ORG/PROJECT или /PROJECT."
-        )
+        raise Cveta2Error(f"Некорректная спецификация проекта {spec!r}: ожидается ORG/PROJECT или /PROJECT.")
     return org.strip(), name
 
 
@@ -66,10 +63,7 @@ def _project_display_name(
     try:
         return client.get_project(project_id).name or str(project_id)
     except CvatApiError as e:
-        logger.info(
-            f"Не удалось прочитать проект {project_id} ({e}) — "
-            f"используем id как имя проекта"
-        )
+        logger.info(f"Не удалось прочитать проект {project_id} ({e}) — используем id как имя проекта")
         return str(project_id)
 
 
@@ -127,14 +121,8 @@ def infer_project_from_tasks(
             continue
         task = client.get_task(int(text))
         if task.project_id is None:
-            raise Cveta2Error(
-                f"Задача {task.id} не принадлежит ни одному проекту — "
-                f"укажите проект явно."
-            )
-        logger.info(
-            f"Проект определён по задаче {task.name!r} (id={task.id}): "
-            f"project_id={task.project_id}"
-        )
+            raise Cveta2Error(f"Задача {task.id} не принадлежит ни одному проекту — укажите проект явно.")
+        logger.info(f"Проект определён по задаче {task.name!r} (id={task.id}): project_id={task.project_id}")
         return task.project_id
     return None
 
@@ -187,7 +175,6 @@ def apply_sync_root_override(
         update["bucket"] = bucket
     overridden = cs_info.model_copy(update=update)
     logger.info(
-        f"Проект {project_name!r}: корень синхронизации переопределён на "
-        f"s3://{overridden.bucket}/{overridden.prefix}"
+        f"Проект {project_name!r}: корень синхронизации переопределён на s3://{overridden.bucket}/{overridden.prefix}"
     )
     return overridden

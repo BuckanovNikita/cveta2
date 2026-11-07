@@ -49,9 +49,7 @@ if TYPE_CHECKING:
     from tests.fixtures.fake_cvat_project import LoadedFixtures
     from tests.fixtures.fake_s3 import FakeS3Client
 
-CFG: Final = CvatConfig(
-    host="http://fake-cvat", username="test-user", password="test-password"
-)
+CFG: Final = CvatConfig(host="http://fake-cvat", username="test-user", password="test-password")
 
 
 def build_fake(
@@ -136,9 +134,7 @@ def patch_cli_client(
                     return_value=config,
                 )
             )
-            stack.enter_context(
-                patch("cveta2.interfaces.commands._bootstrap.require_host")
-            )
+            stack.enter_context(patch("cveta2.interfaces.commands._bootstrap.require_host"))
         yield client
 
 
@@ -225,10 +221,7 @@ def write_split_config_yaml(
             "sync_root": sync.get(name),
             "ignored_prefix": fields.pop("ignored_prefix", None),
             "task_cache_s3": fields.pop("task_cache_s3", None),
-            "ignore": [
-                {"id": entry, "name": ""} if isinstance(entry, int) else entry
-                for entry in entries
-            ],
+            "ignore": [{"id": entry, "name": ""} if isinstance(entry, int) else entry for entry in entries],
         }
     shared_path = path.with_name(path.stem + "-projects.yaml")
     write_config_yaml(
@@ -483,9 +476,7 @@ def mock_client_ctx(*, project_id: int = 1) -> MagicMock:
     client.__exit__ = MagicMock(return_value=False)
     client.resolve_project_id.return_value = project_id
     client.get_project.return_value = ProjectInfo(id=project_id, name=str(project_id))
-    client.find_project_by_name.side_effect = lambda name, **_: ProjectInfo(
-        id=project_id, name=name
-    )
+    client.find_project_by_name.side_effect = lambda name, **_: ProjectInfo(id=project_id, name=name)
     return client
 
 

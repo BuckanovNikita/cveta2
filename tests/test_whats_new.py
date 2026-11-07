@@ -127,9 +127,7 @@ class TestComputeCutoff:
         ],
         ids=["completed-only", "no-completed", "numeric", "id-less-completed"],
     )
-    def test_cutoff(
-        self, tmp_path: Path, rows: list[dict[str, object]], expected: int
-    ) -> None:
+    def test_cutoff(self, tmp_path: Path, rows: list[dict[str, object]], expected: int) -> None:
         assert compute_cutoff(pd.DataFrame(rows), tmp_path / "dataset.csv") == expected
 
     @pytest.mark.parametrize(
@@ -137,15 +135,11 @@ class TestComputeCutoff:
         [[_row(None)], [_row("not-an-id"), _row("also-not", completed=False)]],
         ids=["missing", "non-numeric"],
     )
-    def test_unusable_task_ids_raise(
-        self, tmp_path: Path, rows: list[dict[str, object]]
-    ) -> None:
+    def test_unusable_task_ids_raise(self, tmp_path: Path, rows: list[dict[str, object]]) -> None:
         with pytest.raises(Cveta2Error, match="пуст"):
             compute_cutoff(pd.DataFrame(rows), tmp_path / "dataset.csv")
 
-    def test_baseline_reports_the_csv_path_when_ids_are_unusable(
-        self, tmp_path: Path
-    ) -> None:
+    def test_baseline_reports_the_csv_path_when_ids_are_unusable(self, tmp_path: Path) -> None:
         """compute_baseline must forward its own path into the error message.
 
         The path is used nowhere else, so passing None instead is invisible
@@ -166,9 +160,7 @@ class TestComputeCutoff:
         assert baseline.known_task_ids == {1}
         assert baseline.cutoff == 1
 
-    def test_baseline_also_reads_obsolete_and_deleted_but_not_in_progress(
-        self, tmp_path: Path
-    ) -> None:
+    def test_baseline_also_reads_obsolete_and_deleted_but_not_in_progress(self, tmp_path: Path) -> None:
         """A task living only in obsolete.csv or deleted.csv is known, not new.
 
         Reading dataset.csv alone would leave every superseded task absent
@@ -187,9 +179,7 @@ class TestComputeCutoff:
         assert baseline.known_task_ids == {4, 6, 7}
         assert baseline.cutoff == 7
 
-    def test_a_task_in_progress_at_fetch_time_is_reported_once_completed(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_task_in_progress_at_fetch_time_is_reported_once_completed(self, tmp_path: Path) -> None:
         """The baseline and the client together must surface the promised case.
 
         Task 5 sat in ``in_progress.csv`` when the dataset was written and
@@ -201,34 +191,24 @@ class TestComputeCutoff:
         client = _client_with_tasks([make_task(5), make_task(7)])
 
         baseline = compute_baseline(df, tmp_path / "dataset.csv")
-        result = client.list_new_completed_tasks(
-            1, baseline.cutoff, baseline.known_task_ids
-        )
+        result = client.list_new_completed_tasks(1, baseline.cutoff, baseline.known_task_ids)
 
         assert [t.id for t in result] == [5]
 
     @pytest.mark.parametrize("sibling", ["obsolete.csv", "deleted.csv"])
-    def test_known_task_above_dataset_cutoff_is_not_reported(
-        self, tmp_path: Path, sibling: str
-    ) -> None:
+    def test_known_task_above_dataset_cutoff_is_not_reported(self, tmp_path: Path, sibling: str) -> None:
         write_dataset_csv(tmp_path / sibling, [_row(20)])
         baseline = compute_baseline(pd.DataFrame([_row(10)]), tmp_path / "dataset.csv")
-        client = _client_with_tasks(
-            [make_task(5), make_task(10), make_task(20), make_task(30)]
-        )
+        client = _client_with_tasks([make_task(5), make_task(10), make_task(20), make_task(30)])
 
-        result = client.list_new_completed_tasks(
-            1, baseline.cutoff, baseline.known_task_ids
-        )
+        result = client.list_new_completed_tasks(1, baseline.cutoff, baseline.known_task_ids)
 
         assert baseline.cutoff == 10
         assert baseline.known_task_ids == {10, 20}
         assert [task.id for task in result] == [5, 30]
 
     @pytest.mark.parametrize("source", ["dataset.csv", "deleted.csv", "obsolete.csv"])
-    def test_unfinished_rows_remain_eligible_after_completion(
-        self, tmp_path: Path, source: str
-    ) -> None:
+    def test_unfinished_rows_remain_eligible_after_completion(self, tmp_path: Path, source: str) -> None:
         rows = [_row(1)]
         unfinished = _row(2, completed=False)
         if source == "dataset.csv":
@@ -239,29 +219,18 @@ class TestComputeCutoff:
         client = _client_with_tasks([make_task(1), make_task(2)])
 
         assert baseline.known_task_ids == {1}
-        assert [
-            task.id
-            for task in client.list_new_completed_tasks(
-                1, baseline.cutoff, baseline.known_task_ids
-            )
-        ] == [2]
+        assert [task.id for task in client.list_new_completed_tasks(1, baseline.cutoff, baseline.known_task_ids)] == [2]
 
     @pytest.mark.parametrize("legacy", [True, False])
-    def test_unfinished_evidence_overrides_known_sibling_membership(
-        self, tmp_path: Path, *, legacy: bool
-    ) -> None:
-        write_dataset_csv(
-            tmp_path / "obsolete.csv", [{"task_id": 2}] if legacy else [_row(2)]
-        )
+    def test_unfinished_evidence_overrides_known_sibling_membership(self, tmp_path: Path, *, legacy: bool) -> None:
+        write_dataset_csv(tmp_path / "obsolete.csv", [{"task_id": 2}] if legacy else [_row(2)])
         write_dataset_csv(tmp_path / "deleted.csv", [_row(2, completed=False)])
         baseline = compute_baseline(pd.DataFrame([_row(1)]), tmp_path / "dataset.csv")
 
         assert baseline.known_task_ids == {1}
 
     @pytest.mark.parametrize("source", ["dataset.csv", "obsolete.csv"])
-    def test_later_completed_sibling_preserves_earlier_unfinished_evidence(
-        self, tmp_path: Path, source: str
-    ) -> None:
+    def test_later_completed_sibling_preserves_earlier_unfinished_evidence(self, tmp_path: Path, source: str) -> None:
         rows = [_row(1)]
         unfinished = _row(2, completed=False)
         if source == "dataset.csv":
@@ -274,9 +243,7 @@ class TestComputeCutoff:
 
         assert baseline.known_task_ids == {1}
 
-    def test_legacy_id_only_sibling_still_records_completed_task(
-        self, tmp_path: Path
-    ) -> None:
+    def test_legacy_id_only_sibling_still_records_completed_task(self, tmp_path: Path) -> None:
         write_dataset_csv(tmp_path / "deleted.csv", [{"task_id": 20}])
         baseline = compute_baseline(pd.DataFrame([_row(1)]), tmp_path / "dataset.csv")
         assert baseline.known_task_ids == {1, 20}

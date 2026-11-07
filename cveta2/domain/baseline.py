@@ -21,9 +21,7 @@ class WhatsNewBaseline:
     known_task_ids: set[int]
 
 
-def compute_baseline(
-    df: pd.DataFrame, path: Path, siblings: Sequence[pd.DataFrame] = ()
-) -> WhatsNewBaseline:
+def compute_baseline(df: pd.DataFrame, path: Path, siblings: Sequence[pd.DataFrame] = ()) -> WhatsNewBaseline:
     """Build the comparison baseline from a fetched dataset CSV.
 
     ``known_task_ids`` spans completed tasks in *df* and the sibling CSVs
@@ -47,10 +45,7 @@ def compute_cutoff(df: pd.DataFrame, path: Path) -> int:
     """
     all_ids = _task_ids(df)
     if not all_ids:
-        raise Cveta2Error(
-            f"Ошибка: столбец task_id в {path} пуст — "
-            f"невозможно определить задачу отсечки."
-        )
+        raise Cveta2Error(f"Ошибка: столбец task_id в {path} пуст — невозможно определить задачу отсечки.")
     completed_ids = _task_ids(df[df["task_id"].isin(completed_task_ids(df))])
     return max(completed_ids or all_ids)
 

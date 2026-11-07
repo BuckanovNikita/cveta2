@@ -94,9 +94,7 @@ def _ann(task_id: int, frame_id: int, image_name: str) -> Any:
     )
 
 
-def _img_no_ann(
-    task_id: int, frame_id: int, image_name: str
-) -> ImageWithoutAnnotations:
+def _img_no_ann(task_id: int, frame_id: int, image_name: str) -> ImageWithoutAnnotations:
     return ImageWithoutAnnotations(
         image_name=image_name,
         image_width=640,
@@ -119,9 +117,7 @@ def _project(*records: Any) -> ProjectAnnotations:
     ("storage", "expected"),
     [
         pytest.param(
-            _FakeCloudStorage(
-                5, "my-bucket", "prefix=data/images&endpoint_url=http://minio:9000"
-            ),
+            _FakeCloudStorage(5, "my-bucket", "prefix=data/images&endpoint_url=http://minio:9000"),
             (5, "my-bucket", "data/images", "http://minio:9000"),
             id="full",
         ),
@@ -139,9 +135,7 @@ def _project(*records: Any) -> ProjectAnnotations:
         pytest.param(_BareCloudStorage(), (0, "", "", ""), id="missing-attributes"),
     ],
 )
-def test_parse_cloud_storage(
-    storage: object, expected: tuple[int, str, str, str]
-) -> None:
+def test_parse_cloud_storage(storage: object, expected: tuple[int, str, str, str]) -> None:
     info = parse_cloud_storage(storage)
     assert (info.id, info.bucket, info.prefix, info.endpoint_url) == expected
 
@@ -156,9 +150,7 @@ def test_download_creates_a_group_writable_cache_dir(
 
     old_umask = os.umask(0o077)
     try:
-        stats = ImageDownloader(target).download(
-            annotations, project_cloud_storage=_project_cs()
-        )
+        stats = ImageDownloader(target).download(annotations, project_cloud_storage=_project_cs())
     finally:
         os.umask(old_umask)
 
@@ -293,12 +285,8 @@ def test_failed_write_leaves_no_partial_file_and_is_retried_next_run(
     target = tmp_path / "images"
 
     with monkeypatch.context() as patched:
-        patched.setattr(
-            "cveta2.adapters.files.shared.write_shared_bytes", _raise_no_space
-        )
-        failed_run = downloader.download(
-            annotations, project_cloud_storage=_project_cs()
-        )
+        patched.setattr("cveta2.adapters.files.shared.write_shared_bytes", _raise_no_space)
+        failed_run = downloader.download(annotations, project_cloud_storage=_project_cs())
 
     assert failed_run.failed == 1
     assert failed_run.downloaded == 0
@@ -421,9 +409,7 @@ def test_s3_syncer_stats(
         assert bucket is not None
     else:
         bucket, prefix = "test-bucket", "images"
-    cs_info = make_cs_info(
-        bucket=bucket, prefix=prefix, endpoint_url="http://minio:9000"
-    )
+    cs_info = make_cs_info(bucket=bucket, prefix=prefix, endpoint_url="http://minio:9000")
 
     stats = S3Syncer(target).sync(cs_info)
 
@@ -500,9 +486,7 @@ def test_download_key_lookup_prefers_frame_path_over_image_name(
     _patch_boto(monkeypatch, FakeS3Client(s3_data))
 
     target = tmp_path / "images"
-    stats = ImageDownloader(target).download(
-        annotations, project_cloud_storage=_project_cs()
-    )
+    stats = ImageDownloader(target).download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.downloaded == 2
     assert stats.failed == 0
@@ -510,9 +494,7 @@ def test_download_key_lookup_prefers_frame_path_over_image_name(
     assert (target / "2026-02" / "two.jpg").read_bytes() == b"wanted-two"
 
     # Nested frames mirror the S3 layout and are cache hits on a rerun.
-    rerun = ImageDownloader(target).download(
-        annotations, project_cloud_storage=_project_cs()
-    )
+    rerun = ImageDownloader(target).download(annotations, project_cloud_storage=_project_cs())
     assert (rerun.cached, rerun.downloaded) == (2, 0)
 
 
@@ -536,9 +518,7 @@ def test_s3_syncer_scopes_to_bucket_and_reports_failures(
     }
     client = _UnreadableKeysS3Client(s3_data, unreadable={"images/broken.jpg"})
     factory = patch_recording_s3(monkeypatch, "cveta2.adapters.s3.download", client)
-    cs_info = make_cs_info(
-        bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000"
-    )
+    cs_info = make_cs_info(bucket="test-bucket", prefix="images", endpoint_url="http://minio:9000")
 
     target = tmp_path / "sync-dir"
     stats = S3Syncer(target).sync(cs_info)
@@ -562,9 +542,7 @@ def test_s3_syncer_ignored_prefix_keeps_remainder(
         "data/projA/b.jpg": b"data-b",
     }
     _patch_boto(monkeypatch, FakeS3Client(s3_objects, keyed_by_bucket=False))
-    cs_info = make_cs_info(
-        bucket="test-bucket", prefix="data/projA", endpoint_url="http://minio:9000"
-    )
+    cs_info = make_cs_info(bucket="test-bucket", prefix="data/projA", endpoint_url="http://minio:9000")
 
     target = tmp_path / "sync-dir"
     stats = S3Syncer(target, ignored_prefix="data").sync(cs_info)
@@ -577,9 +555,7 @@ def test_s3_syncer_ignored_prefix_keeps_remainder(
 def test_absolute_frame_path_is_made_relative_to_storage_root(tmp_path: Path) -> None:
     downloader = ImageDownloader(tmp_path / "cache")
 
-    destination = downloader._dest_path(
-        "/images/nested/a.jpg", make_cs_info(prefix="images")
-    )
+    destination = downloader._dest_path("/images/nested/a.jpg", make_cs_info(prefix="images"))
 
     assert destination == tmp_path / "cache" / "nested" / "a.jpg"
 
@@ -605,37 +581,26 @@ def test_relative_key_rejects_empty_and_dot_segments(value: str) -> None:
 
 def test_relative_key_and_local_name_preserve_nested_segments() -> None:
     assert _validate_relative_key("a/b.jpg", original="a/b.jpg") == "a/b.jpg"
-    assert (
-        _local_name_from_key("images/a/b.jpg", "images/", original="a/b.jpg")
-        == "a/b.jpg"
-    )
+    assert _local_name_from_key("images/a/b.jpg", "images/", original="a/b.jpg") == "a/b.jpg"
 
 
-def test_storage_name_map_forwards_bucket_and_prefix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_storage_name_map_forwards_bucket_and_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[object, str, str]] = []
     client = FakeS3Client({}, keyed_by_bucket=False)
 
-    def record_listing(
-        received_client: object, bucket: str, prefix: str
-    ) -> list[tuple[str, str]]:
+    def record_listing(received_client: object, bucket: str, prefix: str) -> list[tuple[str, str]]:
         calls.append((received_client, bucket, prefix))
         return [("images/a.jpg", "a.jpg")]
 
     monkeypatch.setattr("cveta2.adapters.s3.download.list_s3_objects", record_listing)
 
-    result = ImageDownloader(tmp_path)._build_project_storage_name_map(
-        client, "bucket", "images"
-    )
+    result = ImageDownloader(tmp_path)._build_project_storage_name_map(client, "bucket", "images")
 
     assert calls == [(client, "bucket", "images")]
     assert result["a.jpg"] == "images/a.jpg"
 
 
-def test_listing_fallback_still_validates_absolute_frame_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_listing_fallback_still_validates_absolute_frame_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     downloader = ImageDownloader(tmp_path)
     storage = make_cs_info(prefix="images")
     listed_prefixes: list[str] = []
@@ -647,9 +612,7 @@ def test_listing_fallback_still_validates_absolute_frame_root(
     monkeypatch.setattr(downloader, "_build_project_storage_name_map", storage_map)
 
     with pytest.raises(Cveta2Error, match="вне"):
-        downloader._resolve_s3_keys(
-            FakeS3Client({}), storage, {"a.jpg": "/outside/a.jpg"}
-        )
+        downloader._resolve_s3_keys(FakeS3Client({}), storage, {"a.jpg": "/outside/a.jpg"})
     assert listed_prefixes == ["images"]
 
 
@@ -667,14 +630,10 @@ def test_frame_path_cannot_escape_through_cache_symlink(tmp_path: Path) -> None:
     (target / "linked").symlink_to(tmp_path)
 
     with pytest.raises(Cveta2Error, match="вне локального кэша"):
-        ImageDownloader(target)._dest_path(
-            "linked/escape.jpg", make_cs_info(prefix="images")
-        )
+        ImageDownloader(target)._dest_path("linked/escape.jpg", make_cs_info(prefix="images"))
 
 
-def test_s3_sync_rejects_traversal_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_s3_sync_rejects_traversal_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_boto(
         monkeypatch,
         FakeS3Client({"images/../../escape.jpg": b"bad"}, keyed_by_bucket=False),
@@ -713,9 +672,7 @@ def test_expected_keys_skip_the_whole_prefix_listing(
     factory = patch_recording_s3(monkeypatch, "cveta2.adapters.s3.download", fake_s3)
 
     target = tmp_path / "images"
-    stats = ImageDownloader(target).download(
-        annotations, project_cloud_storage=_project_cs()
-    )
+    stats = ImageDownloader(target).download(annotations, project_cloud_storage=_project_cs())
 
     assert factory.endpoints == [_project_cs().endpoint_url]
     assert (stats.total, stats.downloaded, stats.cached) == (2, 2, 0)
@@ -757,9 +714,7 @@ def test_a_key_the_frame_name_misses_falls_back_to_the_listing(
     _patch_boto(monkeypatch, fake_s3)
 
     target = tmp_path / "images"
-    stats = ImageDownloader(target).download(
-        annotations, project_cloud_storage=_project_cs()
-    )
+    stats = ImageDownloader(target).download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.downloaded == 2
     assert stats.failed == 0
@@ -854,9 +809,7 @@ def test_nested_cache_hits_need_no_s3_requests(
     fake_s3 = FakeS3Client({"test-bucket/data/project/nested/a.jpg": b"remote"})
     _patch_boto(monkeypatch, fake_s3)
 
-    stats = ImageDownloader(target, ignored_prefix="data").download(
-        annotations, project_cloud_storage=storage
-    )
+    stats = ImageDownloader(target, ignored_prefix="data").download(annotations, project_cloud_storage=storage)
 
     assert stats.cached == stats.total == 1
     assert stats.downloaded == stats.failed == 0
@@ -887,9 +840,7 @@ def test_fallback_cache_hits_accumulate_and_do_not_stop_later_images(
     )
     _patch_boto(monkeypatch, fake_s3)
 
-    stats = ImageDownloader(target).download(
-        annotations, project_cloud_storage=_project_cs()
-    )
+    stats = ImageDownloader(target).download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.total == 5
     assert stats.cached == 3
@@ -936,9 +887,7 @@ def test_download_adds_listing_misses_and_transfer_failures(
     )
 
     target = tmp_path / "images"
-    stats = ImageDownloader(target).download(
-        annotations, project_cloud_storage=_project_cs()
-    )
+    stats = ImageDownloader(target).download(annotations, project_cloud_storage=_project_cs())
 
     assert stats.total == 3
     assert stats.failed == 2

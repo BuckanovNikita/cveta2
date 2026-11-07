@@ -25,9 +25,7 @@ def validate_bundle(frame: Any, metadata: Any, base_dir: Any) -> BundleValidatio
         inspection=inspect_images(
             frame,
             profile="clearml-yolo",
-            options=ValidationOptions(
-                check_images=True, emit_warnings=False, base_dir=base_dir
-            ),
+            options=ValidationOptions(check_images=True, emit_warnings=False, base_dir=base_dir),
         ),
     )
 
@@ -43,9 +41,7 @@ def metadata() -> DatasetMetadata:
     )
 
 
-def row(
-    tmp_path: Path, name: str, split: str = "train", label: str = "cat"
-) -> dict[str, object]:
+def row(tmp_path: Path, name: str, split: str = "train", label: str = "cat") -> dict[str, object]:
     path = tmp_path / name
     Image.new("RGB", (32, 32)).save(path, format="PNG")
     return {
@@ -64,9 +60,7 @@ def row(
 def test_aliases_deduplicate_and_preserve_original_broken_cells(tmp_path: Path) -> None:
     first = row(tmp_path, "train.png", label="kitten")
     second = {**first, "instance_label": "cat", "extra": "second"}
-    frame = pd.DataFrame(
-        [first, second, row(tmp_path, "val.png", "val")], index=[9, 9, -1]
-    )
+    frame = pd.DataFrame([first, second, row(tmp_path, "val.png", "val")], index=[9, 9, -1])
     original = frame.copy(deep=True)
     bundle = validate_bundle(frame, metadata(), tmp_path)
     assert not bundle.blockers
@@ -82,9 +76,7 @@ def test_aliases_deduplicate_and_preserve_original_broken_cells(tmp_path: Path) 
 def test_excluded_classes_quarantine_whole_image(tmp_path: Path, label: str) -> None:
     good = row(tmp_path, "bad.png")
     bad = {**good, "instance_label": label, "bbox_x_tl": "21", "bbox_x_br": "31"}
-    frame = pd.DataFrame(
-        [good, bad, row(tmp_path, "train.png"), row(tmp_path, "val.png", "val")]
-    )
+    frame = pd.DataFrame([good, bad, row(tmp_path, "train.png"), row(tmp_path, "val.png", "val")])
     result = validate_bundle(frame, metadata(), tmp_path)
     assert result.result.broken_row_positions == (0, 1)
     assert len(result.broken_images) == 2
@@ -93,9 +85,7 @@ def test_excluded_classes_quarantine_whole_image(tmp_path: Path, label: str) -> 
 
 def test_aliases_canonicalized_before_cross_class_conflicts(tmp_path: Path) -> None:
     first = row(tmp_path, "conflict.png", label="kitten")
-    frame = pd.DataFrame(
-        [first, {**first, "instance_label": "dog"}, row(tmp_path, "val.png", "val")]
-    )
+    frame = pd.DataFrame([first, {**first, "instance_label": "dog"}, row(tmp_path, "val.png", "val")])
     result = validate_bundle(frame, metadata(), tmp_path)
     assert result.result.broken_row_positions == (0, 1)
     assert result.blockers
@@ -136,10 +126,7 @@ def test_invalid_split_blocks_even_with_trainable_remainder(tmp_path: Path) -> N
             row(tmp_path, "c.png", "val"),
         ]
     )
-    assert any(
-        "split" in reason
-        for reason in validate_bundle(frame, metadata(), tmp_path).blockers
-    )
+    assert any("split" in reason for reason in validate_bundle(frame, metadata(), tmp_path).blockers)
 
 
 @pytest.mark.parametrize(
@@ -159,9 +146,7 @@ def test_training_media_quarantine(tmp_path: Path, kind: str, code: str) -> None
         Image.new("RGB", (9, 32)).save(path)
     else:
         Image.new("RGB", (32, 32)).save(path, format="GIF")
-    frame = pd.DataFrame(
-        [bad, row(tmp_path, "train.png"), row(tmp_path, "val.png", "val")]
-    )
+    frame = pd.DataFrame([bad, row(tmp_path, "train.png"), row(tmp_path, "val.png", "val")])
     bundle = validate_bundle(frame, metadata(), tmp_path)
     assert bundle.result.broken_row_positions == (0,)
     assert code in {issue.code for issue in bundle.result.issues}
@@ -180,9 +165,7 @@ def test_clipping_is_only_in_clean_and_broken_evidence_is_original(
     first = row(tmp_path, "train.png", label="kitten")
     first["bbox_x_tl"] = "-1"
     repeated = {**first, "extra": "different"}
-    frame = pd.DataFrame(
-        [first, repeated, row(tmp_path, "val.png", "val")], index=[4, 4, 4]
-    )
+    frame = pd.DataFrame([first, repeated, row(tmp_path, "val.png", "val")], index=[4, 4, 4])
     bundle = validate_bundle(frame, metadata(), tmp_path)
     assert bundle.result.clean.iloc[0]["bbox_x_tl"] == "0"
     assert bundle.result.clean.iloc[0]["instance_label"] == "cat"
@@ -213,10 +196,7 @@ def test_minimum_side_and_extension_quarantine_all_duplicate_rows(
 
 def test_empty_input_and_missing_val_block(tmp_path: Path) -> None:
     frame = pd.DataFrame([row(tmp_path, "train.png")])
-    assert any(
-        "val" in blocker
-        for blocker in validate_bundle(frame, metadata(), tmp_path).blockers
-    )
+    assert any("val" in blocker for blocker in validate_bundle(frame, metadata(), tmp_path).blockers)
     assert validate_bundle(frame.iloc[:0], metadata(), tmp_path).blockers
 
 
@@ -224,8 +204,6 @@ def test_explicit_negative_does_not_require_an_empty_class(tmp_path: Path) -> No
     background = row(tmp_path, "val.png", "val", "")
     for column in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
         background[column] = ""
-    bundle = validate_bundle(
-        pd.DataFrame([row(tmp_path, "train.png"), background]), metadata(), tmp_path
-    )
+    bundle = validate_bundle(pd.DataFrame([row(tmp_path, "train.png"), background]), metadata(), tmp_path)
     assert not bundle.blockers
     assert bundle.result.broken.empty

@@ -43,9 +43,7 @@ class DatasetStore(Protocol):
         """Return latest finalized nonarchived exact parent; errors are not absence."""
         ...
 
-    def publish(
-        self, project: str, name: str, parent_id: str | None, directory: Path
-    ) -> Publication:
+    def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
         """Publish only payload files, reporting known child IDs on failure."""
         ...
 
@@ -93,9 +91,7 @@ class BundleFiles(Protocol):
         """Verify hashes and stage stable bytes; clean temporary files on exit."""
         ...
 
-    def payload_matches(
-        self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest
-    ) -> bool:
+    def payload_matches(self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest) -> bool:
         """Compare rederived publication bytes with the reviewed snapshot."""
         ...
 

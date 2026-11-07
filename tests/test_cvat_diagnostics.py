@@ -58,9 +58,7 @@ def _server(route: Route) -> Iterator[tuple[str, list[tuple[str, str]]]]:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(
-        target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
-    )
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_port}", calls
@@ -129,9 +127,7 @@ def test_public_exception_constructor_and_diagnostics_identity() -> None:
 def test_failure_inside_pagination_names_the_failed_page() -> None:
     def route(_method: str, path: str) -> Reply:
         if parse_qs(urlsplit(path).query).get("page") == ["1"]:
-            return _json_reply(
-                200, {"results": [], "next": "page-2", "previous": None, "count": 1}
-            )
+            return _json_reply(200, {"results": [], "next": "page-2", "previous": None, "count": 1})
         return _json_reply(500, {"detail": "page failed"}, "page-two")
 
     with (
@@ -203,9 +199,7 @@ def test_retry_logs_distinguish_cveta2_attempts_and_wait(
     ):
         SdkCvatApiAdapter(client).get_task_annotations(42)
     assert len(calls) == 2
-    retry_messages = [
-        message for message in capture_logs if "попытка cveta2" in message
-    ]
+    retry_messages = [message for message in capture_logs if "попытка cveta2" in message]
     assert len(retry_messages) == 1
     assert "1/2" in retry_messages[0]
     assert "через 0.00 с" in retry_messages[0]
@@ -215,9 +209,7 @@ def test_retry_logs_distinguish_cveta2_attempts_and_wait(
 
 @pytest.mark.parametrize("strict", [False, True])
 @pytest.mark.parametrize("status", [500, 502, 503, 504, 429])
-def test_controlled_task_failure_preserves_default_strict_and_429_policy(
-    *, strict: bool, status: int
-) -> None:
+def test_controlled_task_failure_preserves_default_strict_and_429_policy(*, strict: bool, status: int) -> None:
     with (
         _server(lambda _method, _path: _json_reply(status, {"detail": "busy"})) as (
             host,
@@ -225,9 +217,7 @@ def test_controlled_task_failure_preserves_default_strict_and_429_policy(
         ),
         Client(host, check_server_version=False) as client,
     ):
-        client.api_client.rest_client.pool_manager.connection_from_url(
-            host
-        ).retries = Retry(total=0)
+        client.api_client.rest_client.pool_manager.connection_from_url(host).retries = Retry(total=0)
         adapter = SdkCvatApiAdapter(client)
         task = make_task(7, name="sample", status="completed")
         context = FetchContext([task], {}, {}, raise_on_failure=strict)
@@ -252,9 +242,7 @@ def test_redaction_bounds_response_and_allowlists_request_metadata() -> None:
 
     def route(_method: str, _path: str) -> Reply:
         status, headers, content = _json_reply(500, body)
-        headers.update(
-            {"Set-Cookie": "session=cookie-secret", "X-Private": "private-secret"}
-        )
+        headers.update({"Set-Cookie": "session=cookie-secret", "X-Private": "private-secret"})
         return status, headers, content
 
     with (
@@ -266,8 +254,7 @@ def test_redaction_bounds_response_and_allowlists_request_metadata() -> None:
         @cvat_read
         def fetch(task_id: int) -> None:
             adapter.client.api_client.rest_client.GET(
-                host
-                + f"/api/tasks/7/annotations/?token=url-secret&page=2&task_id={task_id}"
+                host + f"/api/tasks/7/annotations/?token=url-secret&page=2&task_id={task_id}"
                 "&password=query-secret#fragment-secret",
                 headers={
                     "Authorization": "Bearer request-secret",
@@ -360,9 +347,7 @@ def test_concurrent_calls_keep_resources_independent_and_clear_stale_context() -
             assert diagnostic.request_ids == (("X-Request-Id", f"request-{task_id}"),)
 
     fake = MagicMock()
-    fake.api_client.tasks_api.retrieve_annotations.side_effect = ApiException(
-        status=404
-    )
+    fake.api_client.tasks_api.retrieve_annotations.side_effect = ApiException(status=404)
     with pytest.raises(CvatApiError) as caught:
         SdkCvatApiAdapter(fake).get_task_annotations(99)
     assert caught.value.diagnostics is None
@@ -424,17 +409,12 @@ def test_warm_injected_pool_keeps_policy_and_connection_configuration() -> None:
 def test_html_fragments_are_omitted_even_without_html_content_type(
     content_type: str,
 ) -> None:
-    assert (
-        _response_summary(b"<h1>gateway</h1><pre>secret</pre>", content_type)
-        == "HTML-ответ скрыт"
-    )
+    assert _response_summary(b"<h1>gateway</h1><pre>secret</pre>", content_type) == "HTML-ответ скрыт"
 
 
 def test_url_userinfo_and_nonidentifier_queries_are_removed() -> None:
     assert (
-        _safe_endpoint(
-            "https://user:password@example.test/api/tasks/7?token=secret&page=2&task_id=7#secret"
-        )
+        _safe_endpoint("https://user:password@example.test/api/tasks/7?token=secret&page=2&task_id=7#secret")
         == "https://example.test/api/tasks/7?page=2&task_id=7"
     )
 
@@ -589,9 +569,7 @@ def test_echoed_cookie_header_and_query_secrets_are_redacted(
     headers: dict[str, str], query: list[tuple[str, str]], url_query: str, secret: str
 ) -> None:
     def route(_method: str, _path: str) -> Reply:
-        status, response_headers, body = _json_reply(
-            500, {"detail": f"Refused cookie {secret}"}
-        )
+        status, response_headers, body = _json_reply(500, {"detail": f"Refused cookie {secret}"})
         response_headers["X-Correlation-Id"] = secret
         return status, response_headers, body
 
@@ -603,9 +581,7 @@ def test_echoed_cookie_header_and_query_secrets_are_redacted(
 
         @cvat_read
         def fetch() -> None:
-            client.api_client.rest_client.GET(
-                host + "/api/tasks/7" + url_query, query_params=query, headers=headers
-            )
+            client.api_client.rest_client.GET(host + "/api/tasks/7" + url_query, query_params=query, headers=headers)
 
         with pytest.raises(CvatApiError) as caught:
             fetch()

@@ -31,8 +31,7 @@ def configure_s3_sync(parser: "argparse.ArgumentParser") -> None:
     add_project_arg(
         parser,
         help_text=(
-            "Sync only this project (name from image_cache config). "
-            "If omitted, syncs every configured project."
+            "Sync only this project (name from image_cache config). If omitted, syncs every configured project."
         ),
     )
     parser.add_argument(
@@ -80,9 +79,7 @@ def _resolve_sync_dirs(project_filter: str | None) -> "dict[str, SyncTarget]":
 def run_s3_sync(args: "argparse.Namespace") -> None:
     """Run the ``s3-sync`` command."""
     if args.root and not args.project:
-        raise Cveta2Error(
-            "Ошибка: --root требует явного указания проекта через --project."
-        )
+        raise Cveta2Error("Ошибка: --root требует явного указания проекта через --project.")
 
     project_filter = args.project.strip() if args.project else None
     if project_filter:
@@ -98,9 +95,7 @@ def run_s3_sync(args: "argparse.Namespace") -> None:
                     f"Добавьте image_cache.{project_name} или cache.images_root "
                     f"в конфигурацию (cveta2 setup-cache)."
                 )
-            _sync_project(
-                client, project_id, project_name, cs_info, targets[project_name]
-            )
+            _sync_project(client, project_id, project_name, cs_info, targets[project_name])
         return
 
     projects_to_sync = _resolve_sync_dirs(None)
@@ -140,9 +135,7 @@ def _sync_project(
 ) -> bool:
     """Sync a resolved project; return False when it has no cloud storage."""
     if cs_info is None:
-        logger.warning(
-            f"Проект {project_name!r}: cloud storage не найден — пропускаем."
-        )
+        logger.warning(f"Проект {project_name!r}: cloud storage не найден — пропускаем.")
         return False
     stats = client.sync_project_images(
         project_id,

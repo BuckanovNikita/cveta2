@@ -76,7 +76,6 @@ def _confined_destination(target_dir: Path, local_name: str, *, original: str) -
     destination = target_dir / local_name
     if not destination.resolve().is_relative_to(target_dir.resolve()):
         raise Cveta2Error(
-            f"Небезопасный путь изображения {original!r}: "
-            f"назначение находится вне локального кэша {target_dir}"
+            f"Небезопасный путь изображения {original!r}: назначение находится вне локального кэша {target_dir}"
         )
     return destination

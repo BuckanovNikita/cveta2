@@ -19,9 +19,7 @@ def is_missing(value: object) -> bool:
 
 def number(value: object) -> float | None:
     """Parse a finite real value without coercing or replacing the source cell."""
-    if isinstance(value, (bool, np.bool_)) or not isinstance(
-        value, (str, Real, Decimal)
-    ):
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (str, Real, Decimal)):
         return None
     try:
         parsed = float(value)

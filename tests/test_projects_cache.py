@@ -18,9 +18,7 @@ if TYPE_CHECKING:
 
 
 def _org(slug: str, *projects: ProjectInfo) -> OrgProjects:
-    return OrgProjects(
-        slug=slug, name=slug or "Личное пространство", projects=list(projects)
-    )
+    return OrgProjects(slug=slug, name=slug or "Личное пространство", projects=list(projects))
 
 
 def test_missing_file_returns_empty_list(tmp_path: Path) -> None:
@@ -28,18 +26,14 @@ def test_missing_file_returns_empty_list(tmp_path: Path) -> None:
     assert load_projects_cache(tmp_path / "nonexistent.yaml") == []
 
 
-def test_invalid_yaml_returns_empty_list(
-    tmp_path: Path, capture_logs: list[str]
-) -> None:
+def test_invalid_yaml_returns_empty_list(tmp_path: Path, capture_logs: list[str]) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text(": : :", encoding="utf-8")
     assert load_orgs_cache(bad) == []
     assert any("Failed to load" in m for m in capture_logs)
 
 
-def test_undecodable_bytes_return_empty_list(
-    tmp_path: Path, capture_logs: list[str]
-) -> None:
+def test_undecodable_bytes_return_empty_list(tmp_path: Path, capture_logs: list[str]) -> None:
     """A cache file that is not valid UTF-8 must degrade, not raise.
 
     PyYAML owns the decoding (the file is handed to ``safe_load`` as bytes), so
@@ -69,9 +63,7 @@ def test_legacy_flat_format_is_ignored(tmp_path: Path) -> None:
     assert load_projects_cache(path) == []
 
 
-def test_skips_invalid_org_entry_with_warning(
-    tmp_path: Path, capture_logs: list[str]
-) -> None:
+def test_skips_invalid_org_entry_with_warning(tmp_path: Path, capture_logs: list[str]) -> None:
     path = tmp_path / "bad_entry.yaml"
     path.write_text(
         "organizations:\n"

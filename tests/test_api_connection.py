@@ -49,9 +49,7 @@ class TestOpenConnection:
         ):
             pytest.fail("must not yield")
 
-    def test_explicit_settings_override_config(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_explicit_settings_override_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "cveta2.interfaces.api.connection.CvatConfig.load",
             lambda *_a, **_k: cveta2.CvatConfig(host="http://from-config"),
@@ -70,22 +68,16 @@ class TestOpenConnection:
                 return None
 
         monkeypatch.setattr("cveta2.interfaces.api.connection.CvatClient", _FakeClient)
-        connection = cveta2.Connection(
-            host="http://explicit", username="user", password="pass"
-        )
+        connection = cveta2.Connection(host="http://explicit", username="user", password="pass")
         with _open(connection):
             pass
         assert captured["host"] == "http://explicit"
         assert captured["user"] == "user"
 
-    def test_empty_organization_explicitly_selects_personal_workspace(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_organization_explicitly_selects_personal_workspace(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             "cveta2.interfaces.api.connection.CvatConfig.load",
-            lambda *_a, **_k: cveta2.CvatConfig(
-                host="http://from-config", organization="team"
-            ),
+            lambda *_a, **_k: cveta2.CvatConfig(host="http://from-config", organization="team"),
         )
         captured: dict[str, str | None] = {}
 

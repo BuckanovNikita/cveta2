@@ -52,15 +52,9 @@ def upload(  # noqa: PLR0913
     labels instead of creating a second task, reading back from CVAT what
     the interrupted run had already managed to store.
     """
-    df = (
-        dataset
-        if isinstance(dataset, pd.DataFrame)
-        else read_dataset_csv(Path(dataset), UPLOAD_REQUIRED_COLUMNS)
-    )
+    df = dataset if isinstance(dataset, pd.DataFrame) else read_dataset_csv(Path(dataset), UPLOAD_REQUIRED_COLUMNS)
     df_normal, deleted_names = split_deleted_rows(df)
-    exclude_names = read_exclude_names(
-        str(exclude_in_progress) if exclude_in_progress else None
-    )
+    exclude_names = read_exclude_names(str(exclude_in_progress) if exclude_in_progress else None)
     if labels is None:
         labels = sorted(df_normal["instance_label"].dropna().unique())
         include_unannotated = True
@@ -76,9 +70,7 @@ def upload(  # noqa: PLR0913
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
         options = UploadOptions(
-            search_dirs=build_search_dirs(
-                image_dirs, project_name, config_path=config_path
-            ),
+            search_dirs=build_search_dirs(image_dirs, project_name, config_path=config_path),
             segment_size=upload_cfg.images_per_job,
             image_quality=upload_cfg.image_quality,
             mark_all_deleted=mark_all_deleted,

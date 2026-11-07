@@ -41,9 +41,7 @@ def _factory() -> _Factory:
         # Keep the optional SDK lazy and opaque at its outgoing boundary.
         return cast("_Factory", import_module("clearml").Dataset)
     except ImportError as error:
-        raise ManagedError(
-            "Install cveta2[clearml] to read published dataset evidence"
-        ) from error
+        raise ManagedError("Install cveta2[clearml] to read published dataset evidence") from error
 
 
 def _check_yaml(node: Node, active: set[int]) -> None:
@@ -71,9 +69,7 @@ class ClearMLSources:
 
     @staticmethod
     def _dataset(dataset_id: str) -> _Dataset:
-        dataset = _factory().get(
-            dataset_id=dataset_id, only_completed=True, auto_create=False
-        )
+        dataset = _factory().get(dataset_id=dataset_id, only_completed=True, auto_create=False)
         if dataset.id != dataset_id or not dataset.is_final():
             raise ManagedError("ClearML returned a different or unfinished dataset")
         return dataset
@@ -82,11 +78,7 @@ class ClearMLSources:
     def _read_files(dataset: _Dataset, names: tuple[str, ...]) -> dict[str, bytes]:
         if not set(names).issubset(dataset.list_files()):
             raise ManagedError("Published dataset lacks required payload files")
-        directory = Path(
-            dataset.get_local_copy(
-                files=list(names), use_soft_links=False, raise_on_error=True
-            )
-        )
+        directory = Path(dataset.get_local_copy(files=list(names), use_soft_links=False, raise_on_error=True))
         content = {}
         for name in names:
             path = directory / name
@@ -97,9 +89,7 @@ class ClearMLSources:
 
     def read_files(self, dataset_id: str, names: tuple[str, ...]) -> dict[str, bytes]:
         """Require exact dataset identity and a complete requested inventory."""
-        if not names or any(
-            name not in {"dataset.csv", "dataset.yaml", "tasks.yaml"} for name in names
-        ):
+        if not names or any(name not in {"dataset.csv", "dataset.yaml", "tasks.yaml"} for name in names):
             raise ManagedError("Only the three public payload files can be retrieved")
         with _sdk_errors("Cannot read published managed dataset"):
             return self._read_files(self._dataset(dataset_id), names)
@@ -122,6 +112,4 @@ class ClearMLSources:
                 return None
             return ManagedSnapshot.model_validate(parsed["managed"])
         except (yaml.YAMLError, ValidationError) as error:
-            raise ManagedError(
-                "Invalid managed source snapshot in published tasks.yaml"
-            ) from error
+            raise ManagedError("Invalid managed source snapshot in published tasks.yaml") from error

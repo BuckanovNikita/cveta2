@@ -13,14 +13,9 @@ from cveta2.domain.models import LabelInfo
 
 def _client_with_labels(names: set[str], *, project_id: int = 1) -> MagicMock:
     """Answer ``get_project_labels`` with *names* for *project_id* only."""
-    labels = [
-        LabelInfo(id=i, name=name, attributes=[])
-        for i, name in enumerate(sorted(names))
-    ]
+    labels = [LabelInfo(id=i, name=name, attributes=[]) for i, name in enumerate(sorted(names))]
     client = MagicMock()
-    client.get_project_labels.side_effect = lambda requested: (
-        labels if requested == project_id else []
-    )
+    client.get_project_labels.side_effect = lambda requested: labels if requested == project_id else []
     return client
 
 
@@ -45,10 +40,7 @@ def test_mismatch_error_carries_and_renders_every_diagnostic() -> None:
     assert exc_info.value.unknown_labels == ["cat", "dog"]
     assert exc_info.value.available_labels == ["car", "person"]
     message = str(exc_info.value)
-    assert all(
-        fragment in message
-        for fragment in ("cat", "dog", "test_project", "car", "person")
-    )
+    assert all(fragment in message for fragment in ("cat", "dog", "test_project", "car", "person"))
 
 
 def test_empty_real_labels_no_error() -> None:

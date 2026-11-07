@@ -47,25 +47,14 @@ def _parse_snapshot(content: bytes) -> ManagedSnapshot:
 def _tables(source: SourceSnapshot) -> FetchTables:
     if set(source.tables) != set(_TABLES):
         raise ManagedError(f"Incomplete four-table snapshot for source: {source.name}")
-    frames = [
-        read_csv_bytes(
-            source.tables[name].encode("utf-8"), source=f"{source.name}/{name}"
-        )
-        for name in _TABLES
-    ]
+    frames = [read_csv_bytes(source.tables[name].encode("utf-8"), source=f"{source.name}/{name}") for name in _TABLES]
     return FetchTables(*frames)
 
 
 def _integer(value: object) -> int | None:
     try:
         number = Decimal(str(value))
-        return (
-            int(number)
-            if number.is_finite()
-            and number >= 0
-            and number == number.to_integral_value()
-            else None
-        )
+        return int(number) if number.is_finite() and number >= 0 and number == number.to_integral_value() else None
     except InvalidOperation:
         return None
 
@@ -77,18 +66,12 @@ def _origins(snapshot: ManagedSnapshot) -> frozenset[tuple[str, int, int, int]]:
             continue
         for key, task in source.tasks.items():
             if str(task.id) != key or set(task.tables) != set(_TABLES):
-                raise ManagedError(
-                    f"Invalid per-task evidence in source: {source.name}"
-                )
+                raise ManagedError(f"Invalid per-task evidence in source: {source.name}")
             for name, content in task.tables.items():
-                table = read_csv_bytes(
-                    content.encode("utf-8"), source=f"{source.name}/{key}/{name}"
-                )
+                table = read_csv_bytes(content.encode("utf-8"), source=f"{source.name}/{key}/{name}")
                 for row in table.to_dict(orient="records"):
                     if _integer(row.get("task_id")) != task.id:
-                        raise ManagedError(
-                            f"Source task identity mismatch: {source.name}/{key}"
-                        )
+                        raise ManagedError(f"Source task identity mismatch: {source.name}/{key}")
                     if (frame := _integer(row.get("frame_id"))) is not None:
                         origins.add((source.name, source.project_id, task.id, frame))
     return frozenset(origins)
@@ -120,9 +103,7 @@ class LocalManagedPreparationFiles:
                 origins=_origins(snapshot),
             )
         except (OSError, ValidationError) as error:
-            raise ManagedError(
-                f"Cannot capture managed preparation inputs: {error}"
-            ) from error
+            raise ManagedError(f"Cannot capture managed preparation inputs: {error}") from error
 
     def image_hashes(self, frame: pd.DataFrame) -> ImageHashes:
         """Hash each readable path once while letting media validation report errors."""
@@ -135,9 +116,7 @@ class LocalManagedPreparationFiles:
                 digest = hashlib.sha256(Path(value).read_bytes()).hexdigest()
                 readable[value] = digest
             except (OSError, ValueError):
-                digest = (
-                    "unreadable:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-                )
+                digest = "unreadable:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
             identities[value] = digest
         return ImageHashes(identities, readable)
 
@@ -145,14 +124,10 @@ class LocalManagedPreparationFiles:
         """Require approved local and S3 coverage before cleanup removes any rows."""
         roots = LocalRoots()
         if uncovered := roots.uncovered_paths(frame, metadata.images):
-            raise ManagedError(
-                f"Transformed images are outside approved roots: {uncovered}"
-            )
+            raise ManagedError(f"Transformed images are outside approved roots: {uncovered}")
         roots.check_s3_paths(frame, metadata.images)
 
-    def payload_bytes(
-        self, frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest
-    ) -> dict[str, bytes]:
+    def payload_bytes(self, frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest) -> dict[str, bytes]:
         """Use the same deterministic three-file serialization as legacy bundles."""
         return _payload(frame, metadata, tasks)
 
@@ -192,9 +167,7 @@ class LocalManagedPreparationFiles:
             raise ManagedError(f"Preparation directory already exists: {directory}")
         try:
             directory.parent.mkdir(parents=True, exist_ok=True)
-            with TemporaryDirectory(
-                prefix=".cveta2-managed-", dir=directory.parent
-            ) as temporary:
+            with TemporaryDirectory(prefix=".cveta2-managed-", dir=directory.parent) as temporary:
                 staged = Path(temporary)
                 (staged / "transformed.csv").write_bytes(captured.input_content)
                 (staged / "source-snapshot.yaml").write_bytes(captured.source_content)
@@ -202,9 +175,7 @@ class LocalManagedPreparationFiles:
                     json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8",
                 )
-                broken_images.to_csv(
-                    staged / "broken-images.csv", index=False, lineterminator="\n"
-                )
+                broken_images.to_csv(staged / "broken-images.csv", index=False, lineterminator="\n")
                 for name, content in payload.items():
                     if name not in _PAYLOAD:
                         raise ManagedError(f"Unexpected managed payload file: {name}")
@@ -227,25 +198,19 @@ class LocalManagedPreparationFiles:
                     if (staged / name).is_file():
                         os.link(staged / name, directory / name)
         except OSError as error:
-            raise ManagedError(
-                f"Cannot persist managed preparation: {directory}"
-            ) from error
+            raise ManagedError(f"Cannot persist managed preparation: {directory}") from error
 
     def load_prepared(self, directory: Path) -> LoadedManagedPreparation:
         """Reject edited records, inputs or payload and hold stable captured bytes."""
         try:
             if directory.is_symlink() or not directory.is_dir():
-                raise ManagedError(
-                    f"Expected a nonsymlink preparation directory: {directory}"
-                )
+                raise ManagedError(f"Expected a nonsymlink preparation directory: {directory}")
             record_bytes = _regular_bytes(directory / "preparation.json")
             if (
                 hashlib.sha256(record_bytes).hexdigest().encode("ascii")
                 != _regular_bytes(directory / "preparation.sha256").strip()
             ):
-                raise ManagedError(
-                    "Managed preparation record checksum mismatch; prepare again"
-                )
+                raise ManagedError("Managed preparation record checksum mismatch; prepare again")
             record = ManagedRecord.model_validate_json(record_bytes)
             input_content = _regular_bytes(directory / "transformed.csv")
             source_content = _regular_bytes(directory / "source-snapshot.yaml")
@@ -253,9 +218,7 @@ class LocalManagedPreparationFiles:
                 hashlib.sha256(input_content).hexdigest() != record.input_hash
                 or hashlib.sha256(source_content).hexdigest() != record.source_hash
             ):
-                raise ManagedError(
-                    "Managed input or source snapshot changed; prepare again"
-                )
+                raise ManagedError("Managed input or source snapshot changed; prepare again")
             source_snapshot = _parse_snapshot(source_content)
             expected_snapshot = source_snapshot.model_copy(
                 update={
@@ -269,16 +232,13 @@ class LocalManagedPreparationFiles:
                 or record.registry_hash != source_snapshot.registry_hash
                 or record.parent_id != source_snapshot.parent_id
             ):
-                raise ManagedError(
-                    "Managed source binding is inconsistent; prepare again"
-                )
+                raise ManagedError("Managed source binding is inconsistent; prepare again")
             payload = _read_payload(directory, record)
             metadata, tasks, frame = _parse_payload(payload)
             if tasks is not None and tasks.managed != record.snapshot:
                 raise ManagedError("Managed task snapshot changed; prepare again")
             if metadata is not None and (
-                metadata.managed is None
-                or metadata.managed.definition_hash != record.definition_hash
+                metadata.managed is None or metadata.managed.definition_hash != record.definition_hash
             ):
                 raise ManagedError("Managed metadata binding changed; prepare again")
             report = _REPORT.validate_json(_regular_bytes(directory / "report.json"))
@@ -294,17 +254,13 @@ class LocalManagedPreparationFiles:
                 report=report,
             )
         except (OSError, ValidationError) as error:
-            raise ManagedError(
-                f"Cannot load managed preparation: {directory}: {error}"
-            ) from error
+            raise ManagedError(f"Cannot load managed preparation: {directory}: {error}") from error
 
     @contextmanager
     def stage_payload(self, payload: Mapping[str, bytes]) -> Iterator[Path]:
         """Publish private captured bytes rather than rereading mutable local files."""
         if set(payload) != set(_PAYLOAD):
-            raise ManagedError(
-                "Managed publication requires exactly three payload files"
-            )
+            raise ManagedError("Managed publication requires exactly three payload files")
         with TemporaryDirectory(prefix="cveta2-managed-publish-") as temporary:
             directory = Path(temporary)
             for name, content in payload.items():
@@ -317,9 +273,7 @@ def _read_payload(directory: Path, record: ManagedRecord) -> dict[str, bytes]:
     if set(record.payload_hashes) != expected:
         raise ManagedError("Invalid managed payload inventory; prepare again")
     payload = {name: _regular_bytes(directory / name) for name in record.payload_hashes}
-    if {
-        name: hashlib.sha256(content).hexdigest() for name, content in payload.items()
-    } != record.payload_hashes:
+    if {name: hashlib.sha256(content).hexdigest() for name, content in payload.items()} != record.payload_hashes:
         raise ManagedError("Managed payload checksum mismatch; prepare again")
     return payload
 
@@ -329,9 +283,7 @@ def _parse_payload(
 ) -> tuple[DatasetMetadata | None, TaskManifest | None, pd.DataFrame]:
     if not payload:
         return None, None, pd.DataFrame()
-    metadata = DatasetMetadata.model_validate(
-        _yaml(payload["dataset.yaml"], "dataset.yaml")
-    )
+    metadata = DatasetMetadata.model_validate(_yaml(payload["dataset.yaml"], "dataset.yaml"))
     tasks = TaskManifest.model_validate(_yaml(payload["tasks.yaml"], "tasks.yaml"))
     frame = read_csv_bytes(payload["dataset.csv"], source="dataset.csv")
     return metadata, tasks, frame

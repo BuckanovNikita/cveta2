@@ -9,9 +9,7 @@ from cveta2.domain.upload import UploadManifest
 class ManifestStore(Protocol):
     """Persist upload identity and mandatory recovery checkpoints."""
 
-    def load(
-        self, project_id: int, fingerprint: str, *, host: str
-    ) -> UploadManifest | None:
+    def load(self, project_id: int, fingerprint: str, *, host: str) -> UploadManifest | None:
         """Read the matching recovery manifest, returning None when absent."""
         ...
 

@@ -162,9 +162,7 @@ def _fork_safe_tqdm() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _hide_live_run_variables(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _hide_live_run_variables(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep a live run's credentials and endpoints away from unit tests.
 
     The live session fixture exports the run's variables into its worker and
@@ -233,9 +231,7 @@ def test_config(isolated_config_path: Path) -> Path:
 def capture_logs() -> Generator[list[str], None, None]:
     """Capture loguru messages at WARNING+ level into a list of strings."""
     messages: list[str] = []
-    handler_id = logger.add(
-        lambda msg: messages.append(msg.record["message"]), level="WARNING"
-    )
+    handler_id = logger.add(lambda msg: messages.append(msg.record["message"]), level="WARNING")
     try:
         yield messages
     finally:
@@ -251,9 +247,7 @@ def capture_info_logs() -> Generator[list[str], None, None]:
     at WARNING.
     """
     messages: list[str] = []
-    handler_id = logger.add(
-        lambda msg: messages.append(msg.record["message"]), level="INFO"
-    )
+    handler_id = logger.add(lambda msg: messages.append(msg.record["message"]), level="INFO")
     try:
         yield messages
     finally:

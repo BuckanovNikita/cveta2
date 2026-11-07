@@ -62,18 +62,12 @@ def _add_common_fetch_args(parser: "argparse.ArgumentParser") -> None:
         "--images-dir",
         type=str,
         default=None,
-        help=(
-            "Override image cache directory for this run "
-            "(takes precedence over config mapping)."
-        ),
+        help=("Override image cache directory for this run (takes precedence over config mapping)."),
     )
     parser.add_argument(
         "--save-tasks",
         action="store_true",
-        help=(
-            "Keep per-task CSV files in .tasks/ subdirectory. "
-            "By default .tasks is left untouched."
-        ),
+        help=("Keep per-task CSV files in .tasks/ subdirectory. By default .tasks is left untouched."),
     )
     parser.add_argument(
         "--no-cache",
@@ -83,10 +77,7 @@ def _add_common_fetch_args(parser: "argparse.ArgumentParser") -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help=(
-            "Re-download annotations from CVAT even for cached tasks "
-            "and refresh the cache."
-        ),
+        help=("Re-download annotations from CVAT even for cached tasks and refresh the cache."),
     )
 
 
@@ -96,15 +87,13 @@ def configure_fetch(parser: "argparse.ArgumentParser") -> None:
     parser.add_argument(
         "--skip-validation",
         action="store_true",
-        help="Accept completed annotation jobs in eligible tasks in CVAT "
-        "before fetching.",
+        help="Accept completed annotation jobs in eligible tasks in CVAT before fetching.",
     )
     parser.add_argument(
         "--output-dir",
         "-o",
         required=True,
-        help="Directory to save partitioned CSV files "
-        "(dataset, obsolete, in_progress, deleted).",
+        help="Directory to save partitioned CSV files (dataset, obsolete, in_progress, deleted).",
     )
     parser.add_argument(
         "--raw",
@@ -151,9 +140,7 @@ def run_fetch(args: "argparse.Namespace") -> None:
     output_dir = _resolve_output_dir(Path(args.output_dir))
     prompted = not args.project or output_dir != Path(args.output_dir)
     with open_client() as client:
-        project_id, project_name, cs_info = resolve_project_and_cloud_storage(
-            client, args.project
-        )
+        project_id, project_name, cs_info = resolve_project_and_cloud_storage(client, args.project)
         options = _build_project_fetch_options(args, project_name)
         echo_if_prompted(
             "fetch",
@@ -180,12 +167,8 @@ def run_fetch_task(args: "argparse.Namespace") -> None:
     explicit_tasks = [v.strip() for v in (args.task or []) if v.strip()]
     prompted = not args.project or not explicit_tasks
     with open_client() as client:
-        project_id, project_name, cs_info = _resolve_fetch_task_project(
-            client, args.project, explicit_tasks
-        )
-        options = _build_task_fetch_options(
-            args, explicit_tasks, client, project_id, project_name
-        )
+        project_id, project_name, cs_info = _resolve_fetch_task_project(client, args.project, explicit_tasks)
+        options = _build_task_fetch_options(args, explicit_tasks, client, project_id, project_name)
         echo_if_prompted(
             "fetch-task",
             {
@@ -258,9 +241,7 @@ def _build_task_fetch_options(
     ignore_set, silent_set = load_ignore_sets(project_name)
     return FetchOptions(
         completed_only=args.completed_only,
-        task_selector=_resolve_task_selector(
-            explicit_tasks, client, project_id, ignore_set
-        ),
+        task_selector=_resolve_task_selector(explicit_tasks, client, project_id, ignore_set),
         ignore_task_ids=ignore_set,
         silent_task_ids=silent_set,
         use_cache=not args.no_cache,
@@ -275,9 +256,7 @@ def _resolve_output_dir(output_dir: Path) -> Path:
     if not output_dir.exists():
         return output_dir
     if is_interactive_disabled():
-        logger.info(
-            f"Папка {output_dir} уже существует — перезапись (неинтерактивный режим)."
-        )
+        logger.info(f"Папка {output_dir} уже существует — перезапись (неинтерактивный режим).")
         return output_dir
     answer = interactive.select_one(
         f"Папка {output_dir} уже существует. Что делать?",
@@ -346,10 +325,7 @@ def _resolve_images_dir(
 
     new_path = interactive.path(
         f"Укажите путь для кэширования изображений проекта {project_name!r}: ",
-        hint=(
-            f"Укажите --images-dir, --no-images или добавьте "
-            f"image_cache.{project_name} в конфигурацию."
-        ),
+        hint=(f"Укажите --images-dir, --no-images или добавьте image_cache.{project_name} в конфигурацию."),
         history_key="image-cache-dir",
     )
     if new_path is None:

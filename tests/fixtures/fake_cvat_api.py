@@ -327,9 +327,7 @@ class FakeCvatApi:
     def attach_task_data(self, task_id: int, spec: UploadTaskSpec) -> None:
         """Synthesize frame metadata for *task_id* from the spec."""
         self._enter("attach_task_data")
-        data_meta = RawDataMeta(
-            frames=[RawFrame(name=f, width=640, height=480) for f in spec.server_files]
-        )
+        data_meta = RawDataMeta(frames=[RawFrame(name=f, width=640, height=480) for f in spec.server_files])
         with self._lock:
             _, annotations = self._task_data[task_id]
             self._task_data[task_id] = (data_meta, annotations)
@@ -353,10 +351,7 @@ class FakeCvatApi:
                     annotations,
                     shapes=[
                         *annotations.shapes,
-                        *(
-                            _as_raw_shape(next_id + offset, shape)
-                            for offset, shape in enumerate(shapes)
-                        ),
+                        *(_as_raw_shape(next_id + offset, shape) for offset, shape in enumerate(shapes)),
                     ],
                 ),
             )
