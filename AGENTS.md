@@ -73,3 +73,11 @@ release gates. Inspect auto-fixes and commit mechanical changes separately, then
 repeat affected verification until the final committed content passes without changes.
 Reuse successful checks while their inputs remain unchanged; do not repeat full
 verification before every intermediate commit.
+
+## Specification rewrites
+
+Compare the original behavior, conditions and exceptions with their new authoritative
+homes, including requirements embedded in scenarios. Separate approved policy changes
+from wording changes; resolve overloaded terms before editing. Retain compatibility
+obligations, remove historical status claims, and have the reviewer compare meaning
+against the original source rather than judge length or wording alone.

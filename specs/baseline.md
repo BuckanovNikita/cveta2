@@ -15,28 +15,42 @@ may change while these public behaviors and formats remain compatible.
 ## Connections, configuration and failures
 
 Users select CVAT projects by ID or organization-scoped name. Ambiguous names report
-matching IDs before mutation; an empty organization selects the personal workspace.
+matching IDs before mutation. Empty-string and null organization values normalize
+to the personal workspace in shared files, environment settings and saved credentials;
+this never permits a personal override of a nonempty shared organization.
 Explicit connection values override environment, selected file and bundled defaults.
-Invalid selected configuration fails without fallback. API calls never prompt or exit;
+Invalid selected configuration fails without fallback. Custom file selection also
+selects adjacent project-cache state and appears in credential diagnostics.
+Noninteractive operation reports missing choices as errors and never authorizes
+overwriting a verification/preparation directory. API calls never prompt or exit;
 owned sessions close deterministically and injected clients remain caller-owned.
 ClearML is optional, and ordinary CSV verification needs neither CVAT nor ClearML.
 
 Expected operational failures have typed errors and actionable CLI messages. Preserve
 unexpected defects. Diagnostics identify the failing resource, time, HTTP status and
 sanitized context without credentials, raw HTML or YAML values; concurrent requests
-cannot mix diagnostic context. Missing diagnostic values are explicit. Timeout zero
+cannot mix diagnostic context or leak prior failures into subsequent successes. Missing diagnostic values are explicit. Timeout zero
 or unset means no read timeout; positive values use the requested read timeout and a
-ten-second connect timeout. Negative/nonfinite values fail.
+ten-second connect timeout. Negative/nonfinite values fail. Malformed YAML diagnostics
+include the file, category and available one-based line/column, without source excerpts
+or scalar values. CLI failures have no incidental traceback; API callers retain the
+original parser exception as the cause for explicit debugging.
 
 Retry transient reads within configured budgets. Non-idempotent create/append retries
 only refused 429 responses, never ambiguous 503 responses; idempotent operations use
-their declared retry policy. Invalid Retry-After values use ordinary backoff. Exhausted
-429 aborts fetch; ordinary per-task 5xx failures identify skipped tasks and continue
+their declared retry policy. Retry-After accepts only finite nonnegative delta-seconds;
+negative, nonfinite, missing, unparseable and HTTP-date values use ordinary backoff.
+Exhausted SDK 502/503/504 responses retain the final status and task failure policy
+instead of becoming unidentified transport failures. Retry logs count cveta2 attempts,
+not underlying HTTP attempts. Exhausted 429 aborts fetch; ordinary per-task 5xx failures identify skipped tasks and continue
 unless fail-on-error is selected. Authentication, configuration and exhausted connection
 failures abort. Optional issue-read failures produce degraded output, not complete cache
 entries. Report cached/fetched/skipped/degraded totals and distinguish wall time from
 summed worker time. Configuration diagnosis succeeds only when required checks succeed;
-optional warnings do not imply live CVAT health or cause failure.
+optional AWS, image-cache or cache warnings and disabled checks do not fail diagnosis.
+The diagnostic command exits 0 when required checks succeed and 1 when they fail or
+cannot run; success does not certify live CVAT health. S3 authorization/not-found
+errors are not indiscriminately retried.
 
 ## Fetch and partition
 
@@ -98,8 +112,9 @@ Resume adds only missing issues, reuses exact shapes and may repeat idempotent d
 or completion. Create issues only from new, nonempty issue text with a complete bbox;
 identical image/text/bbox rows deduplicate and missing boxes warn/skip. Preserve exported
 open/resolved states. Expose explicit label updates, task deletion/status changes,
-mark-deleted and drop-label operations. Repeated mark-deleted returns zero without a
-write. Removing a stored ignored numeric ID does not require that remote task to exist.
+mark-deleted and drop-label operations. Mark-deleted counts only requested frames
+not already deleted; an entirely redundant request returns zero without a write. Removing a stored ignored numeric ID does not require that remote task to exist;
+project resolution remains required, and names or unknown IDs still resolve remotely.
 
 ## Conversion and local verification
 
@@ -149,6 +164,11 @@ exact parent, decisions, source/payload hashes and completion checksum. The user
 it before a separate same-machine upload. Its checksum detects accidental edits, not a
 hostile machine owner's rewriting. Standalone preparation uses format version 1.
 
+### Shared publication safeguards
+
+These safeguards apply to both standalone and managed publication; managed source
+and split rules are specified in the next section.
+
 Publication accepts only the prepared directory. Recheck captured and prepared bytes,
 media, roots, class registry and latest finalized nonarchived exact parent before child
 creation. A changed/unavailable prerequisite requires new preparation. Parents remain
@@ -168,26 +188,44 @@ Shared policy owns these choices; personal settings own credentials, local cache
 runtime settings. Personal fields cannot override shared policy. Selected files fail
 strictly; shared file selection is explicit argument, environment, then saved reference.
 
-Attach shared configuration without rewriting it or requesting credentials. Migration
+Saved relative shared-file references resolve from the personal file directory;
+explicit and environment relative paths resolve from the working directory. Personal
+policy fields are rejected even when equal to shared values; legacy authentication-only
+standalone files remain readable. Shared destination pairs are unique across definitions,
+with unique source aliases/references within each definition.
+
+Ordinary setup offers shared-file attachment. Attachment validates shared configuration
+without rewriting it or requesting credentials. Migration
 previews a redacted field split, preserves unknown values in a private original backup,
 and requires explicit approval. Cancellation changes nothing; repeated/interrupted
-migration is recoverable. Never invent project IDs, overwrite a differing shared file
+migration is recoverable through its journal after approved shared-first activation.
+Move mixed-section fields individually and report unresolved fields/identities.
+Never invent project IDs, overwrite a differing shared file
 or let noninteractive operation approve migration. Policy writes update shared storage
 or fail; local-path writes remain personal.
 
-Managed fetch pins the latest finalized nonarchived parent. Reuse unchanged completed
-CVAT task evidence only after checking live completion/revision; refresh changed,
-new/reopened/deleted tasks and invalidate reuse on label/registry changes. Explicit
+Managed fetch pins the latest finalized nonarchived parent when one exists.
+Configured fetch and preparation also work before either the destination ClearML
+project or dataset exists: parent identity stays null, and setup, fetch and preparation
+create no remote dataset. The first explicit publication creates and finalizes a
+version without parent IDs; subsequent fetches may reuse that version.
+
+Reuse unchanged completed CVAT task evidence only after checking live completion/revision; refresh changed,
+new/reopened/deleted tasks and invalidate reuse on CVAT label changes; registry
+changes conservatively invalidate CVAT reuse across the dataset. Explicit
 refresh bypasses reuse. Capture each S3 CSV's bytes/hash and available object identity
 on every fetch; changed objects replace their source contribution. S3 rows never acquire
 invented CVAT task IDs. Missing mandatory sources fail assembly. Preserve raw evidence,
 including empty tasks and rows discarded by project partitioning, independently of
-combined annotations.
+combined annotations. Fetch writes source evidence and combined annotations to a new
+directory. Task-ID recency and deletion precedence are source-project local. S3 source
+images are not downloaded and must be locally available for verification.
 
 Users may run arbitrary external transformations. Managed preparation accepts the
 transformed CSV without assuming one-to-one rows; untraceable lineage is unmapped.
-Assign train/val/test with default targets 0.6/0.2/0.2 and seed 42, preserving published
-assignments by image-content hash and assigning new content deterministically. Identical
+Assign train/val/test before validation, with default targets 0.6/0.2/0.2 and seed 42, preserving published
+assignments by image-content SHA-256 and assigning new content by deterministic
+seeded hashing. Identical
 content cannot cross splits; report and replace script-supplied splits. Targets do not
 promise exact counts. No silent rebalance; changed split policy needs a new lineage.
 Require nonempty train/val and viable training boxes.
@@ -197,15 +235,19 @@ source names; changed membership needs renewed resolution. Different content wit
 filename blocks. Apply training/image/class checks and explicit cleaning as above.
 Report CVAT review issues only for unambiguous original project/task/frame lineage,
 using original coordinates when reliable. Deduplicate retries and preserve annotations,
-job states and human issues. Mapped delivery failures block publication; unmapped/S3
-findings stay local. Feedback metadata alone must not make annotations appear stale.
+job states and human issues. Group reasons by frame, use stable markers and read
+existing issues before retries; record created, already-present, failed and unmapped
+findings. S3 task-like cells never authorize CVAT feedback. Mapped delivery failures
+block publication; unmapped/S3 findings stay local. Feedback metadata alone must not make annotations appear stale.
 
 Managed preparation uses format version 2, binding raw evidence, transformed CSV,
 resolved relevant definition, exact parent, media and payloads. Unrelated shared entries
 do not invalidate preparation. Recheck these facts, S3 content, registry and images
 before publication. Adoption of a parent without managed evidence performs a full
-refresh and preserves prior splits only with unambiguous identity. Publish the same
-three-file payload as standalone; managed tasks.yaml additionally embeds complete
+refresh and preserves prior splits only with unambiguous identity. Apply the
+[shared publication safeguards](#shared-publication-safeguards), including root and
+prepared-byte revalidation, a stable checked copy and parent immutability. The
+payload contains the same three files; managed tasks.yaml additionally embeds complete
 source evidence and dataset.yaml embeds resolved class/split/image policy. No images
 or archive are published; source evidence survives filtering/transformation.
 

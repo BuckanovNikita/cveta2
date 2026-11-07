@@ -4,74 +4,20 @@ The [functional specification](../specs/baseline.md) describes the workflows and
 state and failure rules. This reference supplies detailed public formats, API values
 and compatibility cases. Internal decomposition is replaceable.
 
-## Product and public interfaces
+## Public interfaces and diagnostic values
 
-cveta2 is a Python >=3.12,<3.14 CLI and API for CVAT projects: fetch annotations
-and images, partition and convert datasets, upload to CVAT, manage labels and
-tasks, compare completed-task membership, inspect CSVs, and explicitly prepare
-and publish reviewed datasets to ClearML. Python 3.12 and 3.13 are supported;
-3.10, 3.11 and >=3.14 are excluded. Development remains on Python 3.12; Ruff's
-conservative syntax target is not an additional runtime support promise.
-ClearML is optional; ordinary CSV verification requires neither CVAT nor ClearML.
+The [Python API guide](python-api.md) owns supported imports, signatures and return
+types; the [CLI guide](cli.md) owns commands; [configuration](configuration.md) owns
+fields, environment variables and defaults. Runtime compatibility is declared in
+`pyproject.toml`. The functional specification owns [connection, retry and diagnostic
+behavior](../specs/baseline.md#connections-configuration-and-failures).
 
-The [Python API guide](python-api.md) defines supported imports, signatures,
-return types and caller-owned session lifetimes; the [CLI guide](cli.md) defines
-commands. APIs never prompt or exit. Expected failures use typed Cveta2Error subclasses;
-unexpected defects remain visible. Project names are organization-scoped; ambiguous
-names return matching IDs before mutation. Explicit connection values override environment,
-selected file and preset; an empty organization selects personal workspace. Injected
-clients remain caller-owned, and owned sessions close deterministically.
-
-### Configuration and failures
-
-Configuration resolves explicit API values, then environment, the selected YAML
-file (`CVETA2_CONFIG` or the default `~/.config/cveta2/config.yaml`), then the
-bundled preset. The maintained configuration guide owns all fields, environment
-variables and defaults. Custom config selection also selects adjacent project
-cache state and appears in credential diagnostics. CLI YAML/type/value errors
-are actionable, omit credential values and do not produce incidental tracebacks;
-API callers retain typed errors.
-
-Malformed YAML diagnostics name the file, error category and available one-based
-line/column without including source excerpts or scalar values. The original
-parser exception remains available as the cause for explicit API debugging.
-
-Unset/zero data timeout means no timeout; positive values set the read timeout
-with a ten-second connect timeout. Negative/nonfinite values fail validation.
-Noninteractive operation replaces missing choices with errors and follows the
-command-specific requirements in the configuration guide; it never authorizes
-overwriting an existing verification/preparation directory.
-
-CVAT reads retry configured transient failures; non-idempotent create/append
-writes retry refused 429 responses, never ambiguous 503 responses, including
-ones carrying `Retry-After`. Idempotent deletion/job-state replacement retains
-its retry policy. Exhausted 429 errors abort fetch; ordinary per-task 5xx failures
-warn, identify skipped tasks and continue unless `CVETA2_RAISE_ON_FAILURE` is
-enabled. S3 authorization/not-found failures are not indiscriminately retried.
-Only finite nonnegative `Retry-After` delta-seconds are accepted; negative,
-nonfinite, missing, unparseable and HTTP-date values use ordinary backoff.
-Exhausted SDK 502/503/504 responses retain their final status and follow this
-task policy, rather than becoming unidentified transport failures. Optional
-issue-read failures remain degraded results. `CvatApiError` accepts optional
-keyword-only `diagnostics`, with neutral `CvatRequestDiagnostics` exported from
-the exceptions facade. Actual failing HTTP context, UTC time, status, resource
-IDs, allowlisted correlation IDs and bounded sanitized summaries are available;
-credentials/cookies/raw HTML are excluded. Retry logs count cveta2 attempts,
-not all underlying HTTP attempts. Configured retry budgets, SDK interaction and worker settings remain documented
-in the configuration guide. Request context stays isolated across concurrent calls and
-subsequent successes. Diagnostics are immutable neutral values with name/value identifier
-tuples, a timezone-aware UTC timestamp and status 0 when unavailable; no SDK object is retained.
-Stage wall time is distinct from summed worker duration; report cached/fetched/skipped/degraded totals.
-
-`doctor` returns 0 when required CVAT configuration checks succeed and 1 when
-they fail or cannot run. Optional AWS/image-cache/cache warnings and disabled
-checks do not fail it. This is configuration diagnosis, not a guarantee of live
-CVAT network health. Stored ignored numeric task IDs can be removed by CLI/API
-without requiring that remote task to exist; names/unknown IDs still resolve
-remotely and project resolution remains required.
-
-Task mark-deleted counts only requested frames not already deleted. An entirely
-redundant request returns zero without a CVAT metadata PATCH.
+`CvatApiError` accepts optional keyword-only `diagnostics`; the exceptions facade
+exports neutral `CvatRequestDiagnostics`. Diagnostics contain actual failing HTTP
+context, resource IDs, allowlisted correlation IDs and bounded sanitized summaries.
+They are immutable neutral values with name/value identifier tuples, a timezone-aware
+UTC timestamp and status 0 when unavailable; they retain no SDK objects. Cookies,
+credentials and raw HTML are excluded.
 
 ## Dataset format and fetch
 
@@ -514,117 +460,54 @@ Fetch never initializes/publishes to ClearML. `publish_clearml`, `--no-clearml`,
 without a compatibility period. Old configuration files are not rewritten;
 obsolete automatic settings do not restore publication. CVAT `upload` remains a
 separate supported operation. Standalone preparation requires externally assigned
-splits; managed preparation assigns them as described below. Neither workflow
+splits; [managed preparation](../specs/baseline.md#managed-datasets) assigns them. Neither workflow
 authorizes automatic end-to-end publication, remote deployment or a cryptographic
 review system.
 
-## Managed dataset configuration and lifecycle
+## Managed dataset formats and operations
 
-### Strict configuration ownership
+The functional specification owns [managed configuration, migration, source reuse,
+transformation, splits, feedback and publication](../specs/baseline.md#managed-datasets),
+including first publication when the ClearML destination does not exist. The following
+is the serialized and API reference for that workflow.
 
-Personal and shared files are separately versioned with schema_version=1. Personal
-configuration owns credentials/auth references, local image/task-cache paths,
-network/runtime settings and the project_config reference. Shared configuration
-owns CVAT host/organization, stable project IDs, source interpretation/S3 roots,
-task exclusions, dataset source memberships, exact ClearML destination, class
-registry/exclusion policy, split policy and overlap decisions. Personal fields do
-not overlay shared policy, including values equal to shared values.
+### Configuration representation
 
-Resolve personal selection explicit --config > CVETA2_CONFIG > the existing
-default. Resolve exactly one shared file explicit --project-config/API argument >
-CVETA2_PROJECT_CONFIG > saved personal reference. Saved relative references are
-anchored to the personal file directory; explicit/environment relative paths use
-the working directory. Invalid selected files fail without fallback. Environment
-credential/runtime settings remain supported; conflicting CVAT identity overrides
-are rejected. Standalone legacy authentication-only configuration remains readable.
+Personal and shared files each use `schema_version=1`. Personal configuration contains
+credentials/auth references, local image/task-cache paths, network/runtime settings and
+`project_config`. Shared configuration contains CVAT host/organization, stable project
+IDs, source interpretation/S3 roots, task exclusions, dataset source memberships,
+ClearML destination, class registry/exclusion policy, split policy and overlap decisions.
 
-setup --project-config validates and attaches without rewriting the shared file
-or asking for credentials. Ordinary setup offers attachment. setup --migrate-config
-previews a redacted field split and requires verification before activation. Move
-mixed-section fields individually; keep unknown values in the original backup and
-report unresolved fields/identities. Never invent project IDs from names, silently
-restore retired automatic mappings or overwrite an existing differing shared file.
-Preserve a private original backup and recover an interrupted approved shared-first
-activation from its journal. Cancellation is a no-op; repeated migration is
-idempotent. Noninteractive callers cannot auto-approve migration. Explicit policy
-writers update shared storage or fail if read-only; local-path writers stay personal.
+Personal file selection is `--config`, then `CVETA2_CONFIG`, then the configured default.
+Shared selection is `--project-config` or the explicit API argument, then
+`CVETA2_PROJECT_CONFIG`, then the saved personal reference. The CLI attachment and
+migration operations are `setup --project-config` and `setup --migrate-config`.
 
-### Managed sources and transformation
+Source types are `cvat` and `s3-csv`; CVAT sources reference the shared project registry.
+S3 sources identify exact `s3://bucket/key.csv` objects. Captured metadata includes
+SHA-256 of bytes and available opaque ETag/version identity. Required CSV fields are
+`image_name`, `image_path`, `instance_label` and the four bbox coordinates; `split` may
+be absent. Extra fields and explicit source lineage are retained.
 
-A named dataset combines one or more cvat or s3-csv sources. Source aliases and
-references are unique inside a definition; exact ClearML destination pairs are
-unique across definitions. CVAT sources reference the shared project registry.
-A managed definition uses one configured CVAT server/organization.
+### Publication and preparation records
 
-Pin the latest finalized, nonarchived parent. Check live task completion and
-updated_date before reusing published unchanged completed task evidence without
-annotation downloads. Refresh changed/new/reopened tasks, account for deleted
-ones, and invalidate project reuse after CVAT label changes. Registry changes
-conservatively invalidate CVAT reuse across the dataset. --refresh bypasses reuse.
-Preserve original per-task evidence, including empty tasks and rows lost during
-project partitioning; task-ID recency and same-task deletion precedence remain
-source-project local. Missing mandatory sources fail assembly.
+The three-file payload uses `dataset.csv` for accepted transformed rows and assigned
+splits. `dataset.yaml` embeds resolved class/split/image policy. The typed versioned
+managed extension of `tasks.yaml` contains CVAT/S3 source evidence: tasks, label
+definitions, all four original partitions, empty-task facts, object hashes and the
+registry snapshot. Files without managed extensions remain readable.
 
-S3 sources are exact s3://bucket/key.csv annotation objects, captured with SHA-256
-of bytes and available opaque ETag/version metadata. Required annotation fields
-are image_name, image_path, instance_label and four bbox coordinates; split may be
-absent. Retain extra fields and explicit source lineage without manufacturing CVAT
-task IDs. Each fetch captures the CSV; changed objects replace their entire source
-contribution. Referenced images are not downloaded and must be locally available
-before verification.
+Managed local preparation uses `format_version=2` and binds captured sources,
+transformed CSV, payload hashes, media, the relevant resolved shared definition and
+exact parent. The format differs from standalone `format_version=1`; the behavior and
+freshness rules are owned by the managed specification linked above.
 
-Fetch emits separate source evidence and combined annotations in a new directory.
-The user runs any transformation script externally. Preparation accepts its CSV
-without restricting operations or requiring one-to-one source/output rows. Raw
-source evidence remains independent. Untraceable output lineage is reported as
-unmapped rather than guessed from filenames or row positions.
+### Public operations
 
-### Splits, preparation and feedback
-
-Managed preparation assigns train/val/test before validation, default targets
-0.6/0.2/0.2 and seed 42. Preserve published assignments by image-content SHA-256;
-new images use deterministic seeded hashing. Targets do not guarantee exact
-counts. Identical content never crosses splits. Replace/report script-provided
-splits. Do not silently rebalance; split policy changes require a new lineage.
-Require nonempty train/val populations and at least one training box.
-
-Content overlaps require explicit source selection or exclusion, bound to the
-participating source names. Changed membership requires renewed resolution.
-Different content sharing an image filename blocks preparation. Apply the training/image/class validation and quarantine rules above. Explicit --clean accepts proposed
-repairs and removal; structural failures remain blocking.
-
-Create review issues only for findings with unambiguous original CVAT
-project/task/frame lineage. Group reasons by frame and use original coordinates
-only when reliably traced. Preserve annotations/job status/human issues. Stable
-markers and existing-issue reads make retries deduplicated. Record created,
-already-present, failed and unmapped findings; mapped delivery failures block
-publication, unmapped/S3-only findings remain local. Never accept arbitrary
-S3 task-like cells as permission for feedback. Own issue-only metadata changes
-must not create a false stale-annotation loop.
-
-### Managed persistence and public operations
-
-Payload inventory is exactly dataset.csv, dataset.yaml and tasks.yaml. The CSV
-contains accepted transformed training rows and managed splits. Strict metadata accepts optional typed versioned managed extensions; files
-without the extensions remain readable. dataset.yaml embeds resolved mapping/split/image policy.
-tasks.yaml embeds complete CVAT/S3 source evidence: tasks, label definitions,
-all four original partitions, empty-task facts, object hashes and registry
-snapshot. No ZIP or images are published. Raw evidence is retained even when
-transformation or validation discards training rows.
-
-A format_version=2 local preparation binds captured sources, transformed CSV,
-payload hashes, media, relevant resolved shared definition and exact parent.
-Only relevant definition changes invalidate it; unrelated shared entries do not.
-Recheck parent, source facts, S3 content, registry, roots, images and prepared
-bytes before publishing a stable checked copy. Legacy adoption performs one full
-source refresh and preserves prior splits only where identity is unambiguous.
-Parents are never modified.
-
-The dataset CLI group exposes list/show/versions/fetch/prepare/diff/report-errors/
-publish. APIs are prompt-free: list_datasets, show_dataset, dataset_versions,
-fetch_dataset, prepare_managed_dataset, compare_datasets, report_dataset_errors
-and publish_dataset. Shared selection accepts an explicit independent API argument.
-Outputs include JSON inspection; prepare ready=false exits 1 and operational/
-configuration failures exit 2. The standalone verify/prepare/upload interfaces
-retain their existing contracts apart from the explicit configuration-ownership
-migration.
+The dataset CLI group exposes `list`, `show`, `versions`, `fetch`, `prepare`, `diff`,
+`report-errors` and `publish`. Corresponding API functions are `list_datasets`,
+`show_dataset`, `dataset_versions`, `fetch_dataset`, `prepare_managed_dataset`,
+`compare_datasets`, `report_dataset_errors` and `publish_dataset`. They accept shared
+selection independently and support JSON inspection. The functional specification
+owns readiness and exit behavior.

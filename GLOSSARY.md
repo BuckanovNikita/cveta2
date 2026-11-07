@@ -10,4 +10,6 @@ Terms distinguish source evidence from reviewed training output.
 
 **Source evidence**: Captured annotations and source identity before transformation, filtering or repair; it is distinct from the training rows selected for publication.
 
-**Prepared bundle**: Local reviewed publication input binding source evidence, training payload, decisions and exact parent. A ready bundle has no unresolved publication blockers.
+**Prepared bundle**: Local publication input binding source evidence, training payload, decisions and parent identity for review. Readiness means no unresolved publication blockers; it does not mean the user has reviewed or published it.
+
+**Parent dataset**: The exact existing finalized, nonarchived dataset version from which a publication continues. A first publication has no parent.
