@@ -199,8 +199,6 @@ source_paths = ["cveta2"]
 pytest_add_cli_args = [
     "-n", "0", "-p", "no:cacheprovider", "-p", "no:randomly", "--no-cov",
     "--ignore=tests/integration",
-    "--ignore=tests/test_integration_lifecycle.py",
-    "--ignore=tests/test_mutation_tool.py",
     "--ignore=tests/test_integration_tool_boundaries.py",
     "--ignore=tests/test_architecture.py",
 ]
