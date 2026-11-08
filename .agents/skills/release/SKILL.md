@@ -33,6 +33,9 @@ uv run prek run property-exploration --hook-stage manual --all-files
 
 ## 2. Merge, release and push under the lock
 
+Proceed only with the user's separate authorization to push `main` and the
+release tag; otherwise stop after step 1 and report its results.
+
 ```bash
 git switch main
 flock -n "$(git rev-parse --git-common-dir)/cveta2-release.lock" bash -c '

@@ -38,13 +38,18 @@ L stop            # remove the run, release the tag (also the crash cleanup)
 eval "$(L env)"   # the run's variables, for manual tools
 ```
 
+The k8s-infra helpers are not on `PATH`. After `eval "$(L env)"`, `infra.py` and
+`cvat.py` below mean `python3 "$INTEGRATION_SKILL_DIR/scripts/<name>"`.
+`INTEGRATION_SKILL_DIR` is `K8S_INFRA_SKILL_DIR` when set, else the installed
+k8s-infra skill under `~/.agents/skills` or `~/.claude/skills`.
+
 ## Stopped stands: notify and wait
 
 The owner stops the stands at times. A stopped stand is not a failure:
 
 - **What counts as stopped.**
   - The cluster does not answer.
-  - `infra.py room` answers WAIT or fails.
+  - `infra.py room` answers WAIT (exit 3).
   - The CVAT, MinIO or ClearML endpoint does not answer.
 - **What happens.** The fixture (and `L up`) prints one notice, then polls with
   backoff from 15 s up to 60 s. It prints a heartbeat every 5 minutes and
@@ -53,14 +58,16 @@ The owner stops the stands at times. A stopped stand is not a failure:
   - The wait is unlimited unless `CVETA2_STAND_WAIT_TIMEOUT` (seconds) is set.
   - Ctrl-C stops it; nothing has been created yet.
 - **Agents.**
-  - Start a commit or test run that touches live-affected code with
-    `run_in_background`, so a long wait is not killed by a tool timeout.
+  - Start a live test run (the `integration-tests` or `acceptance-tests` hook,
+    or pytest over `tests/integration`) with `run_in_background`, so a long
+    wait is not killed by a tool timeout.
   - Tell the user the run is waiting for the stands to be restored.
   - Never restart a stand, skip the tests, or bypass the hook.
 
 These fail at once instead:
 
 - a missing Secret key;
+- `infra.py room` exiting with any non-zero code other than 3;
 - an untrusted certificate (a TLS trust problem, not a stopped stand; never
   switch to plain HTTP or disable verification);
 - a ClearML identity that the stand refuses.
@@ -99,7 +106,8 @@ Different tags never share objects. The registry's
 `[capacity].cveta2_integration_runs` caps concurrent cveta2 suites, but nothing
 enforces it, because `room` checks only the stands' own load. Every session that
 runs selected live tests starts a run. Before running from several worktrees or
-agents at once, count the active runs (`cvat.py --project cveta2 ls`) and
+agents at once, count the active runs
+(`python3 "$INTEGRATION_SKILL_DIR/scripts/cvat.py" --project cveta2 ls`) and
 serialize the runs beyond the cap.
 
 ## Completion evidence
