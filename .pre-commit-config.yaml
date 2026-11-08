@@ -83,6 +83,7 @@ repos:
     stages:
     - pre-commit
     include_deleted: true
+    require_serial: true
   - id: integration-tests
     name: pytest (live integration, shared stands required)
     entry: uv run --locked pytest tests/integration
