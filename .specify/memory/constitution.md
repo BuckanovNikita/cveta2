@@ -16,7 +16,9 @@ entire application. The current consolidated product contract is
 [specs/baseline.md](../../specs/baseline.md). An explicitly authorized consolidation
 MUST retain current requirements, deliberate limitations and outstanding obligations,
 with immutable decision sources and a verified reachable checkpoint before retiring
-historical records. Archived specifications are evidence, not competing contracts.
+historical records. The 2026-11-08 consolidation's checkpoint is the pre-reset commit
+`f52c857`; read retired records with `git show f52c857:<path>`. Archived specifications
+are evidence, not competing contracts.
 Subsequent capability changes MUST use a new or active feature's spec, plan and tasks,
 describe their delta from the baseline and reconcile the baseline on acceptance.
 Completed feature history MUST remain recoverable rather than being rewritten.
@@ -94,7 +96,7 @@ their user documentation. Keep `AGENTS.md` as the shared discovery entry point
 and `CLAUDE.md` as a regular file importing it with `@AGENTS.md`. Detailed operational rules live in
 [engineering.md](engineering.md), architecture in
 [architecture.md](architecture.md), and output contracts in
-[the living dataset reference](../../specs/baseline.md).
+[the living dataset reference](../../docs/dataset-contract.md).
 Retain dated reviews as historical feature evidence, preserving dispositions
 without treating old suggestions as a current work queue.
 Use Conventional Commits when authorized; `main`
@@ -205,7 +207,7 @@ only for code and dependency paths. Hooks run through prek. Gate placement and
 application contracts are unchanged.
 
 Version 2.1.0 amends principles I, IV and V at the user's request (development
-speed plan, `docs/plans/dev-speed-20261106/`). Spec Kit is required for new or
+speed plan, `docs/plans/dev-speed-20261106/` at `f52c857`). Spec Kit is required for new or
 changed capabilities only; bug fixes and refactors may use a plain plan. Live
 tests join the normal suite and a stopped stand is waited for; the commit test
 hook runs affected tests, and the full suite with coverage gates the merge.
@@ -219,6 +221,10 @@ and advisory expensive checks at the user's request. The default pipeline runs
 unit checks; live integration and changed-function mutation are explicit manual
 stages. Full-suite coverage before merge and mutation reporting for code changes
 remain acceptance requirements. Application behavior and test fixtures are unchanged.
+
+Version 3.0.1 clarifies principle I by naming the reachable checkpoint of the
+2026-11-08 specification consolidation and points output contracts at the dataset
+contract. Principles and application contracts are unchanged.
 
 Version 3.1.0 permits targeted verification skips for intermediate task commits,
 with full default verification after the final commit and separate mechanical

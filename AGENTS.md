@@ -18,8 +18,12 @@ sources below rather than duplicating them here.
    workflow, verification, working-tree ownership, integration, and release rules.
 3. [Architecture context](.specify/memory/architecture.md) when changing module
    flow, project resolution, fetch/upload, or conversion behavior.
-4. [Current specification and dataset contract](specs/baseline.md) for preserved
-   behavior, behavior rules.
+4. [Functional specification](specs/baseline.md) for preserved behavior and
+   compatibility obligations of any workflow you change.
+5. [Dataset contract](docs/dataset-contract.md) when changing CSV columns, API
+   return values or serialized file formats.
+6. [Glossary](GLOSSARY.md) for dataset-preparation terms (standalone and managed
+   preparation, source evidence, prepared bundle, parent dataset).
 
 Human usage is in [README.md](README.md); setup commands are in
 [engineering guidance](.specify/memory/engineering.md); release commands are in the

@@ -58,6 +58,8 @@ include = [
     "README.md",
     "CHANGELOG.md",
     "specs/baseline.md",
+    "docs/dataset-contract.md",
+    "GLOSSARY.md",
     "pyproject.toml",
 ]
 

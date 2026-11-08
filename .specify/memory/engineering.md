@@ -17,7 +17,7 @@ through `uv run`.
 Language rules live in [AGENTS.md](../../AGENTS.md). This file owns detailed
 operational guidance; [constitution.md](constitution.md) owns governance.
 Read [architecture.md](architecture.md) for module ownership and
-[the dataset contract](../../specs/baseline.md)
+[the dataset contract](../../docs/dataset-contract.md)
 for output-format behavior.
 
 ## Preserve the working tree
@@ -63,8 +63,9 @@ violations, and blocking analysis findings before implementation. The bundled
 four-step `speckit` workflow runner does not include all repository-required
 steps; do not use it as a substitute for this sequence.
 
-The [baseline](../../specs/baseline.md) owns consolidated product/data contracts;
-its immutable sources preserve historical decisions and evidence. For a change to
+The [baseline](../../specs/baseline.md) owns consolidated functional behavior and the
+[dataset contract](../../docs/dataset-contract.md) its exact formats; retired decisions
+and evidence are recoverable from the checkpoint named in the constitution, principle I. For a change to
 a consolidated capability, create a feature describing the delta from the baseline.
 For an existing active feature, select its directory, update `spec.md` and run the
 remaining sequence. Reconcile the plan and task list with the revised spec and
@@ -222,9 +223,9 @@ CLI or public API behavior changes.
 `docs/configuration.md` owns configuration details; `docs/cli.md` owns
 commands and flags; `docs/images-and-cache.md` owns S3, cache, and ClearML
 behavior. Maintain [architecture.md](architecture.md) and the
-[living dataset contract](../../specs/baseline.md)
+[living dataset contract](../../docs/dataset-contract.md)
 when a feature changes their documented behavior. Keep dated findings in
-feature evidence or immutable archive sources, including the preserved
+feature evidence; retired findings stay at their checkpoint commits, such as the
 [2026-09-04 review](https://github.com/BuckanovNikita/cveta2/blob/af0073e5bd8a8799f0cfd322cfb27c8efd7b747d/specs/001-project-documentation/evidence/bug-review-2026-09-04.md).
 
 ### Project skills

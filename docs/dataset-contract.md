@@ -488,7 +488,26 @@ Source types are `cvat` and `s3-csv`; CVAT sources reference the shared project 
 S3 sources identify exact `s3://bucket/key.csv` objects. Captured metadata includes
 SHA-256 of bytes and available opaque ETag/version identity. Required CSV fields are
 `image_name`, `image_path`, `instance_label` and the four bbox coordinates; `split` may
-be absent. Extra fields and explicit source lineage are retained.
+be absent. Extra fields and explicit source lineage are retained. Managed configuration
+models reject unknown keys.
+
+### Managed fetch directory
+
+Managed fetch writes a new directory, refusing an existing path, and links its files
+into place only after staging all of them:
+
+| Path | Contract |
+| --- | --- |
+| `dataset.csv` | Combined annotations of all sources with provenance columns |
+| `sources/<source-name>/{dataset,obsolete,in_progress,deleted}.csv` | Captured partitions of each source; S3 sources fill only `dataset.csv` |
+| `source-snapshot.yaml` | Typed `format_version=1` snapshot: definition and registry hashes, pinned parent, per-source tables, task facts, label fingerprint and S3 object identity |
+
+Source names match `[A-Za-z0-9][A-Za-z0-9_-]*`. The provenance columns `source_id`,
+`source_project_id`, `source_task_id`, `source_frame_id` and `source_row_id` are
+reserved: a source CSV that already contains any of them is rejected. `source_id` is
+the source name; project, task and frame IDs are filled only from CVAT source identity
+and stay empty for S3 rows. `source_row_id` is `<source-name>:<SHA-256 of the row>:<n>`,
+where `n` counts identical rows.
 
 ### Publication and preparation records
 
@@ -501,7 +520,10 @@ registry snapshot. Files without managed extensions remain readable.
 Managed local preparation uses `format_version=2` and binds captured sources,
 transformed CSV, payload hashes, media, the relevant resolved shared definition and
 exact parent. The format differs from standalone `format_version=1`; the behavior and
-freshness rules are owned by the managed specification linked above.
+freshness rules are owned by the managed specification linked above. Feedback delivery
+keeps its receipts in the preparation's `feedback.json`, separate from the payload: intent
+is recorded before each CVAT issue write and acknowledged afterwards, so an interrupted
+delivery resumes without duplicating issues.
 
 ### Public operations
 
