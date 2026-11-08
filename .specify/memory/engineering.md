@@ -343,7 +343,7 @@ and run the full default pipeline after the last task commit.
 - The `mypy` hook runs standalone whole-project analysis without stopping or
   modifying pre-existing daemon processes.
 - The `pytest` hook runs affected unit tests and excludes `tests/integration`,
-  including its conftest. Staged non-Python fixtures run all unit tests because
+  including its conftest. Selected non-Python inputs and deletions run all unit tests because
   testmon tracks Python only. Coverage remains an explicit full-suite merge gate.
 - Invoke `integration-tests` with `--hook-stage manual --all-files` for the live
   suite. It may wait for stopped stands; the `running-integration-tests` skill

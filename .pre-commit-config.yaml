@@ -74,11 +74,11 @@ repos:
     include_deleted: true
   - id: pytest
     name: pytest (affected unit tests, testmon)
-    entry: bash -c 'if git diff --cached --name-only | grep -E "^(cveta2|tests)/" | grep -qvE "\.py$"; then exec uv run --locked
-      pytest --testmon-noselect -m "not integration" --ignore=tests/integration; fi; exec uv run --locked pytest --testmon
-      -m "not integration" --ignore=tests/integration'
+    entry: bash -c 'for file do case "$file" in *.py) test -e "$file" && continue;; esac; exec uv run --locked pytest --testmon-noselect
+      -m "not integration" --ignore=tests/integration; done; exec uv run --locked pytest --testmon -m "not integration" --ignore=tests/integration'
+      --
     language: system
-    pass_filenames: false
+    pass_filenames: true
     files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$)
     stages:
     - pre-commit
