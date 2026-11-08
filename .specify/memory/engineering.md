@@ -331,21 +331,17 @@ several writers share the checkout.
 Hooks call `uv run --locked`, so a stale `uv.lock` fails rather than re-locks.
 `uv.lock` may change only together with `pyproject.toml` (the `lockfile-guard`
 hook); a deliberate re-lock alone, such as a dependency upgrade, is a
-`build(deps):` commit made with `SKIP=lockfile-guard`, the one standing
-exception to the no-bypass rule below; the release commit's skip in
-[Releases](#releases) is the other. Do not bypass hooks otherwise unless the
-user explicitly directs it.
+`build(deps):` commit made with `SKIP=lockfile-guard`, an explicit dependency-maintenance exception. Intermediate task commits may also
+skip named verification hooks; commit-message checks remain enabled. Clear SKIP
+and run the full default pipeline after the last task commit.
 
 - Default verification runs unit checks at commit time; live integration and
   advisory mutation are manual hooks. There is no pre-push stage. Pushes still
   require separate authorization and the acceptance checks below.
 - A hook that rewrites files (`uv lock`, `ruff format`): inspect the new diff,
   restage only task-owned paths and commit again.
-- The `mypy` hook runs the mypy daemon (`dmypy run -- .`), which stays alive
-  per worktree; any daemon failure falls back to a full `mypy .`, which gives
-  the verdict. Run the daemon on `.` only (a path subset can crash its
-  fine-grained mode in third-party code) and stop it with `uv run dmypy stop`
-  after a dependency or mypy configuration change.
+- The `mypy` hook runs standalone whole-project analysis without stopping or
+  modifying pre-existing daemon processes.
 - The `pytest` hook runs affected unit tests and excludes `tests/integration`,
   including its conftest. Staged non-Python fixtures run all unit tests because
   testmon tracks Python only. Coverage remains an explicit full-suite merge gate.
@@ -360,8 +356,7 @@ user explicitly directs it.
   remain advisory, while tool errors and failing clean tests must be resolved.
 - A failure caused by unrelated pre-existing work: report the exact blocker; do
   not modify, stage or discard that work.
-- Rebase, cherry-pick and merge run no pre-commit hook, and a commit that only
-  deletes files runs no file-filtered hook. After rewriting history and before
+- Rebase, cherry-pick and merge run no pre-commit hook, while deletion-only commits select the relevant project-wide hooks. After rewriting history and before
   pushing it, run `uv run prek run --all-files`, and
   `uv run python scripts/mutation.py --base <upstream>` for the mutation report
   (the hook only sees staged changes, which are empty then).

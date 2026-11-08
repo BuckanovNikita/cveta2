@@ -63,3 +63,13 @@ Behavior, interface, dependency, security and operational-policy changes require
 independent review after integration and verification; wording edits may be self-reviewed.
 Documentation checks are limited to native Spec Kit or OpenSpec checks. Local commits
 may be autonomous; pushes require separate authorization, including existing session authorization.
+
+## Split commits and final verification
+
+Intermediate task commits may skip explicitly named verification hooks with `SKIP`;
+keep commit-message validation enabled. After the last commit, clear `SKIP` and run
+`prek run --all-files` through the project environment. Keep applicable manual and
+release gates. Inspect auto-fixes and commit mechanical changes separately, then
+repeat affected verification until the final committed content passes without changes.
+Reuse successful checks while their inputs remain unchanged; do not repeat full
+verification before every intermediate commit.

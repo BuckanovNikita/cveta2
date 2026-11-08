@@ -66,8 +66,9 @@ and bounded by a per-commit budget: survivors are information, triaged with the
 repository mutation skill rather than recorded in an allowlist. Tests MUST
 observe behavior; do not add tests whose only purpose is to kill a mutant of a
 default argument or to pin presentation wording, and extend a module's existing
-test file before creating a new one. Commits require their configured,
-path-filtered hooks, whose test hook runs unit tests affected by the change.
+test file before creating a new one. Ordinary commits use configured path-filtered hooks. Intermediate task commits
+may skip named verification hooks while retaining message validation; final
+committed content requires the full default pipeline with skips cleared.
 Live integration and advisory mutation run through explicit manual stages;
 code changes still require a reported mutation run before acceptance. The full suite with coverage MUST pass on a branch tip
 before it is merged; Spec Kit does not replace these checks.
@@ -76,7 +77,8 @@ before it is merged; Spec Kit does not replace these checks.
 
 Agents MUST inspect status and diffs before editing, preserve unrelated work,
 and stage only task-owned paths when a commit is authorized. Do not automatically
-stash, reset, revert, or bypass hooks; the only standing exceptions are the
+stash, reset, revert, or disable all hooks. Targeted intermediate verification
+skips are allowed; additional standing exceptions are the
 release commit's documented heavy-hook skip and the `build(deps)` re-lock skip
 of the lockfile guard, both defined in engineering guidance. Shared integration resources MUST use the
 existing lifecycle skills, one owned run tag, and exact-tag cleanup on success
@@ -218,4 +220,8 @@ unit checks; live integration and changed-function mutation are explicit manual
 stages. Full-suite coverage before merge and mutation reporting for code changes
 remain acceptance requirements. Application behavior and test fixtures are unchanged.
 
-**Version**: 3.0.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-07
+Version 3.1.0 permits targeted verification skips for intermediate task commits,
+with full default verification after the final commit and separate mechanical
+fix commits. Message validation and release acceptance remain required.
+
+**Version**: 3.1.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-08
