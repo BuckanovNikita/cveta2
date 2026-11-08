@@ -242,17 +242,6 @@ the Claude copy carries Claude-only frontmatter. Their hashes are recorded in
 them. Regenerate them with `specify` (see `.specify/integration.json` for the
 installed integrations).
 
-### Portable usage skill
-
-The canonical portable `cveta2` skill lives in
-[corp-skills/skills/cveta2](https://github.com/BuckanovNikita/corp-skills/tree/main/skills/cveta2).
-It teaches tool usage; this repository owns implementation and public contracts.
-Edit that source package, not an installed agent copy. Keep machine-specific setup
-in global environment guidance.
-
-Update this canonical usage guidance when public behavior changes. Preserve unrelated
-edits and dated evidence; installation remains a separate action.
-
 ## Mutation testing
 
 `scripts/mutation.py` mutates the functions a commit changes, in a fresh
