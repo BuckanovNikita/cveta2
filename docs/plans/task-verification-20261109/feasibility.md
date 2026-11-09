@@ -82,13 +82,9 @@ paths = sorted(
     if path.is_file() and "__pycache__" not in path.parts
 )
 paths += [Path("pytest.ini"), Path("uv.lock"), Path("Taskfile.yml")]
-rows = [
-    ("interpreter", sys.version, sys.implementation.cache_tag,
-     sys.executable, platform.platform())
-]
+rows = [("interpreter", sys.version, sys.implementation.cache_tag, sys.executable, platform.platform())]
 rows += [
-    (path.as_posix(), "" if path.suffix == ".py"
-     else hashlib.sha256(path.read_bytes()).hexdigest())
+    (path.as_posix(), "" if path.suffix == ".py" else hashlib.sha256(path.read_bytes()).hexdigest())
     for path in sorted(paths)
 ]
 print(hashlib.sha256(json.dumps(rows).encode()).hexdigest())
