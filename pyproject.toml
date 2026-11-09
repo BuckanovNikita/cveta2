@@ -84,6 +84,7 @@ dev = [
     "clearml[s3]>=2.1.12,<3",
     "deptry>=0.23",
     "hypothesis>=6.130",
+    "go-task-bin>=3.54.0",
 ]
 
 [tool.semantic_release]
@@ -108,6 +109,10 @@ commit_message = "chore(release): {version}"
 build_command = """
 uv lock --upgrade-package "$PACKAGE_NAME"
 git add uv.lock
+if [ "${CVETA2_RELEASE_CHECK:-}" = 1 ]; then
+    git add pyproject.toml CHANGELOG.md
+    uv run --locked task --exit-code release-check
+fi
 """
 
 [tool.semantic_release.changelog]

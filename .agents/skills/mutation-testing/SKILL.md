@@ -1,6 +1,6 @@
 ---
 name: mutation-testing
-description: Runs and triages cveta2's changed-function mutation check (scripts/mutation.py, [tool.mutmut] in pyproject.toml). Use for surviving mutants reported by the manual mutmut hook, hardening tests of a function, deciding whether a survivor is equivalent, a run that produces no mutants, or edits to the mutmut settings.
+description: Runs and triages cveta2's changed-function mutation check (scripts/mutation.py, [tool.mutmut] in pyproject.toml). Use for surviving mutants reported by the mutation Task, hardening tests of a function, deciding whether a survivor is equivalent, a run that produces no mutants, or edits to the mutmut settings.
 ---
 
 # Changed-function mutation testing
@@ -8,18 +8,18 @@ description: Runs and triages cveta2's changed-function mutation check (scripts/
 `scripts/mutation.py` maps the staged diff to the top-level functions and methods
 it touches, exports the index into a fresh temporary workspace, and runs mutmut
 there on those functions only. It reports survivors (the first five with diffs)
-and passes; nothing is cached or shared between runs. The hook runs within a
+and passes; nothing is cached or shared between runs. The workflow runs within a
 budget: at most 8 changed functions (`--max-functions`) and 120 s of mutmut
 (`--budget-seconds`); unjudged mutants count as "not run", and mutants no unit
 test reaches as "not reached by tests", never as survivors. Read the script's
 docstring for the mechanics.
 
 ```bash
-uv run prek run mutmut --hook-stage manual --all-files  # staged change vs HEAD
-uv run python scripts/mutation.py --base main       # the whole branch
-uv run python scripts/mutation.py cveta2/domain/merge.py   # every function of a file
-uv run python scripts/mutation.py --keep --strict   # keep workspace; exit 1 on survivors
-uv run python scripts/mutation.py --budget-seconds 0 --max-functions 0  # no budget
+uv run --locked task --exit-code mutation  # staged change vs HEAD
+uv run --locked task --exit-code mutation -- --base main  # whole branch
+uv run --locked task --exit-code mutation -- cveta2/domain/merge.py
+uv run --locked task --exit-code mutation -- --keep --strict
+uv run --locked task --exit-code mutation -- --budget-seconds 0 --max-functions 0
 ```
 
 With `--keep`, `cd` into the printed workspace and use
@@ -62,3 +62,6 @@ also passes, but is a prompt to add a unit test.
 Report the functions mutated (and any skipped by the budget), the
 killed/survived/not-reached/not-run counts, each survivor's
 classification (test added, equivalent, presentation) and the rerun result.
+Survivors remain advisory; tool errors and failing clean tests remain unresolved.
+Run explicitly for code changes before acceptance; do not cache mutation outcomes
+or confuse staged comparison with an unstaged branch comparison.

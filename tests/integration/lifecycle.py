@@ -32,12 +32,12 @@ pods see it), ``MINIO_ACCESS_KEY/SECRET_KEY/REGION/CONSOLE`` and ``MINIO_BUCKET`
 trust variables (``SSL_CERT_FILE`` and friends) the helpers add. A failed
 handshake is reported as a TLS problem, never as a stand that is down.
 
-Stopped stands are normal: the owner shuts them down at times. ``prepare``
-then prints one notice, polls with backoff, prints a heartbeat every few
-minutes and continues once they answer; ``CVETA2_STAND_WAIT_TIMEOUT`` (seconds)
-bounds the wait. A missing skill or Secret key, an untrusted certificate or a
-refused identity fails at once. A missing Secret key is never defaulted: a
-defaulted credential would silently act as somebody else on a shared stand.
+``check`` performs a read-only preflight within ``CVETA2_INFRA_CHECK_TIMEOUT``
+(60 seconds by default). Task-driven ``prepare`` repeats this bounded check;
+an outage blocks setup without minting a tag. Direct operator ``up`` retains
+the explicit stand-wait workflow, bounded by ``CVETA2_STAND_WAIT_TIMEOUT`` when
+set. Missing prerequisites, credentials, TLS trust and refused identities are
+errors rather than temporary outages.
 
 The module stays standard-library only. Inside pytest, ``tests.env_isolation``
 replaces HOME; it records the real environment in ``CVETA2_REAL_ENV`` and this
@@ -48,6 +48,7 @@ the k8s-infra helpers need the real HOME and caches).
 import argparse
 import io
 import json
+import math
 import os
 import re
 import shlex
@@ -57,9 +58,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import urllib.request
 import zipfile
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from http import HTTPStatus
 from pathlib import Path
 from types import FrameType
@@ -101,6 +104,62 @@ class LifecycleError(Exception):
         """Keep every line; the first is the headline."""
         super().__init__(lines[0])
         self.lines = lines
+
+
+class StandUnavailableError(LifecycleError):
+    """Temporary infrastructure unavailability; live verification is deferred."""
+
+
+def _probe_call(command: Sequence[str], deadline: float) -> subprocess.CompletedProcess[str]:
+    """Bound a read-only probe and kill only its owned process group on timeout."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise StandUnavailableError("infrastructure preflight deadline expired")
+    try:
+        with subprocess.Popen(  # noqa: S603 - fixed read-only tool commands
+            list(command),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=child_env(),
+            start_new_session=True,
+        ) as child:
+            try:
+                stdout, stderr = child.communicate(timeout=remaining)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt, SystemExit) as error:
+                with suppress(ProcessLookupError):
+                    os.killpg(child.pid, signal.SIGKILL)
+                child.communicate()
+                if isinstance(error, subprocess.TimeoutExpired):
+                    raise StandUnavailableError(
+                        f"infrastructure preflight timed out during {Path(command[0]).name}"
+                    ) from error
+                raise
+    except FileNotFoundError:
+        fail(f"{command[0]} is not installed or not on PATH; the live tests need it.")
+    return subprocess.CompletedProcess(list(command), child.returncode, stdout, stderr)
+
+
+def _probe_failure(result: subprocess.CompletedProcess[str], description: str) -> NoReturn:
+    """Classify helper transport errors without exposing captured credentials."""
+    detail = (result.stderr or "").lower()
+    permanent = ("unauthorized", "forbidden", "certificate", "tls", "credential", "not found", "401", "403")
+    temporary = (
+        "connection refused",
+        "connection reset",
+        "remote end closed",
+        "timed out",
+        "timeout",
+        "no such host",
+        "name or service not known",
+        "unreachable",
+        "503",
+        "502",
+        "504",
+    )
+    if not any(term in detail for term in permanent) and any(term in detail for term in temporary):
+        raise StandUnavailableError(f"{description}: service connectivity was lost")
+    fail(f"{description} failed (exit {result.returncode}); check prerequisites, credentials, TLS and service access.")
 
 
 def fail(*lines: str) -> NoReturn:
@@ -222,9 +281,10 @@ def find_skill_dir() -> Path | None:
 class Run:
     """One integration run: its tag, its credentials and the steps on it."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, deadline: float | None = None) -> None:
         """Resolve everything a run owns, as sourcing the old env script did."""
         self.root = root
+        self.deadline = deadline
         self.tag_file = root / "tests" / "integration" / ".run-tag"
         self.exported: dict[str, str] = {}
         skill_dir = find_skill_dir()
@@ -266,11 +326,16 @@ class Run:
     def helper(self, stand: str, *args: str, capture: bool = False) -> subprocess.CompletedProcess[str]:
         """Run a k8s-infra helper as project cveta2."""
         script = self.skill_dir / "scripts" / f"{stand}.py"
-        return call(["python3", str(script), "--project", PROJECT, *args], capture=capture)
+        command = [sys.executable, str(script), "--project", PROJECT, *args]
+        if self.deadline is not None:
+            return _probe_call(command, self.deadline)
+        return call(command, capture=capture)
 
     def _stand_env(self, stand: str) -> dict[str, str]:
         completed = self.helper(stand, "env", capture=True)
         if completed.returncode != 0:
+            if self.deadline is not None:
+                _probe_failure(completed, f"{stand} credential lookup")
             fail(
                 f"{stand}.py --project {PROJECT} env failed (see above);",
                 f"the cveta2 {stand} Secret is missing or the cluster is not reachable.",
@@ -288,12 +353,11 @@ class Run:
     # -- run tag ----------------------------------------------------------
 
     def on_main(self) -> bool:
-        branch = subprocess.run(  # noqa: S603 - fixed git arguments
-            ["git", "-C", str(self.root), "symbolic-ref", "--quiet", "--short", "HEAD"],  # noqa: S607
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        command = ["git", "-C", str(self.root), "symbolic-ref", "--quiet", "--short", "HEAD"]
+        if self.deadline is not None:
+            branch = _probe_call(command, self.deadline)
+        else:
+            branch = subprocess.run(command, check=False, capture_output=True, text=True)  # noqa: S603
         return branch.stdout.strip() == "main"
 
     def _read_tag_file(self) -> str:
@@ -458,9 +522,6 @@ class Run:
                 )
         log(f"coco8 images extracted to {images}")
 
-    def whoami_clearml(self) -> bool:
-        return self.helper("clearml", "whoami").returncode == 0
-
     def stop(self) -> int:
         """Remove this tag's objects: CVAT, then the bucket, then ClearML."""
         self.require_tag()
@@ -489,6 +550,18 @@ class Run:
                 f"         python3 \"{self.skill_dir}/scripts/clearml.py\" --project {PROJECT} cleanup --prefix '{tag}'"
             )
             failed = True
+        for stand in REQUIRED_KEYS:
+            listing = self.helper(stand, "ls", "--prefix", tag, capture=True)
+            rows = [
+                line
+                for line in listing.stdout.splitlines()
+                if line.split() and line.split()[0] in {"project", "task", "storage", "bucket"}
+            ]
+            if listing.returncode or rows:
+                warn(f"WARNING: {stand} exact-tag cleanup proof failed for '{tag}': {len(rows)} object row(s).")
+                failed = True
+            else:
+                log(f"{stand}: no objects remain for exact tag '{tag}'")
         if failed:
             warn(f"ERROR: run '{tag}' is not fully torn down; the .run-tag file stays for the retry.")
             return 1
@@ -505,6 +578,8 @@ MAX_DELAY_SECONDS = 60.0
 HEARTBEAT_SECONDS = 300.0
 PROBE_TIMEOUT_SECONDS = 20
 WAIT_TIMEOUT_VARIABLE = "CVETA2_STAND_WAIT_TIMEOUT"
+CHECK_TIMEOUT_VARIABLE = "CVETA2_INFRA_CHECK_TIMEOUT"
+DEFAULT_CHECK_TIMEOUT_SECONDS = 60.0
 
 
 # curl exit statuses of an endpoint that is not there right now: host not
@@ -513,9 +588,12 @@ DOWN_CURL_STATUSES = frozenset({6, 7, 28, 52, 56, -1})
 HTTP_SERVER_ERROR = 500
 
 
-def _quiet(command: Sequence[str]) -> tuple[int, str]:
+def _quiet(command: Sequence[str], deadline: float | None = None) -> tuple[int, str]:
     """Exit status and stdout of a probe command; its stderr is noise."""
     try:
+        if deadline is not None:
+            result = _probe_call(command, deadline)
+            return result.returncode, result.stdout
         completed = subprocess.run(  # noqa: S603 - fixed tool commands and stand URLs
             list(command),
             check=False,
@@ -532,14 +610,14 @@ def _quiet(command: Sequence[str]) -> tuple[int, str]:
     return completed.returncode, completed.stdout
 
 
-def _curl(name: str, url: str) -> str | None:
+def _curl(name: str, url: str, deadline: float | None = None) -> str | None:
     """None when the endpoint answers; a reason when it is down; else fail.
 
     Down means no connection or an HTTP 5xx (an ingress whose backend is scaled
     to zero answers 503). A TLS failure or another HTTP error (404, 401) is a
     problem waiting cannot fix.
     """
-    status, out = _quiet(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url])
+    status, out = _quiet(["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url], deadline)
     if status in TLS_CURL_STATUSES:
         fail(
             f"TLS verification of the {name} stand at {url} failed (curl exit {status}).",
@@ -549,8 +627,11 @@ def _curl(name: str, url: str) -> str | None:
         return f"the {name} stand at {url} does not answer (curl exit {status})"
     if status != 0:
         fail(f"curl could not check the {name} stand at {url} (exit {status}).")
-    code = int(out.strip() or "0")
-    if code >= HTTP_SERVER_ERROR:
+    try:
+        code = int(out.strip() or "0")
+    except ValueError:
+        fail(f"curl returned an invalid HTTP status for the {name} stand")
+    if code >= HTTP_SERVER_ERROR or code == HTTPStatus.TOO_MANY_REQUESTS:
         return f"the {name} stand at {url} answers HTTP {code}"
     if code >= HTTPStatus.BAD_REQUEST or code == 0:
         fail(
@@ -560,7 +641,74 @@ def _curl(name: str, url: str) -> str | None:
     return None
 
 
-def probe(root: Path) -> "Run | str":
+def _cluster_available(deadline: float) -> str | None:
+    """Separate Kubernetes access errors from temporary connectivity failures."""
+    try:
+        result = _probe_call(["kubectl", "--context", "docker-desktop", "get", "--raw=/readyz"], deadline)
+    except StandUnavailableError as error:
+        return str(error)
+    if result.returncode == 0:
+        return None
+    detail = result.stderr.lower()
+    if any(term in detail for term in ("unauthorized", "forbidden", "certificate", "tls", "context", "credentials")):
+        fail("Kubernetes access, context, credentials or TLS configuration failed; check kubectl access.")
+    if any(
+        term in detail
+        for term in (
+            "connection refused",
+            "connection reset",
+            "timed out",
+            "timeout",
+            "no such host",
+            "unreachable",
+            "eof",
+            "serviceunavailable",
+            "unable to handle the request",
+        )
+    ):
+        return "the docker-desktop cluster does not answer"
+    fail(f"Kubernetes readiness probe failed unexpectedly (exit {result.returncode}); check kubectl access.")
+
+
+def _run_capacity(run: Run) -> str | None:
+    """Apply the installed registry's limit without claiming or creating a run."""
+    override = os.environ.get("INFRA_REGISTRY")
+    candidates = (
+        [Path(override)] if override else [run.skill_dir / "projects.toml", run.skill_dir / "scripts" / "projects.toml"]
+    )
+    try:
+        registry = next(path for path in candidates if path.is_file())
+        values = tomllib.loads(registry.read_text(encoding="utf-8"))
+        limit = values["capacity"]["cveta2_integration_runs"]
+        pattern = re.compile(values["contract"]["tag_regex"])
+    except (StopIteration, OSError, KeyError, TypeError, tomllib.TOMLDecodeError, re.PatternError) as error:
+        fail(f"cannot read integration capacity from the k8s-infra registry: {error}")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        fail("registry capacity.cveta2_integration_runs must be a positive integer")
+    if "project" not in pattern.groupindex:
+        fail("registry contract.tag_regex must identify the owning project")
+    listing = run.helper("cvat", "ls", capture=True)
+    if listing.returncode:
+        _probe_failure(listing, "CVAT run-capacity listing")
+    tags: set[str] = set()
+    for line in listing.stdout.splitlines():
+        fields = line.split(maxsplit=4)
+        if not fields or fields[0] not in {"project", "task", "storage"}:
+            continue
+        if len(fields) != 5:
+            fail("CVAT run-capacity listing has an unexpected row format")
+        tag = fields[4].split()[0]
+        match = pattern.fullmatch(tag)
+        if tag == MAIN_TAG or (match is not None and match.groupdict().get("project") == PROJECT):
+            tags.add(tag)
+    # An explicitly adopted run already occupies its slot.
+    tags.discard(run.tag)
+    if len(tags) >= limit:
+        return f"capacity.cveta2_integration_runs is full ({len(tags)}/{limit})"
+    return None
+
+
+def probe(root: Path, *, deadline: float | None = None) -> "Run | str":
     """Return a ready run, or the reason the stands are down.
 
     "Down" is what the owner causes by stopping the stands (cluster or stand
@@ -570,10 +718,12 @@ def probe(root: Path) -> "Run | str":
     LifecycleError, because waiting would not fix it.
     """
     skill_dir = find_skill_dir()
-    if skill_dir is not None and _quiet(["kubectl", "--context", "docker-desktop", "get", "--raw=/readyz"])[0]:
-        return "the docker-desktop cluster does not answer"
-    run = Run(root)
-    room, _ = _quiet(["python3", str(run.skill_dir / "scripts" / "infra.py"), "room"])
+    if skill_dir is not None:
+        reason = _cluster_available(deadline or (time.monotonic() + PROBE_TIMEOUT_SECONDS))
+        if reason is not None:
+            return reason
+    run = Run(root, deadline=deadline)
+    room, _ = _quiet([sys.executable, str(run.skill_dir / "scripts" / "infra.py"), "room"], deadline)
     if room == ROOM_WAIT:
         return "infra.py room answers WAIT: the stands are at capacity"
     if room != 0:
@@ -583,18 +733,37 @@ def probe(root: Path) -> "Run | str":
         ("MinIO", f"{os.environ['MINIO_ENDPOINT']}/minio/health/live"),
         ("ClearML", f"{os.environ['CLEARML_API_HOST']}/debug.ping"),
     ):
-        reason = _curl(name, url)
+        reason = _curl(name, url, deadline)
         if reason is not None:
             return reason
-    if not run.whoami_clearml():
-        fail(
-            "the ClearML stand answers but does not authenticate the cveta2 identity",
-            f"(clearml.py --project {PROJECT} whoami failed, see above).",
-            "A certificate or SSL error in that output is a trust problem, not a refused identity:",
-            *TLS_REMEDY,
-            "Diagnose the stand and the Secret with the k8s-infra skill.",
-        )
+    for stand in REQUIRED_KEYS:
+        identity = run.helper(stand, "whoami", capture=True)
+        if identity.returncode:
+            _probe_failure(identity, f"{stand} identity probe")
+    reason = _run_capacity(run)
+    if reason is not None:
+        return reason
+    run.deadline = None
     return run
+
+
+def check_timeout() -> float:
+    raw = os.environ.get(CHECK_TIMEOUT_VARIABLE, str(DEFAULT_CHECK_TIMEOUT_SECONDS))
+    try:
+        timeout = float(raw)
+    except ValueError:
+        fail(f"{CHECK_TIMEOUT_VARIABLE} must be a positive finite number of seconds")
+    if not math.isfinite(timeout) or timeout <= 0:
+        fail(f"{CHECK_TIMEOUT_VARIABLE} must be a positive finite number of seconds")
+    return timeout
+
+
+def check_stands(root: Path) -> Run:
+    """One read-only preflight, with one overall deadline and no polling."""
+    result = probe(root, deadline=time.monotonic() + check_timeout())
+    if isinstance(result, str):
+        raise StandUnavailableError(result)
+    return result
 
 
 def _minutes(seconds: float) -> str:
@@ -656,16 +825,36 @@ def prepare(root: Path, *, notify: Callable[[str], None]) -> "Run":
     The teardown is armed before seeding: a failed or interrupted ``up`` keeps
     or stops whatever its tag already created, exactly as ``finish`` would.
     """
-    run = wait_for_stands(lambda: probe(root), notify=notify, timeout=wait_timeout())
+    if os.environ.get("CVETA2_TASK_VERIFICATION") == "1":
+        try:
+            run = check_stands(root)
+        except StandUnavailableError as error:
+            raise StandUnavailableError(f"UNAVAILABLE: live setup blocked: {error}") from error
+    else:
+        run = wait_for_stands(lambda: probe(root), notify=notify, timeout=wait_timeout())
     run.refuse_active_run()
     try:
         run.up()
-    except BaseException:
+    except BaseException as setup_error:
+        unavailable: StandUnavailableError | None = None
+        if os.environ.get("CVETA2_TASK_VERIFICATION") == "1" and isinstance(setup_error, LifecycleError):
+            try:
+                check_stands(root)
+            except StandUnavailableError as error:
+                unavailable = error
+            except LifecycleError as error:
+                # Preserve the original setup failure while exposing a second
+                # permanent preflight error, without treating it as an outage.
+                report(error)
         if run.tag:
             try:
                 finish(run)
             except LifecycleError as error:
                 report(error)
+        if unavailable is not None:
+            raise StandUnavailableError(
+                f"UNAVAILABLE: live setup blocked: {unavailable}; original setup failure: {setup_error}"
+            ) from setup_error
         raise
     return run
 
@@ -708,6 +897,10 @@ def _print_env(run: "Run") -> None:
 
 
 def _dispatch(command: str, root: Path) -> int:
+    if command == "check":
+        check_stands(root)
+        log("AVAILABLE: infrastructure preflight passed; no resources created")
+        return 0
     if command == "up":
         prepare(root, notify=warn)
         return 0
@@ -727,6 +920,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=argparse.SUPPRESS,
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("check", help="read-only bounded availability check (0 available, 3 unavailable, 1 error)")
     commands.add_parser("env", help="print this run's variables as shell exports")
     commands.add_parser("up", help="wait for the stands, claim a tag, seed the run")
     commands.add_parser("stop", help="remove the run and release its tag")
@@ -739,8 +933,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     root: Path = args.repo_root.resolve()
     try:
         return _dispatch(args.command, root)
+    except StandUnavailableError as error:
+        warn(f"UNAVAILABLE: {error}; live verification is deferred")
+        return ROOM_WAIT
     except LifecycleError as error:
         report(error)
+        return 1
+    except OSError as error:
+        warn(f"ERROR: lifecycle operation could not access a required tool or file ({type(error).__name__})")
         return 1
     except KeyboardInterrupt:
         warn("interrupted")

@@ -52,36 +52,49 @@ limited to opaque third-party SDK boundaries with an explanatory comment.
 
 ### IV. Verify the changed behavior
 
-Plans and task lists MUST include the repository checks appropriate to the
-change, regardless of optional-test wording in upstream templates. Start with
-the nearest meaningful tests and expand when shared behavior, interfaces, or
-failures justify it. Bug fixes MUST capture the failing observation, reproduce
-it when feasible, and verify the original failure path. When reproduction is
-unavailable, distinguish hypotheses, static evidence, and performed checks.
-Documentation-only work needs no package test run; commit hooks are
-path-filtered so that such commits run only fast checks.
-Reported results MUST identify skipped or unavailable checks accurately.
-Preserve test environment isolation and cleanup. Live tests on the shared stands
-remain part of the full acceptance suite; a stopped stand is waited for with a notice,
-never skipped or bypassed. Mutation testing is advisory, scoped to each change
-and bounded by a per-commit budget: survivors are information, triaged with the
-repository mutation skill rather than recorded in an allowlist. Tests MUST
-observe behavior; do not add tests whose only purpose is to kill a mutant of a
-default argument or to pin presentation wording, and extend a module's existing
-test file before creating a new one. Ordinary commits use configured path-filtered hooks. Intermediate task commits
-may skip named verification hooks while retaining message validation; final
-committed content requires the full default pipeline with skips cleared.
-Live integration and advisory mutation run through explicit manual stages;
-code changes still require a reported mutation run before acceptance. The full suite with coverage MUST pass on a branch tip
-before it is merged; Spec Kit does not replace these checks.
+Plans and task lists MUST identify applicable development verification, live
+acceptance and review. Bug fixes MUST record the failing observation, reproduce
+it when feasible, and verify the original failure path; distinguish hypotheses
+from performed checks. Tests MUST exercise product behavior, not third-party
+tooling or presentation details. Extend existing test modules where practical.
+
+Task owns sequential executable verification; prek owns Git hooks and message
+validation. Automatic safe fixes MUST be explicit before staging. Commits MUST
+verify fully staged repository inputs, rejecting unstaged tracked and nonignored
+untracked files before prek. Direct verification describes the working copy.
+Each required command runs once per verification run. Tool-native incremental
+checks and affected-unit selection are permitted with conservative invalidation
+for inputs they cannot track; Task freshness is not completion evidence.
+Interrupted and failed commands establish no successful completion.
+
+Development verification MUST pass on final committed content with verification
+skips cleared. Successful applicable checks are reused while their inputs remain
+unchanged; do not repeat an equivalent full gate merely to change stages.
+Intermediate task commits may explicitly defer the verification hook while
+preserving message validation; final completion remains required.
+
+Acceptance MUST run on a clean branch tip: static checks, packaging, randomized
+property exploration and full-suite coverage including live tests, without a
+preceding duplicate affected-unit stage. Mutation reporting remains required for
+code changes; survivors are advisory, but tool errors are unresolved. Mutation,
+properties, availability, live acceptance and release operations are never cached.
+
+Live verification MUST begin with bounded read-only preflight. Temporary outage,
+timeout or capacity WAIT means deferred verification, not success; configuration,
+credentials, TLS and authorization errors are failures requiring diagnosis.
+Continue independent local work, retry at a meaningful milestone or after restored
+availability, and stop for the user's decision when only blocked verification
+remains. Deferred checks block acceptance, merge and release. Explicit operator
+waiting remains available. Preserve pytest isolation, live serial execution,
+exact-tag cleanup and an honest report of leftovers.
 
 ### V. Preserve ownership, documentation, and release controls
 
 Agents MUST inspect status and diffs before editing, preserve unrelated work,
 and stage only task-owned paths when a commit is authorized. Do not automatically
-stash, reset, revert, or disable all hooks. Targeted intermediate verification
-skips are allowed; the standing release exception is the
-release commit's documented heavy-hook skip, defined in engineering guidance. Shared integration resources MUST use the
+stash, reset, revert, or disable all hooks. An explicitly deferred intermediate verification hook is allowed. The standing
+release exception requires the explicit release-check task for the version,
+changelog and lockfile-only commit, as defined in engineering guidance. Shared integration resources MUST use the
 existing lifecycle skills, one owned run tag, and exact-tag cleanup on success
 and failure; leave other runs and durable resources intact. Do not store
 credentials or machine-specific setup in tracked project artifacts.
@@ -233,4 +246,11 @@ Version 3.2.0 removes the lockfile co-staging policy at the user's request.
 Intentional lockfile-only dependency updates require no hook skip; lockfile
 freshness remains checked. Application contracts are unchanged.
 
-**Version**: 3.2.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-09
+Version 4.0.0 replaces repeated hook pipelines with Task orchestration, explicit
+safe fixes and fully staged commit inputs. Tool-native incremental checks remain,
+while Task freshness is excluded as completion evidence. Bounded infrastructure
+preflight and explicit deferral replace indefinite default waiting; acceptance,
+cleanup, independent review and release controls remain required. This amendment
+implements the user-approved verification migration and changes no product contract.
+
+**Version**: 4.0.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-09

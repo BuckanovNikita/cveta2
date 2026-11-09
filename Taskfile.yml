@@ -1,0 +1,168 @@
+version: '3'
+
+# Deliberately no sources, generates, status, or completion cache.
+# Commands run sequentially; only the individual tools reuse incremental data.
+vars:
+  TEST_WORKERS: '{{default "2" .CVETA2_TEST_WORKERS}}'
+  # Command-local environment assignments defeat inherited shared-cache overrides.
+  RUN: >-
+    env UV_PROJECT_ENVIRONMENT={{.ROOT_DIR | shellQuote}}/.venv
+    TESTMON_DATAFILE={{.ROOT_DIR | shellQuote}}/.testmondata
+    COVERAGE_FILE={{.ROOT_DIR | shellQuote}}/.coverage
+    RUFF_CACHE_DIR={{.ROOT_DIR | shellQuote}}/.ruff_cache
+    MYPY_CACHE_DIR={{.ROOT_DIR | shellQuote}}/.mypy_cache
+
+tasks:
+  fix:
+    desc: Apply safe Ruff fixes and formatting before staging
+    cmds:
+      - "{{.RUN}} uv run --locked ruff check --fix --no-unsafe-fixes ."
+      - "{{.RUN}} uv run --locked ruff format ."
+
+  check:
+    desc: Run read-only static and dependency checks
+    cmds:
+      - "{{.RUN}} uv lock --check"
+      - task: _ruff
+      - "{{.RUN}} uv run --locked lint-imports"
+      - "{{.RUN}} uv run --locked mypy ."
+      - "{{.RUN}} uv run --locked vulture"
+      - "{{.RUN}} uv run --locked deptry ."
+
+  _ruff:
+    internal: true
+    cmds:
+      - "{{.RUN}} uv run --locked ruff check ."
+      - "{{.RUN}} uv run --locked ruff format --check ."
+
+  test:
+    desc: Run affected unit tests with worktree-local testmon history
+    cmds:
+      - task: _unit
+        vars: {TESTMON_MODE: '--testmon'}
+
+  test-full:
+    desc: Run every unit test and refresh testmon dependency information
+    cmds:
+      - task: _unit
+        vars: {TESTMON_MODE: '--testmon-noselect'}
+
+  _unit:
+    internal: true
+    vars:
+      TESTMON_ENV:
+        sh: |
+          {{.RUN}} uv run --locked python - <<'PY'
+          import hashlib
+          import platform
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          digest = hashlib.sha256()
+          digest.update(repr((sys.version, sys.executable, platform.platform())).encode())
+          listed = subprocess.check_output(
+              ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z']
+          ).decode().split('\0')
+          paths = {Path(name) for name in listed if name}
+          # Ignored downloaded fixture assets can also affect tests.
+          paths.update(Path('tests/fixtures').rglob('*'))
+          paths.update(Path('cveta2').rglob('*'))
+          configs = {'uv.lock', 'Taskfile.yml', '.pre-commit-config.yaml', '.python-version', '.coveragerc'}
+          for path in sorted(paths):
+              if not path.is_file() or '__pycache__' in path.parts or path.suffix in {'.pyc', '.pyo'}:
+                  continue
+              in_tree = path.parts[0] in {'cveta2', 'tests', 'scripts'}
+              config = path.name in configs or path.suffix in {'.toml', '.ini', '.cfg'}
+              if not (in_tree or config or path == Path('main.py')):
+                  continue
+              digest.update(path.as_posix().encode() + b'\0')
+              # Python execution dependencies stay with testmon. Scripts are
+              # orchestration inputs, so changes conservatively invalidate.
+              if path.suffix != '.py' or path.parts[0] == 'scripts':
+                  digest.update(path.read_bytes())
+              digest.update(b'\0')
+          print(digest.hexdigest())
+          PY
+    cmds:
+      - "{{.RUN}} uv run --locked pytest {{.TESTMON_MODE}} --testmon-env={{.TESTMON_ENV}} --ignore=tests/integration -n {{.TEST_WORKERS}} --dist loadgroup"
+
+  build:
+    desc: Validate packaging in uniquely owned temporary output
+    cmds:
+      - |
+        {{.RUN}} bash -eu -c '
+          scratch=$(mktemp -d "${TMPDIR:-/tmp}/cveta2-build.XXXXXX")
+          trap '\''rm -rf -- "$scratch"'\'' EXIT
+          uv build --out-dir "$scratch"
+        '
+
+  verify:
+    desc: Development verification (checks, affected units, packaging)
+    cmds:
+      - task: check
+      - task: test
+      - task: build
+
+  infra-check:
+    desc: Read-only bounded availability (0 available, 3 unavailable, 1 error)
+    cmds:
+      - "{{.RUN}} uv run --locked python -m tests.integration.lifecycle check"
+
+  integration:
+    desc: Preflight then live integration tests with bounded setup
+    cmds:
+      - task: infra-check
+      - "CVETA2_TASK_VERIFICATION=1 {{.RUN}} uv run --locked pytest tests/integration -n {{.TEST_WORKERS}} --dist loadgroup"
+
+  properties:
+    desc: Randomized unit property exploration
+    cmds:
+      - "HYPOTHESIS_PROFILE=explore {{.RUN}} uv run --locked pytest --ignore=tests/integration -p no:randomly -n {{.TEST_WORKERS}} --dist loadgroup"
+
+  mutation:
+    desc: Advisory changed-function mutation (pass -- --base main for branch mode)
+    cmds:
+      - "{{.RUN}} uv run --locked python scripts/mutation.py {{.CLI_ARGS}}"
+
+  _clean-tip:
+    internal: true
+    cmds:
+      - |
+        test -z "$(git status --porcelain --untracked-files=all)" || {
+          echo 'Acceptance requires a clean committed tip.' >&2
+          exit 1
+        }
+
+  acceptance:
+    desc: Clean-tip checks, build, properties, preflight and full live coverage
+    cmds:
+      - task: _clean-tip
+      - task: check
+      - task: build
+      - task: properties
+      - task: infra-check
+      - "CVETA2_TASK_VERIFICATION=1 {{.RUN}} uv run --locked pytest --cov -n {{.TEST_WORKERS}} --dist loadgroup"
+      - task: _clean-tip
+
+  release-check:
+    desc: Explicit checks for the version/changelog/lockfile release exception
+    cmds:
+      - |
+        bash -eu -c '
+          git diff --quiet --ignore-submodules=none
+          if IFS= read -r -d "" path < <(git ls-files --others --exclude-standard -z); then
+            echo "Release check requires fully staged inputs." >&2
+            exit 1
+          fi
+          while IFS= read -r -d "" path; do
+            case "$path" in
+              pyproject.toml|uv.lock|CHANGELOG.md) ;;
+              *) echo "Outside release exception: $path" >&2; exit 1 ;;
+            esac
+          done < <(git diff --cached --name-only -z)
+        '
+      - "{{.RUN}} uv lock --check"
+      - task: _ruff
+      - "{{.RUN}} uv run --locked deptry ."
+      - task: build

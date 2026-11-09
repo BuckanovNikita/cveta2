@@ -48,9 +48,11 @@ hook rules are in engineering guidance. Sources live in `.agents/skills/` and
 `.claude/skills/` symlinks to them; the generated `speckit-*` skills are per-host
 copies (see engineering guidance, "Project skills").
 
+- `verification-workflow` — select Task stages for fixes, commits, acceptance and
+  deferred verification; read before verifying or claiming completion.
 - `mutation-testing` — run and triage the changed-function mutation check.
 - `running-integration-tests` — explicitly invoked live CVAT/MinIO/ClearML tests,
-  run tags, cleanup and the stopped-stand wait.
+  bounded preflight, deferral, run tags and cleanup.
 - `release` — the semantic-release procedure on `main` and its failure recovery.
 
 ## Authorization
@@ -68,15 +70,15 @@ independent review after integration and verification; wording edits may be self
 Documentation checks are limited to native Spec Kit or OpenSpec checks. Local commits
 may be autonomous; pushes require separate authorization, including existing session authorization.
 
-## Split commits and final verification
+## Completion
 
-Intermediate task commits may skip explicitly named verification hooks with `SKIP`;
-keep commit-message validation enabled. After the last commit, clear `SKIP` and run
-`prek run --all-files` through the project environment. Keep applicable manual and
-release gates. Inspect auto-fixes and commit mechanical changes separately, then
-repeat affected verification until the final committed content passes without changes.
-Reuse successful checks while their inputs remain unchanged; do not repeat full
-verification before every intermediate commit.
+Use the `verification-workflow` skill and engineering guidance for explicit fixes,
+fully staged commits, development verification and clean-tip acceptance. Task owns
+commands; prek owns hooks and message validation. Reuse applicable successful
+checks while inputs remain unchanged; Task freshness is never completion evidence.
+Deferred live verification blocks acceptance, merge and release. Continue independent
+local work; when only blocked verification remains, report it and ask for the user's
+decision. Preserve explicit intermediate deferrals and the documented release exception.
 
 ## Specification rewrites
 

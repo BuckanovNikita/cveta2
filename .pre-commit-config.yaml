@@ -6,137 +6,46 @@ fail_fast: true
 repos:
 - repo: local
   hooks:
-  - id: uv-lock-check
-    name: uv lock --check
-    entry: uv lock --check
+  - id: verify
+    name: Task development verification
+    entry: uv run --locked task --exit-code verify
     language: system
     pass_filenames: false
-    files: ^(pyproject\.toml|uv\.lock|\.python-version)$
-    include_deleted: true
-  - id: ruff-format
-    name: ruff format (all files)
-    entry: uv run --locked ruff format --force-exclude
-    language: system
-    pass_filenames: true
-    types_or:
-    - python
-    - pyi
-  - id: ruff-check
-    name: ruff check (all files)
-    entry: uv run --locked ruff check --force-exclude
-    language: system
-    pass_filenames: true
-    types_or:
-    - python
-    - pyi
-  - id: lint-imports
-    name: import-linter (architecture)
-    entry: uv run --locked lint-imports
-    language: system
-    pass_filenames: false
-    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
-    include_deleted: true
-  - id: mypy
-    name: mypy
-    entry: uv run --locked mypy .
-    language: system
-    pass_filenames: false
-    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
-    include_deleted: true
-  - id: vulture
-    name: vulture (dead code)
-    entry: uv run --locked vulture
-    language: system
-    pass_filenames: false
-    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
-    include_deleted: true
-  - id: pytest
-    name: pytest (affected unit tests, testmon)
-    entry: bash -c 'for file do case "$file" in *.py) test -e "$file" && continue;; esac; exec uv run --locked pytest --testmon-noselect
-      -m "not integration" --ignore=tests/integration; done; exec uv run --locked pytest --testmon -m "not integration" --ignore=tests/integration'
-      --
-    language: system
-    pass_filenames: true
-    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
-    include_deleted: true
+    always_run: true
     require_serial: true
   - id: integration-tests
-    name: pytest (live integration, shared stands required)
-    entry: uv run --locked pytest tests/integration
+    name: Task live integration
+    entry: uv run --locked task --exit-code integration
     language: system
     pass_filenames: false
     always_run: true
-    stages:
-    - manual
+    stages: [manual]
   - id: acceptance-tests
-    name: pytest (full acceptance suite with coverage, shared stands required)
-    entry: uv run --locked pytest --cov
+    name: Task clean-tip acceptance
+    entry: uv run --locked task --exit-code acceptance
     language: system
     pass_filenames: false
     always_run: true
-    stages:
-    - manual
+    stages: [manual]
   - id: property-exploration
-    name: pytest (random property exploration, unit tests only)
-    entry: bash -c 'HYPOTHESIS_PROFILE=explore exec uv run --locked pytest -m "not integration" --ignore=tests/integration
-      -p no:randomly'
+    name: Task property exploration
+    entry: uv run --locked task --exit-code properties
     language: system
     pass_filenames: false
     always_run: true
-    stages:
-    - manual
-  - id: deptry
-    name: deptry (declared dependencies)
-    entry: uv run --locked deptry .
-    language: system
-    pass_filenames: false
-    files: ^(cveta2/|pyproject\.toml$|uv\.lock$|\.python-version$)
-    include_deleted: true
-  - id: uv-build
-    name: uv build (check project is buildable)
-    entry: bash -c 'uv build --quiet && rm -rf dist'
-    language: system
-    pass_filenames: false
-    files: ^(cveta2/|pyproject\.toml$|uv\.lock$|README\.md$|\.python-version$)
-    include_deleted: true
+    stages: [manual]
   - id: mutmut
-    name: mutmut (changed functions, advisory)
-    entry: uv run --locked python scripts/mutation.py
+    name: Task changed-function mutation (advisory)
+    entry: uv run --locked task --exit-code mutation
     language: system
     pass_filenames: false
-    files: ^cveta2/.*\.py$
-    stages:
-    - manual
+    always_run: true
+    stages: [manual]
     verbose: true
-  - id: ruff-format-config
-    name: ruff format (all files) (configuration changed)
-    entry: uv run --locked ruff format --force-exclude .
-    language: system
-    pass_filenames: false
-    include_deleted: true
-    files: ^(pyproject\.toml|uv\.lock|\.?ruff\.toml|\.pre-commit-config\.yaml|\.python-version)$
-  - id: ruff-check-config
-    name: ruff check (all files) (configuration changed)
-    entry: uv run --locked ruff check --force-exclude .
-    language: system
-    pass_filenames: false
-    include_deleted: true
-    files: ^(pyproject\.toml|uv\.lock|\.?ruff\.toml|\.pre-commit-config\.yaml|\.python-version)$
 - repo: https://github.com/compilerla/conventional-pre-commit
   rev: v4.5.0
   hooks:
   - id: conventional-pre-commit
-    stages:
-    - commit-msg
-    args:
-    - build
-    - chore
-    - ci
-    - docs
-    - feat
-    - fix
-    - perf
-    - refactor
-    - style
-    - test
+    stages: [commit-msg]
+    args: [build, chore, ci, docs, feat, fix, perf, refactor, style, test]
 minimum_prek_version: 0.5.10

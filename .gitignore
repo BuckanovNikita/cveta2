@@ -65,6 +65,8 @@ tests/integration/.run-tag
 !.agents/skills/release/**
 !.agents/skills/running-integration-tests/
 !.agents/skills/running-integration-tests/**
+!.agents/skills/verification-workflow/
+!.agents/skills/verification-workflow/**
 # Repository-managed Spec Kit skills; personal skills remain ignored.
 !.agents/skills/speckit-*/
 !.agents/skills/speckit-*/**

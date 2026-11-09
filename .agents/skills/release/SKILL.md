@@ -1,83 +1,86 @@
 ---
 name: release
-description: Merges a checked cveta2 branch into main by fast-forward and cuts the release with semantic-release under a release lock - full check on the branch tip, ff-only merge, version bump, changelog and Git tag with the heavy hooks skipped, push and confirmation. Use when a branch is ready to land on main, when semantic-release fails or stays silent, or when a release hook fails and leaves bumped files staged.
+description: Integrate an accepted cveta2 tip by fast-forward and evaluate semantic-release under the shared release lock. Use for releases, blocked acceptance, explicit release-check failures, or staged version/changelog/lockfile recovery.
 ---
 
 # Merge and release cveta2
 
-Release policy is in engineering guidance § "Commits, hooks, and releases":
-- `main` changes only by fast-forward merge;
-- semantic-release is the only writer of the version;
-- only Git tags are published;
-- authorization rules apply.
+[Engineering guidance](../../../.specify/memory/engineering.md#releases) owns policy.
+Semantic-release owns versions, changelog and tags. Publish Git version tags only.
+`BRANCH` below names the branch to land. Push authorization is separate.
 
-This skill is the procedure. `BRANCH` is the branch to land.
+## 1. Accept the clean branch tip
 
-## 1. Check the branch tip
-
-On `BRANCH`, with a clean working tree:
+Fetch and rebase if needed, inspect load and choose `CVETA2_TEST_WORKERS`. On the
+clean committed branch, with `SKIP` cleared:
 
 ```bash
 git fetch origin
-git rebase origin/main                 # skip when already on top of main
-uv run prek run --all-files            # default verification over the whole tree
-uv run prek run acceptance-tests --hook-stage manual --all-files
-uv run prek run property-exploration --hook-stage manual --all-files
+git rebase origin/main
+uv run --locked task --exit-code acceptance
 ```
 
-- **After the rebase,** if it rewrote commits, the commit hooks did not run on
-  them. These checks are what covers them.
-- **Live tests may wait for stopped stands,** with a notice. Run the full suite
-  in the background and tell the user it is waiting; never skip it.
-- **Every check must pass** before step 2.
+Skip an unnecessary rebase. Acceptance includes static checks, packaging,
+randomized properties and full-suite live coverage; do not repeat those stages
+or run affected units immediately beforehand. Code changes also require the
+`mutation-testing` skill's branch comparison and fresh independent review after
+integration and verification. A rewritten or changed tip needs checks for the new
+inputs. Record the accepted tip and outcomes in the release-attempt report.
+
+Use `running-integration-tests` for bounded preflight and cleanup. UNAVAILABLE/3
+means deferred verification, ERROR/1 means diagnosis is required. Continue useful
+independent work; retry at a meaningful milestone or after restored availability.
+When only blocked verification remains, stop and ask for the user's decision.
+Every required check must pass before integration. Live acceptance is reusable
+only within this same release attempt on the unchanged clean branch tip.
 
 ## 2. Merge, release and push under the lock
 
-Proceed only with the user's separate authorization to push `main` and the
-release tag; otherwise stop after step 1 and report its results.
+Proceed only with separate authorization to push `main` and the release tag;
+otherwise stop after the concrete acceptance result. Set `ACCEPTED_TIP` to the
+commit just accepted; do not infer acceptance from a branch name or old cache.
 
 ```bash
 git switch main
 flock -n "$(git rev-parse --git-common-dir)/cveta2-release.lock" bash -c '
   set -e
+  test "$(git rev-parse "$1")" = "$2"
+  test -z "$(git status --porcelain)"
   git fetch origin
-  git merge --ff-only origin/main      # catch up with what other sessions pushed
-  git merge --ff-only "$1"             # land the checked branch
-  uv run semantic-release version --print
-  SKIP=lint-imports,mypy,vulture,pytest uv run semantic-release version --no-push --no-vcs-release
+  git merge --ff-only origin/main
+  git merge --ff-only "$1"
+  test "$(git rev-parse HEAD)" = "$2"
+  uv run --locked semantic-release version --print
+  CVETA2_RELEASE_CHECK=1 SKIP=verify uv run --locked semantic-release version --no-push --no-vcs-release
   git push origin main --follow-tags
-' _ "$BRANCH"
-git ls-remote origin refs/heads/main 'refs/tags/v*' | tail -3   # confirm it landed
+' _ "$BRANCH" "$ACCEPTED_TIP"
+git ls-remote origin refs/heads/main 'refs/tags/v*'
 ```
 
-- **The lock.** `flock -n` fails at once when another session holds the lock.
-  Report that and retry after that session's release, instead of waiting
-  silently.
-- **The merge is refused.** `--ff-only` refuses when `origin/main` moved past
-  the branch's base. Nothing was tagged; return to step 1: rebase and check
-  again.
-- **No release.** `No release will be made` after a merge of only non-releasing
-  types is a success; the push publishes `main` alone.
-- **The skip.** The release commit touches `pyproject.toml`, `uv.lock` and
-  `CHANGELOG.md` on an already-checked tree. The `SKIP` list is the documented
-  exception. Ruff, `uv lock --check`, deptry and `uv build`
-  still run.
+The lock covers merge through push. Lock contention is a reported blocker, not
+permission to start a concurrent release. If a fast-forward fails or the accepted
+tip no longer matches, return to step 1; do not tag a different tip. A no-release
+decision is successful evaluation and publishes only `main` when authorized.
 
-## A release hook fails
+`CVETA2_RELEASE_CHECK=1` explicitly invokes
+`uv run --locked task --exit-code release-check` from semantic-release's build
+command after its version/changelog/lockfile updates and before committing.
+The task permits only those release paths and runs lock, read-only Ruff,
+dependency and packaging checks. `SKIP=verify` is the documented release exception;
+Conventional Commit validation and staging guards remain active. Never use the
+exception for other content or infer it from the branch name.
 
-The commit and tag are not created, but the bumped version files stay staged.
-Read the error, then restore them and fix the cause before releasing again:
+## Failed release recovery
 
-```bash
-git restore --staged --worktree pyproject.toml uv.lock CHANGELOG.md
-```
-
-Never hand-edit the version or create the tag yourself. Never widen the `SKIP`
-list beyond the one above.
+A failed build/check may leave task-owned version, changelog and lockfile changes
+staged without a release commit or tag. Inspect `git status`, the staged diff and
+actual tags before recovery; establish which changes this attempt created. Restore
+only those owned changes when returning to the accepted tip, fix the cause on the
+branch and repeat affected verification. Do not hand-edit the version or tag, widen
+the exception, discard unrelated work or claim a partially created release passed.
 
 ## Report
 
-- The merged range and the full-check results from step 1.
-- The released version, or "no release".
-- The release commit and tag, confirmed by `git ls-remote`.
-- Any failed, skipped or waiting gate, reported as a gap.
+Report the accepted and merged tips, required check outcomes, mutation findings,
+release version or no-release decision, and actual release commit/tag. Confirm
+pushed refs remotely. Distinguish failures, deferred checks and cleanup leftovers.

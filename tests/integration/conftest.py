@@ -83,9 +83,10 @@ def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Run]:
     finally:
         try:
             if lifecycle.finish(run):
-                _notify(
-                    request,
-                    f"run '{run.tag}' is not fully torn down; see the output above.",
+                pytest.fail(
+                    f"run '{run.tag}' is not fully torn down; retry exact-tag cleanup with "
+                    f"INFRA_RUN_TAG={run.tag} {lifecycle.MODULE} stop; see the output above.",
+                    pytrace=False,
                 )
         finally:
             os.environ.clear()

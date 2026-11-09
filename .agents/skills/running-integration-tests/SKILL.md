@@ -1,6 +1,6 @@
 ---
 name: running-integration-tests
-description: Runs and troubleshoots cveta2's live tests against the shared CVAT, MinIO and ClearML stands of the docker-desktop cluster. They run through the manual integration-tests hook or an explicit full pytest run (tests/integration, session fixture over tests/integration/lifecycle.py). Use for targeted or full live runs, stopped-stand waits, live test failures, run-tag ownership and cleanup, TLS trust failures, or concurrent runs.
+description: Run cveta2 live tests through Task with bounded preflight, explicit infrastructure deferral, run-tag ownership and exact-tag cleanup. Use for integration or acceptance runs, blocked setup, assertion failures, TLS/access errors, cleanup leftovers or explicitly requested operator waiting.
 ---
 
 # Run cveta2 live tests
@@ -10,67 +10,75 @@ Live tests run on the shared stands owned by the `k8s-infra` skill (read its
 host. Credentials come from the project Secrets through the skill, never from a
 file.
 
-The live tests are ordinary pytest tests under `tests/integration`. The default
-prek pipeline excludes this directory; invoke live checks explicitly. The full
+The live tests are ordinary pytest tests under `tests/integration`. Development
+verification excludes this directory; invoke live checks explicitly. The full
 suite with coverage, including live tests, remains required before merging.
 `tests/conftest.py` marks them `integration` and puts them in the `live` xdist
-group, so under the default `-n auto --dist loadgroup` one worker runs them
+group, so under the configured `--dist loadgroup` one worker runs them
 serially; unit tests stay parallel. The autouse session fixture `live_run`
 (`tests/integration/conftest.py`) does the following:
 
-1. Waits for the stands (see below).
+1. Rechecks availability with bounded startup in Task-driven runs (see below).
 2. Mints or adopts the run tag, then seeds the run through
    `tests/integration/lifecycle.py`.
 3. Keeps or stops the run after the last live test.
 
 ```bash
-uv run prek run acceptance-tests --hook-stage manual --all-files  # full suite with coverage
-uv run pytest tests/integration/test_upload.py -k upload
-uv run pytest -m "not integration"             # unit tests only
-uv run prek run integration-tests --hook-stage manual --all-files
+uv run --locked task --exit-code infra-check
+uv run --locked task --exit-code integration
+uv run --locked task --exit-code acceptance  # clean-tip full coverage, including live tests
+uv run --locked task --exit-code test        # affected units, integration directory excluded
 ```
 
-`L` below is `uv run python -m tests.integration.lifecycle`, for manual work:
+`L` below abbreviates `uv run --locked python -m tests.integration.lifecycle`,
+for manual lifecycle operations after reading this skill:
 
 ```bash
-L up              # wait for the stands, mint a tag, seed; prints the tag
+L check           # read-only bounded availability, no tag or resources
+L up              # operator lifecycle: prepare, mint a tag and seed
 L stop            # remove the run, release the tag (also the crash cleanup)
 eval "$(L env)"   # the run's variables, for manual tools
 ```
 
 The k8s-infra helpers are not on `PATH`. After `eval "$(L env)"`, `infra.py` and
-`cvat.py` below mean `python3 "$INTEGRATION_SKILL_DIR/scripts/<name>"`.
+`cvat.py` below mean `uv run --locked python "$INTEGRATION_SKILL_DIR/scripts/<name>"`.
 `INTEGRATION_SKILL_DIR` is `K8S_INFRA_SKILL_DIR` when set, else the installed
 k8s-infra skill under `~/.agents/skills` or `~/.claude/skills`.
 
-## Stopped stands: notify and wait
+## Bounded preflight and deferral
 
-The owner stops the stands at times. A stopped stand is not a failure:
+`infra-check` checks cluster access, registry capacity and the required CVAT,
+MinIO and ClearML services. `CVETA2_INFRA_CHECK_TIMEOUT` bounds the overall
+read-only check (60 seconds by default). It creates no run tag or service data.
+Task uses `--exit-code` to retain these results:
 
-- **What counts as stopped.**
-  - The cluster does not answer.
-  - `infra.py room` answers WAIT (exit 3).
-  - The CVAT, MinIO or ClearML endpoint does not answer.
-- **What happens.** The fixture (and `L up`) prints one notice, then polls with
-  backoff from 15 s up to 60 s. It prints a heartbeat every 5 minutes and
-  continues once the stands answer.
-- **Limits.**
-  - The wait is unlimited unless `CVETA2_STAND_WAIT_TIMEOUT` (seconds) is set.
-  - Ctrl-C stops it; nothing has been created yet.
-- **Agents.**
-  - Start a live test run (the `integration-tests` or `acceptance-tests` hook,
-    or pytest over `tests/integration`) with `run_in_background`, so a long
-    wait is not killed by a tool timeout.
-  - Tell the user the run is waiting for the stands to be restored.
-  - Never restart a stand, skip the tests, or bypass the hook.
+| Result | Exit | Action |
+| --- | --- | --- |
+| AVAILABLE | 0 | Live verification may start; setup rechecks availability. |
+| UNAVAILABLE | 3 | Temporary outage, timeout or capacity WAIT: defer live verification. |
+| ERROR | 1 | Diagnose prerequisites, credentials, authorization, TLS or unexpected failure. |
 
-These fail at once instead:
+Every Task-driven live run performs preflight and bounds startup. An availability
+result is not a test result. Loss of availability during setup is blocked setup;
+assertion failures are test failures. Missing Secret keys, untrusted certificates
+and refused identities are errors: do not default credentials, disable TLS or
+switch to HTTP. Use the installed infrastructure skill to diagnose them.
 
-- a missing Secret key;
-- `infra.py room` exiting with any non-zero code other than 3;
-- an untrusted certificate (a TLS trust problem, not a stopped stand; never
-  switch to plain HTTP or disable verification);
-- a ClearML identity that the stand refuses.
+When unavailable, report the reason and required checks left deferred. Continue
+independent implementation, documentation, review and local verification. Retry
+at a meaningful milestone or after restored availability, without continuous
+polling. When only blocked checks remain, stop and ask for the user's decision.
+Deferred live verification blocks acceptance, merge and release.
+
+Explicit operator waiting remains available through lifecycle `up` and
+`CVETA2_STAND_WAIT_TIMEOUT`; use it only when waiting was requested. Keep the
+waiting process observable, report its state and retain interruption cleanup.
+Task verification must not silently revert to indefinite waiting. Never restart,
+stop or otherwise modify shared stands merely to make verification pass.
+
+For a focused live selector, first run `infra-check`, then invoke pytest with
+bounded startup configured as in `Taskfile.yml`, preserving environment isolation
+and `--dist loadgroup`. Do not use an unbounded ad hoc command as acceptance.
 
 ## Rules
 
@@ -103,15 +111,18 @@ never acting on another run. In addition, for this suite:
 ## Concurrency
 
 Different tags never share objects. The registry's
-`[capacity].cveta2_integration_runs` caps concurrent cveta2 suites, but nothing
-enforces it, because `room` checks only the stands' own load. Every session that
+`[capacity].cveta2_integration_runs` caps concurrent cveta2 suites; preflight must enforce that
+capacity in addition to the stand load checked by `room`. Every session that
 runs selected live tests starts a run. Before running from several worktrees or
 agents at once, count the active runs
-(`python3 "$INTEGRATION_SKILL_DIR/scripts/cvat.py" --project cveta2 ls`) and
+(`uv run --locked python "$INTEGRATION_SKILL_DIR/scripts/cvat.py" --project cveta2 ls`) and
 serialize the runs beyond the cap.
 
 ## Completion evidence
 
 Report the run tag, the selector, the pytest result, and whether the run was
-stopped or kept (by tag). After a failed setup or cleanup, name what may remain
-and the exact same-tag `L stop` retry.
+stopped or kept (by tag). Distinguish passed tests, actual failures, deferred verification and
+incomplete cleanup. After a failed or interrupted setup, clean owned resources
+with the exact run tag; report what may remain and the same-tag `L stop` retry.
+Never clear ownership evidence while cleanup is incomplete. A successful preflight
+without executed live tests is not acceptance.
