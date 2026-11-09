@@ -327,7 +327,7 @@ and run the full default pipeline after the last task commit.
 - Default verification runs unit checks at commit time; live integration and
   advisory mutation are manual hooks. There is no pre-push stage. Pushes still
   require separate authorization and the acceptance checks below.
-- A hook that rewrites files (`ruff format`, `ruff check --fix`): inspect the new diff,
+- A hook that rewrites files (`ruff format`): inspect the new diff,
   restage only task-owned paths and commit again.
 - The `mypy` hook runs standalone whole-project analysis without stopping or
   modifying pre-existing daemon processes.
