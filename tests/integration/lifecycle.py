@@ -681,7 +681,7 @@ def _run_capacity(run: Run) -> str | None:
         values = tomllib.loads(registry.read_text(encoding="utf-8"))
         limit = values["capacity"]["cveta2_integration_runs"]
         pattern = re.compile(values["contract"]["tag_regex"])
-    except (StopIteration, OSError, KeyError, TypeError, tomllib.TOMLDecodeError, re.PatternError) as error:
+    except (StopIteration, OSError, KeyError, TypeError, tomllib.TOMLDecodeError, re.error) as error:
         fail(f"cannot read integration capacity from the k8s-infra registry: {error}")
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
         fail("registry capacity.cveta2_integration_runs must be a positive integer")
