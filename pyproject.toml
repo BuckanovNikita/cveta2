@@ -99,6 +99,9 @@ major_on_zero = false
 # The default release commit message is not a conventional commit, so it would
 # fail any later check over the range.
 commit_message = "chore(release): {version}"
+# semantic-release builds with a restricted environment; forward this explicit
+# release exception selector so the required check cannot silently disappear.
+build_command_env = ["CVETA2_RELEASE_CHECK"]
 # A release only moves the version and the tag; it builds no artifact, because
 # nothing publishes one. This hook exists solely to keep uv.lock honest:
 # uv.lock carries its own cveta2 version entry, which version_toml does not
@@ -107,6 +110,7 @@ commit_message = "chore(release): {version}"
 # `git add` is what puts the lockfile inside the release commit instead of
 # leaving it dirty after.
 build_command = """
+set -e
 uv lock --upgrade-package "$PACKAGE_NAME"
 git add uv.lock
 if [ "${CVETA2_RELEASE_CHECK:-}" = 1 ]; then

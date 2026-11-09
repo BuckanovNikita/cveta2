@@ -84,6 +84,7 @@ pip install cveta2-<версия>-py3-none-any.whl
 ## Разработка и проверки
 
 ```bash
+unset UV_PROJECT_ENVIRONMENT  # окружение .venv текущего рабочего дерева
 uv sync --locked
 bash scripts/install-hooks.sh
 uv run --locked task --exit-code fix

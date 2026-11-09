@@ -161,6 +161,9 @@ records to win same-task ties. Recency uses `task_id`, never
 Read the `verification-workflow` skill when choosing a stage or reporting completion.
 Executable definitions and ordering belong to `Taskfile.yml`; invoke them through
 `uv run --locked task --exit-code <name>` so child failures retain their exit codes.
+Before the outer `uv run`, clear inherited `UV_PROJECT_ENVIRONMENT` so uv uses
+this worktree's `.venv`. The Git dispatcher enforces this before invoking uv;
+Task fixes child-command cache paths even when cache overrides were inherited.
 Task freshness, timestamps and interrupted runs never establish completion.
 Markdownlint remains a separate operation.
 
@@ -210,7 +213,9 @@ read-only and bounded by `CVETA2_INFRA_CHECK_TIMEOUT` (60 seconds by default):
 AVAILABLE exits 0, UNAVAILABLE exits 3, ERROR exits 1. Missing prerequisites,
 credentials, authorization or TLS trust are errors, not reasons to wait indefinitely.
 Preflight does not mint tags or create service resources. Recheck before every live run.
-Task-driven startup remains bounded; explicitly requested operator waiting is separate.
+Task-driven availability waiting remains bounded; explicitly requested operator
+waiting is separate. Seeding and teardown keep their existing operation timeouts;
+the preflight deadline is not an overall live-suite deadline.
 
 When infrastructure is unavailable, report the reason and deferred checks; continue
 independent implementation, documentation, review and local checks. Retry at a meaningful

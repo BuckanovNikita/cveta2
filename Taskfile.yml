@@ -110,7 +110,7 @@ tasks:
       - "{{.RUN}} uv run --locked python -m tests.integration.lifecycle check"
 
   integration:
-    desc: Preflight then live integration tests with bounded setup
+    desc: Preflight then live tests with a bounded availability wait
     cmds:
       - task: infra-check
       - "CVETA2_TASK_VERIFICATION=1 {{.RUN}} uv run --locked pytest tests/integration -n {{.TEST_WORKERS}} --dist loadgroup"

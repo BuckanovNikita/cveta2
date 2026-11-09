@@ -18,7 +18,7 @@ group, so under the configured `--dist loadgroup` one worker runs them
 serially; unit tests stay parallel. The autouse session fixture `live_run`
 (`tests/integration/conftest.py`) does the following:
 
-1. Rechecks availability with bounded startup in Task-driven runs (see below).
+1. Rechecks availability with a bounded wait in Task-driven runs (see below).
 2. Mints or adopts the run tag, then seeds the run through
    `tests/integration/lifecycle.py`.
 3. Keeps or stops the run after the last live test.
@@ -58,7 +58,8 @@ Task uses `--exit-code` to retain these results:
 | UNAVAILABLE | 3 | Temporary outage, timeout or capacity WAIT: defer live verification. |
 | ERROR | 1 | Diagnose prerequisites, credentials, authorization, TLS or unexpected failure. |
 
-Every Task-driven live run performs preflight and bounds startup. An availability
+Every Task-driven live run bounds its preflight and setup availability checks.
+The deadline does not bound the whole seeding, test or teardown operation. An availability
 result is not a test result. Loss of availability during setup is blocked setup;
 assertion failures are test failures. Missing Secret keys, untrusted certificates
 and refused identities are errors: do not default credentials, disable TLS or
@@ -77,7 +78,7 @@ Task verification must not silently revert to indefinite waiting. Never restart,
 stop or otherwise modify shared stands merely to make verification pass.
 
 For a focused live selector, first run `infra-check`, then invoke pytest with
-bounded startup configured as in `Taskfile.yml`, preserving environment isolation
+bounded availability checks configured as in `Taskfile.yml`, preserving environment isolation
 and `--dist loadgroup`. Do not use an unbounded ad hoc command as acceptance.
 
 ## Rules

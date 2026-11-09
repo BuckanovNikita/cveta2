@@ -143,13 +143,14 @@ def _probe_call(command: Sequence[str], deadline: float) -> subprocess.Completed
 def _probe_failure(result: subprocess.CompletedProcess[str], description: str) -> NoReturn:
     """Classify helper transport errors without exposing captured credentials."""
     detail = (result.stderr or "").lower()
-    permanent = ("unauthorized", "forbidden", "certificate", "tls", "credential", "not found", "401", "403")
+    permanent = ("unauthorized", "forbidden", "certificate", "x509", "invalid credential", "not found", "401", "403")
     temporary = (
         "connection refused",
         "connection reset",
         "remote end closed",
         "timed out",
         "timeout",
+        "deadline exceeded",
         "no such host",
         "name or service not known",
         "unreachable",
@@ -650,7 +651,7 @@ def _cluster_available(deadline: float) -> str | None:
     if result.returncode == 0:
         return None
     detail = result.stderr.lower()
-    if any(term in detail for term in ("unauthorized", "forbidden", "certificate", "tls", "context", "credentials")):
+    if any(term in detail for term in ("unauthorized", "forbidden", "certificate", "x509", "invalid credentials")):
         fail("Kubernetes access, context, credentials or TLS configuration failed; check kubectl access.")
     if any(
         term in detail
@@ -659,6 +660,7 @@ def _cluster_available(deadline: float) -> str | None:
             "connection reset",
             "timed out",
             "timeout",
+            "deadline exceeded",
             "no such host",
             "unreachable",
             "eof",

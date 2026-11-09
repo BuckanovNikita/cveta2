@@ -19,6 +19,7 @@ hook_dir=$(cd "$(dirname "$0")" && pwd)
 hook_type=$(basename "$0")
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+export UV_PROJECT_ENVIRONMENT="$root/.venv"
 if [ -f Taskfile.yml ] && [ -f scripts/git-hook.sh ]; then
     exec bash scripts/git-hook.sh "$hook_type" "$hook_dir" "$@"
 fi

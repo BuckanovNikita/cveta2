@@ -11,6 +11,8 @@ Policy and definitions live in [engineering guidance](../../../.specify/memory/e
 
 1. Inspect worktree ownership and load, choose `CVETA2_TEST_WORKERS`, and stop
    concurrent editing before verification. Each worktree owns its tool state.
+   Clear inherited `UV_PROJECT_ENVIRONMENT` before the outer `uv run` so it uses
+   this worktree's `.venv`; Task then fixes cache paths for its child commands.
 2. Run `fix` explicitly before staging; inspect safe fixes and formatting. Stage
    exact task-owned paths. Commit inputs must be fully staged with no nonignored
    untracked files. The Git shim rejects unsuitable inputs before prek runs.
