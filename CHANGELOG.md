@@ -2,6 +2,63 @@
 
 <!-- version list -->
 
+## v0.13.3 (2026-11-09)
+
+### Bug Fixes
+
+- Serialize affected test selection
+  ([`0405ea0`](https://github.com/BuckanovNikita/cveta2/commit/0405ea033510eaa90a624b8a8907de11b10206fd))
+
+- Verify committed fixture changes in final hook runs
+  ([`4f99a3e`](https://github.com/BuckanovNikita/cveta2/commit/4f99a3e7248e978f8a84ca7b886c8b65a0e2da15))
+
+- **hooks**: Reject deleted workflow files before legacy fallback
+  ([`e8c308c`](https://github.com/BuckanovNikita/cveta2/commit/e8c308ca81d2c0ee2288bb765ac7589546c77c47))
+
+- **hooks**: Verify interpreter selection changes
+  ([`e937b6f`](https://github.com/BuckanovNikita/cveta2/commit/e937b6fad31e619a0550df5a03822a8cf8dca3c7))
+
+- **verification**: Preserve release gates and infrastructure outcomes
+  ([`f2e8cc2`](https://github.com/BuckanovNikita/cveta2/commit/f2e8cc2eda7ca91a438e2d1748d8c7a8455c1399))
+
+- **verification**: Retain Python 3.12 registry error handling
+  ([`bd6ca39`](https://github.com/BuckanovNikita/cveta2/commit/bd6ca396ac837adc5865125d8762ac43eabc1b4b))
+
+### Documentation
+
+- Clarify domain boundaries and preserve specification meaning
+  ([`936fa93`](https://github.com/BuckanovNikita/cveta2/commit/936fa932a95c69a0e5159a3685358c3600922c2a))
+
+- Consolidate specifications into functional descriptions
+  ([`c55c77e`](https://github.com/BuckanovNikita/cveta2/commit/c55c77ea088e242808bb6b344ed17ce57c10c101))
+
+- Define self-contained functional behavior
+  ([`8437049`](https://github.com/BuckanovNikita/cveta2/commit/843704982e012a6f4f24dcbf928b1023bf398826))
+
+- Drop the portable usage skill stage
+  ([`da52705`](https://github.com/BuckanovNikita/cveta2/commit/da5270599c07ea9108e0689ab6d28b6e91264873))
+
+- Replace progress records with fresh product specifications
+  ([`8b6b11f`](https://github.com/BuckanovNikita/cveta2/commit/8b6b11f52509e29136dc58cb185a6d711fd99541))
+
+- Retarget dataset-contract links and name the pre-reset checkpoint
+  ([`0bb9a24`](https://github.com/BuckanovNikita/cveta2/commit/0bb9a24d4a6c2e6caeadcb351f1454b394ace47f))
+
+- **hooks**: Name the configured rewriting hook
+  ([`3044f2b`](https://github.com/BuckanovNikita/cveta2/commit/3044f2bfe538d4f443c4a7f6821753e47e4ae070))
+
+- **skills**: Fix live-test helper resolution and release push gate
+  ([`30d0033`](https://github.com/BuckanovNikita/cveta2/commit/30d0033aff351000118d5f386ef71f4c7fc5645f))
+
+- **verification**: Record acceptance and convergence evidence
+  ([`31fcc31`](https://github.com/BuckanovNikita/cveta2/commit/31fcc3176d320e82fdec8954a349fece4eae71ff))
+
+### Testing
+
+- Remove development tooling self-tests
+  ([`7422092`](https://github.com/BuckanovNikita/cveta2/commit/7422092ed1cc0bb05c843d17afcd20b319a8ad96))
+
+
 ## v0.13.2 (2026-11-06)
 
 ### Bug Fixes
