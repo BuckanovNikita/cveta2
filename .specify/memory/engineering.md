@@ -319,16 +319,15 @@ several writers share the checkout.
 `uv run prek install` installs the pre-commit and commit-msg stages. Read
 `.pre-commit-config.yaml` for the current hook set and each hook's path filter.
 Hooks call `uv run --locked`, so a stale `uv.lock` fails rather than re-locks.
-`uv.lock` may change only together with `pyproject.toml` (the `lockfile-guard`
-hook); a deliberate re-lock alone, such as a dependency upgrade, is a
-`build(deps):` commit made with `SKIP=lockfile-guard`, an explicit dependency-maintenance exception. Intermediate task commits may also
+Intentional lockfile-only dependency updates use `build(deps):` commits; no
+hook skip is needed. Intermediate task commits may also
 skip named verification hooks; commit-message checks remain enabled. Clear SKIP
 and run the full default pipeline after the last task commit.
 
 - Default verification runs unit checks at commit time; live integration and
   advisory mutation are manual hooks. There is no pre-push stage. Pushes still
   require separate authorization and the acceptance checks below.
-- A hook that rewrites files (`uv lock`, `ruff format`): inspect the new diff,
+- A hook that rewrites files (`ruff format`, `ruff check --fix`): inspect the new diff,
   restage only task-owned paths and commit again.
 - The `mypy` hook runs standalone whole-project analysis without stopping or
   modifying pre-existing daemon processes.
@@ -363,8 +362,8 @@ rebased onto it, after the full suite passed on that exact tip:
 `uv run prek run acceptance-tests --hook-stage manual --all-files` (live tests
 included, coverage enforced). The `main` tip is then a checked commit, so the release
 commit, which only bumps the version, `CHANGELOG.md` and `uv.lock`, runs with
-`SKIP=lint-imports,mypy,vulture,pytest` - the second standing hook exception;
-ruff, `uv lock --check`, the lockfile guard, deptry and `uv build` still run. One
+`SKIP=lint-imports,mypy,vulture,pytest` - the standing release hook exception;
+ruff, `uv lock --check`, deptry and `uv build` still run. One
 release at a time: the `release` skill holds a `flock` on
 `.git/cveta2-release.lock` from the merge to the push.
 

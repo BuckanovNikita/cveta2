@@ -60,7 +60,7 @@ git ls-remote origin refs/heads/main 'refs/tags/v*' | tail -3   # confirm it lan
   types is a success; the push publishes `main` alone.
 - **The skip.** The release commit touches `pyproject.toml`, `uv.lock` and
   `CHANGELOG.md` on an already-checked tree. The `SKIP` list is the documented
-  exception. Ruff, `uv lock --check`, the lockfile guard, deptry and `uv build`
+  exception. Ruff, `uv lock --check`, deptry and `uv build`
   still run.
 
 ## A release hook fails

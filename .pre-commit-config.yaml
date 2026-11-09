@@ -1,6 +1,7 @@
 default_install_hook_types:
 - pre-commit
 - commit-msg
+default_stages: [pre-commit]
 fail_fast: true
 repos:
 - repo: local
@@ -10,28 +11,13 @@ repos:
     entry: uv lock --check
     language: system
     pass_filenames: false
-    files: (?:^(pyproject\.toml|uv\.lock)$)|^\.python-version$
-    stages:
-    - pre-commit
-    include_deleted: true
-  - id: lockfile-guard
-    name: uv.lock changes only with pyproject.toml
-    entry: bash -c 'git diff --cached --name-only | grep -qx uv.lock || exit 0; git diff --cached --name-only | grep -qx pyproject.toml
-      || { echo "uv.lock is staged without pyproject.toml - a deliberate re-lock is a build(deps) commit made with SKIP=lockfile-guard";
-      exit 1; }'
-    language: system
-    pass_filenames: false
-    files: ^uv\.lock$
-    stages:
-    - pre-commit
+    files: ^(pyproject\.toml|uv\.lock|\.python-version)$
     include_deleted: true
   - id: ruff-format
     name: ruff format (all files)
     entry: uv run --locked ruff format --force-exclude
     language: system
     pass_filenames: true
-    stages: &id001
-    - pre-commit
     types_or:
     - python
     - pyi
@@ -40,8 +26,6 @@ repos:
     entry: uv run --locked ruff check --force-exclude
     language: system
     pass_filenames: true
-    stages: &id002
-    - pre-commit
     types_or:
     - python
     - pyi
@@ -50,27 +34,21 @@ repos:
     entry: uv run --locked lint-imports
     language: system
     pass_filenames: false
-    files: (?:^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$))|^\.python-version$
-    stages:
-    - pre-commit
+    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
     include_deleted: true
   - id: mypy
     name: mypy
     entry: uv run --locked mypy .
     language: system
     pass_filenames: false
-    files: (?:^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$))|^\.python-version$
-    stages:
-    - pre-commit
+    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
     include_deleted: true
   - id: vulture
     name: vulture (dead code)
     entry: uv run --locked vulture
     language: system
     pass_filenames: false
-    files: (?:^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$))|^\.python-version$
-    stages:
-    - pre-commit
+    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
     include_deleted: true
   - id: pytest
     name: pytest (affected unit tests, testmon)
@@ -79,9 +57,7 @@ repos:
       --
     language: system
     pass_filenames: true
-    files: (?:^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$))|^\.python-version$
-    stages:
-    - pre-commit
+    files: ^(cveta2/|tests/|scripts/|main\.py$|pyproject\.toml$|uv\.lock$|\.python-version$)
     include_deleted: true
     require_serial: true
   - id: integration-tests
@@ -114,18 +90,14 @@ repos:
     entry: uv run --locked deptry .
     language: system
     pass_filenames: false
-    files: (?:^(cveta2/|pyproject\.toml$|uv\.lock$))|^\.python-version$
-    stages:
-    - pre-commit
+    files: ^(cveta2/|pyproject\.toml$|uv\.lock$|\.python-version$)
     include_deleted: true
   - id: uv-build
     name: uv build (check project is buildable)
     entry: bash -c 'uv build --quiet && rm -rf dist'
     language: system
     pass_filenames: false
-    files: (?:^(cveta2/|pyproject\.toml$|uv\.lock$|README\.md$))|^\.python-version$
-    stages:
-    - pre-commit
+    files: ^(cveta2/|pyproject\.toml$|uv\.lock$|README\.md$|\.python-version$)
     include_deleted: true
   - id: mutmut
     name: mutmut (changed functions, advisory)
@@ -141,17 +113,15 @@ repos:
     entry: uv run --locked ruff format --force-exclude .
     language: system
     pass_filenames: false
-    stages: *id001
     include_deleted: true
-    files: (?:^(pyproject\.toml|uv\.lock|\.?ruff\.toml|\.pre-commit-config\.yaml)$)|^\.python-version$
+    files: ^(pyproject\.toml|uv\.lock|\.?ruff\.toml|\.pre-commit-config\.yaml|\.python-version)$
   - id: ruff-check-config
     name: ruff check (all files) (configuration changed)
     entry: uv run --locked ruff check --force-exclude .
     language: system
     pass_filenames: false
-    stages: *id002
     include_deleted: true
-    files: (?:^(pyproject\.toml|uv\.lock|\.?ruff\.toml|\.pre-commit-config\.yaml)$)|^\.python-version$
+    files: ^(pyproject\.toml|uv\.lock|\.?ruff\.toml|\.pre-commit-config\.yaml|\.python-version)$
 - repo: https://github.com/compilerla/conventional-pre-commit
   rev: v4.5.0
   hooks:

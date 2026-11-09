@@ -80,9 +80,8 @@ before it is merged; Spec Kit does not replace these checks.
 Agents MUST inspect status and diffs before editing, preserve unrelated work,
 and stage only task-owned paths when a commit is authorized. Do not automatically
 stash, reset, revert, or disable all hooks. Targeted intermediate verification
-skips are allowed; additional standing exceptions are the
-release commit's documented heavy-hook skip and the `build(deps)` re-lock skip
-of the lockfile guard, both defined in engineering guidance. Shared integration resources MUST use the
+skips are allowed; the standing release exception is the
+release commit's documented heavy-hook skip, defined in engineering guidance. Shared integration resources MUST use the
 existing lifecycle skills, one owned run tag, and exact-tag cleanup on success
 and failure; leave other runs and durable resources intact. Do not store
 credentials or machine-specific setup in tracked project artifacts.
@@ -230,4 +229,8 @@ Version 3.1.0 permits targeted verification skips for intermediate task commits,
 with full default verification after the final commit and separate mechanical
 fix commits. Message validation and release acceptance remain required.
 
-**Version**: 3.1.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-08
+Version 3.2.0 removes the lockfile co-staging policy at the user's request.
+Intentional lockfile-only dependency updates require no hook skip; lockfile
+freshness remains checked. Application contracts are unchanged.
+
+**Version**: 3.2.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-09
