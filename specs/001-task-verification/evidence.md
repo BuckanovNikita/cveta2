@@ -37,9 +37,9 @@ branch therefore stages its owned version/changelog files before invoking the
 check; `uv.lock` is already staged by the existing build command. Release execution
 itself is not authorized without the separate push/integration decision.
 
-## Completion status
+## Initial implementation checkpoint
 
-Implementation is awaiting final integrated verification, independent review and
+At that checkpoint, implementation was awaiting final integrated verification, independent review and
 clean-tip acceptance. No merge, release or push has occurred. Deferred or failed
 checks remain incomplete until executed successfully; availability is not a live
 test result.
@@ -91,3 +91,47 @@ AVAILABLE; live acceptance remains pending on the committed corrected tip.
 Post-check independent correction review found no remaining code blockers. Its
 README ordering observation was applied: clear the environment override before
 `uv sync`, not after it. Final local baseline took 19.88 seconds in pytest.
+
+
+## Live acceptance and cleanup
+
+On clean corrected commit `f2e8cc2`, with `INFRA_HARNESS=codex`,
+`env -u SKIP -u UV_PROJECT_ENVIRONMENT uv run --locked task --exit-code acceptance`
+returned 0. Static checks and temporary packaging passed; randomized properties
+ran 2,384 tests (28.69 seconds). Preflight returned AVAILABLE. Full coverage ran
+2,422 tests, including all 38 live tests, in 287.64 seconds: all passed,
+480 warnings, total coverage 92.23% against the 90% gate. The final clean-tip
+guard passed.
+
+Owned run: `cveta2-codex-20261109-integration-vttf`. Fixture cleanup succeeded.
+An additional read-only exact-tag listing returned exit 0 and zero object rows
+for each of CVAT, MinIO and ClearML. The `.run-tag` file was absent. No shared
+stand was restarted, stopped or reconfigured; no cleanup leftovers remain.
+
+A controlled real preflight with `CVETA2_INFRA_CHECK_TIMEOUT=0.001` subsequently
+returned UNAVAILABLE during kubectl and Task preserved exit 3. This deliberately
+insufficient deadline tests deferral; it is not evidence that services stopped.
+Independent local work continued: actual `release-check` on the clean eligible
+(no-change) tree returned 0, exercising its static checks and temporary build.
+With the final evidence files staged, `release-check` rejected the nonrelease
+path before static commands and preserved exit 1. No release, version bump,
+Git tag, merge or push was performed.
+
+## Convergence and retained state
+
+Native Spec Kit convergence checked 12 functional requirements, 4 success
+criteria, all 11 user-story scenarios, the plan's orchestration/isolation/
+deferral/release decisions, and the five constitutional principles. There were
+no remaining implementation gaps or actionable convergence tasks. Independent
+review corrections and observed verification satisfy the completed task list.
+Final-tip acceptance will be reported in-session after this evidence-only commit;
+these recorded live results specifically identify the tested commit above.
+
+The original hook installation remains in the task-owned rollback directory
+`.git/hooks/cveta2-backup.wpMHKi`; the intermediate dispatcher backup is
+`.git/hooks/cveta2-backup.lz9jdH`. These are intentionally retained for rollback.
+Tool-native worktree caches and coverage output remain local as designed.
+Disposable experiments and owned child processes were cleaned. Application
+sources, glossary, CLAUDE adapter and generated Spec Kit skills/templates were
+unchanged. Remote refs were not fetched; integration/publication still requires
+separate authorization.

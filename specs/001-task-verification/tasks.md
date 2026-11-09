@@ -38,9 +38,9 @@ Independent check: disposable current/legacy worktrees, input rejection and roll
 
 - [x] T011 [P] Migrate AGENTS.md, .specify/memory/engineering.md, README.md, authored skills, new verification-workflow skill/symlink and docs/adr/task-verification.md; leave generated tools and glossary unchanged (FR-010).
 - [x] T012 Run integrated development verification after all edits stop, inspect mechanical fixes separately and record actual counts/timings/outcomes in specs/001-task-verification/evidence.md (SC-001, SC-002).
-- [ ] T013 Run properties, applicable mutation and live acceptance on the clean committed tip; leave this unchecked while any required verification is deferred (FR-007–FR-009, SC-003).
+- [x] T013 Run properties, applicable mutation and live acceptance on the clean committed tip; leave this unchecked while any required verification is deferred (FR-007–FR-009, SC-003).
 - [x] T014 Obtain fresh independent review after integration and verification, resolve findings and rerun affected checks; record in specs/001-task-verification/evidence.md (SC-004).
-- [ ] T015 Converge implementation against spec, plan and tasks; keep deferred acceptance visibly incomplete in specs/001-task-verification/tasks.md and report passed/failed/deferred/cleanup outcomes (SC-003, SC-004).
+- [x] T015 Converge implementation against spec, plan and tasks; keep deferred acceptance visibly incomplete in specs/001-task-verification/tasks.md and report passed/failed/deferred/cleanup outcomes (SC-003, SC-004).
 
 ## Dependencies and execution
 
