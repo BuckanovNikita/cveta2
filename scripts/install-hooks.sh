@@ -20,7 +20,13 @@ hook_type=$(basename "$0")
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 export UV_PROJECT_ENVIRONMENT="$root/.venv"
-if [ -f Taskfile.yml ] && [ -f scripts/git-hook.sh ]; then
+# A deleted working-tree file must not masquerade as a legacy checkout.
+if [ -f Taskfile.yml ] || git cat-file -e HEAD:Taskfile.yml 2>/dev/null ||
+    git cat-file -e :Taskfile.yml 2>/dev/null; then
+    if [ ! -f Taskfile.yml ] || [ ! -f scripts/git-hook.sh ]; then
+        echo 'Task workflow files are missing; restore them before committing.' >&2
+        exit 1
+    fi
     exec bash scripts/git-hook.sh "$hook_type" "$hook_dir" "$@"
 fi
 # Older worktrees keep their own prek configuration and environment.

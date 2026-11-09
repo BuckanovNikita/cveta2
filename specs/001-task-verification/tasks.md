@@ -49,3 +49,7 @@ T009–T010. Guidance drafting T011 may run independently with explicit file own
 T012 waits for all editing to stop; T013 and review T014 follow integrated checks.
 Convergence T015 is last. US1 is the local-verification MVP, not acceptance of the
 whole migration. No shared heavy-job lock or same-worktree editing during checks.
+
+## Phase 7: Convergence
+
+- [x] T016 Detect migrated worktrees from Git HEAD/index as well as working files in scripts/install-hooks.sh; reject missing workflow files before prek and recheck genuine legacy dispatch per FR-004 and FR-005 (partial).

@@ -135,3 +135,31 @@ Disposable experiments and owned child processes were cleaned. Application
 sources, glossary, CLAUDE adapter and generated Spec Kit skills/templates were
 unchanged. Remote refs were not fetched; integration/publication still requires
 separate authorization.
+
+## Late deletion-boundary convergence correction
+
+The evidence-only tip `31fcc31` also passed clean-tip acceptance: randomized
+properties 2,384 passed in 31.42 seconds; full live coverage 2,422 passed in
+284.16 seconds, 92.23% coverage, 480 warnings. Run
+`cveta2-codex-20261109-integration-3wkz` completed teardown, removed its ownership
+file, and left a clean tree.
+
+A further bounded independent experiment found a concrete FR-004 gap: deleting
+either tracked workflow file made the shared dispatcher choose legacy fallback.
+Actual prek then stashed the deletion instead of rejecting it. Convergence added
+T016. The dispatcher now recognizes migration markers in HEAD or the index even
+when working files are absent, and refuses incomplete workflow files before uv.
+It does not execute shell content from the index.
+
+`bash -n` passed for both scripts. Disposable actual-prek rechecks established:
+missing tracked shim, missing tracked Taskfile, and an unborn index-only marker
+all exit 1 before uv/prek with no stash. A genuine linked legacy worktree without
+markers still runs its own configuration. Fresh independent correction review
+found no remaining blocker. These fixtures were cleaned; no repository tooling
+self-tests were added. The corrected dispatcher was installed; its previous
+version is retained in `.git/hooks/cveta2-backup.yJigZd`. Removing the complete
+workflow deliberately requires an explicit hook migration or rollback.
+
+T016 is complete and the native convergence inventory has no further unbuilt
+work. A final clean-tip acceptance run follows this correction commit and is
+reported in-session, without changing committed inputs during verification.
