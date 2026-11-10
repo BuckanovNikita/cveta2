@@ -1085,6 +1085,31 @@ def keep_data() -> bool:
     return os.environ.get("INTEGRATION_KEEP_DATA", "") == "1"
 
 
+def _outage_after(root: Path) -> InfrastructureUnavailableError | None:
+    """Recheck availability after a failed setup: an outage turns it into deferral."""
+    try:
+        check_infrastructure(root)
+    except InfrastructureUnavailableError as error:
+        return error
+    except LifecycleError as error:
+        # Preserve the original setup failure while exposing a second
+        # permanent preflight error, without treating it as an outage.
+        report(error)
+    return None
+
+
+def _teardown_after(session: Session, *, delete: bool) -> None:
+    """Delete or keep a session whose setup failed, without masking that failure."""
+    try:
+        if delete:
+            session.stop()
+        else:
+            finish(session)
+    except LifecycleError as error:
+        report(error)
+        warn(f"       Retry: {MODULE} stop {session.namespace}")
+
+
 def prepare(root: Path, *, notify: Callable[[str], None]) -> Session:
     """Check or wait for the cluster, then create, deploy and seed a new session.
 
@@ -1105,21 +1130,12 @@ def prepare(root: Path, *, notify: Callable[[str], None]) -> Session:
         session.up()
     except BaseException as setup_error:
         unavailable: InfrastructureUnavailableError | None = None
+        if task_driven and not isinstance(setup_error, SetupBlockedError) and isinstance(setup_error, LifecycleError):
+            unavailable = _outage_after(root)
+        _teardown_after(session, delete=isinstance(setup_error, SetupBlockedError) or not keep_data())
         if isinstance(setup_error, SetupBlockedError):
-            unavailable = setup_error
-        elif task_driven and isinstance(setup_error, LifecycleError):
-            try:
-                check_infrastructure(root)
-            except InfrastructureUnavailableError as error:
-                unavailable = error
-            except LifecycleError as error:
-                # Preserve the original setup failure while exposing a second
-                # permanent preflight error, without treating it as an outage.
-                report(error)
-        if isinstance(setup_error, SetupBlockedError) or not keep_data():
-            session.stop()
-        else:
-            finish(session)
+            first, *rest = setup_error.lines
+            raise SetupBlockedError(f"UNAVAILABLE: live setup blocked: {first}", *rest) from setup_error
         if unavailable is not None:
             raise InfrastructureUnavailableError(
                 f"UNAVAILABLE: live setup blocked: {unavailable}; original setup failure: {setup_error}"
@@ -1254,6 +1270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _dispatch(args, root)
     except InfrastructureUnavailableError as error:
         first, *rest = error.lines
+        first = first.removeprefix("UNAVAILABLE: ")
         warn(f"UNAVAILABLE: {first}; live verification is deferred")
         for line in rest:
             warn(f"       {line}")
