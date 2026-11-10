@@ -79,14 +79,15 @@ preceding duplicate affected-unit stage. Mutation reporting remains required for
 code changes; survivors are advisory, but tool errors are unresolved. Mutation,
 properties, availability, live acceptance and release operations are never cached.
 
-Live verification MUST begin with bounded read-only preflight. Temporary outage,
-timeout or capacity WAIT means deferred verification, not success; configuration,
-credentials, TLS and authorization errors are failures requiring diagnosis.
+Live verification MUST begin with bounded read-only preflight. A cluster that
+does not answer, a node that cannot admit the session quota, or a timeout means
+deferred verification, not success; configuration, credentials and authorization
+errors are failures requiring diagnosis.
 Continue independent local work, retry at a meaningful milestone or after restored
 availability, and stop for the user's decision when only blocked verification
 remains. Deferred checks block acceptance, merge and release. Explicit operator
 waiting remains available. Preserve pytest isolation, live serial execution,
-exact-tag cleanup and an honest report of leftovers.
+exact-namespace teardown and an honest report of leftovers.
 
 ### V. Preserve ownership, documentation, and release controls
 
@@ -94,10 +95,13 @@ Agents MUST inspect status and diffs before editing, preserve unrelated work,
 and stage only task-owned paths when a commit is authorized. Do not automatically
 stash, reset, revert, or disable all hooks. An explicitly deferred intermediate verification hook is allowed. The standing
 release exception requires the explicit release-check task for the version,
-changelog and lockfile-only commit, as defined in engineering guidance. Shared integration resources MUST use the
-existing lifecycle skills, one owned run tag, and exact-tag cleanup on success
-and failure; leave other runs and durable resources intact. Do not store
-credentials or machine-specific setup in tracked project artifacts.
+changelog and lockfile-only commit, as defined in engineering guidance. Each live
+test session MUST own one Kubernetes namespace that it creates with a resource
+quota before any workload, deploys its services into from this repository's
+manifests, and deletes by exact name on success, failure and interruption unless
+keeping was requested; never act on another session's namespace or on shared
+services. Do not store credentials or machine-specific setup in tracked project
+artifacts.
 
 Conversation MUST follow the user's requested language (English by default).
 CLI output, README files, contributor documentation, and `docs/` human guides
@@ -124,7 +128,7 @@ cveta2 remains a Python >=3.12,<3.14 CVAT CLI and API using the existing `uv`, R
 mypy, pytest, import-linter, and release configuration. Spec Kit is development
 tooling, not an application dependency. Follow maintained configuration for
 changing values; do not duplicate machine paths, credentials, capacities, or
-stand setup in specifications. New workflow tooling MUST preserve the existing
+service setup in specifications. New workflow tooling MUST preserve the existing
 quality gates and the commit, mutation, and integration skill contracts.
 
 ## Development Workflow and Quality Gates
@@ -253,4 +257,12 @@ preflight and explicit deferral replace indefinite default waiting; acceptance,
 cleanup, independent review and release controls remain required. This amendment
 implements the user-approved verification migration and changes no product contract.
 
-**Version**: 4.0.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-09
+Version 4.1.0 amends principles IV and V for the retirement of the shared
+docker-desktop stands (k8s-infra plan of 2026-11-10). One owned run tag on shared
+stands with exact-tag cleanup becomes one owned session namespace with a quota and
+exact-namespace teardown; capacity WAIT gives way to node admission of the session
+quota, and the TLS trust class disappears with loopback port-forwards. Preflight
+outcomes, deferral, serial live execution and leftover reporting are unchanged.
+The amendment changes no product contract.
+
+**Version**: 4.1.0 | **Ratified**: 2026-09-30 | **Last Amended**: 2026-11-10
