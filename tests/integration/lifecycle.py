@@ -423,6 +423,9 @@ def _cluster_available(deadline: float) -> str | None:
         term in detail
         for term in (
             "connection refused",
+            # kubectl's own wording when nothing listens on the API port, as
+            # when Docker Desktop's Kubernetes is stopped.
+            "was refused",
             "connection reset",
             "timed out",
             "timeout",
