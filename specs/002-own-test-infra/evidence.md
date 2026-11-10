@@ -157,3 +157,59 @@ PersistentVolume claimed from one, and no port-forward or sampler process of
 this work remained. Two port-forwards of another agent's `cy-it-m5` namespace
 were running and were left alone. The scratch directory, including the
 throwaway credentials, was removed before committing.
+
+# Implementation verification — 2026-11-10
+
+Same worktree and branch, on the implementation commits through `fix(integration):
+treat a refused API connection as an unavailable cluster`. Host load average
+about 4-6 on 32 CPUs. The shared stands still existed in the cluster; no test,
+helper or variable referred to them (SC-005 below), and every exported host was
+`http://127.0.0.1:<port>` of a session port-forward or the session's own
+in-cluster MinIO Service.
+
+## T020: live suite through Task (SC-001-SC-004)
+
+- `task infra-check`: AVAILABLE, exit 0, nothing created.
+- `task integration` (13:26:10-13:32:33 UTC): preflight AVAILABLE, then
+  **38 passed** in 381.2 s, exit 0. Session `cveta2-it-20261110-132613-3b56`
+  was created, used by the serial `live` group and reported deleted by the
+  fixture. Afterwards no `cveta2-it-*` namespace, no session port-forward
+  process and no `tests/integration/.session` remained.
+- Kept session (`lifecycle up`, 13:18:02 UTC, 98 s wall): quota and limit
+  range applied by their own `kubectl apply` before the workload apply; every
+  service ready 51 s after creation; bootstrap, identity check and seeding
+  passed. Quota use at steady state: pods 13/16, requests.cpu 1075m/3,
+  requests.memory 3296Mi/6Gi, limits.memory 12032Mi/16Gi, 1/1 claim, 5Gi/5Gi
+  storage, GPU 0/0. Namespace label `app.kubernetes.io/part-of=cveta2-integration`.
+
+## T021: quickstart experiments
+
+| # | Experiment | Outcome |
+|---|---|---|
+| 2 | `check` with a throwaway kubeconfig whose `docker-desktop` context is a ServiceAccount token minted in a quota'd `cveta2-it-probe-rbac` namespace | exit 1, "may not create namespaces"; nothing created; the probe namespace was deleted |
+| 3 | `check` against an unreachable API server | **First run failed**: refused connection gave exit 1 because kubectl says "connection to the server ... was refused". Fixed in the preflight; rerun: exit 3 in under 1 s (refused) and exit 3 in 11 s with `CVETA2_INFRA_CHECK_TIMEOUT=10` (unroutable address) |
+| 4 | Signal to the whole pytest process group while `seed_cvat.py` ran (`test_task_ops.py`, `-n 2`) | SIGINT: exit 130 after 7 s; the namespace was Terminating and gone by about 50 s later; no port-forward left. SIGTERM: exit 143; the namespace was gone 51 s later; no port-forward or worker process left |
+| 5 | `up`, `env`, `stop`, `stop` again, `stop bogus-ns` | `env` refused a terminal only through its isatty check (not exercised here), printed 21 exports into a file (names checked, values not shown), restarted the 4 forwards on the recorded ports; CVAT `/api/server/about`, ClearML `debug.ping` and MinIO `/minio/health/ready` answered 200 through them. `stop` deleted the namespace (50 s), stopped the forwards and removed `.session`; the second `stop` by name reported "already gone" (exit 0); `stop` with nothing recorded exit 0; `bogus-ns` refused (exit 1) |
+| 6 | Kept session deleted by hand, then `up` | `up` printed that the kept session no longer exists, forgot it and created a new namespace; `stop` of the vanished name succeeded as already gone |
+| 7 | Two pytest runs at once in this checkout | Distinct namespaces (`...-c6db`, `...-f5b4`) and distinct local ports; both 5 passed; both namespaces and all forwards gone afterwards |
+
+Experiments 4 and 7 used `pytest` directly with `CVETA2_TASK_VERIFICATION=1`,
+the same options as the Task. Worker output under xdist is not shown, so the
+teardown lines of experiment 4 were observed through the cluster, not the log.
+
+## T022: SC-005
+
+`git grep -E 'INFRA_RUN_TAG|INFRA_PROJECT|K8S_INFRA_SKILL_DIR|INFRA_REGISTRY|INTEGRATION_SKILL_DIR|infra\.py|scripts/(clearml|mongodb|cvat|lakefs|postgres|minio)\.py|--project cveta2|cveta2-main|\.run-tag' -- ':!specs/' ':!docs/plans/' ':!CHANGELOG.md'`
+returned nothing.
+
+## T024: mutation
+
+`task mutation -- --base main`: "No changed cveta2 function can be mutated;
+nothing to do." No product module changed in this feature.
+
+## Not done here
+
+- T025, a fresh independent review, was not run by the implementing agent.
+- Cold start with an empty image cache is still unmeasured.
+- Whether SIGTERM without the new handler leaked the namespace was not
+  reproduced; the handler was added from reading pytest's default behavior.
