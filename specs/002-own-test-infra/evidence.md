@@ -160,8 +160,9 @@ throwaway credentials, was removed before committing.
 
 # Implementation verification — 2026-11-10
 
-Same worktree and branch. T020 and experiments 2, 4-7 ran on `d74addc`;
-experiment 3 was rerun after the preflight fix `4bd3e32`, and the acceptance
+Same worktree and branch. T020 and experiments 2 and 4-6 ran on `d74addc`;
+experiment 3 was rerun and experiment 7 ran after the preflight fix `4bd3e32`;
+the test-phase interrupts ran on `911621d`; the acceptance
 below ran on `739c964`, which contains both. Host load average
 about 4-6 on 32 CPUs. The shared stands still existed in the cluster; no test,
 helper or variable referred to them (SC-005 below), and every exported host was
@@ -192,7 +193,8 @@ in-cluster MinIO Service.
 | 4 | Signal to the whole pytest process group while `seed_cvat.py` ran (`test_task_ops.py`, `-n 2`) | SIGINT: exit 130 after 7 s; the namespace was Terminating and gone by about 50 s later; no port-forward left. SIGTERM: exit 143; the namespace was gone 51 s later; no port-forward or worker process left |
 | 5 | `up`, `env`, `stop`, `stop` again, `stop bogus-ns` | `env` refused a terminal only through its isatty check (not exercised here), printed 21 exports into a file (names checked, values not shown), restarted the 4 forwards on the recorded ports; CVAT `/api/server/about`, ClearML `debug.ping` and MinIO `/minio/health/ready` answered 200 through them. `stop` deleted the namespace (50 s), stopped the forwards and removed `.session`; the second `stop` by name reported "already gone" (exit 0); `stop` with nothing recorded exit 0; `bogus-ns` refused (exit 1) |
 | 6 | Kept session deleted by hand, then `up` | `up` printed that the kept session no longer exists, forgot it and created a new namespace; `stop` of the vanished name succeeded as already gone |
-| 7 | Two pytest runs at once in this checkout | Distinct namespaces (`...-c6db`, `...-f5b4`) and distinct local ports; both 5 passed; both namespaces and all forwards gone afterwards |
+| 7 | Two pytest runs at once in this checkout | Distinct namespaces (`...-c6db`, `...-f5b4`), each with its own CVAT port-forward; both 5 passed; both namespaces and all forwards gone afterwards. The local port numbers were not read; distinct ports are inferred from both runs binding and passing |
+| 4' | Signal to the process group 10 s after seeding ended, during `test_upload.py` | SIGTERM: exit 143; namespace gone 51 s later. SIGINT: exit 130; namespace gone 50 s later. No port-forward or worker process left after either |
 
 Experiments 4 and 7 used `pytest` directly with `CVETA2_TASK_VERIFICATION=1`,
 the same options as the Task. Worker output under xdist is not shown, so the
