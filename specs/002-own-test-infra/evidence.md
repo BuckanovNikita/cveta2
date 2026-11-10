@@ -160,8 +160,9 @@ throwaway credentials, was removed before committing.
 
 # Implementation verification — 2026-11-10
 
-Same worktree and branch, on the implementation commits through `fix(integration):
-treat a refused API connection as an unavailable cluster`. Host load average
+Same worktree and branch. T020 and experiments 2, 4-7 ran on `d74addc`;
+experiment 3 was rerun after the preflight fix `4bd3e32`, and the acceptance
+below ran on `739c964`, which contains both. Host load average
 about 4-6 on 32 CPUs. The shared stands still existed in the cluster; no test,
 helper or variable referred to them (SC-005 below), and every exported host was
 `http://127.0.0.1:<port>` of a session port-forward or the session's own
@@ -213,3 +214,11 @@ nothing to do." No product module changed in this feature.
 - Cold start with an empty image cache is still unmeasured.
 - Whether SIGTERM without the new handler leaked the namespace was not
   reproduced; the handler was added from reading pytest's default behavior.
+
+## Acceptance on the clean tip `739c964`
+
+`task acceptance` (13:54:48-14:01:55 UTC), exit 0: checks, build, randomized
+properties (2384 passed), preflight AVAILABLE, then the full suite with
+coverage, **2422 passed** (38 live) in 391.3 s, total coverage 92.23% (required
+90%). Live session `cveta2-it-20261110-135527-99a4` was reported deleted;
+afterwards no `cveta2-it-*` namespace and no session port-forward remained.

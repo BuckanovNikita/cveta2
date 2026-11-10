@@ -60,7 +60,7 @@ Can start after T001, in parallel with Phases 3-5 (different files).
 - [x] T020 Stop editing. Run `infra-check` and `integration` through Task; record the run, namespace, timings and cleanup proof in evidence.md; confirm the serial `live` group and environment isolation held and the session finished far inside 48 hours (SC-001-SC-004, FR-020, FR-021).
 - [x] T021 Record the quickstart experiments 2-7 with date and outcome in evidence.md (SC-006, US2, US3).
 - [x] T022 Run the SC-005 `git grep`; record the empty result (SC-005, FR-013).
-- [ ] T023 Run development verification with `SKIP` cleared on the final commit; inspect and commit mechanical fixes separately.
+- [x] T023 Run development verification with `SKIP` cleared on the final commit; inspect and commit mechanical fixes separately.
 - [x] T024 Run the mutation report for changed functions and triage per the mutation skill.
 - [ ] T025 Fresh independent review of the integrated branch (behavior and operational policy); resolve findings and rerun affected checks.
 - [ ] T026 Converge spec, plan and tasks with the result; clean-tip acceptance; merge and release follow the release skill and need their authorizations.
