@@ -131,8 +131,8 @@ reading `kubectl get ns`.
 **Decision**: apply quota and limit range, then the workloads; wait for the
 initializer Job to complete and every Deployment and StatefulSet to be
 available within a cold-start deadline (default five minutes, overridable by
-an environment variable); then bootstrap identities, start port-forwards and
-seed. Teardown deletes the namespace and waits up to a bounded time.
+`CVETA2_SESSION_READY_TIMEOUT`); then start port-forwards, bootstrap identities
+and seed. Teardown deletes the namespace and waits up to a bounded time.
 
 **Rationale**: With cached images the measured cold start and namespace
 deletion fit well inside this deadline (figures in evidence.md, M2). A first
