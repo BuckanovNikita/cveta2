@@ -69,6 +69,13 @@ def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Session]:
     environment.
     """
     saved = dict(os.environ)
+    # SIGTERM becomes SystemExit while the session exists, so the cleanup in
+    # prepare and below runs on termination as well as on Ctrl-C.
+    with lifecycle.sigterm_as_exit():
+        yield from _live_session(request, saved)
+
+
+def _live_session(request: pytest.FixtureRequest, saved: dict[str, str]) -> Iterator[lifecycle.Session]:
     try:
         run = lifecycle.prepare(REPO_ROOT, notify=lambda m: _notify(request, m))
     except lifecycle.LifecycleError as error:

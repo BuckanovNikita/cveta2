@@ -59,12 +59,13 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Callable, Sequence
-from contextlib import suppress
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1170,11 +1171,31 @@ def _terminate(signum: int, _frame: FrameType | None) -> NoReturn:
     raise SystemExit(128 + signum)
 
 
+@contextmanager
+def sigterm_as_exit() -> Iterator[None]:
+    """Run teardown on SIGTERM too: raise SystemExit instead of dying at once.
+
+    Only the main thread may install a handler; elsewhere nothing changes.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = signal.signal(signal.SIGTERM, _terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _recorded_or_given(root: Path, given: str | None) -> tuple[str, dict[str, int]]:
-    record = read_session_record(root)
     if given:
         namespace = require_session_name(given)
+        # A damaged record must not block acting on a namespace named explicitly.
+        record = None
+        with suppress(LifecycleError):
+            record = read_session_record(root)
         return namespace, record[1] if record and record[0] == namespace else {}
+    record = read_session_record(root)
     if record is None:
         fail(f"no kept session in this checkout; start one with {MODULE} up or name the namespace.")
     return record
@@ -1264,10 +1285,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if isinstance(sys.stdout, io.TextIOWrapper):
         # Our lines must interleave with the children's in captured output.
         sys.stdout.reconfigure(line_buffering=True)
-    signal.signal(signal.SIGTERM, _terminate)
     root: Path = args.repo_root.resolve()
     try:
-        return _dispatch(args, root)
+        with sigterm_as_exit():
+            return _dispatch(args, root)
     except InfrastructureUnavailableError as error:
         first, *rest = error.lines
         first = first.removeprefix("UNAVAILABLE: ")
