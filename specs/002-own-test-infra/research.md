@@ -112,10 +112,15 @@ kubectl choose the port avoids collisions between concurrent sessions.
 labelled `app.kubernetes.io/part-of=cveta2-integration`. The namespace name is
 also `INTEGRATION_RUN_TAG`, the MinIO bucket and the prefix of CVAT and
 ClearML object names. A kept session (`up` or `INTEGRATION_KEEP_DATA=1`) is
-recorded in the gitignored `tests/integration/.session` (namespace name only;
-no credentials, no ports). `env` reads credentials from the namespace's Secrets
-and starts fresh port-forwards; `stop [<namespace>]` deletes exactly that
-namespace.
+recorded in the gitignored `tests/integration/.session`: the namespace name and
+the four local ports, no credentials. `env` reads credentials from the
+namespace's Secrets and starts port-forwards on the recorded ports when they are
+free, because ClearML stores absolute file-server URLs in dataset metadata and a
+new port would break links to files a kept session already holds; when a port is
+taken it picks a new one and warns about that limitation. Port-forward processes
+are found by exact command-line match on `kubectl --context docker-desktop -n
+<namespace> port-forward`, so `stop` only ever kills that session's forwards;
+`stop [<namespace>]` then deletes exactly that namespace.
 
 **Rationale**: The name is unique per session and valid as a bucket name, a
 namespace name and a CVAT name prefix; it sorts by start time for an operator
@@ -129,10 +134,10 @@ available within a cold-start deadline (default five minutes, overridable by
 an environment variable); then bootstrap identities, start port-forwards and
 seed. Teardown deletes the namespace and waits up to a bounded time.
 
-**Rationale**: With images cached the minimal set was ready about 70 seconds
-after namespace creation and namespace deletion took under a minute. A first
-pull of the CVAT server image (about 2.4 GB) is not measured and may exceed the
-deadline; that is reported as blocked setup, never as a test failure.
+**Rationale**: With cached images the measured cold start and namespace
+deletion fit well inside this deadline (figures in evidence.md, M2). A first
+pull of the CVAT server image is not measured and may exceed it; that is
+reported as blocked setup, never as a test failure.
 
 ## R9. Preflight without a registry
 
@@ -150,9 +155,11 @@ the platform has no admission logic of its own (plan decision 4).
 **Decision**: export the names the tests read (spec FR-011), including the
 standard AWS names for the session's MinIO.
 
-**Rationale**: Measured: without `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
-and friends, eight live tests fail with `NoCredentialsError`; the k8s-infra
-MinIO helper used to export them as a side effect. Product configuration names
+**Rationale**: Measured: without the AWS names, eight live tests fail with
+`NoCredentialsError`, which proves the key pair is needed; they passed with all
+four set (region and endpoint were not isolated, and are kept because the old
+helper exported them). The k8s-infra MinIO helper used to export them as a side
+effect. Product configuration names
 such as `CVAT_USERNAME` were not needed by any test.
 
 ## R11. Versions

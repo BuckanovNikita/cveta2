@@ -53,7 +53,7 @@ Can start after T001, in parallel with Phases 3-5 (different files).
 - [ ] T016 [P] Rewrite .agents/skills/running-integration-tests/SKILL.md for sessions, keep/stop, cleanup proof and concurrency; adjust .agents/skills/verification-workflow/SKILL.md wording (FR-022).
 - [ ] T017 [P] Update AGENTS.md project-skill line and the Russian README.md live-test paragraph (FR-022).
 - [ ] T018 [P] Update scripts/mutation.py `STAND_NAMES`, scripts/session_status.sh, scripts/README.md and .gitignore (`.run-tag` → `.session`) (FR-013).
-- [ ] T019 [P] Update tests/env_isolation.py comments that name the skill lookup (FR-013).
+- [ ] T019 [P] Update tests/env_isolation.py and tests/conftest.py comments that name the skill lookup or the stands, and the `integration` marker description in pyproject.toml (FR-013, FR-022).
 
 ## Phase 7: Verification and convergence
 

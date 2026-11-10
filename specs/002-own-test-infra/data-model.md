@@ -8,7 +8,7 @@ No product data changes. These are the operational entities a live session owns.
 |---|---|---|
 | namespace | `cveta2-it-<UTC yyyymmdd-hhmmss>-<4 hex>` | Unique per session; never a protected name; also the run tag, the MinIO bucket and the CVAT/ClearML name prefix |
 | kept | whether teardown is skipped | True for `lifecycle up` and for `INTEGRATION_KEEP_DATA=1`; false otherwise, on `main` too |
-| ports | loopback ports of the four port-forwards | Chosen by kubectl per session; never recorded in tracked files |
+| ports | loopback ports of the four port-forwards | Chosen by kubectl per session; recorded only in the gitignored `.session` of a kept session |
 | credentials | generated values for PostgreSQL, Redis, kvrocks, MinIO, CVAT user, ClearML pairs | Only in the namespace's Secrets and the process environment |
 
 States: `created` (namespace and quota exist) → `deployed` (workloads applied) →
@@ -31,8 +31,8 @@ command). A namespace that vanished externally is `removed`.
 
 ## Kept-session record
 
-`tests/integration/.session`, gitignored, one line: the namespace of the kept
-session in this checkout. Written by `up`, removed by a successful `stop`. It
+`tests/integration/.session`, gitignored: the namespace of the kept session in
+this checkout and its four local ports; no credentials. Written by `up`, removed by a successful `stop`. It
 replaces `tests/integration/.run-tag`. A fresh `up` refuses while it names a
 namespace that still exists, and discards it when the namespace is gone.
 

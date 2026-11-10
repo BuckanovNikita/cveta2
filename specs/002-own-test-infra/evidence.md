@@ -23,7 +23,10 @@ afterwards. No secret value is recorded.
 - PostgreSQL 15, MinIO and a hand-written minimal ClearML (API server, file
   server, MongoDB, Elasticsearch 7.17.28, Redis) on `emptyDir`; CVAT's shared
   data claim on `hostpath`.
-- Each namespace got a `ResourceQuota` and `LimitRange` before any workload.
+- `cveta2-it-m1` and `cveta2-it-m2` got a `ResourceQuota` and `LimitRange`
+  before any workload. The short-lived `cveta2-it-probe` namespace (one pod)
+  got a `ResourceQuota` only, without a `LimitRange`: a deviation from the
+  measurement rule, harmless because its single container declared resources.
 - Throwaway credentials were generated into a mode-0600 scratch file.
 - Host access through `kubectl port-forward --address 127.0.0.1` to the CVAT
   backend, MinIO, ClearML API and ClearML file server.
@@ -53,7 +56,9 @@ afterwards. No secret value is recorded.
   harness had not set the standard AWS variables that the k8s-infra MinIO
   helper used to export as a side effect. After adding `AWS_ACCESS_KEY_ID`,
   `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` and `AWS_ENDPOINT_URL`, the
-  eight failed tests passed (8 passed in 103.4 s, separate seed).
+  eight failed tests passed (8 passed in 103.4 s, separate seed). The four
+  names were added together, so only the set is proven: the error proves the
+  key pair is needed; whether region and endpoint are needed was not isolated.
 - Queue usage over both passes: `import` 45 jobs
   (`cvat.apps.engine.task.create_thread`), `chunks` 5 jobs; `annotation`,
   `consensus`, `export`, `qualityreports`, `utils`, `webhooks`: none.
@@ -77,8 +82,10 @@ afterwards. No secret value is recorded.
   PostgreSQL 11 s, MongoDB 11 s, Elasticsearch 17 s, CVAT Redis 28 s,
   initializer finished 33 s, kvrocks 37 s, ClearML API 44 s, file server 54 s
   (2 restarts while waiting for the API), CVAT server 56 s, OPA 67 s.
-- Bootstrap (register, organization): 0.3 s. Seeding was not among the five
-  slowest test phases, so it took under 11.5 s.
+- Bootstrap (register, organization): 0.3 s. Seeding runs inside the session
+  fixture, which pytest charges to the first live test's setup; the slowest
+  setup phase was 41.56 s on the first test, so seeding took at most about
+  42 s; it was not measured on its own.
 - Full live suite: **38 passed** in 307.7 s (wall 309 s), 0 failed.
 - Queue usage: `import` 36 jobs, `chunks` 4 jobs.
 - Peak memory per container (MiB): Elasticsearch 801, import worker 373,
@@ -96,20 +103,22 @@ namespace (`cveta2-it-probe`) listed `/var/lib/k8s-pvs/cvat-backend-data`
 Deleting a session namespace therefore removes its `hostpath` data on the
 node, not only the API objects.
 
-## Images (all already present in the local image store)
+## Images
 
 `cvat/server:v2.59.1`, `openpolicyagent/opa:1.12.2`, `apache/kvrocks:2.12.1`,
 `public.ecr.aws/docker/library/redis:7.2.11`, `postgres:15-alpine`,
 `minio/minio:RELEASE.2025-09-07T16-13-09Z`,
 `docker.io/allegroai/clearml:2.0.0-613`,
 `docker.io/bitnamilegacy/mongodb:6.0.10-debian-11-r8`,
-`docker.elastic.co/elasticsearch/elasticsearch:7.17.28`, and an untagged
-`busybox` in the chart's permission-fix init container, which the manifests
-must pin. `cvat-sdk` is locked at 2.73.0 against server 2.59.1 and passed.
+`docker.elastic.co/elasticsearch/elasticsearch:7.17.28` were present in the
+local image store. The chart's permission-fix init container uses an untagged
+`busybox` (that is `:latest`, pulled according to its pull policy); its
+presence in the store was not checked, and the manifests must pin it. `cvat-sdk` is locked at 2.73.0 against server 2.59.1 and passed.
 
 ## Not measured
 
 - Cold start with an empty image cache (first pull of the 2.4 GB CVAT image).
+- Seeding time on its own (bounded above by about 42 s, see M2).
 - Whether a single pod holding the CVAT server and both workers could replace
   the `hostpath` claim with `emptyDir`.
 - Preflight, interruption, kept-session, vanished-namespace and concurrent
@@ -129,6 +138,8 @@ then remediation by the author (no owner question was needed):
 | A4 | Low | Constitution IV keeps explicit operator waiting; spec did not say so | Added to FR-014 |
 | A5 | Low | FR-020 and FR-021 had no explicit task | Mapped to T020 |
 | A6 | Info | Constitution V conflict | Gated by T001 before any implementation |
+| A7 | Medium | Prose naming the stands that SC-005 cannot see: the `integration` marker text in `pyproject.toml` and a comment in `tests/conftest.py` had no task (`git grep -i -E 'shared stand\|стенд\|the stands\|k8s-infra'` with the same exclusions) | Added to T019; every other hit is in a file a task already owns |
+| A8 | Medium | Kept sessions: `.session` held only the name, but `env` and `stop` must find or recreate port-forwards, and ClearML stores absolute file-server URLs | `.session` records the four ports; `env` reuses them when free; `stop` matches port-forwards by exact namespace command line |
 
 Coverage: every FR maps to at least one task; every task maps to an FR, SC or
 verification gate. Running the SC-005 pattern on the current tree matched

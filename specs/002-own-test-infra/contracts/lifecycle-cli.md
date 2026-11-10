@@ -8,8 +8,8 @@ shapes; nothing prints a credential.
 |---|---|---|
 | `check` | Read-only preflight within `CVETA2_INFRA_CHECK_TIMEOUT` (default 60 s): kubectl present, cluster ready, namespace create/delete allowed, node can admit the session quota. Creates nothing. | 0 AVAILABLE, 3 UNAVAILABLE, 1 ERROR |
 | `up` | Preflight, create a session, deploy, wait (cold-start deadline), bootstrap, seed; keep it and record it in `tests/integration/.session`. Refuses while `.session` names a namespace that still exists. | 0, 3 blocked setup, 1 error |
-| `env` | For the recorded (or given) session: read its credentials from its Secrets, start port-forwards, print `export NAME=<quoted>` lines for the names in [environment.md](environment.md). Refuses a terminal. | 0, 1 |
-| `stop [<namespace>]` | Delete exactly the given or recorded `cveta2-it-*` namespace and wait until it is gone; stop this checkout's port-forwards for it; remove `.session` when it names it. An absent namespace is success. A name without the prefix is refused. | 0, 1 incomplete cleanup |
+| `env` | For the recorded (or given) session: read its credentials from its Secrets, start port-forwards on the recorded ports when free (else new ports, with a warning that stored ClearML file URLs may not resolve), print `export NAME=<quoted>` lines for the names in [environment.md](environment.md). Refuses a terminal. | 0, 1 |
+| `stop [<namespace>]` | Delete exactly the given or recorded `cveta2-it-*` namespace and wait until it is gone; stop the port-forwards whose command line is exactly `kubectl --context docker-desktop -n <namespace> port-forward ...`; remove `.session` when it names it. An absent namespace is success. A name without the prefix is refused. | 0, 1 incomplete cleanup |
 
 Session fixture (`tests/integration/conftest.py::live_run`): `prepare` performs
 `up` without recording `.session`; `finish` stops the session unless
