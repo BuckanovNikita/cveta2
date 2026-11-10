@@ -1,12 +1,13 @@
-"""Live-test session and helpers: the run on the stands, its client and project.
+"""Live-test session and helpers: the session's services, its client and project.
 
 The live tests are part of the normal pytest run. ``tests/conftest.py`` marks
 every test here ``integration`` and puts it in the ``live`` xdist group, so one
-worker runs them serially (CVAT rate limits) while unit tests stay parallel.
-The autouse session fixture ``live_run`` prepares one tagged run through
-``tests/integration/lifecycle.py`` before the first live test - waiting, with a
-notice, while the stands are stopped - and keeps or stops it after the last.
-Everything else reads the ``CVAT_INTEGRATION_*`` variables that run exports.
+worker runs them serially while unit tests stay parallel. The autouse session
+fixture ``live_run`` starts one session through ``tests/integration/lifecycle.py``
+before the first live test - its own namespace with CVAT, MinIO and ClearML,
+waiting, with a notice, while the cluster is unavailable - and deletes it after
+the last unless ``INTEGRATION_KEEP_DATA=1``. Everything else reads the
+``CVAT_INTEGRATION_*``, ``MINIO_*`` and ``CLEARML_*`` variables it exports.
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ import pytest
 
 from cveta2.adapters.config.settings import CvatConfig
 from tests.integration import lifecycle
-from tests.integration.stand_tls import StandTlsError, tls_failure_message
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -60,10 +60,10 @@ def _notify(request: pytest.FixtureRequest, message: str) -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Run]:
-    """Prepare this session's run on the stands, then keep or stop it.
+def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Session]:
+    """Start this pytest session's live session, then delete or keep it.
 
-    The run's variables stay in this worker's environment until the session
+    The session's variables stay in this worker's environment until the session
     ends; ``tests/conftest.py`` hides the names listed in
     ``CVETA2_LIVE_EXPORTED`` from unit tests, and teardown restores the
     environment.
@@ -78,14 +78,18 @@ def live_run(request: pytest.FixtureRequest) -> Iterator[lifecycle.Run]:
     if refusal:
         pytest.fail(refusal, pytrace=False)
     os.environ[LIVE_EXPORTED_VARIABLE] = json.dumps(sorted(set(os.environ) - set(saved) | set(run.exported)))
+    _notify(request, f"live session {run.namespace} is ready")
     try:
         yield run
     finally:
         try:
-            if lifecycle.finish(run):
+            failed = lifecycle.finish(run)
+            kept = "kept" if lifecycle.keep_data() else "deleted"
+            _notify(request, f"live session {run.namespace}: {'cleanup incomplete' if failed else kept}")
+            if failed:
                 pytest.fail(
-                    f"run '{run.tag}' is not fully torn down; retry exact-tag cleanup with "
-                    f"INFRA_RUN_TAG={run.tag} {lifecycle.MODULE} stop; see the output above.",
+                    f"session namespace '{run.namespace}' is not fully removed; retry with "
+                    f"{lifecycle.MODULE} stop {run.namespace}; see the output above.",
                     pytrace=False,
                 )
         finally:
@@ -97,11 +101,24 @@ def _env(key: str, default: str) -> str:
     return os.environ.get(key, default).strip()
 
 
+def session_cvat_host() -> str:
+    """Return the session's own CVAT host; there is no default to fall back to."""
+    host = _env("CVAT_INTEGRATION_HOST", "")
+    if not host:
+        pytest.fail(
+            "CVAT_INTEGRATION_HOST is not set; live tests run through pytest, whose "
+            "live_run fixture starts the session, or after "
+            f'eval "$({lifecycle.MODULE} env)"',
+            pytrace=False,
+        )
+    return host
+
+
 def make_integration_config() -> CvatConfig:
-    """CvatConfig for the stand, scoped to the integration organization."""
+    """CvatConfig for the session's CVAT, scoped to the integration organization."""
     return CvatConfig(
-        host=_env("CVAT_INTEGRATION_HOST", "https://cvat.k8s.docker.internal"),
-        username=_env("CVAT_INTEGRATION_USER", "cveta2"),
+        host=session_cvat_host(),
+        username=_env("CVAT_INTEGRATION_USER", ""),
         password=_env("CVAT_INTEGRATION_PASSWORD", ""),
         organization=_env("CVAT_INTEGRATION_ORG", "") or None,
     )
@@ -110,9 +127,9 @@ def make_integration_config() -> CvatConfig:
 def _make_sdk_client() -> CvatSdkClient:
     """Create and return an opened cvat_sdk client scoped to the organization.
 
-    Skips the SDK's server-version check: the stand throttles anonymous
-    requests per client IP, and that check would be a second one per open,
-    next to the login itself.
+    Skips the SDK's server-version check: the locked SDK is newer than the
+    pinned server, and that check would be a second request per open, next to
+    the login itself.
     """
     from cvat_sdk.api_client.exceptions import ApiException
     from cvat_sdk.core.client import Client
@@ -122,13 +139,8 @@ def _make_sdk_client() -> CvatSdkClient:
     client = Client(cfg.host, check_server_version=False)
     try:
         client.login((cfg.username, cfg.password))
-    except (OSError, ApiException, Urllib3Error) as exc:
+    except (OSError, ApiException, Urllib3Error):
         client.close()
-        # A trust failure is an OSError too; callers skip on OSError as
-        # "not reachable", so it is re-raised as a failure that names TLS.
-        tls = tls_failure_message(exc, cfg.host)
-        if tls is not None:
-            raise StandTlsError(tls) from exc
         raise
     if cfg.organization:
         client.organization_slug = cfg.organization
@@ -136,15 +148,15 @@ def _make_sdk_client() -> CvatSdkClient:
 
 
 def seeded_project_name() -> str:
-    """Full name of this run's seeded project, ``"<run-tag> coco8-dev"``."""
+    """Full name of this session's seeded project, ``"<namespace> coco8-dev"``."""
     return _env("CVAT_INTEGRATION_PROJECT", "coco8-dev")
 
 
 def find_seeded_project(adapter: CvatApiPort) -> ProjectInfo:
     """Return the seeded project by full name; skip if absent, fail if ambiguous.
 
-    CVAT does not enforce unique project names, and two copies mean a run's
-    cleanup did not happen - a duplicate is never silently the first match.
+    CVAT does not enforce unique project names, and the session seeds exactly
+    one - a duplicate is never silently the first match.
     """
     name = seeded_project_name()
     matches = [p for p in adapter.list_projects() if p.name == name]
@@ -152,7 +164,5 @@ def find_seeded_project(adapter: CvatApiPort) -> ProjectInfo:
         pytest.skip(f"project '{name}' not found (run `uv run python -m tests.integration.lifecycle up` first)")
     if len(matches) > 1:
         ids = ", ".join(str(p.id) for p in matches)
-        pytest.fail(
-            f"{len(matches)} projects named '{name}' (ids {ids}); run cvat_stand.py cleanup --tag and seed again"
-        )
+        pytest.fail(f"{len(matches)} projects named '{name}' (ids {ids}); the session seeds one, start a new session")
     return matches[0]

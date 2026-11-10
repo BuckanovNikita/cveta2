@@ -1,0 +1,443 @@
+# ClearML for one live-test session: API server, file server and their stores
+# (MongoDB, Elasticsearch, Redis), all emptyDir; no web UI, agent,
+# async-delete service or GPU (specs/002-own-test-infra/research.md, R4).
+# Configured through environment only. lifecycle.py generates the Secret
+# clearml-credentials per session: the server's `apiserver` and `tests`
+# credential pairs and the auth token secret; the tests use the `tests` pair.
+# Every Elasticsearch host entry names "scheme":"http", or the API server
+# crashes at start; the file server's init container waits for the API
+# server, or it restarts until the API answers. MongoDB runs without an
+# account: only pods of the session namespace reach it.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearml-redis
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-redis
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-redis
+  ports:
+  - name: tcp
+    port: 6379
+    targetPort: 6379
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clearml-redis
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-redis
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: cveta2-integration
+      app.kubernetes.io/component: clearml-redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: cveta2-integration
+        app.kubernetes.io/component: clearml-redis
+    spec:
+      containers:
+      - name: redis
+        image: public.ecr.aws/docker/library/redis:7.2.11
+        imagePullPolicy: IfNotPresent
+        args:
+        - --save
+        - ''
+        - --appendonly
+        - 'no'
+        ports:
+        - containerPort: 6379
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - redis-cli ping | grep -q PONG
+          initialDelaySeconds: 2
+          periodSeconds: 3
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearml-mongodb
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-mongodb
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-mongodb
+  ports:
+  - name: tcp
+    port: 27017
+    targetPort: 27017
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clearml-mongodb
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-mongodb
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: cveta2-integration
+      app.kubernetes.io/component: clearml-mongodb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: cveta2-integration
+        app.kubernetes.io/component: clearml-mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: docker.io/bitnamilegacy/mongodb:6.0.10-debian-11-r8
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: ALLOW_EMPTY_PASSWORD
+          value: 'yes'
+        ports:
+        - containerPort: 27017
+        readinessProbe:
+          tcpSocket:
+            port: 27017
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        volumeMounts:
+        - name: data
+          mountPath: /bitnami/mongodb
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearml-elastic
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-elastic
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-elastic
+  ports:
+  - name: tcp
+    port: 9200
+    targetPort: 9200
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clearml-elastic
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-elastic
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: cveta2-integration
+      app.kubernetes.io/component: clearml-elastic
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: cveta2-integration
+        app.kubernetes.io/component: clearml-elastic
+    spec:
+      containers:
+      - name: elasticsearch
+        image: docker.elastic.co/elasticsearch/elasticsearch:7.17.28
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: discovery.type
+          value: single-node
+        - name: cluster.name
+          value: clearml
+        - name: xpack.security.enabled
+          value: 'false'
+        - name: xpack.monitoring.enabled
+          value: 'false'
+        - name: bootstrap.memory_lock
+          value: 'false'
+        - name: cluster.routing.allocation.disk.threshold_enabled
+          value: 'false'
+        - name: ES_JAVA_OPTS
+          value: -Xms512m -Xmx512m
+        ports:
+        - containerPort: 9200
+        readinessProbe:
+          httpGet:
+            path: /_cluster/health?wait_for_status=yellow&timeout=1s
+            port: 9200
+          initialDelaySeconds: 5
+          periodSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 1Gi
+          limits:
+            cpu: '2'
+            memory: 1536Mi
+        volumeMounts:
+        - name: data
+          mountPath: /usr/share/elasticsearch/data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearml-apiserver
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-apiserver
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-apiserver
+  ports:
+  - name: tcp
+    port: 8008
+    targetPort: 8008
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clearml-apiserver
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-apiserver
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: cveta2-integration
+      app.kubernetes.io/component: clearml-apiserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: cveta2-integration
+        app.kubernetes.io/component: clearml-apiserver
+    spec:
+      initContainers:
+      - name: wait-for-stores
+        image: docker.io/allegroai/clearml:2.0.0-613
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        - until [ "$(curl -s -o /dev/null -w "%{http_code}" http://clearml-elastic:9200/_cluster/health)"
+          = 200 ]; do echo waiting for elasticsearch; sleep 3; done; until [ "$(curl --telnet-option BOGUS
+          --connect-timeout 2 -s telnet://clearml-mongodb:27017 -o /dev/null; echo $?)" = 49 ]; do echo
+          waiting for mongodb; sleep 3; done; until [ "$(curl --telnet-option BOGUS --connect-timeout
+          2 -s telnet://clearml-redis:6379 -o /dev/null; echo $?)" = 49 ]; do echo waiting for redis;
+          sleep 3; done
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+      containers:
+      - name: apiserver
+        image: docker.io/allegroai/clearml:2.0.0-613
+        imagePullPolicy: IfNotPresent
+        args:
+        - apiserver
+        env:
+        - name: CLEARML__HOSTS__ELASTIC__WORKERS__HOSTS
+          value: '[{"host":"clearml-elastic","port":9200,"scheme":"http"}]'
+        - name: CLEARML__HOSTS__ELASTIC__EVENTS__HOSTS
+          value: '[{"host":"clearml-elastic","port":9200,"scheme":"http"}]'
+        - name: CLEARML__HOSTS__ELASTIC__DATASETS__HOSTS
+          value: '[{"host":"clearml-elastic","port":9200,"scheme":"http"}]'
+        - name: CLEARML__HOSTS__ELASTIC__LOGS__HOSTS
+          value: '[{"host":"clearml-elastic","port":9200,"scheme":"http"}]'
+        - name: CLEARML_MONGODB_SERVICE_CONNECTION_STRING
+          value: mongodb://clearml-mongodb:27017
+        - name: CLEARML_REDIS_SERVICE_HOST
+          value: clearml-redis
+        - name: CLEARML_REDIS_SERVICE_PORT
+          value: '6379'
+        - name: CLEARML__secure__credentials__apiserver__user_key
+          valueFrom:
+            secretKeyRef:
+              name: clearml-credentials
+              key: apiserver-key
+        - name: CLEARML__secure__credentials__apiserver__user_secret
+          valueFrom:
+            secretKeyRef:
+              name: clearml-credentials
+              key: apiserver-secret
+        - name: CLEARML__secure__credentials__tests__user_key
+          valueFrom:
+            secretKeyRef:
+              name: clearml-credentials
+              key: tests-key
+        - name: CLEARML__secure__credentials__tests__user_secret
+          valueFrom:
+            secretKeyRef:
+              name: clearml-credentials
+              key: tests-secret
+        - name: CLEARML__secure__auth__token_secret
+          valueFrom:
+            secretKeyRef:
+              name: clearml-credentials
+              key: token-secret
+        ports:
+        - containerPort: 8008
+        readinessProbe:
+          httpGet:
+            path: /debug.ping
+            port: 8008
+          initialDelaySeconds: 5
+          periodSeconds: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '2'
+            memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clearml-fileserver
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-fileserver
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-fileserver
+  ports:
+  - name: tcp
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clearml-fileserver
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: clearml-fileserver
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: cveta2-integration
+      app.kubernetes.io/component: clearml-fileserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: cveta2-integration
+        app.kubernetes.io/component: clearml-fileserver
+    spec:
+      initContainers:
+      - name: wait-for-apiserver
+        image: docker.io/allegroai/clearml:2.0.0-613
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        - until [ "$(curl -s -o /dev/null -w "%{http_code}" http://clearml-apiserver:8008/debug.ping)"
+          = 200 ]; do echo waiting for apiserver; sleep 3; done
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+      containers:
+      - name: fileserver
+        image: docker.io/allegroai/clearml:2.0.0-613
+        imagePullPolicy: IfNotPresent
+        args:
+        - fileserver
+        env:
+        - name: CLEARML__HOSTS__API_SERVER
+          value: http://clearml-apiserver:8008
+        - name: CLEARML_REDIS_SERVICE_HOST
+          value: clearml-redis
+        - name: CLEARML_REDIS_SERVICE_PORT
+          value: '6379'
+        - name: USER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: clearml-credentials
+              key: apiserver-key
+        - name: USER_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: clearml-credentials
+              key: apiserver-secret
+        ports:
+        - containerPort: 8081
+        readinessProbe:
+          tcpSocket:
+            port: 8081
+          initialDelaySeconds: 2
+          periodSeconds: 3
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: /mnt/fileserver
+      volumes:
+      - name: data
+        emptyDir: {}

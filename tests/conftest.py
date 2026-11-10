@@ -72,7 +72,7 @@ def pytest_itemcollected(item: pytest.Item) -> None:
 
     Every test under ``tests/integration`` is marked ``integration`` and joins
     the ``live`` xdist group: with ``--dist loadgroup`` one worker runs them
-    serially, so the run's session fixture prepares the stands once. This runs
+    serially, so the session fixture deploys the session's services once. This runs
     per item during collection, before xdist reads the groups. Exclude them
     with ``-m "not integration"``.
     """

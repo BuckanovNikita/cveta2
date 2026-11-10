@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect and clean this project's objects on the cluster CVAT stand.
+"""Inspect and clean the integration user's objects on the session's CVAT.
 
     uv run python tests/integration/cvat_stand.py verify
     uv run python tests/integration/cvat_stand.py ls
@@ -7,23 +7,23 @@
 
 Credentials come from ``CVAT_INTEGRATION_HOST`` / ``CVAT_INTEGRATION_USER`` /
 ``CVAT_INTEGRATION_PASSWORD`` / ``CVAT_INTEGRATION_ORG``, which
-``tests/integration/lifecycle.py`` derives from the project's Secret through the
-k8s-infra skill (``cvat.py --project cveta2 env``).
+``tests/integration/lifecycle.py`` reads from the session namespace's Secret
+``cvat-user`` and exports (``eval "$(... lifecycle env)"`` for a kept session).
 
-``verify`` logs in as that user, checks that the stand answers as the same
-account and that the account is a member of the organization, and fails with
-the exact missing piece otherwise. It never registers users or organizations:
-the stand admin creates both with ``deploy_cvat.sh`` (k8s-infra). The login
-runs without the organization header, which CVAT rejects for a slug the user
-is not a member of - the very state ``verify`` reports.
+``verify`` logs in as that user, checks that CVAT answers as the same account
+and that the account is a member of the organization, and fails with the exact
+missing piece otherwise. The lifecycle registers both through CVAT's public API
+right before it runs ``verify``. The login runs without the organization
+header, which CVAT rejects for a slug the user is not a member of - the very
+state ``verify`` reports.
 
-``ls`` and ``cleanup`` see only objects owned by the integration user; the
-organization is shared with other projects. ``cleanup --tag`` matches
-``"<tag> "`` - the tag followed by a space - so that tag ``nkt`` never matches
-``nkt-feature coco8-dev``. Do not "simplify" it to a bare prefix. Projects go
-first (their tasks cascade), then standalone tasks, then cloud storages, which
-nothing may reference any more. Stale objects of dead runs belong to the
-skill's ``cvat.py cleanup --stale`` and the janitor, not to this script.
+``ls`` and ``cleanup`` see only objects owned by the integration user.
+``cleanup --tag`` matches ``"<tag> "`` - the tag followed by a space - so that
+tag ``nkt`` never matches ``nkt-feature coco8-dev``. Do not "simplify" it to a
+bare prefix. Projects go first (their tasks cascade), then standalone tasks,
+then cloud storages, which nothing may reference any more. A session's whole
+CVAT disappears with its namespace, so these commands are for inspecting a
+kept session by hand.
 """
 
 from __future__ import annotations
@@ -40,16 +40,13 @@ from loguru import logger
 from pydantic import BaseModel
 from urllib3.exceptions import HTTPError as Urllib3Error
 
-from tests.integration.stand_tls import tls_failure_message
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 PAGE_SIZE = 100
 SECRET_HINT = (
-    "the credentials are the cveta2 Secret on the cluster "
-    "(`cvat.py --project cveta2 env` from the k8s-infra skill); "
-    "the stand admin fixes the account with deploy_cvat.sh"
+    "the credentials are the session's Secret cvat-user, registered by "
+    "tests/integration/lifecycle.py when the session started"
 )
 
 
@@ -77,7 +74,7 @@ class StandSettings(BaseModel):
             raise StandError(
                 f"{', '.join(missing)} not set; "
                 'eval "$(uv run python -m tests.integration.lifecycle env)" '
-                "(it exports them from the cveta2 Secret through the k8s-infra skill)"
+                "(it exports them from the session namespace's Secrets)"
             )
         values["host"] = values["host"].rstrip("/")
         return cls(**values)
@@ -110,8 +107,8 @@ def _owner_name(item: object) -> str:
 def _login(settings: StandSettings) -> Client:
     """Open a client with one anonymous request (the login), not two.
 
-    The stand throttles anonymous requests per client IP, and the server
-    version check every ``make_client`` performs is one of them.
+    The server version check every ``make_client`` performs would be a second
+    one, and the locked SDK is newer than the pinned server anyway.
     """
     client = Client(settings.host, check_server_version=False)
     try:
@@ -121,11 +118,8 @@ def _login(settings: StandSettings) -> Client:
         raise StandError(
             f"login as '{settings.username}' at {settings.host} failed: {exc.status} {exc.body}; {SECRET_HINT}"
         ) from exc
-    except (OSError, Urllib3Error) as exc:
+    except (OSError, Urllib3Error):
         client.close()
-        tls = tls_failure_message(exc, settings.host)
-        if tls is not None:
-            raise StandError(tls) from exc
         raise
     return client
 

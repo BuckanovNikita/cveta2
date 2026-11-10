@@ -1,8 +1,9 @@
 """Explicit reviewed bundle publication against this run's ClearML and MinIO.
 
 Registry HTTP and image/source fixtures are local. ClearML projects use the exact
-run tag and are removed by the session fixture; the seeded MinIO bucket is read
-only and remains owned by the normal integration lifecycle.
+run tag and are removed by this module's fixture; the seeded MinIO bucket is read
+only. The session namespace, with everything in it, is deleted by the session
+fixture.
 """
 
 import json

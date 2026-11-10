@@ -33,8 +33,9 @@ Policy and definitions live in [engineering guidance](../../../.specify/memory/e
 live verification; keep its task incomplete and continue independent local work.
 Retry at a meaningful milestone or after restored availability, without polling.
 When only blocked verification remains, report the reason and ask for the user's
-decision. Deferred verification blocks acceptance, merge and release. Configuration,
-authorization and TLS errors require diagnosis; assertions remain test failures.
+decision. Deferred verification blocks acceptance, merge and release. Configuration
+and authorization errors require diagnosis; a session whose services are not
+ready in time is blocked setup; assertions remain test failures.
 
 Use `properties`, `integration` or `mutation` separately when the relevant change
 needs them. None is persistently cached. Reuse successful checks only while their

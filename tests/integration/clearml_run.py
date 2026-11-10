@@ -1,17 +1,14 @@
-"""The run's objects on the shared ClearML stand: their names and their removal.
+"""The run's objects on the session's ClearML: their names and their removal.
 
-The run acts as project ``cveta2`` under one run tag (``INTEGRATION_RUN_TAG``,
-exported by ``tests/integration/lifecycle.py`` together with the ``CLEARML_*``
-identity of the cveta2 Secret, which the ClearML SDK reads from the
-environment). Everything the tests create on the stand is a project named
-``"<tag> <what>"``; the SDK files a dataset under ``<project>/.datasets/<name>``,
-so a run owns every project whose first ``/`` path element starts with the tag
-as its first whitespace token - the rule ``clearml.py`` of the k8s-infra skill
-applies too. ``delete_run_projects`` removes them deepest first, with their
-contents, over the same ``projects.get_all`` / ``projects.delete`` calls the
-skill uses; ``uv run python -m tests.integration.lifecycle stop`` runs the skill's
-``clearml.py --project cveta2 cleanup --prefix <tag>`` afterwards for whatever
-a killed session left behind.
+The run tag (``INTEGRATION_RUN_TAG``) is the session namespace, exported by
+``tests/integration/lifecycle.py`` together with the session's ``CLEARML_*``
+identity, which the ClearML SDK reads from the environment. Everything the
+tests create in ClearML is a project named ``"<tag> <what>"``; the SDK files a
+dataset under ``<project>/.datasets/<name>``, so a run owns every project whose
+first ``/`` path element starts with the tag as its first whitespace token.
+``delete_run_projects`` removes them deepest first, with their contents, over
+the ``projects.get_all`` / ``projects.delete`` calls; whatever a killed test
+leaves behind disappears with the session namespace.
 """
 
 from __future__ import annotations
@@ -50,8 +47,7 @@ class RunSettings(BaseModel):
             raise RunError(
                 f"{', '.join(missing)} not set; run it through pytest, whose "
                 "live session fixture (tests/integration/conftest.py) exports "
-                "the run tag and the cveta2 ClearML identity from the Secret "
-                "through the k8s-infra skill"
+                "the run tag and the session's ClearML identity"
             )
         return cls(
             tag=values["INTEGRATION_RUN_TAG"],

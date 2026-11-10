@@ -28,8 +28,8 @@ import pytest
 _FAKE_HOME = Path(tempfile.mkdtemp(prefix="cveta2-test-home-"))
 _REPLACED = ("HOME", "USERPROFILE", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")
 
-# The live-test lifecycle needs the real values for kubectl, uv and the
-# k8s-infra skill lookup (tests/integration/lifecycle.py::child_env). An xdist
+# The live-test lifecycle needs the real values for kubectl and uv
+# (tests/integration/lifecycle.py::child_env). An xdist
 # worker inherits the controller's record, so only the first writer sets it.
 os.environ.setdefault(
     "CVETA2_REAL_ENV",

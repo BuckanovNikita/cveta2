@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Seed one run's bucket and coco8-dev project on the shared stands.
+"""Seed one session's bucket and coco8-dev project on its own CVAT and MinIO.
 
 Reads the JSON fixture files from tests/fixtures/cvat/coco8-dev/ and
-recreates the same project/task structure on the CVAT stand, under the run
-tag: bucket "<tag>" on the shared MinIO with the coco8 images from
+recreates the same project/task structure on the session's CVAT, under the run
+tag (the session namespace): bucket "<tag>" on the session MinIO with the coco8 images from
 tests/fixtures/data/coco8/images/, cloud storage "<tag> minio" pointing at
 that bucket through the in-cluster MinIO endpoint, and project
 "<tag> coco8-dev" with its tasks.
@@ -13,16 +13,15 @@ Environment (tests/integration/lifecycle.py exports all of it):
   CVAT_INTEGRATION_ORG      organization every object is created in
   CVAT_INTEGRATION_PROJECT  full project name, "<tag> coco8-dev"
   INTEGRATION_RUN_TAG       the tag, names the cloud storage
-  MINIO_ENDPOINT            the shared MinIO as this script sees it
+  MINIO_ENDPOINT            the session MinIO as this script sees it
   MINIO_ENDPOINT_FOR_CVAT   the same MinIO as the CVAT pods see it
   MINIO_ACCESS_KEY / MINIO_SECRET_KEY / MINIO_REGION / MINIO_BUCKET
-                            the cveta2 key, its region and this run's bucket
+                            the session key, its region and this run's bucket
 
-The cveta2 key is the only credential this script knows: it owns the bucket
-it creates (path-style requests, the only style the MinIO ingress accepts)
-and it is what CVAT stores in the cloud storage. Create-only on purpose:
-cvat_stand.py cleanup --tag and minio.py cleanup --prefix run first, so a
-project with the configured name already present is an error, not a second
+The session's MinIO key is the only storage credential this script knows: it
+owns the bucket it creates (path-style requests) and it is what CVAT stores in
+the cloud storage. Create-only on purpose: a fresh session holds nothing, so
+a project with the configured name already present is an error, not a second
 copy; a bucket this key already owns is reused, since a bucket is just a
 container for the same images.
 """
@@ -38,7 +37,7 @@ from urllib.parse import urlencode
 
 import boto3
 from botocore.config import Config as BotoConfig
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import ClientError
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiException
 from cvat_sdk.core.client import Client
@@ -47,8 +46,6 @@ from cvat_sdk.core.proxies.tasks import ResourceType
 from loguru import logger
 from pydantic import BaseModel
 from urllib3.exceptions import HTTPError as Urllib3Error
-
-from tests.integration.stand_tls import tls_failure_message
 
 if TYPE_CHECKING:
     from cvat_sdk.core.client import Client as CvatClient
@@ -112,7 +109,7 @@ class SeedSettings(BaseModel):
             raise SeedError(
                 f"{', '.join(missing)} not set; "
                 'eval "$(uv run python -m tests.integration.lifecycle env)" '
-                "(it exports them from the cveta2 Secrets through the k8s-infra skill)"
+                "(it exports them from the session namespace's Secrets)"
             )
         values["cvat_host"] = values["cvat_host"].rstrip("/")
         return cls(**values)
@@ -177,9 +174,8 @@ def create_bucket(s3: BucketClient, bucket: str) -> None:
         code = exc.response.get("Error", {}).get("Code", "")
         if code != "BucketAlreadyOwnedByYou":
             raise SeedError(
-                f"cannot create bucket '{bucket}': {code or exc}; the cveta2 key "
-                "may create only buckets named '<its own run tag>' "
-                "(minio.py --project cveta2 whoami shows the policy)"
+                f"cannot create bucket '{bucket}': {code or exc}; the session's "
+                "MinIO key should own every bucket of its own MinIO"
             ) from exc
         logger.info(f"Bucket '{bucket}' already exists and is ours; reusing it")
         return
@@ -359,15 +355,11 @@ def open_stand(settings: SeedSettings) -> Client:
         client.close()
         raise SeedError(
             f"login as '{settings.cvat_username}' at {settings.cvat_host} failed: "
-            f"{exc.status} {exc.body}; the credentials are the cveta2 Secret "
-            "(`cvat.py --project cveta2 env` from the k8s-infra skill), "
-            "cvat_stand.py verify tells which piece is wrong"
+            f"{exc.status} {exc.body}; the credentials are the session's Secret "
+            "cvat-user, cvat_stand.py verify tells which piece is wrong"
         ) from exc
-    except (OSError, Urllib3Error) as exc:
+    except (OSError, Urllib3Error):
         client.close()
-        tls = tls_failure_message(exc, settings.cvat_host)
-        if tls is not None:
-            raise SeedError(tls) from exc
         raise
     client.organization_slug = settings.cvat_organization
     return client
@@ -382,15 +374,7 @@ def main() -> int:
             f"(for CVAT: {settings.minio_endpoint_for_cvat}), "
             f"bucket {settings.minio_bucket}"
         )
-        try:
-            seed_bucket(settings, make_bucket_client(settings), IMAGES_DIR)
-        except (BotoCoreError, OSError) as exc:
-            # The bucket is the first HTTPS call of the run, so an untrusted CA
-            # usually fails here, as botocore's SSLError, before the CVAT login.
-            tls = tls_failure_message(exc, settings.minio_endpoint)
-            if tls is not None:
-                raise SeedError(tls) from exc
-            raise
+        seed_bucket(settings, make_bucket_client(settings), IMAGES_DIR)
         client = open_stand(settings)
         try:
             project_id = seed_project(client, settings)

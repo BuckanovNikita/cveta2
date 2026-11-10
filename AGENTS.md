@@ -51,8 +51,9 @@ copies (see engineering guidance, "Project skills").
 - `verification-workflow` — select Task stages for fixes, commits, acceptance and
   deferred verification; read before verifying or claiming completion.
 - `mutation-testing` — run and triage the changed-function mutation check.
-- `running-integration-tests` — explicitly invoked live CVAT/MinIO/ClearML tests,
-  bounded preflight, deferral, run tags and cleanup.
+- `running-integration-tests` — explicitly invoked live tests on CVAT, MinIO and
+  ClearML that each session deploys into its own quota'd namespace; bounded
+  preflight, deferral, kept sessions and namespace teardown.
 - `release` — the semantic-release procedure on `main` and its failure recovery.
 
 ## Authorization

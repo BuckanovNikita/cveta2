@@ -4,7 +4,7 @@ Contents: [Project](#project) · [Preserve the working tree](#preserve-the-worki
 [Spec Kit development workflow](#spec-kit-development-workflow) · [Architecture](#architecture) ·
 [Code conventions](#code-conventions) · [Verification](#verification) ·
 [Documentation](#documentation) · [Mutation testing](#mutation-testing) ·
-[Integration tests](#integration-tests) · [Shared infra](#shared-infra) ·
+[Integration tests](#integration-tests) ·
 [Configuration](#configuration) · [Commits, hooks, and releases](#commits-hooks-and-releases)
 
 ## Project
@@ -48,7 +48,8 @@ The installer preserves the previous hook installation and installs a shared ent
 that resolves the invoking worktree; prek reads that worktree's
 `.pre-commit-config.yaml` and owns pre-commit and commit-msg execution. Python 3.12 or 3.13 and uv are
 required; the live tests in the full acceptance suite also need `kubectl` with the
-`docker-desktop` context and the installed `k8s-infra` skill.
+`docker-desktop` context. They deploy their own services, so no other repository,
+skill, Helm or local CA is needed.
 
 For a new capability, run `specify` to create `specs/<number>-<name>/spec.md`.
 Continue through `clarify` -> `plan` -> `checklist` -> `tasks` -> `analyze` ->
@@ -208,14 +209,16 @@ Code changes also require the mutation skill's explicit report. Survivors are ad
 tool errors and failing clean tests remain unresolved. These operations are not cached.
 
 Deferred verification means a required live check could not run because infrastructure
-is temporarily unavailable, including timeout or capacity WAIT. `infra-check` is
-read-only and bounded by `CVETA2_INFRA_CHECK_TIMEOUT` (60 seconds by default):
-AVAILABLE exits 0, UNAVAILABLE exits 3, ERROR exits 1. Missing prerequisites,
-credentials, authorization or TLS trust are errors, not reasons to wait indefinitely.
-Preflight does not mint tags or create service resources. Recheck before every live run.
-Task-driven availability waiting remains bounded; explicitly requested operator
-waiting is separate. Seeding and teardown keep their existing operation timeouts;
-the preflight deadline is not an overall live-suite deadline.
+is temporarily unavailable: the cluster does not answer, the node cannot admit the
+session quota, a timeout, or session services that are not ready within the
+cold-start deadline (blocked setup). `infra-check` is read-only and bounded by
+`CVETA2_INFRA_CHECK_TIMEOUT` (60 seconds by default): AVAILABLE exits 0, UNAVAILABLE
+exits 3, ERROR exits 1. Missing prerequisites, a missing context or a refused
+namespace permission are errors, not reasons to wait indefinitely. Preflight
+creates nothing. Recheck before every live run. Task-driven availability waiting
+remains bounded; explicitly requested operator waiting is separate. Readiness,
+seeding and teardown keep their own operation timeouts; the preflight deadline is
+not an overall live-suite deadline.
 
 When infrastructure is unavailable, report the reason and deferred checks; continue
 independent implementation, documentation, review and local checks. Retry at a meaningful
@@ -223,7 +226,7 @@ verification milestone or after evidence of restored availability, without polli
 Repair ordinary code failures within scope. When only blocked verification remains,
 stop and ask for the user's decision. Deferral blocks acceptance, merge and release.
 Availability disappearing during setup is blocked setup; assertions remain test failures.
-Clean up exact-tag resources if any exist and report incomplete cleanup separately.
+Delete the session namespace if it exists and report incomplete cleanup separately.
 
 After parallel integration, verify the combined branch. Substantive behavior, interface,
 dependency, security and operational-policy changes require fresh independent review
@@ -287,41 +290,23 @@ is cached between runs. Read the
 
 ## Integration tests
 
-Live tests run against the shared CVAT, MinIO and ClearML stands of the
-docker-desktop cluster under one run tag per pytest session; nothing runs on this
-host. The `running-integration-tests` skill owns the session fixture and
-lifecycle tool, the tag (minted through the k8s-infra skill, adopted with
-`INFRA_RUN_TAG`), the credentials (evaluated from the project Secrets, never
-stored), serial execution and exact-tag cleanup. Do not start, stop, or clean a
-stand manually, and never act on another run's tag.
+Each live pytest session deploys its own CVAT, MinIO and ClearML into one
+Kubernetes namespace of the docker-desktop cluster, `cveta2-it-<id>`, created by
+the session with a `ResourceQuota` and `LimitRange` before any workload, reached
+only through loopback `kubectl port-forward`, and deleted by exact name on success,
+failure and interruption unless `INTEGRATION_KEEP_DATA=1`. The manifests live in
+`tests/integration/k8s/`; the quota sizes there are the project's own choice. The
+`running-integration-tests` skill owns the session fixture and lifecycle tool,
+generated credentials (namespace Secrets and the test process environment only,
+never stored or printed), kept sessions, serial execution and teardown.
 
-The owner may stop the stands. Use bounded Task preflight and the deferral rules
-above; the `running-integration-tests` skill owns recovery and explicit operator
-waiting. Never restart or stop shared services to satisfy a verification gate.
-
-## Shared infra
-
-Use the installed global `k8s-infra` skill and read its
-`references/run-contract.md` before touching a stand. Its maintained registry
-owns project identities, allowed stands, capacity limits, helper locations,
-credential lookup, and machine setup; do not duplicate those values here.
-This project's lifecycle tool, `tests/integration/lifecycle.py`, acts as `cveta2`
-and resolves the installed skill.
-
-- Preflight with the skill's `infra.py room`; obey WAIT (exit status 3).
-- Mint one owned tag through `infra.py newtag --project cveta2 --slug <what>`.
-  Assign, then export `INFRA_RUN_TAG` only after a successful mint. Export
-  `INFRA_HARNESS=codex|ci|human` before minting outside Claude Code.
-- Name every created object with that tag. Read credentials from the skill's
-  project environment helpers, never from files or logged output.
-- Run and clean integration resources through the `running-integration-tests`
-  skill and the repository lifecycle tool, on success and failure. Prove cleanup
-  with the exact-tag listings; CVAT cloud storage is part of that cleanup.
-- Never broaden a cleanup selector beyond the exact run tag.
-- Read current capacity from the registry; never infer permission from an idle
-  stand. Never run `cleanup --stale` without `--dry-run`.
-- Never touch another tag or an unrelated durable name. Report anything
-  intentionally kept by its full name.
+Never act on a namespace this session did not create: not another session's, not
+another project's, not a platform namespace. Use no shared service; the cluster's
+dedicated ClearML and MongoDB are not for tests. Request no GPU. Never restart
+Docker Desktop or change cluster settings to satisfy a verification gate. The
+platform may delete any project namespace 48 hours after creation or after a
+restart; a session never depends on an earlier one, and a vanished namespace
+needs no repair.
 
 ## Configuration
 

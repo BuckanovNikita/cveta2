@@ -60,10 +60,11 @@ UNREACHED_STATUSES = frozenset({"no tests"})
 NOTHING_MATCHES = "Filtered for specific mutants, but nothing matches"
 # mutmut stops when no unit test reaches any mutated function at all.
 NO_TESTS = "could not find any test case for any mutant"
-# Live-stand variables an earlier `eval "$(lifecycle env)"` may have left in the
-# shell. The unit suite must never see them: some fixtures switch to live CVAT.
+# Live-session variables an earlier `eval "$(lifecycle env)"` may have left in
+# the shell. The unit suite must never see them: some fixtures switch to live
+# CVAT, and the AWS names would point every boto3 client at the session MinIO.
 STAND_PREFIXES = ("CVAT_INTEGRATION_", "MINIO_", "CLEARML_", "INTEGRATION_")
-STAND_NAMES = frozenset({"INFRA_RUN_TAG"})
+STAND_NAMES = frozenset({"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_DEFAULT_REGION", "AWS_ENDPOINT_URL"})
 CLASS_SEPARATOR = "ǁ"
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 MAX_DIFFS = 5

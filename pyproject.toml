@@ -191,7 +191,7 @@ testpaths = ["tests"]
 # tests/conftest.py) on one worker: one prepared run, serial CVAT calls.
 addopts = ["-v", "--tb=short", "-n", "auto", "--dist", "loadgroup", "-p", "tests.env_isolation"]
 markers = [
-    "integration: live test on the shared stands (every test under tests/integration); exclude with -m 'not integration'",
+    "integration: live test on the session's own CVAT, MinIO and ClearML (every test under tests/integration); exclude with -m 'not integration'",
 ]
 
 [tool.mutmut]

@@ -1,6 +1,6 @@
 """Integration tests for upload (S3Uploader, create_upload_task, etc).
 
-Requires a seeded run on the shared CVAT and MinIO stands (``lifecycle.py up``).
+Requires a seeded session on its own CVAT and MinIO (``lifecycle.py up``).
 Uses coco8-dev project and tests/fixtures/data/coco8/images/.
 """
 

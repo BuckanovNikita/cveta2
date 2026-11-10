@@ -52,7 +52,7 @@ local/
 
 # Integration test artifacts
 tests/fixtures/data/coco8/images/
-tests/integration/.run-tag
+tests/integration/.session
 
 # Claude Code agent worktrees
 .claude/worktrees/

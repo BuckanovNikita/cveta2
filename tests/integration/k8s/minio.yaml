@@ -1,0 +1,88 @@
+# MinIO for one live-test session, on emptyDir. The root key pair and region
+# come from the Secret minio-credentials that lifecycle.py generates per
+# session; the tests use that pair as MINIO_* and AWS_*. CVAT reaches it at
+# the Service name, the host through a loopback port-forward.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: minio
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: minio
+  ports:
+  - name: tcp
+    port: 9000
+    targetPort: 9000
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  labels:
+    app.kubernetes.io/part-of: cveta2-integration
+    app.kubernetes.io/component: minio
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: cveta2-integration
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: cveta2-integration
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+        imagePullPolicy: IfNotPresent
+        args:
+        - server
+        - /data
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: access-key
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: secret-key
+        - name: MINIO_REGION
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: region
+        ports:
+        - containerPort: 9000
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 2
+          periodSeconds: 3
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}

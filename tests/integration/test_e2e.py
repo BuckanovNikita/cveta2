@@ -30,11 +30,11 @@ from cveta2.domain.models import (
 )
 from tests.helpers import fetch_all_annotations
 from tests.integration.conftest import (
-    _env,
     _make_sdk_client,
     find_seeded_project,
     make_integration_config,
     seeded_project_name,
+    session_cvat_host,
 )
 from tests.integration.test_upload import (
     IMAGE_NAMES,
@@ -126,8 +126,7 @@ class TestRealClientFetchAnnotations:
         sdk_client = _make_sdk_client()
         try:
             adapter = SdkCvatApiAdapter(sdk_client)
-            host = _env("CVAT_INTEGRATION_HOST", "https://cvat.k8s.docker.internal")
-            cfg = CvatConfig(host=host)
+            cfg = CvatConfig(host=session_cvat_host())
             client = CvatClient(cfg, api=adapter)
 
             project = find_seeded_project(adapter)

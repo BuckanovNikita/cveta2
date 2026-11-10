@@ -37,7 +37,7 @@ if [ -e "$lock" ] && command -v flock >/dev/null && ! flock -n "$lock" true; the
     echo "  release lock held: another session is merging or releasing main"
 fi
 
-if [ -s tests/integration/.run-tag ]; then
-    echo "  active live run tag: $(head -1 tests/integration/.run-tag) (lifecycle stop when it is yours and done)"
+if [ -s tests/integration/.session ]; then
+    echo "  kept live session: $(sed -n 's/.*"namespace": *"\([^"]*\)".*/\1/p' tests/integration/.session) (lifecycle stop when it is yours and done)"
 fi
 exit 0
