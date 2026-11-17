@@ -65,3 +65,6 @@ classification (test added, equivalent, presentation) and the rerun result.
 Survivors remain advisory; tool errors and failing clean tests remain unresolved.
 Run explicitly for code changes before acceptance; do not cache mutation outcomes
 or confuse staged comparison with an unstaged branch comparison.
+
+Record the report in the Linear issue or linked dated evidence for the PR, using
+[engineering policy](../../../docs/agents/engineering.md#verification).

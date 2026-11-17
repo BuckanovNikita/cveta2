@@ -1,5 +1,7 @@
 # Dataset preparation
 
+Maintained vocabulary; synchronize product meaning with the [Linear contract topic](https://linear.app/sip-ds-team/document/contract-draft-glossarymd-a4613e4e8529) after migration cutover. Until SIP-66 is human-merged and accepted, that topic remains a draft.
+
 Terms distinguish source evidence from reviewed training output.
 
 ## Language

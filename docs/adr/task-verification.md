@@ -1,7 +1,10 @@
 # ADR: Task orchestration with tool-native incremental verification and explicit infrastructure deferral
 
-Date: 2026-11-09. Decision: accepted design; rollout evidence belongs in
-[the feature](../../specs/001-task-verification/plan.md).
+Date: 2026-11-09. Decision: accepted design. The session-owned infrastructure
+decision supersedes the original shared-stand cleanup model; the approved Linear/GitHub
+migration supersedes local fast-forward delivery and release execution. Historical rollout
+evidence remains in [the frozen feature](../../specs/001-task-verification/plan.md).
+Current procedures live in [engineering policy](../agents/engineering.md).
 
 ## Context
 
@@ -32,8 +35,10 @@ live acceptance and release operations are never persistently cached.
 Read-only bounded preflight returns AVAILABLE/0, UNAVAILABLE/3 or ERROR/1. Temporary
 unavailability defers live verification while allowing independent local work.
 Deferral is neither a passing test nor permission to merge or release. Preserve
-exact-tag cleanup, clean-tip full-suite acceptance, independent review, fast-forward
-integration, semantic-release ownership, the shared release lock and push authorization.
+exact-namespace cleanup, clean-tip full-suite acceptance and independent review.
+Humans merge GitHub PRs; agents may push task branches. Code releases are suspended
+pending separately authorized replacement tooling that preserves semantic-release
+ownership, the shared release lock and separate publication authorization.
 
 ## Consequences
 
@@ -41,4 +46,5 @@ Repeated unchanged unit runs can avoid unaffected tests, but static checks still
 execute. Record measured counts and timings rather than promise universal speedups.
 Explicit stages and honest deferral make completion reviewable without unsafe
 success caching. Contributors must stage complete inputs before commits and stop
-concurrent editing during verification. Markdownlint remains separate.
+concurrent editing during verification. Review documentation consistency within the
+Linear/PR workflow without introducing a separate documentation checker.

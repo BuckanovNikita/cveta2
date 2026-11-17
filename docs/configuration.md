@@ -1,5 +1,7 @@
 # Конфигурация
 
+> После слияния и приёмки SIP-66 нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-draft-docsconfigurationmd-67789ec2f0b6). До этого документ Linear — черновик миграции. Это руководство продолжает обновляться.
+
 ## Личный и общий файлы
 
 Настройки разделены по владельцу. Личный `~/.config/cveta2/config.yaml`

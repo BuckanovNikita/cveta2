@@ -1,5 +1,7 @@
 # Python API
 
+> После слияния и приёмки SIP-66 нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-draft-docspython-apimd-a72b44e6c704). До этого документ Linear — черновик миграции. Это руководство продолжает обновляться.
+
 ## Функции-команды (рекомендуемый способ)
 
 Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [контракт датасета](dataset-contract.md#dataset-format-and-fetch)).

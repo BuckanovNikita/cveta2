@@ -117,7 +117,8 @@ acceptance.
 - **Parallelism.** Do not split the `live` group across workers, and keep
   `--dist loadgroup`: each worker would otherwise start its own session.
 - **Shell profile.** Remove the exports of the retired shared-stand model
-  (listed in `specs/002-own-test-infra/spec.md`, FR-013) from your shell
+  (identified in the retired-variable removal audit linked from
+  `docs/agents/operational-contracts.md`, feature 002 FR-013) from your shell
   profile; nothing reads them any more.
 
 ## Concurrency
@@ -137,3 +138,7 @@ interrupted run, prove cleanup with `kubectl --context docker-desktop get ns`
 `kubectl --context docker-desktop -n <namespace> port-forward` process; report
 anything left by name with the `L stop <namespace>` retry. A successful
 preflight without executed live tests is not acceptance.
+
+Record live outcomes and cleanup in the Linear issue or linked dated evidence.
+The maintained session interface contract is
+[operational contracts](../../../docs/agents/operational-contracts.md#session-lifecycle-interface).

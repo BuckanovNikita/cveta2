@@ -119,6 +119,11 @@ if [ "${CVETA2_RELEASE_CHECK:-}" = 1 ]; then
 fi
 """
 
+# Releases are suspended until reviewed PR-based release tooling is installed.
+# Reject every branch before semantic-release can modify files or create tags.
+[tool.semantic_release.branches.main]
+match = "(?!)"
+
 [tool.semantic_release.changelog]
 # The release commit itself, and the two types that describe no change a reader
 # of the changelog can act on.

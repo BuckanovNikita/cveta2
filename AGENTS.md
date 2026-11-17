@@ -1,90 +1,65 @@
 # cveta2 agent entry point
 
 cveta2 is a Python >=3.12,<3.14 CVAT CLI and API. Run Python tools through `uv run`.
+`CLAUDE.md` imports this shared entry point with `@AGENTS.md`.
 
-This file is the shared discovery entry point for Codex and Claude; `CLAUDE.md` is a
-regular file importing it with `@AGENTS.md`. Keep detailed rules in the canonical
-sources below rather than duplicating them here.
+## Read before work
 
-## Language
+- Read [engineering policy](docs/agents/engineering.md) before planning, editing,
+  verification or commits, and [Linear/GitHub delivery](docs/agents/issue-tracker.md)
+  before planning or delivering repository changes.
+- Consult the [product contract index](docs/agents/contracts.md) before changing
+  behavior, configuration, API return values or serialized formats.
+- Read [architecture](docs/agents/architecture.md) before changing module flow,
+  project resolution, fetch/upload or conversion behavior.
+- Use [domain documentation](docs/agents/domain.md) and [GLOSSARY.md](GLOSSARY.md)
+  for dataset-preparation terminology; [triage guidance](docs/agents/triage-labels.md)
+  owns readiness labels.
 
-- Human guides and CLI output remain Russian. Agent instructions, skills, Spec Kit
-  memory and feature artifacts, and the dataset contract are English.
+Linear owns current product requirements, proposals, plans and task status; repository
+policy owns engineering safeguards. Spec Kit is temporarily disabled. Preserve
+`specs/`, `.specify/` and archived tooling unchanged and outside active discovery.
+Reactivation requires explicit user instruction. Historical workflow instructions
+are inactive; historical product requirements remain preserved through the migration.
+The approved migration branch uses the new workflow; repository-wide authority changes
+only after human merge and accepted migration, with Linear drafts activated then.
 
-## Read before planning or editing
+## Language and ownership
 
-1. [Spec Kit constitution](.specify/memory/constitution.md) for project principles.
-2. [Engineering guidance](.specify/memory/engineering.md) for the required
-   workflow, verification, working-tree ownership, integration, and release rules.
-3. [Architecture context](.specify/memory/architecture.md) when changing module
-   flow, project resolution, fetch/upload, or conversion behavior.
-4. [Functional specification](specs/baseline.md) for preserved behavior and
-   compatibility obligations of any workflow you change.
-5. [Dataset contract](docs/dataset-contract.md) when changing CSV columns, API
-   return values or serialized file formats.
-6. [Glossary](GLOSSARY.md) for dataset-preparation terms (standalone and managed
-   preparation, source evidence, prepared bundle, parent dataset).
+Keep README, human usage guides and CLI output Russian. Agent instructions, skills,
+architecture, plans and evidence are English. Keep this entry point concise and link
+procedures. Edit maintained sources, preserve unrelated work and local overrides,
+and keep machine-specific settings out of portable policy.
 
-Human usage is in [README.md](README.md); setup commands are in
-[engineering guidance](.specify/memory/engineering.md); release commands are in the
-`release` skill.
+## Delivery and completion
 
-Release only Git version tags; do not create GitHub Releases or publish release
-assets or packages. Follow the release policy in the engineering guidance.
+Agents may commit task-owned changes, push task branches and open GitHub PRs. Humans
+merge into `main`; agents do not deliver through local main merges or main pushes.
+Explicit session restrictions and host read-only modes take precedence. Code releases
+are suspended pending separately authorized PR-based release tooling.
 
-## Workflow
+Use [verification-workflow](.agents/skills/verification-workflow/SKILL.md) before
+verification or completion claims. Task owns commands; prek owns hooks and message
+validation. Preserve required gates and report executed evidence accurately. Deferred
+live verification blocks acceptance and merge readiness; continue independent work
+and ask for the user's decision when only blocked verification remains.
 
-- Use `$speckit-<step>` in Codex and `/speckit-<step>` in Claude. Follow the full
-  sequence in engineering guidance; select the active feature explicitly before
-  writing artifacts.
-- New features describe deltas from the baseline; product requirements contain no
-  implementation status.
-- Apply the Python conventions in the constitution within the selected native stages.
+Delegate independent substantial work with bounded ownership and acceptance evidence;
+keep dependencies ordered and inspect integrated results. Behavior, interface,
+dependency, security and operational-policy changes require fresh independent review
+after integrated verification. Wording edits may be self-reviewed. Review documentation
+consistency proportionately without introducing a documentation checker.
 
-## Project skills
+## Situational skills
 
-These skills hold situational procedures within the Spec Kit workflow; commit and
-hook rules are in engineering guidance. Sources live in `.agents/skills/` and
-`.claude/skills/` symlinks to them; the generated `speckit-*` skills are per-host
-copies (see engineering guidance, "Project skills").
+Authored sources live in `.agents/skills/`; Claude symlinks use those same sources.
 
-- `verification-workflow` — select Task stages for fixes, commits, acceptance and
-  deferred verification; read before verifying or claiming completion.
-- `mutation-testing` — run and triage the changed-function mutation check.
-- `running-integration-tests` — explicitly invoked live tests on CVAT, MinIO and
-  ClearML that each session deploys into its own quota'd namespace; bounded
-  preflight, deferral, kept sessions and namespace teardown.
-- `release` — the semantic-release procedure on `main` and its failure recovery.
+- `mutation-testing`: changed-function mutation execution and survivor triage.
+- `running-integration-tests`: live CVAT, MinIO and ClearML sessions, preflight,
+  namespace ownership, kept sessions and cleanup.
+- `release`: suspended release route and requirements for its replacement.
 
-## Authorization
-
-- Continue authorized stages through verification, documentation and the project
-  release workflow without requiring a separate user prompt for each stage.
-- Explicit stopping points and host Plan Mode/read-only limits take precedence.
-
-## Project execution policy
-
-Use Spec Kit for new capabilities or documented behavior changes; routine fixes,
-docs and small refactors proceed directly, updating existing task artifacts as needed.
-Behavior, interface, dependency, security and operational-policy changes require
-independent review after integration and verification; wording edits may be self-reviewed.
-Documentation checks are limited to native Spec Kit or OpenSpec checks. Local commits
-may be autonomous; pushes require separate authorization, including existing session authorization.
-
-## Completion
-
-Use the `verification-workflow` skill and engineering guidance for explicit fixes,
-fully staged commits, development verification and clean-tip acceptance. Task owns
-commands; prek owns hooks and message validation. Reuse applicable successful
-checks while inputs remain unchanged; Task freshness is never completion evidence.
-Deferred live verification blocks acceptance, merge and release. Continue independent
-local work; when only blocked verification remains, report it and ask for the user's
-decision. Preserve explicit intermediate deferrals and the documented release exception.
-
-## Specification rewrites
-
-Compare the original behavior, conditions and exceptions with their new authoritative
-homes, including requirements embedded in scenarios. Separate approved policy changes
-from wording changes; resolve overloaded terms before editing. Retain compatibility
-obligations, remove historical status claims, and have the reviewer compare meaning
-against the original source rather than judge length or wording alone.
+For requirement rewrites, compare original meaning, conditions and scenario exceptions
+against their new authoritative homes; preserve compatibility and immutable provenance.
+Separate approved policy changes from wording changes. Independent review must compare
+meaning against the original source, not just judge the resulting prose.
