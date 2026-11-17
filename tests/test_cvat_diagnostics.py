@@ -661,3 +661,15 @@ def test_data_meta_with_null_chunks_updated_date_still_uses_raw_fallback() -> No
         result = SdkCvatApiAdapter(client).get_task_data_meta(7)
 
     assert [(frame.name, frame.width, frame.height) for frame in result.frames] == [("a.jpg", 4, 3)]
+
+
+def test_mistyped_host_scheme_becomes_cvat_api_error_naming_the_host() -> None:
+    """The SDK rejects the scheme before any request; the CLI needs a typed error."""
+    config = CvatConfig(host="htps://cvat.example", username="user", password="password")
+
+    with pytest.raises(CvatApiError) as caught, open_sdk_api(config):
+        pass
+
+    assert "htps://cvat.example" in str(caught.value)
+    assert caught.value.__cause__ is not None
+    assert not isinstance(caught.value.__cause__, Cveta2Error)
