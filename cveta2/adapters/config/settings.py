@@ -393,6 +393,11 @@ class CvatConfig(BaseModel):
             _restrict_to_owner(path)
         return cfg
 
+    @property
+    def source_path(self) -> Path | None:
+        """Personal file this configuration was loaded from, if any."""
+        return self._source_path
+
     @classmethod
     def from_env(cls) -> "CvatConfig":
         """Build config from environment variables."""

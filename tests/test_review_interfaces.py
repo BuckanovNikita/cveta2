@@ -346,3 +346,45 @@ def test_unwritable_personal_config_keeps_the_os_error_as_cause(tmp_path: Path) 
         directory.chmod(0o700)
     assert str(config) in str(caught.value)
     assert isinstance(caught.value.__cause__, PermissionError)
+
+
+@pytest.mark.parametrize(
+    ("document", "category", "line", "column"),
+    [
+        ("schema_version: 1\nDO_NOT_LOG_SECRET: 1\nDO_NOT_LOG_SECRET: 2\n", "unique strings", 3, 1),
+        ("schema_version: 1\n7: DO_NOT_LOG_SECRET\n", "unique strings", 2, 1),
+        ("schema_version: 1\ncvat: [DO_NOT_LOG_SECRET\n", "ParserError", 3, 1),
+    ],
+    ids=["duplicate-key", "non-string-key", "syntax-error"],
+)
+def test_shared_yaml_diagnostics_name_the_file_and_location(
+    tmp_path: Path, document: str, category: str, line: int, column: int
+) -> None:
+    shared = tmp_path / "shared.yaml"
+    shared.write_text(document, encoding="utf-8")
+    personal = tmp_path / "personal.yaml"
+    personal.write_text(f"schema_version: 1\nproject_config: {shared}\n", encoding="utf-8")
+
+    with pytest.raises(Cveta2Error) as caught:
+        CvatConfig.load(personal)
+
+    message = str(caught.value)
+    assert str(shared) in message
+    assert category in message
+    assert f"line {line}, column {column}" in message
+    assert "DO_NOT_LOG_SECRET" not in message
+
+
+def test_missing_host_names_the_selected_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from cveta2.domain.errors import MissingHostError
+    from cveta2.interfaces.commands._helpers import require_host
+
+    selected = tmp_path / "selected.yaml"
+    selected.write_text("cvat:\n  username: user\n", encoding="utf-8")
+    monkeypatch.setenv("CVETA2_CONFIG", str(tmp_path / "ambient.yaml"))
+
+    with pytest.raises(MissingHostError) as caught:
+        require_host(CvatConfig.from_file(selected))
+
+    assert str(selected) in str(caught.value)
+    assert "ambient.yaml" not in str(caught.value)

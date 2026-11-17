@@ -176,4 +176,4 @@ def require_host(cfg: CvatConfig) -> None:
     """Raise a friendly error when host is not configured."""
     if cfg.host:
         return
-    raise MissingHostError(_MISSING_HOST_MESSAGE.format(config_path=get_config_path()))
+    raise MissingHostError(_MISSING_HOST_MESSAGE.format(config_path=cfg.source_path or get_config_path()))

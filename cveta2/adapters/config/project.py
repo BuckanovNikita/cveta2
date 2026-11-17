@@ -38,21 +38,37 @@ _SHARED_KEYS = {"projects", "datasets", "sync_roots", "ignore", "clearml"}
 _POLICY_KEYS = {"ignored_prefix", "task_cache_s3"}
 
 
-def _check_nodes(node: yaml.Node, active: set[int]) -> None:
-    """Reject duplicate/non-string mapping keys and recursive aliases."""
+def _yaml_location(mark: yaml.Mark | None) -> str:
+    """Return a one-based ``, line N, column M`` suffix, or nothing without a mark."""
+    return "" if mark is None else f", line {mark.line + 1}, column {mark.column + 1}"
+
+
+def _yaml_error_location(error: yaml.YAMLError) -> str:
+    if isinstance(error, yaml.MarkedYAMLError):
+        return _yaml_location(error.problem_mark or error.context_mark)
+    return ""
+
+
+def _check_nodes(node: yaml.Node, active: set[int], path: Path) -> None:
+    """Reject duplicate/non-string mapping keys and recursive aliases.
+
+    Diagnostics name the file and position, never the offending key or value.
+    """
     if id(node) in active:
-        raise ManagedError("Recursive YAML configuration is unsupported")
+        raise ManagedError(f"Recursive YAML configuration is unsupported: {path}{_yaml_location(node.start_mark)}")
     active.add(id(node))
     if isinstance(node, yaml.MappingNode):
         keys: set[str] = set()
         for key, value in node.value:
             if not isinstance(key, yaml.ScalarNode) or key.tag != "tag:yaml.org,2002:str" or key.value in keys:
-                raise ManagedError("Configuration mapping keys must be unique strings")
+                raise ManagedError(
+                    f"Configuration mapping keys must be unique strings: {path}{_yaml_location(key.start_mark)}"
+                )
             keys.add(key.value)
-            _check_nodes(value, active)
+            _check_nodes(value, active, path)
     elif isinstance(node, yaml.SequenceNode):
         for item in node.value:
-            _check_nodes(item, active)
+            _check_nodes(item, active, path)
     active.remove(id(node))
 
 
@@ -73,10 +89,14 @@ def read_config(path: Path, *, missing_ok: bool = False) -> dict[str, object]:
         content = path.read_bytes()
         node = yaml.compose(content, Loader=yaml.SafeLoader)
         if node is not None:
-            _check_nodes(node, set())
+            _check_nodes(node, set(), path)
         raw: object = yaml.safe_load(content)
-    except (OSError, UnicodeError, yaml.YAMLError) as error:
+    except (OSError, UnicodeError) as error:
         raise ManagedError(f"Cannot read configuration {path}: {type(error).__name__}") from error
+    except yaml.YAMLError as error:
+        raise ManagedError(
+            f"Cannot read configuration {path}: {type(error).__name__}{_yaml_error_location(error)}"
+        ) from error
     if raw is None:
         return {}
     if not isinstance(raw, dict):
