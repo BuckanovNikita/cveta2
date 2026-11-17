@@ -276,6 +276,17 @@ def test_fresh_export_and_snapshot_roundtrip(tmp_path: Path) -> None:
         files.export(output, snapshot, frame)
 
 
+def test_export_reports_uncreatable_output_parent(tmp_path: Path) -> None:
+    config, definition = _config()
+    snapshot, frame = _fetch(config, definition, _Cvat({12: [_task(1)]}))
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("x")
+    output = blocker / "nested" / "fetched"
+    with pytest.raises(ManagedError, match="nested") as raised:
+        LocalSourceFiles().export(output, snapshot, frame)
+    assert isinstance(raised.value.__cause__, OSError)
+
+
 def test_s3_adapter_captures_opaque_etag_and_content_without_images() -> None:
     content = _S3().content
     client = Mock()
