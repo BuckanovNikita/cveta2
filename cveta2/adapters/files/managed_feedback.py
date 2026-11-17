@@ -207,7 +207,7 @@ class LocalFeedbackLedger:
         if owner != (finding.source_id, state.project_id, state.task_id):
             return False
         chain = _acknowledged_chain(ledger.receipts.values(), owner, stored.before_date, stored.fingerprint)
-        if state.updated_date not in chain[1:]:
+        if len(chain) == 1 or state.updated_date != chain[-1]:
             return False
         ledger.receipts[finding.marker] = stored.model_copy(update={"before_date": state.updated_date})
         self._save(ledger)
