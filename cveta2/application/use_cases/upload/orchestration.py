@@ -20,6 +20,7 @@ from cveta2.application.use_cases.upload.types import (
     _StagedUpload,
 )
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.paths import validate_upload_image_names
 from cveta2.domain.upload import UploadManifest, validate_upload_boxes
 
 
@@ -73,6 +74,7 @@ def upload_dataset(client: CvatClient, request: UploadRequest, *, deps: UploadDe
     moment a task id exists, so ``resume=True`` can continue an upload that
     died partway.  It is removed once the upload finishes.
     """
+    validate_upload_image_names([*request.plan.image_names, *request.plan.deleted_names])
     validate_upload_boxes(request.plan.annotations)
     fingerprint = request_fingerprint(request)
     if request.resume:

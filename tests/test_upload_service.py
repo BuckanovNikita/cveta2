@@ -870,6 +870,58 @@ class TestManifestLifecycle:
         assert capture_logs
 
 
+class TestUnsafeImageNames:
+    """An image name is a path below the search roots and the storage prefix."""
+
+    @pytest.mark.parametrize(
+        ("bad", "deleted"),
+        [
+            ("../private.jpg", False),
+            ("sub/../../private.jpg", False),
+            ("/etc/private.jpg", False),
+            ("C:/private.jpg", False),
+            ("sub\\private.jpg", False),
+            ("bad\x00.jpg", False),
+            ("", False),
+            ("../private.jpg", True),
+        ],
+        ids=["parent", "nested_parent", "absolute", "drive", "backslash", "nul", "empty", "deleted_parent"],
+    )
+    def test_is_refused_before_any_lookup_or_remote_effect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str, *, deleted: bool
+    ) -> None:
+        s3 = _ListCountingS3()
+        make_s3(monkeypatch, s3)
+        client = make_client()
+        image_dir = make_local_images(tmp_path, ["a.jpg"])
+        request = (
+            make_request(image_names=["a.jpg"], deleted_names=[bad], search_dirs=[image_dir])
+            if deleted
+            else make_request(image_names=["a.jpg", bad], search_dirs=[image_dir])
+        )
+
+        with pytest.raises(Cveta2Error) as caught:
+            upload_cvat_dataset(client, request)
+
+        assert repr(bad) in str(caught.value)
+        assert "'a.jpg'" not in str(caught.value)
+        assert s3.list_calls == 0
+        assert s3.uploaded_keys == []
+        assert _writes_of(client).created_tasks == []
+        assert list_manifests(PROJECT_ID, host=client.host) == []
+
+    def test_a_subfolder_name_is_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        name = "2026-02/a.jpg"
+        image_dir = tmp_path / "images"
+        (image_dir / "2026-02").mkdir(parents=True)
+        (image_dir / name).write_bytes(b"x")
+        make_s3(monkeypatch, _ListCountingS3())
+
+        outcome = upload_cvat_dataset(make_client(), make_request(image_names=[name], search_dirs=[image_dir]))
+
+        assert outcome.images == 1
+
+
 class TestS3FailureAbortsBeforeTaskCreation:
     def test_a_failed_transfer_stops_the_upload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Every name enters ``server_files`` whether it uploaded or not.
