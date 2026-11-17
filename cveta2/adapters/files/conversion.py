@@ -30,26 +30,19 @@ _STEM_LOOKUP_EXTENSIONS = (*_IMAGE_EXTENSIONS, ".tif")
 
 
 def _image_in_dir_by_stem(directory: Path, stem: str) -> Path | None:
-    """Find ``<stem><ext>`` in *directory*, matching the suffix case-insensitively.
+    """Find ``<stem><ext>`` in *directory* with a lower-, upper- or title-case suffix.
 
-    Exact lower- and upper-case suffixes are probed first; a directory scan
-    covers mixed-case suffixes.  Extension order, then name, decides ties.
+    Fixed probes keep the lookup proportional to the extension list rather
+    than the directory size; other mixed-case suffixes are not matched.
     """
     if not directory.is_dir():
         return None
     for ext in _STEM_LOOKUP_EXTENSIONS:
-        for suffix in (ext, ext.upper()):
+        for suffix in dict.fromkeys((ext, ext.upper(), ext.title())):
             candidate = directory / f"{stem}{suffix}"
             if candidate.is_file():
                 return candidate
-    matches = [
-        path
-        for path in directory.iterdir()
-        if path.stem == stem and path.suffix.lower() in _STEM_LOOKUP_EXTENSIONS and path.is_file()
-    ]
-    if not matches:
-        return None
-    return min(matches, key=lambda path: (_STEM_LOOKUP_EXTENSIONS.index(path.suffix.lower()), path.name))
+    return None
 
 
 def _find_image_by_stem(
