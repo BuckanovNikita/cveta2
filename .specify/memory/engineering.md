@@ -193,8 +193,10 @@ commit hook still performs development verification.
 `test` uses testmon affected selection without a marker expression and excludes
 `tests/integration`, including its conftest. `test-full` runs all units while updating
 history. Testmon's environment namespace incorporates interpreter identity, locked
-dependencies, verification configuration, static test/package assets and complete
-relative source/test file membership. An unseen namespace needs a full baseline;
+dependencies, verification configuration, static test/package assets, complete
+relative source/test file membership and the content of `scripts/` and of pytest
+startup code (every `conftest.py` and each `-p` plugin of the pytest `addopts`),
+which no test records as a dependency. An unseen namespace needs a full baseline;
 returning to unchanged previously verified inputs may reuse matching history.
 Python-content dependency selection remains testmon's responsibility. If an input
 class cannot be reliably represented, use `test-full` conservatively. A deselected
