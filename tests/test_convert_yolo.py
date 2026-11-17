@@ -940,6 +940,18 @@ class TestFromYoloPredictions:
         assert df["image_name"].tolist() == ["b.jpg"]
         assert df["frame_id"].tolist() == [0]
 
+    def test_image_suffix_case_and_tif_are_matched(self, tmp_path: Path) -> None:
+        """Uppercase, mixed-case and ``.tif`` image suffixes pair with their labels."""
+        pred_dir = tmp_path / "preds"
+        for name in ("A.JPG", "b.tif", "c.Png"):
+            make_image(pred_dir / name)
+            (pred_dir / f"{Path(name).stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(pred_dir, out, names_file=self._names_file(tmp_path, {0: "cat"}), read_all_sizes=False)
+
+        assert pd.read_csv(out)["image_name"].tolist() == ["A.JPG", "b.tif", "c.Png"]
+
     def test_missing_image_is_collected_and_the_walk_continues(self, tmp_path: Path, capture_logs: list[str]) -> None:
         """A .txt with no matching image is reported, later files still load.
 

@@ -24,6 +24,34 @@ from cveta2.domain.models import CSV_COLUMNS
 from cveta2.domain.output import CSV_WRITE_OPTIONS, format_counts_ru
 
 
+# Prediction lookup also accepts ``.tif``; it stays out of ``_IMAGE_EXTENSIONS``
+# so YOLO re-export pruning does not start deleting ``.tif`` files.
+_STEM_LOOKUP_EXTENSIONS = (*_IMAGE_EXTENSIONS, ".tif")
+
+
+def _image_in_dir_by_stem(directory: Path, stem: str) -> Path | None:
+    """Find ``<stem><ext>`` in *directory*, matching the suffix case-insensitively.
+
+    Exact lower- and upper-case suffixes are probed first; a directory scan
+    covers mixed-case suffixes.  Extension order, then name, decides ties.
+    """
+    if not directory.is_dir():
+        return None
+    for ext in _STEM_LOOKUP_EXTENSIONS:
+        for suffix in (ext, ext.upper()):
+            candidate = directory / f"{stem}{suffix}"
+            if candidate.is_file():
+                return candidate
+    matches = [
+        path
+        for path in directory.iterdir()
+        if path.stem == stem and path.suffix.lower() in _STEM_LOOKUP_EXTENSIONS and path.is_file()
+    ]
+    if not matches:
+        return None
+    return min(matches, key=lambda path: (_STEM_LOOKUP_EXTENSIONS.index(path.suffix.lower()), path.name))
+
+
 def _find_image_by_stem(
     stem: str,
     search_dirs: list[Path],
@@ -34,20 +62,10 @@ def _find_image_by_stem(
     Searches flat dirs first, then one level of subdirs.
     """
     for search_dir in search_dirs:
-        if not search_dir.is_dir():
-            continue
-        for ext in _IMAGE_EXTENSIONS:
-            candidate = search_dir / f"{stem}{ext}"
-            if candidate.is_file():
-                return candidate
-        for sub in subdirs or []:
-            sub_dir = search_dir / sub
-            if not sub_dir.is_dir():
-                continue
-            for ext in _IMAGE_EXTENSIONS:
-                candidate = sub_dir / f"{stem}{ext}"
-                if candidate.is_file():
-                    return candidate
+        for directory in (search_dir, *(search_dir / sub for sub in subdirs or [])):
+            found = _image_in_dir_by_stem(directory, stem)
+            if found is not None:
+                return found
     return None
 
 
