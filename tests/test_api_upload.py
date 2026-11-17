@@ -318,7 +318,7 @@ class TestUploadResumeWiring:
         """Run ``upload`` far enough to see the request it builds."""
         seen: list[UploadRequest] = []
 
-        def record(_client: object, request: UploadRequest) -> UploadOutcome:
+        def record(_client: object, request: UploadRequest, **_kwargs: object) -> UploadOutcome:
             seen.append(request)
             return UploadOutcome(
                 task_id=1,

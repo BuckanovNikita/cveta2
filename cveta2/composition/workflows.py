@@ -4,6 +4,7 @@ import threading
 import time
 from collections.abc import Sequence
 from contextlib import AbstractContextManager
+from functools import partial
 from pathlib import Path
 
 from cveta2.adapters.config.settings import (
@@ -19,6 +20,7 @@ from cveta2.adapters.files.task_output import LocalWorkflowFiles
 from cveta2.adapters.s3.task_cache import AnnotationCacheFactory
 from cveta2.adapters.s3.upload import S3UploadStorage
 from cveta2.application.client import ApplicationClient
+from cveta2.application.ports.cache import CacheInvalidator
 from cveta2.application.use_cases import fetch, resolve, task_ops, upload
 from cveta2.domain.models import ProjectAnnotations, TaskInfo
 from cveta2.domain.partition import PartitionResult
@@ -66,26 +68,41 @@ def invalidate_local_entry(
     task_id: int,
     project_name: str,
     cs_info: CloudStorageInfo | None = None,
+    *,
+    config_path: Path | None = None,
 ) -> None:
-    """Invalidate local state and the enabled remote cache mirror."""
-    settings = CacheConfig.load().for_project(project_name)
+    """Invalidate local state and the enabled remote cache mirror.
+
+    *config_path* selects the configuration file whose cache settings name
+    the entry, the same file a fetch with that path writes through.
+    """
+    settings = CacheConfig.load(config_path).for_project(project_name)
     cache = AnnotationCacheFactory().create(project_id, cs_info, settings, local_only=is_cache_disabled())
     cache.invalidate(task_id)
 
 
-def upload_dependencies() -> upload.UploadDependencies:
+def _cache_invalidator(config_path: Path | None) -> CacheInvalidator:
+    """Bind cache invalidation to the selected configuration file."""
+    if config_path is None:
+        return invalidate_local_entry
+    return partial(invalidate_local_entry, config_path=config_path)
+
+
+def upload_dependencies(*, config_path: Path | None = None) -> upload.UploadDependencies:
     """Assemble production upload staging and recovery dependencies."""
     return upload.UploadDependencies(
         storage=S3UploadStorage(),
         files=LocalWorkflowFiles(),
         manifests=LocalManifestStore(),
-        invalidate=invalidate_local_entry,
+        invalidate=_cache_invalidator(config_path),
     )
 
 
-def upload_cvat_dataset(client: ApplicationClient, request: upload.UploadRequest) -> upload.UploadOutcome:
+def upload_cvat_dataset(
+    client: ApplicationClient, request: upload.UploadRequest, *, config_path: Path | None = None
+) -> upload.UploadOutcome:
     """Run an upload using configured production adapters."""
-    return upload.upload_dataset(client, request, deps=upload_dependencies())
+    return upload.upload_dataset(client, request, deps=upload_dependencies(config_path=config_path))
 
 
 def read_exclude_names(in_progress_path: str | None) -> set[str]:
@@ -136,7 +153,14 @@ def apply_sync_root_override(
 
 
 def resolved_task(
-    client: ApplicationClient, project_id: int, project_name: str, task: int | str
+    client: ApplicationClient,
+    project_id: int,
+    project_name: str,
+    task: int | str,
+    *,
+    config_path: Path | None = None,
 ) -> AbstractContextManager[TaskInfo]:
-    """Resolve a task and invalidate its cache on context exit."""
-    return task_ops.resolved_task(client, project_id, project_name, task, invalidate=invalidate_local_entry)
+    """Resolve a task and invalidate its cache, as *config_path* selects it, on exit."""
+    return task_ops.resolved_task(
+        client, project_id, project_name, task, invalidate=_cache_invalidator(config_path)
+    )

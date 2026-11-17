@@ -6,6 +6,7 @@ import os
 import stat
 from dataclasses import replace
 from datetime import datetime, timezone
+from importlib import import_module
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
@@ -27,12 +28,14 @@ from cveta2.application.ports.dtos import (
     RawIssue,
 )
 from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
+from cveta2.application.use_cases.upload import UploadOutcome, UploadRequest
 from cveta2.composition.client import CvatClient
 from cveta2.composition.workflows import (
     fetch_project,
     fetch_selected_tasks,
     invalidate_local_entry,
     resolved_task,
+    upload_dependencies,
 )
 from cveta2.domain.cache import CACHE_SCHEMA_VERSION, CachedTaskEnvelope
 from cveta2.domain.errors import CvatApiError, Cveta2Error
@@ -48,7 +51,8 @@ from cveta2.domain.storage import CloudStorageInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import CFG, build_fake, make_bbox, make_task, write_split_config_yaml
+from tests.api_helpers import _scoped
+from tests.helpers import CFG, build_fake, csv_row, make_bbox, make_task, write_split_config_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -1087,3 +1091,60 @@ def test_strict_invalidation_reports_s3_failure_and_can_retry(
 
     cache.invalidate(1, strict=True)
     assert key not in s3.objects
+
+
+class TestInvalidationFollowsTheSelectedConfig:
+    """``Connection(config_path=...)`` selects one cache state for every step."""
+
+    def _custom_config(self, tmp_path: Path) -> tuple[Path, Path]:
+        root = tmp_path / "custom_tasks_root"
+        config_path = tmp_path / "custom.yaml"
+        config_path.write_text(f"cache:\n  tasks_root: {root}\n", encoding="utf-8")
+        return config_path, root
+
+    def test_api_task_mutation_drops_the_entry_under_the_selected_tasks_root(
+        self, normal_fake: LoadedFixtures, tmp_path: Path
+    ) -> None:
+        """Fetch caches under the custom root, so the mutation must clear it there."""
+        config_path, root = self._custom_config(tmp_path)
+        api, connection = _scoped(normal_fake, config_path=config_path)
+        task = normal_fake.tasks[0]
+        cveta2.fetch(normal_fake.project.id, tmp_path / "out", download_images=False, connection=connection)
+        entry = get_task_cache_dir(normal_fake.project.id, root=root) / f"task_{task.id}.json"
+        assert entry.exists()
+
+        cveta2.task_set_status(normal_fake.project.id, task.id, state="in progress", connection=connection)
+
+        assert not entry.exists()
+        api.annotation_calls.clear()
+        cveta2.fetch(normal_fake.project.id, tmp_path / "out2", download_images=False, connection=connection)
+        assert task.id in api.annotation_calls
+
+    def test_upload_invalidates_under_the_selected_tasks_root(self, tmp_path: Path) -> None:
+        config_path, root = self._custom_config(tmp_path)
+        cache_dir = get_task_cache_dir(5, root=root)
+        TaskAnnotationCache(cache_dir).put(make_task(updated=_UPDATED), _payload())
+
+        upload_dependencies(config_path=config_path).invalidate(5, 1, "")
+
+        assert not (cache_dir / "task_1.json").exists()
+
+    def test_api_upload_forwards_the_selected_config(
+        self, normal_fake: LoadedFixtures, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_path, _root = self._custom_config(tmp_path)
+        seen: list[Path | None] = []
+
+        def record(_client: object, request: UploadRequest, *, config_path: Path | None = None) -> UploadOutcome:
+            seen.append(config_path)
+            return UploadOutcome(
+                task_id=1, task_name=request.task_name, images=0, deleted=0, annotations=0, issues=0, jobs=0
+            )
+
+        monkeypatch.setattr(import_module("cveta2.interfaces.api.upload"), "upload_cvat_dataset", record)
+        dataset = pd.DataFrame([csv_row("a.jpg", label="cat")])
+        _api, connection = _scoped(normal_fake, config_path=config_path)
+
+        cveta2.upload(dataset, project=normal_fake.project.id, name="t", connection=connection)
+
+        assert seen == [config_path]
