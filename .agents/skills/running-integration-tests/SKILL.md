@@ -69,8 +69,11 @@ default). It creates nothing. Task uses `--exit-code` to retain these results:
 | ERROR | 1 | Diagnose a missing tool or context, refused namespace permission or unexpected failure. |
 
 Setup is bounded by `CVETA2_SESSION_READY_TIMEOUT` (300 seconds by default) for
-the services to become ready. Services not ready in time are blocked setup:
-the namespace is deleted and the run is UNAVAILABLE, never a test failure. A
+the services to become ready, and by `CVETA2_SESSION_SEED_TIMEOUT` (600 seconds
+by default) for stand verification, the coco8 download and seeding together.
+Services not ready in time, or seeding not finished in time, are blocked setup:
+the namespace is deleted (even with `INTEGRATION_KEEP_DATA=1`) and the run is
+UNAVAILABLE, never a test failure. A
 first pull of the CVAT server image may exceed the deadline; pull it once or
 raise the deadline. An availability result is not a test result. Loss of
 availability during setup is blocked setup; assertion failures are test

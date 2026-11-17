@@ -219,7 +219,8 @@ exits 3, ERROR exits 1. Missing prerequisites, a missing context or a refused
 namespace permission are errors, not reasons to wait indefinitely. Preflight
 creates nothing. Recheck before every live run. Task-driven availability waiting
 remains bounded; explicitly requested operator waiting is separate. Readiness,
-seeding and teardown keep their own operation timeouts; the preflight deadline is
+seeding and teardown keep their own operation timeouts (`CVETA2_SESSION_READY_TIMEOUT`
+and `CVETA2_SESSION_SEED_TIMEOUT`; expiry is blocked setup); the preflight deadline is
 not an overall live-suite deadline.
 
 When infrastructure is unavailable, report the reason and deferred checks; continue

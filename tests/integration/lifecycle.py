@@ -16,7 +16,9 @@ the namespace's Secrets, applies the CVAT, MinIO and ClearML manifests next to
 it, waits for them within a cold-start deadline (``CVETA2_SESSION_READY_TIMEOUT``,
 300 seconds by default), reaches them through ``kubectl port-forward`` on
 127.0.0.1, registers a regular CVAT user that owns one organization, and
-seeds the run. The namespace name is also the run tag: the MinIO bucket and
+seeds the run within a seeding deadline (``CVETA2_SESSION_SEED_TIMEOUT``, 600
+seconds by default, covering stand verification, the coco8 download and the
+seed script). The namespace name is also the run tag: the MinIO bucket and
 the prefix of every CVAT and ClearML object. Teardown first requests deletion of
 exactly that namespace, then stops the session's port-forwards and waits until
 the namespace is gone; it runs on success, failure and interruption unless
@@ -38,7 +40,8 @@ node cannot admit the session quota), 1 ERROR (a missing tool, or a context
 that may not create or delete namespaces). Task-driven ``prepare`` repeats it;
 direct operator ``up`` waits for an unavailable cluster instead, bounded by
 ``CVETA2_STAND_WAIT_TIMEOUT`` when set. Services that are not ready within the
-cold-start deadline block setup (exit 3) and the namespace is deleted.
+cold-start deadline, or seeding that does not finish within its deadline,
+block setup (exit 3) and the namespace is deleted.
 
 The module stays standard-library only. Inside pytest, ``tests.env_isolation``
 replaces HOME; it records the real environment in ``CVETA2_REAL_ENV`` and this
@@ -94,6 +97,9 @@ CVAT_ORG = "cveta2-it"
 MINIO_REGION = "us-east-1"
 READY_TIMEOUT_VARIABLE = "CVETA2_SESSION_READY_TIMEOUT"
 DEFAULT_READY_TIMEOUT_SECONDS = 300.0
+SEED_TIMEOUT_VARIABLE = "CVETA2_SESSION_SEED_TIMEOUT"
+DEFAULT_SEED_TIMEOUT_SECONDS = 600.0
+DOWNLOAD_SOCKET_TIMEOUT_SECONDS = 60.0
 DELETE_TIMEOUT_SECONDS = 240.0
 FORWARD_START_SECONDS = 30.0
 BOOTSTRAP_SECONDS = 90.0
@@ -119,7 +125,7 @@ class InfrastructureUnavailableError(LifecycleError):
 
 
 class SetupBlockedError(InfrastructureUnavailableError):
-    """The session's services did not become ready within the cold-start deadline."""
+    """Session setup did not finish within its readiness or seeding deadline."""
 
 
 def fail(*lines: str) -> NoReturn:
@@ -603,17 +609,25 @@ def wait_timeout() -> float | None:
         fail(f"{WAIT_TIMEOUT_VARIABLE}={raw} is not a number of seconds.")
 
 
-def ready_timeout() -> float:
-    raw = os.environ.get(READY_TIMEOUT_VARIABLE, "").strip()
+def _positive_seconds(variable: str, default: float) -> float:
+    raw = os.environ.get(variable, "").strip()
     if not raw:
-        return DEFAULT_READY_TIMEOUT_SECONDS
+        return default
     try:
         timeout = float(raw)
     except ValueError:
         timeout = math.nan
     if not math.isfinite(timeout) or timeout <= 0:
-        fail(f"{READY_TIMEOUT_VARIABLE} must be a positive finite number of seconds")
+        fail(f"{variable} must be a positive finite number of seconds")
     return timeout
+
+
+def ready_timeout() -> float:
+    return _positive_seconds(READY_TIMEOUT_VARIABLE, DEFAULT_READY_TIMEOUT_SECONDS)
+
+
+def seed_timeout() -> float:
+    return _positive_seconds(SEED_TIMEOUT_VARIABLE, DEFAULT_SEED_TIMEOUT_SECONDS)
 
 
 # -- port-forwards -----------------------------------------------------------
@@ -1068,8 +1082,23 @@ class Session:
                 )
             time.sleep(POLL_SECONDS)
 
-    def uv_python(self, *args: str) -> int:
-        return call(["uv", "run", "python", *args], cwd=self.root)
+    def _seeding_blocked(self, timeout: float, what: str) -> SetupBlockedError:
+        return SetupBlockedError(
+            f"session {self.namespace} was not seeded within {timeout:.0f} s ({SEED_TIMEOUT_VARIABLE})",
+            f"stopped during {what}",
+        )
+
+    def _seed_step(self, deadline: float, timeout: float, script: str, *args: str) -> None:
+        """Run one seeding script under ``uv run python`` before the seeding deadline."""
+        what = " ".join((Path(script).name, *args))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise self._seeding_blocked(timeout, what)
+        try:
+            status = call(["uv", "run", "python", script, *args], cwd=self.root, timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            raise self._seeding_blocked(timeout, what) from error
+        self._require(status, what)
 
     def _require(self, status: int, command: str) -> None:
         if status != 0:
@@ -1086,16 +1115,18 @@ class Session:
         log(f"Registering CVAT user {user['username']} and organization {user['organization']}")
         bootstrap_cvat(host, user)
         self.export_environment()
-        self._require(self.uv_python("tests/integration/cvat_stand.py", "verify"), "cvat_stand.py verify")
-        self._ensure_coco8_images()
+        timeout = seed_timeout()
+        deadline = time.monotonic() + timeout
+        self._seed_step(deadline, timeout, "tests/integration/cvat_stand.py", "verify")
+        self._ensure_coco8_images(deadline, timeout)
         log(f"Seeding bucket '{self.namespace}' and project '{os.environ['CVAT_INTEGRATION_PROJECT']}'")
-        self._require(self.uv_python("tests/integration/seed_cvat.py"), "seed_cvat.py")
+        self._seed_step(deadline, timeout, "tests/integration/seed_cvat.py")
         log(f"Session {self.namespace} is ready:")
         log(f"CVAT:     {host}  (organization {user['organization']})")
         log(f"MinIO:    {os.environ['MINIO_ENDPOINT']}  (for CVAT: {os.environ['MINIO_ENDPOINT_FOR_CVAT']})")
         log(f"ClearML:  {os.environ['CLEARML_API_HOST']}  (files {os.environ['CLEARML_FILES_HOST']})")
 
-    def _ensure_coco8_images(self) -> None:
+    def _ensure_coco8_images(self, deadline: float, timeout: float) -> None:
         images = self.root / "tests" / "fixtures" / "data" / "coco8" / "images"
         if (images / "train").is_dir() and (images / "val").is_dir():
             log("coco8 images already present")
@@ -1103,13 +1134,33 @@ class Session:
         log("Downloading coco8 dataset images")
         with tempfile.TemporaryDirectory(prefix="coco8-") as scratch:
             archive = Path(scratch) / "coco8.zip"
-            urllib.request.urlretrieve(COCO8_URL, archive)
+            self._download(COCO8_URL, archive, deadline, timeout)
             with zipfile.ZipFile(archive) as bundle:
                 bundle.extractall(scratch)
             images.mkdir(parents=True, exist_ok=True)
             for split in ("train", "val"):
                 shutil.copytree(Path(scratch) / "coco8" / "images" / split, images / split, dirs_exist_ok=True)
         log(f"coco8 images extracted to {images}")
+
+    def _download(self, url: str, target: Path, deadline: float, timeout: float) -> None:
+        """Download *url* to *target*; a stalled or slow transfer blocks setup at the deadline."""
+        what = f"the download of {url}"
+        try:
+            socket_timeout = min(DOWNLOAD_SOCKET_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
+            with (
+                urllib.request.urlopen(url, timeout=socket_timeout) as response,  # noqa: S310 - fixed https URL
+                target.open("wb") as output,
+            ):
+                while chunk := response.read(1 << 20):
+                    if time.monotonic() >= deadline:
+                        raise self._seeding_blocked(timeout, what)
+                    output.write(chunk)
+        except (TimeoutError, urllib.error.URLError) as error:
+            if isinstance(error, urllib.error.URLError) and not isinstance(error.reason, TimeoutError):
+                raise
+            raise SetupBlockedError(
+                f"session {self.namespace} seeding stalled: {url} sent nothing for {socket_timeout:.0f} s"
+            ) from error
 
     # -- teardown ---------------------------------------------------------
 
