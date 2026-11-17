@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from cveta2.adapters.cvat.managed_feedback import CvatFeedback
-from cveta2.adapters.files.managed_feedback import LocalFeedbackLedger
+from cveta2.adapters.files.managed_feedback import LocalFeedbackLedger, shared_ledger_path
 from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawDataMeta,
@@ -65,6 +65,7 @@ class _Remote:
         self.states = {task: FeedbackTaskState(12, task, "0", "annotations-v1") for task in (1, 2)}
         self.creates = 0
         self.fail_before: set[int] = set()
+        self.fail_frames: set[int] = set()
         self.fail_after: set[int] = set()
         self.edit_during: set[int] = set()
         self.bump_time = True
@@ -79,7 +80,7 @@ class _Remote:
         receipt = self.ledger.get_receipt(finding.marker)
         assert receipt is not None
         assert not receipt.delivered
-        if finding.task_id in self.fail_before:
+        if finding.task_id in self.fail_before or finding.frame_id in self.fail_frames:
             raise ManagedError("CVAT unavailable")
         self.creates += 1
         self.issues.add(finding.marker)
@@ -171,6 +172,37 @@ def test_partial_failure_is_explicit_and_other_findings_complete(
     assert not retried.failed
 
 
+def test_pending_delivery_follows_sibling_issue_times_on_its_task(tmp_path: Path) -> None:
+    ledger = LocalFeedbackLedger(tmp_path)
+    remote = _Remote(ledger)
+    remote.fail_frames.add(0)
+    findings = [_finding(frame=0), _finding(frame=1), _finding(frame=2)]
+    first = report_findings(findings, remote=remote, ledger=ledger)
+    assert (first.created, len(first.failed)) == (2, 1)
+    remote.fail_frames.clear()
+    reconcile_pending(findings, remote=remote, ledger=ledger)
+    retried = report_findings(findings, remote=remote, ledger=ledger)
+    assert (retried.created, retried.existing, retried.failed) == (1, 2, [])
+    assert remote.creates == 3
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "3"
+
+
+def test_pending_delivery_refuses_a_task_time_its_ledger_cannot_explain(tmp_path: Path) -> None:
+    ledger = LocalFeedbackLedger(tmp_path)
+    remote = _Remote(ledger)
+    remote.fail_frames.add(0)
+    findings = [_finding(frame=0), _finding(frame=1)]
+    report_findings(findings, remote=remote, ledger=ledger)
+    remote.fail_frames.clear()
+    remote.states[1] = FeedbackTaskState(12, 1, "7", "annotations-v1")
+    retried = report_findings(findings, remote=remote, ledger=ledger)
+    assert (retried.created, len(retried.failed)) == (0, 1)
+    assert remote.creates == 1
+    pending = ledger.get_receipt(findings[0].marker)
+    assert pending is not None
+    assert pending.before_date == "0"
+
+
 def test_new_finding_cannot_hide_edit_between_same_task_deliveries(
     tmp_path: Path,
 ) -> None:
@@ -206,6 +238,18 @@ def test_checkpoint_failure_prevents_remote_write(tmp_path: Path, monkeypatch: p
     outcome = report_findings([_finding()], remote=remote, ledger=ledger)
     assert len(outcome.failed) == 1
     assert remote.creates == 0
+
+
+def test_shared_ledger_is_keyed_by_an_exact_snapshot_hash(tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"snapshot").hexdigest()
+    shared = shared_ledger_path(tmp_path / "state", digest)
+    first = LocalFeedbackLedger(tmp_path / "first", shared)
+    report_findings([_finding()], remote=_Remote(first), ledger=first)
+    second = LocalFeedbackLedger(tmp_path / "second", shared)
+    assert second.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "1"
+    for invalid in ("../escape", digest.upper(), digest[:-1]):
+        with pytest.raises(ManagedError):
+            shared_ledger_path(tmp_path / "state", invalid)
 
 
 def test_corrupt_or_symlinked_ledger_fails_closed(tmp_path: Path) -> None:

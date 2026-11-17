@@ -16,6 +16,7 @@ from cveta2.domain.bundle.models import (
     TaskManifest,
 )
 from cveta2.domain.managed.models import ManagedSnapshot
+from cveta2.domain.managed.policies import ParentSplits
 from cveta2.domain.managed.preparation import FeedbackFinding, ManagedRecord
 
 
@@ -29,6 +30,7 @@ class CapturedManagedInput:
     snapshot: ManagedSnapshot
     source_tables: dict[str, FetchTables]
     origins: frozenset[tuple[str, int, int, int]]
+    source_directory: Path
 
 
 @dataclass(frozen=True)
@@ -65,6 +67,10 @@ class ManagedPreparationFiles(Protocol):
         """Hash readable local files and assign placeholders to unreadable paths."""
         ...
 
+    def parent_image_hashes(self, frame: pd.DataFrame, metadata: DatasetMetadata) -> dict[str, str]:
+        """Hash a parent's regular image files that lie inside approved local roots."""
+        ...
+
     def check_roots(self, frame: pd.DataFrame, metadata: DatasetMetadata) -> None:
         """Validate configured roots and transformed source path coverage."""
         ...
@@ -73,7 +79,7 @@ class ManagedPreparationFiles(Protocol):
         """Serialize the exact three-file publication payload."""
         ...
 
-    def validation_report(
+    def validation_report(  # noqa: PLR0913 - one diagnostics boundary.
         self,
         validation: BundleValidation,
         *,
@@ -81,6 +87,7 @@ class ManagedPreparationFiles(Protocol):
         findings: list[FeedbackFinding],
         unmapped: int,
         split_replacements: int,
+        parent_splits: ParentSplits | None = None,
     ) -> dict[str, JsonValue]:
         """Return JSON-safe diagnostics without inventing successful checks."""
         ...

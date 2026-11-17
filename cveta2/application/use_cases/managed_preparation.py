@@ -9,6 +9,7 @@ from typing import cast
 
 import pandas as pd
 
+from cveta2.application.ports.dataset_bundle import S3Storage
 from cveta2.application.ports.managed_preparation import (
     CapturedManagedInput,
     ManagedPreparationFiles,
@@ -23,7 +24,12 @@ from cveta2.domain.managed.models import (
     ProjectConfig,
     definition_fingerprint,
 )
-from cveta2.domain.managed.policies import assign_splits, resolve_overlaps
+from cveta2.domain.managed.policies import (
+    ParentSplits,
+    assign_splits,
+    parent_splits,
+    resolve_overlaps,
+)
 from cveta2.domain.managed.preparation import (
     FeedbackFinding,
     ManagedRecord,
@@ -126,9 +132,11 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     registry_hash: str,
     files: ManagedPreparationFiles,
     media: MediaInspector,
+    s3_roots: S3Storage,
     parent_id: str | None = None,
     parent_version: str | None = None,
     parent_metadata: DatasetMetadata | None = None,
+    parent_rows: pd.DataFrame | None = None,
     clean: bool = False,
 ) -> PreparationSummary:
     """Split, validate and persist a fresh preparation without remote mutation."""
@@ -142,12 +150,23 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         raise ManagedError("Class registry changed; fetch the managed dataset again")
     if snapshot.parent_id != parent_id:
         raise ManagedError("Source parent changed; fetch the managed dataset again")
+    if parent_id is not None and parent_metadata is None:
+        raise ManagedError(f"Parent {parent_id} lacks dataset.yaml; choose a new dataset name")
     previous = dict(snapshot.assignments)
     if parent_metadata is not None and parent_metadata.managed is not None:
         if parent_metadata.managed.definition.splits != definition.splits:
             raise ManagedError("Split policy changed; choose a new dataset lineage")
         previous.update(parent_metadata.managed.assignments)
     files.check_roots(captured.frame, metadata)
+    for root in metadata.images.s3_root:
+        s3_roots.check_root(root)
+    legacy: ParentSplits | None = None
+    if parent_metadata is not None and parent_metadata.managed is None:
+        if parent_rows is None:
+            raise ManagedError(f"Parent {parent_id} published rows are required to keep its splits")
+        # Adoption without managed evidence: carry only unambiguous content identity.
+        legacy = parent_splits(parent_rows, files.parent_image_hashes(parent_rows, metadata))
+        previous.update(legacy.assignments)
     image_hashes = files.image_hashes(captured.frame)
     frame = resolve_overlaps(captured.frame, image_hashes.identities, definition.overlaps)
     split_frame, assignments = assign_splits(frame, definition.splits, image_hashes.identities, previous)
@@ -208,6 +227,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         findings=findings,
         unmapped=unmapped,
         split_replacements=replacements,
+        parent_splits=legacy,
     )
     files.persist(directory, captured, record, payload, report, validation.broken_images)
     return PreparationSummary(directory=directory, ready=ready, report=report)
