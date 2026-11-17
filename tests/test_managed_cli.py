@@ -1,0 +1,63 @@
+"""Exit codes of the managed dataset CLI group."""
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from cveta2.domain.managed.models import ManagedError
+from cveta2.interfaces import managed_datasets
+from cveta2.interfaces.cli import main
+
+
+def test_missing_shared_config_exits_two_with_path(tmp_path: Path, capture_logs: list[str]) -> None:
+    missing = tmp_path / "absent.yaml"
+    with pytest.raises(SystemExit) as exited:
+        main(["dataset", "show", "combined", "--project-config", str(missing)])
+    assert exited.value.code == 2
+    assert any(str(missing) in line for line in capture_logs)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ManagedError("источник недоступен"), PermissionError(13, "Permission denied", "out")],
+    ids=["managed-error", "os-error"],
+)
+def test_operational_errors_exit_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str], error: Exception
+) -> None:
+    def fail(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    monkeypatch.setattr(managed_datasets, "fetch_dataset", fail)
+    with pytest.raises(SystemExit) as exited:
+        main(["dataset", "fetch", "combined", "--output-dir", str(tmp_path / "out")])
+    assert exited.value.code == 2
+    assert any(str(error) in line for line in capture_logs)
+
+
+def test_unready_preparation_still_exits_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    prepared = SimpleNamespace(ready=False, model_dump=lambda **_kwargs: {"ready": False})
+    monkeypatch.setattr(managed_datasets, "prepare_managed_dataset", lambda *_args, **_kwargs: prepared)
+    with pytest.raises(SystemExit) as exited:
+        main(
+            [
+                "dataset",
+                "prepare",
+                "combined",
+                str(tmp_path / "in.csv"),
+                "--source",
+                str(tmp_path),
+                "--output-dir",
+                str(tmp_path / "prepared"),
+            ]
+        )
+    assert exited.value.code == 1
+
+
+def test_failed_feedback_report_still_exits_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    report = SimpleNamespace(model_dump=lambda **_kwargs: {"failed": 1})
+    monkeypatch.setattr(managed_datasets, "report_dataset_errors", lambda *_args, **_kwargs: report)
+    with pytest.raises(SystemExit) as exited:
+        main(["dataset", "report-errors", str(tmp_path)])
+    assert exited.value.code == 2
