@@ -10,7 +10,8 @@
 The pre-commit hook runs the first form, within a budget: at most
 ``--max-functions`` (default 8) changed functions are mutated and the rest are
 listed; mutmut stops after ``--budget-seconds`` (default 120), and mutants it
-did not reach by then count as "not run", not as survivors. Changed lines of
+did not reach by then count as "not run", not as survivors; a run that judges
+no mutant at all before the budget expires has no verdict and fails. Changed lines of
 staged ``cveta2/**/*.py`` files are mapped to the top-level functions and
 methods that contain them, and mutmut runs only their mutants. The verdict is
 advisory: surviving mutants are printed (the first few with diffs) and the run
@@ -354,7 +355,11 @@ def report(
     functions: Sequence[str],
     show: ShowFn,
 ) -> list[str]:
-    """Print the verdict; return the names of mutants that escaped."""
+    """Print the verdict; return the names of mutants that escaped.
+
+    Raises MutationError when mutants exist but none was judged because the
+    budget expired first: "nothing survived" would then be no evidence at all.
+    """
     selected = {n: s for n, s in statuses.items() if _selected(n, functions)}
     if not selected:
         print("The changed functions produce no mutants; nothing to do.")
@@ -367,6 +372,10 @@ def report(
     print(f"Mutants in changed functions: {len(selected)}, killed: {killed}, "
           f"survived: {len(escaped)}, not reached by tests: {unreached}, "
           f"not run (budget): {unrun}")  # fmt: skip
+    if unrun and unrun + unreached == len(selected):
+        msg = ("no verdict: the budget expired before any mutant of the changed "
+               "functions was judged; rerun with a larger --budget-seconds (0: no limit).")  # fmt: skip
+        raise MutationError(msg)
     if not escaped:
         print("No judged mutant of the changed functions survived.")
     for name in escaped[:MAX_DIFFS]:

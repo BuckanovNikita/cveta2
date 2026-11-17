@@ -11,8 +11,9 @@ there on those functions only. It reports survivors (the first five with diffs)
 and passes; nothing is cached or shared between runs. The workflow runs within a
 budget: at most 8 changed functions (`--max-functions`) and 120 s of mutmut
 (`--budget-seconds`); unjudged mutants count as "not run", and mutants no unit
-test reaches as "not reached by tests", never as survivors. Read the script's
-docstring for the mechanics.
+test reaches as "not reached by tests", never as survivors. A run that judges no
+mutant before the budget expires reports "no verdict" and fails; rerun it with a
+larger `--budget-seconds`. Read the script's docstring for the mechanics.
 
 ```bash
 uv run --locked task --exit-code mutation  # staged change vs HEAD
