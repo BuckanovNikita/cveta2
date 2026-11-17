@@ -57,6 +57,7 @@ tasks:
           import platform
           import subprocess
           import sys
+          import tomllib
           from pathlib import Path
 
           digest = hashlib.sha256()
@@ -69,6 +70,10 @@ tasks:
           paths.update(Path('tests/fixtures').rglob('*'))
           paths.update(Path('cveta2').rglob('*'))
           configs = {'uv.lock', 'Taskfile.yml', '.pre-commit-config.yaml', '.python-version', '.coveragerc'}
+          # Code that runs at pytest startup or collection is no test's
+          # dependency in testmon: conftest files and the -p plugins of addopts.
+          addopts = tomllib.loads(Path('pyproject.toml').read_text())['tool']['pytest']['ini_options']['addopts']
+          plugins = {Path(*name.split('.')).with_suffix('.py') for flag, name in zip(addopts, addopts[1:]) if flag == '-p'}
           for path in sorted(paths):
               if not path.is_file() or '__pycache__' in path.parts or path.suffix in {'.pyc', '.pyo'}:
                   continue
@@ -77,9 +82,11 @@ tasks:
               if not (in_tree or config or path == Path('main.py')):
                   continue
               digest.update(path.as_posix().encode() + b'\0')
-              # Python execution dependencies stay with testmon. Scripts are
-              # orchestration inputs, so changes conservatively invalidate.
-              if path.suffix != '.py' or path.parts[0] == 'scripts':
+              # Python execution dependencies stay with testmon. Scripts and
+              # pytest startup code are orchestration inputs, so changes
+              # conservatively invalidate.
+              startup = path.name == 'conftest.py' or path in plugins
+              if path.suffix != '.py' or path.parts[0] == 'scripts' or startup:
                   digest.update(path.read_bytes())
               digest.update(b'\0')
           print(digest.hexdigest())

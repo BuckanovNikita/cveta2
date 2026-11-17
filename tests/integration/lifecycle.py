@@ -16,10 +16,13 @@ the namespace's Secrets, applies the CVAT, MinIO and ClearML manifests next to
 it, waits for them within a cold-start deadline (``CVETA2_SESSION_READY_TIMEOUT``,
 300 seconds by default), reaches them through ``kubectl port-forward`` on
 127.0.0.1, registers a regular CVAT user that owns one organization, and
-seeds the run. The namespace name is also the run tag: the MinIO bucket and
-the prefix of every CVAT and ClearML object. Teardown deletes exactly that
-namespace, waits until it is gone and stops the session's port-forwards; it
-runs on success, failure and interruption unless ``INTEGRATION_KEEP_DATA=1``.
+seeds the run within a seeding deadline (``CVETA2_SESSION_SEED_TIMEOUT``, 600
+seconds by default, covering stand verification, the coco8 download and the
+seed script). The namespace name is also the run tag: the MinIO bucket and
+the prefix of every CVAT and ClearML object. Teardown first requests deletion of
+exactly that namespace, then stops the session's port-forwards and waits until
+the namespace is gone; it runs on success, failure and interruption unless
+``INTEGRATION_KEEP_DATA=1``.
 A kept session (``up``, or the fixture with ``INTEGRATION_KEEP_DATA=1``) is
 recorded with its local ports, never its credentials, in the gitignored
 ``tests/integration/.session``.
@@ -37,7 +40,8 @@ node cannot admit the session quota), 1 ERROR (a missing tool, or a context
 that may not create or delete namespaces). Task-driven ``prepare`` repeats it;
 direct operator ``up`` waits for an unavailable cluster instead, bounded by
 ``CVETA2_STAND_WAIT_TIMEOUT`` when set. Services that are not ready within the
-cold-start deadline block setup (exit 3) and the namespace is deleted.
+cold-start deadline, or seeding that does not finish within its deadline,
+block setup (exit 3) and the namespace is deleted.
 
 The module stays standard-library only. Inside pytest, ``tests.env_isolation``
 replaces HOME; it records the real environment in ``CVETA2_REAL_ENV`` and this
@@ -77,6 +81,8 @@ KUBECTL = ("kubectl", "--context", CONTEXT)
 PREFIX = "cveta2-it-"
 NAMESPACE_PATTERN = re.compile(r"^cveta2-it-[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$")
 PART_OF = ("app.kubernetes.io/part-of", "cveta2-integration")
+# Random per-session label value: proves a namespace was created by this session.
+SESSION_TOKEN_LABEL = "cveta2-integration/session-token"
 MODULE = "uv run python -m tests.integration.lifecycle"
 COCO8_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco8.zip"
 QUOTA_MANIFEST = "quota.yaml"
@@ -93,11 +99,17 @@ CVAT_ORG = "cveta2-it"
 MINIO_REGION = "us-east-1"
 READY_TIMEOUT_VARIABLE = "CVETA2_SESSION_READY_TIMEOUT"
 DEFAULT_READY_TIMEOUT_SECONDS = 300.0
+SEED_TIMEOUT_VARIABLE = "CVETA2_SESSION_SEED_TIMEOUT"
+DEFAULT_SEED_TIMEOUT_SECONDS = 600.0
+DOWNLOAD_SOCKET_TIMEOUT_SECONDS = 60.0
 DELETE_TIMEOUT_SECONDS = 240.0
 FORWARD_START_SECONDS = 30.0
 BOOTSTRAP_SECONDS = 90.0
 POLL_SECONDS = 3.0
 KUBECTL_TIMEOUT_SECONDS = 120
+# How long an interrupted or timed-out child may take to finish; execnet
+# force-exits an interrupted xdist worker about 10 seconds after interrupting it.
+CHILD_GRACE_SECONDS = 5.0
 UNAVAILABLE_EXIT = 3
 
 
@@ -115,7 +127,7 @@ class InfrastructureUnavailableError(LifecycleError):
 
 
 class SetupBlockedError(InfrastructureUnavailableError):
-    """The session's services did not become ready within the cold-start deadline."""
+    """Session setup did not finish within its readiness or seeding deadline."""
 
 
 def fail(*lines: str) -> NoReturn:
@@ -227,28 +239,42 @@ def kubectl_ok(*args: str, stdin: str | None = None, what: str) -> str:
     return result.stdout
 
 
-def call(command: Sequence[str], *, cwd: Path | None = None) -> int:
-    """Run a child and, if this process is interrupted, let the child finish first.
+def _stop_child(child: subprocess.Popen[str], signum: int) -> None:
+    """Signal the child's process group, give it a grace period, then kill the group.
 
-    ``subprocess.run`` kills its child on any exception, so Ctrl-C or SIGTERM
-    would orphan the child's own cleanup and race the session's teardown.
-    Like a shell's foreground job, the child is waited for: Ctrl-C already
-    reached it through the terminal's process group, SIGTERM is forwarded.
-    A second Ctrl-C while waiting kills it.
+    A Ctrl-C while waiting kills it at once.
     """
-    with subprocess.Popen(list(command), cwd=cwd, text=True, env=child_env()) as child:  # noqa: S603
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(child.pid, signum)
+    with suppress(subprocess.TimeoutExpired, KeyboardInterrupt):
+        child.wait(timeout=CHILD_GRACE_SECONDS)
+    if child.poll() is None:
+        # The group leader is alive, so its group id cannot have been reused.
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(child.pid, signal.SIGKILL)
+        child.wait()
+
+
+def call(command: Sequence[str], *, cwd: Path | None = None, timeout: float | None = None) -> int:
+    """Run a child in its own process group and stop it together with this process.
+
+    The child gets no terminal signals of its own: when this process is
+    interrupted - Ctrl-C, or execnet interrupting an xdist worker, both a
+    KeyboardInterrupt - the child's group gets SIGINT; on SIGTERM (SystemExit)
+    or any other exception it gets SIGTERM. The child then has
+    ``CHILD_GRACE_SECONDS`` to finish before the group is killed, so the
+    session's teardown still runs before execnet force-exits the worker; a
+    second Ctrl-C kills it at once. After ``timeout`` seconds the child is
+    stopped the same way and ``subprocess.TimeoutExpired`` is raised.
+    """
+    with subprocess.Popen(  # noqa: S603 - fixed tool commands
+        list(command), cwd=cwd, text=True, env=child_env(), stdin=subprocess.DEVNULL, start_new_session=True
+    ) as child:
         try:
-            child.wait()
+            return child.wait(timeout=timeout)
         except BaseException as interrupt:
-            if isinstance(interrupt, SystemExit) and child.poll() is None:
-                child.send_signal(signal.SIGTERM)
-            try:
-                child.wait()
-            except KeyboardInterrupt:
-                child.kill()
-                child.wait()
+            _stop_child(child, signal.SIGINT if isinstance(interrupt, KeyboardInterrupt) else signal.SIGTERM)
             raise
-    return child.returncode
 
 
 def require_session_name(namespace: str) -> str:
@@ -335,6 +361,8 @@ def quota_requests(root: Path, deadline: float) -> dict[str, float]:
     """``requests.cpu`` and ``requests.memory`` of the session quota, read client-side."""
     manifest = root / "tests" / "integration" / "k8s" / QUOTA_MANIFEST
     result = kubectl("create", "--dry-run=client", "-o", "json", "-f", str(manifest), deadline=deadline)
+    if _lost_connection(result):
+        raise InfrastructureUnavailableError(f"the {CONTEXT} cluster stopped answering while reading the quota")
     if result.returncode != 0:
         fail(f"reading the session quota {manifest} failed (kubectl exit {result.returncode}).")
     # One JSON document per manifest document, concatenated.
@@ -353,11 +381,31 @@ def quota_requests(root: Path, deadline: float) -> dict[str, float]:
     fail(f"{manifest} holds no ResourceQuota")
 
 
+def _unschedulable(node: dict[str, Any]) -> list[str]:
+    """Why the scheduler would place no session pod on *node*; empty when it may.
+
+    The session's pods tolerate no taint, so any NoSchedule or NoExecute taint
+    excludes the node, as do a cordon and a Ready condition that is not True.
+    """
+    reasons = []
+    if node.get("spec", {}).get("unschedulable"):
+        reasons.append("cordoned")
+    conditions = node.get("status", {}).get("conditions", [])
+    if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
+        reasons.append("not Ready")
+    reasons.extend(
+        f"taint {taint.get('key', '?')}:{taint['effect']}"
+        for taint in node.get("spec", {}).get("taints", []) or []
+        if taint.get("effect") in {"NoSchedule", "NoExecute"}
+    )
+    return reasons
+
+
 def node_admission(root: Path, deadline: float) -> str | None:
-    """None when a node can admit the session quota's requests; else the reason."""
+    """None when a schedulable node can admit the session quota's requests; else the reason."""
     need = quota_requests(root, deadline)
-    nodes = _json_output(kubectl("get", "nodes", "-o", "json", deadline=deadline), "listing nodes")
-    pods = _json_output(
+    nodes = _probe_json(kubectl("get", "nodes", "-o", "json", deadline=deadline), "listing nodes")
+    pods = _probe_json(
         kubectl(
             "get",
             "pods",
@@ -381,6 +429,10 @@ def node_admission(root: Path, deadline: float) -> str | None:
     shortfalls = []
     for node in nodes.get("items", []):
         name = node.get("metadata", {}).get("name", "?")
+        ineligible = _unschedulable(node)
+        if ineligible:
+            shortfalls.append(f"{name} does not accept new pods ({', '.join(ineligible)})")
+            continue
         allocatable = node.get("status", {}).get("allocatable", {})
         free = {
             resource: quantity(allocatable.get(resource, "0")) - used.get(name, {}).get(resource, 0.0)
@@ -419,33 +471,51 @@ def _cluster_available(deadline: float) -> str | None:
         fail("Kubernetes access, context, credentials or TLS configuration failed; check kubectl access.")
     if "context" in detail and ("does not exist" in detail or "not found" in detail):
         fail(f"kubectl has no context '{CONTEXT}'; the live tests run on Docker Desktop's Kubernetes.")
-    if any(
-        term in detail
-        for term in (
-            "connection refused",
-            # kubectl's own wording when nothing listens on the API port, as
-            # when Docker Desktop's Kubernetes is stopped.
-            "was refused",
-            "connection reset",
-            "timed out",
-            "timeout",
-            "deadline exceeded",
-            "no such host",
-            "unreachable",
-            "eof",
-            "serviceunavailable",
-            "unable to handle the request",
-        )
-    ):
+    if _lost_connection(result):
         return f"the {CONTEXT} cluster does not answer"
     fail(f"Kubernetes readiness probe failed unexpectedly (exit {result.returncode}); check kubectl access.")
+
+
+_CONNECTIVITY_TERMS = (
+    "connection refused",
+    # kubectl's own wording when nothing listens on the API port, as
+    # when Docker Desktop's Kubernetes is stopped.
+    "was refused",
+    "connection reset",
+    "timed out",
+    "timeout",
+    "deadline exceeded",
+    "no such host",
+    "unreachable",
+    "eof",
+    "serviceunavailable",
+    "unable to handle the request",
+)
+
+
+def _lost_connection(result: subprocess.CompletedProcess[str]) -> bool:
+    """Whether a failed kubectl call reports a connectivity failure, not an answer."""
+    detail = (result.stderr or "").lower()
+    return result.returncode != 0 and any(term in detail for term in _CONNECTIVITY_TERMS)
+
+
+def _probe_json(result: subprocess.CompletedProcess[str], what: str) -> dict[str, Any]:
+    """Like ``_json_output`` for a preflight probe: lost connectivity is an outage."""
+    if _lost_connection(result):
+        raise InfrastructureUnavailableError(f"the {CONTEXT} cluster stopped answering while {what}")
+    return _json_output(result, what)
 
 
 def _namespace_rights(deadline: float) -> None:
     """Require the right to create and delete namespaces; a refusal is an error, not an outage."""
     for verb in ("create", "delete"):
         result = _probe_call([*KUBECTL, "auth", "can-i", verb, "namespaces"], deadline)
-        if result.stdout.strip() != "yes":
+        answer = result.stdout.strip()
+        if not answer and _lost_connection(result):
+            raise InfrastructureUnavailableError(
+                f"the {CONTEXT} cluster stopped answering while checking the right to {verb} namespaces"
+            )
+        if answer != "yes":
             fail(
                 f"the {CONTEXT} context may not {verb} namespaces (kubectl auth can-i answered "
                 f"'{result.stdout.strip() or result.stderr.strip()[:80]}');",
@@ -541,17 +611,25 @@ def wait_timeout() -> float | None:
         fail(f"{WAIT_TIMEOUT_VARIABLE}={raw} is not a number of seconds.")
 
 
-def ready_timeout() -> float:
-    raw = os.environ.get(READY_TIMEOUT_VARIABLE, "").strip()
+def _positive_seconds(variable: str, default: float) -> float:
+    raw = os.environ.get(variable, "").strip()
     if not raw:
-        return DEFAULT_READY_TIMEOUT_SECONDS
+        return default
     try:
         timeout = float(raw)
     except ValueError:
         timeout = math.nan
     if not math.isfinite(timeout) or timeout <= 0:
-        fail(f"{READY_TIMEOUT_VARIABLE} must be a positive finite number of seconds")
+        fail(f"{variable} must be a positive finite number of seconds")
     return timeout
+
+
+def ready_timeout() -> float:
+    return _positive_seconds(READY_TIMEOUT_VARIABLE, DEFAULT_READY_TIMEOUT_SECONDS)
+
+
+def seed_timeout() -> float:
+    return _positive_seconds(SEED_TIMEOUT_VARIABLE, DEFAULT_SEED_TIMEOUT_SECONDS)
 
 
 # -- port-forwards -----------------------------------------------------------
@@ -851,6 +929,7 @@ class Session:
     # Teardown deletes the namespace only once this session created it, so a
     # failed create can never remove a namespace somebody else owns.
     created: bool = False
+    token: str = field(default_factory=lambda: secrets.token_hex(8))
 
     # -- environment ------------------------------------------------------
 
@@ -922,9 +1001,18 @@ class Session:
         namespace = {
             "apiVersion": "v1",
             "kind": "Namespace",
-            "metadata": {"name": require_session_name(self.namespace), "labels": {PART_OF[0]: PART_OF[1]}},
+            "metadata": {
+                "name": require_session_name(self.namespace),
+                "labels": {PART_OF[0]: PART_OF[1], SESSION_TOKEN_LABEL: self.token},
+            },
         }
-        kubectl_ok("create", "-f", "-", stdin=json.dumps(namespace), what=f"creating namespace {self.namespace}")
+        try:
+            kubectl_ok("create", "-f", "-", stdin=json.dumps(namespace), what=f"creating namespace {self.namespace}")
+        except BaseException:
+            # The server may have accepted a create that failed, timed out or
+            # was interrupted on this side: own it only if it carries our token.
+            self.created = self._carries_token()
+            raise
         self.created = True
         log(f"Session namespace {self.namespace} created")
         kubectl_ok(
@@ -944,6 +1032,24 @@ class Session:
             stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": generated_secrets()}),
             what="storing the session credentials",
         )
+
+    def _carries_token(self) -> bool:
+        """Whether the namespace exists and carries this session's token label."""
+        try:
+            result = kubectl("get", "namespace", self.namespace, "-o", "json")
+        except LifecycleError:
+            result = None
+        if result is None or (result.returncode != 0 and "notfound" not in result.stderr.lower().replace(" ", "")):
+            warn(f"WARNING: could not check whether namespace {self.namespace} was created; it is not deleted.")
+            warn(f"         If it exists with label {SESSION_TOKEN_LABEL}={self.token}: {MODULE} stop {self.namespace}")
+            return False
+        if result.returncode != 0:
+            return False
+        try:
+            labels = json.loads(result.stdout).get("metadata", {}).get("labels") or {}
+        except (json.JSONDecodeError, AttributeError):
+            return False
+        return bool(labels.get(SESSION_TOKEN_LABEL) == self.token)
 
     def deploy(self) -> None:
         files = [arg for name in SERVICE_MANIFESTS for arg in ("-f", str(manifest_dir(self.root) / name))]
@@ -1006,8 +1112,23 @@ class Session:
                 )
             time.sleep(POLL_SECONDS)
 
-    def uv_python(self, *args: str) -> int:
-        return call(["uv", "run", "python", *args], cwd=self.root)
+    def _seeding_blocked(self, timeout: float, what: str) -> SetupBlockedError:
+        return SetupBlockedError(
+            f"session {self.namespace} was not seeded within {timeout:.0f} s ({SEED_TIMEOUT_VARIABLE})",
+            f"stopped during {what}",
+        )
+
+    def _seed_step(self, deadline: float, timeout: float, script: str, *args: str) -> None:
+        """Run one seeding script under ``uv run python`` before the seeding deadline."""
+        what = " ".join((Path(script).name, *args))
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise self._seeding_blocked(timeout, what)
+        try:
+            status = call(["uv", "run", "python", script, *args], cwd=self.root, timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            raise self._seeding_blocked(timeout, what) from error
+        self._require(status, what)
 
     def _require(self, status: int, command: str) -> None:
         if status != 0:
@@ -1024,16 +1145,18 @@ class Session:
         log(f"Registering CVAT user {user['username']} and organization {user['organization']}")
         bootstrap_cvat(host, user)
         self.export_environment()
-        self._require(self.uv_python("tests/integration/cvat_stand.py", "verify"), "cvat_stand.py verify")
-        self._ensure_coco8_images()
+        timeout = seed_timeout()
+        deadline = time.monotonic() + timeout
+        self._seed_step(deadline, timeout, "tests/integration/cvat_stand.py", "verify")
+        self._ensure_coco8_images(deadline, timeout)
         log(f"Seeding bucket '{self.namespace}' and project '{os.environ['CVAT_INTEGRATION_PROJECT']}'")
-        self._require(self.uv_python("tests/integration/seed_cvat.py"), "seed_cvat.py")
+        self._seed_step(deadline, timeout, "tests/integration/seed_cvat.py")
         log(f"Session {self.namespace} is ready:")
         log(f"CVAT:     {host}  (organization {user['organization']})")
         log(f"MinIO:    {os.environ['MINIO_ENDPOINT']}  (for CVAT: {os.environ['MINIO_ENDPOINT_FOR_CVAT']})")
         log(f"ClearML:  {os.environ['CLEARML_API_HOST']}  (files {os.environ['CLEARML_FILES_HOST']})")
 
-    def _ensure_coco8_images(self) -> None:
+    def _ensure_coco8_images(self, deadline: float, timeout: float) -> None:
         images = self.root / "tests" / "fixtures" / "data" / "coco8" / "images"
         if (images / "train").is_dir() and (images / "val").is_dir():
             log("coco8 images already present")
@@ -1041,7 +1164,7 @@ class Session:
         log("Downloading coco8 dataset images")
         with tempfile.TemporaryDirectory(prefix="coco8-") as scratch:
             archive = Path(scratch) / "coco8.zip"
-            urllib.request.urlretrieve(COCO8_URL, archive)
+            self._download(COCO8_URL, archive, deadline, timeout)
             with zipfile.ZipFile(archive) as bundle:
                 bundle.extractall(scratch)
             images.mkdir(parents=True, exist_ok=True)
@@ -1049,29 +1172,67 @@ class Session:
                 shutil.copytree(Path(scratch) / "coco8" / "images" / split, images / split, dirs_exist_ok=True)
         log(f"coco8 images extracted to {images}")
 
+    def _download(self, url: str, target: Path, deadline: float, timeout: float) -> None:
+        """Download *url* to *target*; a stalled or slow transfer blocks setup at the deadline."""
+        what = f"the download of {url}"
+        try:
+            socket_timeout = min(DOWNLOAD_SOCKET_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
+            with (
+                urllib.request.urlopen(url, timeout=socket_timeout) as response,  # noqa: S310 - fixed https URL
+                target.open("wb") as output,
+            ):
+                while chunk := response.read(1 << 20):
+                    if time.monotonic() >= deadline:
+                        raise self._seeding_blocked(timeout, what)
+                    output.write(chunk)
+        except (TimeoutError, urllib.error.URLError) as error:
+            if isinstance(error, urllib.error.URLError) and not isinstance(error.reason, TimeoutError):
+                raise
+            raise SetupBlockedError(
+                f"session {self.namespace} seeding stalled: {url} sent nothing for {socket_timeout:.0f} s"
+            ) from error
+
     # -- teardown ---------------------------------------------------------
 
     def stop(self) -> int:
-        """Delete exactly this namespace and stop its port-forwards."""
-        dead = self.stop_forwards()
+        """Delete exactly this namespace and stop its port-forwards.
+
+        The delete request goes out first: an interrupted pytest worker may be
+        force-exited before the rest of teardown finishes.
+        """
+        dead = [name for name, forward in self.forwards.items() if not forward.alive()]
+        requested = request_deletion(self.namespace) if self.created else True
+        self.stop_forwards()
         for name in dead:
             warn(f"WARNING: the port-forward to {FORWARDS[name][0]} had stopped before teardown;")
             warn("         tests after that point lost their connection to that service.")
         if not self.created:
             return 0
-        return delete_session(self.root, self.namespace)
+        stop_session_forwards(self.namespace)
+        if not requested:
+            return 1
+        return await_deletion(self.root, self.namespace)
 
 
-def delete_session(root: Path, namespace: str) -> int:
-    """Delete one session namespace by exact name and wait until it is gone."""
+def request_deletion(namespace: str) -> bool:
+    """Ask the API server to delete one session namespace by exact name; do not wait."""
     require_session_name(namespace)
-    stop_session_forwards(namespace)
     log(f"Deleting session namespace {namespace}")
-    result = kubectl("delete", "namespace", namespace, "--ignore-not-found", "--wait=false")
-    if result.returncode != 0:
-        warn(f"ERROR: deleting namespace {namespace} failed (kubectl exit {result.returncode}).")
+    try:
+        result = kubectl("delete", "namespace", namespace, "--ignore-not-found", "--wait=false")
+    except LifecycleError as error:
+        report(error)
+        result = None
+    if result is None or result.returncode != 0:
+        status = "no answer" if result is None else f"kubectl exit {result.returncode}"
+        warn(f"ERROR: deleting namespace {namespace} failed ({status}).")
         warn(f"       Retry: {MODULE} stop {namespace}")
-        return 1
+        return False
+    return True
+
+
+def await_deletion(root: Path, namespace: str) -> int:
+    """Wait, bounded, until a session namespace whose deletion was requested is gone."""
     started = time.monotonic()
     while namespace_exists(namespace):
         if time.monotonic() - started >= DELETE_TIMEOUT_SECONDS:
@@ -1083,6 +1244,15 @@ def delete_session(root: Path, namespace: str) -> int:
     forget_session_record(root, namespace)
     log(f"Session namespace {namespace} is gone ({time.monotonic() - started:.0f} s)")
     return 0
+
+
+def delete_session(root: Path, namespace: str) -> int:
+    """Delete one session namespace by exact name, stop its port-forwards, wait until it is gone."""
+    requested = request_deletion(namespace)
+    stop_session_forwards(namespace)
+    if not requested:
+        return 1
+    return await_deletion(root, namespace)
 
 
 def keep_data() -> bool:
@@ -1114,6 +1284,24 @@ def _teardown_after(session: Session, *, delete: bool) -> None:
         warn(f"       Retry: {MODULE} stop {session.namespace}")
 
 
+def refuse_kept_session(root: Path) -> None:
+    """Refuse to start a session to keep while this checkout keeps one that still exists.
+
+    A new kept session would overwrite the record of the earlier one and
+    orphan it; a recorded namespace that vanished is forgotten.
+    """
+    record = read_session_record(root)
+    if record is None:
+        return
+    if namespace_exists(record[0]):
+        fail(
+            f"session {record[0]} is kept in this checkout ({session_file(root)});",
+            f"stop it first: {MODULE} stop {record[0]}",
+        )
+    warn(f"Kept session {record[0]} no longer exists; forgetting it.")
+    session_file(root).unlink(missing_ok=True)
+
+
 def prepare(root: Path, *, notify: Callable[[str], None]) -> Session:
     """Check or wait for the cluster, then create, deploy and seed a new session.
 
@@ -1129,6 +1317,8 @@ def prepare(root: Path, *, notify: Callable[[str], None]) -> Session:
             raise InfrastructureUnavailableError(f"UNAVAILABLE: live setup blocked: {error}") from error
     else:
         wait_for_cluster(lambda: probe(root), notify=notify, timeout=wait_timeout())
+    if keep_data():
+        refuse_kept_session(root)
     session = Session(root, new_session_name())
     try:
         session.up()
@@ -1205,15 +1395,7 @@ def _recorded_or_given(root: Path, given: str | None) -> tuple[str, dict[str, in
 
 
 def command_up(root: Path) -> int:
-    record = read_session_record(root)
-    if record is not None:
-        if namespace_exists(record[0]):
-            fail(
-                f"session {record[0]} is kept in this checkout ({session_file(root)});",
-                f"stop it first: {MODULE} stop {record[0]}",
-            )
-        warn(f"Kept session {record[0]} no longer exists; forgetting it.")
-        session_file(root).unlink(missing_ok=True)
+    refuse_kept_session(root)
     session = prepare(root, notify=warn)
     keep(session)
     return 0
