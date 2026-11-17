@@ -1,5 +1,6 @@
 """Read-only CVAT queries: projects, tasks, labels and cloud storage."""
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -10,6 +11,25 @@ from cveta2.domain.errors import CvatApiError, Cveta2Error, ProjectNotFoundError
 if TYPE_CHECKING:
     from cveta2.domain.models import LabelInfo, OrganizationInfo, ProjectInfo, TaskInfo
     from cveta2.domain.storage import CloudStorageInfo
+
+
+@dataclass(frozen=True, slots=True)
+class LabelUsage:
+    """Annotations per label across a project, with the tasks that were not read.
+
+    ``counts`` maps ``label_id`` to the number of shapes, tags and tracks
+    using it. A task whose annotations could not be read is listed in
+    ``skipped_task_ids``; its annotations are missing from ``counts``, so a
+    zero is then not proof that a label is unused.
+    """
+
+    counts: dict[int, int]
+    skipped_task_ids: tuple[int, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        """Whether every project task was read."""
+        return not self.skipped_task_ids
 
 
 class _ReadMixin(_ClientBase):
@@ -74,10 +94,23 @@ class _ReadMixin(_ClientBase):
     def count_label_usage(self, project_id: int) -> dict[int, int]:
         """Count annotations per label across all project tasks.
 
-        Returns a mapping ``{label_id: annotation_count}``.
-        Used to warn before label deletion.
+        Returns a mapping ``{label_id: annotation_count}`` of shapes, tags
+        and tracks. Tasks that cannot be read are skipped with a warning;
+        use :meth:`label_usage` to learn whether the count is complete.
         """
-        source = self._require_api("count_label_usage")
+        return self._label_usage(project_id, "count_label_usage").counts
+
+    def label_usage(self, project_id: int) -> LabelUsage:
+        """Count annotations per label and report the tasks that were not read.
+
+        Used to choose the confirmation before label deletion: an incomplete
+        count cannot prove that a label is unused.
+        """
+        return self._label_usage(project_id, "label_usage")
+
+    def _label_usage(self, project_id: int, operation: str) -> LabelUsage:
+        """Count shapes, tags and tracks per label, skipping unreadable tasks."""
+        source = self._require_api(operation)
         tasks = source.get_project_tasks(project_id)
         counts: dict[int, int] = {}
         skipped: list[int] = []
@@ -91,8 +124,10 @@ class _ReadMixin(_ClientBase):
                 )
                 skipped.append(task.id)
                 return
-            for shape in annotations.shapes:
-                counts[shape.label_id] = counts.get(shape.label_id, 0) + 1
+            label_ids = [shape.label_id for shape in annotations.shapes]
+            label_ids += annotations.tag_label_ids + annotations.track_label_ids
+            for label_id in label_ids:
+                counts[label_id] = counts.get(label_id, 0) + 1
 
         self._runner(
             tasks,
@@ -104,7 +139,7 @@ class _ReadMixin(_ClientBase):
         )
         if skipped:
             logger.warning(f"Пропущено задач при подсчёте меток: {skipped}")
-        return counts
+        return LabelUsage(counts=counts, skipped_task_ids=tuple(skipped))
 
     def resolve_project_id(
         self,

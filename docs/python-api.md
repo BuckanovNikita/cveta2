@@ -184,6 +184,11 @@ with CvatClient() as client:
         count = usage.get(label.id, 0)
         print(f"{label.name}: {count} аннотаций")
 
+    # Тот же подсчёт с признаком полноты: задачи, чьи аннотации не прочитаны
+    full = client.label_usage(project_id)
+    if not full.complete:
+        print(f"Подсчёт неполный, пропущены задачи: {full.skipped_task_ids}")
+
     # Добавить новые метки
     client.update_project_labels(project_id, add=["cat", "dog"])
 

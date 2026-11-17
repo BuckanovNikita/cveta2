@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from cveta2.adapters.config.settings import CvatConfig
+from cveta2.application.client.read import LabelUsage
 from cveta2.application.ports.cvat import CvatApiPort
 from cveta2.application.ports.dtos import (
     LabelPatch,
@@ -310,6 +311,91 @@ def test_count_label_usage_continues_past_a_failing_task(
     assert any("Пропущено задач при подсчёте меток: [10]" in message for message in capture_logs)
 
 
+def test_label_usage_reports_skipped_tasks_as_incomplete() -> None:
+    api = FakeCvatApi(
+        _usage_fixtures(),
+        fail_task_ids={10},
+        fail_methods=("get_task_annotations",),
+    )
+
+    usage = CvatClient(CvatConfig(), api=api).label_usage(1)
+
+    assert usage.counts == {2: 2}
+    assert usage.skipped_task_ids == (10,)
+    assert not usage.complete
+
+
+def test_label_usage_without_failures_is_complete() -> None:
+    usage = CvatClient(CvatConfig(), api=FakeCvatApi(_usage_fixtures())).label_usage(1)
+
+    assert usage.counts == {1: 1, 2: 3}
+    assert usage.complete
+
+
+def test_count_label_usage_counts_tags_and_tracks() -> None:
+    """A label used only by a tag or a track must not look unused before deletion."""
+    data_meta = RawDataMeta(frames=[RawFrame(name="a.jpg", width=64, height=64)])
+    fixtures = LoadedFixtures(
+        project=ProjectInfo(id=1, name="usage"),
+        tasks=[make_task(10)],
+        labels=_USAGE_LABELS,
+        task_data={
+            10: (
+                data_meta,
+                RawAnnotations(
+                    shapes=[make_raw_shape(id=1, label_id=1)],
+                    tag_label_ids=[1, 2],
+                    track_label_ids=[2],
+                ),
+            ),
+        },
+    )
+
+    assert CvatClient(CvatConfig(), api=FakeCvatApi(fixtures)).count_label_usage(1) == {1: 2, 2: 2}
+
+
+def test_delete_after_incomplete_count_requires_retyped_names(capture_logs: list[str]) -> None:
+    """Label 1 lives only in the unreadable task; a y/n prompt would hide that."""
+    api = FakeCvatApi(
+        _usage_fixtures(),
+        fail_task_ids={10},
+        fail_methods=("get_task_annotations",),
+    )
+    client = CvatClient(CvatConfig(), api=api)
+
+    with (
+        _patch_prompts(select_labels=[1], confirm=True, text=None),
+        pytest.MonkeyPatch.context() as mp,
+    ):
+        update = MagicMock()
+        mp.setattr(client, "update_project_labels", update)
+        _interactive_delete(client, 1, list(_USAGE_LABELS))
+
+    update.assert_not_called()
+    assert any("неизвестно" in message for message in capture_logs)
+    assert not any("аннотаций нет" in message for message in capture_logs)
+
+
+def test_delete_after_incomplete_count_proceeds_when_names_are_retyped() -> None:
+    api = FakeCvatApi(
+        _usage_fixtures(),
+        fail_task_ids={10},
+        fail_methods=("get_task_annotations",),
+    )
+    client = CvatClient(CvatConfig(), api=api)
+
+    with (
+        _patch_prompts(select_labels=[1], confirm=False, text="cat"),
+        pytest.MonkeyPatch.context() as mp,
+    ):
+        update = MagicMock()
+        mp.setattr(client, "update_project_labels", update)
+        mp.setattr(client, "get_project_labels", lambda _project_id: [_USAGE_LABELS[1]])
+        _interactive_delete(client, 1, list(_USAGE_LABELS))
+
+    update.assert_called_once_with(1, delete=[1])
+
+
 # ---------------------------------------------------------------------------
 # CvatClient.update_project_labels (mock SDK)
 # ---------------------------------------------------------------------------
@@ -505,7 +591,7 @@ def test_rename_no_update(select: int | None, text: str | None) -> None:
 
 def _delete_client(usage: dict[int, int], remaining: list[LabelInfo]) -> MagicMock:
     mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = usage
+    mock_client.label_usage.return_value = LabelUsage(counts=usage)
     mock_client.get_project_labels.return_value = remaining
     return mock_client
 
@@ -550,7 +636,7 @@ def test_delete_single_label_proceeds(
 def test_delete_no_update(usage: dict[int, int], prompts: dict[str, object]) -> None:
     """Decline / wrong-name / cancel all skip the API call."""
     mock_client = MagicMock()
-    mock_client.count_label_usage.return_value = usage
+    mock_client.label_usage.return_value = LabelUsage(counts=usage)
 
     with _patch_prompts(select_labels=[1], **prompts):
         result = _interactive_delete(mock_client, 1, list(_LABELS))
@@ -578,7 +664,7 @@ def test_delete_empty_selection_cancels(selection: list[int] | None) -> None:
     with _patch_prompts(select_labels=selection or []):
         result = _interactive_delete(mock_client, 1, list(_LABELS))
 
-    mock_client.count_label_usage.assert_not_called()
+    mock_client.label_usage.assert_not_called()
     mock_client.update_project_labels.assert_not_called()
     assert result == list(_LABELS)
 
