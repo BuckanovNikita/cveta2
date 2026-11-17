@@ -223,6 +223,12 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     parent, previous = _parent(definition)
     if previous and previous.managed and previous.managed.definition.splits != definition.splits:
         raise ManagedError("Split policy changed; select a new dataset lineage")
+    parent_rows = None
+    if parent is not None and previous is not None and previous.managed is None:
+        parent_rows = read_csv_bytes(
+            ClearMLSources().read_files(parent.dataset_id, ("dataset.csv",))["dataset.csv"],
+            source=f"{parent.dataset_id}/dataset.csv",
+        )
     return prepare_managed(
         config,
         name,
@@ -236,6 +242,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
         parent_id=parent.dataset_id if parent else None,
         parent_version=parent.version if parent else None,
         parent_metadata=previous,
+        parent_rows=parent_rows,
         clean=clean,
     )
 

@@ -23,7 +23,12 @@ from cveta2.domain.managed.models import (
     ProjectConfig,
     definition_fingerprint,
 )
-from cveta2.domain.managed.policies import assign_splits, resolve_overlaps
+from cveta2.domain.managed.policies import (
+    ParentSplits,
+    assign_splits,
+    parent_splits,
+    resolve_overlaps,
+)
 from cveta2.domain.managed.preparation import (
     FeedbackFinding,
     ManagedRecord,
@@ -129,6 +134,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     parent_id: str | None = None,
     parent_version: str | None = None,
     parent_metadata: DatasetMetadata | None = None,
+    parent_rows: pd.DataFrame | None = None,
     clean: bool = False,
 ) -> PreparationSummary:
     """Split, validate and persist a fresh preparation without remote mutation."""
@@ -150,6 +156,13 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
             raise ManagedError("Split policy changed; choose a new dataset lineage")
         previous.update(parent_metadata.managed.assignments)
     files.check_roots(captured.frame, metadata)
+    legacy: ParentSplits | None = None
+    if parent_metadata is not None and parent_metadata.managed is None:
+        if parent_rows is None:
+            raise ManagedError(f"Parent {parent_id} published rows are required to keep its splits")
+        # Adoption without managed evidence: carry only unambiguous content identity.
+        legacy = parent_splits(parent_rows, files.parent_image_hashes(parent_rows, metadata))
+        previous.update(legacy.assignments)
     image_hashes = files.image_hashes(captured.frame)
     frame = resolve_overlaps(captured.frame, image_hashes.identities, definition.overlaps)
     split_frame, assignments = assign_splits(frame, definition.splits, image_hashes.identities, previous)
@@ -210,6 +223,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         findings=findings,
         unmapped=unmapped,
         split_replacements=replacements,
+        parent_splits=legacy,
     )
     files.persist(directory, captured, record, payload, report, validation.broken_images)
     return PreparationSummary(directory=directory, ready=ready, report=report)

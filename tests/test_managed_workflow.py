@@ -34,7 +34,8 @@ from cveta2.domain.bundle.models import (
     Publication,
 )
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
+from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SplitPolicy
+from cveta2.domain.managed.policies import assign_splits
 from cveta2.domain.models import LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
 from cveta2.interfaces.cli import main
@@ -313,8 +314,8 @@ def _legacy_parent(workflow: Workflow, dataset: pd.DataFrame | None = None) -> P
         images=ImageRoots(local_root=[str(workflow.images)]),
     )
     (parent / "dataset.yaml").write_text(yaml.safe_dump(metadata.model_dump(mode="json")))
-    if dataset is not None:
-        dataset.to_csv(parent / "dataset.csv", index=False)
+    published = pd.DataFrame(columns=["image_name", "image_path", "split"]) if dataset is None else dataset
+    published.to_csv(parent / "dataset.csv", index=False)
     workflow.clearml.latest_id = "legacy"
     return parent
 
@@ -380,6 +381,7 @@ def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workfl
         "tasks.yaml",
     }
     source = workflow.clearml.read_snapshot(result.dataset_id)
+    assert source is not None
     assert {item.type for item in source.sources} == {"cvat", "s3-csv"}
     workflow.cvat.annotation_reads.clear()
     reused = api.fetch_dataset("combined", output_dir=tmp_path / "again", **workflow.options)
@@ -457,3 +459,26 @@ def test_parent_that_lost_its_metadata_blocks_publication(workflow: Workflow, tm
     with pytest.raises(ManagedError, match=r"dataset\.yaml"):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+def test_legacy_parent_adoption_keeps_published_splits_of_unambiguous_images(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    paths = sorted(str(path) for path in workflow.images.iterdir())
+    hashes = {path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in paths}
+    seeded, _ = assign_splits(pd.DataFrame({"image_path": paths}), SplitPolicy(), hashes)
+    # Published splits deliberately differ from what seeded hashing would choose.
+    published = dict(zip(paths, seeded["split"].map({"train": "val", "val": "train", "test": "train"}), strict=True))
+    ambiguous = paths[0]
+    rows = [{"image_name": Path(path).name, "image_path": path, "split": split} for path, split in published.items()]
+    rows.append({"image_name": Path(ambiguous).name, "image_path": ambiguous, "split": "test"})
+    _legacy_parent(workflow, pd.DataFrame(rows))
+    prepared = _prepare(workflow, tmp_path)
+    result = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    splits = result.groupby("image_path")["split"].agg(set).to_dict()
+    assert {path: splits[path] for path in paths if path != ambiguous} == {
+        path: {published[path]} for path in paths if path != ambiguous
+    }
+    assert splits[ambiguous] == set(seeded.loc[seeded["image_path"].eq(ambiguous), "split"])
+    report = json.loads((prepared / "report.json").read_text())
+    assert report["parent_split_conflicts"] == 1

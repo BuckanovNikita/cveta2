@@ -10,10 +10,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pandas as pd
+from loguru import logger
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from cveta2.adapters.files.bundle import _payload, _yaml
-from cveta2.adapters.files.bundle_paths import LocalRoots
+from cveta2.adapters.files.bundle_paths import LocalRoots, absolute_image_path
 from cveta2.adapters.files.verification import read_csv_bytes, report_dict
 from cveta2.application.ports.managed_preparation import (
     CapturedManagedInput,
@@ -25,8 +26,10 @@ from cveta2.domain.bundle.models import (
     DatasetMetadata,
     FetchTables,
     TaskManifest,
+    UploadError,
 )
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SourceSnapshot
+from cveta2.domain.managed.policies import ParentSplits
 from cveta2.domain.managed.preparation import FeedbackFinding, ManagedRecord
 
 _PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
@@ -120,6 +123,22 @@ class LocalManagedPreparationFiles:
             identities[value] = digest
         return ImageHashes(identities, readable)
 
+    def parent_image_hashes(self, frame: pd.DataFrame, metadata: DatasetMetadata) -> dict[str, str]:
+        """Hash only regular files under approved roots; parent paths are untrusted."""
+        roots = LocalRoots()
+        approved = [Path(roots.check_local_root(root)) for root in metadata.images.local_root]
+        hashes: dict[str, str] = {}
+        for value in frame.get("image_path", []):
+            if not isinstance(value, str) or value in hashes:
+                continue
+            try:
+                path = absolute_image_path(value)
+                if any(path.is_relative_to(root) for root in approved) and path.is_file():
+                    hashes[value] = hashlib.sha256(path.read_bytes()).hexdigest()
+            except (OSError, UploadError) as error:
+                logger.debug(f"Parent image is not readable for split identity: {value}: {error}")
+        return hashes
+
     def check_roots(self, frame: pd.DataFrame, metadata: DatasetMetadata) -> None:
         """Require approved local and S3 coverage before cleanup removes any rows."""
         roots = LocalRoots()
@@ -131,7 +150,7 @@ class LocalManagedPreparationFiles:
         """Use the same deterministic three-file serialization as legacy bundles."""
         return _payload(frame, metadata, tasks)
 
-    def validation_report(
+    def validation_report(  # noqa: PLR0913 - one diagnostics boundary.
         self,
         validation: BundleValidation,
         *,
@@ -139,6 +158,7 @@ class LocalManagedPreparationFiles:
         findings: list[FeedbackFinding],
         unmapped: int,
         split_replacements: int,
+        parent_splits: ParentSplits | None = None,
     ) -> dict[str, JsonValue]:
         """Serialize report tuples as JSON arrays and retain original diagnostics."""
         report = report_dict(validation.result)
@@ -151,6 +171,12 @@ class LocalManagedPreparationFiles:
             unmapped_errors=unmapped,
             split_replacements=split_replacements,
         )
+        if parent_splits is not None:
+            report.update(
+                parent_splits_carried=len(parent_splits.assignments),
+                parent_split_conflicts=parent_splits.conflicts,
+                parent_split_unresolved=parent_splits.unresolved,
+            )
         return _REPORT.validate_json(json.dumps(report))
 
     def persist(  # noqa: PLR0913, PLR0917 - immutable persistence boundary.
