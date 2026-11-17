@@ -32,8 +32,13 @@ from cveta2.domain.bundle.preparation import (
 )
 
 
-def _check_yaml_nodes(node: Node, active: set[int]) -> None:
-    """Reject duplicate/nontext mapping keys and recursive YAML aliases."""
+def _check_yaml_nodes(node: Node, active: set[int], checked: set[int]) -> None:
+    """Reject duplicate/nontext mapping keys and recursive YAML aliases.
+
+    A node reused through an alias is checked once; revisits return early.
+    """
+    if id(node) in checked:
+        return
     if id(node) in active:
         raise UploadError("Recursive YAML aliases are not supported.")
     active.add(id(node))
@@ -45,11 +50,22 @@ def _check_yaml_nodes(node: Node, active: set[int]) -> None:
             if key.value in keys:
                 raise UploadError(f"Duplicate YAML key: {key.value!r}")
             keys.add(key.value)
-            _check_yaml_nodes(value, active)
+            _check_yaml_nodes(value, active, checked)
     elif isinstance(node, SequenceNode):
         for value in node.value:
-            _check_yaml_nodes(value, active)
+            _check_yaml_nodes(value, active, checked)
     active.remove(id(node))
+    checked.add(id(node))
+
+
+def _error_details(error: OSError | ValidationError) -> str:
+    """Describe a failure without echoing input, whose repr may be exponential under YAML aliases."""
+    if isinstance(error, OSError):
+        return str(error)
+    return "; ".join(
+        f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+        for item in error.errors(include_input=False, include_url=False)
+    )
 
 
 def _yaml(content: bytes, name: str) -> object:
@@ -57,7 +73,7 @@ def _yaml(content: bytes, name: str) -> object:
         text = content.decode("utf-8")
         node = yaml.compose(text, Loader=yaml.SafeLoader)
         if node is not None:
-            _check_yaml_nodes(node, set())
+            _check_yaml_nodes(node, set(), set())
         result: object = yaml.safe_load(text)
     except (yaml.YAMLError, UnicodeError) as error:
         raise UploadError(f"Cannot parse {name}: {error}") from error
@@ -119,7 +135,7 @@ class LocalBundleFiles:
         try:
             return DatasetMetadata.model_validate(_yaml(path.read_bytes(), str(path)))
         except (OSError, ValidationError) as error:
-            raise UploadError(f"Invalid dataset metadata {path}: {error}") from error
+            raise UploadError(f"Invalid dataset metadata {path}: {_error_details(error)}") from error
 
     def save_preparation(self, directory: Path, draft: BundleDraft) -> PreparedDataset:
         """Write reports and copied evidence without replacing any existing file."""
@@ -212,7 +228,7 @@ class LocalBundleFiles:
                     (staging / name).write_bytes(content)
                 yield StoredBundle(staging, captured, record, metadata, tasks, dataset, payload)
         except (OSError, ValidationError) as error:
-            raise UploadError(f"Cannot read prepared bundle {directory}: {error}") from error
+            raise UploadError(f"Cannot read prepared bundle {directory}: {_error_details(error)}") from error
 
     def payload_matches(self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest) -> bool:
         """Require deterministic derivation to equal the bytes actually reviewed."""

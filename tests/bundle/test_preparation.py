@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 from typing import cast
 
@@ -411,6 +412,28 @@ def test_strict_metadata_rejects_ambiguous_yaml(tmp_path: Path, text: str) -> No
     metadata.write_text(text)
     with pytest.raises(UploadError):
         LocalBundleFiles().read_metadata(metadata)
+
+
+def test_strict_metadata_checks_reused_aliases_once(tmp_path: Path) -> None:
+    levels = 60
+    lines = ["api_url: https://example.org/classes", "classes: {}", "x0: &a0 [x, x]"]
+    lines += [f"x{level}: &a{level} [*a{level - 1}, *a{level - 1}]" for level in range(1, levels + 1)]
+    metadata = tmp_path / "dataset.yaml"
+    metadata.write_text("\n".join(lines) + "\n")
+    outcome: list[BaseException] = []
+
+    def read() -> None:
+        try:
+            LocalBundleFiles().read_metadata(metadata)
+        except UploadError as error:
+            outcome.append(error)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    reader.join(timeout=10)
+    assert not reader.is_alive(), "alias fan-out is re-walked on every reference"
+    assert len(outcome) == 1
+    assert "x0" in str(outcome[0])
 
 
 def test_failed_preparation_never_leaves_uploadable_marker(
