@@ -311,7 +311,7 @@ def run_mutmut(
             if timer is not None:
                 timer.cancel()
                 timer.join()
-    if spent.is_set() and process.returncode != 0:
+    if spent.is_set():
         return None, "".join(tail)
     return process.returncode, "".join(tail)
 
