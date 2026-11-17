@@ -95,18 +95,17 @@ def lock_upload(project_id: int, fingerprint: str, *, host: str) -> FileUploadLo
     Where the platform or filesystem offers no ``flock``, the run goes on
     unlocked with a warning, as uploads did before the lock existed.
     """
+    if fcntl is None:
+        logger.warning(
+            "Блокировка файлов недоступна на этой платформе — одновременный запуск той же загрузки не исключён."
+        )
+        return FileUploadLock(None)
     path = get_manifest_path(project_id, fingerprint, host=host).with_suffix(".lock")
     try:
         ensure_shared_dir(path.parent)
         fd = _open_lock_file(path)
     except OSError as e:
         raise Cveta2Error(f"Не удалось открыть файл блокировки загрузки {path}: {e}") from e
-    if fcntl is None:
-        logger.warning(
-            "Блокировка файлов недоступна на этой платформе — одновременный запуск той же загрузки не исключён."
-        )
-        os.close(fd)
-        return FileUploadLock(None)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as e:

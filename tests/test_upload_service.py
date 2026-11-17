@@ -1044,15 +1044,15 @@ class TestConcurrentUploads:
 
         assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"])).task_id == NEW_TASK_ID
 
-    def test_without_os_locks_the_upload_still_runs_and_warns(
-        self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
-    ) -> None:
+    def test_without_os_locks_the_upload_still_runs_unlocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Where ``fcntl`` is missing no lock file is touched at all."""
         client = make_client()
         make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
         monkeypatch.setattr("cveta2.adapters.files.manifests.fcntl", None)
+        monkeypatch.delattr("os.fchmod", raising=False)
 
         assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"])).task_id == NEW_TASK_ID
-        assert capture_logs
+        assert list(get_upload_manifest_dir(PROJECT_ID, host=client.host).glob("*.lock")) == []
 
 
 class TestS3FailureAbortsBeforeTaskCreation:
