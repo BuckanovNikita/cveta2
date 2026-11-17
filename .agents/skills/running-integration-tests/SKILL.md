@@ -52,8 +52,9 @@ L stop [<namespace>] # delete exactly that session namespace and stop its port-f
 ## Bounded preflight and deferral
 
 `infra-check` checks that `kubectl` exists, that the cluster answers `/readyz`,
-that the context may create and delete namespaces, and that a node's
-unrequested CPU and memory can admit the session quota's requests.
+that the context may create and delete namespaces, and that the unrequested CPU
+and memory of a schedulable node (not cordoned, Ready, without a `NoSchedule` or
+`NoExecute` taint) can admit the session quota's requests.
 `CVETA2_INFRA_CHECK_TIMEOUT` bounds the whole read-only check (60 seconds by
 default). It creates nothing. Task uses `--exit-code` to retain these results:
 

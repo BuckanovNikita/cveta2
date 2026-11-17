@@ -355,8 +355,28 @@ def quota_requests(root: Path, deadline: float) -> dict[str, float]:
     fail(f"{manifest} holds no ResourceQuota")
 
 
+def _unschedulable(node: dict[str, Any]) -> list[str]:
+    """Why the scheduler would place no session pod on *node*; empty when it may.
+
+    The session's pods tolerate no taint, so any NoSchedule or NoExecute taint
+    excludes the node, as do a cordon and a Ready condition that is not True.
+    """
+    reasons = []
+    if node.get("spec", {}).get("unschedulable"):
+        reasons.append("cordoned")
+    conditions = node.get("status", {}).get("conditions", [])
+    if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
+        reasons.append("not Ready")
+    reasons.extend(
+        f"taint {taint.get('key', '?')}:{taint['effect']}"
+        for taint in node.get("spec", {}).get("taints", []) or []
+        if taint.get("effect") in {"NoSchedule", "NoExecute"}
+    )
+    return reasons
+
+
 def node_admission(root: Path, deadline: float) -> str | None:
-    """None when a node can admit the session quota's requests; else the reason."""
+    """None when a schedulable node can admit the session quota's requests; else the reason."""
     need = quota_requests(root, deadline)
     nodes = _probe_json(kubectl("get", "nodes", "-o", "json", deadline=deadline), "listing nodes")
     pods = _probe_json(
@@ -383,6 +403,10 @@ def node_admission(root: Path, deadline: float) -> str | None:
     shortfalls = []
     for node in nodes.get("items", []):
         name = node.get("metadata", {}).get("name", "?")
+        ineligible = _unschedulable(node)
+        if ineligible:
+            shortfalls.append(f"{name} does not accept new pods ({', '.join(ineligible)})")
+            continue
         allocatable = node.get("status", {}).get("allocatable", {})
         free = {
             resource: quantity(allocatable.get(resource, "0")) - used.get(name, {}).get(resource, 0.0)
