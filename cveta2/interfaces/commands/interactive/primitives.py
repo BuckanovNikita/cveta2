@@ -10,9 +10,10 @@ CRUD loop can continue.
 import getpass
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from cveta2.composition.configuration import require_interactive
+from cveta2.domain.errors import InteractiveModeRequiredError
 from cveta2.interfaces.commands.interactive import _questionary
 from cveta2.interfaces.commands.interactive._history import history_for
 
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from cveta2.interfaces.commands.interactive._questionary import Choice
 
 OnCancel = Literal["exit", "none"]
+_Answer = TypeVar("_Answer")
 
 # Shared captions. These stay named rather than inline because they are
 # *parameter defaults*, the one presentation surface
@@ -30,6 +32,22 @@ OnCancel = Literal["exit", "none"]
 _CANCELLED = "Отменено."
 _VALUE_NOT_SET = "Значение не указано."
 _NOTHING_SELECTED = "Ничего не выбрано."
+_NO_TERMINAL_HINT = "Задайте CVAT_USERNAME/CVAT_PASSWORD или запустите команду в терминале."
+
+
+def _ask(hint: str, ask: "Callable[[], _Answer]") -> _Answer:
+    """Run one prompt; closed standard input becomes the typed interactive error.
+
+    A cron or CI job that forgot ``CVETA2_NO_INTERACTIVE`` reaches the prompt
+    with stdin at end-of-file; prompt_toolkit and ``getpass`` then raise a bare
+    ``EOFError``.
+    """
+    try:
+        return ask()
+    except EOFError as error:
+        raise InteractiveModeRequiredError(
+            f"Interactive prompt required but standard input is closed. {hint}"
+        ) from error
 
 
 def _handle_cancel(on_cancel: "OnCancel") -> None:
@@ -41,7 +59,7 @@ def _handle_cancel(on_cancel: "OnCancel") -> None:
 def confirm(message: str, *, default: bool = False, hint: str) -> bool:
     """Ask a yes/no question.  A cancelled prompt counts as No."""
     require_interactive(hint)
-    answer = _questionary.ask_confirm(message, default=default)
+    answer = _ask(hint, lambda: _questionary.ask_confirm(message, default=default))
     return bool(answer)
 
 
@@ -60,7 +78,7 @@ def confirm_or_exit(
     if yes:
         return
     require_interactive(hint)
-    if not _questionary.ask_confirm(f"{message} [y/N]", default=False):
+    if not _ask(hint, lambda: _questionary.ask_confirm(f"{message} [y/N]", default=False)):
         sys.exit(on_no)
 
 
@@ -84,7 +102,7 @@ def text(  # noqa: PLR0913
     """
     require_interactive(hint)
     history = history_for(history_key) if history_key else None
-    answer = _questionary.ask_text(message, validate=validate, history=history)
+    answer = _ask(hint, lambda: _questionary.ask_text(message, validate=validate, history=history))
     if answer is None:
         _handle_cancel(on_cancel)
         return None
@@ -124,7 +142,7 @@ def select_one(
 ) -> object | None:
     """Single-choice picker.  Returns the chosen value or ``None`` on cancel."""
     require_interactive(hint)
-    answer = _questionary.ask_select(message, choices)
+    answer = _ask(hint, lambda: _questionary.ask_select(message, choices))
     if answer is None:
         _handle_cancel(on_cancel)
         return None
@@ -142,7 +160,7 @@ def select_many(  # noqa: PLR0913
 ) -> list[object] | None:
     """Multi-choice picker.  Returns selected values or ``None`` on cancel."""
     require_interactive(hint)
-    answer = _questionary.ask_checkbox(message, choices)
+    answer = _ask(hint, lambda: _questionary.ask_checkbox(message, choices))
     if answer is None:
         _handle_cancel(on_cancel)
         return None
@@ -155,4 +173,4 @@ def select_many(  # noqa: PLR0913
 
 def prompt_password(message: str) -> str:
     """Prompt for a secret without echo.  Caller guards interactivity."""
-    return getpass.getpass(message)
+    return _ask(_NO_TERMINAL_HINT, lambda: getpass.getpass(message))

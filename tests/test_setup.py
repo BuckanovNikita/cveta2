@@ -403,3 +403,25 @@ def test_attached_setup_does_not_persist_one_run_environment_overrides(
     assert saved.password == "file-password"
     assert saved.request_timeout is None
     assert saved.username == "alice"
+
+
+def _closed_stdin(*_args: object, **_kwargs: object) -> None:
+    raise EOFError
+
+
+@pytest.mark.parametrize("seam", ["prompt", "password"])
+def test_setup_with_closed_stdin_is_a_typed_interactive_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seam: str
+) -> None:
+    """A cron job that forgot CVETA2_NO_INTERACTIVE gets the typed hint, not EOFError."""
+    if seam == "prompt":
+        monkeypatch.setattr("questionary.text", _closed_stdin)
+    else:
+        feed_inputs(monkeypatch, ["", "acme", "user1"])
+        monkeypatch.setattr("getpass.getpass", _closed_stdin)
+
+    with pytest.raises(InteractiveModeRequiredError) as caught:
+        run_setup(_args(tmp_path / "config.yaml"))
+
+    assert "CVETA2_NO_INTERACTIVE=true." not in str(caught.value)
+    assert not (tmp_path / "config.yaml").exists()
