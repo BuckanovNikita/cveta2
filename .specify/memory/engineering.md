@@ -340,7 +340,8 @@ deletes or stashes. Mandatory guards live in executable commands, not bypassable
 Task preconditions.
 
 The default hook is always-selected, serial `verify`. Conventional Commit validation
-remains active. Intentional lockfile-only updates use `build(deps):` and require no
+remains active: the hook dispatcher clears `SKIP` and `PREK_SKIP` for the `commit-msg`
+stage, so they defer pre-commit hooks only. Intentional lockfile-only updates use `build(deps):` and require no
 exception. Intermediate task commits may use `SKIP=verify` to defer development
 verification explicitly; clear `SKIP` before final verification. There is no pre-push
 stage. Manual hook aliases, when present, route to Task; situational skills use Task
