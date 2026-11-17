@@ -29,8 +29,12 @@ serially; unit tests stay parallel. The autouse session fixture `live_run`
    waits for readiness within the cold-start deadline, starts loopback
    port-forwards, registers a regular CVAT user that owns one organization,
    and seeds the run. The namespace name is the run tag.
-3. Deletes the namespace after the last live test, waits until it is gone and
-   stops the port-forwards, unless `INTEGRATION_KEEP_DATA=1`.
+3. After the last live test, unless `INTEGRATION_KEEP_DATA=1`, requests
+   deletion of the namespace first, then stops the port-forwards and waits
+   until the namespace is gone. An interrupted or timed-out setup child
+   (stand verification, seeding) gets SIGINT or SIGTERM and a few seconds to
+   finish before it is killed, so teardown runs before an interrupted xdist
+   worker is force-exited.
 
 ```bash
 uv run --locked task --exit-code infra-check

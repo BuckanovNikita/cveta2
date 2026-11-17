@@ -17,9 +17,10 @@ it, waits for them within a cold-start deadline (``CVETA2_SESSION_READY_TIMEOUT`
 300 seconds by default), reaches them through ``kubectl port-forward`` on
 127.0.0.1, registers a regular CVAT user that owns one organization, and
 seeds the run. The namespace name is also the run tag: the MinIO bucket and
-the prefix of every CVAT and ClearML object. Teardown deletes exactly that
-namespace, waits until it is gone and stops the session's port-forwards; it
-runs on success, failure and interruption unless ``INTEGRATION_KEEP_DATA=1``.
+the prefix of every CVAT and ClearML object. Teardown first requests deletion of
+exactly that namespace, then stops the session's port-forwards and waits until
+the namespace is gone; it runs on success, failure and interruption unless
+``INTEGRATION_KEEP_DATA=1``.
 A kept session (``up``, or the fixture with ``INTEGRATION_KEEP_DATA=1``) is
 recorded with its local ports, never its credentials, in the gitignored
 ``tests/integration/.session``.
@@ -98,6 +99,9 @@ FORWARD_START_SECONDS = 30.0
 BOOTSTRAP_SECONDS = 90.0
 POLL_SECONDS = 3.0
 KUBECTL_TIMEOUT_SECONDS = 120
+# How long an interrupted or timed-out child may take to finish; execnet
+# force-exits an interrupted xdist worker about 10 seconds after interrupting it.
+CHILD_GRACE_SECONDS = 5.0
 UNAVAILABLE_EXIT = 3
 
 
@@ -227,28 +231,42 @@ def kubectl_ok(*args: str, stdin: str | None = None, what: str) -> str:
     return result.stdout
 
 
-def call(command: Sequence[str], *, cwd: Path | None = None) -> int:
-    """Run a child and, if this process is interrupted, let the child finish first.
+def _stop_child(child: subprocess.Popen[str], signum: int) -> None:
+    """Signal the child's process group, give it a grace period, then kill the group.
 
-    ``subprocess.run`` kills its child on any exception, so Ctrl-C or SIGTERM
-    would orphan the child's own cleanup and race the session's teardown.
-    Like a shell's foreground job, the child is waited for: Ctrl-C already
-    reached it through the terminal's process group, SIGTERM is forwarded.
-    A second Ctrl-C while waiting kills it.
+    A Ctrl-C while waiting kills it at once.
     """
-    with subprocess.Popen(list(command), cwd=cwd, text=True, env=child_env()) as child:  # noqa: S603
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(child.pid, signum)
+    with suppress(subprocess.TimeoutExpired, KeyboardInterrupt):
+        child.wait(timeout=CHILD_GRACE_SECONDS)
+    if child.poll() is None:
+        # The group leader is alive, so its group id cannot have been reused.
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(child.pid, signal.SIGKILL)
+        child.wait()
+
+
+def call(command: Sequence[str], *, cwd: Path | None = None, timeout: float | None = None) -> int:
+    """Run a child in its own process group and stop it together with this process.
+
+    The child gets no terminal signals of its own: when this process is
+    interrupted - Ctrl-C, or execnet interrupting an xdist worker, both a
+    KeyboardInterrupt - the child's group gets SIGINT; on SIGTERM (SystemExit)
+    or any other exception it gets SIGTERM. The child then has
+    ``CHILD_GRACE_SECONDS`` to finish before the group is killed, so the
+    session's teardown still runs before execnet force-exits the worker; a
+    second Ctrl-C kills it at once. After ``timeout`` seconds the child is
+    stopped the same way and ``subprocess.TimeoutExpired`` is raised.
+    """
+    with subprocess.Popen(  # noqa: S603 - fixed tool commands
+        list(command), cwd=cwd, text=True, env=child_env(), stdin=subprocess.DEVNULL, start_new_session=True
+    ) as child:
         try:
-            child.wait()
+            return child.wait(timeout=timeout)
         except BaseException as interrupt:
-            if isinstance(interrupt, SystemExit) and child.poll() is None:
-                child.send_signal(signal.SIGTERM)
-            try:
-                child.wait()
-            except KeyboardInterrupt:
-                child.kill()
-                child.wait()
+            _stop_child(child, signal.SIGINT if isinstance(interrupt, KeyboardInterrupt) else signal.SIGTERM)
             raise
-    return child.returncode
 
 
 def require_session_name(namespace: str) -> str:
@@ -1096,26 +1114,44 @@ class Session:
     # -- teardown ---------------------------------------------------------
 
     def stop(self) -> int:
-        """Delete exactly this namespace and stop its port-forwards."""
-        dead = self.stop_forwards()
+        """Delete exactly this namespace and stop its port-forwards.
+
+        The delete request goes out first: an interrupted pytest worker may be
+        force-exited before the rest of teardown finishes.
+        """
+        dead = [name for name, forward in self.forwards.items() if not forward.alive()]
+        requested = request_deletion(self.namespace) if self.created else True
+        self.stop_forwards()
         for name in dead:
             warn(f"WARNING: the port-forward to {FORWARDS[name][0]} had stopped before teardown;")
             warn("         tests after that point lost their connection to that service.")
         if not self.created:
             return 0
-        return delete_session(self.root, self.namespace)
+        stop_session_forwards(self.namespace)
+        if not requested:
+            return 1
+        return await_deletion(self.root, self.namespace)
 
 
-def delete_session(root: Path, namespace: str) -> int:
-    """Delete one session namespace by exact name and wait until it is gone."""
+def request_deletion(namespace: str) -> bool:
+    """Ask the API server to delete one session namespace by exact name; do not wait."""
     require_session_name(namespace)
-    stop_session_forwards(namespace)
     log(f"Deleting session namespace {namespace}")
-    result = kubectl("delete", "namespace", namespace, "--ignore-not-found", "--wait=false")
-    if result.returncode != 0:
-        warn(f"ERROR: deleting namespace {namespace} failed (kubectl exit {result.returncode}).")
+    try:
+        result = kubectl("delete", "namespace", namespace, "--ignore-not-found", "--wait=false")
+    except LifecycleError as error:
+        report(error)
+        result = None
+    if result is None or result.returncode != 0:
+        status = "no answer" if result is None else f"kubectl exit {result.returncode}"
+        warn(f"ERROR: deleting namespace {namespace} failed ({status}).")
         warn(f"       Retry: {MODULE} stop {namespace}")
-        return 1
+        return False
+    return True
+
+
+def await_deletion(root: Path, namespace: str) -> int:
+    """Wait, bounded, until a session namespace whose deletion was requested is gone."""
     started = time.monotonic()
     while namespace_exists(namespace):
         if time.monotonic() - started >= DELETE_TIMEOUT_SECONDS:
@@ -1127,6 +1163,15 @@ def delete_session(root: Path, namespace: str) -> int:
     forget_session_record(root, namespace)
     log(f"Session namespace {namespace} is gone ({time.monotonic() - started:.0f} s)")
     return 0
+
+
+def delete_session(root: Path, namespace: str) -> int:
+    """Delete one session namespace by exact name, stop its port-forwards, wait until it is gone."""
+    requested = request_deletion(namespace)
+    stop_session_forwards(namespace)
+    if not requested:
+        return 1
+    return await_deletion(root, namespace)
 
 
 def keep_data() -> bool:
