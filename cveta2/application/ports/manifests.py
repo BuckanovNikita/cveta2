@@ -1,5 +1,6 @@
 """Durable upload checkpoint persistence."""
 
+from pathlib import Path
 from typing import Protocol
 
 from cveta2.domain.storage import CloudStorageInfo
@@ -8,6 +9,10 @@ from cveta2.domain.upload import UploadManifest
 
 class ManifestStore(Protocol):
     """Persist upload identity and mandatory recovery checkpoints."""
+
+    def path(self, project_id: int, fingerprint: str, *, host: str) -> Path:
+        """Name where the manifest lives, so a refusal can point the operator at it."""
+        ...
 
     def load(self, project_id: int, fingerprint: str, *, host: str) -> UploadManifest | None:
         """Read the matching recovery manifest, returning None when absent."""

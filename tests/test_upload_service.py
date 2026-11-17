@@ -19,6 +19,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from cveta2.adapters.files.manifests import (
+    get_upload_manifest_dir,
     list_manifests,
     new_manifest,
     save_manifest,
@@ -920,6 +921,60 @@ class TestUnsafeImageNames:
         outcome = upload_cvat_dataset(make_client(), make_request(image_names=[name], search_dirs=[image_dir]))
 
         assert outcome.images == 1
+
+
+@contextmanager
+def _create_answers(client: CvatClient, status: int) -> Iterator[None]:
+    """Make the next task create fail with *status* before any task id exists."""
+    original = client.api.create_task
+
+    def refuse(_spec: object) -> int:
+        raise CvatApiError(f"create answered {status}", status_code=status)
+
+    client.api.create_task = refuse  # type: ignore[assignment,method-assign]
+    try:
+        yield
+    finally:
+        client.api.create_task = original  # type: ignore[method-assign]
+
+
+class TestCreateRejection:
+    """A definitive refusal of the create is not an unknown outcome."""
+
+    @pytest.mark.parametrize("status", [400, 403, 409])
+    @pytest.mark.parametrize("resume", [False, True], ids=["rerun", "resume"])
+    def test_a_rejected_create_can_be_run_again(
+        self, monkeypatch: pytest.MonkeyPatch, status: int, *, resume: bool
+    ) -> None:
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+
+        with _create_answers(client, status), pytest.raises(CvatApiError):
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+        outcome = upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=resume))
+
+        assert len(_writes_of(client).created_tasks) == 1
+        assert outcome.task_id == NEW_TASK_ID
+        assert list_manifests(PROJECT_ID, host=client.host) == []
+
+    @pytest.mark.parametrize("status", [0, 408, 429, 500, 503])
+    @pytest.mark.parametrize("resume", [False, True], ids=["rerun", "resume"])
+    def test_an_uncertain_create_still_refuses_and_names_the_manifest(
+        self, monkeypatch: pytest.MonkeyPatch, status: int, *, resume: bool
+    ) -> None:
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+        request = make_request(image_names=["a.jpg"])
+        manifest_file = get_upload_manifest_dir(PROJECT_ID, host=client.host) / f"{request_fingerprint(request)}.json"
+
+        with _create_answers(client, status), pytest.raises(CvatApiError):
+            upload_cvat_dataset(client, request)
+        with pytest.raises(Cveta2Error) as caught:
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=resume))
+
+        assert str(manifest_file) in str(caught.value)
+        assert _writes_of(client).created_tasks == []
+        assert list_manifests(PROJECT_ID, host=client.host)[0].creation_pending
 
 
 class TestS3FailureAbortsBeforeTaskCreation:

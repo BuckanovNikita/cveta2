@@ -88,8 +88,10 @@ def upload_dataset(client: CvatClient, request: UploadRequest, *, deps: UploadDe
             )
             return _completed_outcome(request, manifest)
         if manifest.creation_pending and manifest.task_id is None:
+            manifest_path = deps.manifests.path(request.project_id, fingerprint, host=client.host)
             raise Cveta2Error(
-                "Результат создания задачи неизвестен; проверьте CVAT вручную. Новая задача не создаётся."
+                "Результат создания задачи неизвестен; проверьте CVAT вручную. Новая задача не создаётся. "
+                f"Если задача не создана, удалите состояние загрузки {manifest_path} и повторите команду."
             )
         current_storage = client.detect_project_cloud_storage(request.project_id)
         if current_storage != manifest.cs_info:

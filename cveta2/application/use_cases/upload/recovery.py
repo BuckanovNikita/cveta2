@@ -27,6 +27,14 @@ from cveta2.domain.upload import (
 )
 
 _HTTP_NOT_FOUND = 404
+_HTTP_CLIENT_ERRORS = range(400, 500)
+# A timeout or throttling reply does not prove the create was not applied.
+_UNCERTAIN_CLIENT_ERRORS = frozenset({408, 429})
+
+
+def _is_definitive_rejection(status_code: int) -> bool:
+    """Whether a create reply proves CVAT applied nothing."""
+    return status_code in _HTTP_CLIENT_ERRORS and status_code not in _UNCERTAIN_CLIENT_ERRORS
 
 
 def _verify_existing_shapes(
@@ -110,15 +118,24 @@ def _ensure_task(
         manifest.task_id = None
         manifest.creation_pending = True
         deps.manifests.save(manifest, required=True)
-        return client.create_upload_task(
-            project_id=request.project_id,
-            name=request.task_name,
-            image_names=staged.task_image_names,
-            cloud_storage_id=staged.cs_info.id,
-            segment_size=request.options.segment_size,
-            image_quality=request.options.image_quality,
-            on_created=lambda new_id: _record_task_id(manifest, new_id, deps=deps),
-        )
+        try:
+            return client.create_upload_task(
+                project_id=request.project_id,
+                name=request.task_name,
+                image_names=staged.task_image_names,
+                cloud_storage_id=staged.cs_info.id,
+                segment_size=request.options.segment_size,
+                image_quality=request.options.image_quality,
+                on_created=lambda new_id: _record_task_id(manifest, new_id, deps=deps),
+            )
+        except CvatApiError as e:
+            if manifest.task_id is None and _is_definitive_rejection(e.status_code):
+                # CVAT refused the create outright, so no task exists and a
+                # rerun may create one; only an unknown outcome stays pending.
+                logger.info(f"CVAT отклонил создание задачи (HTTP {e.status_code}); задача не создана.")
+                manifest.creation_pending = False
+                deps.manifests.save(manifest, required=True)
+            raise
 
     if manifest.task_id is None:
         return create()
@@ -203,10 +220,12 @@ def _fresh_manifest(
     """Stage images for a new upload and record what it decided."""
     existing = deps.manifests.load(request.project_id, fingerprint, host=client.host)
     if existing is not None and (existing.task_id is not None or existing.creation_pending):
+        manifest_path = deps.manifests.path(request.project_id, fingerprint, host=client.host)
         raise Cveta2Error(
             f"Найдена незавершённая загрузка этого набора "
             f"(задача {existing.task_id}); повторное создание запрещено. "
-            f"Чтобы продолжить её, повторите команду с --resume."
+            f"Чтобы продолжить её, повторите команду с --resume. "
+            f"Состояние загрузки: {manifest_path}"
         )
     staged = _stage_images(client, request, deps=deps)
     manifest = deps.manifests.new(

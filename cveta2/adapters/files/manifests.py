@@ -26,9 +26,14 @@ def get_upload_manifest_dir(project_id: int, *, host: str) -> Path:
     return default_cache_base() / "uploads" / server / f"project_{project_id}"
 
 
+def get_manifest_path(project_id: int, fingerprint: str, *, host: str) -> Path:
+    """Return the file holding the manifest of one unfinished upload."""
+    return get_upload_manifest_dir(project_id, host=host) / f"{fingerprint}.json"
+
+
 def save_manifest(manifest: UploadManifest, *, required: bool = False) -> None:
     """Persist recovery state; required checkpoints stop writes on failure."""
-    target = get_upload_manifest_dir(manifest.project_id, host=manifest.host) / f"{manifest.fingerprint}.json"
+    target = get_manifest_path(manifest.project_id, manifest.fingerprint, host=manifest.host)
     try:
         replace_shared_bytes(target, manifest.model_dump_json().encode())
     except OSError as e:
@@ -45,7 +50,7 @@ def save_manifest(manifest: UploadManifest, *, required: bool = False) -> None:
 
 def load_manifest(project_id: int, fingerprint: str, *, host: str) -> UploadManifest | None:
     """Return the manifest for *fingerprint*, or None when absent or stale."""
-    path = get_upload_manifest_dir(project_id, host=host) / f"{fingerprint}.json"
+    path = get_manifest_path(project_id, fingerprint, host=host)
     manifest = _read_manifest(path)
     if manifest is None:
         return None
@@ -74,7 +79,7 @@ def list_manifests(project_id: int, *, host: str) -> list[UploadManifest]:
 
 def delete_manifest(project_id: int, fingerprint: str, *, host: str, task_id: int | None = None) -> None:
     """Drop the manifest once its upload has finished."""
-    path = get_upload_manifest_dir(project_id, host=host) / f"{fingerprint}.json"
+    path = get_manifest_path(project_id, fingerprint, host=host)
     try:
         path.unlink(missing_ok=True)
     except OSError as exc:
@@ -139,6 +144,7 @@ def _read_manifest(path: Path) -> UploadManifest | None:
 class LocalManifestStore:
     """Persist manifests with the existing atomic/checkpoint behavior."""
 
+    path = staticmethod(get_manifest_path)
     load = staticmethod(load_manifest)
     save = staticmethod(save_manifest)
     list_for_project = staticmethod(list_manifests)
