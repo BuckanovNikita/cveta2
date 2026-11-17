@@ -17,7 +17,7 @@ def _escapes_search_dir(name: str) -> bool:
 
 
 def _inside(path: Path, excluded: Path | None) -> bool:
-    """Whether the real location of directory *path* lies under *excluded*."""
+    """Whether the real location of *path* lies under *excluded*."""
     return excluded is not None and path.resolve().is_relative_to(excluded)
 
 
@@ -31,7 +31,9 @@ def _build_basename_index(search_dir: Path, excluded: Path | None = None) -> dic
         root_path = Path(root)
         dirs[:] = [name for name in dirs if not _inside(root_path / name, excluded)]
         for file_name in files:
-            index.setdefault(file_name, []).append(root_path / file_name)
+            candidate = root_path / file_name
+            if not _inside(candidate, excluded):
+                index.setdefault(file_name, []).append(candidate)
     for paths in index.values():
         paths.sort()
     return index
@@ -66,7 +68,7 @@ def _search_one_dir(
     """
     for name in list(remaining):
         candidate = search_dir / name
-        if candidate.is_file() and not _inside(candidate.parent, excluded):
+        if candidate.is_file() and not _inside(candidate, excluded):
             found[name] = candidate
             remaining.discard(name)
     if not remaining:

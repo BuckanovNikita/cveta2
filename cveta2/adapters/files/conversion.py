@@ -170,14 +170,37 @@ def _split_images(raw_split: object, dataset_root: Path) -> list[Path]:
     return result
 
 
-def _validate_yolo_output(ctx: ExportContext) -> None:
-    """Reject label and metadata destinations that would write through a link.
+def _validate_yolo_image_output(ctx: ExportContext) -> None:
+    """Allow linked image directories only when materialization will make no writes."""
+    images = ctx.output_dir / "images"
+    linked_splits: dict[str, Path] = {}
+    for split in ctx.splits:
+        directory = images / split
+        link = images if images.is_symlink() else directory
+        if not link.is_symlink():
+            continue
+        if not directory.is_dir():
+            raise Cveta2Error(f"Ошибка: небезопасный каталог изображений YOLO: {link}")
+        linked_splits[split] = link
+    for name, split in set(ctx.df[["image_name", "split"]].itertuples(index=False, name=None)):
+        source = ctx.found.get(name)
+        if source is None or split not in linked_splits:
+            continue
+        destination = images / split / name
+        # Materialization preserves an existing regular same-file destination.
+        # Every other case would unlink or create a file through the directory alias.
+        if destination.is_symlink() or not destination.is_file() or not source.samefile(destination):
+            raise Cveta2Error(f"Ошибка: небезопасный каталог изображений YOLO: {linked_splits[split]}")
 
-    Runs before the first write.  Image destinations are replaced rather
-    than written through, and symlinked ``images`` directories pointing at
-    the source stay supported, so only the label tree and ``dataset.yaml``
-    are checked.  A linked ancestor above the output directory is allowed.
+
+def _validate_yolo_output(ctx: ExportContext) -> None:
+    """Reject destinations that would mutate files through directory or file links.
+
+    Runs before the first write. Linked image directories remain supported
+    when they alias existing source images and require no image writes or
+    directory creation. A linked ancestor above the output directory is allowed.
     """
+    _validate_yolo_image_output(ctx)
     labels = ctx.output_dir / "labels"
     directories = [labels, *(labels / split for split in ctx.splits)]
     for directory in directories:

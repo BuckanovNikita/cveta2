@@ -160,6 +160,8 @@ def _restrict_to_owner(path: Path) -> None:
     Files written by older versions followed the umask (often ``0644``).  A
     file owned by someone else, or a refused ``chmod``, is reported, not fatal.
     """
+    if os.name != "posix":
+        return
     try:
         status = path.stat()
         if not stat.S_IMODE(status.st_mode) & 0o077:

@@ -354,13 +354,20 @@ def report(
     statuses: dict[str, str],
     functions: Sequence[str],
     show: ShowFn,
+    *,
+    budget_expired: bool,
 ) -> list[str]:
     """Print the verdict; return the names of mutants that escaped.
 
-    Raises MutationError when mutants exist but none was judged because the
-    budget expired first: "nothing survived" would then be no evidence at all.
+    Raises MutationError when the budget expired before any mutant was judged,
+    including before mutation metadata was written.
     """
     selected = {n: s for n, s in statuses.items() if _selected(n, functions)}
+    unjudged = UNRUN_STATUSES | UNREACHED_STATUSES
+    if budget_expired and not any(status not in unjudged for status in selected.values()):
+        msg = ("no verdict: the budget expired before any mutant of the changed "
+               "functions was judged; rerun with a larger --budget-seconds (0: no limit).")  # fmt: skip
+        raise MutationError(msg)
     if not selected:
         print("The changed functions produce no mutants; nothing to do.")
         return []
@@ -372,10 +379,6 @@ def report(
     print(f"Mutants in changed functions: {len(selected)}, killed: {killed}, "
           f"survived: {len(escaped)}, not reached by tests: {unreached}, "
           f"not run (budget): {unrun}")  # fmt: skip
-    if unrun and unrun + unreached == len(selected):
-        msg = ("no verdict: the budget expired before any mutant of the changed "
-               "functions was judged; rerun with a larger --budget-seconds (0: no limit).")  # fmt: skip
-        raise MutationError(msg)
     if not escaped:
         print("No judged mutant of the changed functions survived.")
     for name in escaped[:MAX_DIFFS]:
@@ -470,7 +473,9 @@ def run(args: argparse.Namespace) -> int:
             text=True,
         ).stdout
         functions = [name for t in targets for name in t.names]
-        escaped = report(parse_results(results), functions, ShowFn(binary, workspace, env))
+        escaped = report(
+            parse_results(results), functions, ShowFn(binary, workspace, env), budget_expired=status is None
+        )
         if not escaped:
             return 0
         print()

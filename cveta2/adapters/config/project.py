@@ -11,6 +11,9 @@ import os
 import re
 import secrets
 import stat
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -356,6 +359,74 @@ def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinitio
     return result
 
 
+def _check_shared_policy_lock(descriptor: int, lock_path: Path) -> None:
+    """Reject links, special files and a lock name replaced while it was opened."""
+    opened = os.fstat(descriptor)
+    named = lock_path.lstat()
+    if (
+        not stat.S_ISREG(named.st_mode)
+        or not stat.S_ISREG(opened.st_mode)
+        or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)
+    ):
+        raise ManagedError(f"Shared configuration lock must be a regular nonsymlink file: {lock_path}")
+
+
+def _open_shared_policy_lock(path: Path, lock_path: Path) -> int:
+    """Open a stable regular lock inode, preserving the shared file's group access."""
+    flags = os.O_RDWR | (os.O_NOFOLLOW if os.name == "posix" else 0)
+    created = False
+    try:
+        descriptor = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+    except FileExistsError:
+        descriptor = os.open(lock_path, flags)
+    try:
+        _check_shared_policy_lock(descriptor, lock_path)
+        if created:
+            os.write(descriptor, b"0")
+            if os.name == "posix":
+                shared = path.stat()
+                os.fchown(descriptor, -1, shared.st_gid)
+                os.fchmod(descriptor, stat.S_IMODE(shared.st_mode))
+    except (OSError, ManagedError):
+        os.close(descriptor)
+        raise
+    else:
+        return descriptor
+
+
+@contextmanager
+def _shared_policy_lock(path: Path) -> Iterator[None]:
+    """Hold a nonblocking OS lock; process termination releases it automatically.
+
+    The sibling inode stays in place, because unlinking it would allow two
+    writers to lock different files. Only the open descriptor owns the hold.
+    """
+    lock_path = path.with_name(f".{path.name}.lock")
+    try:
+        descriptor = _open_shared_policy_lock(path, lock_path)
+    except OSError as error:
+        raise ManagedError(f"Cannot open shared configuration lock {lock_path}: {type(error).__name__}") from error
+    try:
+        try:
+            if sys.platform == "win32":
+                import msvcrt  # noqa: PLC0415 - platform-specific standard-library locking
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl  # noqa: PLC0415 - platform-specific standard-library locking
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise SharedConfigConflictError(
+                f"Cannot lock shared configuration {path}; another writer may be active. Retry the change."
+            ) from error
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def write_shared_project_fields(
     personal_path: Path,
     changes: dict[str, dict[str, object]],
@@ -371,8 +442,20 @@ def write_shared_project_fields(
     path = project_config_path(personal_path)
     if path is None:
         raise ManagedError("No shared project configuration is selected")
+    with _shared_policy_lock(path):
+        return _write_shared_project_fields_locked(personal_path, path, changes, expected=expected)
+
+
+def _write_shared_project_fields_locked(
+    personal_path: Path,
+    path: Path,
+    changes: dict[str, dict[str, object]],
+    *,
+    expected: dict[str, dict[str, object]] | None,
+) -> Path:
+    """Read, merge and replace while cooperating policy writers are excluded."""
     original = _read_shared_bytes(path)
-    config = load_project_config(personal_path)
+    config = load_project_config(personal_path, path)
     projects = dict(config.projects)
     aliases = shared_projects_by_name(config)
     for name, fields in changes.items():

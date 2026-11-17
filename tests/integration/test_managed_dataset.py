@@ -213,6 +213,16 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
         finding = next(
             finding for finding in record.findings if finding.task_id == bad_task and finding.frame_id == bad_frame
         )
+        sibling = tmp_path / "sibling-preparation"
+        sibling_summary = api.prepare_managed_dataset(
+            "combined",
+            transformed_path,
+            source=fetched,
+            output_dir=sibling,
+            clean=True,
+            **options,
+        )
+        assert sibling_summary.ready, sibling_summary.report
         first_feedback = api.report_dataset_errors(prepared, **options)
         assert first_feedback.created >= 1
         assert first_feedback.failed == []
@@ -233,12 +243,14 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             current_tasks = {task.id: task for task in adapter.get_project_tasks(project.id)}
         finally:
             sdk.close()
-        publication = api.publish_dataset(prepared, **options)
+        # A sibling prepared before the issue writes shares acknowledged feedback
+        # history and must not mistake those writes for external annotation edits.
+        publication = api.publish_dataset(sibling, **options)
         remote = Dataset.get(dataset_id=publication.dataset_id)
         assert remote.is_final()
         assert set(remote.list_files()) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
         local = Path(remote.get_local_copy(use_soft_links=False))
-        assert (local / "tasks.yaml").read_bytes() == (prepared / "tasks.yaml").read_bytes()
+        assert (local / "tasks.yaml").read_bytes() == (sibling / "tasks.yaml").read_bytes()
         assert {item.type for item in LocalSourceFiles().read_snapshot(local / "tasks.yaml").sources} == {
             "cvat",
             "s3-csv",

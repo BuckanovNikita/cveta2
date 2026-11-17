@@ -109,8 +109,8 @@ class LocalFeedbackLedger:
 
         ``shared`` is the ledger of every preparation built from one fetch, so
         each sees the others' acknowledged issue times. A preparation's own
-        ``feedback.json`` from before sharing is still read; new writes go to
-        ``shared`` when it is given.
+        ``feedback.json`` from before sharing is preserved and its missing
+        receipts are migrated to ``shared`` when read.
         """
         self._local = directory / "feedback.json"
         self._path = shared or self._local
@@ -118,8 +118,14 @@ class LocalFeedbackLedger:
     def _load(self) -> _Ledger:
         ledger = _read_ledger(self._path)
         if self._path != self._local:
-            for marker, receipt in _read_ledger(self._local).receipts.items():
-                ledger.receipts.setdefault(marker, receipt)
+            missing = {
+                marker: receipt
+                for marker, receipt in _read_ledger(self._local).receipts.items()
+                if marker not in ledger.receipts
+            }
+            if missing:
+                ledger.receipts.update(missing)
+                self._save(ledger)
         return ledger
 
     def _save(self, ledger: _Ledger) -> None:

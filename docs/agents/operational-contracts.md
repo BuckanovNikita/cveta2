@@ -284,7 +284,7 @@ or timed-out child gets a bounded cleanup grace period, then its entire owned
 process group is terminated, including descendants whose leader has exited.
 Teardown requests namespace deletion before stopping forwards and waiting for
 deletion. A namespace create with an uncertain result authorizes automatic
-cleanup only when its per-session token matches. Failed setup is cleaned even
+cleanup only when its per-session token matches. Blocked setup is cleaned even
 when keeping was requested; a new kept run refuses an existing live session
 record rather than overwriting it.
 

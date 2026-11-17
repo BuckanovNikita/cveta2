@@ -2,8 +2,11 @@
 
 import argparse
 import json
+import multiprocessing
 import os
+import stat
 from collections.abc import Callable
+from multiprocessing.connection import Connection as ProcessConnection
 from pathlib import Path
 
 import pytest
@@ -1055,6 +1058,151 @@ def test_conflicting_policy_save_is_refused_and_keeps_the_first_value(tmp_path: 
     assert str(shared_file.resolve()) in str(caught.value)
     assert "s3://" not in str(caught.value)
     assert shared_file.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", list(_SECTIONS))
+@pytest.mark.parametrize("aliased", [False, True])
+def test_overlapping_policy_saves_refuse_contention_then_preserve_both_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, *, aliased: bool
+) -> None:
+    alice, bob = _two_writers(tmp_path)
+    if aliased:
+        alias = tmp_path / "team-alias.yaml"
+        alias.symlink_to(alice.with_name("alice-projects.yaml"))
+        write(bob, {"schema_version": 1, "project_config": str(alias)})
+    alice_config = _SECTIONS[kind].load(alice)
+    bob_config = _SECTIONS[kind].load(bob)
+    _edit(kind, alice_config, "A", 100)
+    _edit(kind, bob_config, "B", 200)
+    original_write = project_config._private_write
+    shared_file = alice.with_name("alice-projects.yaml")
+    overlapping = False
+
+    def overlap_before_replace(
+        path: Path, content: bytes, *, replace: bool = False, preserve_permissions: bool = False
+    ) -> None:
+        nonlocal overlapping
+        if path == shared_file and not overlapping:
+            overlapping = True
+            with pytest.raises(SharedConfigConflictError):
+                bob_config.save(bob)
+        original_write(path, content, replace=replace, preserve_permissions=preserve_permissions)
+
+    monkeypatch.setattr(project_config, "_private_write", overlap_before_replace)
+    alice_config.save(alice)
+    bob_config.save(bob)
+
+    shared_config = load_project_config(alice)
+    assert _policy(shared_config, kind, "project-1") == _WRITTEN[kind](100)
+    assert _policy(shared_config, kind, "project-2") == _WRITTEN[kind](200)
+
+
+def test_failed_policy_save_releases_the_hold_and_keeps_the_lock_inode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alice, _bob = _two_writers(tmp_path)
+    config = SyncRootsConfig.load(alice)
+    config.projects["A"] = "s3://bucket/100"
+
+    def fail_write(*_args: object, **_kwargs: object) -> None:
+        raise OSError("simulated save failure")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(project_config, "_private_write", fail_write)
+        with pytest.raises(OSError, match="simulated save failure"):
+            config.save(alice)
+
+    shared_path = alice.with_name("alice-projects.yaml")
+    lock_path = shared_path.with_name(f".{shared_path.name}.lock")
+    inode = lock_path.stat().st_ino
+    config.save(alice)
+
+    assert lock_path.stat().st_ino == inode
+    assert load_project_config(alice).projects["project-1"].sync_root == "s3://bucket/100"
+
+
+def _hold_shared_policy_save(personal: Path, ready: ProcessConnection) -> None:
+    """Pause a real writer immediately before its atomic replacement."""
+    config = SyncRootsConfig.load(personal)
+    config.projects["A"] = "s3://bucket/100"
+    original_write = project_config._private_write
+
+    def pause_before_replace(
+        path: Path, content: bytes, *, replace: bool = False, preserve_permissions: bool = False
+    ) -> None:
+        ready.send("locked")
+        ready.recv()
+        original_write(path, content, replace=replace, preserve_permissions=preserve_permissions)
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(project_config, "_private_write", pause_before_replace)
+        config.save(personal)
+
+
+def test_terminated_policy_writer_releases_its_lock(tmp_path: Path) -> None:
+    alice, bob = _two_writers(tmp_path)
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe()
+    process = context.Process(target=_hold_shared_policy_save, args=(alice, child))
+    process.start()
+    child.close()
+    try:
+        assert parent.poll(10), "Writer did not reach the replacement boundary"
+        assert parent.recv() == "locked"
+        config = SyncRootsConfig.load(bob)
+        config.projects["B"] = "s3://bucket/200"
+        with pytest.raises(SharedConfigConflictError):
+            config.save(bob)
+    finally:
+        process.terminate()
+        process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+        parent.close()
+        process.close()
+
+    config.save(bob)
+    shared_config = load_project_config(bob)
+    assert shared_config.projects["project-1"].sync_root == "s3://bucket/1"
+    assert shared_config.projects["project-2"].sync_root == "s3://bucket/200"
+
+
+def test_policy_lock_preserves_shared_access_under_restrictive_umask(tmp_path: Path) -> None:
+    alice, _bob = _two_writers(tmp_path)
+    shared_path = alice.with_name("alice-projects.yaml")
+    shared_path.chmod(0o664)
+    config = SyncRootsConfig.load(alice)
+    config.projects["A"] = "s3://bucket/100"
+    previous_umask = os.umask(0o077)
+    try:
+        config.save(alice)
+    finally:
+        os.umask(previous_umask)
+
+    lock_path = shared_path.with_name(f".{shared_path.name}.lock")
+    assert stat.S_IMODE(lock_path.stat().st_mode) == 0o664
+    assert lock_path.stat().st_gid == shared_path.stat().st_gid
+    assert stat.S_IMODE(shared_path.stat().st_mode) == 0o664
+
+
+def test_policy_save_refuses_a_symlinked_lock_without_touching_its_target(tmp_path: Path) -> None:
+    alice, _bob = _two_writers(tmp_path)
+    shared_path = alice.with_name("alice-projects.yaml")
+    original = shared_path.read_bytes()
+    victim = tmp_path / "private.txt"
+    victim.write_bytes(b"untouched")
+    lock_path = shared_path.with_name(f".{shared_path.name}.lock")
+    lock_path.symlink_to(victim)
+    config = SyncRootsConfig.load(alice)
+    config.projects["A"] = "s3://bucket/100"
+
+    with pytest.raises(ManagedError, match="lock"):
+        config.save(alice)
+
+    assert victim.read_bytes() == b"untouched"
+    assert lock_path.is_symlink()
+    assert shared_path.read_bytes() == original
 
 
 @pytest.mark.parametrize(

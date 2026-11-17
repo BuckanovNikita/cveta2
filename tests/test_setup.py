@@ -7,6 +7,7 @@ import os
 import resource
 import signal
 import stat
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -337,6 +338,17 @@ def test_setup_saves_the_personal_config_owner_only(tmp_path: Path, monkeypatch:
 
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
     assert CvatConfig.from_file(config_path).password == "secret"
+
+
+def test_password_config_loads_on_platforms_without_posix_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "personal.yaml"
+    path.write_text("cvat: {username: alice, password: secret}\n", encoding="utf-8")
+    path.chmod(0o644)
+    monkeypatch.setattr("cveta2.adapters.config.settings.os", SimpleNamespace(name="nt"))
+
+    assert CvatConfig.from_file(path).password == "secret"
 
 
 @pytest.mark.usefixtures("default_umask")

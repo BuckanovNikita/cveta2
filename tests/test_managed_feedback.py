@@ -252,6 +252,35 @@ def test_shared_ledger_is_keyed_by_an_exact_snapshot_hash(tmp_path: Path) -> Non
             shared_ledger_path(tmp_path / "state", invalid)
 
 
+def test_legacy_migration_preserves_existing_shared_receipts(tmp_path: Path) -> None:
+    legacy_dir = tmp_path / "legacy"
+    legacy = LocalFeedbackLedger(legacy_dir)
+    known = _finding(frame=0)
+    missing = _finding(frame=1)
+    other = _finding(task=2)
+    legacy.begin(known, FeedbackTaskState(12, 1, "0", "annotations-v1"))
+    legacy.complete(known, FeedbackTaskState(12, 1, "1", "annotations-v1"))
+    legacy.begin(missing, FeedbackTaskState(12, 1, "1", "annotations-v1"))
+    legacy.complete(missing, FeedbackTaskState(12, 1, "2", "annotations-v1"))
+    original = (legacy_dir / "feedback.json").read_bytes()
+    shared = shared_ledger_path(tmp_path / "state", hashlib.sha256(b"snapshot").hexdigest())
+    current = LocalFeedbackLedger(tmp_path / "current", shared)
+    current.begin(known, FeedbackTaskState(12, 1, "0", "annotations-v1"))
+    current.complete(known, FeedbackTaskState(12, 1, "3", "annotations-v1"))
+    current.begin(other, FeedbackTaskState(12, 2, "0", "annotations-v1"))
+    current.complete(other, FeedbackTaskState(12, 2, "1", "annotations-v1"))
+    known_receipt, other_receipt = current.get_receipt(known.marker), current.get_receipt(other.marker)
+
+    migrated = LocalFeedbackLedger(legacy_dir, shared).get_receipt(missing.marker)
+    sibling = LocalFeedbackLedger(tmp_path / "sibling", shared)
+
+    assert migrated is not None
+    assert sibling.get_receipt(missing.marker) == migrated
+    assert sibling.get_receipt(known.marker) == known_receipt
+    assert sibling.get_receipt(other.marker) == other_receipt
+    assert (legacy_dir / "feedback.json").read_bytes() == original
+
+
 def test_corrupt_or_symlinked_ledger_fails_closed(tmp_path: Path) -> None:
     ledger = LocalFeedbackLedger(tmp_path)
     path = tmp_path / "feedback.json"

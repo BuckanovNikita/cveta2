@@ -549,12 +549,31 @@ def test_feedback_from_an_inspection_does_not_stale_a_sibling_preparation(workfl
     assert len(workflow.cvat.issues[101]) == 1
 
 
-def test_preparation_with_a_ledger_from_before_sharing_still_publishes(workflow: Workflow, tmp_path: Path) -> None:
+@pytest.mark.parametrize("publish_sibling", [False, True])
+def test_preparation_with_a_ledger_from_before_sharing_still_publishes(
+    workflow: Workflow, tmp_path: Path, *, publish_sibling: bool
+) -> None:
     prepared = _prepare(workflow, tmp_path, bad=True)
     workflow.cvat.advance_issue_timestamp = True
     assert api.report_dataset_errors(prepared, **workflow.options).created == 1
     (shared,) = (workflow.personal.parent / "managed-feedback").iterdir()
     # Earlier versions kept the only ledger inside the preparation directory.
-    shared.rename(prepared / "feedback.json")
-    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    local = shared.rename(prepared / "feedback.json")
+    original_ledger = local.read_bytes()
+    repeated = api.report_dataset_errors(prepared, **workflow.options)
+    assert (repeated.created, repeated.existing, repeated.failed) == (0, 1, [])
+    target = prepared
+    if publish_sibling:
+        sibling = api.prepare_managed_dataset(
+            "combined",
+            tmp_path / "transformed.csv",
+            source=tmp_path / "fetched",
+            output_dir=tmp_path / "sibling",
+            clean=True,
+            **workflow.options,
+        )
+        assert sibling.ready
+        target = sibling.directory
+    assert api.publish_dataset(target, **workflow.options).dataset_id == "version-1"
     assert len(workflow.cvat.issues[101]) == 1
+    assert local.read_bytes() == original_ledger

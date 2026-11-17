@@ -127,6 +127,48 @@ class TestConversionRegressions:
         assert sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")) == before
         assert victim.read_text() == "precious\n"
 
+    @pytest.mark.parametrize("linked", ["images", "images/train"])
+    @pytest.mark.parametrize("existing", [False, True], ids=["new-image", "existing-image"])
+    def test_linked_image_directory_cannot_write_outside_the_export(
+        self, tmp_path: Path, linked: str, *, existing: bool
+    ) -> None:
+        source = tmp_path / "source"
+        make_image(source / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = tmp_path / "yolo"
+        external = tmp_path / "external"
+        external.mkdir()
+        image_dir = external / "train" if linked == "images" else external
+        image_dir.mkdir(exist_ok=True)
+        victim = image_dir / "a.jpg"
+        if existing:
+            victim.write_bytes(b"precious")
+        link = output / linked
+        link.parent.mkdir(parents=True)
+        link.symlink_to(external, target_is_directory=True)
+        before = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*"))
+
+        with pytest.raises(Cveta2Error, match=str(link)):
+            convert_to_yolo(csv_path, output, image_dirs=[source], link_mode="copy")
+
+        assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")) == before
+        assert victim.read_bytes() == b"precious" if existing else not victim.exists()
+
+    def test_linked_images_root_cannot_create_an_external_split_without_source_images(self, tmp_path: Path) -> None:
+        csv_path = write_convert_csv(tmp_path, [csv_row("missing.jpg", label="cat", split="train")])
+        external = tmp_path / "external"
+        external.mkdir()
+        output = tmp_path / "yolo"
+        output.mkdir()
+        (output / "images").symlink_to(external, target_is_directory=True)
+
+        with pytest.raises(Cveta2Error, match=str(output / "images")):
+            convert_to_yolo(csv_path, output, image_dirs=[], link_mode="copy")
+
+        assert list(external.iterdir()) == []
+        assert not (output / "labels").exists()
+        assert not (output / "dataset.yaml").exists()
+
     def test_box_row_takes_precedence_over_negative_row(self, tmp_path: Path) -> None:
         images = tmp_path / "source"
         make_image(images / "a.jpg")
