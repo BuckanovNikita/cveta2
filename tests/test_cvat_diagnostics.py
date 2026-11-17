@@ -592,3 +592,72 @@ def test_echoed_cookie_header_and_query_secrets_are_redacted(
         assert "[redacted]" in diagnostic.response_summary
         assert ("X-Correlation-Id", "[redacted]") in diagnostic.request_ids
         assert urlsplit(diagnostic.endpoint).query == ""
+
+
+_JOB_WITH_NULL_UPDATED_DATE = {
+    "url": "http://x/api/jobs/1",
+    "id": 1,
+    "task_id": 7,
+    "project_id": 1,
+    "assignee": None,
+    "guide_id": None,
+    "dimension": "2d",
+    "bug_tracker": None,
+    "status": "annotation",
+    "stage": "annotation",
+    "state": "new",
+    "mode": "annotation",
+    "frame_count": 1,
+    "start_frame": 0,
+    "stop_frame": 0,
+    "data_chunk_size": 1,
+    "data_compressed_chunk_type": "imageset",
+    "data_original_chunk_type": "imageset",
+    "created_date": "2026-01-01T00:00:00Z",
+    "updated_date": None,
+    "issues": {"url": "x", "count": 0},
+    "labels": {"url": "x"},
+    "type": "annotation",
+    "organization": None,
+    "target_storage": None,
+    "source_storage": None,
+    "assignee_updated_date": None,
+    "parent_job_id": None,
+    "consensus_replicas": 0,
+}
+
+
+def test_undeserializable_payload_becomes_cvat_api_error() -> None:
+    """A payload the SDK cannot parse must not cross the port as an SDK error."""
+    page = {"count": 1, "next": None, "previous": None, "results": [_JOB_WITH_NULL_UPDATED_DATE]}
+    with (
+        _server(lambda _method, _path: _json_reply(200, page)) as (host, _calls),
+        Client(host, check_server_version=False) as client,
+        pytest.raises(CvatApiError) as caught,
+    ):
+        SdkCvatApiAdapter(client).get_task_jobs(7)
+
+    assert caught.value.status_code == 0
+    assert isinstance(caught.value.__cause__, TypeError)
+
+
+def test_data_meta_with_null_chunks_updated_date_still_uses_raw_fallback() -> None:
+    meta = {
+        "chunks_updated_date": None,
+        "chunk_size": 1,
+        "size": 1,
+        "image_quality": 70,
+        "start_frame": 0,
+        "stop_frame": 0,
+        "frame_filter": "",
+        "frames": [{"name": "a.jpg", "width": 4, "height": 3, "related_files": 0, "has_related_context": False}],
+        "deleted_frames": [],
+        "included_frames": None,
+    }
+    with (
+        _server(lambda _method, _path: _json_reply(200, meta)) as (host, _calls),
+        Client(host, check_server_version=False) as client,
+    ):
+        result = SdkCvatApiAdapter(client).get_task_data_meta(7)
+
+    assert [(frame.name, frame.width, frame.height) for frame in result.frames] == [("a.jpg", 4, 3)]
