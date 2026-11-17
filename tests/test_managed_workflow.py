@@ -25,7 +25,14 @@ from cveta2.application.ports.dtos import (
 )
 from cveta2.application.ports.managed_sources import S3Object
 from cveta2.composition import managed
-from cveta2.domain.bundle.models import ApiClass, DatasetParent, Publication
+from cveta2.domain.bundle.models import (
+    ApiClass,
+    ClassInfo,
+    DatasetMetadata,
+    DatasetParent,
+    ImageRoots,
+    Publication,
+)
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
 from cveta2.domain.models import LabelInfo, TaskInfo
@@ -157,12 +164,13 @@ class FakeClearML:
     def latest(self, project: str, name: str) -> DatasetParent | None:
         if self.latest_id is None:
             return None
+        metadata = self.root / self.latest_id / "dataset.yaml"
         return DatasetParent(
             self.latest_id,
             project,
             name,
             str(len(self.publications)),
-            self.root / self.latest_id / "dataset.yaml",
+            metadata if metadata.is_file() else None,
         )
 
     def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
@@ -180,8 +188,9 @@ class FakeClearML:
         self.latest_id = dataset_id
         return Publication(dataset_id, str(len(self.publications)))
 
-    def read_snapshot(self, dataset_id: str) -> ManagedSnapshot:
-        return LocalSourceFiles().read_snapshot(self.root / dataset_id / "tasks.yaml")
+    def read_snapshot(self, dataset_id: str) -> ManagedSnapshot | None:
+        path = self.root / dataset_id / "tasks.yaml"
+        return LocalSourceFiles().read_snapshot(path) if path.is_file() else None
 
     def read_files(self, dataset_id: str, names: tuple[str, ...]) -> dict[str, bytes]:
         return {name: (self.root / dataset_id / name).read_bytes() for name in names}
@@ -292,6 +301,22 @@ def workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workflow:
     ]
     monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: records)
     return Workflow(personal, shared, images, cvat, s3, clearml)
+
+
+def _legacy_parent(workflow: Workflow, dataset: pd.DataFrame | None = None) -> Path:
+    """Install a standalone parent without managed extensions as the latest version."""
+    parent = workflow.clearml.root / "legacy"
+    parent.mkdir(parents=True)
+    metadata = DatasetMetadata(
+        api_url="https://classes.example/api",
+        classes={"cat": ClassInfo(prod_id=7)},
+        images=ImageRoots(local_root=[str(workflow.images)]),
+    )
+    (parent / "dataset.yaml").write_text(yaml.safe_dump(metadata.model_dump(mode="json")))
+    if dataset is not None:
+        dataset.to_csv(parent / "dataset.csv", index=False)
+    workflow.clearml.latest_id = "legacy"
+    return parent
 
 
 def _prepare(workflow: Workflow, tmp_path: Path, *, bad: bool = False) -> Path:
@@ -413,5 +438,22 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
     else:
         Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
     with pytest.raises(ManagedError):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_csv_only_parent_cannot_become_a_ready_preparation(workflow: Workflow, tmp_path: Path) -> None:
+    parent = _legacy_parent(workflow)
+    (parent / "dataset.yaml").unlink()
+    with pytest.raises(ManagedError, match=r"dataset\.yaml"):
+        _prepare(workflow, tmp_path)
+    assert not (tmp_path / "prepared").exists()
+
+
+def test_parent_that_lost_its_metadata_blocks_publication(workflow: Workflow, tmp_path: Path) -> None:
+    parent = _legacy_parent(workflow)
+    prepared = _prepare(workflow, tmp_path)
+    (parent / "dataset.yaml").unlink()
+    with pytest.raises(ManagedError, match=r"dataset\.yaml"):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []

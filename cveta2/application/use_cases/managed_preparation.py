@@ -142,6 +142,8 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         raise ManagedError("Class registry changed; fetch the managed dataset again")
     if snapshot.parent_id != parent_id:
         raise ManagedError("Source parent changed; fetch the managed dataset again")
+    if parent_id is not None and parent_metadata is None:
+        raise ManagedError(f"Parent {parent_id} lacks dataset.yaml; choose a new dataset name")
     previous = dict(snapshot.assignments)
     if parent_metadata is not None and parent_metadata.managed is not None:
         if parent_metadata.managed.definition.splits != definition.splits:
