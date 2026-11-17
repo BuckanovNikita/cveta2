@@ -823,3 +823,70 @@ def test_approved_migration_creates_the_shared_file_with_the_umask_mode(
     assert proposal.shared_path.stat().st_mode & 0o777 == shared_mode
     assert cfg.stat().st_mode & 0o777 == 0o600
     assert next(iter(tmp_path.glob("*.bak"))).stat().st_mode & 0o777 == 0o600
+
+
+def _journal_with_stages(cfg: Path, *, drop: str) -> Path:
+    """Write a journal whose named stage file is missing, as after a cleanup."""
+    stages = {
+        "staged_shared": cfg.with_name(f".{cfg.name}.shared-stage"),
+        "staged_personal": cfg.with_name(f".{cfg.name}.personal-stage"),
+    }
+    for name, stage in stages.items():
+        if name != drop:
+            stage.write_bytes(b"schema_version: 1\n")
+    journal = cfg.with_name(f"{cfg.name}.migration.json")
+    journal.write_text(
+        json.dumps(
+            {
+                "shared_path": str(cfg.with_name("project-config.yaml")),
+                "staged_shared": str(stages["staged_shared"]),
+                "staged_personal": str(stages["staged_personal"]),
+                "shared_hash": "0",
+                "personal_hash": "0",
+                "original_hash": project_config._digest(cfg.read_bytes()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return journal
+
+
+@pytest.mark.parametrize("damage", ["truncated", "empty", "wrong-shape", "missing-shared-stage"])
+def test_damaged_migration_journal_is_a_recoverable_typed_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    """A damaged journal names itself and the recovery instead of a raw traceback."""
+    cfg = legacy(tmp_path / "personal.yaml")
+    journal = cfg.with_name(f"{cfg.name}.migration.json")
+    if damage == "truncated":
+        journal.write_bytes(b'{"shared_path": "/x", "stag')
+    elif damage == "empty":
+        journal.write_bytes(b"")
+    elif damage == "wrong-shape":
+        journal.write_text(json.dumps({"shared_path": str(tmp_path / "project-config.yaml")}), encoding="utf-8")
+    else:
+        _journal_with_stages(cfg, drop="staged_shared")
+    monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
+
+    with pytest.raises(ManagedError) as caught:
+        setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None))
+
+    assert str(journal) in str(caught.value)
+    assert "setup --migrate-config" in str(caught.value)
+    assert journal.exists()
+
+
+def test_journal_with_a_missing_personal_stage_is_a_recoverable_typed_error(tmp_path: Path) -> None:
+    cfg = legacy(tmp_path / "personal.yaml")
+    journal = _journal_with_stages(cfg, drop="staged_personal")
+    shared_path = cfg.with_name("project-config.yaml")
+    shared_path.write_bytes(b"schema_version: 1\n")
+    data = json.loads(journal.read_bytes())
+    data["shared_hash"] = project_config._digest(shared_path.read_bytes())
+    journal.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ManagedError) as caught:
+        recover_migration(cfg)
+
+    assert str(journal) in str(caught.value)
+    assert "personal-stage" in str(caught.value)

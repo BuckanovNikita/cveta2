@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-from pydantic import JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from cveta2.domain.managed.models import (
     ManagedError,
@@ -220,10 +220,15 @@ def _private_write(
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not replace:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # Claim the name exclusively, then fill it by atomic replacement: an
+        # interrupted write leaves at worst an empty file, never partial bytes.
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
         try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(content)
+            claimed = _stage_bytes(path, content, "claim")
+            try:
+                claimed.replace(path)
+            finally:
+                claimed.unlink(missing_ok=True)
         except OSError:
             path.unlink(missing_ok=True)
             raise
@@ -508,27 +513,68 @@ def _journal_path(personal_path: Path) -> Path:
     return personal_path.with_name(f"{personal_path.name}.migration.json")
 
 
+class _MigrationJournal(BaseModel):
+    """Paths and hashes of one approved activation; never file contents."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    shared_path: Path
+    staged_shared: Path
+    staged_personal: Path
+    shared_hash: str
+    personal_hash: str
+    original_hash: str
+
+
+def _journal_recovery_hint(journal_path: Path, personal_path: Path) -> str:
+    return (
+        f"check {personal_path} and the shared file (restore the personal file from its .bak backup "
+        f"if it is damaged), then delete {journal_path} and run setup --migrate-config again"
+    )
+
+
+def _read_journal(journal_path: Path, personal_path: Path) -> _MigrationJournal:
+    """Parse the journal, turning damaged content into an actionable error."""
+    try:
+        return _MigrationJournal.model_validate_json(journal_path.read_bytes())
+    except (OSError, ValidationError) as error:
+        raise ManagedError(
+            f"Migration journal {journal_path} is unreadable or damaged ({type(error).__name__}); "
+            f"{_journal_recovery_hint(journal_path, personal_path)}"
+        ) from error
+
+
+def _read_stage(stage: Path, journal_path: Path, personal_path: Path) -> bytes:
+    try:
+        return stage.read_bytes()
+    except FileNotFoundError as error:
+        raise ManagedError(
+            f"Migration journal {journal_path} references a missing stage {stage}; "
+            f"{_journal_recovery_hint(journal_path, personal_path)}"
+        ) from error
+
+
 def recover_migration(personal_path: Path) -> bool:
     """Complete a previously approved activation using verified staged bytes."""
     journal_path = _journal_path(personal_path)
     if not journal_path.exists():
         return False
-    journal = cast("dict[str, str]", json.loads(journal_path.read_bytes()))
-    shared = Path(journal["shared_path"])
-    staged_shared = Path(journal["staged_shared"])
-    staged_personal = Path(journal["staged_personal"])
+    journal = _read_journal(journal_path, personal_path)
+    shared = journal.shared_path
+    staged_shared = journal.staged_shared
+    staged_personal = journal.staged_personal
     if shared.exists():
-        if _digest(shared.read_bytes()) != journal["shared_hash"]:
+        if _digest(shared.read_bytes()) != journal.shared_hash:
             raise ManagedError("Migration recovery found a conflicting shared file")
     else:
-        if _digest(staged_shared.read_bytes()) != journal["shared_hash"]:
+        if _digest(_read_stage(staged_shared, journal_path, personal_path)) != journal.shared_hash:
             raise ManagedError("Migration shared stage changed")
         os.link(staged_shared, shared)
     current_hash = _digest(personal_path.read_bytes())
-    if current_hash != journal["personal_hash"]:
-        if current_hash != journal["original_hash"]:
+    if current_hash != journal.personal_hash:
+        if current_hash != journal.original_hash:
             raise ManagedError("Personal configuration changed during migration recovery")
-        if _digest(staged_personal.read_bytes()) != journal["personal_hash"]:
+        if _digest(_read_stage(staged_personal, journal_path, personal_path)) != journal.personal_hash:
             raise ManagedError("Migration personal stage changed")
         staged_personal.replace(personal_path)
     staged_personal.unlink(missing_ok=True)
