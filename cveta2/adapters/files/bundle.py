@@ -32,30 +32,44 @@ from cveta2.domain.bundle.preparation import (
 )
 
 
-def _check_yaml_nodes(node: Node, active: set[int], checked: set[int]) -> None:
-    """Reject duplicate/nontext mapping keys and recursive YAML aliases.
-
-    A node reused through an alias is checked once; revisits return early.
-    """
-    if id(node) in checked:
-        return
-    if id(node) in active:
-        raise UploadError("Recursive YAML aliases are not supported.")
-    active.add(id(node))
+def _yaml_children(node: Node) -> list[Node]:
+    """Return a node's values after rejecting duplicate or nontext mapping keys."""
     if isinstance(node, MappingNode):
         keys: set[str] = set()
-        for key, value in node.value:
+        for key, _value in node.value:
             if not isinstance(key, ScalarNode) or key.tag != "tag:yaml.org,2002:str":
                 raise UploadError("YAML mapping keys must be strings.")
             if key.value in keys:
                 raise UploadError(f"Duplicate YAML key: {key.value!r}")
             keys.add(key.value)
-            _check_yaml_nodes(value, active, checked)
-    elif isinstance(node, SequenceNode):
-        for value in node.value:
-            _check_yaml_nodes(value, active, checked)
-    active.remove(id(node))
-    checked.add(id(node))
+        return [value for _key, value in node.value]
+    if isinstance(node, SequenceNode):
+        return list(node.value)
+    return []
+
+
+def _check_yaml_nodes(root: Node) -> None:
+    """Reject duplicate/nontext mapping keys and recursive YAML aliases.
+
+    The walk is iterative so nesting depth cannot exhaust the call stack. A node
+    reused through an alias is checked once; ``active`` holds the current path.
+    """
+    active: set[int] = set()
+    checked: set[int] = set()
+    pending: list[tuple[Node, bool]] = [(root, False)]
+    while pending:
+        node, leaving = pending.pop()
+        if leaving:
+            active.remove(id(node))
+            checked.add(id(node))
+            continue
+        if id(node) in checked:
+            continue
+        if id(node) in active:
+            raise UploadError("Recursive YAML aliases are not supported.")
+        active.add(id(node))
+        pending.append((node, True))
+        pending.extend((child, False) for child in reversed(_yaml_children(node)))
 
 
 def _error_details(error: OSError | ValidationError) -> str:
@@ -73,10 +87,12 @@ def _yaml(content: bytes, name: str) -> object:
         text = content.decode("utf-8")
         node = yaml.compose(text, Loader=yaml.SafeLoader)
         if node is not None:
-            _check_yaml_nodes(node, set(), set())
+            _check_yaml_nodes(node)
         result: object = yaml.safe_load(text)
     except (yaml.YAMLError, UnicodeError) as error:
         raise UploadError(f"Cannot parse {name}: {error}") from error
+    except RecursionError as error:
+        raise UploadError(f"Cannot parse {name}: YAML nesting is too deep") from error
     else:
         return result
 

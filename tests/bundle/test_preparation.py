@@ -405,7 +405,9 @@ def test_invalid_file_inventory_blocks_even_with_matching_record_digest(scenario
         "classes: &classes {cat: *classes}\n",
         "[invalid",
         "true: invalid\n",
+        "api_url: https://example.org/classes\nclasses: {}\nimages: " + "[" * 5000 + "]" * 5000 + "\n",
     ],
+    ids=["duplicate-key", "recursive-alias", "syntax", "non-text-key", "deep-nesting"],
 )
 def test_strict_metadata_rejects_ambiguous_yaml(tmp_path: Path, text: str) -> None:
     metadata = tmp_path / "dataset.yaml"

@@ -67,5 +67,5 @@ class HttpClassApi:
         try:
             value: object = json.loads(body)
             return TypeAdapter(list[ApiClass]).validate_python(value, strict=True)
-        except (ValueError, UnicodeError, ValidationError) as exc:
+        except (ValueError, UnicodeError, ValidationError, RecursionError) as exc:
             raise UploadError("Class API must return a JSON list of valid class definitions") from exc
