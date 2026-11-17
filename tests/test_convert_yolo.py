@@ -863,6 +863,68 @@ class TestFromYoloDatasetSplits:
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
 
 
+class TestFromYoloUnreadableInputs:
+    """Undecodable or unreadable inputs are skipped or named, never a raw traceback."""
+
+    _NON_UTF8 = b"0 0.5 0.5 0.2 0.2 # \xff\xfe\n"
+
+    def test_undecodable_prediction_label_is_skipped_and_summarized(
+        self, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        pred_dir = tmp_path / "preds"
+        for stem in ("a", "b", "c"):
+            make_image(pred_dir / f"{stem}.jpg")
+        (pred_dir / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+        (pred_dir / "b.txt").write_bytes(self._NON_UTF8)
+        (pred_dir / "c.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(pred_dir, out, read_all_sizes=False)
+
+        assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg", "c.jpg"]
+        assert any(str(pred_dir / "b.txt") in message for message in capture_logs)
+        assert any("нечитаемых файлов разметки: 1" in message for message in capture_logs)
+
+    def test_undecodable_dataset_label_skips_its_image(self, tmp_path: Path, capture_logs: list[str]) -> None:
+        """A label that cannot be read is not mistaken for "no boxes" (a none row)."""
+        root = tmp_path / "ds"
+        for stem in ("a", "b"):
+            make_image(root / "images" / "train" / f"{stem}.jpg")
+        _write_yolo_label(root, "train", "a", "0 0.5 0.5 0.2 0.2\n")
+        (root / "labels" / "train" / "b.txt").write_bytes(self._NON_UTF8)
+        _write_yolo_yaml(root, {0: "cat"}, ["train"])
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(root, out, read_all_sizes=False)
+
+        df = pd.read_csv(out)
+        assert df["image_name"].tolist() == ["a.jpg"]
+        assert df["instance_shape"].tolist() == ["box"]
+        assert any("нечитаемых файлов разметки: 1" in message for message in capture_logs)
+
+    def test_undecodable_split_list_names_the_file(self, tmp_path: Path) -> None:
+        root = tmp_path / "ds"
+        make_image(root / "images" / "train" / "a.jpg")
+        listing = root / "train.txt"
+        listing.write_bytes(b"./images/train/a.jpg\n./images/train/\xe9.jpg\n")
+        (root / "dataset.yaml").write_text(yaml.dump({"train": "train.txt", "names": {0: "cat"}}), encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match=str(listing)) as excinfo:
+            convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
+        assert isinstance(excinfo.value.__cause__, UnicodeError)
+
+    def test_corrupt_image_names_the_file(self, tmp_path: Path) -> None:
+        pred_dir = tmp_path / "preds"
+        pred_dir.mkdir()
+        image = pred_dir / "a.jpg"
+        image.write_bytes(b"not an image")
+        (pred_dir / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match=str(image)) as excinfo:
+            convert_from_yolo(pred_dir, tmp_path / "out.csv", read_all_sizes=False)
+        assert isinstance(excinfo.value.__cause__, OSError)
+
+
 class TestFromYoloPredictions:
     """Tests for bare-.txt prediction mode."""
 

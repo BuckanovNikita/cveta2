@@ -17,6 +17,7 @@ from cveta2.adapters.files.materialization import _link_or_copy
 from cveta2.domain.conversion import (
     _IMAGE_EXTENSIONS,
     ExportContext,
+    UnreadableLabelError,
     _normalize_class_names,
 )
 from cveta2.domain.errors import Cveta2Error
@@ -73,8 +74,11 @@ def _get_image_size(img_path: Path) -> tuple[int, int]:
     """Get image dimensions using Pillow (lazy import)."""
     from PIL import Image  # noqa: PLC0415
 
-    with Image.open(img_path) as im:
-        return im.size
+    try:
+        with Image.open(img_path) as im:
+            return im.size
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise Cveta2Error(f"Ошибка: не удалось прочитать изображение {img_path}: {exc}") from exc
 
 
 def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
@@ -132,8 +136,12 @@ def _images_from_split_source(source: Path, dataset_root: Path) -> list[Path]:
     if source.is_dir():
         return sorted(path for path in source.rglob("*") if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS)
     if source.is_file() and source.suffix.lower() == ".txt":
+        try:
+            text = read_text_utf8(source)
+        except (UnicodeError, OSError) as exc:
+            raise Cveta2Error(f"Ошибка: не удалось прочитать список изображений {source}: {exc}") from exc
         images: list[Path] = []
-        for line in read_text_utf8(source).splitlines():
+        for line in text.splitlines():
             raw = line.strip()
             if raw:
                 images.append(_resolve_listed_image(raw, source, dataset_root))
@@ -270,8 +278,13 @@ def _prepare_coco_split(directory: Path) -> None:
 
 
 def _label_text(path: Path) -> str | None:
-    """Read optional label text."""
-    return read_text_utf8(path) if path.is_file() else None
+    """Read optional label text; an unreadable file raises ``UnreadableLabelError``."""
+    if not path.is_file():
+        return None
+    try:
+        return read_text_utf8(path)
+    except (UnicodeError, OSError) as exc:
+        raise UnreadableLabelError(f"не удалось прочитать файл разметки {path}: {exc}") from exc
 
 
 class LocalConversionFiles(LocalDatasetFiles):

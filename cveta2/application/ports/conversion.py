@@ -68,7 +68,10 @@ class ConversionFiles(DatasetFiles, Protocol):
         ...
 
     def label_text(self, path: Path) -> str | None:
-        """Read an existing label file, returning none when absent."""
+        """Read an existing label file, returning none when absent.
+
+        Raises ``UnreadableLabelError`` when the file cannot be read or decoded.
+        """
         ...
 
     def materialize_image(self, src: Path, dst: Path, mode: str) -> None:
