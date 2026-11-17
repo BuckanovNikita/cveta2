@@ -109,6 +109,7 @@ def convert_to_yolo(
         files=files,
     )
 
+    files.validate_yolo_output(ctx)
     files.prepare_yolo_output(ctx.output_dir, ctx.splits)
 
     box_df = ctx.df[ctx.df["instance_shape"] == "box"].copy()

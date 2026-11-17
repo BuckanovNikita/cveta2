@@ -97,6 +97,36 @@ class TestConversionRegressions:
         assert not placed.is_symlink()
         assert placed.read_bytes() == source.read_bytes()
 
+    @pytest.mark.parametrize("linked", ["labels", "labels/train", "labels/train/a.txt", "dataset.yaml"])
+    def test_symlinked_label_or_metadata_destination_is_rejected_before_any_write(
+        self, tmp_path: Path, linked: str
+    ) -> None:
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = tmp_path / "yolo"
+        external = tmp_path / "external"
+        external.mkdir()
+        victim = external / "a.txt"
+        victim.write_text("precious\n")
+        link = output / linked
+        link.parent.mkdir(parents=True)
+        if linked == "labels":
+            (external / "train").mkdir()
+            (external / "train" / "a.txt").write_text("precious\n")
+            link.symlink_to(external, target_is_directory=True)
+        elif linked == "labels/train":
+            link.symlink_to(external, target_is_directory=True)
+        else:
+            link.symlink_to(victim)
+        before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+
+        with pytest.raises(Cveta2Error, match=str(link)):
+            convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+
+        assert sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")) == before
+        assert victim.read_text() == "precious\n"
+
     def test_box_row_takes_precedence_over_negative_row(self, tmp_path: Path) -> None:
         images = tmp_path / "source"
         make_image(images / "a.jpg")

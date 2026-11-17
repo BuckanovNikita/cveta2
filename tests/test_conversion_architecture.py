@@ -39,6 +39,7 @@ def test_yolo_export_uses_port_and_preserves_utf8_label_order() -> None:
             {"кошка.jpg": Path("/input/кошка.jpg")},
             [],
         ),
+        validate_yolo_output=lambda _ctx: None,
         prepare_yolo_output=lambda _path, _splits: None,
         materialize_image=lambda src, dst, mode: materialized.append((src, dst, mode)),
         write_output_text=lambda path, text: output.update({path: text}),

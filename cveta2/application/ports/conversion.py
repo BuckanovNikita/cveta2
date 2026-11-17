@@ -45,6 +45,10 @@ class ConversionFiles(DatasetFiles, Protocol):
         """Enumerate declared split sources in declaration order."""
         ...
 
+    def validate_yolo_output(self, ctx: ExportContext) -> None:
+        """Reject linked or non-regular label and metadata destinations before any write."""
+        ...
+
     def prune_yolo_output(self, ctx: ExportContext) -> None:
         """Remove obsolete conversion image and label files."""
         ...

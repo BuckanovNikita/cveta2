@@ -172,6 +172,29 @@ def _split_images(raw_split: object, dataset_root: Path) -> list[Path]:
     return result
 
 
+def _validate_yolo_output(ctx: ExportContext) -> None:
+    """Reject label and metadata destinations that would write through a link.
+
+    Runs before the first write.  Image destinations are replaced rather
+    than written through, and symlinked ``images`` directories pointing at
+    the source stay supported, so only the label tree and ``dataset.yaml``
+    are checked.  A linked ancestor above the output directory is allowed.
+    """
+    labels = ctx.output_dir / "labels"
+    directories = [labels, *(labels / split for split in ctx.splits)]
+    for directory in directories:
+        if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+            raise Cveta2Error(f"Ошибка: небезопасный каталог разметки YOLO: {directory}")
+    destinations = {
+        labels / split / f"{Path(name).stem}.txt"
+        for name, split in ctx.df[["image_name", "split"]].itertuples(index=False, name=None)
+    }
+    destinations.add(ctx.output_dir / "dataset.yaml")
+    for destination in sorted(destinations):
+        if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+            raise Cveta2Error(f"Ошибка: небезопасный путь вывода YOLO: {destination}")
+
+
 def _prune_yolo_output(ctx: ExportContext) -> None:
     """Remove files for images and splits absent from the current export."""
     expected_images: set[Path] = set()
@@ -298,6 +321,7 @@ class LocalConversionFiles(LocalDatasetFiles):
     load_class_names = staticmethod(_load_class_names_yaml)
     resolve_dataset_root = staticmethod(_resolve_dataset_root)
     split_images = staticmethod(_split_images)
+    validate_yolo_output = staticmethod(_validate_yolo_output)
     prune_yolo_output = staticmethod(_prune_yolo_output)
     coco_owned_paths = staticmethod(_coco_owned_paths)
     prune_coco_output = staticmethod(_prune_coco_output)
