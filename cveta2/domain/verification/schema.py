@@ -99,7 +99,7 @@ _REASONS = {
     "invalid_split": ("Expected train, val or test (an empty split is allowed only in cveta2)"),
     "invalid_job_stage": "Expected annotation, validation or acceptance",
     "invalid_job_state": "Expected new, in progress, completed or rejected",
-    "invalid_issue_state": ("Expected open, resolved, their pipe-separated combination, or upload value new"),
+    "invalid_issue_state": ("Expected open or resolved per issue joined with ' | ', or upload value new"),
 }
 
 
@@ -138,6 +138,13 @@ def _optional(predicate: Callable[[object], bool], value: object) -> bool:
 
 def _enum(allowed: tuple[str, ...], value: object) -> bool:
     return isinstance(value, str) and value in allowed
+
+
+def _issue_state(value: object) -> bool:
+    """Accept upload ``new`` or fetched per-issue states joined with `` | ``."""
+    if value == "new":
+        return True
+    return isinstance(value, str) and all(state in ("open", "resolved") for state in value.split(" | "))
 
 
 def _nonnegative_integer(value: object) -> bool:
@@ -288,13 +295,10 @@ def schema_for(profile: Profile) -> pa.DataFrameSchema:
     columns["rotation"].checks.append(_check(partial(_range, 0, 360), "invalid_rotation"))
     columns["confidence"].checks.append(_check(partial(_range, 0, 1), "invalid_confidence"))
     columns["attributes"].checks.append(_check(_attributes, "invalid_attributes"))
+    columns["issue_state"].checks.append(_check(_issue_state, "invalid_issue_state"))
     for name, allowed in (
         ("job_stage", ("annotation", "validation", "acceptance")),
         ("job_state", ("new", "in progress", "completed", "rejected")),
-        (
-            "issue_state",
-            ("open", "resolved", "open | resolved", "resolved | open", "new"),
-        ),
         ("split", ("train", "val", "test")),
     ):
         columns[name].checks.append(
