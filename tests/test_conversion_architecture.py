@@ -35,7 +35,7 @@ def test_yolo_export_uses_port_and_preserves_utf8_label_order() -> None:
     materialized: list[tuple[Path, Path, str]] = []
     files = SimpleNamespace(
         read_dataset_csv=lambda _path, _required: frame,
-        resolve_images=lambda _names, _dirs: (
+        resolve_images=lambda _names, _dirs, **_kwargs: (
             {"кошка.jpg": Path("/input/кошка.jpg")},
             [],
         ),

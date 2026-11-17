@@ -69,7 +69,8 @@ def prepare_export(  # noqa: PLR0913
     logger.info(f"Классов: {len(label_map)}, map: {label_map}")
 
     search_dirs = [Path(directory) for directory in image_dirs or ()]
-    found, missing = files.resolve_images(set(df["image_name"].unique()), search_dirs)
+    # The previous output must never serve as its own image source.
+    found, missing = files.resolve_images(set(df["image_name"].unique()), search_dirs, exclude=out_dir)
     if missing:
         logger.warning(f"Не найдено {len(missing)} изображений: {preview_names(missing)}")
 

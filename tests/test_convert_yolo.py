@@ -51,6 +51,52 @@ class TestConversionRegressions:
 
         assert (output / "images/train/a.jpg").is_file()
 
+    @pytest.mark.parametrize("link_mode", ["copy", "hardlink", "symlink"])
+    def test_reexport_inside_image_dir_refreshes_from_the_source(
+        self, tmp_path: Path, link_mode: Literal["copy", "hardlink", "symlink"]
+    ) -> None:
+        """The previous output under ``--image-dir`` is never taken as the source."""
+        data = tmp_path / "data"
+        source = make_image(data / "raw" / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = data / "yolo"
+        convert_to_yolo(csv_path, output, image_dirs=[data], link_mode=link_mode)
+        source.unlink()
+        make_image(source, width=320, height=240)
+
+        convert_to_yolo(csv_path, output, image_dirs=[data], link_mode=link_mode)
+
+        placed = output / "images/train/a.jpg"
+        assert placed.read_bytes() == source.read_bytes()
+
+    @pytest.mark.parametrize("link_mode", ["copy", "symlink"])
+    def test_reexport_with_previous_split_as_image_dir_keeps_a_valid_image(
+        self, tmp_path: Path, link_mode: Literal["copy", "symlink"]
+    ) -> None:
+        images = tmp_path / "source"
+        source = make_image(images / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = tmp_path / "yolo"
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="symlink")
+
+        convert_to_yolo(csv_path, output, image_dirs=[output / "images/train", images], link_mode=link_mode)
+
+        placed = output / "images/train/a.jpg"
+        assert placed.read_bytes() == source.read_bytes()
+        assert placed.is_symlink() == (link_mode == "symlink")
+
+    def test_materializing_a_symlink_onto_itself_keeps_the_image(self, tmp_path: Path) -> None:
+        """Copying a destination link over itself copies its target instead of deleting it."""
+        source = make_image(tmp_path / "source" / "a.jpg")
+        placed = tmp_path / "out" / "a.jpg"
+        placed.parent.mkdir()
+        placed.symlink_to(source)
+
+        LocalConversionFiles.materialize_image(placed, placed, "copy")
+
+        assert not placed.is_symlink()
+        assert placed.read_bytes() == source.read_bytes()
+
     def test_box_row_takes_precedence_over_negative_row(self, tmp_path: Path) -> None:
         images = tmp_path / "source"
         make_image(images / "a.jpg")
