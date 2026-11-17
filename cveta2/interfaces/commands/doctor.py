@@ -89,10 +89,9 @@ def check_config() -> bool:
     # --- Config file existence ---
     if not config_path.is_file():
         logger.warning(f"Config file not found: {config_path}. Run 'cveta2 setup' or set env variables.")
-        cfg = CvatConfig.from_env()
     else:
         logger.info(f"Config file: {config_path}")
-        cfg = CvatConfig.load()
+    cfg = CvatConfig.load(config_path)
 
     problems: list[str] = []
 

@@ -36,12 +36,14 @@ def _collect_shapes(
     """Extract BBoxAnnotations from direct shapes."""
     result: list[BBoxAnnotation] = []
     skipped_polygons = 0
+    missing_frame_shapes = 0
     for shape in shapes:
         if shape.type not in (_RECTANGLE, "polygon"):
             logger.warning(f"Skipping shape type {shape.type} as it's not supported.")
             continue
         frame_info = ctx.frames.get(shape.frame)
         if frame_info is None:
+            missing_frame_shapes += 1
             continue
         if shape.type == "polygon":
             try:
@@ -96,4 +98,6 @@ def _collect_shapes(
         )
     if skipped_polygons:
         logger.warning(f"Задача {ctx.task_id}: пропущено полигонов: {skipped_polygons}")
+    if missing_frame_shapes:
+        logger.warning(f"Задача {ctx.task_id}: пропущено аннотаций без метаданных кадра: {missing_frame_shapes}")
     return result

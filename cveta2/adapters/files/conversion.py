@@ -1,6 +1,7 @@
 """Local conversion file access, image discovery, and owned-output lifecycle."""
 
 import json
+from itertools import product
 from pathlib import Path
 
 import pandas as pd
@@ -30,15 +31,20 @@ _STEM_LOOKUP_EXTENSIONS = (*_IMAGE_EXTENSIONS, ".tif")
 
 
 def _image_in_dir_by_stem(directory: Path, stem: str) -> Path | None:
-    """Find ``<stem><ext>`` in *directory* with a lower-, upper- or title-case suffix.
+    """Find ``<stem><ext>`` in *directory* with a case-insensitive suffix.
 
     Fixed probes keep the lookup proportional to the extension list rather
-    than the directory size; other mixed-case suffixes are not matched.
+    than the directory size. Preserve lower-, upper- and title-case priority
+    before trying the remaining suffix variants.
     """
     if not directory.is_dir():
         return None
     for ext in _STEM_LOOKUP_EXTENSIONS:
-        for suffix in dict.fromkeys((ext, ext.upper(), ext.title())):
+        suffixes = [ext, ext.upper(), ext.title()]
+        suffixes.extend(
+            f".{''.join(letters)}" for letters in product(*[(letter, letter.upper()) for letter in ext[1:]])
+        )
+        for suffix in dict.fromkeys(suffixes):
             candidate = directory / f"{stem}{suffix}"
             if candidate.is_file():
                 return candidate

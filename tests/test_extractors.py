@@ -142,15 +142,23 @@ def test_unsupported_shape_is_skipped_with_a_warning(capture_logs: list[str]) ->
     assert any("polyline" in m.lower() for m in capture_logs)
 
 
-def test_missing_frame_skipped() -> None:
-    """Shape referencing a non-existent frame is skipped."""
+@pytest.mark.parametrize("missing_frames", [[], [999], [998, 999, 999]])
+def test_missing_frames_are_skipped_and_summarized_per_task(missing_frames: list[int], capture_logs: list[str]) -> None:
+    """Report the number of lost annotations while keeping valid frames."""
     ctx = _make_ctx()
-    bad_frame = make_raw_shape(frame=999)
+    bad_frames = [make_raw_shape(frame=frame) for frame in missing_frames]
     good = make_raw_shape(id=2, frame=0)
-    result = _collect_shapes([bad_frame, good], ctx)
+    result = _collect_shapes([*bad_frames, good], ctx)
 
     assert len(result) == 1
     assert result[0].frame_id == 0
+    if missing_frames:
+        assert len(capture_logs) == 1
+        assert str(ctx.task_id) in capture_logs[0]
+        assert f": {len(missing_frames)}" in capture_logs[0]
+        assert "кадр" in capture_logs[0].lower()
+    else:
+        assert capture_logs == []
 
 
 def test_unknown_label_fallback() -> None:
@@ -361,4 +369,8 @@ def test_mixed_task_keeps_valid_shapes_and_counts_only_malformed_polygons(
     assert len(summaries) == 1
     assert "100" in summaries[0]
     assert "пропущено полигонов: 2" in summaries[0].lower()
-    assert len(capture_logs) == 6
+    missing_frame_summaries = [message for message in capture_logs if "метаданных кадра" in message.lower()]
+    assert len(missing_frame_summaries) == 1
+    assert "100" in missing_frame_summaries[0]
+    assert ": 1" in missing_frame_summaries[0]
+    assert len(capture_logs) == 7

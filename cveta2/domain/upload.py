@@ -114,20 +114,28 @@ def compute_fingerprint(  # noqa: PLR0913
             if column not in {"image_path", "s3_uri", "s3_path", "image_url"} and annotations[column].notna().any()
         )
         records: list[str] = []
-        for row in annotations[columns].to_dict("records"):
-            normalized = {
-                column: None if pd.isna(value) else float(value) if column in BBOX_COLUMNS else value
-                for column, value in row.items()
-            }
-            records.append(
-                json.dumps(
-                    normalized,
-                    sort_keys=True,
-                    ensure_ascii=False,
-                    default=str,
-                    allow_nan=False,
+        image_name: object = "?"
+        try:
+            for row in annotations[columns].to_dict("records"):
+                image_name = row.get("image_name", "?")
+                normalized = {
+                    column: None if pd.isna(value) else float(value) if column in BBOX_COLUMNS else value
+                    for column, value in row.items()
+                }
+                records.append(
+                    json.dumps(
+                        normalized,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        default=str,
+                        allow_nan=False,
+                    )
                 )
-            )
+        except ValueError as exc:
+            raise Cveta2Error(
+                f"Некорректные данные изображения {image_name!r} "
+                "для вычисления идентификатора загрузки. Загрузка не начата."
+            ) from exc
         intent["annotations"] = sorted(records)
     return hashlib.sha256(json.dumps(intent, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 

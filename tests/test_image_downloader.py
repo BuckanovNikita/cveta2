@@ -5,7 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import stat
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import IO, TYPE_CHECKING, Any, NamedTuple
 
 import pytest
 
@@ -264,12 +264,6 @@ def test_download_fallback_project_storage(
     assert (tmp_path / "images" / "img.jpg").read_bytes() == b"project-data"
 
 
-def _raise_no_space(path: Path, data: bytes) -> None:
-    """Fail like a full disk after only a prefix of *data* reached *path*."""
-    path.write_bytes(data[:3])
-    raise OSError(errno.ENOSPC, "No space left on device")
-
-
 def _temp_leftovers(directory: Path) -> list[str]:
     return sorted(p.name for p in directory.iterdir() if ".tmp" in p.name)
 
@@ -285,7 +279,20 @@ def test_failed_write_leaves_no_partial_file_and_is_retried_next_run(
     target = tmp_path / "images"
 
     with monkeypatch.context() as patched:
-        patched.setattr("cveta2.adapters.files.shared.write_shared_bytes", _raise_no_space)
+        original_fdopen = os.fdopen
+
+        def open_failing_stream(descriptor: int, mode: str) -> IO[bytes]:
+            stream = original_fdopen(descriptor, mode)
+            original_write = stream.write
+
+            def write_a_prefix_then_fail(data: bytes) -> int:
+                original_write(data[:3])
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+            patched.setattr(stream, "write", write_a_prefix_then_fail)
+            return stream
+
+        patched.setattr("cveta2.adapters.files.shared.os.fdopen", open_failing_stream)
         failed_run = downloader.download(annotations, project_cloud_storage=_project_cs())
 
     assert failed_run.failed == 1

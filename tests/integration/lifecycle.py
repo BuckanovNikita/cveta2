@@ -244,15 +244,31 @@ def _stop_child(child: subprocess.Popen[str], signum: int) -> None:
 
     A Ctrl-C while waiting kills it at once.
     """
+    if child.returncode is not None:
+        warn("WARNING: child already reaped; descendant cleanup cannot be verified.")
+        return
     with suppress(ProcessLookupError, PermissionError):
         os.killpg(child.pid, signum)
-    with suppress(subprocess.TimeoutExpired, KeyboardInterrupt):
-        child.wait(timeout=CHILD_GRACE_SECONDS)
-    if child.poll() is None:
-        # The group leader is alive, so its group id cannot have been reused.
+    try:
+        # Keep the leader unreaped through the grace period: its descendants may
+        # ignore the signal even if it exits, and its PID must not be reused
+        # before signalling the entire owned group again.
+        with suppress(KeyboardInterrupt):
+            time.sleep(CHILD_GRACE_SECONDS)
+    finally:
         with suppress(ProcessLookupError, PermissionError):
             os.killpg(child.pid, signal.SIGKILL)
         child.wait()
+
+
+def _wait_child_exit(child: subprocess.Popen[str], timeout: float | None) -> None:
+    """Observe completion without reaping the process-group leader."""
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    while os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+        remaining = deadline - time.monotonic() if deadline is not None else 0.05
+        if timeout is not None and remaining <= 0:
+            raise subprocess.TimeoutExpired(child.args, timeout)
+        time.sleep(min(remaining, 0.05))
 
 
 def call(command: Sequence[str], *, cwd: Path | None = None, timeout: float | None = None) -> int:
@@ -271,10 +287,14 @@ def call(command: Sequence[str], *, cwd: Path | None = None, timeout: float | No
         list(command), cwd=cwd, text=True, env=child_env(), stdin=subprocess.DEVNULL, start_new_session=True
     ) as child:
         try:
-            return child.wait(timeout=timeout)
+            # Popen.wait() may reap the leader while handling KeyboardInterrupt.
+            # Observe exit without reaping so interruption cleanup still owns a
+            # pinned process-group identity, including surviving descendants.
+            _wait_child_exit(child, timeout)
         except BaseException as interrupt:
             _stop_child(child, signal.SIGINT if isinstance(interrupt, KeyboardInterrupt) else signal.SIGTERM)
             raise
+        return child.wait()
 
 
 def require_session_name(namespace: str) -> str:
@@ -1175,22 +1195,36 @@ class Session:
     def _download(self, url: str, target: Path, deadline: float, timeout: float) -> None:
         """Download *url* to *target*; a stalled or slow transfer blocks setup at the deadline."""
         what = f"the download of {url}"
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise self._seeding_blocked(timeout, what)
+        # A socket timeout only bounds inactivity. Run the transfer in an owned
+        # child so even a continuously trickling response has a wall-time bound.
+        script = """
+import shutil
+import sys
+import urllib.error
+import urllib.request
+
+try:
+    with urllib.request.urlopen(sys.argv[1], timeout=float(sys.argv[3])) as source, open(sys.argv[2], 'wb') as target:
+        shutil.copyfileobj(source, target)
+except (TimeoutError, urllib.error.URLError) as error:
+    if isinstance(error, urllib.error.URLError) and not isinstance(error.reason, TimeoutError):
+        raise
+    sys.exit(3)
+"""
         try:
-            socket_timeout = min(DOWNLOAD_SOCKET_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
-            with (
-                urllib.request.urlopen(url, timeout=socket_timeout) as response,  # noqa: S310 - fixed https URL
-                target.open("wb") as output,
-            ):
-                while chunk := response.read(1 << 20):
-                    if time.monotonic() >= deadline:
-                        raise self._seeding_blocked(timeout, what)
-                    output.write(chunk)
-        except (TimeoutError, urllib.error.URLError) as error:
-            if isinstance(error, urllib.error.URLError) and not isinstance(error.reason, TimeoutError):
-                raise
-            raise SetupBlockedError(
-                f"session {self.namespace} seeding stalled: {url} sent nothing for {socket_timeout:.0f} s"
-            ) from error
+            status = call(
+                [sys.executable, "-c", script, url, str(target), str(min(DOWNLOAD_SOCKET_TIMEOUT_SECONDS, remaining))],
+                cwd=self.root,
+                timeout=remaining,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise self._seeding_blocked(timeout, what) from error
+        if status == 3:
+            raise self._seeding_blocked(timeout, what)
+        self._require(status, what)
 
     # -- teardown ---------------------------------------------------------
 

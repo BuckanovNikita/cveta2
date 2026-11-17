@@ -939,6 +939,28 @@ def _create_answers(client: CvatClient, status: int) -> Iterator[None]:
         client.api.create_task = original  # type: ignore[method-assign]
 
 
+@pytest.mark.parametrize("column", ["bbox_x_tl", "custom_numeric_property"])
+@pytest.mark.parametrize("value", [float("inf"), float("-inf")])
+def test_nonfinite_upload_intent_is_typed_before_remote_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, column: str, value: float
+) -> None:
+    client = make_client()
+    s3 = _ListCountingS3()
+    make_s3(monkeypatch, s3)
+    image_dir = make_local_images(tmp_path, ["a.jpg"])
+    row = annotation_row("a.jpg", instance_label="", instance_shape="none")
+    row[column] = value
+
+    with pytest.raises(Cveta2Error, match=r"a\.jpg") as caught:
+        upload_cvat_dataset(client, make_request(image_names=["a.jpg"], rows=[row], search_dirs=[image_dir]))
+
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert s3.list_calls == 0
+    assert s3.objects == {}
+    assert _writes_of(client).created_tasks == []
+    assert not get_upload_manifest_dir(PROJECT_ID, host=client.host).exists()
+
+
 class TestCreateRejection:
     """A definitive refusal of the create is not an unknown outcome."""
 
@@ -1086,7 +1108,10 @@ class TestS3FailureAbortsBeforeTaskCreation:
 
         assert _writes_of(client).created_tasks == []
 
-    def test_an_image_found_nowhere_stops_the_upload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("deleted", [False, True])
+    def test_an_image_found_nowhere_stops_the_upload(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, deleted: bool
+    ) -> None:
         """A name that is neither local nor on S3 reaches the same dead end.
 
         Bound into the task anyway, CVAT would reject the data after the
@@ -1101,11 +1126,16 @@ class TestS3FailureAbortsBeforeTaskCreation:
         with pytest.raises(Cveta2Error, match=r"c\.jpg") as caught:
             upload_cvat_dataset(
                 client,
-                make_request(image_names=["a.jpg", "c.jpg"], search_dirs=[image_dir]),
+                make_request(
+                    image_names=["a.jpg"] if deleted else ["a.jpg", "c.jpg"],
+                    deleted_names=["c.jpg"] if deleted else [],
+                    search_dirs=[image_dir],
+                ),
             )
 
         assert "a.jpg" not in str(caught.value)
-        assert s3.uploaded_keys == [current_month_key("a.jpg")]
+        assert s3.objects == {}
+        assert s3.uploaded_keys == []
         assert _writes_of(client).created_tasks == []
         assert list_manifests(PROJECT_ID, host=client.host) == []
 

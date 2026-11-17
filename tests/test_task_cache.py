@@ -1195,19 +1195,47 @@ class TestUnusableS3Mirror:
         assert any("S3-кэш аннотаций недоступен" in message for message in capture_logs)
 
     @pytest.mark.parametrize("task_cache_s3", _MALFORMED_TASK_CACHE_S3)
-    def test_api_mutation_succeeds_when_invalidation_cannot_build_the_mirror(
-        self, normal_fake: LoadedFixtures, tmp_path: Path, capture_logs: list[str], task_cache_s3: str
+    def test_api_mutation_refuses_malformed_shared_cache_settings_before_writing(
+        self, normal_fake: LoadedFixtures, tmp_path: Path, task_cache_s3: str
     ) -> None:
         config_path = _write_task_cache_s3_config(
             tmp_path, normal_fake.project.name, normal_fake.project.id, task_cache_s3
         )
-        _api, connection = _scoped(normal_fake, cloud_storage=_PROJECT_STORAGE, config_path=config_path)
+        api, connection = _scoped(normal_fake, cloud_storage=_PROJECT_STORAGE, config_path=config_path)
         task = normal_fake.tasks[0]
+
+        with pytest.raises(Cveta2Error, match="task_cache_s3"):
+            cveta2.task_set_status(normal_fake.project.id, task.id, state="in progress", connection=connection)
+
+        assert api.writes.job_updates == []
+
+    @pytest.mark.parametrize("task_cache_s3", _MALFORMED_TASK_CACHE_S3)
+    def test_api_mutation_succeeds_when_cache_settings_become_invalid_after_writing(
+        self,
+        normal_fake: LoadedFixtures,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_logs: list[str],
+        task_cache_s3: str,
+    ) -> None:
+        config_path = _write_task_cache_s3_config(
+            tmp_path, normal_fake.project.name, normal_fake.project.id, "s3://cache/tasks"
+        )
+        api, connection = _scoped(normal_fake, cloud_storage=_PROJECT_STORAGE, config_path=config_path)
+        task = normal_fake.tasks[0]
+        update_job = api.update_job
+
+        def update_then_damage_config(job_id: int, *, stage: str | None = None, state: str | None = None) -> None:
+            update_job(job_id, stage=stage, state=state)
+            _write_task_cache_s3_config(tmp_path, normal_fake.project.name, normal_fake.project.id, task_cache_s3)
+
+        monkeypatch.setattr(api, "update_job", update_then_damage_config)
 
         updated = cveta2.task_set_status(normal_fake.project.id, task.id, state="in progress", connection=connection)
 
         assert updated > 0
-        assert capture_logs
+        assert len(api.writes.job_updates) == updated
+        assert any("не удалось прочитать настройки кэша" in message for message in capture_logs)
 
     def test_invalidation_warns_when_the_cache_settings_cannot_load(
         self, tmp_path: Path, capture_logs: list[str]

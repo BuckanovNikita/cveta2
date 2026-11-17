@@ -24,6 +24,7 @@ from cveta2.interfaces.commands.doctor import (
     check_config,
     collect_cache_roots,
 )
+from tests.helpers import write_config_yaml
 
 # ---------------------------------------------------------------------------
 # check_config
@@ -50,13 +51,29 @@ def test_check_config(tmp_path: Path, cfg: CvatConfig, cache_dir: str | None, *,
             "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch("cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg),
+        patch("cveta2.interfaces.commands.doctor.CvatConfig.load", return_value=cfg),
         patch(
             "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ic_cfg,
         ),
     ):
         assert check_config() is expected
+
+
+def test_check_config_without_personal_file_uses_shared_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared = write_config_yaml(tmp_path / "projects.yaml", schema_version=1, cvat={"host": "https://shared.example"})
+    personal = tmp_path / "missing-personal.yaml"
+    monkeypatch.setenv("CVETA2_CONFIG", str(personal))
+    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(shared))
+    monkeypatch.delenv("CVAT_HOST", raising=False)
+    monkeypatch.delenv("CVAT_ORGANIZATION", raising=False)
+    monkeypatch.setenv("CVAT_USERNAME", "user")
+    monkeypatch.setenv("CVAT_PASSWORD", "password")
+
+    assert check_config() is True
+    assert not personal.exists()
 
 
 # ---------------------------------------------------------------------------
