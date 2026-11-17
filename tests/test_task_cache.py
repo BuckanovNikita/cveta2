@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
-from botocore.exceptions import ClientError, EndpointConnectionError
+from botocore.exceptions import ClientError, EndpointConnectionError, ProfileNotFound
 
 import cveta2
 from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
@@ -48,10 +48,10 @@ from cveta2.domain.models import (
     TaskInfo,
 )
 from cveta2.domain.storage import CloudStorageInfo
+from tests.api_helpers import _scoped
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.api_helpers import _scoped
 from tests.helpers import CFG, build_fake, csv_row, make_bbox, make_task, write_split_config_yaml
 
 if TYPE_CHECKING:
@@ -1148,3 +1148,103 @@ class TestInvalidationFollowsTheSelectedConfig:
         cveta2.upload(dataset, project=normal_fake.project.id, name="t", connection=connection)
 
         assert seen == [config_path]
+
+
+_MALFORMED_TASK_CACHE_S3 = ["s3://", "s3:///x", "/", "  "]
+
+
+def _write_task_cache_s3_config(tmp_path: Path, project_name: str, project_id: int, task_cache_s3: str) -> Path:
+    return write_split_config_yaml(
+        tmp_path / "mirror.yaml",
+        project_ids={project_name: project_id},
+        cache={"projects": {project_name: {"task_cache_s3": task_cache_s3}}},
+    )
+
+
+def _missing_profile(_endpoint: str | None) -> None:
+    raise ProfileNotFound(profile="absent")
+
+
+class TestUnusableS3Mirror:
+    """A mirror that cannot be configured or reached never escapes as a raw error."""
+
+    @pytest.mark.parametrize("task_cache_s3", _MALFORMED_TASK_CACHE_S3)
+    def test_a_malformed_location_is_a_typed_error(self, task_cache_s3: str) -> None:
+        with (
+            patch("cveta2.adapters.s3.task_cache.make_s3_client", return_value=FakeS3Client()),
+            pytest.raises(Cveta2Error, match="task_cache_s3"),
+        ):
+            S3CacheBackend.from_cloud_storage(_PROJECT_STORAGE, task_cache_s3=task_cache_s3)
+
+    def test_fetch_without_an_s3_client_warns_and_uses_the_local_cache(
+        self, normal_fake: LoadedFixtures, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        fake = normal_fake
+        task = fake.tasks[0]
+        api = FakeCvatApi(fake, cloud_storage=_PROJECT_STORAGE)
+
+        with patch("cveta2.adapters.s3.task_cache.make_s3_client", side_effect=_missing_profile):
+            fetch_selected_tasks(
+                CvatClient(CFG, api=api),
+                FetchTarget(fake.project.id, fake.project.name, tmp_path / "out", None),
+                FetchOptions(task_selector=[task.name]),
+            )
+
+        assert api.annotation_calls == [task.id]
+        assert (get_task_cache_dir(fake.project.id) / f"task_{task.id}.json").exists()
+        assert any("S3-кэш аннотаций недоступен" in message for message in capture_logs)
+
+    @pytest.mark.parametrize("task_cache_s3", _MALFORMED_TASK_CACHE_S3)
+    def test_api_mutation_succeeds_when_invalidation_cannot_build_the_mirror(
+        self, normal_fake: LoadedFixtures, tmp_path: Path, capture_logs: list[str], task_cache_s3: str
+    ) -> None:
+        config_path = _write_task_cache_s3_config(
+            tmp_path, normal_fake.project.name, normal_fake.project.id, task_cache_s3
+        )
+        _api, connection = _scoped(normal_fake, cloud_storage=_PROJECT_STORAGE, config_path=config_path)
+        task = normal_fake.tasks[0]
+        cache_dir = get_task_cache_dir(normal_fake.project.id)
+        TaskAnnotationCache(cache_dir).put(make_task(task.id, updated=_UPDATED), _payload(task.id))
+
+        updated = cveta2.task_set_status(normal_fake.project.id, task.id, state="in progress", connection=connection)
+
+        assert updated > 0
+        assert not (cache_dir / f"task_{task.id}.json").exists()
+        assert capture_logs
+
+    def test_api_mutation_succeeds_without_an_s3_client(
+        self, normal_fake: LoadedFixtures, capture_logs: list[str]
+    ) -> None:
+        api, connection = _scoped(normal_fake, cloud_storage=_PROJECT_STORAGE)
+        task = normal_fake.tasks[0]
+
+        with patch("cveta2.adapters.s3.task_cache.make_s3_client", side_effect=_missing_profile):
+            cveta2.task_delete(normal_fake.project.id, task.id, connection=connection)
+
+        assert api.writes.deleted_tasks == [task.id]
+        assert capture_logs
+
+    def test_a_failed_invalidation_never_masks_the_mutation_error(
+        self, normal_fake: LoadedFixtures, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        config_path = _write_task_cache_s3_config(tmp_path, normal_fake.project.name, normal_fake.project.id, "s3://")
+        client = CvatClient(CFG, api=FakeCvatApi(normal_fake, cloud_storage=_PROJECT_STORAGE))
+        task = normal_fake.tasks[0]
+
+        with (
+            pytest.raises(CvatApiError, match="mutation refused"),
+            client,
+            resolved_task(client, normal_fake.project.id, normal_fake.project.name, task.id, config_path=config_path),
+        ):
+            raise CvatApiError("mutation refused", status_code=403)
+        assert capture_logs
+
+    def test_upload_invalidation_warns_instead_of_raising(self, tmp_path: Path, capture_logs: list[str]) -> None:
+        config_path = _write_task_cache_s3_config(tmp_path, "proj", 5, "s3://")
+        cache_dir = get_task_cache_dir(5)
+        TaskAnnotationCache(cache_dir).put(make_task(updated=_UPDATED), _payload())
+
+        upload_dependencies(config_path=config_path).invalidate(5, 1, "proj", _PROJECT_STORAGE)
+
+        assert not (cache_dir / "task_1.json").exists()
+        assert capture_logs

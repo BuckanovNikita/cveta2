@@ -7,6 +7,9 @@ from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
 
+from loguru import logger
+from pydantic import ValidationError
+
 from cveta2.adapters.config.settings import (
     CacheConfig,
     IgnoreConfig,
@@ -22,6 +25,7 @@ from cveta2.adapters.s3.upload import S3UploadStorage
 from cveta2.application.client import ApplicationClient
 from cveta2.application.ports.cache import CacheInvalidator
 from cveta2.application.use_cases import fetch, resolve, task_ops, upload
+from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import ProjectAnnotations, TaskInfo
 from cveta2.domain.partition import PartitionResult
 from cveta2.domain.storage import CloudStorageInfo
@@ -75,9 +79,20 @@ def invalidate_local_entry(
 
     *config_path* selects the configuration file whose cache settings name
     the entry, the same file a fetch with that path writes through.
+    It runs after a successful remote write, so expected failures warn and
+    never raise: a broken mirror still drops the local entry.
     """
-    settings = CacheConfig.load(config_path).for_project(project_name)
-    cache = AnnotationCacheFactory().create(project_id, cs_info, settings, local_only=is_cache_disabled())
+    try:
+        settings = CacheConfig.load(config_path).for_project(project_name)
+    except (Cveta2Error, ValidationError, OSError) as error:
+        logger.warning(f"Кэш задачи {task_id} не очищен: не удалось прочитать настройки кэша ({error}).")
+        return
+    factory = AnnotationCacheFactory()
+    try:
+        cache = factory.create(project_id, cs_info, settings, local_only=is_cache_disabled())
+    except Cveta2Error as error:
+        logger.warning(f"S3-кэш задачи {task_id} не очищен: {error} — очищен только локальный кэш.")
+        cache = factory.create(project_id, None, settings, local_only=True)
     cache.invalidate(task_id)
 
 
