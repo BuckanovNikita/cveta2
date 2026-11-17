@@ -239,6 +239,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
         registry_hash=_registry_hash(records),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
+        s3_roots=S3Roots(),
         parent_id=parent.dataset_id if parent else None,
         parent_version=parent.version if parent else None,
         parent_metadata=previous,

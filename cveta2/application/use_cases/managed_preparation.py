@@ -9,6 +9,7 @@ from typing import cast
 
 import pandas as pd
 
+from cveta2.application.ports.dataset_bundle import S3Storage
 from cveta2.application.ports.managed_preparation import (
     CapturedManagedInput,
     ManagedPreparationFiles,
@@ -131,6 +132,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     registry_hash: str,
     files: ManagedPreparationFiles,
     media: MediaInspector,
+    s3_roots: S3Storage,
     parent_id: str | None = None,
     parent_version: str | None = None,
     parent_metadata: DatasetMetadata | None = None,
@@ -156,6 +158,8 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
             raise ManagedError("Split policy changed; choose a new dataset lineage")
         previous.update(parent_metadata.managed.assignments)
     files.check_roots(captured.frame, metadata)
+    for root in metadata.images.s3_root:
+        s3_roots.check_root(root)
     legacy: ParentSplits | None = None
     if parent_metadata is not None and parent_metadata.managed is None:
         if parent_rows is None:

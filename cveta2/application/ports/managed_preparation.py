@@ -30,6 +30,7 @@ class CapturedManagedInput:
     snapshot: ManagedSnapshot
     source_tables: dict[str, FetchTables]
     origins: frozenset[tuple[str, int, int, int]]
+    source_directory: Path
 
 
 @dataclass(frozen=True)

@@ -104,6 +104,7 @@ class LocalManagedPreparationFiles:
                 snapshot=snapshot,
                 source_tables=tables,
                 origins=_origins(snapshot),
+                source_directory=source_path.parent.resolve(),
             )
         except (OSError, ValidationError) as error:
             raise ManagedError(f"Cannot capture managed preparation inputs: {error}") from error
@@ -191,6 +192,8 @@ class LocalManagedPreparationFiles:
         """Create a new preparation with the record completion marker written last."""
         if directory.exists() or directory.is_symlink():
             raise ManagedError(f"Preparation directory already exists: {directory}")
+        if directory.resolve().is_relative_to(captured.source_directory):
+            raise ManagedError(f"Preparation must be outside the fetch source directory: {directory}")
         try:
             directory.parent.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(prefix=".cveta2-managed-", dir=directory.parent) as temporary:
