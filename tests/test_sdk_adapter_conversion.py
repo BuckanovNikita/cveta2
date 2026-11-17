@@ -158,6 +158,22 @@ class TestConvertLabel:
 
         assert convert_label(label) == LabelInfo(id=1, name="car")
 
+    @pytest.mark.parametrize("check_type", [True, False], ids=["enum", "raw-string"])
+    def test_sdk_attribute_input_type_preserves_enum_and_raw_string(self, *, check_type: bool) -> None:
+        attribute = cvat_models.Attribute(
+            id=10,
+            name="visibility",
+            mutable=False,
+            input_type="select",
+            values=["visible", "hidden"],
+            _check_type=check_type,
+        )
+        label = cvat_models.Label(id=1, name="car", attributes=[attribute])
+
+        converted = convert_label(label)
+
+        assert converted.attributes[0].input_type == "select"
+
     def test_basic_label(self) -> None:
         label = SimpleNamespace(id=1, name="car", color="#ff0000", attributes=[])
         result = convert_label(label)
