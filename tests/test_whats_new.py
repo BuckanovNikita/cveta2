@@ -248,12 +248,18 @@ class TestComputeCutoff:
         baseline = compute_baseline(pd.DataFrame([_row(1)]), tmp_path / "dataset.csv")
         assert baseline.known_task_ids == {1, 20}
 
-    @pytest.mark.parametrize("obsolete", [None, 'a,b\n"unclosed\n'])
+    @pytest.mark.parametrize(
+        "obsolete",
+        [None, 'a,b\n"unclosed\n', b"image_name,task_id\n\xff\xfe,6\n"],
+        ids=["missing", "malformed", "invalid-utf8"],
+    )
     def test_a_missing_or_unreadable_sibling_does_not_stop_the_later_ones(
-        self, tmp_path: Path, obsolete: str | None
+        self, tmp_path: Path, obsolete: str | bytes | None
     ) -> None:
         """A bad obsolete.csv costs its own ids; deleted.csv after it is still read."""
-        if obsolete is not None:
+        if isinstance(obsolete, bytes):
+            (tmp_path / "obsolete.csv").write_bytes(obsolete)
+        elif obsolete is not None:
             (tmp_path / "obsolete.csv").write_text(obsolete, encoding="utf-8")
         write_dataset_csv(tmp_path / "deleted.csv", [_row(6)])
         df = pd.DataFrame([_row(7)])

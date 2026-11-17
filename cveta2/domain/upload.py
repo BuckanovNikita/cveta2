@@ -15,6 +15,10 @@ from cveta2.domain.storage import CloudStorageInfo
 MANIFEST_SCHEMA_VERSION = 3
 
 
+class UploadInProgressError(Cveta2Error):
+    """Another process is running the same upload right now."""
+
+
 class UploadManifest(BaseModel):
     """One unfinished upload, keyed by what it was uploading."""
 

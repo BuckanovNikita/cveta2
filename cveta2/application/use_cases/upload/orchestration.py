@@ -20,6 +20,7 @@ from cveta2.application.use_cases.upload.types import (
     _StagedUpload,
 )
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.paths import validate_upload_image_names
 from cveta2.domain.upload import UploadManifest, validate_upload_boxes
 
 
@@ -73,8 +74,22 @@ def upload_dataset(client: CvatClient, request: UploadRequest, *, deps: UploadDe
     moment a task id exists, so ``resume=True`` can continue an upload that
     died partway.  It is removed once the upload finishes.
     """
+    validate_upload_image_names([*request.plan.image_names, *request.plan.deleted_names])
     validate_upload_boxes(request.plan.annotations)
     fingerprint = request_fingerprint(request)
+    # Held for the whole run: two runs of one upload would otherwise both
+    # pass the unfinished-upload check below and each create a task.
+    lock = deps.manifests.lock(request.project_id, fingerprint, host=client.host)
+    try:
+        return _upload_locked(client, request, fingerprint, deps=deps)
+    finally:
+        lock.release()
+
+
+def _upload_locked(
+    client: CvatClient, request: UploadRequest, fingerprint: str, *, deps: UploadDependencies
+) -> UploadOutcome:
+    """Run the upload chain while this process holds the upload's lock."""
     if request.resume:
         manifest = _resume_manifest(request, fingerprint, host=client.host, deps=deps)
         if manifest.completed_counts is not None:
@@ -86,8 +101,10 @@ def upload_dataset(client: CvatClient, request: UploadRequest, *, deps: UploadDe
             )
             return _completed_outcome(request, manifest)
         if manifest.creation_pending and manifest.task_id is None:
+            manifest_path = deps.manifests.path(request.project_id, fingerprint, host=client.host)
             raise Cveta2Error(
-                "Результат создания задачи неизвестен; проверьте CVAT вручную. Новая задача не создаётся."
+                "Результат создания задачи неизвестен; проверьте CVAT вручную. Новая задача не создаётся. "
+                f"Если задача не создана, удалите состояние загрузки {manifest_path} и повторите команду."
             )
         current_storage = client.detect_project_cloud_storage(request.project_id)
         if current_storage != manifest.cs_info:

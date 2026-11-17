@@ -47,6 +47,32 @@ def test_read_exclude_names_reads_the_image_name_column(tmp_path: Path, content:
     assert read_exclude_names(str(csv)) == expected
 
 
+@pytest.mark.parametrize(
+    "content",
+    [b"", "image_name\nкот.jpg\n".encode("cp1251"), b'image_name\n"unterminated\n'],
+    ids=["empty", "not_utf8", "malformed"],
+)
+def test_read_exclude_names_unreadable_file_is_a_typed_error_naming_it(tmp_path: Path, content: bytes) -> None:
+    csv = tmp_path / "in_progress.csv"
+    csv.write_bytes(content)
+    with pytest.raises(Cveta2Error, match=r"in_progress\.csv"):
+        read_exclude_names(str(csv))
+
+
+def test_read_exclude_names_header_only_file_excludes_nothing(tmp_path: Path) -> None:
+    csv = tmp_path / "in_progress.csv"
+    csv.write_text("image_name,task_id\n", encoding="utf-8")
+    assert read_exclude_names(str(csv)) == set()
+
+
+def test_read_exclude_names_without_the_column_warns(tmp_path: Path, capture_logs: list[str]) -> None:
+    """The pinned empty result stays, but excluding nothing must not be silent."""
+    csv = tmp_path / "in_progress.csv"
+    csv.write_text("col_a,col_b\n1,2\n", encoding="utf-8")
+    assert read_exclude_names(str(csv)) == set()
+    assert any("image_name" in message and "in_progress.csv" in message for message in capture_logs)
+
+
 def test_read_exclude_names_missing_file(tmp_path: Path) -> None:
     """The error must name the file; ``Cveta2Error(None)`` stringifies to "None"."""
     with pytest.raises(Cveta2Error, match=r"nope\.csv"):
