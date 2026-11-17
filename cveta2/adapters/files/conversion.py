@@ -24,7 +24,6 @@ from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import CSV_COLUMNS
 from cveta2.domain.output import CSV_WRITE_OPTIONS, format_counts_ru
 
-
 # Prediction lookup also accepts ``.tif``; it stays out of ``_IMAGE_EXTENSIONS``
 # so YOLO re-export pruning does not start deleting ``.tif`` files.
 _STEM_LOOKUP_EXTENSIONS = (*_IMAGE_EXTENSIONS, ".tif")
