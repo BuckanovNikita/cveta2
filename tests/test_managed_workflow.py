@@ -28,7 +28,7 @@ from cveta2.composition import managed
 from cveta2.domain.bundle.models import ApiClass, DatasetParent, Publication
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
-from cveta2.domain.models import LabelInfo, TaskInfo
+from cveta2.domain.models import LabelAttributeInfo, LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
 from cveta2.interfaces.cli import main
 
@@ -53,12 +53,42 @@ class FakeCvat:
         self.issues: dict[int, list[RawIssue]] = {101: [], 102: []}
         self.fail_issues = False
         self.advance_issue_timestamp = False
+        self.labels = {
+            project: [
+                LabelInfo(
+                    id=1,
+                    name="cat",
+                    color="#123456",
+                    type="rectangle",
+                    project_id=project,
+                    attributes=[
+                        LabelAttributeInfo(
+                            id=4,
+                            name="quality",
+                            mutable=True,
+                            input_type="select",
+                            default_value="good",
+                            values=["good", "poor"],
+                        )
+                    ],
+                ),
+                LabelInfo(
+                    id=2,
+                    name="pose",
+                    type="skeleton",
+                    project_id=project,
+                    svg='<svg><circle data-node-id="3" /></svg>',
+                    sublabels=[LabelInfo(id=3, name="head", type="points", parent_id=2, has_parent=True)],
+                ),
+            ]
+            for project in (12, 27)
+        }
 
     def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         return [task for task in self.tasks.values() if task.project_id == project_id]
 
-    def get_project_labels(self, _project_id: int) -> list[LabelInfo]:
-        return [LabelInfo(id=1, name="cat")]
+    def get_project_labels(self, project_id: int) -> list[LabelInfo]:
+        return self.labels[project_id]
 
     def get_task(self, task_id: int) -> TaskInfo:
         return self.tasks[task_id]
@@ -367,6 +397,32 @@ def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workfl
     assert compared["rows"]["removed"] == 0
 
 
+def test_full_registry_and_labels_survive_fetch_prepare_and_publication(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    result = api.publish_dataset(prepared, **workflow.options)
+    expected_registry = [
+        {
+            "id": 90,
+            "number": 7,
+            "name": "cat",
+            "techClass": False,
+            "isPeriodical": False,
+            "isCritical": False,
+            "threshold": 0.5,
+        }
+    ]
+    fetched = yaml.safe_load((tmp_path / "fetched" / "source-snapshot.yaml").read_text())
+    local = yaml.safe_load((prepared / "tasks.yaml").read_text())["managed"]
+    published = yaml.safe_load((workflow.clearml.root / result.dataset_id / "tasks.yaml").read_text())["managed"]
+    for snapshot in (fetched, local, published):
+        assert snapshot.get("registry") == expected_registry
+        for source in snapshot["sources"]:
+            if source["type"] == "cvat":
+                assert source.get("labels") == [
+                    label.model_dump(mode="json") for label in workflow.cvat.get_project_labels(source["project_id"])
+                ]
+
+
 def test_feedback_retry_and_own_timestamp_change_allow_clean_publication(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path, bad=True)
     workflow.cvat.advance_issue_timestamp = True
@@ -393,7 +449,7 @@ def test_feedback_failure_blocks_remote_publication(workflow: Workflow, tmp_path
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
-@pytest.mark.parametrize("change", ["definition", "parent", "cvat", "s3", "image"])
+@pytest.mark.parametrize("change", ["definition", "parent", "cvat", "label-attribute", "s3", "image"])
 def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path, change: str) -> None:
     prepared = _prepare(workflow, tmp_path)
     if change == "definition":
@@ -408,6 +464,11 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
         workflow.clearml.latest_id = "competing"
     elif change == "cvat":
         workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
+    elif change == "label-attribute":
+        label = workflow.cvat.labels[12][0]
+        workflow.cvat.labels[12] = [
+            label.model_copy(update={"attributes": [label.attributes[0].model_copy(update={"default_value": "poor"})]})
+        ]
     elif change == "s3":
         workflow.s3.content += b"\n"
     else:
@@ -415,3 +476,65 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
     with pytest.raises(ManagedError):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels", "changed-registry", "changed-labels"])
+def test_incomplete_or_corrupt_prepared_records_block_publication(
+    workflow: Workflow, tmp_path: Path, damage: str
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    source_path = prepared / "source-snapshot.yaml"
+    tasks_path = prepared / "tasks.yaml"
+    record_path = prepared / "preparation.json"
+    source = yaml.safe_load(source_path.read_text())
+    tasks = yaml.safe_load(tasks_path.read_text())
+    record = json.loads(record_path.read_text())
+    # Keep byte bindings consistent, as in an old or corrupted exporter, so the
+    # publication check must inspect the records themselves rather than checksums.
+    for snapshot in (source, tasks["managed"], record["snapshot"]):
+        if damage == "missing-registry":
+            snapshot.pop("registry")
+        elif damage == "missing-labels":
+            snapshot["sources"][0].pop("labels")
+        elif damage == "changed-registry":
+            snapshot["registry"][0]["threshold"] = 0.75
+        else:
+            snapshot["sources"][0]["labels"][0]["attributes"][0]["default_value"] = "poor"
+    source_path.write_text(yaml.safe_dump(source))
+    tasks_path.write_text(yaml.safe_dump(tasks))
+    record["source_hash"] = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    record["payload_hashes"]["tasks.yaml"] = hashlib.sha256(tasks_path.read_bytes()).hexdigest()
+    record_path.write_text(json.dumps(record))
+    (prepared / "preparation.sha256").write_text(hashlib.sha256(record_path.read_bytes()).hexdigest())
+
+    with pytest.raises(ManagedError, match=r"fetch|fingerprint|records|definitions"):
+        api.publish_dataset(prepared, **workflow.options)
+
+    assert workflow.clearml.publications == []
+    assert all(not issues for issues in workflow.cvat.issues.values())
+
+
+@pytest.mark.parametrize("missing", ["registry", "labels"])
+def test_legacy_published_parent_refetches_all_tasks_and_preserves_splits(
+    workflow: Workflow, tmp_path: Path, missing: str
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    published = api.publish_dataset(prepared, **workflow.options)
+    tasks_path = workflow.clearml.root / published.dataset_id / "tasks.yaml"
+    tasks = yaml.safe_load(tasks_path.read_text())
+    assignments = tasks["managed"]["assignments"]
+    assert assignments
+    if missing == "registry":
+        tasks["managed"].pop("registry")
+    else:
+        tasks["managed"]["sources"][0].pop("labels")
+    tasks_path.write_text(yaml.safe_dump(tasks))
+    workflow.cvat.annotation_reads.clear()
+
+    api.fetch_dataset("combined", output_dir=tmp_path / "refetched", **workflow.options)
+
+    refreshed = LocalSourceFiles().read_snapshot(tmp_path / "refetched")
+    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
+    assert refreshed.assignments == assignments
+    assert refreshed.registry is not None
+    assert all(source.labels is not None for source in refreshed.sources if source.type == "cvat")

@@ -17,6 +17,7 @@ from cveta2.application.ports.verification import MediaInspector
 from cveta2.domain.bundle.models import DatasetMetadata, TaskManifest
 from cveta2.domain.bundle.tasks import derive_tasks
 from cveta2.domain.bundle.validation import validate_bundle
+from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
     ManagedError,
     ManagedMetadata,
@@ -136,6 +137,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     definition = config.datasets[name]
     captured = files.capture(transformed, source)
     snapshot = captured.snapshot
+    require_complete_evidence(snapshot)
     if snapshot.definition_hash != definition_hash:
         raise ManagedError("Source definition changed; fetch the managed dataset again")
     if snapshot.registry_hash != registry_hash:
