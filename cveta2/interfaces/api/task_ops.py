@@ -8,7 +8,7 @@ from cveta2.application.use_cases.resolve import resolve_project_spec
 from cveta2.composition.workflows import resolved_task
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import JOB_STAGES, JOB_STATES
-from cveta2.interfaces.api.connection import _open
+from cveta2.interfaces.api.connection import _config_path, _open
 from cveta2.interfaces.api.types import (
     Connection,  # noqa: TC001 - Public runtime annotations.
 )
@@ -37,7 +37,7 @@ def _resolved_task(
     """
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
-        with resolved_task(c, project_id, project_name, task) as task_info:
+        with resolved_task(c, project_id, project_name, task, config_path=_config_path(connection)) as task_info:
             yield c, task_info
 
 

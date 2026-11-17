@@ -75,12 +75,14 @@ class S3CacheBackend:
     images; an explicit ``cache.projects.<name>.task_cache_s3`` location
     stores them under ``{key_prefix}/task_annotations/`` instead.  Any S3
     failure (except a plain missing key) disables the backend for the
-    rest of the run.
+    rest of the run.  A client that cannot be constructed leaves the
+    backend unavailable from the start: reads and writes are skipped, and
+    only a strict deletion reports the original failure.
     """
 
     def __init__(
         self,
-        s3_client: S3Client,
+        s3_client: S3Client | None,
         bucket: str,
         key_prefix: str,
         *,
@@ -91,7 +93,8 @@ class S3CacheBackend:
         self._bucket = bucket
         self._key_prefix = key_prefix
         self._explicit_location = explicit_location
-        self._disabled = False
+        self._disabled = s3_client is None
+        self._unavailable: BotoCoreError | None = None
 
     @classmethod
     def from_cloud_storage(
@@ -107,29 +110,42 @@ class S3CacheBackend:
         bucket.  The project storage endpoint is used in both cases.
         """
         if task_cache_s3:
-            bucket, prefix = parse_sync_root(task_cache_s3)
+            try:
+                bucket, prefix = parse_sync_root(task_cache_s3)
+            except ValueError as e:
+                raise Cveta2Error(f"Некорректный task_cache_s3 {task_cache_s3!r}: {e}") from e
             if bucket is None:
                 if cs_info is None:
                     return None
                 bucket = cs_info.bucket
             endpoint_url = cs_info.endpoint_url if cs_info else ""
-            return cls(
-                make_s3_client(endpoint_url or None),
-                bucket,
-                prefix,
-                explicit_location=True,
-            )
+            return cls._connect(endpoint_url or None, bucket, prefix, explicit_location=True)
         if cs_info is None:
             return None
-        return cls(
-            make_s3_client(cs_info.endpoint_url or None),
-            cs_info.bucket,
-            cs_info.prefix,
-        )
+        return cls._connect(cs_info.endpoint_url or None, cs_info.bucket, cs_info.prefix)
+
+    @classmethod
+    def _connect(
+        cls,
+        endpoint_url: str | None,
+        bucket: str,
+        key_prefix: str,
+        *,
+        explicit_location: bool = False,
+    ) -> "S3CacheBackend":
+        """Build a backend, or an unavailable one when no client can be made."""
+        try:
+            client = make_s3_client(endpoint_url)
+        except BotoCoreError as e:
+            backend = cls(None, bucket, key_prefix, explicit_location=explicit_location)
+            backend._unavailable = e
+            backend._disable(e)
+            return backend
+        return cls(client, bucket, key_prefix, explicit_location=explicit_location)
 
     def get(self, task_id: int) -> bytes | None:
         """Fetch the raw cache entry for *task_id*, or None on miss/failure."""
-        if self._disabled:
+        if self._disabled or self._s3 is None:
             return None
         try:
             data = s3_get_bytes(self._s3, self._bucket, self._entry_key(task_id))
@@ -145,7 +161,7 @@ class S3CacheBackend:
 
     def put(self, task_id: int, data: bytes) -> None:
         """Store the raw cache entry for *task_id* (best effort)."""
-        if self._disabled:
+        if self._disabled or self._s3 is None:
             return
         try:
             _s3_put_bytes(self._s3, self._bucket, self._entry_key(task_id), data)
@@ -154,6 +170,12 @@ class S3CacheBackend:
 
     def delete(self, task_id: int, *, strict: bool = False) -> None:
         """Drop an entry; strict mutation preflight must succeed or raise."""
+        if self._s3 is None:
+            if strict:
+                raise Cveta2Error(
+                    f"Не удалось удалить S3-кэш задачи {task_id}: {self._unavailable}"
+                ) from self._unavailable
+            return
         if self._disabled and not strict:
             return
         try:

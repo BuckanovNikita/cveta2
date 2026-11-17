@@ -32,6 +32,17 @@ def _rows_are_finished(frame: "pd.DataFrame") -> "pd.Series[bool]":
     return finished.fillna(value=False)
 
 
+def usable_task_ids(values: "pd.Series") -> "pd.Series":
+    """Return *values* as numeric task IDs, with unusable cells as NaN.
+
+    Text, fractional and infinite cells name no task: they are dropped
+    rather than truncated, and one of them cannot turn the whole column
+    into text that no longer matches numeric IDs.
+    """
+    numeric = pd.to_numeric(values, errors="coerce")
+    return numeric.where(numeric % 1 == 0)
+
+
 def completed_task_ids(
     df: "pd.DataFrame",
     deleted_images: "list[DeletedImage] | None" = None,
@@ -50,7 +61,7 @@ def completed_task_ids(
     qualifies when it owns at least one row and no unfinished one, which
     the set difference expresses without either frame's row labels having
     to mean anything.  A row without a ``task_id`` belongs to no task and
-    neither qualifies nor disqualifies one.
+    neither qualifies nor disqualifies one; neither does an unusable one.
     """
     columns = ["task_id", "job_stage", "job_state"]
     if "task_completed" in df:
@@ -74,7 +85,7 @@ def completed_task_ids(
     unfinished: set[int] = set()
     for frame in frames:
         is_finished = _rows_are_finished(frame)
-        task_ids = frame["task_id"]
+        task_ids = usable_task_ids(frame["task_id"])
         finished |= {int(t) for t in task_ids[is_finished].dropna()}
         unfinished |= {int(t) for t in task_ids[~is_finished].dropna()}
     return finished - unfinished
