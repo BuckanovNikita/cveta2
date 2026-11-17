@@ -54,9 +54,16 @@ class RawDataMeta:
 
 @dataclass(frozen=True, slots=True)
 class RawAnnotations:
-    """Shapes for a task."""
+    """Shapes for a task, plus the labels of its tags and tracks.
+
+    Fetch exports only ``shapes``. ``tag_label_ids`` and ``track_label_ids``
+    hold one label id per tag or track and exist so label usage counting
+    sees every annotation that deleting a label would destroy.
+    """
 
     shapes: list[RawShape] = field(default_factory=list)
+    tag_label_ids: list[int] = field(default_factory=list)
+    track_label_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

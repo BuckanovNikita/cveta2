@@ -36,6 +36,7 @@ _CONTEXT_REQUIRED_OPS: list[tuple[str, Callable[[CvatClient], object]]] = [
     ("get_project", lambda c: c.get_project(1)),
     ("get_project_labels", lambda c: c.get_project_labels(1)),
     ("count_label_usage", lambda c: c.count_label_usage(1)),
+    ("label_usage", lambda c: c.label_usage(1)),
     ("detect_project_cloud_storage", lambda c: c.detect_project_cloud_storage(1)),
     ("prepare_fetch", lambda c: c.prepare_fetch(1)),
 ]

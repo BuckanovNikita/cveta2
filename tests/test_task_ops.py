@@ -230,6 +230,23 @@ class TestMarkFramesDeleted:
         api.get_task_data_meta.assert_called_once_with(7)
         api.set_deleted_frames.assert_called_once_with(7, [1])
 
+    def test_unmatched_image_names_are_warned_about(self, capture_logs: list[str]) -> None:
+        api = _api_with_frames("a.jpg", "b.jpg")
+        client = _client_with_api(api)
+
+        assert client.mark_frames_deleted(7, {"b.jpg", "missing.jpg"}) == 1
+        api.set_deleted_frames.assert_called_once_with(7, [1])
+        unmatched = [msg for msg in capture_logs if "missing.jpg" in msg]
+        assert unmatched
+        assert not any("b.jpg" in msg for msg in unmatched)
+
+    def test_all_names_matched_logs_no_unmatched_warning(self, capture_logs: list[str]) -> None:
+        api = _api_with_frames("a.jpg", "b.jpg")
+        client = _client_with_api(api)
+
+        assert client.mark_frames_deleted(7, {"a.jpg"}) == 1
+        assert not any("не найден" in msg for msg in capture_logs)
+
 
 class TestMarkFramesDeletedByIds:
     def test_already_deleted_frame_is_not_patched_or_counted(self) -> None:

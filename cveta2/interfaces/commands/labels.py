@@ -18,6 +18,7 @@ from cveta2.interfaces.commands._parsers import add_list_arg, add_project_arg
 if TYPE_CHECKING:
     import argparse
 
+    from cveta2.application.client.read import LabelUsage
     from cveta2.composition.client import CvatClient
     from cveta2.domain.models import LabelInfo
 
@@ -236,16 +237,28 @@ def _interactive_recolor(
     return client.get_project_labels(project_id)
 
 
-def _log_label_usage(selected_labels: "list[LabelInfo]", usage: dict[int, int]) -> bool:
-    """Log per-label annotation counts; return True if any label has annotations."""
-    has_annotations = False
+def _log_label_usage(selected_labels: "list[LabelInfo]", usage: "LabelUsage") -> bool:
+    """Log per-label annotation counts; return True if deletion may destroy annotations.
+
+    An incomplete count proves nothing about labels it found unused, so it
+    is reported as unknown and treated like a label with annotations.
+    """
+    if not usage.complete:
+        logger.warning(
+            f"Не удалось прочитать аннотации задач {list(usage.skipped_task_ids)}: "
+            f"точное число аннотаций выбранных меток неизвестно"
+        )
+    has_annotations = not usage.complete
     for label in selected_labels:
-        count = usage.get(label.id, 0)
+        count = usage.counts.get(label.id, 0)
         if count > 0:
             has_annotations = True
-            logger.warning(f"Метка {label.name!r} (id={label.id}): {count} аннотаций будет УНИЧТОЖЕНО")
-        else:
+            at_least = "" if usage.complete else "не менее "
+            logger.warning(f"Метка {label.name!r} (id={label.id}): {at_least}{count} аннотаций будет УНИЧТОЖЕНО")
+        elif usage.complete:
             logger.info(f"Метка {label.name!r} (id={label.id}): 0 аннотаций")
+        else:
+            logger.warning(f"Метка {label.name!r} (id={label.id}): число аннотаций неизвестно")
     return has_annotations
 
 
@@ -294,7 +307,7 @@ def _interactive_delete(
     selected_labels = [lbl for lbl in labels if lbl.id in set(selected_ids)]
 
     logger.info("Подсчёт аннотаций, использующих выбранные метки...")
-    usage = client.count_label_usage(project_id)
+    usage = client.label_usage(project_id)
     has_annotations = _log_label_usage(selected_labels, usage)
 
     confirmed = (

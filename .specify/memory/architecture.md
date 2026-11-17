@@ -277,8 +277,10 @@ while retaining lexical validation and symlink escape rejection.
 Domain errors own immutable request diagnostics exposed through the exceptions
 facade. CVAT adapters capture actual failed HTTP calls, including nested pages and
 comments, sanitize allowlisted context and preserve causes. A per-pool request
-wrapper copies the effective retry policy and changes only raise_on_status; shared
-pool settings and retry method/budget restrictions remain intact. Bootstrap and
+wrapper copies the effective retry policy and disables raise_on_status; for methods
+other than GET, HEAD and OPTIONS the copy also disables read, other and status
+retries and Retry-After replays, keeping connect retries. Shared pool settings and
+retry method/budget restrictions remain intact. Bootstrap and
 already-used injected clients are covered; SDK version checks remain advisory.
 Context-local state is reset after each operation/request. Final 502/503/504 statuses
 reach established task-level 5xx policy, and required-read 429 still aborts.

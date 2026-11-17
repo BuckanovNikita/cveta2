@@ -78,6 +78,8 @@ _CREDENTIAL = re.compile(
 _AUTH = re.compile(r"(?i)\b(bearer|basic|token)\s+[a-z0-9._~+/=-]+")
 _URL = re.compile(r"https?://[^\s<>\"']+")
 _POOL_LOCK = threading.Lock()
+# Methods urllib3 may replay after the server could have acted on the request.
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 @dataclass(frozen=True)
@@ -322,6 +324,21 @@ class _DiagnosticApiException(ApiException):  # type: ignore[misc]
         return format_diagnostics(self._cveta2_diagnostics)
 
 
+def _request_policy(policy: Retry, method: str) -> Retry:
+    """Copy *policy* for one request, never replaying a non-safe method.
+
+    The final response must reach cveta2, so status exhaustion never raises.
+    urllib3 also replays a non-safe method on a read error, on an error after
+    sending, on a forcelisted status and on any Retry-After answer, although
+    the server may already have applied it. Those retries are switched off
+    for anything but GET, HEAD and OPTIONS; connect retries remain, because
+    the request never reached the server.
+    """
+    if method.upper() in _SAFE_METHODS:
+        return policy.new(raise_on_status=False)
+    return policy.new(raise_on_status=False, read=0, other=0, status=0, respect_retry_after_header=False)
+
+
 def install_pool_capture(manager: urllib3.PoolManager) -> None:
     """Wrap this manager once; request-local retry copies leave pools untouched."""
     with _POOL_LOCK:
@@ -340,7 +357,7 @@ def install_pool_capture(manager: urllib3.PoolManager) -> None:
             pool = manager.connection_from_url(url)
             supplied = cast("Retry | bool | int | None", kwargs.get("retries"))
             policy = Retry.from_int(supplied, default=pool.retries)
-            kwargs["retries"] = policy.new(raise_on_status=False)
+            kwargs["retries"] = _request_policy(policy, method)
             try:
                 response = forward(method, url, *args, **kwargs)
             except (OSError, urllib3.exceptions.HTTPError):

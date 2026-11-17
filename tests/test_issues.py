@@ -430,9 +430,9 @@ class TestGetTaskIssuesAdapter:
         issue = SimpleNamespace(id=7, frame=3, resolved=False, position=[1, 2, 3, 4])
         sdk.api_client.issues_api.list_endpoint.call_with_http_info.return_value = _single_page([issue])
         comments = [
-            SimpleNamespace(message="первый"),
-            SimpleNamespace(message=None),
-            SimpleNamespace(message="третий"),
+            SimpleNamespace(id=1, message="первый"),
+            SimpleNamespace(id=2, message=None),
+            SimpleNamespace(id=3, message="третий"),
         ]
         sdk.api_client.comments_api.list_endpoint.call_with_http_info.return_value = _single_page(comments)
         adapter = SdkCvatApiAdapter(sdk)
@@ -452,6 +452,23 @@ class TestGetTaskIssuesAdapter:
         assert issues_call.kwargs["task_id"] == 42
         comments_call = sdk.api_client.comments_api.list_endpoint.call_with_http_info.call_args
         assert comments_call.kwargs["issue_id"] == 7
+
+    def test_comments_are_requested_and_returned_in_creation_order(self) -> None:
+        """CVAT's comment list defaults to newest first; the contract is creation order."""
+        sdk = MagicMock()
+        issue = SimpleNamespace(id=7, frame=0, resolved=False, position=[1, 2, 3, 4])
+        sdk.api_client.issues_api.list_endpoint.call_with_http_info.return_value = _single_page([issue])
+        newest_first = [
+            SimpleNamespace(id=31, message="reply: fixed?"),
+            SimpleNamespace(id=4, message="wrong label"),
+        ]
+        sdk.api_client.comments_api.list_endpoint.call_with_http_info.return_value = _single_page(newest_first)
+
+        result = SdkCvatApiAdapter(sdk).get_task_issues(42)
+
+        assert result[0].comments == ["wrong label", "reply: fixed?"]
+        comments_call = sdk.api_client.comments_api.list_endpoint.call_with_http_info.call_args
+        assert comments_call.kwargs["sort"] == "id"
 
     def test_no_issues_returns_empty_list(self) -> None:
         sdk = MagicMock()
