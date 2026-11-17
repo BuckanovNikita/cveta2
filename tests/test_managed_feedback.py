@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 
 from cveta2.adapters.cvat.managed_feedback import CvatFeedback
-from cveta2.adapters.files.managed_feedback import LocalFeedbackLedger
+from cveta2.adapters.files.managed_feedback import LocalFeedbackLedger, shared_ledger_path
 from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawDataMeta,
@@ -238,6 +238,18 @@ def test_checkpoint_failure_prevents_remote_write(tmp_path: Path, monkeypatch: p
     outcome = report_findings([_finding()], remote=remote, ledger=ledger)
     assert len(outcome.failed) == 1
     assert remote.creates == 0
+
+
+def test_shared_ledger_is_keyed_by_an_exact_snapshot_hash(tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"snapshot").hexdigest()
+    shared = shared_ledger_path(tmp_path / "state", digest)
+    first = LocalFeedbackLedger(tmp_path / "first", shared)
+    report_findings([_finding()], remote=_Remote(first), ledger=first)
+    second = LocalFeedbackLedger(tmp_path / "second", shared)
+    assert second.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "1"
+    for invalid in ("../escape", digest.upper(), digest[:-1]):
+        with pytest.raises(ManagedError):
+            shared_ledger_path(tmp_path / "state", invalid)
 
 
 def test_corrupt_or_symlinked_ledger_fails_closed(tmp_path: Path) -> None:

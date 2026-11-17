@@ -523,9 +523,12 @@ Managed local preparation uses `format_version=2` and binds captured sources,
 transformed CSV, payload hashes, media, the relevant resolved shared definition and
 exact parent. The format differs from standalone `format_version=1`; the behavior and
 freshness rules are owned by the managed specification linked above. Feedback delivery
-keeps its receipts in the preparation's `feedback.json`, separate from the payload: intent
+keeps its receipts separate from the payload, in
+`managed-feedback/<SHA-256 of source-snapshot.yaml>.json` next to the personal
+configuration file, so every preparation built from one fetch shares them: intent
 is recorded before each CVAT issue write and acknowledged afterwards, so an interrupted
-delivery resumes without duplicating issues.
+delivery resumes without duplicating issues. A preparation's own `feedback.json`
+written by earlier versions is still read.
 
 ### Public operations
 

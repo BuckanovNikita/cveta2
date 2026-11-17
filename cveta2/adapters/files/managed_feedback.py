@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
@@ -72,36 +73,59 @@ def _acknowledged_chain(
     return chain
 
 
+def shared_ledger_path(root: Path, source_hash: str) -> Path:
+    """Locate the ledger shared by every preparation of one fetched source snapshot."""
+    if re.fullmatch(r"[0-9a-f]{64}", source_hash) is None:
+        raise ManagedError("Invalid source snapshot hash for the feedback ledger")
+    return root / f"{source_hash}.json"
+
+
+def _read_ledger(path: Path) -> _Ledger:
+    if path.is_symlink():
+        raise ManagedError("Feedback ledger must be a regular nonsymlink file")
+    if not path.exists():
+        return _Ledger()
+    if not path.is_file():
+        raise ManagedError("Feedback ledger must be a regular nonsymlink file")
+    try:
+        ledger = _Ledger.model_validate(
+            json.loads(
+                path.read_text(encoding="utf-8"),
+                object_pairs_hook=_unique_pairs,
+            )
+        )
+    except (OSError, json.JSONDecodeError, UnicodeError, ValidationError) as error:
+        raise ManagedError("Cannot read feedback delivery ledger") from error
+    if any(marker != receipt.marker for marker, receipt in ledger.receipts.items()):
+        raise ManagedError("Feedback ledger index does not match its receipt")
+    return ledger
+
+
 class LocalFeedbackLedger:
     """Persist intent before a remote issue write and acknowledge it afterward."""
 
-    def __init__(self, directory: Path) -> None:
-        """Use one preparation-owned delivery file, never a public payload file."""
-        self._path = directory / "feedback.json"
+    def __init__(self, directory: Path, shared: Path | None = None) -> None:
+        """Keep receipts outside public payload files.
+
+        ``shared`` is the ledger of every preparation built from one fetch, so
+        each sees the others' acknowledged issue times. A preparation's own
+        ``feedback.json`` from before sharing is still read; new writes go to
+        ``shared`` when it is given.
+        """
+        self._local = directory / "feedback.json"
+        self._path = shared or self._local
 
     def _load(self) -> _Ledger:
-        if self._path.is_symlink():
-            raise ManagedError("Feedback ledger must be a regular nonsymlink file")
-        if not self._path.exists():
-            return _Ledger()
-        if not self._path.is_file():
-            raise ManagedError("Feedback ledger must be a regular nonsymlink file")
-        try:
-            ledger = _Ledger.model_validate(
-                json.loads(
-                    self._path.read_text(encoding="utf-8"),
-                    object_pairs_hook=_unique_pairs,
-                )
-            )
-        except (OSError, json.JSONDecodeError, UnicodeError, ValidationError) as error:
-            raise ManagedError("Cannot read feedback delivery ledger") from error
-        if any(marker != receipt.marker for marker, receipt in ledger.receipts.items()):
-            raise ManagedError("Feedback ledger index does not match its receipt")
+        ledger = _read_ledger(self._path)
+        if self._path != self._local:
+            for marker, receipt in _read_ledger(self._local).receipts.items():
+                ledger.receipts.setdefault(marker, receipt)
         return ledger
 
     def _save(self, ledger: _Ledger) -> None:
         temporary: Path | None = None
         try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
             with NamedTemporaryFile(
                 prefix=".cveta2-feedback-",
                 dir=self._path.parent,

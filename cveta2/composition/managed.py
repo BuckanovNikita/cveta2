@@ -24,7 +24,7 @@ from cveta2.adapters.cvat.managed_feedback import CvatFeedback
 from cveta2.adapters.cvat.managed_sources import CvatSources
 from cveta2.adapters.files.bundle import LocalBundleFiles
 from cveta2.adapters.files.bundle_paths import LocalRoots
-from cveta2.adapters.files.managed_feedback import LocalFeedbackLedger
+from cveta2.adapters.files.managed_feedback import LocalFeedbackLedger, shared_ledger_path
 from cveta2.adapters.files.managed_preparation import LocalManagedPreparationFiles
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.adapters.files.media import LocalMediaInspector
@@ -319,7 +319,10 @@ def _prepared_effects(
                 roots=LocalRoots(),
                 s3_roots=S3Roots(),
                 feedback=CvatFeedback(client.api),
-                ledger=LocalFeedbackLedger(prepared),
+                ledger=LocalFeedbackLedger(
+                    prepared,
+                    shared_ledger_path(path.parent / "managed-feedback", loaded.record.source_hash),
+                ),
                 local_roots=local_roots,
             ),
         )

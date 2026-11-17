@@ -517,3 +517,44 @@ def test_unexplained_task_change_still_blocks_a_pending_delivery(workflow: Workf
     with pytest.raises(ManagedError):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+def _fetch_and_transform(workflow: Workflow, tmp_path: Path) -> tuple[Path, Path]:
+    fetched = tmp_path / "fetched"
+    api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
+    transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
+    transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    transformed.loc[
+        transformed["source_id"].eq("main") & transformed["source_frame_id"].astype(str).eq("0"),
+        "bbox_x_br",
+    ] = 1
+    output = tmp_path / "transformed.csv"
+    transformed.to_csv(output, index=False)
+    return fetched, output
+
+
+def test_feedback_from_an_inspection_does_not_stale_a_sibling_preparation(workflow: Workflow, tmp_path: Path) -> None:
+    fetched, transformed = _fetch_and_transform(workflow, tmp_path)
+    inspection = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "inspection", **workflow.options
+    )
+    assert not inspection.ready
+    workflow.cvat.advance_issue_timestamp = True
+    assert api.report_dataset_errors(inspection.directory, **workflow.options).created == 1
+    prepared = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "prepared", clean=True, **workflow.options
+    )
+    assert prepared.ready
+    assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
+    assert len(workflow.cvat.issues[101]) == 1
+
+
+def test_preparation_with_a_ledger_from_before_sharing_still_publishes(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.advance_issue_timestamp = True
+    assert api.report_dataset_errors(prepared, **workflow.options).created == 1
+    (shared,) = (workflow.personal.parent / "managed-feedback").iterdir()
+    # Earlier versions kept the only ledger inside the preparation directory.
+    shared.rename(prepared / "feedback.json")
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    assert len(workflow.cvat.issues[101]) == 1
