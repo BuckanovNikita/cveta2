@@ -4,6 +4,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, field_validator
 
+from cveta2.domain.paths import parse_sync_root
+
 
 def _none_if_falsy(value: object) -> object:
     """Coerce falsy YAML values (``""`` / ``0`` / ``null``) to None, else str."""
@@ -28,6 +30,18 @@ class CacheProjectSettings(BaseModel):
     none_if_falsy = field_validator("images_root", "tasks_root", "ignored_prefix", "task_cache_s3", mode="before")(
         _none_if_falsy
     )
+
+    @field_validator("task_cache_s3")
+    @classmethod
+    def _parsable_task_cache_s3(cls, value: str | None) -> str | None:
+        """Reject a root the task cache cannot parse when configuration loads."""
+        if value is not None:
+            try:
+                parse_sync_root(value)
+            except ValueError:
+                # The parser's own message repeats the value; diagnostics must not.
+                raise ValueError("Expected s3://bucket[/prefix] or a nonempty bare prefix") from None
+        return value
 
 
 class IgnoredTask(BaseModel):

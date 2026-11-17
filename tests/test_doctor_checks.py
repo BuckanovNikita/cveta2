@@ -350,3 +350,29 @@ def test_aws_sdk_failure_is_translated_at_adapter_boundary() -> None:
         pytest.raises(Cveta2Error, match="Unable to locate credentials"),
     ):
         check_aws_credentials()
+
+
+def test_cache_permission_repair_leaves_per_user_prompt_history_alone() -> None:
+    from cveta2.composition.files import default_cache_base
+    from cveta2.interfaces.commands.interactive._history import history_for
+
+    previous_umask = os.umask(0o022)
+    try:
+        history = history_for("cvat-host")
+        history.store_string("https://cvat.example")
+        shared_entry = default_cache_base() / "tasks" / "entry.json"
+        shared_entry.parent.mkdir(parents=True)
+        shared_entry.write_text("{}", encoding="utf-8")
+    finally:
+        os.umask(previous_umask)
+    history_file = Path(os.fsdecode(history.filename))
+    history_modes = (stat.S_IMODE(history_file.stat().st_mode), stat.S_IMODE(history_file.parent.stat().st_mode))
+
+    assert check_cache_permissions(fix=True) is True
+
+    assert stat.S_IMODE(shared_entry.stat().st_mode) & 0o060 == 0o060
+    assert (stat.S_IMODE(history_file.stat().st_mode), stat.S_IMODE(history_file.parent.stat().st_mode)) == (
+        history_modes
+    )
+    assert history_modes[0] & 0o020 == 0
+    assert check_cache_permissions(fix=False) is True

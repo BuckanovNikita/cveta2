@@ -3,13 +3,17 @@
 import argparse
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from cveta2.adapters.config import project as project_config
 from cveta2.adapters.config.project import (
+    SharedConfigConflictError,
+    SharedIdentityMismatchError,
     activate_migration,
     attach_project_config,
     load_project_config,
@@ -36,7 +40,7 @@ from cveta2.domain.managed.models import (
     ProjectDefinition,
 )
 from cveta2.interfaces.commands import setup
-from cveta2.interfaces.commands.interactive import primitives
+from cveta2.interfaces.commands.interactive import primitives, wizard
 from tests.helpers import write_config_yaml, write_split_config_yaml
 
 
@@ -756,3 +760,334 @@ def test_empty_local_cache_save_does_not_invent_policy_or_raise(tmp_path: Path) 
     CacheConfig().save(path)
     assert yaml.safe_load(path.read_bytes()) == {}
     assert CacheConfig.load(path) == CacheConfig()
+
+
+# ---------------------------------------------------------------------------
+# Load-time validation of S3 roots
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["task_cache_s3", "sync_root"])
+@pytest.mark.parametrize("value", ["s3://", "s3:///DO_NOT_LOG", "/", "   ", ""])
+def test_shared_malformed_s3_root_is_rejected_at_load(tmp_path: Path, field: str, value: str) -> None:
+    target = shared(tmp_path / "shared.yaml")
+    data = read_config(target)
+    projects = data["projects"]
+    assert isinstance(projects, dict)
+    projects["main"][field] = value
+    write(target, data)
+    cfg = personal(tmp_path / "personal.yaml", target)
+
+    with pytest.raises(ManagedError) as caught:
+        load_project_config(cfg)
+
+    assert f"projects.main.{field}" in str(caught.value)
+    assert "DO_NOT_LOG" not in str(caught.value)
+
+
+@pytest.mark.parametrize("value", ["s3://bucket", "s3://bucket/prefix/", "prefix/sub"])
+def test_shared_valid_s3_roots_still_load(tmp_path: Path, value: str) -> None:
+    target = shared(tmp_path / "shared.yaml")
+    data = read_config(target)
+    projects = data["projects"]
+    assert isinstance(projects, dict)
+    projects["main"]["task_cache_s3"] = value
+    write(target, data)
+
+    assert load_project_config(personal(tmp_path / "personal.yaml", target)).projects["main"].task_cache_s3 == value
+
+
+@pytest.mark.parametrize("value", ["s3://", "s3:///DO_NOT_LOG", "/", "   "])
+def test_personal_malformed_task_cache_s3_is_rejected_at_load(value: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        CacheConfig.model_validate({"projects": {"alpha": {"task_cache_s3": value}}})
+
+    issues = caught.value.errors(include_input=False, include_url=False)
+    assert [issue["loc"] for issue in issues] == [("projects", "alpha", "task_cache_s3")]
+    assert "DO_NOT_LOG" not in str(issues)
+
+
+def test_personal_blank_task_cache_s3_still_means_unset() -> None:
+    assert CacheProjectSettings(task_cache_s3="").task_cache_s3 is None
+
+
+@pytest.mark.parametrize(("umask", "shared_mode"), [(0o022, 0o644), (0o002, 0o664), (0o077, 0o600)])
+def test_approved_migration_creates_the_shared_file_with_the_umask_mode(
+    tmp_path: Path, umask: int, shared_mode: int
+) -> None:
+    """Colleagues must be able to read the team file; credentials stay private."""
+    cfg = legacy(tmp_path / "personal.yaml")
+    proposal = migration_proposal(cfg)
+    previous = os.umask(umask)
+    try:
+        activate_migration(proposal)
+    finally:
+        os.umask(previous)
+    assert proposal.shared_path.stat().st_mode & 0o777 == shared_mode
+    assert cfg.stat().st_mode & 0o777 == 0o600
+    assert next(iter(tmp_path.glob("*.bak"))).stat().st_mode & 0o777 == 0o600
+
+
+def _journal_with_stages(cfg: Path, *, drop: str) -> Path:
+    """Write a journal whose named stage file is missing, as after a cleanup."""
+    stages = {
+        "staged_shared": cfg.with_name(f".{cfg.name}.shared-stage"),
+        "staged_personal": cfg.with_name(f".{cfg.name}.personal-stage"),
+    }
+    for name, stage in stages.items():
+        if name != drop:
+            stage.write_bytes(b"schema_version: 1\n")
+    journal = cfg.with_name(f"{cfg.name}.migration.json")
+    journal.write_text(
+        json.dumps(
+            {
+                "shared_path": str(cfg.with_name("project-config.yaml")),
+                "staged_shared": str(stages["staged_shared"]),
+                "staged_personal": str(stages["staged_personal"]),
+                "shared_hash": "0",
+                "personal_hash": "0",
+                "original_hash": project_config._digest(cfg.read_bytes()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    return journal
+
+
+@pytest.mark.parametrize("damage", ["truncated", "empty", "wrong-shape", "missing-shared-stage"])
+def test_damaged_migration_journal_is_a_recoverable_typed_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    """A damaged journal names itself and the recovery instead of a raw traceback."""
+    cfg = legacy(tmp_path / "personal.yaml")
+    journal = cfg.with_name(f"{cfg.name}.migration.json")
+    if damage == "truncated":
+        journal.write_bytes(b'{"shared_path": "/x", "stag')
+    elif damage == "empty":
+        journal.write_bytes(b"")
+    elif damage == "wrong-shape":
+        journal.write_text(json.dumps({"shared_path": str(tmp_path / "project-config.yaml")}), encoding="utf-8")
+    else:
+        _journal_with_stages(cfg, drop="staged_shared")
+    monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
+
+    with pytest.raises(ManagedError) as caught:
+        setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None))
+
+    assert str(journal) in str(caught.value)
+    assert "setup --migrate-config" in str(caught.value)
+    assert journal.exists()
+
+
+def test_journal_with_a_missing_personal_stage_is_a_recoverable_typed_error(tmp_path: Path) -> None:
+    cfg = legacy(tmp_path / "personal.yaml")
+    journal = _journal_with_stages(cfg, drop="staged_personal")
+    shared_path = cfg.with_name("project-config.yaml")
+    shared_path.write_bytes(b"schema_version: 1\n")
+    data = json.loads(journal.read_bytes())
+    data["shared_hash"] = project_config._digest(shared_path.read_bytes())
+    journal.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ManagedError) as caught:
+        recover_migration(cfg)
+
+    assert str(journal) in str(caught.value)
+    assert "personal-stage" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Wizard attachment of an existing shared file
+# ---------------------------------------------------------------------------
+
+
+def _team_file(path: Path) -> Path:
+    """Write a hand-written team file that omits null and empty defaults."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "schema_version: 1\ncvat:\n  host: https://cvat.example/\n  organization: team\n"
+        "projects:\n  main:\n    id: 12\n    name: Main\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _run_wizard(monkeypatch: pytest.MonkeyPatch, cfg: Path, team: Path, organization: str) -> None:
+    monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+    monkeypatch.setattr(wizard, "prompt_host", lambda _default: "https://cvat.example")
+    monkeypatch.setattr(wizard, "prompt_organization", lambda _existing: organization)
+    monkeypatch.setattr(wizard, "prompt_username", lambda _default: "alice")
+    monkeypatch.setattr(wizard, "prompt_password", lambda: "private")
+    monkeypatch.setattr(primitives, "path", lambda *_args, **_kwargs: team)
+    monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
+    setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=False, project_config=None))
+
+
+def test_wizard_attaches_an_existing_shared_file_with_the_same_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team = _team_file(tmp_path / "team" / "project-config.yaml")
+    before = team.read_bytes()
+    cfg = tmp_path / "config.yaml"
+
+    _run_wizard(monkeypatch, cfg, team, "team")
+
+    assert team.read_bytes() == before
+    saved = read_config(cfg)
+    assert saved["schema_version"] == 1
+    assert saved["project_config"] == str(team.resolve())
+    assert saved["cvat"] == {"username": "alice", "password": "private"}
+    loaded = CvatConfig.load(cfg)
+    assert (loaded.host, loaded.organization, loaded.password) == ("https://cvat.example", "team", "private")
+
+
+def test_wizard_refuses_an_existing_shared_file_with_another_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team = _team_file(tmp_path / "team" / "project-config.yaml")
+    before = team.read_bytes()
+    cfg = tmp_path / "config.yaml"
+
+    with pytest.raises(SharedIdentityMismatchError) as caught:
+        _run_wizard(monkeypatch, cfg, team, "other-team")
+
+    assert str(team.resolve()) in str(caught.value)
+    assert "other-team" not in str(caught.value)
+    assert team.read_bytes() == before
+    assert "project_config" not in read_config(cfg)
+
+
+def test_migration_accepts_a_semantically_equal_hand_written_shared_file(tmp_path: Path) -> None:
+    """Omitted null defaults do not make an existing shared file differ."""
+    cfg = write(
+        tmp_path / "personal.yaml",
+        {"cvat": {"host": "https://cvat.example", "organization": "team", "username": "a", "password": "p"}},
+    )
+    team = tmp_path / "team.yaml"
+    team.write_text("cvat: {organization: team, host: 'https://cvat.example/'}\nschema_version: 1\n", encoding="utf-8")
+    before = team.read_bytes()
+
+    proposal = migration_proposal(cfg, team)
+
+    assert proposal.unresolved == ()
+    activate_migration(proposal)
+    assert team.read_bytes() == before
+    assert read_config(cfg)["project_config"] == str(team.resolve())
+
+
+# ---------------------------------------------------------------------------
+# Concurrent shared-policy writers
+# ---------------------------------------------------------------------------
+
+
+def _two_writers(tmp_path: Path) -> tuple[Path, Path]:
+    """Two personal files attached to one shared file whose projects A and B carry policy."""
+    alice = write_split_config_yaml(
+        tmp_path / "alice.yaml",
+        project_ids={"A": 1, "B": 2},
+        sync_roots={"A": "s3://bucket/1", "B": "s3://bucket/2"},
+        cache={"projects": {name: {"task_cache_s3": f"s3://cache/{name}"} for name in ("A", "B")}},
+    )
+    bob = write(
+        tmp_path / "bob.yaml",
+        {"schema_version": 1, "project_config": str(alice.with_name("alice-projects.yaml"))},
+    )
+    return alice, bob
+
+
+def _edit(kind: str, config: SyncRootsConfig | IgnoreConfig | CacheConfig, project: str, value: int) -> None:
+    if isinstance(config, IgnoreConfig):
+        config.add_task(project, value, f"task-{value}")
+    elif isinstance(config, SyncRootsConfig):
+        config.projects[project] = f"s3://bucket/{value}"
+    else:
+        current = config.projects.get(project) or CacheProjectSettings()
+        config.projects[project] = current.model_copy(update={kind: f"s3://cache/{value}"})
+
+
+def _policy(config: ProjectConfig, kind: str, key: str) -> object:
+    value = getattr(config.projects[key], kind)
+    return [entry["id"] for entry in value] if kind == "ignore" else value
+
+
+_SECTIONS: dict[str, type[SyncRootsConfig | IgnoreConfig | CacheConfig]] = {
+    "ignore": IgnoreConfig,
+    "sync_root": SyncRootsConfig,
+    "task_cache_s3": CacheConfig,
+}
+_WRITTEN: dict[str, Callable[[int], object]] = {
+    "ignore": lambda value: [value],
+    "sync_root": "s3://bucket/{}".format,
+    "task_cache_s3": "s3://cache/{}".format,
+}
+
+
+@pytest.mark.parametrize("kind", list(_SECTIONS))
+def test_interleaved_policy_saves_keep_both_writers_changes(tmp_path: Path, kind: str) -> None:
+    alice, bob = _two_writers(tmp_path)
+    section = _SECTIONS[kind]
+    alice_config = section.load(alice)
+    bob_config = section.load(bob)
+    _edit(kind, bob_config, "B", 200)
+    bob_config.save(bob)
+    _edit(kind, alice_config, "A", 100)
+    alice_config.save(alice)
+
+    shared = load_project_config(alice)
+    assert _policy(shared, kind, "project-1") == _WRITTEN[kind](100)
+    assert _policy(shared, kind, "project-2") == _WRITTEN[kind](200)
+
+
+@pytest.mark.parametrize("kind", ["sync_root", "task_cache_s3"])
+def test_conflicting_policy_save_is_refused_and_keeps_the_first_value(tmp_path: Path, kind: str) -> None:
+    alice, bob = _two_writers(tmp_path)
+    section = _SECTIONS[kind]
+    alice_config = section.load(alice)
+    bob_config = section.load(bob)
+    _edit(kind, bob_config, "A", 200)
+    bob_config.save(bob)
+    _edit(kind, alice_config, "A", 100)
+    shared_file = alice.with_name("alice-projects.yaml")
+    before = shared_file.read_bytes()
+
+    with pytest.raises(SharedConfigConflictError) as caught:
+        alice_config.save(alice)
+
+    assert str(shared_file.resolve()) in str(caught.value)
+    assert "s3://" not in str(caught.value)
+    assert shared_file.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "section",
+    [{"sync_roots": {"main": ""}}, {"cache": {"projects": {"main": {"task_cache_s3": "", "ignored_prefix": ""}}}}],
+    ids=["sync-root", "cache-policy"],
+)
+def test_migration_treats_blank_legacy_roots_as_unset(tmp_path: Path, section: dict[str, object]) -> None:
+    """Legacy readers ignore blank values, so migration must not turn them into invalid policy."""
+    path = _legacy_registry(tmp_path, {"main": 7})
+    raw = read_config(path)
+    raw.pop("sync_roots")
+    write(path, {**raw, **section})
+
+    proposal = migration_proposal(path)
+
+    assert proposal.unresolved == ()
+    activate_migration(proposal)
+    project = load_project_config(path).projects["main"]
+    assert (project.sync_root, project.task_cache_s3, project.ignored_prefix) == (None, None, None)
+
+
+def test_migration_reports_an_unusable_legacy_root_for_review(tmp_path: Path) -> None:
+    path = _legacy_registry(tmp_path, {"main": 7})
+    raw = read_config(path)
+    raw["sync_roots"] = {"main": "s3:///DO_NOT_LOG"}
+    write(path, raw)
+    original = path.read_bytes()
+
+    proposal = migration_proposal(path)
+
+    assert any("projects.main.sync_root" in item for item in proposal.unresolved)
+    assert "DO_NOT_LOG" not in json.dumps(proposal.unresolved)
+    with pytest.raises(ManagedError, match="unresolved"):
+        activate_migration(proposal)
+    assert path.read_bytes() == original

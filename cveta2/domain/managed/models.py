@@ -16,6 +16,7 @@ from pydantic import (
 )
 
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.paths import parse_sync_root
 
 _SPLIT_TOLERANCE = 1e-9
 
@@ -65,6 +66,18 @@ class ProjectDefinition(StrictModel):
     ignored_prefix: str | None = None
     task_cache_s3: str | None = None
     ignore: list[dict[str, JsonValue]] = Field(default_factory=list)
+
+    @field_validator("sync_root", "task_cache_s3")
+    @classmethod
+    def s3_root(cls, value: str | None) -> str | None:
+        """Reject roots the S3 adapters cannot parse, before any command uses them."""
+        if value is not None:
+            try:
+                parse_sync_root(value)
+            except ValueError:
+                # The parser's own message repeats the value; diagnostics must not.
+                raise ValueError("Expected s3://bucket[/prefix] or a nonempty bare prefix") from None
+        return value
 
     @field_validator("ignore")
     @classmethod
