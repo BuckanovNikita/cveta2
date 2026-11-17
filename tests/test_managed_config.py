@@ -806,3 +806,20 @@ def test_personal_malformed_task_cache_s3_is_rejected_at_load(value: str) -> Non
 
 def test_personal_blank_task_cache_s3_still_means_unset() -> None:
     assert CacheProjectSettings(task_cache_s3="").task_cache_s3 is None
+
+
+@pytest.mark.parametrize(("umask", "shared_mode"), [(0o022, 0o644), (0o002, 0o664), (0o077, 0o600)])
+def test_approved_migration_creates_the_shared_file_with_the_umask_mode(
+    tmp_path: Path, umask: int, shared_mode: int
+) -> None:
+    """Colleagues must be able to read the team file; credentials stay private."""
+    cfg = legacy(tmp_path / "personal.yaml")
+    proposal = migration_proposal(cfg)
+    previous = os.umask(umask)
+    try:
+        activate_migration(proposal)
+    finally:
+        os.umask(previous)
+    assert proposal.shared_path.stat().st_mode & 0o777 == shared_mode
+    assert cfg.stat().st_mode & 0o777 == 0o600
+    assert next(iter(tmp_path.glob("*.bak"))).stat().st_mode & 0o777 == 0o600

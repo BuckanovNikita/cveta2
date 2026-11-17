@@ -9,10 +9,10 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import cast
 
 import yaml
@@ -185,13 +185,22 @@ def _yaml_bytes(data: dict[str, object]) -> bytes:
     return yaml.safe_dump(data, allow_unicode=True, sort_keys=False).encode("utf-8")
 
 
-def _stage_bytes(path: Path, content: bytes, purpose: str) -> Path:
-    """Create an exclusively claimed private stage beside its destination."""
+def _stage_bytes(path: Path, content: bytes, purpose: str, *, private: bool = True) -> Path:
+    """Create an exclusively claimed stage beside its destination.
+
+    Stages are owner-only unless *private* is False: a shared team file is
+    created through its stage, so that stage takes the umask-default mode.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    stream = NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.{purpose}-", delete=False)  # noqa: SIM115
-    temporary = Path(stream.name)
+    while True:
+        temporary = path.with_name(f".{path.name}.{purpose}-{secrets.token_hex(8)}")
+        try:
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if private else 0o666)
+        except FileExistsError:
+            continue
+        break
     try:
-        with stream:
+        with os.fdopen(descriptor, "wb") as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
@@ -532,7 +541,9 @@ def _claim_migration_journal(proposal: MigrationProposal, personal_bytes: bytes,
     """Claim one approved transaction without replacing another writer's journal."""
     staged_personal = _stage_bytes(proposal.personal_path, personal_bytes, "migration")
     try:
-        staged_shared = _stage_bytes(proposal.shared_path, shared_bytes, "migration")
+        # The shared stage becomes the team file through a hard link, so it
+        # takes the umask-default mode; the personal stage holds credentials.
+        staged_shared = _stage_bytes(proposal.shared_path, shared_bytes, "migration", private=False)
     except OSError:
         staged_personal.unlink(missing_ok=True)
         raise
