@@ -67,9 +67,7 @@ tests/integration/.session
 !.agents/skills/running-integration-tests/**
 !.agents/skills/verification-workflow/
 !.agents/skills/verification-workflow/**
-# Repository-managed Spec Kit skills; personal skills remain ignored.
-!.agents/skills/speckit-*/
-!.agents/skills/speckit-*/**
+# Spec Kit is archived outside active skill discovery; personal skills remain ignored.
 
 # pytest-testmon dependency database, one per worktree
 .testmondata

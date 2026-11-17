@@ -1,0 +1,5 @@
+Source: BuckanovNikita/clearml-yolo
+Initially inspected HEAD: 4c3d772 (migration uncommitted)
+Pinned migration commit: 99d45b48ef8fdb7f8f9d4fcc60bd8ce677421022
+Captured: 2026-11-17
+Source advanced concurrently; subsequent release PRs #10/#11 are outside approved scope.

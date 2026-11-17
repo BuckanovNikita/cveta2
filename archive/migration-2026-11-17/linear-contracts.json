@@ -1,0 +1,47 @@
+{
+  "index": "https://linear.app/sip-ds-team/document/cveta2-product-contract-index-migration-draft-0f712c7810f8",
+  "topics": [
+    {
+      "path": "specs/baseline.md",
+      "id": "38a2e232-d191-4b52-bf14-ffb08656398c",
+      "url": "https://linear.app/sip-ds-team/document/contract-draft-specsbaselinemd-2331f5c7c87b",
+      "source_commit": "63cd25522f29c566a25840a944f6486e7d3451ed"
+    },
+    {
+      "path": "docs/dataset-contract.md",
+      "id": "a80c666a-0f6c-41e5-be45-155080e0be8f",
+      "url": "https://linear.app/sip-ds-team/document/contract-draft-docsdataset-contractmd-ffd41fecfde2",
+      "source_commit": "63cd25522f29c566a25840a944f6486e7d3451ed"
+    },
+    {
+      "path": "docs/configuration.md",
+      "id": "26e813f1-38a1-4b0d-85b7-4779e7898a3a",
+      "url": "https://linear.app/sip-ds-team/document/contract-draft-docsconfigurationmd-67789ec2f0b6",
+      "source_commit": "63cd25522f29c566a25840a944f6486e7d3451ed"
+    },
+    {
+      "path": "docs/cli.md",
+      "id": "c03b4494-96c3-4cf6-af1d-5238c15e1759",
+      "url": "https://linear.app/sip-ds-team/document/contract-draft-docsclimd-ccd8081c0258",
+      "source_commit": "63cd25522f29c566a25840a944f6486e7d3451ed"
+    },
+    {
+      "path": "docs/python-api.md",
+      "id": "b16b031f-5363-419e-b7d1-a908de38b257",
+      "url": "https://linear.app/sip-ds-team/document/contract-draft-docspython-apimd-a72b44e6c704",
+      "source_commit": "63cd25522f29c566a25840a944f6486e7d3451ed"
+    },
+    {
+      "path": "docs/images-and-cache.md",
+      "id": "0429c824-e298-432a-b1ad-37cedd262e4d",
+      "url": "https://linear.app/sip-ds-team/document/contract-draft-docsimages-and-cachemd-533d3ab25cef",
+      "source_commit": "63cd25522f29c566a25840a944f6486e7d3451ed"
+    },
+    {
+      "path": "GLOSSARY.md",
+      "id": "428b4764-b755-4abc-b75d-d32a39e33c85",
+      "url": "https://linear.app/sip-ds-team/document/contract-draft-glossarymd-a4613e4e8529",
+      "source_commit": "63cd25522f29c566a25840a944f6486e7d3451ed"
+    }
+  ]
+}

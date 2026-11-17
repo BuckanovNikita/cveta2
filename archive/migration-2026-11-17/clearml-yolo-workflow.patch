@@ -1,0 +1,596 @@
+diff --git a/.agents/skills/mutation-testing/SKILL.md b/.agents/skills/mutation-testing/SKILL.md
+index ff0553d..4d46a49 100644
+--- a/.agents/skills/mutation-testing/SKILL.md
++++ b/.agents/skills/mutation-testing/SKILL.md
+@@ -18,7 +18,7 @@ own invocation, selection, budgets and exit meanings; paths start at the reposit
+    Identify coverage requiring live/hardware execution. Diagnose failed clean baselines
+    and tool errors rather than interpreting report production as successful coverage.
+ 4. Record selected functions/tests, selection source, outcomes, dispositions and reruns
+-   in native evidence. Use `verification-workflow` to assess reuse and remaining gaps.
++   in verification evidence linked from Linear and the PR. Use `verification-workflow` to assess reuse and remaining gaps.
+ 
+ Changes to mutation tooling preserve product-only mutation, isolated staged inputs,
+ bounded selectors, heavy/live exclusions and owned-process cleanup. Exercise tooling
+diff --git a/.agents/skills/release/SKILL.md b/.agents/skills/release/SKILL.md
+index a277927..07becff 100644
+--- a/.agents/skills/release/SKILL.md
++++ b/.agents/skills/release/SKILL.md
+@@ -1,29 +1,18 @@
+ ---
+ name: release
+-description: Use when integrating or publishing a release, or recovering failed release attempts.
++description: Use when a code release is requested, or when assessing the suspended release route.
+ ---
+ 
+-# Release reviewed changes
++# Code releases are suspended
+ 
+-Read `docs/development.md` (Local releases and Paired CY and queue release check).
+-Paths start at the repository root; Task and semantic-release own mechanics.
++Read `docs/development.md` (Local releases). The legacy `release-local` and
++`release-publish` commands bypass GitHub PR integration; do not invoke them.
++Find the PR-based release tooling follow-up in the Linear clearml-yolo project and
++report the suspension. An ordinary implementation request does not authorize replacing
++release tooling or publishing tags. Preserve existing releases and unrelated work.
+ 
+-1. Establish local release authorization and separate publishing authorization.
+-   Review the full change since the previous release, fresh independent review and
+-   the native verification record. Confirm required checks passed or were explicitly
+-   waived, including relevant manual evidence; use `verification-workflow` for gaps.
+-2. Select `--pairing required` for dependency/installation changes, queue-consumed
+-   interfaces or uncertain compatibility; otherwise justify `not-required` in the record.
+-   A version bump alone does not require pairing. Missing release baseline requires
+-   comprehensive selection.
+-3. Invoke `release-local` or `release-publish` with full immutable `--expected-tip`,
+-   `--verification-record PATH` and `--pairing required|not-required`. The record is a
+-   reviewed attestation, not machine-validated proof. Reuse applicable checks; selected
+-   pairing executes against final versions. Publishing remains separately authorized.
+-4. Report accepted/final SHAs, reused/executed evidence, pairing decision, version or
+-   no-version result and remotely confirmed refs.
+-
+-A held lock or moved/dirty tip requires owner resolution. Inspect prepared files and
+-refs after version validation failure; recover only this attempt's changes. After
+-publishing failure, inspect remote refs and retry publication without re-versioning.
+-Keep model-weight releases separate; their procedure applies only when requested.
++After an explicitly authorized replacement is reviewed and merged, update this skill
++with its supported procedure before resuming code releases. Preserve semantic-release,
++annotated tags, immutable source checks, locks, applicable verification, selected pairing,
++separate publishing authorization and bounded recovery. Model-weight releases remain a
++separate explicitly requested procedure in `docs/development.md`.
+diff --git a/.agents/skills/running-integration-tests/SKILL.md b/.agents/skills/running-integration-tests/SKILL.md
+index 76780b7..587173f 100644
+--- a/.agents/skills/running-integration-tests/SKILL.md
++++ b/.agents/skills/running-integration-tests/SKILL.md
+@@ -41,5 +41,5 @@ Select only affected observations, comparing actual results with their topic con
+   separate from numerical quality or random-weight smoke.
+ 
+ Record source identities, commands, task/model IDs, observations, limitations and cleanup
+-in native evidence. Simulations do not establish physical multi-GPU, multi-user or NFS
++in verification evidence linked from Linear and the PR. Simulations do not establish physical multi-GPU, multi-user or NFS
+ execution. Retain source data and user SDK settings throughout.
+diff --git a/.agents/skills/verification-workflow/SKILL.md b/.agents/skills/verification-workflow/SKILL.md
+index ac1fe27..926ba63 100644
+--- a/.agents/skills/verification-workflow/SKILL.md
++++ b/.agents/skills/verification-workflow/SKILL.md
+@@ -6,7 +6,7 @@ description: Use when selecting verification, committing, reporting completion o
+ # Select verification
+ 
+ Read `docs/development.md` (Verification and Commit procedure). Paths start at the
+-repository root. Task owns execution; the native evidence record owns selection.
++repository root. Task owns execution; the verification record linked from Linear and the PR owns selection.
+ 
+ 1. Inspect changes and record the comparison base/tip: the whole development branch,
+    or changes since the previous release. Select comprehensive verification when no
+@@ -18,7 +18,7 @@ repository root. Task owns execution; the native evidence record owns selection.
+ 3. Record exclusions and reuse reasons alongside source/environment identities.
+    Reuse successful evidence only while relevant inputs remain applicable; rerun
+    invalidated checks. A focused run cannot establish the global coverage floor.
+-4. Complete native consistency review, follow the commit procedure, then run the final
++4. Review documentation consistency against Linear acceptance criteria, follow the commit procedure, then run the final
+    `prek run --all-files` with overrides cleared. Obtain independent review for behavior
+    or policy changes after integrated verification.
+ 5. Report selected checks as passed, failed, deferred, waived or error. Unavailable
+diff --git a/AGENTS.md b/AGENTS.md
+index e98cae8..9d7d57a 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -30,7 +30,7 @@ for every task. Read guidance instead of copying shared skills into the reposito
+ | Change application behavior or configuration | [Project contract summary](docs/project-contracts.md), then affected topics in the [current contract index](docs/current-contracts.md) and their implementation evidence |
+ | Set up dependencies, verify code or commit | Relevant sections of [development procedures](docs/development.md); read the commit procedure before every commit |
+ | Plan, implement, fix, resume or accept repository changes | [Workflow policy](docs/agent-workflow.md), including its [module boundaries](docs/agent-workflow.md#module-boundaries) |
+-| Run any Spec Kit stage, including planning or bug-source capture | [Agent workflow policy](docs/agent-workflow.md), then the applicable installed skills |
++| Plan or deliver tickets and PRs | [Linear and GitHub workflow](docs/agents/issue-tracker.md) |
+ | Verify changes, commit, or report completion | [verification-workflow](.agents/skills/verification-workflow/SKILL.md) |
+ | Run live tests, acceptance, or remove a test environment | [running-integration-tests](.agents/skills/running-integration-tests/SKILL.md) |
+ | Triage mutants or change mutmut settings | [mutation-testing](.agents/skills/mutation-testing/SKILL.md) |
+@@ -42,25 +42,20 @@ for every task. Read guidance instead of copying shared skills into the reposito
+ 
+ - Preserve the selected parent model/effort and host planning restrictions.
+ 
+-- The [constitution](.specify/memory/constitution.md) defines typed Python, effect
+-  ownership, verification, preservation and collaboration rules. The
+-  [workflow policy](docs/agent-workflow.md) owns task routing, authorization boundaries,
+-  verification and documentation guidance. Read the policy before workflow
+-  operations so its safeguards apply in time.
+-- For Python repository work, preserve the declared Python compatibility, check
+-  affected module boundaries, run the project verification gates and follow authorized
+-  release procedures. The native Spec Kit workflow owns stage order, task artifacts and review
+-  sequence.
+-- Start from the [product specification](specs/000-baseline/spec.md) and its
+-  technical contracts. New behavior changes use the native Spec Kit workflow;
+-  product specifications describe requirements without implementation status.
+-- Reconcile the actual task-owned diff with the ledger, checks and review before
+-  acceptance; then evaluate the native release workflow within authorization.
+-  Documentation-only changes may produce no new version. Missing or failed required
+-  checks remain acceptance gaps.
++- The [workflow policy](docs/agent-workflow.md) owns planning, engineering safeguards,
++  authorization, verification and documentation guidance. Read it before repository work.
++- Linear owns active requirements, plans, acceptance criteria and status. GitHub PRs own
++  implementation review and delivery; follow the [ticket workflow](docs/agents/issue-tracker.md).
++- Spec Kit is temporarily disabled. Preserve `specs/`, `.specify/` and archived tooling
++  unchanged; do not invoke its stages or update its artifacts. Reactivation requires
++  explicit user instruction. Historical requirements do not authorize workflow gates.
++- Preserve product behavior through the [current contract index](docs/current-contracts.md)
++  and affected technical contracts. Reconcile the task-owned diff with Linear acceptance
++  criteria, checks and independent review before acceptance.
+ - Task classifies staged inputs in hooks and the latest commit after committing.
+   Use the [automatic route](docs/development.md#automatic-routing); explicit test,
+-  acceptance and release commands retain their requested scope.
++  acceptance commands retain their requested scope. Code release routes are suspended
++  pending PR-based release tooling.
+ - Mocked tests do not establish native/GPU/upload outcomes.
+ - Report each required check as passed, failed, deferred, waived or error. Deferred
+   verification blocks acceptance, integration and release; waived checks never block.
+@@ -79,12 +74,12 @@ for every task. Read guidance instead of copying shared skills into the reposito
+   source, checkout, dependency reference or locked revision without explicit user intent;
+   general cleanup or dependency maintenance does not authorize this. Adapt this project's
+   integration; report upstream issues rather than patching or monkeypatching the dependency.
+-- Select verification and pairing through the reviewed native checklist in
++- Select verification and pairing through the reviewed verification checklist in
+   [development procedures](docs/development.md#acceptance-tiers). Release consumes that
+   evidence with an explicit pairing decision; it does not replay blanket acceptance.
+-- Use Conventional Commits and complete the native release workflow when user or standing
+-  authorization covers delivery; explicit no-commit/no-release limits and the active host
+-  mode take precedence. Preserve unrelated changes and stage only task-owned hunks;
++- Use Conventional Commits. Agents may commit task-owned changes, push task branches and
++  open GitHub PRs; humans merge. Explicit no-commit/no-push limits and the active host
++  mode take precedence. Code release tooling is suspended pending its PR-based replacement. Preserve unrelated changes and stage only task-owned hunks;
+   do not stash, reset or revert unrelated work, or bypass hooks to hide failures.
+ - Follow the [commit procedure](docs/development.md#commit-procedure) for coherent split
+   commits, targeted intermediate skips and final verification of committed inputs.
+@@ -105,18 +100,16 @@ for every task. Read guidance instead of copying shared skills into the reposito
+   importing it with `@AGENTS.md`.
+ - Author project skills in `.agents/skills/`; `.claude/skills` is a symlink to it for
+   Claude discovery.
+-- Keep installed Spec Kit skills, commands, templates and `.specify/` files unchanged
+-  unless explicitly requested. Project workflow policy belongs in linked project guidance
+-  or separate project hooks; feature specifications under `specs/` are project documentation.
++- Keep archived Spec Kit skills, commands, templates, `.specify/` and `specs/` unchanged
++  and outside active discovery. Maintain project policy in linked guidance and project hooks.
+ 
+ ## Project execution policy
+ 
+-Use Spec Kit for new capabilities or documented behavior changes; routine fixes,
+-docs and small refactors proceed directly, updating existing task artifacts as needed.
++Follow Linear planning and GitHub PR delivery for repository changes. One cohesive
++feature may include multiple tickets in one branch and PR; stacked PRs are optional.
+ Behavior, interface, dependency, security and operational-policy changes require
+-independent review after integration and verification; wording edits may be self-reviewed.
+-Documentation checks are limited to native Spec Kit or OpenSpec checks. Local commits
+-may be autonomous; pushes require separate authorization, including existing session authorization.
++independent review after integrated verification; wording edits may be self-reviewed.
++Review documentation consistency proportionately without adding a documentation checker.
+ 
+ ## Specification rewrites
+ 
+@@ -125,3 +118,17 @@ homes, including requirements embedded in scenarios. Separate approved policy ch
+ from wording changes; resolve overloaded terms before editing. Retain compatibility
+ obligations, remove historical status claims, and have the reviewer compare meaning
+ against the original source rather than judge length or wording alone.
++
++## Agent skills
++
++### Issue tracker
++
++For ticket operations, use [Linear conventions](docs/agents/issue-tracker.md).
++
++### Triage labels
++
++For ticket triage, use the [standard roles](docs/agents/triage-labels.md).
++
++### Domain docs
++
++Before domain exploration, follow the [single-context documentation guidance](docs/agents/domain.md).
+diff --git a/docs/agent-workflow.md b/docs/agent-workflow.md
+index 75e74eb..d321690 100644
+--- a/docs/agent-workflow.md
++++ b/docs/agent-workflow.md
+@@ -1,104 +1,126 @@
+ # Agent workflow policy
+ 
+-Read this policy before Spec Kit workflow stages, including planning, bug-source capture
+-and governance updates. The [agent instructions](../AGENTS.md) route tasks here; this
+-project policy supplements the installed skills without changing their files.
+-
+-Record Python compatibility, architecture, documentation, verification and authorized
+-release evidence within these routes, following the project contracts and development
+-procedures linked from [AGENTS.md](../AGENTS.md). Spec Kit retains its
+-stage order, artifacts, execution roles and status ledger. Shared skills do not establish
+-a second plan or review process. Inspect current code, configuration, hooks and changes
+-before relying on historical task claims; preserve unrelated work and ignored local configuration.
+-
+-## Spec Kit integration
+-
+-Each normative rule has one authoritative topic location and a linked executable
+-check, or an explicit verification limitation. The [contract index](current-contracts.md)
+-is navigation, not a duplicate specification. Contract changes reconcile specification,
+-implementation, tests, examples and portable usage guidance together. Architecture
+-gates inspect the actual product graph and source; unit tests exercise product behavior.
+-
+-Keep installed Spec Kit skills, extension commands, templates and other `.specify/`
+-files unchanged unless the user explicitly requests a change to those files. Put
+-project workflow policy in this file or separate project hooks. Project feature
+-specifications under `specs/` remain project documentation.
+-
+-### Automatic workflow routing
+-
+-The [product specification](../specs/000-baseline/spec.md) and linked capability
+-contracts define desired behavior and acceptance. New feature work uses its own
+-native Spec Kit artifacts; keep implementation status out of product requirements.
+-
+-Use Spec Kit for new capabilities and changes to documented behavior. Routine fixes,
+-documentation edits and small refactors proceed directly; update the existing native
+-task artifacts when applicable. Keep historical execution records in Git history. Planning-only and read-only
+-requests remain read-only. Verify the original failure path for bugs.
+-
+-Record the task outcome, compatibility boundaries, affected documentation, concrete
+-acceptance checks and authorized stopping point in the native ledger. Reconcile them
+-with the final diff and actual check evidence before completion. Existing user or standing
+-authorization covers its stated commit/release scope without another stage prompt;
+-explicit no-commit/no-release limits and the active host mode take precedence. Evaluate
+-the [native release workflow](development.md#local-releases) after
+-[change acceptance](development.md#acceptance-tiers); the `release` skill owns the
+-procedure. A docs-only change may correctly produce no version tag. Deployment and package publishing remain
+-separate actions requiring explicit authorization.
+-
+-Project wheels (`.whl`) and source archives (`.tar.gz`) are debugging tools only.
+-Do not add their construction, installation or delivery to routine release gates.
+-Use source-checkout verification for releases; a concrete packaging/install
+-debugging task may build local diagnostic distributions. This project-specific
+-rule takes precedence over shared skills' generic packaging checklists.
+-
+-### Module boundaries
+-
+-For affected Python modules, inspect the contracts in [.importlinter](../.importlinter),
++Read this policy before planning, implementing, fixing, resuming or accepting repository
++changes. Linear owns active work and GitHub PRs own delivery; follow the
++[ticket workflow](agents/issue-tracker.md) for grouping, dependencies and lifecycle.
++Inspect current code, configuration, hooks and existing changes before relying on
++historical claims. Preserve unrelated work and ignored local configuration.
++
++## Planning and archive policy
++
++Spec Kit is temporarily disabled. Preserve `specs/`, `.specify/`, and archived skills,
++commands and templates unchanged. Do not invoke their workflows, generate artifacts,
++update their status ledgers or apply their governance gates. Reactivation requires
++explicit user instruction. Read archived sources only for historical context and
++requirement provenance; transfer requirements needed for active work into Linear.
++
++The archive does not repeal product behavior. The [project contract summary](project-contracts.md)
++and [current contract index](current-contracts.md) lead to maintained topic contracts.
++Reconcile approved contract changes with implementation, tests, examples and portable
++usage guidance. Each normative rule has an authoritative home and an executable check
++or explicit verification limitation. Keep historical evidence separate from current claims.
++
++Record the outcome, plan, compatibility boundaries, affected documentation, acceptance
++checks and authorized stopping point in Linear. Reconcile them with the final task-owned
++diff and actual evidence before completion. Shared skills support this workflow rather
++than introducing another specification process. Planning-only requests remain read-only.
++
++Agents may commit task-owned work, push task branches and open PRs; humans merge.
++Explicit session limits and host mode take precedence. Code releases are suspended
++pending PR-based release tooling; do not invoke the existing local integration or
++publication commands. Deployment and package publishing require explicit authorization.
++Model-weight release authorization remains separate. Project wheels and source archives
++are debugging tools only, never routine verification or release deliverables.
++
++## Engineering safeguards
++
++These safeguards preserve the engineering obligations formerly recorded in the archived
++constitution; the archive's stage order and amendment process no longer apply.
++
++- Retain the declared Python compatibility, uv toolchain, uv_build backend and dependency
++  constraints. Declare directly imported dependencies; never weaken Ruff or strict mypy
++  merely to silence a failure. Executable values belong in maintained configuration.
++- Use runtime annotations, absolute imports, typed parameters/returns and `typing.Self`
++  where appropriate; quote forward references when runtime evaluation is unsupported.
++  Do not introduce `from __future__ import annotations`. Use Pydantic for configuration
++  and validated records, Pandera for dataframe validation, and factories for mutable defaults.
++- Keep project interfaces explicitly typed. Confine Any, casts and dynamic access to
++  necessary external boundaries with clear assumptions. Suppressions name specific codes
++  and have a clear reason. Recover or report exceptions at an appropriate boundary;
++  never silently discard unexpected failures.
++- Use Loguru through the observability adapter and injected ports; preserve CLI output
++  contracts, including Rich rendering. Comments and log messages are English. Names and
++  decomposition follow responsibilities and configured complexity; use pathlib conventions.
++- Keep package initialization inert and runtime initialization explicit. Defer heavyweight
++  SDK imports where required for responsive help/configuration. Composition roots inject
++  adapters; application use cases do not construct them or use global locators.
++- Preserve centralized Hydra contracts, pipeline-owned tracking and output routing,
++  isolated run identities, upload/flush completion, credential protection, native backend
++  ownership and validation/test separation. The topic contracts define configuration,
++  queue resource ownership, recovery order and publication behavior in detail.
++- Keep credentials out of tracked files and uploads. Preserve pre-existing services,
++  containers and data. Track and clean up only task-owned resources; shared-resource
++  intervention requires ownership evidence and authorization. Machine-specific values
++  belong in local configuration or environment guidance, not portable project policy.
++
++## Module boundaries
++
++For affected Python modules, inspect [.importlinter](../.importlinter),
+ [Ruff import restrictions](../src/ruff.toml) and the
+ [architecture guidance](development.md#python-integration-and-architecture).
+-Preserve responsibilities, interfaces, dependency direction and effect ownership.
+-Account for type-only imports, function-local imports and justified exact-edge
+-exceptions. Use ordinary local imports for fixed targets and documented exceptions
+-for computed loading. Extend declarative contracts or product behavior tests when
+-coverage is missing; preserve the approved enforcement limits in the import guidance.
+-
+-Run the applicable [verification stages](development.md#verification); the
+-`verification-workflow` skill selects them. The development check stage runs declarative
+-import contracts and Ruff restrictions; product tests exercise imports and runtime
+-targets. Effect ownership remains a review obligation. Automatic routing follows the
+-staged/latest-commit classifier in Task; explicit acceptance keeps its full scope. The
+-full unit suite includes CPU-DDP. Ordinary completion selects affected stages through
+-the reviewed native checklist in Development procedures; explicit comprehensive commands
+-retain full scope. Reuse results while checked inputs remain unchanged.
+-Report deferred and waived checks as such, never as passed. Reconcile the final
+-task-owned diff with contract coverage and record actual results in dated evidence.
+-
+-### Documentation
+-
+-Update affected user guidance with behavior changes. Complete applicable native Spec Kit
+-analysis and consistency review as soon as inputs exist, before expensive checks. Use
+-only documentation checks native to Spec Kit or OpenSpec; no separate checker applies.
+-
+-### Workflow safeguards
+-
+-- In host Plan Mode, return read-only findings or a proposed plan before executing
+-  workflow hooks, mutating setup helpers, artifact writes or generated-file checks.
+-  Existing authorization satisfies the same action/scope gate; retain only unresolved
+-  decisions and the explicitly invoked SDD workflow's review gates.
+-- Before plan setup, use read-only prerequisite discovery and confirm the exact
+-  `spec.md` exists. Do not call `setup-plan.sh` when missing: that helper can
+-  create the feature directory and write `plan.md` before specification validation.
+-- Inspect ignore files without automatic edits outside the authorized task. Always
+-  verify proportionally; add tests when required by the contract or behavior/risk.
+-  Task templates do not authorize pushing or deployment.
+-- For bug workflows, normalize slugs and validate containment and existing symlink
+-  components before I/O. Preserve explicit slug identity on collisions; suffix only
+-  generated slugs. Apply the URL trust policy before fetching, and redact secrets
+-  from source URLs and quoted input before persistence. Ordinary web tools may fetch
+-  allowlisted hosts without peer-IP metadata; raw HTTP or unrecognized-host requests
+-  must enforce public-address selection. Private/metadata targets remain refused.
+-- Reassess a disproven bug hypothesis and continue within the authorized bug scope,
+-  documenting deviations. Ask only for material missing information or scope changes.
+-- Preserve dated constitution history and keep temporary impact reports in the
+-  response rather than tracked governance content. Use the current contract index
+-  to identify amendments instead of presenting historical requirements as current.
++Classify runtime modules under core, application, adapters or entrypoints. Preserve the
++direction entrypoints → adapters → application ports/contracts → core; adapters do not
++import application use cases or entrypoints. Cross-adapter bridges remain explicit.
++Core owns no filesystem/network/process effects or SDK objects; effects belong at outer
++interfaces. Direct commands remain independent of queue and optional UI imports.
++
++Account for type-only imports, function-local imports and justified exact-edge exceptions.
++Use ordinary imports for fixed targets and documented exceptions for computed loading.
++Extend declarative contracts or product tests when coverage is missing; preserve approved
++enforcement limits. Architecture gates inspect the actual product graph and source.
++
++## Verification and review
++
++Run applicable [verification stages](development.md#verification); use the
++`verification-workflow` skill for selection. Automatic routing follows the staged/latest-
++commit classifier in Task; explicit comprehensive commands retain their full scope.
++Assess the whole branch or feature delta, not merely its last documentation commit.
++Record selected checks, exclusions, source/environment identities and reuse reasons in
++Linear or linked dated evidence. Reuse results only while relevant inputs remain applicable.
++
++Tests exercise observable product behavior with isolated paths and controlled substitutes.
++Bug fixes reproduce the original failing observation where feasible and verify that path
++again; distinguish hypotheses, static evidence and executed checks when reproduction is
++unavailable. Mocked tests cannot establish training, GPU or upload outcomes. Use the live
++integration skill for native claims. A focused test run cannot establish global coverage.
++
++Follow the commit procedure and final hook gate. Review integrated changes independently
++after verification for behavior, interface, dependency, security or operational policy;
++wording edits may be self-reviewed. Delegated work has bounded scope, explicit ownership,
++dependencies and acceptance evidence; inspect combined results and preserve others' edits.
++Report checks as passed, failed, deferred, waived or error. Required deferred verification
++blocks acceptance and merge readiness; only the user may waive required checks.
++
++## Documentation
++
++Update affected user guidance with behavior changes. Review consistency between Linear
++acceptance criteria, current contracts and the actual diff before expensive verification.
++Do not invoke archived Spec Kit checks or introduce a separate documentation checker.
++README is Russian; other documentation is English unless explicitly required otherwise.
++Keep counts, timings and deployment observations in dated evidence.
++
++## Workflow safeguards
++
++- Host Plan Mode remains read-only: do not run mutating setup helpers, hooks or artifact
++  generators until execution is authorized. Inspect ignore files without unrelated edits.
++- Preserve unrelated staged and unstaged changes. Stage only task-owned paths or hunks;
++  never stash, reset, revert or bypass hooks to hide failures. Use unique temporary
++  commit-message files when writers are concurrent.
++- For bug-source capture, validate file containment and symlink components before I/O.
++  Preserve explicit slugs on collisions; suffix only generated slugs. Redact secrets
++  from source URLs and quoted input before persistence. Apply the URL trust policy:
++  ordinary web tools may fetch allowlisted hosts without peer-IP metadata; raw HTTP
++  or unrecognized-host requests require public-address selection. Private/metadata
++  targets remain refused.
++- Reassess disproven bug hypotheses within the authorized scope. Ask only for material
++  missing information or scope changes; document assumptions and deviations in Linear.
+diff --git a/docs/current-contracts.md b/docs/current-contracts.md
+index a8a6098..45562cc 100644
+--- a/docs/current-contracts.md
++++ b/docs/current-contracts.md
+@@ -5,7 +5,7 @@ configuration, storage, provenance and operations, use the
+ [technical reference](../TECH_DETAILS.md).
+ 
+ Use this index to select the maintained contract for a topic. The
+-[product description](../specs/000-baseline/spec.md) describes functionality and links detailed contracts. New features amend that baseline and the affected topic guides. A contract describes required behavior; inspect implementation and
++[product description](../specs/000-baseline/spec.md) describes functionality and links detailed contracts. The baseline is archived; new features update Linear requirements and affected topic guides. Archived product requirements remain binding until explicitly superseded in active contracts. A contract describes required behavior; inspect implementation and
+ tests before claiming verification. Surface an unexplained mismatch
+ rather than silently changing the requirement or code.
+ 
+@@ -55,21 +55,20 @@ and remote outcomes.
+ 
+ ## Maintaining consistency
+ 
+-Spec Kit implementation and bug-fix workflows require a **Documentation update**
+-stage before completion. Follow the [project workflow policy](agent-workflow.md#documentation)
++Implementation and fixes require a review of affected documentation before completion. Follow the [project workflow policy](agent-workflow.md#documentation)
+ to plan explicit documentation tasks, reconcile them with the actual changes and
+ validate the result. If no documentation changes are needed, record the reviewed scope
+-and reason in the workflow artifacts. Missing required updates or failed validation
++and reason in the Linear issue or PR. Missing required updates or failed validation
+ blocks completion.
+ 
+-For a contract change, inspect this index, affected contracts, active specifications,
++For a contract change, inspect this index, affected contracts, Linear acceptance criteria,
+ quickstarts, README, project-owned integration skills and any applicable
+ environment skill.
+ Update current normative text together. Preserve completed task history and dated
+ analysis/verification; annotate superseded intent and link to current guidance.
+ Do not turn historical observations into a claim about a new implementation.
+ 
+-Specs record intent, task ledgers record work, and dated evidence records checks
++Linear records intent and work; PRs record review, and dated evidence records checks
+ performed. Completed checkboxes alone do not establish live acceptance. Current status
+ must cite evidence and retain its limitations. Avoid copied artifact counts and
+ dependency versions; use the maintained inventory and package metadata.
+@@ -79,16 +78,14 @@ Planning permits inspection, not artifact writes or mutating hooks. A skill cann
+ authorize commits, deployment, dependency updates or unrelated repairs. Verification is
+ required proportionally; adding new tests depends on affected behavior and risk.
+ 
+-Keep installed Spec Kit skills, commands, templates and `.specify/` files unchanged
+-unless the user explicitly requests modifying them. Project workflow overrides belong
+-in [agent workflow policy](agent-workflow.md), linked from [AGENTS.md](../AGENTS.md),
+-or separate project hooks. Feature specifications in
+-`specs/` remain maintained project documentation. Upstream regeneration must not erase
+-separate project policy or treat historical requirements as current authority.
++Spec Kit is temporarily disabled. `specs/`, `.specify/` and
++`archive/spec-kit/` are frozen historical sources, not active workflow instructions.
++Do not update them. Maintain new or changed requirements in Linear and affected topic
++guides, preserving inherited product obligations. Reactivation requires explicit user intent.
+ 
+ Machine-specific operations stay in the reference of the project's
+ [live-verification skill](../.agents/skills/running-integration-tests/SKILL.md).
+-The reviewed native checklist selects affected acceptance claims. Historical releases and dated evidence describe
++The reviewed verification checklist linked from Linear and the PR selects affected acceptance claims. Historical releases and dated evidence describe
+ observations then; they are not current execution recipes.
+ 
+ The historical force/admission controls are superseded by direct native execution and
+diff --git a/docs/development.md b/docs/development.md
+index 283150c..6dbb04c 100644
+--- a/docs/development.md
++++ b/docs/development.md
+@@ -84,7 +84,7 @@ execute their requested scope regardless of change classification.
+ 
+ ### Order and evidence reuse
+ 
+-Complete applicable native Spec Kit documentation analysis and consistency review as
++Review affected documentation for consistency with the Linear acceptance criteria as
+ soon as inputs exist. Then run hygiene/safe fixes, syntax and required-input checks,
+ lock freshness, remaining static checks, and resource preflight before expensive
+ execution. Early failures and automatic edits stop later stages; inspect and stage
+@@ -111,7 +111,7 @@ without first running an equivalent `verify`. No separate documentation checker
+ | `acceptance` | Explicit complete change acceptance on a clean committed tip |
+ | `release-acceptance` | Explicit release automated gates and paired check |
+ | `paired-check` | [Final CY/queue source compatibility](#paired-cy-and-queue-release-check) |
+-| `release-local` / `release-publish` | [Local integration/versioning / authorized publishing](#local-releases) |
++| `release-local` / `release-publish` | [Suspended legacy release routes](#local-releases) |
+ 
+ Inspect current host load before heavy stages and select the configured worker count
+ accordingly. Verification never builds CY distributions. `local-deps` builds only
+@@ -145,7 +145,7 @@ hooks; verify the combined content explicitly.
+ 
+ ### Acceptance tiers
+ 
+-Ordinary completion uses a reviewed native evidence checklist, not a blanket suite.
++Ordinary completion uses a reviewed verification checklist linked from Linear and the PR, not a blanket suite.
+ Record the comparison base/tip, affected contracts, selected checks, exclusions, prior
+ source/environment identities, reuse reasons and remaining gaps. For development,
+ inspect the whole branch against its integration-base merge ancestor. For release,
+@@ -416,7 +416,7 @@ issues instead of patching or monkeypatching the dependency.
+ 
+ ## Commit procedure
+ 
+-Commit when user or standing authorization covers the native completion workflow.
++Commit task-owned changes under the authorization in the Linear and GitHub workflow.
+ Explicit no-commit/no-release limits and the active host mode take precedence. Stage
+ explicit paths or hunks belonging to the task; preserve unrelated staged and unstaged
+ changes. Do not stash, reset, revert or bypass hooks to make a check pass. Use Conventional
+@@ -440,7 +440,7 @@ during verification; dependency changes land as ordinary reviewed commits that u
+ 
+ ## Paired CY and queue release check
+ 
+-Select pairing in the native verification record for dependency/installation changes,
++Select pairing in the verification record linked from Linear and the PR for dependency/installation changes,
+ interfaces consumed by cy-queue, or uncertain compatibility impact. A version bump alone
+ does not require it. Inspect current CY/cy-queue source state and intended versions when
+ selected; stale installed metadata is not evidence. Task `paired-check` normally resolves
+@@ -457,38 +457,19 @@ the queue at runtime; the queue raises its CY minimum when it adopts a newer int
+ 
+ ## Local releases
+ 
+-Code releases contain Git commits and annotated version tags only. Project distributions
+-are debugging tools, not routine release artifacts. semantic-release owns versions,
+-changelog, commits and annotated tags; no-version outcomes are successful.
+-
+-Both Task entrypoints require `--expected-tip SHA`, `--verification-record PATH` and
+-`--pairing required|not-required`:
+-
+-- `release-local`: locally integrate by fast-forward and version; optional `--branch NAME`
+-  selects the source branch. `--publish` additionally requires publishing authorization.
+-- `release-publish`: publish existing accepted source without re-versioning; optional
+-  `--tag vX` identifies the intended annotated tag.
+-
+-The evidence file must exist. Supplying it attests that its native checklist was reviewed
+-and required checks passed or were explicitly waived. The tool does not parse prose as
+-proof or replay full acceptance. Review must cover source/environment applicability,
+-affected manual observations, pairing selection and any reused results. This is an
+-explicit review obligation, not machine verification of completeness. The release skill
+-owns authorization and recovery; an implementation request alone does not authorize release.
+-
+-Both routes retain clean-tree/expected-tip checks, a nonblocking Git-common-directory lock,
+-fast-forward-only integration and ref-stability checks. Never break another run's lock.
+-Publishing pushes only master and the pinned annotated version tag, including an unpublished
+-ancestor tag after prose-only changes, and confirms remote refs. The tag must declare the
+-same source version. No persistent verification receipt system is introduced.
+-
+-The semantic-release build step refreshes the lock's root version, restricts prepared
+-changes to `pyproject.toml`, `uv.lock` and `CHANGELOG.md`, validates version-only changes
+-and runs pairing when selected. Failed validation creates no release commit/tag and leaves
+-prepared files for inspection. Recover only this attempt's changes; keep version/tag
+-creation with semantic-release. Version commits may skip only ordinary verification;
+-staging and commit-message safeguards remain. A failed publication retains the local
+-release: inspect remote refs and retry publication without creating another version.
++Code release execution is suspended pending PR-based release tooling. Do not invoke
++`release-local` or `release-publish`: the existing implementation integrates into local
++`master` and pushes version commits directly, bypassing the human-merged PR workflow.
++The commands remain in source for replacement, not as supported delivery routes.
++Feature delivery follows [GitHub PR delivery](agents/issue-tracker.md).
++
++The replacement must prepare version/changelog/lock changes in a release PR, retain
++semantic-release ownership and successful no-version outcomes, and publish annotated
++tags only for the human-merged, verified source with separate publishing authorization.
++Preserve clean-tree/immutable-tip checks, concurrency locks, source/environment evidence,
++selected CY/queue pairing, ref confirmation and recovery limited to task-owned changes.
++Code releases contain Git commits and annotated tags only; distributions remain debugging
++tools. Existing historical release evidence does not authorize a new release.
+ 
+ ## Model-weight releases
+ 
