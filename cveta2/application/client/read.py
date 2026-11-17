@@ -114,13 +114,13 @@ class _ReadMixin(_ClientBase):
     ) -> int:
         """Resolve project id from numeric id or project name.
 
-        If project_spec is int or digit string, returns it as int.
+        If project_spec is int or a decimal-digit string, returns it as int.
         If it is a name, delegates to :meth:`find_project_by_name`.
         """
         if isinstance(project_spec, int):
             return project_spec
         s = str(project_spec).strip()
-        if s.isdigit():
+        if s.isdecimal():
             return int(s)
         return self.find_project_by_name(s, cached=cached).id
 

@@ -175,6 +175,28 @@ class TestResolveTaskSelectors:
 
         assert str(exc_info.value) == ("Task not found: 'ghost'. Available tasks: 'alpha' (id=1), 'beta' (id=2)")
 
+    def test_non_decimal_digit_selector_matches_by_name(self) -> None:
+        """``'²'.isdigit()`` is true but ``int('²')`` raises; it is a name."""
+        tasks = [make_task(2, name="²"), make_task(3, name="three")]
+
+        matched = CvatClient.resolve_task_selectors(tasks, ["²"])
+
+        assert [t.id for t in matched] == [2]
+
+    def test_non_decimal_digit_selector_in_prepare_fetch_matches_by_name(self) -> None:
+        """The id-only fast path must not treat a superscript digit as an id."""
+        client = _client(_fixtures([make_task(2, name="²"), make_task(3, name="three")]))
+
+        ctx = client.prepare_fetch(1, task_selector=["²"])
+
+        assert [t.id for t in ctx.tasks] == [2]
+
+    def test_non_decimal_digit_project_spec_is_resolved_by_name(self) -> None:
+        fixtures = LoadedFixtures(project=ProjectInfo(id=4, name="²"), tasks=[], labels=[], task_data={})
+        client = CvatClient(CvatConfig(), api=FakeCvatApi(fixtures))
+
+        assert client.resolve_project_id("²") == 4
+
 
 # ---------------------------------------------------------------------------
 # fetch_one_task
