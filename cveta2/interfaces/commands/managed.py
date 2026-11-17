@@ -6,6 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+from pydantic import ValidationError
+
+from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces import managed_datasets
 
 
@@ -53,6 +57,15 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
 
 
 def run_managed(args: argparse.Namespace) -> None:
+    """Report operational failures with exit code 2, distinct from an unready preparation."""
+    try:
+        _dispatch(args)
+    except (Cveta2Error, ValidationError, OSError) as error:
+        logger.error(f"Ошибка операции с набором данных: {error}")
+        raise SystemExit(2) from error
+
+
+def _dispatch(args: argparse.Namespace) -> None:
     """Dispatch typed public operations; APIs never prompt."""
     options = {"config_path": args.config, "project_config": args.project_config}
     result: Any

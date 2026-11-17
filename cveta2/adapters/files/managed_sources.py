@@ -189,8 +189,8 @@ class LocalSourceFiles:
                 raise ManagedError(f"Unsafe source name in snapshot: {source.name!r}")
             if set(source.tables) != set(TABLE_NAMES):
                 raise ManagedError(f"Incomplete source tables: {source.name}")
-        directory.parent.mkdir(parents=True, exist_ok=True)
         try:
+            directory.parent.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(prefix=".cveta2-source-", dir=directory.parent) as temporary:
                 staged = Path(temporary)
                 (staged / "dataset.csv").write_text(_csv(frame), encoding="utf-8")

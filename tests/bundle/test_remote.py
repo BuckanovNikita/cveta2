@@ -44,6 +44,7 @@ def http_api() -> Iterator[str]:
                 "/bad-json": "not json",
                 "/bad-schema": '[{"id": 7}]',
                 "/wrong-shape": "{}",
+                "/deep": "[" * 100_000 + "]" * 100_000,
             }[self.path]
             self.wfile.write(payload.encode())
 
@@ -66,7 +67,7 @@ def test_http_fetch_uses_number_and_unauthenticated_real_get(http_api: str) -> N
     assert [(record.id, record.number, record.name) for record in records] == [(999, 7, "cat")]
 
 
-@pytest.mark.parametrize("route", ["/error", "/bad-json", "/bad-schema", "/wrong-shape"])
+@pytest.mark.parametrize("route", ["/error", "/bad-json", "/bad-schema", "/wrong-shape", "/deep"])
 def test_http_errors_are_explicit(http_api: str, route: str) -> None:
     with pytest.raises(UploadError):
         HttpClassApi().fetch(http_api + route)
