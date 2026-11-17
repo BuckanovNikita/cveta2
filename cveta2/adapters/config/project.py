@@ -19,6 +19,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from cveta2.domain.managed.models import (
+    CvatIdentity,
     ManagedError,
     MigrationRequired,
     ProjectConfig,
@@ -36,6 +37,10 @@ _PERSONAL_KEYS = {
 }
 _SHARED_KEYS = {"projects", "datasets", "sync_roots", "ignore", "clearml"}
 _POLICY_KEYS = {"ignored_prefix", "task_cache_s3"}
+
+
+class SharedIdentityMismatchError(ManagedError):
+    """The personal CVAT host/organization differ from an existing shared file."""
 
 
 def _yaml_location(mark: yaml.Mark | None) -> str:
@@ -261,12 +266,51 @@ def attach_project_config(personal_path: Path, project_path: Path) -> Path:
     selected = project_path.expanduser().resolve()
     raw = read_config(personal_path, missing_ok=True)
     validate_personal(raw, attached=True)
+    _validated_shared_file(selected)
+    return _save_attachment(personal_path, raw, selected)
+
+
+def attach_existing_project_config(personal_path: Path, project_path: Path) -> Path:
+    """Attach an existing shared file from the setup wizard.
+
+    A legacy personal file carries the CVAT host and organization the wizard
+    just saved.  When they equal the shared identity they are dropped in the
+    same atomic personal write that adds the reference; otherwise the
+    attachment is refused.  The shared file is never rewritten.
+    """
+    selected = project_path.expanduser().resolve()
+    raw = read_config(personal_path, missing_ok=True)
+    shared = _validated_shared_file(selected)
+    cvat = dict(_dict(raw.get("cvat")))
+    if "host" in cvat or "organization" in cvat:
+        try:
+            personal_identity = CvatIdentity.model_validate(
+                {"host": cvat.get("host"), "organization": cvat.get("organization")}
+            )
+        except ValidationError:
+            personal_identity = None
+        if personal_identity != shared.cvat:
+            raise SharedIdentityMismatchError(
+                f"CVAT host/organization in {personal_path} differ from shared configuration {selected}; "
+                "correct them in setup or choose the shared file of that server"
+            )
+        cvat.pop("host", None)
+        cvat.pop("organization", None)
+        raw = {**raw, "cvat": cvat}
+    validate_personal(raw, attached=True)
+    return _save_attachment(personal_path, raw, selected)
+
+
+def _validated_shared_file(selected: Path) -> ProjectConfig:
     try:
-        ProjectConfig.model_validate(read_config(selected))
+        return ProjectConfig.model_validate(read_config(selected))
     except ValidationError as error:
         raise ManagedError(f"Invalid shared project configuration: {selected}") from error
-    raw["schema_version"] = 1
-    raw["project_config"] = str(selected)
+
+
+def _save_attachment(personal_path: Path, raw: dict[str, object], selected: Path) -> Path:
+    """Write the versioned personal file that references *selected*."""
+    raw = {**raw, "schema_version": 1, "project_config": str(selected)}
     try:
         validate_personal(raw, attached=True)
     except ManagedError as error:
@@ -275,6 +319,19 @@ def attach_project_config(personal_path: Path, project_path: Path) -> Path:
         ) from error
     _private_write(personal_path, _yaml_bytes(raw), replace=True)
     return selected
+
+
+def _same_shared(path: Path, document: dict[str, object]) -> bool:
+    """Compare an existing shared file with a proposed document by meaning.
+
+    A hand-written file may omit null defaults or differ in formatting; only
+    an unvalidatable side falls back to comparing the raw mappings.
+    """
+    existing = read_config(path)
+    try:
+        return ProjectConfig.model_validate(existing) == ProjectConfig.model_validate(document)
+    except ValidationError:
+        return existing == document
 
 
 def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinition]:
@@ -497,7 +554,7 @@ def migration_proposal(personal_path: Path, project_path: Path | None = None) ->
     }
     if not unresolved:
         shared = ProjectConfig.model_validate(shared).model_dump()
-    if shared_path.exists() and read_config(shared_path) != shared:
+    if shared_path.exists() and not _same_shared(shared_path, shared):
         unresolved.append("Existing shared configuration differs; reconcile it explicitly before migration")
     return MigrationProposal(
         personal_path,
@@ -630,7 +687,7 @@ def activate_migration(proposal: MigrationProposal) -> Path:
     )
     if proposal.shared_path.exists() and proposal.shared_path.read_bytes() != shared_bytes:
         # Compare semantics as a pre-existing human file may use other formatting.
-        if read_config(proposal.shared_path) != proposal.shared:
+        if not _same_shared(proposal.shared_path, proposal.shared):
             raise ManagedError("Existing shared file differs; it will not be overwritten")
         shared_bytes = proposal.shared_path.read_bytes()
     if proposal.personal == read_config(proposal.personal_path):

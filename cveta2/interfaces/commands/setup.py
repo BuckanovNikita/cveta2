@@ -13,6 +13,7 @@ from cveta2.composition.configuration import (
     CvatConfig,
     ImageCacheConfig,
     activate_migration,
+    attach_existing_project_config,
     attach_project_config,
     cache_dir_for_project,
     get_projects_cache_path,
@@ -129,7 +130,12 @@ def run_setup(args: "argparse.Namespace") -> None:
 def _offer_shared_attachment(config_path: Path) -> None:
     """Offer a shared path without silently moving newly saved identity fields."""
     project_path = primitives.path("Общий YAML проектов (пусто — пропустить): ", hint=wizard.SETUP_HINT)
-    if project_path is not None:
+    if project_path is not None and project_path.exists():
+        # An existing team file is attached, never rewritten; the identity
+        # just entered must match it.
+        selected = attach_existing_project_config(config_path, project_path)
+        logger.info(f"Общая конфигурация подключена: {selected}")
+    elif project_path is not None:
         # Legacy host/org must first move through the reviewed migration.
         proposal = migration_proposal(config_path, project_path)
         logger.info(json.dumps(proposal.preview(), ensure_ascii=False, indent=2))

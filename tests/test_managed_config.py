@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from cveta2.adapters.config import project as project_config
 from cveta2.adapters.config.project import (
+    SharedIdentityMismatchError,
     activate_migration,
     attach_project_config,
     load_project_config,
@@ -37,7 +38,7 @@ from cveta2.domain.managed.models import (
     ProjectDefinition,
 )
 from cveta2.interfaces.commands import setup
-from cveta2.interfaces.commands.interactive import primitives
+from cveta2.interfaces.commands.interactive import primitives, wizard
 from tests.helpers import write_config_yaml, write_split_config_yaml
 
 
@@ -890,3 +891,82 @@ def test_journal_with_a_missing_personal_stage_is_a_recoverable_typed_error(tmp_
 
     assert str(journal) in str(caught.value)
     assert "personal-stage" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Wizard attachment of an existing shared file
+# ---------------------------------------------------------------------------
+
+
+def _team_file(path: Path) -> Path:
+    """Write a hand-written team file that omits null and empty defaults."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "schema_version: 1\ncvat:\n  host: https://cvat.example/\n  organization: team\n"
+        "projects:\n  main:\n    id: 12\n    name: Main\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _run_wizard(monkeypatch: pytest.MonkeyPatch, cfg: Path, team: Path, organization: str) -> None:
+    monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+    monkeypatch.setattr(wizard, "prompt_host", lambda _default: "https://cvat.example")
+    monkeypatch.setattr(wizard, "prompt_organization", lambda _existing: organization)
+    monkeypatch.setattr(wizard, "prompt_username", lambda _default: "alice")
+    monkeypatch.setattr(wizard, "prompt_password", lambda: "private")
+    monkeypatch.setattr(primitives, "path", lambda *_args, **_kwargs: team)
+    monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
+    setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=False, project_config=None))
+
+
+def test_wizard_attaches_an_existing_shared_file_with_the_same_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team = _team_file(tmp_path / "team" / "project-config.yaml")
+    before = team.read_bytes()
+    cfg = tmp_path / "config.yaml"
+
+    _run_wizard(monkeypatch, cfg, team, "team")
+
+    assert team.read_bytes() == before
+    saved = read_config(cfg)
+    assert saved["schema_version"] == 1
+    assert saved["project_config"] == str(team.resolve())
+    assert saved["cvat"] == {"username": "alice", "password": "private"}
+    loaded = CvatConfig.load(cfg)
+    assert (loaded.host, loaded.organization, loaded.password) == ("https://cvat.example", "team", "private")
+
+
+def test_wizard_refuses_an_existing_shared_file_with_another_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team = _team_file(tmp_path / "team" / "project-config.yaml")
+    before = team.read_bytes()
+    cfg = tmp_path / "config.yaml"
+
+    with pytest.raises(SharedIdentityMismatchError) as caught:
+        _run_wizard(monkeypatch, cfg, team, "other-team")
+
+    assert str(team.resolve()) in str(caught.value)
+    assert "other-team" not in str(caught.value)
+    assert team.read_bytes() == before
+    assert "project_config" not in read_config(cfg)
+
+
+def test_migration_accepts_a_semantically_equal_hand_written_shared_file(tmp_path: Path) -> None:
+    """Omitted null defaults do not make an existing shared file differ."""
+    cfg = write(
+        tmp_path / "personal.yaml",
+        {"cvat": {"host": "https://cvat.example", "organization": "team", "username": "a", "password": "p"}},
+    )
+    team = tmp_path / "team.yaml"
+    team.write_text("cvat: {organization: team, host: 'https://cvat.example/'}\nschema_version: 1\n", encoding="utf-8")
+    before = team.read_bytes()
+
+    proposal = migration_proposal(cfg, team)
+
+    assert proposal.unresolved == ()
+    activate_migration(proposal)
+    assert team.read_bytes() == before
+    assert read_config(cfg)["project_config"] == str(team.resolve())
