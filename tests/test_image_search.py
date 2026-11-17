@@ -31,3 +31,20 @@ class TestLookupConfinement:
         assert found == {"sub/private.jpg": search / "sub" / "private.jpg"}
         assert missing == [name]
         assert any(name in message for message in capture_logs)
+
+
+class TestOutputExclusion:
+    """Files located under the excluded output directory are never returned."""
+
+    def test_output_copy_is_skipped_in_both_lookup_passes(self, tmp_path: Path) -> None:
+        data = tmp_path / "data"
+        (data / "raw").mkdir(parents=True)
+        (data / "yolo" / "images").mkdir(parents=True)
+        (data / "raw" / "a.jpg").write_bytes(b"source")
+        (data / "yolo" / "images" / "a.jpg").write_bytes(b"old output")
+        (data / "yolo" / "images" / "b.jpg").write_bytes(b"old output")
+
+        found, missing = resolve_images(["a.jpg", "yolo/images/b.jpg"], [data], exclude=data / "yolo")
+
+        assert found == {"a.jpg": data / "raw" / "a.jpg"}
+        assert missing == ["yolo/images/b.jpg"]
