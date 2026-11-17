@@ -1203,25 +1203,36 @@ class TestUnusableS3Mirror:
         )
         _api, connection = _scoped(normal_fake, cloud_storage=_PROJECT_STORAGE, config_path=config_path)
         task = normal_fake.tasks[0]
-        cache_dir = get_task_cache_dir(normal_fake.project.id)
-        TaskAnnotationCache(cache_dir).put(make_task(task.id, updated=_UPDATED), _payload(task.id))
 
         updated = cveta2.task_set_status(normal_fake.project.id, task.id, state="in progress", connection=connection)
 
         assert updated > 0
-        assert not (cache_dir / f"task_{task.id}.json").exists()
         assert capture_logs
 
-    def test_api_mutation_succeeds_without_an_s3_client(
+    def test_invalidation_warns_when_the_cache_settings_cannot_load(
+        self, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        """The CVAT write already happened, so an unreadable config only warns."""
+        config_path = tmp_path / "broken.yaml"
+        config_path.write_text("cache: [unclosed\n", encoding="utf-8")
+
+        upload_dependencies(config_path=config_path).invalidate(5, 1, "proj", _PROJECT_STORAGE)
+
+        assert capture_logs
+
+    def test_api_mutation_without_an_s3_client_still_drops_the_local_entry(
         self, normal_fake: LoadedFixtures, capture_logs: list[str]
     ) -> None:
         api, connection = _scoped(normal_fake, cloud_storage=_PROJECT_STORAGE)
         task = normal_fake.tasks[0]
+        cache_dir = get_task_cache_dir(normal_fake.project.id)
+        TaskAnnotationCache(cache_dir).put(make_task(task.id, updated=_UPDATED), _payload(task.id))
 
         with patch("cveta2.adapters.s3.task_cache.make_s3_client", side_effect=_missing_profile):
             cveta2.task_delete(normal_fake.project.id, task.id, connection=connection)
 
         assert api.writes.deleted_tasks == [task.id]
+        assert not (cache_dir / f"task_{task.id}.json").exists()
         assert capture_logs
 
     def test_a_failed_invalidation_never_masks_the_mutation_error(
@@ -1241,10 +1252,17 @@ class TestUnusableS3Mirror:
 
     def test_upload_invalidation_warns_instead_of_raising(self, tmp_path: Path, capture_logs: list[str]) -> None:
         config_path = _write_task_cache_s3_config(tmp_path, "proj", 5, "s3://")
+
+        upload_dependencies(config_path=config_path).invalidate(5, 1, "proj", _PROJECT_STORAGE)
+
+        assert capture_logs
+
+    def test_upload_invalidation_without_an_s3_client_drops_the_local_entry(self, capture_logs: list[str]) -> None:
         cache_dir = get_task_cache_dir(5)
         TaskAnnotationCache(cache_dir).put(make_task(updated=_UPDATED), _payload())
 
-        upload_dependencies(config_path=config_path).invalidate(5, 1, "proj", _PROJECT_STORAGE)
+        with patch("cveta2.adapters.s3.task_cache.make_s3_client", side_effect=_missing_profile):
+            upload_dependencies().invalidate(5, 1, "proj", _PROJECT_STORAGE)
 
         assert not (cache_dir / "task_1.json").exists()
         assert capture_logs

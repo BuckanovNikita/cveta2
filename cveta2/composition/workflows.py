@@ -8,7 +8,6 @@ from functools import partial
 from pathlib import Path
 
 from loguru import logger
-from pydantic import ValidationError
 
 from cveta2.adapters.config.settings import (
     CacheConfig,
@@ -84,7 +83,7 @@ def invalidate_local_entry(
     """
     try:
         settings = CacheConfig.load(config_path).for_project(project_name)
-    except (Cveta2Error, ValidationError, OSError) as error:
+    except (Cveta2Error, OSError) as error:
         logger.warning(f"Кэш задачи {task_id} не очищен: не удалось прочитать настройки кэша ({error}).")
         return
     factory = AnnotationCacheFactory()
