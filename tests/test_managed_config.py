@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 
 from cveta2.adapters.config import project as project_config
 from cveta2.adapters.config.project import (
+    SharedConfigConflictError,
     SharedIdentityMismatchError,
     activate_migration,
     attach_project_config,
@@ -970,3 +972,86 @@ def test_migration_accepts_a_semantically_equal_hand_written_shared_file(tmp_pat
     activate_migration(proposal)
     assert team.read_bytes() == before
     assert read_config(cfg)["project_config"] == str(team.resolve())
+
+
+# ---------------------------------------------------------------------------
+# Concurrent shared-policy writers
+# ---------------------------------------------------------------------------
+
+
+def _two_writers(tmp_path: Path) -> tuple[Path, Path]:
+    """Two personal files attached to one shared file whose projects A and B carry policy."""
+    alice = write_split_config_yaml(
+        tmp_path / "alice.yaml",
+        project_ids={"A": 1, "B": 2},
+        sync_roots={"A": "s3://bucket/1", "B": "s3://bucket/2"},
+        cache={"projects": {name: {"task_cache_s3": f"s3://cache/{name}"} for name in ("A", "B")}},
+    )
+    bob = write(
+        tmp_path / "bob.yaml",
+        {"schema_version": 1, "project_config": str(alice.with_name("alice-projects.yaml"))},
+    )
+    return alice, bob
+
+
+def _edit(kind: str, config: SyncRootsConfig | IgnoreConfig | CacheConfig, project: str, value: int) -> None:
+    if isinstance(config, IgnoreConfig):
+        config.add_task(project, value, f"task-{value}")
+    elif isinstance(config, SyncRootsConfig):
+        config.projects[project] = f"s3://bucket/{value}"
+    else:
+        current = config.projects.get(project) or CacheProjectSettings()
+        config.projects[project] = current.model_copy(update={kind: f"s3://cache/{value}"})
+
+
+def _policy(config: ProjectConfig, kind: str, key: str) -> object:
+    value = getattr(config.projects[key], kind)
+    return [entry["id"] for entry in value] if kind == "ignore" else value
+
+
+_SECTIONS: dict[str, type[SyncRootsConfig | IgnoreConfig | CacheConfig]] = {
+    "ignore": IgnoreConfig,
+    "sync_root": SyncRootsConfig,
+    "task_cache_s3": CacheConfig,
+}
+_WRITTEN: dict[str, Callable[[int], object]] = {
+    "ignore": lambda value: [value],
+    "sync_root": "s3://bucket/{}".format,
+    "task_cache_s3": "s3://cache/{}".format,
+}
+
+
+@pytest.mark.parametrize("kind", list(_SECTIONS))
+def test_interleaved_policy_saves_keep_both_writers_changes(tmp_path: Path, kind: str) -> None:
+    alice, bob = _two_writers(tmp_path)
+    section = _SECTIONS[kind]
+    alice_config = section.load(alice)
+    bob_config = section.load(bob)
+    _edit(kind, bob_config, "B", 200)
+    bob_config.save(bob)
+    _edit(kind, alice_config, "A", 100)
+    alice_config.save(alice)
+
+    shared = load_project_config(alice)
+    assert _policy(shared, kind, "project-1") == _WRITTEN[kind](100)
+    assert _policy(shared, kind, "project-2") == _WRITTEN[kind](200)
+
+
+@pytest.mark.parametrize("kind", ["sync_root", "task_cache_s3"])
+def test_conflicting_policy_save_is_refused_and_keeps_the_first_value(tmp_path: Path, kind: str) -> None:
+    alice, bob = _two_writers(tmp_path)
+    section = _SECTIONS[kind]
+    alice_config = section.load(alice)
+    bob_config = section.load(bob)
+    _edit(kind, bob_config, "A", 200)
+    bob_config.save(bob)
+    _edit(kind, alice_config, "A", 100)
+    shared_file = alice.with_name("alice-projects.yaml")
+    before = shared_file.read_bytes()
+
+    with pytest.raises(SharedConfigConflictError) as caught:
+        alice_config.save(alice)
+
+    assert str(shared_file.resolve()) in str(caught.value)
+    assert "s3://" not in str(caught.value)
+    assert shared_file.read_bytes() == before

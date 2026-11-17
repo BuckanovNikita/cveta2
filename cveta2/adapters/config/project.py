@@ -43,6 +43,10 @@ class SharedIdentityMismatchError(ManagedError):
     """The personal CVAT host/organization differ from an existing shared file."""
 
 
+class SharedConfigConflictError(ManagedError):
+    """Another writer changed the shared policy this save would overwrite."""
+
+
 def _yaml_location(mark: yaml.Mark | None) -> str:
     """Return a one-based ``, line N, column M`` suffix, or nothing without a mark."""
     return "" if mark is None else f", line {mark.line + 1}, column {mark.column + 1}"
@@ -334,6 +338,13 @@ def _same_shared(path: Path, document: dict[str, object]) -> bool:
         return existing == document
 
 
+def _read_shared_bytes(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError as error:
+        raise ManagedError(f"Cannot read configuration {path}: {type(error).__name__}") from error
+
+
 def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinition]:
     """Resolve old name-based reader APIs without silently accepting ambiguity."""
     result: dict[str, ProjectDefinition] = {}
@@ -345,11 +356,22 @@ def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinitio
     return result
 
 
-def write_shared_project_fields(personal_path: Path, changes: dict[str, dict[str, object]]) -> Path:
-    """Explicit policy writers update shared fields; no personal shadow copies."""
+def write_shared_project_fields(
+    personal_path: Path,
+    changes: dict[str, dict[str, object]],
+    *,
+    expected: dict[str, dict[str, object]] | None = None,
+) -> Path:
+    """Explicit policy writers update shared fields; no personal shadow copies.
+
+    *expected* holds the caller's view of each changed field before its edit.
+    A field another writer has since set to a different value is refused with
+    :class:`SharedConfigConflictError`, as is a file replaced during this save.
+    """
     path = project_config_path(personal_path)
     if path is None:
         raise ManagedError("No shared project configuration is selected")
+    original = _read_shared_bytes(path)
     config = load_project_config(personal_path)
     projects = dict(config.projects)
     aliases = shared_projects_by_name(config)
@@ -357,6 +379,13 @@ def write_shared_project_fields(personal_path: Path, changes: dict[str, dict[str
         project = aliases.get(name)
         if project is None:
             raise ManagedError(f"Unknown shared project: {name}")
+        for field, value in fields.items():
+            current = getattr(project, field)
+            if expected is not None and current not in (expected[name][field], value):
+                raise SharedConfigConflictError(
+                    f"Shared configuration {path} changed since it was loaded: project {name!r}, field {field}; "
+                    "reload and repeat the change"
+                )
         key = next(key for key, value in projects.items() if value.id == project.id)
         projects[key] = ProjectDefinition.model_validate({**project.model_dump(), **fields})
     updated = ProjectConfig.model_validate(
@@ -369,6 +398,10 @@ def write_shared_project_fields(personal_path: Path, changes: dict[str, dict[str
     # replace a read-only file through its writable parent directory.
     if path.stat().st_mode & 0o222 == 0:
         raise ManagedError(f"Shared project configuration is read-only: {path}")
+    if expected is not None and _read_shared_bytes(path) != original:
+        raise SharedConfigConflictError(
+            f"Shared configuration {path} changed during this save; reload and repeat the change"
+        )
     _private_write(path, _yaml_bytes(updated.model_dump()), replace=True, preserve_permissions=True)
     return path
 
