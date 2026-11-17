@@ -6,7 +6,14 @@ from pathlib import Path, PurePosixPath
 
 from loguru import logger
 
+from cveta2.domain.output import preview_names
 from cveta2.domain.paths import pick_latest_duplicate
+
+
+def _escapes_search_dir(name: str) -> bool:
+    """Whether *name* is absolute or climbs out through a ``..`` component."""
+    path = PurePosixPath(name)
+    return path.is_absolute() or ".." in path.parts
 
 
 def _build_basename_index(search_dir: Path) -> dict[str, list[Path]]:
@@ -47,6 +54,8 @@ def resolve_images(
     Each directory is probed in two passes: a direct path join (supports
     names containing subpaths), then a recursive basename search over the
     whole tree.  Earlier search directories always win over later ones.
+    Absolute names and names with a ``..`` component are never looked up:
+    they are warned about and reported as missing.
 
     Returns
     -------
@@ -58,6 +67,10 @@ def resolve_images(
     """
     found: dict[str, Path] = {}
     remaining = set(image_names)
+    unsafe = sorted(name for name in remaining if _escapes_search_dir(name))
+    if unsafe:
+        logger.warning(f"Пропущены имена изображений вне директории поиска ({len(unsafe)}): {preview_names(unsafe)}")
+    remaining.difference_update(unsafe)
 
     for search_dir in search_dirs:
         if not remaining:
@@ -79,5 +92,5 @@ def resolve_images(
                 found[name] = match
                 remaining.discard(name)
 
-    missing = sorted(remaining)
+    missing = sorted(remaining | set(unsafe))
     return found, missing
