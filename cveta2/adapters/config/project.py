@@ -504,9 +504,10 @@ def _migration_projects(
         projects[key] = {
             "id": project_id,
             "name": name,
-            "sync_root": sync.get(name),
+            # Legacy readers treat a blank value as "not configured".
+            "sync_root": sync.get(name) or None,
             "ignore": ignore_rows,
-            **{field: policies.get(field) for field in _POLICY_KEYS},
+            **{field: policies.get(field) or None for field in _POLICY_KEYS},
         }
     return projects
 
@@ -586,7 +587,13 @@ def migration_proposal(personal_path: Path, project_path: Path | None = None) ->
         "datasets": {},
     }
     if not unresolved:
-        shared = ProjectConfig.model_validate(shared).model_dump()
+        try:
+            shared = ProjectConfig.model_validate(shared).model_dump()
+        except ValidationError as error:
+            unresolved.extend(
+                "Invalid shared value requires review: " + ".".join(str(part) for part in issue["loc"])
+                for issue in error.errors()
+            )
     if shared_path.exists() and not _same_shared(shared_path, shared):
         unresolved.append("Existing shared configuration differs; reconcile it explicitly before migration")
     return MigrationProposal(

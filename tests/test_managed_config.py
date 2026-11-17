@@ -1055,3 +1055,39 @@ def test_conflicting_policy_save_is_refused_and_keeps_the_first_value(tmp_path: 
     assert str(shared_file.resolve()) in str(caught.value)
     assert "s3://" not in str(caught.value)
     assert shared_file.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "section",
+    [{"sync_roots": {"main": ""}}, {"cache": {"projects": {"main": {"task_cache_s3": "", "ignored_prefix": ""}}}}],
+    ids=["sync-root", "cache-policy"],
+)
+def test_migration_treats_blank_legacy_roots_as_unset(tmp_path: Path, section: dict[str, object]) -> None:
+    """Legacy readers ignore blank values, so migration must not turn them into invalid policy."""
+    path = _legacy_registry(tmp_path, {"main": 7})
+    raw = read_config(path)
+    raw.pop("sync_roots")
+    write(path, {**raw, **section})
+
+    proposal = migration_proposal(path)
+
+    assert proposal.unresolved == ()
+    activate_migration(proposal)
+    project = load_project_config(path).projects["main"]
+    assert (project.sync_root, project.task_cache_s3, project.ignored_prefix) == (None, None, None)
+
+
+def test_migration_reports_an_unusable_legacy_root_for_review(tmp_path: Path) -> None:
+    path = _legacy_registry(tmp_path, {"main": 7})
+    raw = read_config(path)
+    raw["sync_roots"] = {"main": "s3:///DO_NOT_LOG"}
+    write(path, raw)
+    original = path.read_bytes()
+
+    proposal = migration_proposal(path)
+
+    assert any("projects.main.sync_root" in item for item in proposal.unresolved)
+    assert "DO_NOT_LOG" not in json.dumps(proposal.unresolved)
+    with pytest.raises(ManagedError, match="unresolved"):
+        activate_migration(proposal)
+    assert path.read_bytes() == original
