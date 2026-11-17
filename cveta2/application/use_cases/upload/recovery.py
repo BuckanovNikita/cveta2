@@ -87,6 +87,45 @@ def _ensure_annotations(
     return client.upload_task_annotations(task_id, staged.annotations, session=session)
 
 
+def _create_task(
+    client: CvatClient,
+    request: UploadRequest,
+    staged: _StagedUpload,
+    manifest: UploadManifest,
+    *,
+    deps: UploadDependencies,
+) -> int:
+    """Persist pending intent and checkpoint the task ID before attachment."""
+    if manifest.creation_pending and manifest.task_id is None:
+        raise Cveta2Error(
+            "Результат создания задачи неизвестен. Проверьте CVAT вручную; "
+            "автоматическое создание новой задачи небезопасно."
+        )
+    # A confirmed missing old task is not the identity of its replacement.
+    # A lost create reply must leave an unknown ID, never the old one.
+    manifest.task_id = None
+    manifest.creation_pending = True
+    deps.manifests.save(manifest, required=True)
+    try:
+        return client.create_upload_task(
+            project_id=request.project_id,
+            name=request.task_name,
+            image_names=staged.task_image_names,
+            cloud_storage_id=staged.cs_info.id,
+            segment_size=request.options.segment_size,
+            image_quality=request.options.image_quality,
+            on_created=lambda new_id: _record_task_id(manifest, new_id, deps=deps),
+        )
+    except CvatApiError as e:
+        if manifest.task_id is None and _is_definitive_rejection(e.status_code):
+            # CVAT refused the create outright, so no task exists and a
+            # rerun may create one; only an unknown outcome stays pending.
+            logger.info(f"CVAT отклонил создание задачи (HTTP {e.status_code}); задача не создана.")
+            manifest.creation_pending = False
+            deps.manifests.save(manifest, required=True)
+        raise
+
+
 def _ensure_task(
     client: CvatClient,
     request: UploadRequest,
@@ -106,39 +145,8 @@ def _ensure_task(
     """
     expected = len(staged.task_image_names)
 
-    def create() -> int:
-        """Persist pending intent and checkpoint the task ID before attachment."""
-        if manifest.creation_pending and manifest.task_id is None:
-            raise Cveta2Error(
-                "Результат создания задачи неизвестен. Проверьте CVAT вручную; "
-                "автоматическое создание новой задачи небезопасно."
-            )
-        # A confirmed missing old task is not the identity of its replacement.
-        # A lost create reply must leave an unknown ID, never the old one.
-        manifest.task_id = None
-        manifest.creation_pending = True
-        deps.manifests.save(manifest, required=True)
-        try:
-            return client.create_upload_task(
-                project_id=request.project_id,
-                name=request.task_name,
-                image_names=staged.task_image_names,
-                cloud_storage_id=staged.cs_info.id,
-                segment_size=request.options.segment_size,
-                image_quality=request.options.image_quality,
-                on_created=lambda new_id: _record_task_id(manifest, new_id, deps=deps),
-            )
-        except CvatApiError as e:
-            if manifest.task_id is None and _is_definitive_rejection(e.status_code):
-                # CVAT refused the create outright, so no task exists and a
-                # rerun may create one; only an unknown outcome stays pending.
-                logger.info(f"CVAT отклонил создание задачи (HTTP {e.status_code}); задача не создана.")
-                manifest.creation_pending = False
-                deps.manifests.save(manifest, required=True)
-            raise
-
     if manifest.task_id is None:
-        return create()
+        return _create_task(client, request, staged, manifest, deps=deps)
 
     try:
         task = client.get_task(manifest.task_id)
@@ -156,7 +164,7 @@ def _ensure_task(
         # in the CVAT UI. That is the state a fresh task is for, so there is
         # nothing to warn about beyond saying what happened.
         logger.info(f"Задача {manifest.task_id} больше не существует в CVAT — создаём новую.")
-        return create()
+        return _create_task(client, request, staged, manifest, deps=deps)
     if size == expected:
         actual_names = [frame.name for frame in client.open_task_session(manifest.task_id).data_meta.frames]
         if not _frames_match(actual_names, staged.task_image_names, staged.cs_info.prefix):
