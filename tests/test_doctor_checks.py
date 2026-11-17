@@ -365,7 +365,7 @@ def test_cache_permission_repair_leaves_per_user_prompt_history_alone() -> None:
         shared_entry.write_text("{}", encoding="utf-8")
     finally:
         os.umask(previous_umask)
-    history_file = Path(history.filename)
+    history_file = Path(os.fsdecode(history.filename))
     history_modes = (stat.S_IMODE(history_file.stat().st_mode), stat.S_IMODE(history_file.parent.stat().st_mode))
 
     assert check_cache_permissions(fix=True) is True
