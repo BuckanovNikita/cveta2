@@ -13,7 +13,7 @@ from cveta2.application.use_cases.upload.types import (
 )
 from cveta2.domain.errors import Cveta2Error, LabelsMismatchError
 from cveta2.domain.output import preview_names
-from cveta2.domain.paths import build_s3_key
+from cveta2.domain.paths import join_s3_key
 
 
 def validate_labels(
@@ -120,7 +120,7 @@ def _stage_images(
 
     _warn_missing_images(missing)
     unreachable = [
-        name for name in missing if build_s3_key(cs_info.prefix, name_to_server_file[name]) not in existing_keys
+        name for name in missing if join_s3_key(cs_info.prefix, name_to_server_file[name]) not in existing_keys
     ]
     if unreachable:
         raise Cveta2Error(
@@ -128,7 +128,7 @@ def _stage_images(
             f"{preview_names(unreachable)}. Задача не создана."
         )
 
-    task_image_names = [build_s3_key(cs_info.prefix, name_to_server_file[n]) for n in all_image_names]
+    task_image_names = [join_s3_key(cs_info.prefix, name_to_server_file[n]) for n in all_image_names]
     return _StagedUpload(
         cs_info=cs_info,
         annotations=annotations,

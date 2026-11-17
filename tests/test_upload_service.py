@@ -298,6 +298,28 @@ class TestStageImages:
             "images/z.jpg",
         ]
 
+    @pytest.mark.parametrize("local", [False, True], ids=["s3_only", "also_local"])
+    def test_a_server_file_that_repeats_the_prefix_keeps_its_listed_key(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, local: bool
+    ) -> None:
+        """``images/images/a.jpg`` lists as ``images/a.jpg`` relative to the prefix.
+
+        Re-reading that relative name as a full key dropped one ``images/``:
+        the image looked absent from S3, so the upload refused it, or it was
+        uploaded a second time under a key the task then did not bind.
+        """
+        key = f"{PREFIX}/{PREFIX}/a.jpg"
+        s3 = _ListCountingS3({f"{BUCKET}/{key}": b"seeded"})
+        make_s3(monkeypatch, s3)
+        search_dirs = [make_local_images(tmp_path, ["a.jpg"])] if local else []
+        request = make_request(image_names=["a.jpg"], search_dirs=search_dirs)
+
+        staged = _stage_images(make_client(), request, deps=upload_dependencies())
+
+        assert staged.task_image_names == [key]
+        assert staged.annotations["s3_image_path"].tolist() == [key]
+        assert s3.uploaded_keys == []
+
     def test_missing_cloud_storage_names_the_project(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """The cloud-storage error must carry the project it failed for.
 

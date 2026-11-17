@@ -95,6 +95,18 @@ def build_s3_key(prefix: str, frame_name: str) -> str:
     return f"{prefix_dir}{frame_name}"
 
 
+def join_s3_key(prefix: str, relative: str) -> str:
+    """Join a path known to be relative to *prefix* onto it.
+
+    Unlike :func:`build_s3_key`, a *relative* that itself starts with the
+    prefix folder is not mistaken for a full key: the server file
+    ``images/a.jpg`` under prefix ``images`` is ``images/images/a.jpg``.
+    """
+    if not prefix:
+        return relative
+    return f"{_key_prefix_dir(prefix)}{relative}"
+
+
 def strip_key_prefix(key: str, prefix: str) -> str:
     """Return *key* with a leading *prefix* removed, keeping subfolders.
 
