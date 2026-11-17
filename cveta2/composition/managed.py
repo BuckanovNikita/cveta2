@@ -1,6 +1,5 @@
 """Construct effects for managed datasets without discovering policy inward."""
 
-
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path

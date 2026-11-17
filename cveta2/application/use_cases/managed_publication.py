@@ -1,6 +1,5 @@
 """Recheck managed preparations and deliver feedback before exact publication."""
 
-
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +22,9 @@ from cveta2.application.use_cases.managed_feedback import (
 )
 from cveta2.domain.bundle.models import Publication
 from cveta2.domain.bundle.validation import validate_bundle
-from cveta2.domain.class_registry import registry_fingerprint as registry_fingerprint  # noqa: PLC0414 - existing import.
+from cveta2.domain.class_registry import (
+    registry_fingerprint as registry_fingerprint,  # noqa: PLC0414 - existing import.
+)
 from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
     ManagedError,
