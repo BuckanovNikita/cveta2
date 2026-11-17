@@ -10,6 +10,7 @@ from loguru import logger
 from cveta2.application.ports.conversion import ConversionFiles
 from cveta2.application.use_cases.convert.common import _SizeCache, prepare_export
 from cveta2.domain.conversion import (
+    UnreadableLabelError,
     _label_path_for_image,
     _make_csv_row_base,
     _normalize_class_names,
@@ -108,6 +109,7 @@ def convert_to_yolo(
         files=files,
     )
 
+    files.validate_yolo_output(ctx)
     files.prepare_yolo_output(ctx.output_dir, ctx.splits)
 
     box_df = ctx.df[ctx.df["instance_shape"] == "box"].copy()
@@ -147,6 +149,24 @@ def _parse_label_file(path: Path, *, files: ConversionFiles) -> list[list[float]
     return [] if text is None else _parse_label_text(text, path)
 
 
+def _labels_or_skip(path: Path, unreadable: list[Path], *, files: ConversionFiles) -> list[list[float]] | None:
+    """Parse *path*, or warn, record it in *unreadable* and return ``None``."""
+    try:
+        return _parse_label_file(path, files=files)
+    except UnreadableLabelError as exc:
+        logger.warning(f"Пропуск: {exc}")
+        unreadable.append(path)
+        return None
+
+
+def _warn_unreadable_labels(unreadable: list[Path]) -> None:
+    if unreadable:
+        logger.warning(
+            f"Пропущено нечитаемых файлов разметки: {len(unreadable)} "
+            f"({preview_names([str(path) for path in unreadable])})"
+        )
+
+
 def _from_yolo_dataset(
     yaml_path: Path,
     output_path: Path,
@@ -169,6 +189,7 @@ def _from_yolo_dataset(
     rows: list[dict[str, object]] = []
     frame_id = 0
     annotation_id = 1
+    unreadable: list[Path] = []
 
     for split_key in ("train", "val", "test"):
         split_val = ds_config.get(split_key)
@@ -180,9 +201,11 @@ def _from_yolo_dataset(
                 logger.warning(f"Изображение из списка не найдено: {img_path}")
                 continue
 
+            labels = _labels_or_skip(_label_path_for_image(img_path), unreadable, files=files)
+            if labels is None:
+                continue
             img_w, img_h = sizes.get(img_path)
             _require_positive_dimensions(img_w, img_h, img_path.name)
-            labels = _parse_label_file(_label_path_for_image(img_path), files=files)
 
             if not labels:
                 rows.append(
@@ -212,6 +235,7 @@ def _from_yolo_dataset(
 
             frame_id += 1
 
+    _warn_unreadable_labels(unreadable)
     files.write_conversion_csv(rows, output_path)
 
 
@@ -238,9 +262,10 @@ def _from_yolo_predictions(  # noqa: PLR0913
     frame_id = 0
     annotation_id = 1
     missing_images: list[str] = []
+    unreadable: list[Path] = []
 
     for label_path in label_files:
-        labels = _parse_label_file(label_path, files=files)
+        labels = _labels_or_skip(label_path, unreadable, files=files)
         if not labels:
             continue
 
@@ -273,6 +298,7 @@ def _from_yolo_predictions(  # noqa: PLR0913
 
     if missing_images:
         logger.warning(f"Не найдены изображения для {len(missing_images)} файлов: {preview_names(missing_images)}")
+    _warn_unreadable_labels(unreadable)
 
     files.write_conversion_csv(rows, output_path)
 

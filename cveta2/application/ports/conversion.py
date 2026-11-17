@@ -11,8 +11,10 @@ from cveta2.domain.conversion import ExportContext
 class ConversionFiles(DatasetFiles, Protocol):
     """Image input discovery and conversion-owned output operations."""
 
-    def resolve_images(self, image_names: Iterable[str], search_dirs: list[Path]) -> tuple[dict[str, Path], list[str]]:
-        """Find images in the supplied directories in order."""
+    def resolve_images(
+        self, image_names: Iterable[str], search_dirs: list[Path], *, exclude: Path | None = None
+    ) -> tuple[dict[str, Path], list[str]]:
+        """Find images in the supplied directories in order, never under *exclude*."""
         ...
 
     def find_image_by_stem(self, stem: str, search_dirs: list[Path], subdirs: list[str] | None = None) -> Path | None:
@@ -43,6 +45,10 @@ class ConversionFiles(DatasetFiles, Protocol):
         """Enumerate declared split sources in declaration order."""
         ...
 
+    def validate_yolo_output(self, ctx: ExportContext) -> None:
+        """Reject linked or non-regular label and metadata destinations before any write."""
+        ...
+
     def prune_yolo_output(self, ctx: ExportContext) -> None:
         """Remove obsolete conversion image and label files."""
         ...
@@ -68,7 +74,10 @@ class ConversionFiles(DatasetFiles, Protocol):
         ...
 
     def label_text(self, path: Path) -> str | None:
-        """Read an existing label file, returning none when absent."""
+        """Read an existing label file, returning none when absent.
+
+        Raises ``UnreadableLabelError`` when the file cannot be read or decoded.
+        """
         ...
 
     def materialize_image(self, src: Path, dst: Path, mode: str) -> None:

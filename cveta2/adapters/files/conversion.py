@@ -17,11 +17,32 @@ from cveta2.adapters.files.materialization import _link_or_copy
 from cveta2.domain.conversion import (
     _IMAGE_EXTENSIONS,
     ExportContext,
+    UnreadableLabelError,
     _normalize_class_names,
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import CSV_COLUMNS
 from cveta2.domain.output import CSV_WRITE_OPTIONS, format_counts_ru
+
+# Prediction lookup also accepts ``.tif``; it stays out of ``_IMAGE_EXTENSIONS``
+# so YOLO re-export pruning does not start deleting ``.tif`` files.
+_STEM_LOOKUP_EXTENSIONS = (*_IMAGE_EXTENSIONS, ".tif")
+
+
+def _image_in_dir_by_stem(directory: Path, stem: str) -> Path | None:
+    """Find ``<stem><ext>`` in *directory* with a lower-, upper- or title-case suffix.
+
+    Fixed probes keep the lookup proportional to the extension list rather
+    than the directory size; other mixed-case suffixes are not matched.
+    """
+    if not directory.is_dir():
+        return None
+    for ext in _STEM_LOOKUP_EXTENSIONS:
+        for suffix in dict.fromkeys((ext, ext.upper(), ext.title())):
+            candidate = directory / f"{stem}{suffix}"
+            if candidate.is_file():
+                return candidate
+    return None
 
 
 def _find_image_by_stem(
@@ -34,20 +55,10 @@ def _find_image_by_stem(
     Searches flat dirs first, then one level of subdirs.
     """
     for search_dir in search_dirs:
-        if not search_dir.is_dir():
-            continue
-        for ext in _IMAGE_EXTENSIONS:
-            candidate = search_dir / f"{stem}{ext}"
-            if candidate.is_file():
-                return candidate
-        for sub in subdirs or []:
-            sub_dir = search_dir / sub
-            if not sub_dir.is_dir():
-                continue
-            for ext in _IMAGE_EXTENSIONS:
-                candidate = sub_dir / f"{stem}{ext}"
-                if candidate.is_file():
-                    return candidate
+        for directory in (search_dir, *(search_dir / sub for sub in subdirs or [])):
+            found = _image_in_dir_by_stem(directory, stem)
+            if found is not None:
+                return found
     return None
 
 
@@ -55,8 +66,11 @@ def _get_image_size(img_path: Path) -> tuple[int, int]:
     """Get image dimensions using Pillow (lazy import)."""
     from PIL import Image  # noqa: PLC0415
 
-    with Image.open(img_path) as im:
-        return im.size
+    try:
+        with Image.open(img_path) as im:
+            return im.size
+    except (OSError, Image.DecompressionBombError) as exc:
+        raise Cveta2Error(f"Ошибка: не удалось прочитать изображение {img_path}: {exc}") from exc
 
 
 def _write_csv(rows: list[dict[str, object]], path: Path) -> None:
@@ -114,8 +128,12 @@ def _images_from_split_source(source: Path, dataset_root: Path) -> list[Path]:
     if source.is_dir():
         return sorted(path for path in source.rglob("*") if path.is_file() and path.suffix.lower() in _IMAGE_EXTENSIONS)
     if source.is_file() and source.suffix.lower() == ".txt":
+        try:
+            text = read_text_utf8(source)
+        except (UnicodeError, OSError) as exc:
+            raise Cveta2Error(f"Ошибка: не удалось прочитать список изображений {source}: {exc}") from exc
         images: list[Path] = []
-        for line in read_text_utf8(source).splitlines():
+        for line in text.splitlines():
             raw = line.strip()
             if raw:
                 images.append(_resolve_listed_image(raw, source, dataset_root))
@@ -144,6 +162,29 @@ def _split_images(raw_split: object, dataset_root: Path) -> list[Path]:
                 seen.add(resolved)
                 result.append(image.absolute())
     return result
+
+
+def _validate_yolo_output(ctx: ExportContext) -> None:
+    """Reject label and metadata destinations that would write through a link.
+
+    Runs before the first write.  Image destinations are replaced rather
+    than written through, and symlinked ``images`` directories pointing at
+    the source stay supported, so only the label tree and ``dataset.yaml``
+    are checked.  A linked ancestor above the output directory is allowed.
+    """
+    labels = ctx.output_dir / "labels"
+    directories = [labels, *(labels / split for split in ctx.splits)]
+    for directory in directories:
+        if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+            raise Cveta2Error(f"Ошибка: небезопасный каталог разметки YOLO: {directory}")
+    destinations = {
+        labels / split / f"{Path(name).stem}.txt"
+        for name, split in ctx.df[["image_name", "split"]].itertuples(index=False, name=None)
+    }
+    destinations.add(ctx.output_dir / "dataset.yaml")
+    for destination in sorted(destinations):
+        if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+            raise Cveta2Error(f"Ошибка: небезопасный путь вывода YOLO: {destination}")
 
 
 def _prune_yolo_output(ctx: ExportContext) -> None:
@@ -252,8 +293,13 @@ def _prepare_coco_split(directory: Path) -> None:
 
 
 def _label_text(path: Path) -> str | None:
-    """Read optional label text."""
-    return read_text_utf8(path) if path.is_file() else None
+    """Read optional label text; an unreadable file raises ``UnreadableLabelError``."""
+    if not path.is_file():
+        return None
+    try:
+        return read_text_utf8(path)
+    except (UnicodeError, OSError) as exc:
+        raise UnreadableLabelError(f"не удалось прочитать файл разметки {path}: {exc}") from exc
 
 
 class LocalConversionFiles(LocalDatasetFiles):
@@ -267,6 +313,7 @@ class LocalConversionFiles(LocalDatasetFiles):
     load_class_names = staticmethod(_load_class_names_yaml)
     resolve_dataset_root = staticmethod(_resolve_dataset_root)
     split_images = staticmethod(_split_images)
+    validate_yolo_output = staticmethod(_validate_yolo_output)
     prune_yolo_output = staticmethod(_prune_yolo_output)
     coco_owned_paths = staticmethod(_coco_owned_paths)
     prune_coco_output = staticmethod(_prune_coco_output)
