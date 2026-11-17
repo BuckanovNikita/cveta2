@@ -1284,6 +1284,24 @@ def _teardown_after(session: Session, *, delete: bool) -> None:
         warn(f"       Retry: {MODULE} stop {session.namespace}")
 
 
+def refuse_kept_session(root: Path) -> None:
+    """Refuse to start a session to keep while this checkout keeps one that still exists.
+
+    A new kept session would overwrite the record of the earlier one and
+    orphan it; a recorded namespace that vanished is forgotten.
+    """
+    record = read_session_record(root)
+    if record is None:
+        return
+    if namespace_exists(record[0]):
+        fail(
+            f"session {record[0]} is kept in this checkout ({session_file(root)});",
+            f"stop it first: {MODULE} stop {record[0]}",
+        )
+    warn(f"Kept session {record[0]} no longer exists; forgetting it.")
+    session_file(root).unlink(missing_ok=True)
+
+
 def prepare(root: Path, *, notify: Callable[[str], None]) -> Session:
     """Check or wait for the cluster, then create, deploy and seed a new session.
 
@@ -1299,6 +1317,8 @@ def prepare(root: Path, *, notify: Callable[[str], None]) -> Session:
             raise InfrastructureUnavailableError(f"UNAVAILABLE: live setup blocked: {error}") from error
     else:
         wait_for_cluster(lambda: probe(root), notify=notify, timeout=wait_timeout())
+    if keep_data():
+        refuse_kept_session(root)
     session = Session(root, new_session_name())
     try:
         session.up()
@@ -1375,15 +1395,7 @@ def _recorded_or_given(root: Path, given: str | None) -> tuple[str, dict[str, in
 
 
 def command_up(root: Path) -> int:
-    record = read_session_record(root)
-    if record is not None:
-        if namespace_exists(record[0]):
-            fail(
-                f"session {record[0]} is kept in this checkout ({session_file(root)});",
-                f"stop it first: {MODULE} stop {record[0]}",
-            )
-        warn(f"Kept session {record[0]} no longer exists; forgetting it.")
-        session_file(root).unlink(missing_ok=True)
+    refuse_kept_session(root)
     session = prepare(root, notify=warn)
     keep(session)
     return 0

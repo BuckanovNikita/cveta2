@@ -118,8 +118,9 @@ acceptance.
   `main` too. `INTEGRATION_KEEP_DATA=1` keeps it and records it in the
   gitignored `tests/integration/.session` (namespace and local ports, no
   credentials); it stays until `L stop`. `L up` always keeps.
-- **A kept session blocks `L up`** in this checkout while its namespace exists;
-  stop it first. A recorded namespace that vanished is forgotten automatically.
+- **A kept session blocks `L up`** and a pytest run with
+  `INTEGRATION_KEEP_DATA=1` in this checkout while its namespace exists; stop
+  it first. A recorded namespace that vanished is forgotten automatically.
 - **Vanished namespaces.** The platform may delete any project namespace 48
   hours after creation or after a cluster restart. A session never relies on
   an earlier one; a new session starts from scratch and `L stop` of a vanished
