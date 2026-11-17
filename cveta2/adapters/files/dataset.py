@@ -113,9 +113,11 @@ def enrich_dataframe_paths(
     """Add ``s3_image_path`` and ``image_path`` columns to the DataFrame."""
     df = df.copy()
     df["s3_image_path"] = df["image_name"].map(
-        lambda name: join_s3_key(cs_info.prefix, name_to_server_file[name])
-        if name_to_server_file and name in name_to_server_file
-        else build_s3_key(cs_info.prefix, name)
+        lambda name: (
+            join_s3_key(cs_info.prefix, name_to_server_file[name])
+            if name_to_server_file and name in name_to_server_file
+            else build_s3_key(cs_info.prefix, name)
+        )
     )
     resolved = {path: str(path.resolve()) for path in set(found_images.values())}
     df["image_path"] = df["image_name"].map(lambda name: resolved[found_images[name]] if name in found_images else None)
