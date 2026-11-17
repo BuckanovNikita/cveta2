@@ -316,3 +316,33 @@ main(['doctor'])
     assert "Traceback" not in result.stderr
     assert "image_cache" in result.stderr
     assert "необязательная" in result.stderr
+
+
+def test_unreadable_personal_config_is_a_typed_cli_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from cveta2.interfaces.cli import CliApp
+
+    config = tmp_path / "config.yaml"
+    config.write_text("cvat:\n  host: https://cvat.example\n  password: DO_NOT_LOG_SECRET\n")
+    config.chmod(0)
+    monkeypatch.setenv("CVETA2_CONFIG", str(config))
+    try:
+        with pytest.raises(SystemExit) as exit_info:
+            CliApp().run(["setup-cache", "--list"])
+    finally:
+        config.chmod(0o600)
+    assert str(config) in str(exit_info.value.code)
+    assert "DO_NOT_LOG_SECRET" not in str(exit_info.value.code)
+
+
+def test_unwritable_personal_config_keeps_the_os_error_as_cause(tmp_path: Path) -> None:
+    directory = tmp_path / "locked"
+    directory.mkdir()
+    config = directory / "config.yaml"
+    directory.chmod(0o500)
+    try:
+        with pytest.raises(Cveta2Error) as caught:
+            CvatConfig(host="https://cvat.example", username="u", password="p").save_to_file(config)
+    finally:
+        directory.chmod(0o700)
+    assert str(config) in str(caught.value)
+    assert isinstance(caught.value.__cause__, PermissionError)

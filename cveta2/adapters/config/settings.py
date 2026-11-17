@@ -101,7 +101,11 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
     if not path.is_file():
         return {}
     try:
-        data = yaml.safe_load(path.read_bytes()) or {}
+        content = path.read_bytes()
+    except OSError as error:
+        raise Cveta2Error(f"Не удалось прочитать конфигурацию {path}: {type(error).__name__}.") from error
+    try:
+        data = yaml.safe_load(content) or {}
     except yaml.YAMLError as e:
         details = type(e).__name__
         if isinstance(e, yaml.MarkedYAMLError):
@@ -138,8 +142,11 @@ _YAML_DUMP: "_YamlDumpOptions" = {
 
 def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
     """Write *data* as UTF-8 YAML, creating the config directory if needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(yaml.safe_dump(data, **_YAML_DUMP))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(yaml.safe_dump(data, **_YAML_DUMP))
+    except OSError as error:
+        raise Cveta2Error(f"Не удалось записать конфигурацию {path}: {type(error).__name__}.") from error
 
 
 def _project_alias(project_key: str, shared: ProjectConfig) -> str:
