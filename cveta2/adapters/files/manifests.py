@@ -1,23 +1,43 @@
 """Atomic filesystem persistence of upload recovery manifests."""
 
 import hashlib
+import importlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+from types import ModuleType
 
 from loguru import logger
 from pydantic import ValidationError
 
-from cveta2.adapters.files.shared import default_cache_base, replace_shared_bytes
+from cveta2.adapters.files.shared import (
+    FILE_MODE,
+    default_cache_base,
+    ensure_shared_dir,
+    replace_shared_bytes,
+)
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.storage import CloudStorageInfo
 from cveta2.domain.upload import (
     MANIFEST_SCHEMA_VERSION,
+    UploadInProgressError,
     UploadManifest,
     normalize_upload_host,
 )
 from cveta2.domain.upload import (
     new_manifest as build_manifest,
 )
+
+
+def _load_fcntl() -> ModuleType | None:
+    """Return the ``fcntl`` module, or None where the platform lacks it (Windows)."""
+    try:
+        return importlib.import_module("fcntl")
+    except ImportError:
+        return None
+
+
+fcntl = _load_fcntl()
 
 
 def get_upload_manifest_dir(project_id: int, *, host: str) -> Path:
@@ -46,6 +66,73 @@ def save_manifest(manifest: UploadManifest, *, required: bool = False) -> None:
         logger.warning(
             f"Не удалось сохранить состояние загрузки ({e}) — команда --resume для этого запуска будет недоступна."
         )
+
+
+class FileUploadLock:
+    """An ``flock`` on a per-upload lock file, held by an open descriptor.
+
+    The kernel drops the lock when the descriptor closes, including when the
+    process dies, so a crashed run never blocks the next one. The file itself
+    stays: unlinking it would let a later run lock a fresh file while an
+    earlier one still holds the old.
+    """
+
+    def __init__(self, fd: int | None) -> None:
+        """Own *fd* (``None`` when no lock could be taken)."""
+        self._fd = fd
+
+    def release(self) -> None:
+        """Close the descriptor, which releases the lock."""
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+
+
+def lock_upload(project_id: int, fingerprint: str, *, host: str) -> FileUploadLock:
+    """Hold one upload exclusively for the rest of this run.
+
+    Raises :class:`UploadInProgressError` while another process holds it.
+    Where the platform or filesystem offers no ``flock``, the run goes on
+    unlocked with a warning, as uploads did before the lock existed.
+    """
+    path = get_manifest_path(project_id, fingerprint, host=host).with_suffix(".lock")
+    try:
+        ensure_shared_dir(path.parent)
+        fd = _open_lock_file(path)
+    except OSError as e:
+        raise Cveta2Error(f"Не удалось открыть файл блокировки загрузки {path}: {e}") from e
+    if fcntl is None:
+        logger.warning(
+            "Блокировка файлов недоступна на этой платформе — одновременный запуск той же загрузки не исключён."
+        )
+        os.close(fd)
+        return FileUploadLock(None)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as e:
+        os.close(fd)
+        raise UploadInProgressError(
+            f"Эта загрузка уже выполняется другим процессом (блокировка {path}). "
+            "Дождитесь его завершения; при необходимости затем используйте --resume."
+        ) from e
+    except OSError as e:
+        os.close(fd)
+        logger.warning(f"Не удалось заблокировать {path} ({e}) — одновременный запуск той же загрузки не исключён.")
+        return FileUploadLock(None)
+    return FileUploadLock(fd)
+
+
+def _open_lock_file(path: Path) -> int:
+    """Open the lock file, giving a newly created one the shared cache mode."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CREAT | os.O_EXCL, FILE_MODE)
+    except FileExistsError:
+        return os.open(path, os.O_RDONLY)
+    try:
+        os.fchmod(fd, FILE_MODE)
+    except OSError as e:
+        logger.debug(f"Не удалось выставить права {oct(FILE_MODE)} на {path}: {e}")
+    return fd
 
 
 def load_manifest(project_id: int, fingerprint: str, *, host: str) -> UploadManifest | None:
@@ -145,6 +232,7 @@ class LocalManifestStore:
     """Persist manifests with the existing atomic/checkpoint behavior."""
 
     path = staticmethod(get_manifest_path)
+    lock = staticmethod(lock_upload)
     load = staticmethod(load_manifest)
     save = staticmethod(save_manifest)
     list_for_project = staticmethod(list_manifests)

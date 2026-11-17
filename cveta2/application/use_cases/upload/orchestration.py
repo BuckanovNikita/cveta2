@@ -77,6 +77,19 @@ def upload_dataset(client: CvatClient, request: UploadRequest, *, deps: UploadDe
     validate_upload_image_names([*request.plan.image_names, *request.plan.deleted_names])
     validate_upload_boxes(request.plan.annotations)
     fingerprint = request_fingerprint(request)
+    # Held for the whole run: two runs of one upload would otherwise both
+    # pass the unfinished-upload check below and each create a task.
+    lock = deps.manifests.lock(request.project_id, fingerprint, host=client.host)
+    try:
+        return _upload_locked(client, request, fingerprint, deps=deps)
+    finally:
+        lock.release()
+
+
+def _upload_locked(
+    client: CvatClient, request: UploadRequest, fingerprint: str, *, deps: UploadDependencies
+) -> UploadOutcome:
+    """Run the upload chain while this process holds the upload's lock."""
     if request.resume:
         manifest = _resume_manifest(request, fingerprint, host=client.host, deps=deps)
         if manifest.completed_counts is not None:

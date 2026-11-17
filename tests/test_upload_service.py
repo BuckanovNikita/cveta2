@@ -36,13 +36,14 @@ from cveta2.composition.workflows import upload_cvat_dataset, upload_dependencie
 from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.models import CSV_COLUMNS, LabelInfo, ProjectInfo
 from cveta2.domain.paths import build_s3_key
+from cveta2.domain.upload import UploadInProgressError
 from tests.fixtures.fake_cvat_api import FakeCvatApi, RecordedWrites
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import client_with_api, make_cs_info
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from cveta2.application.ports.dtos import NewIssue, RawDataMeta
     from cveta2.composition.client import CvatClient
@@ -975,6 +976,83 @@ class TestCreateRejection:
         assert str(manifest_file) in str(caught.value)
         assert _writes_of(client).created_tasks == []
         assert list_manifests(PROJECT_ID, host=client.host)[0].creation_pending
+
+
+class TestConcurrentUploads:
+    """Two runs of one upload would both pass the manifest check."""
+
+    @staticmethod
+    def _start_another_run_while_listing(
+        monkeypatch: pytest.MonkeyPatch, s3: _ListCountingS3, start: Callable[[], None]
+    ) -> None:
+        """Start *start* once, during the first run's bucket listing.
+
+        That is before the first run has saved any manifest, the window in
+        which both runs pass the "unfinished upload" check.
+        """
+        original = s3.list_objects_v2
+        started: list[bool] = []
+
+        def list_then_start(**kwargs: str) -> dict[str, Any]:
+            if not started:
+                started.append(True)
+                start()
+            return original(**kwargs)
+
+        monkeypatch.setattr(s3, "list_objects_v2", list_then_start)
+
+    def test_a_second_run_of_the_same_upload_is_refused_while_the_first_holds_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = make_client()
+        s3 = seeded_bucket(["a.jpg"])
+        make_s3(monkeypatch, s3)
+        refusals: list[UploadInProgressError] = []
+
+        def second_run() -> None:
+            with pytest.raises(UploadInProgressError) as caught:
+                upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+            refusals.append(caught.value)
+
+        self._start_another_run_while_listing(monkeypatch, s3, second_run)
+        outcome = upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+
+        assert len(refusals) == 1
+        assert len(_writes_of(client).created_tasks) == 1
+        assert outcome.task_id == NEW_TASK_ID
+
+    def test_a_different_upload_is_not_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = make_client()
+        s3 = seeded_bucket(["a.jpg", "b.jpg"])
+        make_s3(monkeypatch, s3)
+
+        def other_upload() -> None:
+            upload_cvat_dataset(client, make_request(image_names=["b.jpg"]))
+
+        self._start_another_run_while_listing(monkeypatch, s3, other_upload)
+
+        upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+
+        assert len(_writes_of(client).created_tasks) == 2
+
+    def test_the_lock_is_released_when_a_run_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+
+        with _create_answers(client, 400), pytest.raises(CvatApiError):
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+
+        assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"])).task_id == NEW_TASK_ID
+
+    def test_without_os_locks_the_upload_still_runs_and_warns(
+        self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+    ) -> None:
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+        monkeypatch.setattr("cveta2.adapters.files.manifests.fcntl", None)
+
+        assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"])).task_id == NEW_TASK_ID
+        assert capture_logs
 
 
 class TestS3FailureAbortsBeforeTaskCreation:
