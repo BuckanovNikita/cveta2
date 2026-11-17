@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from pydantic import ValidationError
 
 from cveta2.adapters.class_api.http import HttpClassApi
 from cveta2.adapters.clearml.bundle import ClearMLStore, S3Roots
@@ -22,25 +23,28 @@ def http_api() -> Iterator[str]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             assert self.headers.get("Authorization") is None
+            if self.headers.get("Accept", "").lower() != "application/json":
+                self.send_error(406)
+                return
             if self.path == "/error":
                 self.send_error(503)
                 return
             self.send_response(200)
             self.end_headers()
+            record = {
+                "id": 999,
+                "number": 7,
+                "name": "cat",
+                "techClass": False,
+                "isPeriodical": False,
+                "isCritical": False,
+                "threshold": 0.5,
+            }
             payload = {
-                "/classes": json.dumps(
-                    [
-                        {
-                            "id": 999,
-                            "number": 7,
-                            "name": "cat",
-                            "techClass": False,
-                            "isPeriodical": False,
-                            "isCritical": False,
-                            "threshold": 0.5,
-                        }
-                    ]
-                ),
+                "/classes": json.dumps([record]),
+                "/boolean-number": json.dumps([{**record, "number": True}]),
+                "/string-number": json.dumps([{**record, "number": "7"}]),
+                "/string-boolean": json.dumps([{**record, "techClass": "false"}]),
                 "/bad-json": "not json",
                 "/bad-schema": '[{"id": 7}]',
                 "/wrong-shape": "{}",
@@ -62,9 +66,16 @@ def http_api() -> Iterator[str]:
         server.server_close()
 
 
-def test_http_fetch_uses_number_and_unauthenticated_real_get(http_api: str) -> None:
+def test_http_fetch_negotiates_json_uses_number_and_unauthenticated_real_get(http_api: str) -> None:
     records = HttpClassApi(timeout=2).fetch(http_api + "/classes")
     assert [(record.id, record.number, record.name) for record in records] == [(999, 7, "cat")]
+
+
+@pytest.mark.parametrize("route", ["/boolean-number", "/string-number", "/string-boolean"])
+def test_http_fetch_rejects_coercible_invalid_class_fields(http_api: str, route: str) -> None:
+    with pytest.raises(UploadError) as caught:
+        HttpClassApi(timeout=2).fetch(http_api + route)
+    assert isinstance(caught.value.__cause__, ValidationError)
 
 
 @pytest.mark.parametrize("route", ["/error", "/bad-json", "/bad-schema", "/wrong-shape", "/deep"])

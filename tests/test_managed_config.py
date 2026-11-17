@@ -4,10 +4,12 @@ import argparse
 import json
 import multiprocessing
 import os
+import secrets
 import stat
 from collections.abc import Callable
 from multiprocessing.connection import Connection as ProcessConnection
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -320,6 +322,49 @@ def test_unclassified_nested_fields_require_review(tmp_path: Path) -> None:
         activate_migration(proposal)
 
 
+@pytest.mark.parametrize(
+    "document",
+    [
+        "cvat: {password: DO_NOT_LOG_SECRET, password: duplicate}\n",
+        "ignore: [{7: DO_NOT_LOG_SECRET}]\n",
+        "cvat: &recursive {password: DO_NOT_LOG_SECRET, nested: *recursive}\n",
+        "ignore: &recursive [DO_NOT_LOG_SECRET, *recursive]\n",
+    ],
+    ids=["nested-duplicate", "sequence-non-string-key", "recursive-mapping", "recursive-sequence"],
+)
+def test_config_rejects_ambiguous_or_recursive_nested_yaml(tmp_path: Path, document: str) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text(document, encoding="utf-8")
+    before = config.read_bytes()
+
+    with pytest.raises(ManagedError) as caught:
+        read_config(config)
+
+    assert str(config) in str(caught.value)
+    assert "DO_NOT_LOG_SECRET" not in str(caught.value)
+    assert config.read_bytes() == before
+
+
+def test_config_accepts_reused_nonrecursive_yaml_aliases(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_text("first: &shared {name: cat}\nsecond: *shared\n", encoding="utf-8")
+
+    assert read_config(config) == {"first": {"name": "cat"}, "second": {"name": "cat"}}
+
+
+def test_migration_creates_missing_shared_destination_ancestors(tmp_path: Path) -> None:
+    config = legacy(tmp_path / "personal.yaml")
+    original = config.read_bytes()
+    target = tmp_path / "new" / "team" / "shared.yaml"
+    proposal = migration_proposal(config, project_path=target)
+
+    assert activate_migration(proposal) == target
+
+    assert load_project_config(config).projects["project-7"].id == 7
+    assert next(tmp_path.glob("*.bak")).read_bytes() == original
+    assert project_config_path(config) == target
+
+
 def test_recovery_after_shared_activation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the original personal file recoverable if its final switch fails."""
     cfg = legacy(tmp_path / "personal.yaml")
@@ -342,16 +387,19 @@ def test_recovery_after_shared_activation(tmp_path: Path, monkeypatch: pytest.Mo
     assert load_project_config(cfg).projects["project-7"].id == 7
 
 
-def test_migration_preserves_preexisting_hidden_stage_files(tmp_path: Path) -> None:
+def test_migration_preserves_preexisting_hidden_stage_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Only unique task-owned stages may be written or cleaned up."""
     cfg = legacy(tmp_path / "personal.yaml")
     proposal = migration_proposal(cfg)
     sentinels = [
-        cfg.with_name(f".{cfg.name}.migration-next"),
-        proposal.shared_path.with_name(f".{proposal.shared_path.name}.migration-next"),
+        cfg.with_name(f".{cfg.name}.migration-{'0' * 16}"),
+        proposal.shared_path.with_name(f".{proposal.shared_path.name}.migration-{'0' * 16}"),
     ]
     for path in sentinels:
         path.write_bytes(b"pre-existing user data")
+    # Backup, colliding personal stage, retry, colliding shared stage, retry, journal.
+    tokens = iter(str(number) * 16 for number in (1, 0, 2, 0, 3, 4))
+    monkeypatch.setattr(secrets, "token_hex", lambda _size: next(tokens))
     activate_migration(proposal)
     for path in sentinels:
         assert path.read_bytes() == b"pre-existing user data"
@@ -374,6 +422,59 @@ def test_shared_policy_edits_preserve_permissions(tmp_path: Path, mode: int) -> 
     assert target.stat().st_mode & 0o777 == mode
     assert target.stat().st_gid == group
     assert load_project_config(cfg).projects["main"].sync_root == "s3://bucket/revised"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX supplementary group ownership")
+def test_shared_policy_edit_preserves_a_different_team_group(tmp_path: Path) -> None:
+    target = shared(tmp_path / "shared.yaml")
+    groups = set(os.getgroups()) - {target.stat().st_gid}
+    if not groups:
+        pytest.skip("No supplementary group differs from the destination directory's group")
+    team_group = min(groups)
+    os.chown(target, -1, team_group)
+    target.chmod(0o660)
+    cfg = personal(tmp_path / "personal.yaml", target)
+    roots = SyncRootsConfig.load(cfg)
+    roots.projects["Main project"] = "s3://bucket/team"
+
+    roots.save(cfg)
+
+    assert target.stat().st_gid == team_group
+    assert stat.S_IMODE(target.stat().st_mode) == 0o660
+    assert load_project_config(cfg).projects["main"].sync_root == "s3://bucket/team"
+
+
+def test_shared_policy_save_without_posix_ownership_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise the Windows ownership guard with real IO, not native Windows locking."""
+    target = shared(tmp_path / "shared.yaml")
+    cfg = personal(tmp_path / "personal.yaml", target)
+    mode = stat.S_IMODE(target.stat().st_mode)
+    roots = SyncRootsConfig.load(cfg)
+    roots.projects["Main project"] = "s3://bucket/windows"
+    windows_os = SimpleNamespace(
+        name="nt",
+        environ=os.environ,
+        O_RDWR=os.O_RDWR,
+        O_WRONLY=os.O_WRONLY,
+        O_CREAT=os.O_CREAT,
+        O_EXCL=os.O_EXCL,
+        SEEK_SET=os.SEEK_SET,
+        open=os.open,
+        close=os.close,
+        fstat=os.fstat,
+        write=os.write,
+        lseek=os.lseek,
+        fdopen=os.fdopen,
+        fsync=os.fsync,
+    )
+    monkeypatch.setattr(project_config, "os", windows_os)
+
+    roots.save(cfg)
+
+    assert stat.S_IMODE(target.stat().st_mode) == mode
+    assert load_project_config(cfg).projects["main"].sync_root == "s3://bucket/windows"
 
 
 def test_explicit_shared_path_without_saved_reference(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -406,22 +507,43 @@ def test_concurrent_journal_is_not_overwritten(tmp_path: Path, monkeypatch: pyte
     journal = cfg.with_name(f"{cfg.name}.migration.json")
     original_write = project_config._private_write
 
-    def racing_write(
-        path: Path,
-        content: bytes,
-        *,
-        replace: bool = False,
-        preserve_permissions: bool = False,
-    ) -> None:
+    def racing_write(path: Path, content: bytes, **kwargs: bool) -> None:
         if path == journal:
             path.write_bytes(b"another transaction")
-        original_write(path, content, replace=replace, preserve_permissions=preserve_permissions)
+        original_write(path, content, **kwargs)
 
     monkeypatch.setattr(project_config, "_private_write", racing_write)
     with pytest.raises(ManagedError, match="Another approved migration"):
         activate_migration(proposal)
     assert journal.read_bytes() == b"another transaction"
     assert not list(tmp_path.glob(".*.migration-*"))
+    assert not proposal.shared_path.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX owner-only file mode")
+def test_interrupted_migration_claim_is_private_and_cleaned_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cfg = legacy(tmp_path / "personal.yaml")
+    original = cfg.read_bytes()
+    proposal = migration_proposal(cfg)
+    claimed: list[Path] = []
+
+    def interrupted_stage(path: Path, _content: bytes, _purpose: str) -> Path:
+        claimed.append(path)
+        assert path.read_bytes() == b""
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        raise OSError("stage unavailable")
+
+    monkeypatch.setattr(project_config, "_stage_bytes", interrupted_stage)
+    previous_umask = os.umask(0)
+    try:
+        with pytest.raises(OSError, match="stage unavailable"):
+            activate_migration(proposal)
+    finally:
+        os.umask(previous_umask)
+
+    assert claimed
+    assert all(not path.exists() for path in claimed)
+    assert cfg.read_bytes() == original
     assert not proposal.shared_path.exists()
 
 
