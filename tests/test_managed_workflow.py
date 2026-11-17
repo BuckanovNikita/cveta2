@@ -60,6 +60,7 @@ class FakeCvat:
         self.annotation_reads: list[int] = []
         self.issues: dict[int, list[RawIssue]] = {101: [], 102: []}
         self.fail_issues = False
+        self.fail_frames: set[int] = set()
         self.advance_issue_timestamp = False
 
     def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
@@ -110,7 +111,7 @@ class FakeCvat:
         return self.issues[task_id]
 
     def create_issue(self, issue: NewIssue) -> None:
-        if self.fail_issues:
+        if self.fail_issues or issue.frame in self.fail_frames:
             raise Cveta2Error("Simulated feedback failure")
         task_id = issue.job_id // 10
         self.issues[task_id].append(
@@ -320,7 +321,13 @@ def _legacy_parent(workflow: Workflow, dataset: pd.DataFrame | None = None) -> P
     return parent
 
 
-def _prepare(workflow: Workflow, tmp_path: Path, *, bad: bool = False) -> Path:
+def _prepare(
+    workflow: Workflow,
+    tmp_path: Path,
+    *,
+    bad: bool = False,
+    bad_frames: tuple[str, ...] = ("0",),
+) -> Path:
     fetched = tmp_path / "fetched"
     result = api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
     assert result["rows"] == 30
@@ -328,7 +335,7 @@ def _prepare(workflow: Workflow, tmp_path: Path, *, bad: bool = False) -> Path:
     transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
     if bad:
         transformed.loc[
-            transformed["source_id"].eq("main") & transformed["source_frame_id"].astype(str).eq("0"),
+            transformed["source_id"].eq("main") & transformed["source_frame_id"].astype(str).isin(bad_frames),
             "bbox_x_br",
         ] = 1
     output = tmp_path / "transformed.csv"
@@ -482,3 +489,31 @@ def test_legacy_parent_adoption_keeps_published_splits_of_unambiguous_images(
     assert splits[ambiguous] == set(seeded.loc[seeded["image_path"].eq(ambiguous), "split"])
     report = json.loads((prepared / "report.json").read_text())
     assert report["parent_split_conflicts"] == 1
+
+
+def test_failed_feedback_is_delivered_after_a_sibling_issue_moved_the_task(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True, bad_frames=("0", "1"))
+    workflow.cvat.advance_issue_timestamp = True
+    workflow.cvat.fail_frames = {0}
+    first = api.report_dataset_errors(prepared, **workflow.options)
+    assert (first.created, len(first.failed)) == (1, 1)
+    workflow.cvat.fail_frames.clear()
+    retried = api.report_dataset_errors(prepared, **workflow.options)
+    assert (retried.created, retried.existing, retried.failed) == (1, 1, [])
+    assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [0, 1]
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+
+def test_unexplained_task_change_still_blocks_a_pending_delivery(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True, bad_frames=("0", "1"))
+    workflow.cvat.advance_issue_timestamp = True
+    workflow.cvat.fail_frames = {0}
+    api.report_dataset_errors(prepared, **workflow.options)
+    workflow.cvat.fail_frames.clear()
+    workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
+    with pytest.raises(ManagedError):
+        api.report_dataset_errors(prepared, **workflow.options)
+    assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
+    with pytest.raises(ManagedError):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []

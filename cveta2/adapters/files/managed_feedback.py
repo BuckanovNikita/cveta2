@@ -2,6 +2,7 @@
 
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -38,6 +39,37 @@ def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ManagedError(f"Duplicate feedback ledger key: {key}")
         result[key] = value
     return result
+
+
+def _acknowledged_chain(
+    receipts: Iterable[_StoredReceipt],
+    owner: tuple[str, int, int],
+    start: str,
+    fingerprint: str | None = None,
+) -> list[str]:
+    """Follow acknowledged issue-only time transitions of one task from ``start``."""
+    transitions = [
+        receipt
+        for receipt in receipts
+        if receipt.delivered
+        and (receipt.source_id, receipt.project_id, receipt.task_id) == owner
+        and (fingerprint is None or receipt.fingerprint == fingerprint)
+        and receipt.after_date is not None
+        and receipt.after_date != receipt.before_date
+    ]
+    chain = [start]
+    for _ in transitions:
+        matching = [receipt for receipt in transitions if receipt.before_date == chain[-1]]
+        if not matching:
+            break
+        dates = {receipt.after_date for receipt in matching}
+        if len(dates) != 1:
+            raise ManagedError("Ambiguous feedback timestamp acknowledgements")
+        after = matching[0].after_date
+        if after is None or after in chain:
+            break
+        chain.append(after)
+    return chain
 
 
 class LocalFeedbackLedger:
@@ -141,6 +173,22 @@ class LocalFeedbackLedger:
         )
         self._save(ledger)
 
+    def rebase(self, finding: FeedbackFinding, state: FeedbackTaskState) -> bool:
+        """Rebase a pending receipt only along its own task's acknowledged chain."""
+        ledger = self._load()
+        stored = ledger.receipts.get(finding.marker)
+        if stored is None or stored.delivered or stored.fingerprint != state.fingerprint:
+            return False
+        owner = (stored.source_id, stored.project_id, stored.task_id)
+        if owner != (finding.source_id, state.project_id, state.task_id):
+            return False
+        chain = _acknowledged_chain(ledger.receipts.values(), owner, stored.before_date, stored.fingerprint)
+        if state.updated_date not in chain[1:]:
+            return False
+        ledger.receipts[finding.marker] = stored.model_copy(update={"before_date": state.updated_date})
+        self._save(ledger)
+        return True
+
     def effective_snapshot(self, snapshot: ManagedSnapshot) -> ManagedSnapshot:
         """Chain acknowledged issue-only times without rewriting source records."""
         receipts = self._load().receipts.values()
@@ -148,30 +196,10 @@ class LocalFeedbackLedger:
         for source in snapshot.sources:
             tasks = dict(source.tasks)
             for task_key, task in source.tasks.items():
-                updated = task.updated_date
-                transitions = [
-                    receipt
-                    for receipt in receipts
-                    if receipt.delivered
-                    and receipt.source_id == source.name
-                    and receipt.project_id == source.project_id
-                    and receipt.task_id == task.id
-                    and receipt.after_date is not None
-                    and receipt.after_date != receipt.before_date
-                ]
-                visited = {updated}
-                for _ in transitions:
-                    matching = [receipt for receipt in transitions if receipt.before_date == updated]
-                    if not matching:
-                        break
-                    dates = {receipt.after_date for receipt in matching}
-                    if len(dates) != 1:
-                        raise ManagedError("Ambiguous feedback timestamp acknowledgements")
-                    after = matching[0].after_date
-                    if after is None or after in visited:
-                        break
-                    visited.add(after)
-                    updated = after
+                if source.project_id is None:
+                    continue
+                owner = (source.name, source.project_id, task.id)
+                updated = _acknowledged_chain(receipts, owner, task.updated_date)[-1]
                 tasks[task_key] = task.model_copy(update={"updated_date": updated})
             sources.append(source.model_copy(update={"tasks": tasks}))
         return snapshot.model_copy(update={"sources": sources})
