@@ -515,22 +515,17 @@ where `n` counts identical rows.
 
 The three-file payload uses `dataset.csv` for accepted transformed rows and assigned
 splits. `dataset.yaml` embeds resolved class/split/image policy. The typed versioned
-managed extension of `tasks.yaml` contains CVAT/S3 source evidence: tasks, the
-SHA-256 fingerprint of each CVAT project's label definitions, all four original
-partitions, empty-task facts, object hashes and the SHA-256 fingerprint of the class
-registry. It does not store the label definitions or registry records themselves.
-Files without managed extensions remain readable.
+managed extension of `tasks.yaml` contains CVAT/S3 source evidence: tasks, label
+definitions, all four original partitions, empty-task facts, object hashes and the
+registry snapshot. Files without managed extensions remain readable.
 
 Managed local preparation uses `format_version=2` and binds captured sources,
 transformed CSV, payload hashes, media, the relevant resolved shared definition and
 exact parent. The format differs from standalone `format_version=1`; the behavior and
 freshness rules are owned by the managed specification linked above. Feedback delivery
-keeps its receipts separate from the payload, in
-`managed-feedback/<SHA-256 of source-snapshot.yaml>.json` next to the personal
-configuration file, so every preparation built from one fetch shares them: intent
+keeps its receipts in the preparation's `feedback.json`, separate from the payload: intent
 is recorded before each CVAT issue write and acknowledged afterwards, so an interrupted
-delivery resumes without duplicating issues. A preparation's own `feedback.json`
-written by earlier versions is still read.
+delivery resumes without duplicating issues.
 
 ### Public operations
 

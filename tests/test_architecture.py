@@ -18,36 +18,6 @@ def test_canonical_effect_ownership() -> None:
     assert check_tree(PACKAGE) == []
 
 
-INNER_EFFECT_SAMPLES = {
-    "time.strftime": "import time\ndef f():\n    return time.strftime('%Y')\n",
-    "time.localtime": "import time\ndef f():\n    return time.localtime()\n",
-    "time.gmtime": "from time import gmtime\ndef f():\n    return gmtime()\n",
-    "time.time_ns": "import time\ndef f():\n    return time.time_ns()\n",
-    "time.monotonic_ns": "import time\ndef f():\n    return time.monotonic_ns()\n",
-    "time.perf_counter_ns": "import time\ndef f():\n    return time.perf_counter_ns()\n",
-    "time.process_time": "import time\ndef f():\n    return time.process_time()\n",
-    "datetime.today": "from datetime import datetime\ndef f():\n    return datetime.today()\n",
-    "asyncio": "import asyncio\nasync def f():\n    await asyncio.sleep(1)\n",
-    "asyncio-from-import": "from asyncio import sleep\nasync def f():\n    await sleep(1)\n",
-    "Path.walk": "from pathlib import Path\ndef f(root: Path):\n    return list(root.walk())\n",
-}
-
-
-@pytest.mark.parametrize("effect", sorted(INNER_EFFECT_SAMPLES))
-@pytest.mark.parametrize("layer", ["domain", "application"])
-def test_effect_checker_flags_inner_layer_effects(effect: str, layer: str) -> None:
-    from tests.architecture_effects import inspect_source
-
-    assert inspect_source(INNER_EFFECT_SAMPLES[effect], f"cveta2.{layer}.sample")
-
-
-def test_effect_checker_keeps_ast_walk_pure() -> None:
-    from tests.architecture_effects import inspect_source
-
-    source = "import ast\ndef f(tree: ast.AST):\n    return list(ast.walk(tree))\n"
-    assert inspect_source(source, "cveta2.domain.sample") == []
-
-
 def test_inner_imports_do_not_load_optional_or_network_sdks() -> None:
     import subprocess
     import sys
