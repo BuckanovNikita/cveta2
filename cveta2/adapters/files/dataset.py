@@ -202,8 +202,8 @@ def read_baseline_siblings(path: Path) -> list[pd.DataFrame]:
             continue
         try:
             frames.append(pd.read_csv(sibling, **CSV_READ_OPTIONS))
-        except (pd.errors.ParserError, pd.errors.EmptyDataError, OSError) as exc:
-            logger.info(f"{sibling} не прочитан ({exc}) — его задачи считаются новыми")
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeError, OSError) as exc:
+            logger.warning(f"{sibling} не прочитан ({exc}) — его задачи считаются новыми")
     return frames
 
 
