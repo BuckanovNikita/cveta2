@@ -374,3 +374,32 @@ def test_failed_personal_save_keeps_the_previous_file(tmp_path: Path) -> None:
     assert str(config_path) in str(caught.value)
     assert config_path.read_bytes() == original
     assert sorted(path.name for path in tmp_path.iterdir()) == ["config.yaml"]
+
+
+def test_attached_setup_does_not_persist_one_run_environment_overrides(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared = write_config_yaml(
+        tmp_path / "project-config.yaml",
+        schema_version=1,
+        cvat={"host": "https://cvat.example", "organization": None},
+        projects={},
+        datasets={},
+    )
+    config_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        schema_version=1,
+        project_config=str(shared),
+        cvat={"username": "alice", "password": "file-password"},
+    )
+    monkeypatch.setenv("CVAT_PASSWORD", "one-run-token")
+    monkeypatch.setenv("CVETA2_DATA_TIMEOUT", "7")
+    feed_inputs(monkeypatch, [""])
+    monkeypatch.setattr(primitives, "prompt_password", lambda _prompt: "")
+
+    run_setup(_args(config_path))
+
+    saved = CvatConfig.from_file(config_path)
+    assert saved.password == "file-password"
+    assert saved.request_timeout is None
+    assert saved.username == "alice"

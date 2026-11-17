@@ -93,7 +93,11 @@ def run_setup(args: "argparse.Namespace") -> None:
         return
     require_interactive(wizard.SETUP_HINT)
     shared = optional_project_config(config_path)
-    existing = CvatConfig.load(config_path) if shared is not None else CvatConfig.from_file(config_path)
+    if shared is not None:
+        # Validate the effective configuration (e.g. conflicting environment
+        # identity) without letting one-run environment values reach the file.
+        CvatConfig.load(config_path)
+    existing = CvatConfig.from_file(config_path)
 
     if shared is None:
         host_default = existing.host or "https://app.cvat.ai"
