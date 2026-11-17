@@ -100,9 +100,9 @@ def _load_preset_data() -> dict[str, object]:
 
 def _load_raw_yaml(path: Path) -> dict[str, object]:
     """Load a YAML file and return its top-level mapping (or empty dict)."""
-    if not path.is_file():
-        return {}
     try:
+        if not path.is_file():
+            return {}
         content = path.read_bytes()
     except OSError as error:
         raise Cveta2Error(f"Не удалось прочитать конфигурацию {path}: {type(error).__name__}.") from error

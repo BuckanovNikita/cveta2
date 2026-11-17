@@ -318,18 +318,23 @@ main(['doctor'])
     assert "необязательная" in result.stderr
 
 
-def test_unreadable_personal_config_is_a_typed_cli_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("locked", ["file", "directory"])
+def test_unreadable_personal_config_is_a_typed_cli_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, locked: str
+) -> None:
     from cveta2.interfaces.cli import CliApp
 
-    config = tmp_path / "config.yaml"
+    config = tmp_path / "profile" / "config.yaml"
+    config.parent.mkdir()
     config.write_text("cvat:\n  host: https://cvat.example\n  password: DO_NOT_LOG_SECRET\n")
-    config.chmod(0)
+    target = config if locked == "file" else config.parent
+    target.chmod(0)
     monkeypatch.setenv("CVETA2_CONFIG", str(config))
     try:
         with pytest.raises(SystemExit) as exit_info:
             CliApp().run(["setup-cache", "--list"])
     finally:
-        config.chmod(0o600)
+        target.chmod(0o700)
     assert str(config) in str(exit_info.value.code)
     assert "DO_NOT_LOG_SECRET" not in str(exit_info.value.code)
 

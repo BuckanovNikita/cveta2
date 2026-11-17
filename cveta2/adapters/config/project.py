@@ -92,9 +92,9 @@ def personal_config_path(path: Path | None = None) -> Path:
 
 def read_config(path: Path, *, missing_ok: bool = False) -> dict[str, object]:
     """Read a strict YAML mapping without exposing source scalars on failures."""
-    if missing_ok and not path.exists():
-        return {}
     try:
+        if missing_ok and not path.exists():
+            return {}
         content = path.read_bytes()
         node = yaml.compose(content, Loader=yaml.SafeLoader)
         if node is not None:
