@@ -335,6 +335,8 @@ def quota_requests(root: Path, deadline: float) -> dict[str, float]:
     """``requests.cpu`` and ``requests.memory`` of the session quota, read client-side."""
     manifest = root / "tests" / "integration" / "k8s" / QUOTA_MANIFEST
     result = kubectl("create", "--dry-run=client", "-o", "json", "-f", str(manifest), deadline=deadline)
+    if _lost_connection(result):
+        raise InfrastructureUnavailableError(f"the {CONTEXT} cluster stopped answering while reading the quota")
     if result.returncode != 0:
         fail(f"reading the session quota {manifest} failed (kubectl exit {result.returncode}).")
     # One JSON document per manifest document, concatenated.
@@ -356,8 +358,8 @@ def quota_requests(root: Path, deadline: float) -> dict[str, float]:
 def node_admission(root: Path, deadline: float) -> str | None:
     """None when a node can admit the session quota's requests; else the reason."""
     need = quota_requests(root, deadline)
-    nodes = _json_output(kubectl("get", "nodes", "-o", "json", deadline=deadline), "listing nodes")
-    pods = _json_output(
+    nodes = _probe_json(kubectl("get", "nodes", "-o", "json", deadline=deadline), "listing nodes")
+    pods = _probe_json(
         kubectl(
             "get",
             "pods",
@@ -419,33 +421,51 @@ def _cluster_available(deadline: float) -> str | None:
         fail("Kubernetes access, context, credentials or TLS configuration failed; check kubectl access.")
     if "context" in detail and ("does not exist" in detail or "not found" in detail):
         fail(f"kubectl has no context '{CONTEXT}'; the live tests run on Docker Desktop's Kubernetes.")
-    if any(
-        term in detail
-        for term in (
-            "connection refused",
-            # kubectl's own wording when nothing listens on the API port, as
-            # when Docker Desktop's Kubernetes is stopped.
-            "was refused",
-            "connection reset",
-            "timed out",
-            "timeout",
-            "deadline exceeded",
-            "no such host",
-            "unreachable",
-            "eof",
-            "serviceunavailable",
-            "unable to handle the request",
-        )
-    ):
+    if _lost_connection(result):
         return f"the {CONTEXT} cluster does not answer"
     fail(f"Kubernetes readiness probe failed unexpectedly (exit {result.returncode}); check kubectl access.")
+
+
+_CONNECTIVITY_TERMS = (
+    "connection refused",
+    # kubectl's own wording when nothing listens on the API port, as
+    # when Docker Desktop's Kubernetes is stopped.
+    "was refused",
+    "connection reset",
+    "timed out",
+    "timeout",
+    "deadline exceeded",
+    "no such host",
+    "unreachable",
+    "eof",
+    "serviceunavailable",
+    "unable to handle the request",
+)
+
+
+def _lost_connection(result: subprocess.CompletedProcess[str]) -> bool:
+    """Whether a failed kubectl call reports a connectivity failure, not an answer."""
+    detail = (result.stderr or "").lower()
+    return result.returncode != 0 and any(term in detail for term in _CONNECTIVITY_TERMS)
+
+
+def _probe_json(result: subprocess.CompletedProcess[str], what: str) -> dict[str, Any]:
+    """Like ``_json_output`` for a preflight probe: lost connectivity is an outage."""
+    if _lost_connection(result):
+        raise InfrastructureUnavailableError(f"the {CONTEXT} cluster stopped answering while {what}")
+    return _json_output(result, what)
 
 
 def _namespace_rights(deadline: float) -> None:
     """Require the right to create and delete namespaces; a refusal is an error, not an outage."""
     for verb in ("create", "delete"):
         result = _probe_call([*KUBECTL, "auth", "can-i", verb, "namespaces"], deadline)
-        if result.stdout.strip() != "yes":
+        answer = result.stdout.strip()
+        if not answer and _lost_connection(result):
+            raise InfrastructureUnavailableError(
+                f"the {CONTEXT} cluster stopped answering while checking the right to {verb} namespaces"
+            )
+        if answer != "yes":
             fail(
                 f"the {CONTEXT} context may not {verb} namespaces (kubectl auth can-i answered "
                 f"'{result.stdout.strip() or result.stderr.strip()[:80]}');",
