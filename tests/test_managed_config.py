@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from cveta2.adapters.config import project as project_config
 from cveta2.adapters.config.project import (
@@ -756,3 +757,52 @@ def test_empty_local_cache_save_does_not_invent_policy_or_raise(tmp_path: Path) 
     CacheConfig().save(path)
     assert yaml.safe_load(path.read_bytes()) == {}
     assert CacheConfig.load(path) == CacheConfig()
+
+
+# ---------------------------------------------------------------------------
+# Load-time validation of S3 roots
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["task_cache_s3", "sync_root"])
+@pytest.mark.parametrize("value", ["s3://", "s3:///DO_NOT_LOG", "/", "   ", ""])
+def test_shared_malformed_s3_root_is_rejected_at_load(tmp_path: Path, field: str, value: str) -> None:
+    target = shared(tmp_path / "shared.yaml")
+    data = read_config(target)
+    projects = data["projects"]
+    assert isinstance(projects, dict)
+    projects["main"][field] = value
+    write(target, data)
+    cfg = personal(tmp_path / "personal.yaml", target)
+
+    with pytest.raises(ManagedError) as caught:
+        load_project_config(cfg)
+
+    assert f"projects.main.{field}" in str(caught.value)
+    assert "DO_NOT_LOG" not in str(caught.value)
+
+
+@pytest.mark.parametrize("value", ["s3://bucket", "s3://bucket/prefix/", "prefix/sub"])
+def test_shared_valid_s3_roots_still_load(tmp_path: Path, value: str) -> None:
+    target = shared(tmp_path / "shared.yaml")
+    data = read_config(target)
+    projects = data["projects"]
+    assert isinstance(projects, dict)
+    projects["main"]["task_cache_s3"] = value
+    write(target, data)
+
+    assert load_project_config(personal(tmp_path / "personal.yaml", target)).projects["main"].task_cache_s3 == value
+
+
+@pytest.mark.parametrize("value", ["s3://", "s3:///DO_NOT_LOG", "/", "   "])
+def test_personal_malformed_task_cache_s3_is_rejected_at_load(value: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        CacheConfig.model_validate({"projects": {"alpha": {"task_cache_s3": value}}})
+
+    issues = caught.value.errors(include_input=False, include_url=False)
+    assert [issue["loc"] for issue in issues] == [("projects", "alpha", "task_cache_s3")]
+    assert "DO_NOT_LOG" not in str(issues)
+
+
+def test_personal_blank_task_cache_s3_still_means_unset() -> None:
+    assert CacheProjectSettings(task_cache_s3="").task_cache_s3 is None
