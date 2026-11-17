@@ -54,6 +54,31 @@ def _match_recursive(
     return pick_latest_duplicate(str(search_dir), name, candidates)
 
 
+def _search_one_dir(
+    search_dir: Path,
+    remaining: set[str],
+    found: dict[str, Path],
+    excluded: Path | None,
+) -> None:
+    """Move names found in *search_dir* from *remaining* into *found*.
+
+    A direct path join comes first, then a recursive basename search.
+    """
+    for name in list(remaining):
+        candidate = search_dir / name
+        if candidate.is_file() and not _inside(candidate.parent, excluded):
+            found[name] = candidate
+            remaining.discard(name)
+    if not remaining:
+        return
+    index = _build_basename_index(search_dir, excluded)
+    for name in list(remaining):
+        match = _match_recursive(search_dir, name, index)
+        if match is not None:
+            found[name] = match
+            remaining.discard(name)
+
+
 def resolve_images(
     image_names: Iterable[str],
     search_dirs: list[Path],
@@ -94,19 +119,7 @@ def resolve_images(
         if _inside(search_dir, excluded):
             logger.warning(f"Директория поиска внутри выходной директории пропущена: {search_dir}")
             continue
-        for name in list(remaining):
-            candidate = search_dir / name
-            if candidate.is_file() and not _inside(candidate.parent, excluded):
-                found[name] = candidate
-                remaining.discard(name)
-        if not remaining:
-            break
-        index = _build_basename_index(search_dir, excluded)
-        for name in list(remaining):
-            match = _match_recursive(search_dir, name, index)
-            if match is not None:
-                found[name] = match
-                remaining.discard(name)
+        _search_one_dir(search_dir, remaining, found, excluded)
 
     missing = sorted(remaining | set(unsafe))
     return found, missing
