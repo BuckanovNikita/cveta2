@@ -168,13 +168,17 @@ def _yaml_bytes(data: dict[str, object]) -> bytes:
 def _stage_bytes(path: Path, content: bytes, purpose: str) -> Path:
     """Create an exclusively claimed private stage beside its destination."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.{purpose}-", delete=False) as stream:
-        temporary = Path(stream.name)
-        try:
+    stream = NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.{purpose}-", delete=False)  # noqa: SIM115
+    temporary = Path(stream.name)
+    try:
+        with stream:
             stream.write(content)
-        except OSError:
-            temporary.unlink(missing_ok=True)
-            raise
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        # A full disk may surface only on flush/close; never leave a partial stage.
+        temporary.unlink(missing_ok=True)
+        raise
     return temporary
 
 
@@ -207,6 +211,15 @@ def _private_write(
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def write_personal_file(path: Path, content: bytes) -> None:
+    """Replace a credential-bearing personal file atomically with owner-only access.
+
+    A failed write leaves the previous file untouched: the bytes go to a private
+    stage beside the destination first and only a complete stage replaces it.
+    """
+    _private_write(path, content, replace=True)
 
 
 def attach_project_config(personal_path: Path, project_path: Path) -> Path:

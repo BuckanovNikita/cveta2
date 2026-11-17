@@ -2,6 +2,7 @@
 
 import importlib.resources
 import os
+import stat
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, TypedDict
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from cveta2.adapters.config.project import (
     optional_project_config,
     shared_projects_by_name,
+    write_personal_file,
     write_shared_project_fields,
 )
 from cveta2.application.settings import (
@@ -141,12 +143,35 @@ _YAML_DUMP: "_YamlDumpOptions" = {
 
 
 def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
-    """Write *data* as UTF-8 YAML, creating the config directory if needed."""
+    """Atomically write *data* as owner-only UTF-8 YAML, creating the config directory.
+
+    The personal file holds the CVAT password, so it is never group- or
+    world-readable, and a failed write keeps the previous file intact.
+    """
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(yaml.safe_dump(data, **_YAML_DUMP))
+        write_personal_file(path, yaml.safe_dump(data, **_YAML_DUMP))
     except OSError as error:
         raise Cveta2Error(f"Не удалось записать конфигурацию {path}: {type(error).__name__}.") from error
+
+
+def _restrict_to_owner(path: Path) -> None:
+    """Remove group/other access from a password-bearing file the user owns.
+
+    Files written by older versions followed the umask (often ``0644``).  A
+    file owned by someone else, or a refused ``chmod``, is reported, not fatal.
+    """
+    try:
+        status = path.stat()
+        if not stat.S_IMODE(status.st_mode) & 0o077:
+            return
+        if status.st_uid != os.getuid():
+            logger.warning(f"Файл с паролем {path} доступен другим пользователям; ограничьте права до 0600.")
+            return
+        path.chmod(0o600)
+    except OSError as error:
+        logger.warning(f"Не удалось ограничить права файла с паролем {path}: {type(error).__name__}.")
+        return
+    logger.warning(f"Права файла с паролем {path} ограничены до 0600.")
 
 
 def _project_alias(project_key: str, shared: ProjectConfig) -> str:
@@ -364,6 +389,8 @@ class CvatConfig(BaseModel):
         """Load config from a YAML file.  Returns empty config if file is missing."""
         cfg = cls._from_cvat_section(_load_raw_yaml(path))
         cfg._source_path = path  # noqa: SLF001 - this factory owns the model source
+        if cfg.password:
+            _restrict_to_owner(path)
         return cfg
 
     @classmethod

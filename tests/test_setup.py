@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import os
+import resource
+import signal
+import stat
 from typing import TYPE_CHECKING
 
 import pytest
 
 from cveta2.adapters.config.project import activate_migration, migration_proposal
 from cveta2.adapters.config.settings import CacheConfig, CvatConfig, ImageCacheConfig
-from cveta2.domain.errors import InteractiveModeRequiredError
+from cveta2.domain.errors import Cveta2Error, InteractiveModeRequiredError
 from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands import setup as setup_cmd
 from cveta2.interfaces.commands.interactive import _questionary, primitives, wizard
@@ -17,7 +21,7 @@ from cveta2.interfaces.commands.setup import run_setup, run_setup_cache
 from tests.helpers import write_config_yaml
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
@@ -316,3 +320,57 @@ def test_setup_cache_saves_tasks_root_and_project_settings(tmp_path: Path, monke
     assert beta.ignored_prefix is None
     assert beta.task_cache_s3 is None
     assert beta.tasks_root == tasks_root
+
+
+@pytest.fixture
+def default_umask() -> Iterator[None]:
+    """Run under the common 022 umask that leaves new files world-readable."""
+    previous = os.umask(0o022)
+    yield
+    os.umask(previous)
+
+
+@pytest.mark.usefixtures("default_umask")
+def test_setup_saves_the_personal_config_owner_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_path = tmp_path / "config.yaml"
+    run_setup_with_inputs(monkeypatch, config_path, ["", "acme", "user1"])
+
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+    assert CvatConfig.from_file(config_path).password == "secret"
+
+
+@pytest.mark.usefixtures("default_umask")
+def test_existing_world_readable_password_file_is_tightened_on_load(tmp_path: Path) -> None:
+    config_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080", "username": "user1", "password": "pw"},
+    )
+    config_path.chmod(0o644)
+
+    assert CvatConfig.load(config_path).password == "pw"
+
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+
+def test_failed_personal_save_keeps_the_previous_file(tmp_path: Path) -> None:
+    config_path = write_config_yaml(
+        tmp_path / "config.yaml",
+        cvat={"host": "http://localhost:8080", "username": "user1", "password": "pw"},
+        image_cache={"alpha": "/data/alpha"},
+    )
+    original = config_path.read_bytes()
+    oversized = CvatConfig(host="http://localhost:8080", username="user1", password="x" * 65536)
+    # The file-size limit makes the kernel refuse the write part-way, like a full disk.
+    previous_handler = signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+    previous_limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (4096, previous_limit[1]))
+    try:
+        with pytest.raises(Cveta2Error) as caught:
+            oversized.save_to_file(config_path)
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, previous_limit)
+        signal.signal(signal.SIGXFSZ, previous_handler)
+
+    assert str(config_path) in str(caught.value)
+    assert config_path.read_bytes() == original
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["config.yaml"]
