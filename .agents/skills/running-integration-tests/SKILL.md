@@ -100,7 +100,9 @@ acceptance.
 ## Rules
 
 - **One session, one namespace.** The session acts only on the namespace it
-  created. `L stop` accepts only `cveta2-it-` names and deletes exactly the one
+  created. It labels that namespace with a random per-session token; after a
+  failed, timed-out or interrupted create it treats the namespace as its own,
+  and deletes it, only when the namespace carries that token. `L stop` accepts only `cveta2-it-` names and deletes exactly the one
   given or recorded; never delete another session's namespace, another
   project's namespace or a platform namespace.
 - **Quota first.** Every session namespace carries the quota and limit range

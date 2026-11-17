@@ -81,6 +81,8 @@ KUBECTL = ("kubectl", "--context", CONTEXT)
 PREFIX = "cveta2-it-"
 NAMESPACE_PATTERN = re.compile(r"^cveta2-it-[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$")
 PART_OF = ("app.kubernetes.io/part-of", "cveta2-integration")
+# Random per-session label value: proves a namespace was created by this session.
+SESSION_TOKEN_LABEL = "cveta2-integration/session-token"
 MODULE = "uv run python -m tests.integration.lifecycle"
 COCO8_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0/coco8.zip"
 QUOTA_MANIFEST = "quota.yaml"
@@ -927,6 +929,7 @@ class Session:
     # Teardown deletes the namespace only once this session created it, so a
     # failed create can never remove a namespace somebody else owns.
     created: bool = False
+    token: str = field(default_factory=lambda: secrets.token_hex(8))
 
     # -- environment ------------------------------------------------------
 
@@ -998,9 +1001,18 @@ class Session:
         namespace = {
             "apiVersion": "v1",
             "kind": "Namespace",
-            "metadata": {"name": require_session_name(self.namespace), "labels": {PART_OF[0]: PART_OF[1]}},
+            "metadata": {
+                "name": require_session_name(self.namespace),
+                "labels": {PART_OF[0]: PART_OF[1], SESSION_TOKEN_LABEL: self.token},
+            },
         }
-        kubectl_ok("create", "-f", "-", stdin=json.dumps(namespace), what=f"creating namespace {self.namespace}")
+        try:
+            kubectl_ok("create", "-f", "-", stdin=json.dumps(namespace), what=f"creating namespace {self.namespace}")
+        except BaseException:
+            # The server may have accepted a create that failed, timed out or
+            # was interrupted on this side: own it only if it carries our token.
+            self.created = self._carries_token()
+            raise
         self.created = True
         log(f"Session namespace {self.namespace} created")
         kubectl_ok(
@@ -1020,6 +1032,24 @@ class Session:
             stdin=json.dumps({"apiVersion": "v1", "kind": "List", "items": generated_secrets()}),
             what="storing the session credentials",
         )
+
+    def _carries_token(self) -> bool:
+        """Whether the namespace exists and carries this session's token label."""
+        try:
+            result = kubectl("get", "namespace", self.namespace, "-o", "json")
+        except LifecycleError:
+            result = None
+        if result is None or (result.returncode != 0 and "notfound" not in result.stderr.lower().replace(" ", "")):
+            warn(f"WARNING: could not check whether namespace {self.namespace} was created; it is not deleted.")
+            warn(f"         If it exists with label {SESSION_TOKEN_LABEL}={self.token}: {MODULE} stop {self.namespace}")
+            return False
+        if result.returncode != 0:
+            return False
+        try:
+            labels = json.loads(result.stdout).get("metadata", {}).get("labels") or {}
+        except (json.JSONDecodeError, AttributeError):
+            return False
+        return bool(labels.get(SESSION_TOKEN_LABEL) == self.token)
 
     def deploy(self) -> None:
         files = [arg for name in SERVICE_MANIFESTS for arg in ("-f", str(manifest_dir(self.root) / name))]
