@@ -176,6 +176,4 @@ def resolved_task(
     config_path: Path | None = None,
 ) -> AbstractContextManager[TaskInfo]:
     """Resolve a task and invalidate its cache, as *config_path* selects it, on exit."""
-    return task_ops.resolved_task(
-        client, project_id, project_name, task, invalidate=_cache_invalidator(config_path)
-    )
+    return task_ops.resolved_task(client, project_id, project_name, task, invalidate=_cache_invalidator(config_path))
