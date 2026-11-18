@@ -1,37 +1,85 @@
-"""Persistent cache of fetched task annotations (local disk + optional S3).
+"""Persistent cache of fetched job annotations (local disk + optional S3).
 
-Completed CVAT tasks are immutable in practice, so their fetched
-annotations are cached in ``~/.cache/cveta2/task_annotations`` (and,
-when the project has an attached cloud storage, mirrored to S3 so all
-users share one cache). Ordinary S3 cache errors disable the backend for the
-rest of the run. Mutation preflight can require strict invalidation instead.
+Each finished CVAT job's raw shapes are cached in
+``~/.cache/cveta2/task_annotations/project_<id>/task_<id>/job_<id>.json``
+(``task.json`` when a task's jobs cannot be separated) and, when the project
+has an attached cloud storage, mirrored to S3 so all users share one cache.
+An entry is served only while the task's update time and every covered
+job's identity, stage, state and update time are unchanged. Ordinary S3
+cache errors disable the backend for the rest of the run. Mutation
+preflight can require strict invalidation instead.
 """
 
+import dataclasses
+import shutil
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
 from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
+from pydantic import ValidationError
 
 from cveta2.adapters.files.shared import default_cache_base, replace_shared_bytes
 from cveta2.adapters.s3.types import S3Client
-from cveta2.adapters.s3.utils import make_s3_client, s3_get_bytes, s3_retry
+from cveta2.adapters.s3.utils import list_s3_objects, make_s3_client, s3_get_bytes, s3_retry
+from cveta2.application.ports.cache import AnnotationScope
+from cveta2.application.ports.dtos import RawAnnotations, RawShape
 from cveta2.application.settings import CacheProjectSettings
 from cveta2.domain.cache import (
-    _COMPLETED_STATUS,
     _SOURCE_LOCAL,
     _SOURCE_S3,
     CACHE_SCHEMA_VERSION,
-    CachedTaskEnvelope,
-    _task_id_from_filename,
-    _validate_envelope,
+    CachedEntryHeader,
+    CachedJob,
+    entry_mismatch,
+    task_id_from_name,
 )
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.models import TaskAnnotations, TaskInfo
+from cveta2.domain.models import TaskInfo
 from cveta2.domain.paths import build_s3_key, parse_sync_root
 from cveta2.domain.storage import CloudStorageInfo
 
 _MISSING_KEY_CODES = frozenset({"NoSuchKey", "404", "NoSuchBucket"})
+
+
+class CachedAnnotationsEntry(CachedEntryHeader):
+    """One cache entry: the raw shapes of a job (or of a whole task)."""
+
+    shapes: list[RawShape]
+
+
+def _cached_jobs(scope: AnnotationScope) -> list[CachedJob]:
+    return [CachedJob.model_validate(dataclasses.asdict(job)) for job in scope.jobs]
+
+
+def _entry_name(task_id: int, scope: AnnotationScope) -> str:
+    """Return the entry path relative to the cache root."""
+    return f"task_{task_id}/{scope.name}.json"
+
+
+def _legacy_name(task_id: int) -> str:
+    """Return the relative path of the old per-task entry (schema 5 and older)."""
+    return f"task_{task_id}.json"
+
+
+def _parse_entry(raw: bytes, task: TaskInfo, scope: AnnotationScope, source: str) -> CachedAnnotationsEntry | None:
+    """Return the entry when it still describes the live task and jobs; log why not."""
+    try:
+        entry = CachedAnnotationsEntry.model_validate_json(raw)
+    except ValidationError as e:
+        logger.warning(
+            f"{source}: запись {scope.name} задачи {task.id} не прошла валидацию "
+            f"({e.error_count()} ошибок) — аннотации будут загружены заново"
+        )
+        return None
+    reason = entry_mismatch(entry, task, _cached_jobs(scope))
+    if reason is not None:
+        logger.info(
+            f"{source}: запись {scope.name} задачи {task.id} устарела: {reason} — аннотации будут загружены заново"
+        )
+        return None
+    return entry
 
 
 def get_task_cache_dir(project_id: int, root: Path | None = None) -> Path:
@@ -143,12 +191,12 @@ class S3CacheBackend:
             return backend
         return cls(client, bucket, key_prefix, explicit_location=explicit_location)
 
-    def get(self, task_id: int) -> bytes | None:
-        """Fetch the raw cache entry for *task_id*, or None on miss/failure."""
+    def get(self, name: str) -> bytes | None:
+        """Fetch the raw entry at relative *name*, or None on miss/failure."""
         if self._disabled or self._s3 is None:
             return None
         try:
-            data = s3_get_bytes(self._s3, self._bucket, self._entry_key(task_id))
+            data = s3_get_bytes(self._s3, self._bucket, self._key(name))
         except ClientError as e:
             if _client_error_code(e) in _MISSING_KEY_CODES:
                 return None
@@ -159,17 +207,30 @@ class S3CacheBackend:
             return None
         return data
 
-    def put(self, task_id: int, data: bytes) -> None:
-        """Store the raw cache entry for *task_id* (best effort)."""
+    def put(self, name: str, data: bytes) -> None:
+        """Store the raw entry at relative *name* (best effort)."""
         if self._disabled or self._s3 is None:
             return
         try:
-            _s3_put_bytes(self._s3, self._bucket, self._entry_key(task_id), data)
+            _s3_put_bytes(self._s3, self._bucket, self._key(name), data)
         except (ClientError, BotoCoreError, OSError) as e:
             self._disable(e)
 
-    def delete(self, task_id: int, *, strict: bool = False) -> None:
-        """Drop an entry; strict mutation preflight must succeed or raise."""
+    def delete_legacy(self, task_id: int) -> None:
+        """Drop the task's old per-task object (best effort)."""
+        if self._disabled or self._s3 is None:
+            return
+        try:
+            _s3_delete_object(self._s3, self._bucket, self._key(_legacy_name(task_id)))
+        except (ClientError, BotoCoreError, OSError) as e:
+            self._disable(e)
+
+    def delete_task(self, task_id: int, *, strict: bool = False) -> None:
+        """Drop every entry of a task and its old object; strict preflight must succeed or raise.
+
+        The listing asks for ``task_<id>/`` with the slash, so ``task_12``
+        never matches the entries of ``task_123``.
+        """
         if self._s3 is None:
             if strict:
                 raise Cveta2Error(
@@ -179,15 +240,17 @@ class S3CacheBackend:
         if self._disabled and not strict:
             return
         try:
-            _s3_delete_object(self._s3, self._bucket, self._entry_key(task_id))
+            keys = [key for key, _name in list_s3_objects(self._s3, self._bucket, self._key(f"task_{task_id}"))]
+            for key in [*keys, self._key(_legacy_name(task_id))]:
+                _s3_delete_object(self._s3, self._bucket, key)
         except (ClientError, BotoCoreError, OSError) as e:
             if strict:
                 raise Cveta2Error(f"Не удалось удалить S3-кэш задачи {task_id}: {e}") from e
             self._disable(e)
 
-    def _entry_key(self, task_id: int) -> str:
-        """Build the S3 key of the cache entry for *task_id*."""
-        entry = f"task_annotations/task_{task_id}.json"
+    def _key(self, name: str) -> str:
+        """Build the S3 key of relative entry *name* under the cache root."""
+        entry = f"task_annotations/{name}"
         if not self._explicit_location:
             entry = f".cveta2_cache/{entry}"
         return build_s3_key(self._key_prefix, entry)
@@ -199,124 +262,166 @@ class S3CacheBackend:
 
 
 class TaskAnnotationCache:
-    """Local (plus optional S3) cache of per-task annotation payloads.
+    """Local (plus optional S3) cache of raw annotations per job.
 
-    Only tasks CVAT currently reports as ``completed`` are cached or
-    served. A cached entry must also match the task's live ``updated_date``;
-    annotation and project-label edits therefore cannot leave rendered
-    annotations stale.
+    The fetch decides which jobs are cacheable; this class only stores and
+    validates entries. An entry is served only while it matches the live
+    task's ``updated_date`` and every covered job exactly, so an annotation,
+    label, stage or state change makes it a miss.
     """
 
     def __init__(self, local_dir: Path, s3: S3CacheBackend | None = None) -> None:
         """Store the local cache directory and optional S3 backend."""
         self._local_dir = local_dir
         self._s3 = s3
+        self._legacy_dropped: set[int] = set()
 
-    def get(self, task: TaskInfo) -> TaskAnnotations | None:
-        """Return the cached payload for *task*, or None on miss."""
-        if task.status != _COMPLETED_STATUS:
-            return None
-        local = self._get_local(task)
+    def get(self, task: TaskInfo, scope: AnnotationScope) -> RawAnnotations | None:
+        """Return the cached shapes of *scope*, or None on miss."""
+        local = self._get_local(task, scope)
         if local is not None:
             return local
-        return self._get_s3(task)
+        return self._get_s3(task, scope)
 
-    def put(self, task: TaskInfo, result: TaskAnnotations) -> None:
-        """Cache complete results for completed tasks; omit degraded issues."""
-        if task.status != _COMPLETED_STATUS or not result.issues_complete:
-            return
-        envelope = CachedTaskEnvelope(
+    def put(self, task: TaskInfo, scope: AnnotationScope, annotations: RawAnnotations) -> None:
+        """Cache *scope*'s shapes; the first write of a task also drops its old S3 object."""
+        entry = CachedAnnotationsEntry(
             schema_version=CACHE_SCHEMA_VERSION,
             task_id=task.id,
             task_updated_date=task.updated_date,
+            jobs=_cached_jobs(scope),
             cached_at=datetime.now(timezone.utc).isoformat(),
-            payload=result,
+            shapes=list(annotations.shapes),
         )
-        data = envelope.model_dump_json().encode()
-        self._write_local(task.id, data)
+        data = entry.model_dump_json().encode()
+        name = _entry_name(task.id, scope)
+        self._write_local(name, data)
         if self._s3 is not None:
-            self._s3.put(task.id, data)
+            self._s3.put(name, data)
+            if task.id not in self._legacy_dropped:
+                self._legacy_dropped.add(task.id)
+                self._s3.delete_legacy(task.id)
+
+    def keep_only(self, task_id: int, scopes: Sequence[AnnotationScope]) -> None:
+        """Delete the task's local entries other than *scopes* (vanished jobs, changed layout)."""
+        wanted = {f"{scope.name}.json" for scope in scopes}
+        task_dir = self._local_dir / f"task_{task_id}"
+        try:
+            stale = [path for path in task_dir.glob("*.json") if path.name not in wanted]
+        except OSError as error:
+            logger.warning(f"Не удалось просмотреть локальный кэш задачи {task_id}: {error}")
+            return
+        for path in stale:
+            self._unlink_quiet(path, task_id)
 
     def invalidate_local(self, task_id: int, *, strict: bool = False) -> None:
-        """Remove a local entry, optionally requiring deletion before mutation."""
+        """Remove the task's local entries and old file, optionally requiring success."""
         try:
-            self._local_path(task_id).unlink(missing_ok=True)
+            shutil.rmtree(self._local_dir / f"task_{task_id}")
+        except FileNotFoundError:
+            pass
         except OSError as error:
             if strict:
                 raise
-            logger.warning(f"Не удалось удалить локальный кэш задачи {task_id}: {error} — запись не используется")
+            logger.warning(f"Не удалось удалить локальный кэш задачи {task_id}: {error} — записи не используются")
+        try:
+            (self._local_dir / _legacy_name(task_id)).unlink(missing_ok=True)
+        except OSError as error:
+            if strict:
+                raise
+            logger.warning(f"Не удалось удалить старую запись кэша задачи {task_id}: {error}")
 
     def invalidate(self, task_id: int, *, strict: bool = False) -> None:
-        """Remove the entry for *task_id* from every layer, S3 included.
+        """Remove every entry of *task_id* from every layer, S3 included.
 
-        Only a task mutation calls this: :meth:`prune` and a schema
-        mismatch drop the local copy alone, since a valid S3 entry
-        written by a newer cveta2 must survive an older one's run. With
-        ``strict=True``, local and S3 failures abort mutation preflight.
+        Only a task mutation calls this: :meth:`prune` drops the local copy
+        alone, since a valid S3 entry written by a newer cveta2 must survive
+        an older one's run. With ``strict=True``, local and S3 failures abort
+        mutation preflight.
         """
         self.invalidate_local(task_id, strict=strict)
         if self._s3 is not None:
-            self._s3.delete(task_id, strict=strict)
+            self._s3.delete_task(task_id, strict=strict)
+            self._legacy_dropped.add(task_id)
 
     def prune(self, live_task_ids: set[int]) -> int:
-        """Remove local entries whose task no longer exists; return count.
-
-        Deletion goes through :meth:`invalidate_local`, which rebuilds the
-        canonical ``task_{id}.json`` name — the only name this cache ever
-        writes, so it always names the file the glob just found.
-        """
+        """Remove local entries of tasks that no longer exist; return the task count."""
         removed = 0
-        for path in self._local_dir.glob("task_*.json"):
-            task_id = _task_id_from_filename(path.name)
-            if task_id is None or task_id in live_task_ids:
+        for path in self._local_dir.glob("task_*"):
+            task_id = task_id_from_name(path.name)
+            if not path.is_dir() or task_id is None or task_id in live_task_ids:
                 continue
             self.invalidate_local(task_id)
             removed += 1
         return removed
 
-    def _get_local(self, task: TaskInfo) -> TaskAnnotations | None:
-        """Read and validate the local entry; delete it when invalid.
+    def remove_legacy_entries(self) -> int:
+        """Delete the project's old per-task ``task_<id>.json`` files; return how many."""
+        removed = 0
+        failed = 0
+        for path in self._local_dir.glob("task_*.json"):
+            if task_id_from_name(path.name) is None:
+                continue
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                failed += 1
+                logger.debug(f"Старая запись кэша {path} не удалена: {error}")
+                continue
+            removed += 1
+        if failed:
+            logger.warning(f"Кэш аннотаций: не удалось удалить записей старого формата: {failed}")
+        return removed
+
+    def _get_local(self, task: TaskInfo, scope: AnnotationScope) -> RawAnnotations | None:
+        """Read and validate the local entry; delete it when proven invalid.
 
         An entry that cannot be read at all (permissions, a truncated
-        mount) is a plain miss and is left on disk — only entries proven
-        invalid are dropped.
+        mount) is a plain miss and is left on disk.
         """
+        path = self._local_dir / _entry_name(task.id, scope)
         try:
-            raw = self._local_path(task.id).read_bytes()
+            raw = path.read_bytes()
         except FileNotFoundError:
             return None
         except OSError as e:
             logger.warning(f"Не удалось прочитать локальный кэш задачи {task.id}: {e}")
             return None
-        envelope = _validate_envelope(raw, task, source=_SOURCE_LOCAL)
-        if envelope is None:
-            self.invalidate_local(task.id)
+        entry = _parse_entry(raw, task, scope, _SOURCE_LOCAL)
+        if entry is None:
+            self._unlink_quiet(path, task.id)
             return None
-        return envelope.payload
+        return RawAnnotations(shapes=entry.shapes)
 
-    def _get_s3(self, task: TaskInfo) -> TaskAnnotations | None:
+    def _get_s3(self, task: TaskInfo, scope: AnnotationScope) -> RawAnnotations | None:
         """Read a valid entry from S3, backfilling the local cache on hit."""
         if self._s3 is None:
             return None
-        raw = self._s3.get(task.id)
+        name = _entry_name(task.id, scope)
+        raw = self._s3.get(name)
         if raw is None:
             return None
-        envelope = _validate_envelope(raw, task, source=_SOURCE_S3)
-        if envelope is None:
+        entry = _parse_entry(raw, task, scope, _SOURCE_S3)
+        if entry is None:
             return None
-        self._write_local(task.id, raw)
-        return envelope.payload
+        self._write_local(name, raw)
+        return RawAnnotations(shapes=entry.shapes)
 
-    def _write_local(self, task_id: int, data: bytes) -> None:
+    def _write_local(self, name: str, data: bytes) -> None:
         """Atomically write the local entry (best effort)."""
         try:
-            replace_shared_bytes(self._local_path(task_id), data)
+            replace_shared_bytes(self._local_dir / name, data)
         except OSError as e:
-            logger.warning(f"Не удалось сохранить локальный кэш задачи {task_id}: {e}")
+            logger.warning(f"Не удалось сохранить локальный кэш {name}: {e}")
 
-    def _local_path(self, task_id: int) -> Path:
-        """Build the local file path of the entry for *task_id*."""
-        return self._local_dir / f"task_{task_id}.json"
+    @staticmethod
+    def _unlink_quiet(path: Path, task_id: int) -> None:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            logger.warning(f"Не удалось удалить локальный кэш задачи {task_id}: {error} — запись не используется")
 
 
 class AnnotationCacheFactory:

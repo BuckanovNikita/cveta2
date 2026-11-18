@@ -15,15 +15,16 @@ from cveta2.adapters.files.dataset import enrich_dataframe_paths, populate_recor
 from cveta2.adapters.files.task_output import LocalWorkflowFiles
 from cveta2.adapters.s3.task_cache import TaskAnnotationCache
 from cveta2.application.client import ApplicationClient
+from cveta2.application.client.job_cache import CachedAnnotations
 from cveta2.application.client.shared import FetchContext
-from cveta2.application.ports.cache import CacheFactory, TaskCache
+from cveta2.application.ports.cache import AnnotationScope, CacheFactory, TaskCache
+from cveta2.application.ports.dtos import RawAnnotations, RawJob
 from cveta2.application.ports.workflow_files import WorkflowFiles
 from cveta2.application.settings import CacheProjectSettings
 from cveta2.application.use_cases.fetch import (
     FetchDependencies,
     FetchOptions,
     FetchTarget,
-    _CachePolicy,
     _fetch_and_save_tasks,
     _FetchStats,
     _retrieve_task,
@@ -59,6 +60,12 @@ def test_inventory_snapshot_precedes_filters(coco8_fixtures: "LoadedFixtures") -
     assert api.call_counts["get_project_tasks"] == 1
 
 
+def _seed(cache: TaskAnnotationCache, task_id: int) -> None:
+    """Cache an empty entry for the fake's single finished job of *task_id*."""
+    job = RawJob(task_id, 0, 0, "acceptance", "completed")
+    cache.put(make_task(task_id), AnnotationScope(jobs=(job,)), RawAnnotations())
+
+
 def test_numeric_selection_has_no_complete_inventory(
     normal_fake: "LoadedFixtures",
 ) -> None:
@@ -80,10 +87,7 @@ def test_full_fetch_prunes_from_single_complete_inventory(
     api = FakeCvatApi(fake)
     cache = TaskAnnotationCache(tmp_path / "cache")
     for task_id in [*(task.id for task in fake.tasks), 999]:
-        cache.put(
-            make_task(task_id),
-            TaskAnnotations(task_id=task_id, task_name="task", annotations=[], deleted_images=[]),
-        )
+        _seed(cache, task_id)
     target = FetchTarget(fake.project.id, fake.project.name, tmp_path / "output")
     options = FetchOptions(completed_only=True, ignore_task_ids={fake.tasks[2].id})
     deps = fetch_dependencies(target, options)
@@ -97,8 +101,8 @@ def test_full_fetch_prunes_from_single_complete_inventory(
     )
 
     assert api.call_counts["get_project_tasks"] == 1
-    assert not ((tmp_path / "cache") / "task_999.json").exists()
-    assert all(((tmp_path / "cache") / f"task_{task.id}.json").exists() for task in fake.tasks)
+    assert not ((tmp_path / "cache") / "task_999").exists()
+    assert all(((tmp_path / "cache") / f"task_{task.id}").is_dir() for task in fake.tasks)
 
 
 @pytest.mark.parametrize("save_tasks", [False, True])
@@ -118,7 +122,7 @@ def test_task_csv_effects_are_opt_in(normal_fake: "LoadedFixtures", tmp_path: Pa
         client,
         client.prepare_fetch(fake.project.id),
         tmp_path,
-        _CachePolicy(),
+        None,
         deps=replace(deps, files=files),
         save_tasks=save_tasks,
     )
@@ -157,8 +161,9 @@ def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
     client = Mock(spec=ApplicationClient)
     client.prepare_fetch.return_value = FetchContext([task], {}, {})
     client.detect_project_cloud_storage.return_value = None
+    client.fetch_task_through.return_value = (annotations, True)
     cache = Mock(spec=TaskCache)
-    cache.get.return_value = annotations
+    cache.remove_legacy_entries.return_value = 0
     files = Mock(spec=WorkflowFiles)
     output = Path("unmaterialized-workflow-output")
     files.prepare_tasks.return_value = output / ".tasks"
@@ -167,7 +172,9 @@ def test_fetch_uses_supplied_cache_and_files_without_creating_output() -> None:
     result = fetch_selected_tasks(client, FetchTarget(7, "project", output), FetchOptions(), deps=deps)
 
     assert result == TaskAnnotations.merge([annotations])
-    client.fetch_one_task.assert_not_called()
+    source = client.fetch_task_through.call_args.args[3]
+    assert isinstance(source, CachedAnnotations)
+    assert source.cache is cache
     files.prepare_tasks.assert_not_called()
     files.write_task_csv.assert_not_called()
     files.cleanup_tasks.assert_not_called()
@@ -245,7 +252,7 @@ def test_task_summary_reports_skipped_and_incomplete_without_cache(
     complete = client.fetch_one_task(api, fake.tasks[0], context)
     assert complete is not None
     incomplete = complete.model_copy(update={"issues_complete": False})
-    monkeypatch.setattr(client, "fetch_one_task", Mock(side_effect=[complete, None, incomplete]))
+    monkeypatch.setattr(client, "fetch_task_through", Mock(side_effect=[(complete, False), None, (incomplete, False)]))
     target = FetchTarget(fake.project.id, fake.project.name, tmp_path)
     deps = fetch_dependencies(target, FetchOptions(use_cache=False))
     clock = Mock(side_effect=[100.0, 110.0, 112.0, 120.0, 124.0, 130.0, 135.0, 150.0])
@@ -254,7 +261,7 @@ def test_task_summary_reports_skipped_and_incomplete_without_cache(
         client,
         context,
         tmp_path,
-        _CachePolicy(),
+        None,
         deps=replace(deps, clock=clock, cvat_workers=1),
         save_tasks=False,
     )
@@ -279,10 +286,7 @@ def test_empty_complete_inventory_prunes_every_orphan(
 ) -> None:
     api = FakeCvatApi.from_tasks([])
     cache = TaskAnnotationCache(tmp_path / "cache")
-    cache.put(
-        make_task(999),
-        TaskAnnotations(task_id=999, task_name="old", annotations=[], deleted_images=[]),
-    )
+    _seed(cache, 999)
     target = FetchTarget(1, "fake", tmp_path / "out")
     options = FetchOptions()
     deps = fetch_dependencies(target, options)
@@ -296,7 +300,7 @@ def test_empty_complete_inventory_prunes_every_orphan(
     )
 
     assert api.call_counts["get_project_tasks"] == 1
-    assert not (tmp_path / "cache" / "task_999.json").exists()
+    assert not (tmp_path / "cache" / "task_999").exists()
     assert not (target.output_dir / ".tasks").exists()
     assert any("пропущено: 0, неполные issues: 0" in msg for msg in capture_info_logs)
 
@@ -306,10 +310,7 @@ def test_numeric_project_fetch_does_not_prune_without_complete_inventory(
 ) -> None:
     api = FakeCvatApi(normal_fake)
     cache = TaskAnnotationCache(tmp_path / "cache")
-    cache.put(
-        make_task(999),
-        TaskAnnotations(task_id=999, task_name="other", annotations=[], deleted_images=[]),
-    )
+    _seed(cache, 999)
     target = FetchTarget(normal_fake.project.id, normal_fake.project.name, tmp_path / "out")
     options = FetchOptions(task_selector=[normal_fake.tasks[0].id])
     deps = fetch_dependencies(target, options)
@@ -323,7 +324,7 @@ def test_numeric_project_fetch_does_not_prune_without_complete_inventory(
     )
 
     assert api.call_counts["get_project_tasks"] == 0
-    assert (tmp_path / "cache" / "task_999.json").exists()
+    assert (tmp_path / "cache" / "task_999" / "job_999.json").exists()
 
 
 def test_deletion_after_inventory_is_pruned_next_run(
@@ -344,7 +345,8 @@ def test_deletion_after_inventory_is_pruned_next_run(
 
     monkeypatch.setattr(api, "get_task_issues", delete_after_read)
     client = CvatClient(CvatConfig(), api=api)
-    entry = tmp_path / "cache" / f"task_{normal_fake.tasks[0].id}.json"
+    task_id = normal_fake.tasks[0].id
+    entry = tmp_path / "cache" / f"task_{task_id}" / f"job_{task_id}.json"
 
     fetch_project(client, target, options, deps=replace(deps, cache_enabled=True))
     assert entry.exists()
@@ -381,7 +383,7 @@ def test_empty_task_summary_reports_elapsed_time(tmp_path: Path, capture_info_lo
         client,
         FetchContext([], {}, {}),
         tmp_path,
-        _CachePolicy(),
+        None,
         deps=deps,
         save_tasks=False,
     )
@@ -390,22 +392,17 @@ def test_empty_task_summary_reports_elapsed_time(tmp_path: Path, capture_info_lo
     assert any("прошло 7.0 с" in message for message in capture_info_logs)
 
 
-def test_injected_cache_incomplete_issues_remain_visible_in_totals(
+def test_a_cache_hit_still_reports_incomplete_live_issues(
     normal_fake: "LoadedFixtures",
 ) -> None:
-    api = FakeCvatApi(normal_fake)
+    """Issues are read live even when every shape comes from the cache."""
+    task_id = normal_fake.tasks[0].id
+    api = FakeCvatApi(normal_fake, fail_task_ids={task_id}, fail_methods=("get_task_issues",))
     client = CvatClient(CvatConfig(), api=api)
     context = client.prepare_fetch(normal_fake.project.id)
     task = context.tasks[0]
-    cached = TaskAnnotations(
-        task_id=task.id,
-        task_name=task.name,
-        annotations=[],
-        deleted_images=[],
-        issues_complete=False,
-    )
     cache = Mock(spec=TaskCache)
-    cache.get.return_value = cached
+    cache.get.return_value = RawAnnotations()
     target = FetchTarget(normal_fake.project.id, normal_fake.project.name, Path("unused"))
     deps = replace(
         fetch_dependencies(target, FetchOptions()),
@@ -413,17 +410,12 @@ def test_injected_cache_incomplete_issues_remain_visible_in_totals(
     )
     stats = _FetchStats(lock=Lock())
 
-    result = _retrieve_task(
-        client,
-        task,
-        context,
-        _CachePolicy(cache=cache),
-        stats,
-        deps=deps,
-    )
+    result = _retrieve_task(client, task, context, CachedAnnotations(cache), stats, deps=deps)
 
-    assert result is cached
+    assert result is not None
+    assert not result.issues_complete
     assert stats.degraded_task_ids == [task.id]
     assert (stats.cache_hits, stats.fetched, stats.hit_seconds) == (1, 0, 3.0)
     assert api.annotation_calls == []
+    assert api.job_annotation_calls == []
     cache.put.assert_not_called()

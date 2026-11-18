@@ -21,12 +21,12 @@ remain compatibility facades; canonical packages never import those facades.
   - `baseline.py` - Whats-new cutoff and completed-task identity across supplied frames.
   - `output.py` - UTF-8 CSV settings, text-column schema and count/preview formatting.
   - `paths.py` - Pure frame/key/filename identity, containment components and duplicate-choice rules.
-  - `cache.py` / `storage.py` / `upload.py` - Cache schema, cloud-storage/transfer
+  - `cache.py` / `storage.py` / `upload.py` - Cache schema and entry freshness, cloud-storage/transfer
     values and pure upload validation/fingerprinting/recovery comparisons.
 - **`cveta2/application/ports/`** - Application-owned typed contracts and neutral DTOs:
   - `cvat.py`, `dtos.py`, `client.py` - `CvatApiPort`, frozen raw CVAT dataclasses,
     resolved client values and session factory.
-  - `cache.py` - Cache reads/writes, pruning and strict invalidation, including local-only invalidation.
+  - `cache.py` - `AnnotationScope` and per-job annotation cache reads/writes, stale-entry and legacy cleanup, pruning and strict invalidation, including local-only invalidation.
   - `images.py` / `storage.py` - Image download/sync and upload/server mapping with typed outcomes.
   - `dataset.py` / `conversion.py` / `workflow_files.py` - Narrow CSV, path
     enrichment, image discovery/dimensions/materialization and owned-output lifecycle operations.
@@ -185,7 +185,7 @@ record to reconcile affected modules, actual changes, executed checks and review
    - Opt-in `--skip-validation` / keyword-only `api.fetch(..., skip_validation=False)` runs an application promotion barrier before normal task selection. Every non-ignored project task is inspected using its full, nonempty job list, irrespective of job type or frame coverage. Only tasks whose jobs are all annotation/completed or acceptance/completed qualify; only annotation/completed jobs are updated in CVAT to acceptance/completed. Fully accepted tasks need no writes. Tasks run under the explicitly supplied CVAT worker limit, with sequential updates inside each task; all workers finish before fresh metadata and `completed_only` selection.
    - Promotion strictly invalidates each affected task's configured local cache and enabled S3 mirror before its first update, using the fetch config path and per-project `tasks_root` / `task_cache_s3`. Local invalidation still applies with caching disabled; S3 is not contacted in that mode. Read, invalidation or update errors abort before annotation fetching, image downloads, CSV writing. Successful CVAT writes persist without rollback; retry rechecks jobs and skips accepted ones. `fetch-task` / `api.fetch_task` have no promotion option.
    - Task selection scales with the request, not the project: `application/client/fetch.py:_select_tasks_for_fetch` retrieves each selector through `get_task` when all of them are numeric ids, and only walks the project task list otherwise — for a name selector, an id that turns out to name a task, a task belonging to another project, or an ignored id (all of which the listing path still owns, and all of which end in an error or a skip)
-   - Completed tasks are served from `adapters/s3/task_cache.py` when an entry exists and its cached `task_updated_date` matches CVAT (local `~/.cache/cveta2/task_annotations/`, backfilled from the project bucket's `<prefix>/.cveta2_cache/`). Incomplete issue reads are not cached. A task or project-label edit invalidates the rendered payload; a job moved back to annotation also makes it ineligible. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
+   - Every task reads data meta, jobs and issues live; `application/client/job_cache.py` decides where shapes come from. Finished jobs' raw shapes are cached per job by `adapters/s3/task_cache.py` (local `~/.cache/cveta2/task_annotations/project_<id>/task_<id>/job_<id>.json`, backfilled from the project bucket's `<prefix>/.cveta2_cache/task_annotations/task_<id>/`); an entry is valid while the task's `updated_date` and the job's id, type, range, stage, state and `updated_date` match. A task with no reusable entry is read with one task request and split by job range; otherwise only jobs without one use the job endpoint. Ground Truth, consensus or overlapping layouts keep one task-scope entry valid while all jobs match. Records, completion and job positions are rebuilt every run. Old per-task entries are deleted locally at fetch start and in S3 when the task's new entries are written. `--no-cache` / `--force` / `CVETA2_DISABLE_CACHE=true` override, full fetch prunes orphaned local entries
    - Returns `ProjectAnnotations(annotations, deleted_images)`
    - Annotations converted to `BBoxAnnotation` by `application/client/extractors.py`: standalone
      rectangles retain their existing mapping; polygons use all vertex extrema
@@ -194,8 +194,8 @@ record to reconcile affected modules, actual changes, executed checks and review
      converted polygon warns with task/annotation identity about approximation;
      malformed polygons (fewer than three pairs, odd count, nonfinite coordinates,
      zero-width/height bounds) warn individually and in a per-task skip summary.
-     Cache schema 5 invalidates earlier local/S3 payloads that discarded polygons;
-     cache hits retain existing logging and do not replay parsing warnings.
+     Records are rebuilt from cached raw shapes (schema 6); when every shape of a
+     task came from the cache, per-shape parsing warnings go to the debug log.
    - Result partitioned by `domain/partition.py` into dataset/obsolete/in_progress CSV files
 
 2. **Upload**: `interfaces/commands/upload.py` (or `interfaces/api/`) → `composition/workflows.py` → `application/use_cases/upload/orchestration.py:upload_dataset()` → `ApplicationClient.create_upload_task()` + `ApplicationClient.upload_task_annotations()`
@@ -237,8 +237,8 @@ Two different tasks can no longer tie, so the only tie left is inside one task: 
 ## Nested frame names
 
 Nested CVAT frame names (`sub/img.jpg`) keep `image_name` as a basename; the
-full key is carried in the internal `frame_path` model field — kept in the task
-cache JSON, excluded from the CSV — and used to build `s3_image_path`. The
+full key is carried in the internal `frame_path` model field — taken from the
+live frame metadata, excluded from the CSV — and used to build `s3_image_path`. The
 local image cache mirrors the S3 key layout below the effective storage prefix
 (`sync_roots` overrides the prefix, `cache.projects.<name>.ignored_prefix`
 skips less of the hierarchy); see README.md for the user-facing description.

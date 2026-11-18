@@ -1,6 +1,7 @@
 """Compatible public exports from canonical implementations."""
 
 from cveta2.adapters.s3.task_cache import (
+    CachedAnnotationsEntry,
     S3CacheBackend,
     TaskAnnotationCache,
     get_task_cache_dir,
@@ -8,14 +9,11 @@ from cveta2.adapters.s3.task_cache import (
 from cveta2.composition.workflows import (
     invalidate_local_entry,
 )
-from cveta2.domain.cache import (
-    CACHE_SCHEMA_VERSION,
-    CachedTaskEnvelope,
-)
+from cveta2.domain.cache import CACHE_SCHEMA_VERSION
 
 __all__ = [
     "CACHE_SCHEMA_VERSION",
-    "CachedTaskEnvelope",
+    "CachedAnnotationsEntry",
     "S3CacheBackend",
     "TaskAnnotationCache",
     "get_task_cache_dir",

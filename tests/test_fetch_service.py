@@ -23,6 +23,7 @@ from cveta2.adapters.config.settings import CvatConfig
 from cveta2.adapters.execution.concurrency import configure_workers
 from cveta2.adapters.files.dataset import read_dataset_csv
 from cveta2.adapters.s3.task_cache import TaskAnnotationCache
+from cveta2.application.client.job_cache import CachedAnnotations
 from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawDataMeta,
@@ -33,7 +34,6 @@ from cveta2.application.use_cases.fetch import (
     FetchDependencies,
     FetchOptions,
     FetchTarget,
-    _CachePolicy,
     _FetchStats,
     _retrieve_task,
 )
@@ -46,7 +46,6 @@ from cveta2.domain.models import (
     DeletedImage,
     ProjectAnnotations,
     ProjectInfo,
-    TaskAnnotations,
     TaskInfo,
 )
 from cveta2.domain.partition import (
@@ -448,11 +447,11 @@ def _fetch_context(client: CvatClient, fake: LoadedFixtures) -> FetchContext:
     return client.prepare_fetch(fake.project.id, project_name=fake.project.name)
 
 
-def _fetched(client: CvatClient, task: TaskInfo, ctx: FetchContext) -> TaskAnnotations:
-    """Fetch one task, failing the test rather than the type checker on a skip."""
-    result = client.fetch_one_task(client.api, task, ctx)
-    assert result is not None
-    return result
+def _warm_source(client: CvatClient, task: TaskInfo, tmp_path: Path) -> CachedAnnotations:
+    """Cache the task's finished jobs through one loader read."""
+    source = CachedAnnotations(TaskAnnotationCache(tmp_path / "cache"))
+    source.load(client.api, task, client.api.get_task_jobs(task.id))
+    return source
 
 
 def _accounting_dependencies(fake: LoadedFixtures) -> FetchDependencies:
@@ -475,19 +474,17 @@ class TestRetrieveTaskAccounting:
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
-        policy = _CachePolicy()
+        source = None
         if cached:
-            cache = TaskAnnotationCache(tmp_path / "cache")
-            cache.put(task, _fetched(client, task, ctx))
-            policy = _CachePolicy(cache=cache)
+            source = _warm_source(client, task, tmp_path)
         stats = _FetchStats(lock=Lock())
 
         deps = replace(
             _accounting_dependencies(fake),
             clock=_ScriptedClock([100.0, 101.5, 200.0, 203.0]).monotonic,
         )
-        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
-        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
+        assert _retrieve_task(client, task, ctx, source, stats, deps=deps) is not None
+        assert _retrieve_task(client, task, ctx, source, stats, deps=deps) is not None
 
         counted = (2, pytest.approx(4.5))
         idle = (0, 0.0)
@@ -506,7 +503,7 @@ class TestRetrieveTaskAccounting:
             clock=_ScriptedClock([100.0, 102.0]).monotonic,
         )
 
-        assert _retrieve_task(client, ctx.tasks[0], ctx, _CachePolicy(), stats, deps=deps) is None
+        assert _retrieve_task(client, ctx.tasks[0], ctx, None, stats, deps=deps) is None
 
         assert stats.skipped_task_ids == [ctx.tasks[0].id]
         assert stats.skipped_seconds == 2.0
@@ -519,15 +516,14 @@ class TestRetrieveTaskAccounting:
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
-        cache = TaskAnnotationCache(tmp_path / "cache")
-        cache.put(task, _fetched(client, task, ctx))
+        cache = _warm_source(client, task, tmp_path).cache
         stats = _FetchStats(lock=Lock())
 
         _retrieve_task(
             client,
             task,
             ctx,
-            _CachePolicy(cache=cache, force=True),
+            CachedAnnotations(cache, read=False),
             stats,
             deps=_accounting_dependencies(fake),
         )

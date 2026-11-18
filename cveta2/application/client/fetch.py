@@ -23,6 +23,7 @@ from cveta2.domain.models import TaskAnnotations, TaskInfo
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from cveta2.application.client.job_cache import CachedAnnotations
     from cveta2.application.ports.cvat import CvatApiPort
 
 
@@ -249,18 +250,38 @@ class _FetchMixin(_ClientBase):
     ) -> TaskAnnotations | None:
         """Fetch annotations for a single task via the API port.
 
+        Returns ``None`` when the task was skipped (5xx with
+        ``ctx.raise_on_failure`` not set).
+        """
+        fetched = _FetchMixin.fetch_task_through(api, task, ctx, None)
+        return None if fetched is None else fetched[0]
+
+    @staticmethod
+    def fetch_task_through(
+        api: "CvatApiPort",
+        task: TaskInfo,
+        ctx: FetchContext,
+        annotations: "CachedAnnotations | None",
+    ) -> "tuple[TaskAnnotations, bool] | None":
+        """Fetch a task, reading its shapes through *annotations* when given.
+
+        Returns the result and whether every shape came from the cache, or
+        ``None`` when the task was skipped (5xx with ``ctx.raise_on_failure``
+        not set). Frame metadata, jobs and issues are always read live: the
+        records, completion and job positions are rebuilt from them.
+
         The jobs request is not optional the way issues are: ``job_stage``
         and ``job_state`` are what the partition reads to tell a finished
         task from one still being annotated, so a task whose jobs cannot be
         read is skipped rather than emitted as unreviewed.
-
-        Returns ``None`` when the task was skipped (5xx with
-        ``ctx.raise_on_failure`` not set).
         """
         try:
             data_meta = api.get_task_data_meta(task.id)
-            annotations = api.get_task_annotations(task.id)
             jobs = api.get_task_jobs(task.id)
+            if annotations is None:
+                shapes, from_cache = api.get_task_annotations(task.id), False
+            else:
+                shapes, from_cache = annotations.load(api, task, jobs)
         except CvatApiError as e:
             if _is_rate_limited(e):
                 msg = (
@@ -287,11 +308,14 @@ class _FetchMixin(_ClientBase):
             issues = []
             issues_complete = False
 
-        records, deleted = task_to_records(task, data_meta, annotations, ctx.label_names, ctx.attr_names, issues, jobs)
-        return TaskAnnotations(
+        records, deleted = task_to_records(
+            task, data_meta, shapes, ctx.label_names, ctx.attr_names, issues, jobs, replayed=from_cache
+        )
+        result = TaskAnnotations(
             task_id=task.id,
             task_name=task.name,
             annotations=records,
             deleted_images=deleted,
             issues_complete=issues_complete,
         )
+        return result, from_cache

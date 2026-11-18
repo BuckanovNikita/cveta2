@@ -1,5 +1,6 @@
 """Project promotion contracts over stateful CVAT and real task caches."""
 
+import shutil
 import threading
 from dataclasses import replace
 from pathlib import Path
@@ -16,20 +17,19 @@ from cveta2.adapters.s3.task_cache import (
     TaskAnnotationCache,
     get_task_cache_dir,
 )
+from cveta2.application.ports.cache import AnnotationScope
 from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
 from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
 from cveta2.composition.workflows import fetch_project
 from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.models import (
-    ImageWithoutAnnotations,
     ProjectInfo,
-    TaskAnnotations,
     TaskInfo,
 )
 from tests.fixtures.fake_cvat_api import FakeCvatApi
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
-from tests.helpers import client_with_api, write_split_config_yaml
+from tests.helpers import client_with_api, make_raw_shape, write_split_config_yaml
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -414,34 +414,22 @@ def test_partial_update_failure_preserves_changes_aborts_outputs_and_can_retry(
     assert set(partition.dataset["task_id"]) == {11}
 
 
+_STALE_SHAPE_ID = 4242
+_LEGACY_KEY = "cache-bucket/custom-cache/task_annotations/task_11.json"
+
+
 def _seed_stale_cache(api: PromotionApi, root: Path, s3: FakeS3Client | None = None) -> tuple[Path, str]:
     cache_dir = get_task_cache_dir(1, root=root)
     backend = S3CacheBackend(s3, "cache-bucket", "custom-cache", explicit_location=True) if s3 is not None else None
     cache = TaskAnnotationCache(cache_dir, s3=backend)
-    task = api.get_project_tasks(1)[0].model_copy(update={"status": "completed"})
-    stale = TaskAnnotations(
-        task_id=11,
-        task_name="task-11",
-        deleted_images=[],
-        annotations=[
-            ImageWithoutAnnotations(
-                image_name="stale.jpg",
-                image_width=10,
-                image_height=10,
-                task_id=11,
-                task_name="task-11",
-                frame_id=0,
-                job_stage="annotation",
-                job_state="completed",
-                task_completed=False,
-                task_updated_date="unchanged",
-            )
-        ],
-    )
-    cache.put(task, stale)
+    task = api.get_project_tasks(1)[0]
+    stale = RawAnnotations(shapes=[make_raw_shape(id=_STALE_SHAPE_ID, frame=0)])
+    cache.put(task, AnnotationScope(jobs=tuple(api.jobs[11]), whole_task=True), stale)
+    if s3 is not None:
+        s3.delete_calls.clear()  # the seeding write dropped the old-format object; assert the run's deletes only
     return (
-        cache_dir / "task_11.json",
-        "cache-bucket/custom-cache/task_annotations/task_11.json",
+        cache_dir / "task_11" / "task.json",
+        "cache-bucket/custom-cache/task_annotations/task_11/task.json",
     )
 
 
@@ -485,12 +473,14 @@ def test_promotion_invalidates_custom_local_and_s3_caches_before_first_patch(
 
     api.before_update = before_update
     partition = _run(api, tmp_path / "output", use_cache=True, config_path=config)
-    assert s3.delete_calls == [stale_key]
+    # The barrier deletes before the first PATCH; the later fetch write may drop the old object again.
+    assert s3.delete_calls[:2] == [stale_key, _LEGACY_KEY]
+    assert set(s3.delete_calls) == {stale_key, _LEGACY_KEY}
     assert api.annotation_calls == [11]
     assert set(partition.dataset["image_name"]) == {"11.jpg"}
     assert set(partition.dataset["job_stage"]) == {"acceptance"}
     assert partition.dataset["task_completed"].all()
-    assert b"stale.jpg" not in stale_path.read_bytes()
+    assert f'"id":{_STALE_SHAPE_ID}'.encode() not in stale_path.read_bytes()
 
 
 @pytest.mark.parametrize("disabled_by", ["option", "environment"])
@@ -534,7 +524,7 @@ def test_partial_mutation_failure_leaves_both_cache_layers_invalidated(
         _run(api, tmp_path / "output", use_cache=True, config_path=config)
     assert not stale_path.exists()
     assert stale_key not in s3.objects
-    assert s3.delete_calls == [stale_key]
+    assert s3.delete_calls == [stale_key, _LEGACY_KEY]
     assert api.annotation_calls == []
     api.fail_updates.clear()
     partition = _run(api, tmp_path / "output", use_cache=True, config_path=config)
@@ -568,14 +558,14 @@ def test_invalidation_failure_aborts_before_task_mutation(
     stale_path, _key = _seed_stale_cache(api, root, s3)
     monkeypatch.setattr("cveta2.adapters.s3.task_cache.make_s3_client", lambda _endpoint: s3)
     if layer == "local":
-        original_unlink = Path.unlink
+        original_rmtree = shutil.rmtree
 
-        def deny_stale_unlink(path: Path, *, missing_ok: bool = False) -> None:
-            if path == stale_path:
+        def deny_stale_rmtree(path: Path) -> None:
+            if Path(path) == stale_path.parent:
                 raise PermissionError("cache deletion denied")
-            original_unlink(path, missing_ok=missing_ok)
+            original_rmtree(path)
 
-        monkeypatch.setattr(Path, "unlink", deny_stale_unlink)
+        monkeypatch.setattr("cveta2.adapters.s3.task_cache.shutil.rmtree", deny_stale_rmtree)
     with pytest.raises(Cveta2Error) as caught:
         _run(api, tmp_path / "output", use_cache=use_cache, config_path=config)
     assert "кэш задачи 11" in str(caught.value)

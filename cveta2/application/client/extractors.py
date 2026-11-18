@@ -32,14 +32,21 @@ def _polygon_bounds(points: list[float]) -> tuple[float, float, float, float]:
 def _collect_shapes(
     shapes: list[RawShape],
     ctx: _TaskContext,
+    *,
+    replayed: bool = False,
 ) -> list[BBoxAnnotation]:
-    """Extract BBoxAnnotations from direct shapes."""
+    """Extract BBoxAnnotations from direct shapes.
+
+    *replayed* shapes come from the annotation cache: their warnings were
+    shown when they were first downloaded, so they go to the debug log.
+    """
+    warn = logger.debug if replayed else logger.warning
     result: list[BBoxAnnotation] = []
     skipped_polygons = 0
     missing_frame_shapes = 0
     for shape in shapes:
         if shape.type not in (_RECTANGLE, "polygon"):
-            logger.warning(f"Skipping shape type {shape.type} as it's not supported.")
+            warn(f"Skipping shape type {shape.type} as it's not supported.")
             continue
         frame_info = ctx.frames.get(shape.frame)
         if frame_info is None:
@@ -50,10 +57,10 @@ def _collect_shapes(
                 x_tl, y_tl, x_br, y_br = _polygon_bounds(shape.points)
             except ValueError as error:
                 skipped_polygons += 1
-                logger.warning(f"Задача {ctx.task_id}, аннотация {shape.id}: полигон пропущен: {error}")
+                warn(f"Задача {ctx.task_id}, аннотация {shape.id}: полигон пропущен: {error}")
                 continue
             rotation = 0.0
-            logger.warning(
+            warn(
                 f"Задача {ctx.task_id}, аннотация {shape.id}: полигон преобразован "
                 f"в ограничивающий прямоугольник; это приближение исходного контура"
             )
@@ -97,7 +104,7 @@ def _collect_shapes(
             ),
         )
     if skipped_polygons:
-        logger.warning(f"Задача {ctx.task_id}: пропущено полигонов: {skipped_polygons}")
+        warn(f"Задача {ctx.task_id}: пропущено полигонов: {skipped_polygons}")
     if missing_frame_shapes:
-        logger.warning(f"Задача {ctx.task_id}: пропущено аннотаций без метаданных кадра: {missing_frame_shapes}")
+        warn(f"Задача {ctx.task_id}: пропущено аннотаций без метаданных кадра: {missing_frame_shapes}")
     return result
