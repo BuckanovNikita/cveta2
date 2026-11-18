@@ -11,6 +11,7 @@
 | Проверка владения эффектами (дополняет import-linter) | `tests/architecture_effects.py`, запускается из `tests/test_architecture.py` |
 | Жизненный цикл живого прогона (up / stop / env; в pytest — фикстура сессии) | `tests/integration/lifecycle.py`, см. скилл `running-integration-tests` |
 | Клонирование CVAT-проекта в S3 cloud storage | `tests/integration/clone_project_to_s3.py` |
+| Отпечаток окружения testmon (`testmon_environment.py`): что, кроме кода тестов, сбрасывает историю testmon | `Taskfile.yml`, задачи `test` и `test-full` |
 
 ## benchmark_fetch.py
 
@@ -28,13 +29,13 @@ uv run python -m scripts.benchmark_fetch --label working-tree --output after.jso
 
 Мутационное тестирование (mutmut) только тех функций, которые меняет коммит.
 
-**Назначение:** хук `mutmut` (ручная стадия, `--hook-stage manual`) запускает скрипт без аргументов. Скрипт
+**Назначение:** задача `mutation` (`uv run --locked task --exit-code mutation`) запускает скрипт без аргументов. Скрипт
 берёт изменённые строки из индекса (`git diff --cached` против `HEAD`;
 `--base REV` сравнивает с merge-base от `REV`),
 находит содержащие их функции и методы верхнего уровня `cveta2/` и запускает
 mutmut только для их мутантов. Результат рекомендательный: выжившие мутанты
-печатаются вместе с диффами, а хук проходит. Ошибка инструмента или чистого
-прогона тестов хук роняет.
+печатаются вместе с диффами, а задача завершается успешно. Ошибка инструмента или
+чистого прогона тестов завершает её с ошибкой.
 
 **Изоляция:** каждый прогон выгружает индекс (`git checkout-index`) во
 временный каталог, сужает там `[tool.mutmut].only_mutate` до изменённых
@@ -49,7 +50,7 @@ mutmut только для их мутантов. Результат реком�
 **Примеры:**
 
 ```bash
-# Изменения в индексе против HEAD (то же, что делает хук)
+# Изменения в индексе против HEAD (то же, что делает задача mutation)
 uv run python scripts/mutation.py
 
 # Индекс против другой ревизии
