@@ -161,8 +161,9 @@ def fetch_dataset(
     path, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
-    parent, _ = _parent(definition)
+    parent, metadata = _parent(definition)
     previous = ClearMLSources().read_snapshot(parent.dataset_id) if parent else None
+    previous_cvat = metadata.managed.cvat if metadata is not None and metadata.managed is not None else None
     files = LocalSourceFiles()
     with _client(path, project_config) as client:
         snapshot, frame = fetch_sources(
@@ -173,6 +174,7 @@ def fetch_dataset(
             s3=S3CsvSources(),
             files=files,
             previous=previous,
+            previous_cvat=previous_cvat,
             parent_id=parent.dataset_id if parent else None,
             refresh=refresh,
         )

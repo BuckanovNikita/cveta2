@@ -10,6 +10,7 @@ from cveta2.application.ports.managed_sources import (
 from cveta2.domain.class_registry import ApiClass, registry_fingerprint
 from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
+    CvatIdentity,
     DatasetDefinition,
     ManagedError,
     ManagedSnapshot,
@@ -90,6 +91,7 @@ def fetch_sources(  # noqa: PLR0913
     s3: S3CsvReader,
     files: SourceFiles,
     previous: ManagedSnapshot | None = None,
+    previous_cvat: CvatIdentity | None = None,
     parent_id: str | None = None,
     refresh: bool = False,
 ) -> tuple[ManagedSnapshot, pd.DataFrame]:
@@ -98,6 +100,15 @@ def fetch_sources(  # noqa: PLR0913
     Previously published records are a source cache, never transformed training
     rows. Fresh inventory removes deleted tasks; per-source partitioning keeps
     task IDs from one project from superseding records in another.
+
+    Reuse is decided per source: a source keeps its previous tasks while its
+    name, type, CVAT project and labels match, and ignored tasks are skipped
+    per task, so editing one source refetches at most that source. Every source
+    is reset only by ``refresh``, legacy evidence, a class registry change or a
+    change of the CVAT host or organization. ``previous_cvat`` is the identity
+    the previous snapshot was captured under and must come from the same
+    publication as ``previous``; when it is unknown, any source definition hash
+    mismatch conservatively resets every source.
     """
     registry_hash = registry_fingerprint(registry)
     definition_hash = source_fingerprint(config, definition)
@@ -111,7 +122,7 @@ def fetch_sources(  # noqa: PLR0913
         or previous is None
         or legacy
         or previous.registry_hash != registry_hash
-        or previous.definition_hash != definition_hash
+        or (previous_cvat != config.cvat if previous_cvat is not None else previous.definition_hash != definition_hash)
     )
     old_sources = {source.name: source for source in previous.sources} if previous else {}
     sources: list[SourceSnapshot] = []

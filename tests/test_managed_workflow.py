@@ -432,6 +432,15 @@ def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workfl
     assert workflow.cvat.annotation_reads == []
     assert reused["sources"][0]["reused"] == [101]
     assert reused["sources"][1]["reused"] == [102]
+    assert (reused["directory"], reused["parent_id"]) == (str(tmp_path / "again"), "version-1")
+    forced = api.fetch_dataset("combined", output_dir=tmp_path / "forced", refresh=True, **workflow.options)
+    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
+    assert {source["name"]: source["fetched"] for source in forced["sources"]} == {
+        "main": [101],
+        "other": [102],
+        "imported": [],
+    }
+    assert forced["sources"][2]["content_hash"] == hashlib.sha256(workflow.s3.content).hexdigest()
     assert len(api.dataset_versions("combined", **workflow.options)) == 1
     compared = api.compare_datasets(str(prepared), result.dataset_id, **workflow.options)
     assert compared["rows"]["added"] == 0
@@ -815,17 +824,43 @@ def test_split_policy_change_after_preparation_requires_preparing_again(
     assert workflow.clearml.publications == []
 
 
-def test_parent_published_with_the_previous_hash_scheme_refetches_once(workflow: Workflow, tmp_path: Path) -> None:
-    published = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
-    tasks_path = workflow.clearml.root / published.dataset_id / "tasks.yaml"
-    tasks = yaml.safe_load(tasks_path.read_text())
+def _other_definition_hash(_shared: dict[str, Any], parent: Path) -> None:
+    tasks = yaml.safe_load((parent / "tasks.yaml").read_text())
     tasks["managed"]["definition_hash"] = hashlib.sha256(b"whole definition").hexdigest()
-    tasks_path.write_text(yaml.safe_dump(tasks))
+    (parent / "tasks.yaml").write_text(yaml.safe_dump(tasks))
+
+
+def _unknown_identity(shared: dict[str, Any], parent: Path) -> None:
+    _other_definition_hash(shared, parent)
+    metadata = yaml.safe_load((parent / "dataset.yaml").read_text())
+    metadata.pop("managed")
+    (parent / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+
+
+def _moved_server(shared: dict[str, Any], _parent: Path) -> None:
+    shared["cvat"]["host"] = "https://cvat.moved.example"
+
+
+@pytest.mark.parametrize(
+    ("edit", "reads"),
+    [
+        (_other_definition_hash, []),
+        (lambda shared, _parent: _ignore_task(shared), []),
+        (_moved_server, [101, 102]),
+        (_unknown_identity, [101, 102]),
+    ],
+    ids=["hash-mismatch", "ignored-id", "host", "unknown-identity"],
+)
+def test_published_server_identity_decides_whether_fetch_resets_every_source(
+    workflow: Workflow, tmp_path: Path, edit: Callable[[dict[str, Any], Path], None], reads: list[int]
+) -> None:
+    published = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    _edit_shared(workflow, lambda shared: edit(shared, workflow.clearml.root / published.dataset_id))
     workflow.cvat.annotation_reads.clear()
 
     second = _prepare(workflow, tmp_path / "second")
 
-    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
+    assert sorted(workflow.cvat.annotation_reads) == reads
     assert api.publish_dataset(second, **workflow.options).dataset_id == "version-2"
     workflow.cvat.annotation_reads.clear()
     api.fetch_dataset("combined", output_dir=tmp_path / "third", **workflow.options)
