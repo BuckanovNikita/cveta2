@@ -1,5 +1,6 @@
 """Resolved upload values and application-owned effect dependencies."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +24,8 @@ class UploadDependencies:
     files: UploadFiles
     manifests: ManifestStore
     invalidate: CacheInvalidator
+    sleep: Callable[[float], None]
+    """Blocks for the given seconds; resume waits with it before re-reading a task."""
 
 
 @dataclass(frozen=True)

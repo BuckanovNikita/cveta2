@@ -2,7 +2,7 @@
 
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
@@ -102,13 +102,16 @@ def _cache_invalidator(config_path: Path | None) -> CacheInvalidator:
     return partial(invalidate_local_entry, config_path=config_path)
 
 
-def upload_dependencies(*, config_path: Path | None = None) -> upload.UploadDependencies:
+def upload_dependencies(
+    *, config_path: Path | None = None, sleep: Callable[[float], None] = time.sleep
+) -> upload.UploadDependencies:
     """Assemble production upload staging and recovery dependencies."""
     return upload.UploadDependencies(
         storage=S3UploadStorage(),
         files=LocalWorkflowFiles(),
         manifests=LocalManifestStore(),
         invalidate=_cache_invalidator(config_path),
+        sleep=sleep,
     )
 
 

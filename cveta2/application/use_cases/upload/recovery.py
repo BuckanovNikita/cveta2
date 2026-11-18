@@ -2,6 +2,7 @@
 
 from collections import Counter
 from pathlib import PurePosixPath
+from typing import Final
 
 import pandas as pd
 from loguru import logger
@@ -30,6 +31,8 @@ _HTTP_NOT_FOUND = 404
 _HTTP_CLIENT_ERRORS = range(400, 500)
 # A timeout or throttling reply does not prove the create was not applied.
 _UNCERTAIN_CLIENT_ERRORS = frozenset({408, 429})
+PENDING_ANNOTATIONS_WAIT_SECONDS: Final = 30.0
+"""How long resume waits for an interrupted annotation write before re-reading."""
 
 
 def _is_definitive_rejection(status_code: int) -> bool:
@@ -71,20 +74,45 @@ def _verify_existing_shapes(
     return 0
 
 
-def _ensure_annotations(
+def _ensure_annotations(  # noqa: PLR0913
     client: CvatClient,
     task_id: int,
     staged: _StagedUpload,
     session: TaskWriteSession,
     resuming: bool,  # noqa: FBT001
+    *,
+    manifest: UploadManifest,
+    deps: UploadDependencies,
 ) -> int:
-    """Reuse only a verified complete shape multiset; never guess from count."""
+    """Reuse only a verified complete shape multiset; never guess from count.
+
+    The shape write appends, so it is bracketed by a required pending mark.
+    A resume that finds the mark and an empty task cannot tell a write that
+    never happened from one still in flight: it waits once and reads again.
+    A write landing after the wait can still duplicate; that limit is accepted.
+    """
     if resuming:
         existing = _verify_existing_shapes(task_id, staged.annotations, session)
         if existing:
-            logger.info(f"Задача {task_id}: подтверждены {existing} аннотаций, пропускаем")
             return existing
-    return client.upload_task_annotations(task_id, staged.annotations, session=session)
+        if manifest.annotations_pending:
+            logger.warning(
+                f"Задача {task_id}: прошлый запуск прервался во время записи аннотаций, "
+                f"а в задаче их нет. Ждём {PENDING_ANNOTATIONS_WAIT_SECONDS:.0f} с и проверяем снова, "
+                "чтобы не записать аннотации дважды."
+            )
+            deps.sleep(PENDING_ANNOTATIONS_WAIT_SECONDS)
+            existing = _verify_existing_shapes(task_id, staged.annotations, session)
+            if existing:
+                return existing
+    if not upload_annotation_mask(staged.annotations).any():
+        return client.upload_task_annotations(task_id, staged.annotations, session=session)
+    manifest.annotations_pending = True
+    deps.manifests.save(manifest, required=True)
+    uploaded = client.upload_task_annotations(task_id, staged.annotations, session=session)
+    manifest.annotations_pending = False
+    deps.manifests.save(manifest)
+    return uploaded
 
 
 def _create_task(
