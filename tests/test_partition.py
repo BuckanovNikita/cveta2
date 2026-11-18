@@ -7,7 +7,7 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from cveta2.domain.models import CSV_COLUMNS
+from cveta2.domain.models import CSV_COLUMNS, DeletedImage
 from cveta2.domain.partition import (
     PartitionResult,
     completed_task_ids,
@@ -152,8 +152,15 @@ def test_empty_dataframe_keeps_column_order() -> None:
 
 
 # One record per annotation row or deletion: (image, task_id, job finished).
-_Record = tuple[str, int, bool]
-_RECORDS = st.tuples(st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]), st.integers(1, 5), st.booleans())
+# One record per annotation row or deletion: (image, task_id, job finished).
+# ``None`` is an unknown job position (legacy rows without stage/state), which
+# holds its task back exactly like an unfinished one.
+_Record = tuple[str, int, bool | None]
+_RECORDS = st.tuples(
+    st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]),
+    st.integers(1, 5),
+    st.sampled_from([True, False, None]),
+)
 
 
 def _expected_partition(
@@ -216,19 +223,28 @@ def _expected_partition(
     return parts, sorted(deleted), sorted(pending)
 
 
-def _status(done: bool) -> str:  # noqa: FBT001 - maps a drawn flag
+def _status(done: bool | None) -> str:  # noqa: FBT001 - maps a drawn flag
     return "completed" if done else "annotation"
+
+
+def _drawn_row(record: _Record) -> dict[str, object]:
+    image, task, done = record
+    row = _row(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done))
+    if done is None:
+        row.update(job_stage=None, job_state=None)
+    return row
+
+
+def _drawn_deletion(drawn: _Record) -> DeletedImage:
+    image, task, done = drawn
+    record = make_deleted(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done))
+    return record.model_copy(update={"job_stage": "", "job_state": ""}) if done is None else record
 
 
 def _partition(rows: list[_Record], deletions: list[_Record]) -> PartitionResult:
     """Partition drawn records; task dates run against task ids on purpose."""
-    frame = _df(
-        [_row(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in rows]
-    ).assign(row=range(len(rows)))
-    records = [
-        make_deleted(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in deletions
-    ]
-    return partition_annotations_df(frame, records)
+    frame = _df([_drawn_row(record) for record in rows]).assign(row=range(len(rows)))
+    return partition_annotations_df(frame, [_drawn_deletion(record) for record in deletions])
 
 
 @given(
@@ -326,6 +342,42 @@ def test_unfinished_deletion_waits_for_its_task() -> None:
         "deleted": [],
         "pending": [9],
     }
+
+
+@pytest.mark.parametrize(
+    ("rows", "deletions", "expected"),
+    [
+        pytest.param(
+            [("a.jpg", 1, False)],
+            [("a.jpg", 2, True)],
+            {"dataset": [], "obsolete": [1], "in_progress": [], "deleted": [2], "pending": []},
+            id="unfinished-task-older-than-the-completed-deletion",
+        ),
+        pytest.param(
+            [],
+            [("a.jpg", 1, True), ("a.jpg", 2, False)],
+            {"dataset": [], "obsolete": [], "in_progress": [], "deleted": [1], "pending": []},
+            id="unfinished-deletion-after-a-completed-deletion",
+        ),
+        pytest.param(
+            [("a.jpg", 2, False)],
+            [("a.jpg", 1, True), ("a.jpg", 2, False)],
+            {"dataset": [], "obsolete": [2], "in_progress": [], "deleted": [1], "pending": []},
+            id="unfinished-task-that-annotates-and-deletes-does-not-reopen",
+        ),
+        pytest.param(
+            [("a.jpg", 2, False)],
+            [("a.jpg", 1, True)],
+            {"dataset": [], "obsolete": [], "in_progress": [2], "deleted": [], "pending": []},
+            id="reopened-without-earlier-completed-boxes",
+        ),
+    ],
+)
+def test_accepted_edges_of_completed_deletions(
+    rows: list[_Record], deletions: list[_Record], expected: dict[str, list[int]]
+) -> None:
+    """Edges the decision did not spell out; the owner accepted these outcomes."""
+    assert _tasks_by_part(_partition(rows, deletions)) == expected
 
 
 def test_unfinished_reannotation_keeps_the_completed_result() -> None:
