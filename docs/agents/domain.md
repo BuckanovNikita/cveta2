@@ -1,7 +1,6 @@
 # Domain documentation
 
-Read the root [glossary](../../GLOSSARY.md) and relevant `docs/adr/` decisions before
-domain exploration. Use its vocabulary in issues, tests and explanations; surface
-conflicting ADR decisions explicitly. If no relevant ADR exists, continue without
-creating a placeholder. Product authority follows the [contract index](contracts.md);
-Spec Kit artifacts are read-only historical context.
+Before domain exploration, read the root [glossary](../../GLOSSARY.md) and the affected
+feature files in `docs/feature/`. Use the glossary's vocabulary in issues, tests and
+explanations, and surface a conflict between a request and a documented decision
+explicitly. The repository keeps no ADRs; do not create a placeholder decision record.

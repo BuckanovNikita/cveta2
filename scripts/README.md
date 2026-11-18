@@ -5,7 +5,7 @@
 
 | Что | Где |
 |---|---|
-| Выпуск версий (semantic-release; версия пакета хранится в `cveta2/__init__.py`) | `.github/workflows/release.yml` и `[tool.semantic_release]` в `pyproject.toml`, см. `docs/agents/engineering.md#releases` |
+| Выпуск версий (semantic-release; версия пакета хранится в `cveta2/__init__.py`) | `.github/workflows/release.yml` и `[tool.semantic_release]` в `pyproject.toml`, см. `docs/development.md#releases` |
 | Проверка сообщения коммита | `.pre-commit-config.yaml` (готовый хук `conventional-pre-commit`) |
 | Проверка владения эффектами (дополняет import-linter) | `tests/architecture_effects.py`, запускается из `tests/test_architecture.py` |
 | Жизненный цикл живого прогона (up / stop / env; в pytest — фикстура сессии) | `tests/integration/lifecycle.py`, см. скилл `running-integration-tests` |

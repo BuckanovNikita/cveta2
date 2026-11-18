@@ -7,7 +7,7 @@
     uv run python scripts/mutation.py --keep --strict  # keep it; fail on survivors
     uv run python scripts/mutation.py --budget-seconds 0 --max-functions 0  # no limits
 
-The pre-commit hook runs the first form, within a budget: at most
+The ``mutation`` Task stage runs the first form, within a budget: at most
 ``--max-functions`` (default 8) changed functions are mutated and the rest are
 listed; mutmut stops after ``--budget-seconds`` (default 120), and mutants it
 did not reach by then count as "not run", not as survivors; a run that judges

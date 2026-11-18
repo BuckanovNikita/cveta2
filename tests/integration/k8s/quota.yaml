@@ -1,8 +1,8 @@
 # Quota and default container resources of one live-test session namespace
 # (cveta2-it-<id>). tests/integration/lifecycle.py applies this file first,
 # before any workload, and its preflight checks that the node can admit
-# `requests.cpu` and `requests.memory` below. Sizes come from the dated
-# measurements in specs/002-own-test-infra/evidence.md, with headroom; every
+# `requests.cpu` and `requests.memory` below. Sizes come from measured usage of
+# a full live suite, with headroom; every
 # container in cvat.yaml, minio.yaml and clearml.yaml declares its own
 # requests and limits inside these totals.
 apiVersion: v1

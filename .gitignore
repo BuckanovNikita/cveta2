@@ -67,7 +67,7 @@ tests/integration/.session
 !.agents/skills/running-integration-tests/**
 !.agents/skills/verification-workflow/
 !.agents/skills/verification-workflow/**
-# Spec Kit is archived outside active skill discovery; personal skills remain ignored.
+# Personal skills remain ignored.
 
 # pytest-testmon dependency database, one per worktree
 .testmondata

@@ -1,7 +1,5 @@
 # Dataset preparation
 
-Maintained vocabulary; synchronize product meaning with the [Linear contract topic](https://linear.app/sip-ds-team/document/contract-glossarymd-a4613e4e8529), which has owned the current contract since the 2026-11-17 cutover.
-
 Terms distinguish source evidence from reviewed training output.
 
 ## Language

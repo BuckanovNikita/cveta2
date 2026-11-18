@@ -1,83 +1,65 @@
-# Linear requirements and GitHub delivery
+# Issue tracker: Linear and GitHub PRs
 
-Use Linear team `SIP`, project `cveta2`, and GitHub repository
-`BuckanovNikita/cveta2`. Resolve records by identifier or URL and link issues, PRs
-and evidence in both directions. The [contract index](contracts.md) locates current
-product requirement documents. [Engineering policy](engineering.md) stays in Git.
+Create every issue for this repository in Linear team `SIP`, project `cveta2`; what
+Linear owns is stated in [AGENTS.md](../../AGENTS.md). Resolve an issue by its identifier
+or URL. GitHub PRs in `BuckanovNikita/cveta2` own review and delivery. Link issues and PRs
+both ways.
 
-## Authority
+## Issues
 
-Linear project documents own the current product contract. The cutover completed on
-2026-11-17: the migration PR was human-merged, and SIP-66 records the merged commit,
-the review and the activation of all contract documents. Frozen repository originals
-retain historical provenance and supply the migration comparison baseline.
+Search for an existing issue before creating one, and start each new issue from the
+[issue template](issue-template.md). An issue records the outcome, scope, compatibility
+constraints, a plan where needed, acceptance criteria, selected verification with base and
+tip SHAs, dependencies, ownership, authorized stopping points and evidence. Inspect
+current source and configuration before relying on claims in older issues.
 
-Proposed requirements stay in issues until their implementation is merged and accepted.
-Then update the relevant current contract and index with source commit links. Preserve
-source mappings and conditions/limitations when transferring requirements. Repository
-usage guides remain maintained explanations; superseded normative files are frozen
-references, not another current requirement authority.
+Use the team lifecycle states Backlog, Todo, In Progress, In Review, Done, Canceled and
+Duplicate. Move an issue to In Review when implementation and required verification are
+ready. Mark an implementation issue Done only after its changes reach `main` and
+acceptance is satisfied or every missing gate is recorded as waived; a verification-only
+issue completes on its recorded acceptance outcome.
 
-If Linear is unavailable, investigate and implement in isolation against an identified,
-previously verified contract snapshot. Record snapshot identity and deferred updates;
-defer requirement decisions and merge readiness until Linear can be reconciled. Never
-silently substitute stale repository requirements for current Linear authority.
+Readiness labels are separate from state: see [triage labels](triage-labels.md). A ready
+label never overrides a blocker.
 
-## Planning and acceptance
+## Dependencies
 
-Issues record outcomes, scope, compatibility, implementation plans where needed,
-acceptance criteria, selected verification, dependencies, ownership and stopping points.
-Inspect current source and evidence before adopting historical claims. Use team lifecycle
-states Backlog, Todo, In Progress, In Review, Done, Canceled and Duplicate, with separate
-[readiness labels](triage-labels.md). A ready label never overrides a blocker.
+Record blocking relations explicitly. Start dependent implementation only when its
+prerequisite is implemented and verified on the branch used as its base; merge order still
+follows the dependency. A canceled prerequisite requires replanning or removing the
+dependent work.
 
-Start dependent implementation only once its prerequisite is implemented and verified
-on the branch used as the base; merge dependencies remain explicit. Record actual
-checks, source/environment identities, exclusions, reuse reasons and limitations.
-Report required checks as passed, failed, deferred, waived or error; only a user
-waiver may remove a required gate, and it is never a passing result. A waiver is
-either stated by the user or given by a human merge of a PR whose description lists
-that gate as not run; record the latter as waived by merge. Until then the agent
-reports such a PR as not merge-ready. Documentation-only changes need development
-verification only, as [engineering policy](engineering.md#acceptance-and-deferral) defines.
+## Evidence
 
-Move to In Review when implementation and required verification are ready. Draft PRs may
-contain incomplete work; required deferred verification blocks merge readiness. Mark
-implementation issues Done only after changes reach `main` and acceptance is satisfied
-or every missing gate is recorded as waived.
-Verification-only tasks complete on their recorded acceptance outcome.
+An issue's evidence, kept in the issue and its PR, covers source and environment
+identities, commands, the checks actually run and their statuses, exclusions, reuse
+reasons and remaining limitations. Waivers and reporting follow
+[development procedures](../development.md#order-reuse-and-reporting).
 
-## Branches and PRs
+## PR grouping and delivery
 
-Default to one task branch and PR per cohesive feature, including multiple issues when
-appropriate. Link every issue and map acceptance criteria to implementation/evidence.
-Keep included issues open until the shared PR merges and their criteria are satisfied.
-Agents may push task branches using the existing SSH remote and create PRs. Humans
-merge; agents must not merge locally into `main` or push `main`. Each human merge into
-`main` releases automatically when its commits call for a version (see
-[engineering policy](engineering.md#releases)). Explicit session restrictions prevail.
+Default to one task branch and PR per cohesive feature, including several issues when
+appropriate. Link every included issue, map its acceptance criteria to implementation and
+evidence, and keep it open until the shared PR merges and its criteria are satisfied.
+Draft PRs may hold incomplete work.
+
+Push task branches to the existing SSH remote; merging follows the delivery rule in
+[AGENTS.md](../../AGENTS.md). Each human merge into `main` releases automatically when its
+commits call for a version ([releases](../development.md#releases)). Do not assume branch
+protection, GitHub checks or Linear automation is installed.
 
 Use stacked PRs when separate review units or dependency sequencing help delivery.
-Record grouping and merge order in Linear before implementation; the first PR targets
-`main`, descendants target their parent branches. Record base/head SHAs, review
-incremental diffs, and verify the cumulative feature delta against `main`.
+Record the grouping and merge order in Linear before implementation; the first PR targets
+`main` and each descendant targets its parent branch. Record base and head SHAs, review
+incremental diffs and verify the cumulative feature delta against `main`.
 
-After humans merge bottom-up, retarget or restack remaining task branches, inspect the
-diff, reassess evidence and repeat affected verification and independent review. Use
-force-with-lease only for task-owned rewrites. A canceled prerequisite requires replanning
-or removal of dependent work. Do not assume branch protection, GitHub checks or Linear
-automation is installed. Follow engineering policy for commits, checks and review.
+Humans merge stacks bottom-up. After each merge, retarget or restack the remaining task
+branches, inspect the resulting diffs, reassess evidence and repeat affected verification
+and independent review. Use `--force-with-lease` only to rewrite task-owned branches.
 
-## Migrating existing work
+## Existing branches
 
-Search for existing issues before creation. Reconcile outstanding tasks and findings
-against implementation and dated evidence; unchecked historical tasks are not proof of
-unfinished implementation. Preserve original paths/commits as migration identity and
-maintain a dated mapping. Transfer actionable requirements, discussion and dependencies;
-preserve completed history without inventing active blockers.
-
-Existing branches retain their owners. Migration records do not authorize editing
-another task's branch or claiming its acceptance. New delivery rules apply when those
-branches are integrated. Track unresolved historical evidence in separate follow-ups;
-keep implementation, prior successful checks and missing evidence distinct. Archived
-Spec Kit artifacts remain unchanged and receive no further task-status updates.
+Existing branches keep their owners: an issue does not authorize editing another task's
+branch or claiming its acceptance. Keep implementation, prior successful checks and
+missing evidence distinct, and never rewrite past records to make unverified work appear
+complete.

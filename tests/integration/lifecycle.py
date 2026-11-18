@@ -9,43 +9,135 @@ first live test and ``finish`` after the last one. The same steps by hand:
     eval "$(uv run python -m tests.integration.lifecycle env)"  # its variables
     uv run python -m tests.integration.lifecycle stop [<namespace>]
 
+The rules every session obeys (own namespace, quota first, loopback access, no GPU,
+no shared service) are in ``docs/development.md``, section "Live tests".
+
+Session setup
+-------------
+
 A session creates the namespace ``cveta2-it-<UTC yyyymmdd-hhmmss>-<4 hex>`` in
-the ``docker-desktop`` cluster, applies ``tests/integration/k8s/quota.yaml``
-(quota and limit range) before any workload, generates its credentials into
-the namespace's Secrets, applies the CVAT, MinIO and ClearML manifests next to
-it, waits for them within a cold-start deadline (``CVETA2_SESSION_READY_TIMEOUT``,
-300 seconds by default), reaches them through ``kubectl port-forward`` on
-127.0.0.1, registers a regular CVAT user that owns one organization, and
-seeds the run within a seeding deadline (``CVETA2_SESSION_SEED_TIMEOUT``, 600
-seconds by default, covering stand verification, the coco8 download and the
-seed script). The namespace name is also the run tag: the MinIO bucket and
-the prefix of every CVAT and ClearML object. Teardown first requests deletion of
-exactly that namespace, then stops the session's port-forwards and waits until
-the namespace is gone; it runs on success, failure and interruption unless
-``INTEGRATION_KEEP_DATA=1``.
+the ``docker-desktop`` cluster, labelled with a random per-session token. It then
+applies ``tests/integration/k8s/quota.yaml`` (quota and limit range) before any
+workload, generates its credentials into the namespace's Secrets, applies the
+CVAT, MinIO and ClearML manifests next to it, waits for them within a cold-start
+deadline (``CVETA2_SESSION_READY_TIMEOUT``, 300 seconds by default), reaches them
+through ``kubectl port-forward`` on 127.0.0.1 (another free loopback port when
+one is taken), registers a regular CVAT user through the public registration API
+with an organization it owns, and seeds the run within a seeding deadline
+(``CVETA2_SESSION_SEED_TIMEOUT``, 600 seconds by default, covering stand
+verification, the coco8 download and the seed script; socket activity does not
+extend it). The namespace name is also the run tag: the MinIO bucket and the
+prefix of every CVAT and ClearML object.
+
+Services not ready within the cold-start deadline, or seeding not finished within
+its deadline, are blocked setup: exit 3, never a test failure, and the namespace
+is deleted even when keeping was requested. In Task-driven runs, a setup failure
+followed by an UNAVAILABLE recheck is blocked setup too. Once tests run, a
+vanished namespace fails the remaining tests as lost infrastructure. An
+interrupted or timed-out setup child gets SIGINT or SIGTERM and a grace period of
+a few seconds; then its whole process group is killed, descendants included, so
+teardown runs before an interrupted xdist worker is force-exited.
+
+Teardown and ownership
+----------------------
+
+Teardown requests deletion of exactly the session's namespace first, then stops
+the session's port-forwards and waits, bounded, until the namespace is gone. It
+runs on success, failure and interruption unless ``INTEGRATION_KEEP_DATA=1``. A
+namespace still terminating at the bound, or a refused delete, is incomplete
+cleanup: reported by name with the exact ``stop`` retry command, never success.
+When a namespace create fails, times out or is interrupted, the session deletes
+the namespace only if it carries this session's token. A port-forward that died
+during the run is named in the teardown report.
+
+Only names matching ``cveta2-it-*`` are ever created or deleted, so a platform
+namespace never is. Automatic teardown acts only on the session's own namespace;
+another namespace with the prefix is touched only by an explicit ``stop <name>``.
+
 A kept session (``up``, or the fixture with ``INTEGRATION_KEEP_DATA=1``) is
-recorded with its local ports, never its credentials, in the gitignored
-``tests/integration/.session``.
+recorded with its namespace and local ports, never its credentials, in the
+gitignored ``tests/integration/.session``. While that namespace exists, ``up``
+and a keeping fixture run refuse to start; a recorded namespace that vanished is
+forgotten.
 
-Exported for the session (and printed by ``env``): ``INTEGRATION_RUN_TAG``;
-``CVAT_INTEGRATION_HOST/USER/PASSWORD/ORG/PROJECT``; ``MINIO_ENDPOINT`` (as the
-host sees it), ``MINIO_ENDPOINT_FOR_CVAT`` (as the CVAT pods see it),
-``MINIO_ACCESS_KEY/SECRET_KEY/REGION/BUCKET`` and the same MinIO as
-``AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY/DEFAULT_REGION/ENDPOINT_URL``;
-``CLEARML_API_HOST/FILES_HOST/WEB_HOST`` and ``CLEARML_API_ACCESS_KEY/SECRET_KEY``.
+Session lifecycle interface
+---------------------------
 
-``check`` is read-only and bounded by ``CVETA2_INFRA_CHECK_TIMEOUT`` (60 seconds
-by default): 0 AVAILABLE, 3 UNAVAILABLE (the cluster does not answer, or the
-node cannot admit the session quota), 1 ERROR (a missing tool, or a context
-that may not create or delete namespaces). Task-driven ``prepare`` repeats it;
-direct operator ``up`` waits for an unavailable cluster instead, bounded by
-``CVETA2_STAND_WAIT_TIMEOUT`` when set. Services that are not ready within the
-cold-start deadline, or seeding that does not finish within its deadline,
-block setup (exit 3) and the namespace is deleted.
+Standard library only. Every cluster call uses ``kubectl --context docker-desktop``
+and passes credentials on stdin only. Progress lines start with ``==> ``; failures
+are ``ERROR:`` and deferrals ``UNAVAILABLE:`` lines. Nothing prints a credential.
 
-The module stays standard-library only. Inside pytest, ``tests.env_isolation``
-replaces HOME; it records the real environment in ``CVETA2_REAL_ENV`` and this
-module restores it for every child (kubectl and uv need the real HOME).
+check
+    Read-only preflight within ``CVETA2_INFRA_CHECK_TIMEOUT`` (60 seconds by
+    default): kubectl present, the cluster answers ``/readyz``, the context may
+    create and delete namespaces, and a schedulable node (Ready, not cordoned,
+    without a ``NoSchedule`` or ``NoExecute`` taint) has enough unrequested CPU
+    and memory for the session quota's requests. Creates nothing.
+    Exit 0 AVAILABLE; 3 UNAVAILABLE (no answer, also when lost during a later
+    probe, no node can admit the quota, or the deadline expired); 1 ERROR (a
+    missing tool or context, an authorization refusal, an unexpected failure).
+up
+    Under ``CVETA2_TASK_VERIFICATION=1``, one bounded preflight; otherwise an
+    explicit operator wait for an unavailable cluster, with a notice and
+    heartbeats, unbounded unless ``CVETA2_STAND_WAIT_TIMEOUT`` is set (expiry is
+    exit 1). Then create, deploy, wait, bootstrap and seed a session, keep it,
+    record it in ``.session`` and stop this process's port-forwards.
+    Exit 0; 3 blocked setup or unavailable; 1 error.
+env [<namespace>]
+    Refuses a terminal first, and a namespace that does not exist. For the
+    recorded (or given) session: stop that namespace's earlier port-forwards,
+    read its credentials from its Secrets, start port-forwards on the recorded
+    ports when free (else on new ports, with a warning that stored ClearML file
+    URLs may not resolve, and the record is updated), and print
+    ``export NAME=<quoted>`` lines for the session environment below. These
+    forwards outlive the command until ``stop``. Exit 0; 1.
+stop [<namespace>]
+    Delete exactly the given or recorded namespace and wait until it is gone;
+    stop the processes whose command line starts exactly with
+    ``kubectl --context docker-desktop -n <namespace> port-forward``; remove
+    ``.session`` when it names that namespace. An absent namespace is success
+    (already gone), and so is ``stop`` without a name when nothing is recorded,
+    so a second ``stop`` succeeds. A name without the prefix is refused.
+    Exit 0; 1 incomplete cleanup or refused name.
+
+Session fixture (``tests/integration/conftest.py::live_run``): ``prepare`` does
+what ``up`` does without recording ``.session``; ``finish`` stops the session
+unless ``INTEGRATION_KEEP_DATA=1``, in which case it records ``.session`` and
+prints the exact ``stop`` command. A teardown failure fails the pytest session
+with the namespace name and the retry command. The fixture lists the names it
+exported in ``CVETA2_LIVE_EXPORTED``, so ``tests/conftest.py`` hides them from
+unit tests.
+
+Session environment interface
+-----------------------------
+
+Every live test and helper reads these names; their values describe the current
+session. Values are never printed except by ``env`` into a pipe. Other names
+(for example ``CVAT_URL``, ``CVAT_TOKEN``, ``S3_*`` or CA-bundle variables) are
+not exported.
+
+=============================================  ======================================
+Name                                           Value
+=============================================  ======================================
+INTEGRATION_RUN_TAG                            the session namespace
+CVAT_INTEGRATION_HOST                          http://127.0.0.1:<port>, CVAT backend
+CVAT_INTEGRATION_USER, _PASSWORD               the session's regular CVAT user
+CVAT_INTEGRATION_ORG                           the organization that user owns
+CVAT_INTEGRATION_PROJECT                       "<namespace> coco8-dev"
+MINIO_ENDPOINT                                 http://127.0.0.1:<port>, MinIO
+MINIO_ENDPOINT_FOR_CVAT                        the in-cluster MinIO Service URL
+MINIO_ACCESS_KEY, _SECRET_KEY, _REGION         the session MinIO credentials, region
+MINIO_BUCKET                                   the session namespace
+AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,      the same MinIO, for boto's default
+AWS_DEFAULT_REGION, AWS_ENDPOINT_URL           credential chain
+CLEARML_API_HOST, CLEARML_FILES_HOST           http://127.0.0.1:<port>, API and files
+CLEARML_WEB_HOST                               the API URL (no web UI is deployed)
+CLEARML_API_ACCESS_KEY, _SECRET_KEY            the session's ClearML key pair
+=============================================  ======================================
+
+Inside pytest, ``tests.env_isolation`` replaces HOME; it records the real
+environment in ``CVETA2_REAL_ENV`` and this module restores it for every child
+(kubectl and uv need the real HOME).
 """
 
 import argparse

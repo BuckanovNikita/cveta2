@@ -1,4 +1,9 @@
-"""Versioned neutral contracts for shared configuration and source evidence."""
+"""Versioned neutral contracts for shared configuration and source evidence.
+
+``source_fingerprint`` and ``definition_fingerprint`` are the only implementations of
+the two configuration hashes; fetch, preparation and publication all call them rather
+than recomputing either hash elsewhere.
+"""
 
 import hashlib
 import json

@@ -1,4 +1,9 @@
-"""Project name and cloud-storage resolution shared by CLI and public API."""
+"""Project name and cloud-storage resolution shared by CLI and public API.
+
+A numeric project spec is named from the supplied projects cache, otherwise with
+one ``get_project`` request; it is never named by listing the organization,
+whose cost grows with the number of projects.
+"""
 
 from collections.abc import Sequence
 

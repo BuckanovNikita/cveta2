@@ -3,6 +3,11 @@
 Personal credentials and local paths are never merged into project policy. The
 migration journal records only paths and hashes; secret-bearing stages/backups
 are private files, and the shared target is always claimed exclusively.
+
+Activation is shared-first and recoverable through the journal; it is not an
+atomic write of both files, and no code may claim that it is. Section readers and
+writers in ``settings.py`` route shared policy and local paths to their own files.
+Preview and approval belong to the ``setup`` command; loading here never prompts.
 """
 
 import hashlib

@@ -1,4 +1,9 @@
-"""Construct effects for managed datasets without discovering policy inward."""
+"""Construct effects for managed datasets without discovering policy inward.
+
+Managed use cases receive every effect as a typed port from here and never read
+environment settings or construct SDK clients. Managed adapter groups (CVAT, S3, files,
+ClearML) do not import each other; this module is where they meet.
+"""
 
 from collections.abc import Iterator
 from contextlib import contextmanager

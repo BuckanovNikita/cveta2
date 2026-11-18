@@ -1,4 +1,8 @@
-"""Pure stable splitting, reviewed source overlap and dataset comparison."""
+"""Pure stable splitting, reviewed source overlap and dataset comparison.
+
+Callers supply image content hashes keyed by ``image_path``; these policies never read
+image files, the filesystem or the network.
+"""
 
 import hashlib
 import math
