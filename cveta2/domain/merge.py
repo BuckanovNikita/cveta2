@@ -83,15 +83,15 @@ def reopened_images(in_progress: pd.DataFrame) -> set[str]:
     """Return images the fetch reports as reopened after a completed deletion.
 
     The partition writes rows of a *completed* task into ``in_progress.csv``
-    only for such an image: the boxes of its last completed annotation wait
-    there for the newer unfinished task. Rows of unfinished tasks, and legacy
-    rows without an explicit ``task_completed``, never count, so a plain
-    re-annotation or a task sent back to work keeps the old boxes.
+    only for such an image: always its completed deletion record, plus the
+    boxes of its last completed annotation when there were any. Rows of
+    unfinished tasks (pending deletions included) and legacy rows without an
+    explicit ``task_completed`` never count, so a plain re-annotation or a
+    task sent back to work keeps the old boxes.
     """
     if not {"image_name", "task_completed"}.issubset(in_progress.columns):
         return set()
-    flags = in_progress["task_completed"]
-    explicit = flags.eq(other=True) | flags.astype(str).str.casefold().eq("true")
+    explicit = in_progress["task_completed"].eq(other=True)
     return set(in_progress.loc[explicit, "image_name"].dropna())
 
 

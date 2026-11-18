@@ -12,6 +12,7 @@ preflight can require strict invalidation instead.
 
 import dataclasses
 import shutil
+import threading
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -150,6 +151,8 @@ class S3CacheBackend:
         self._explicit_location = explicit_location
         self._disabled = s3_client is None
         self._legacy_delete_failed = False
+        # Tasks are fetched on a thread pool; the flag must flip and warn once.
+        self._legacy_lock = threading.Lock()
         self._unavailable: BotoCoreError | None = None
 
     @classmethod
@@ -236,7 +239,11 @@ class S3CacheBackend:
         try:
             _s3_delete_object(self._s3, self._bucket, self._key(_legacy_name(task_id)))
         except (ClientError, BotoCoreError, OSError) as e:
-            self._legacy_delete_failed = True
+            with self._legacy_lock:
+                first = not self._legacy_delete_failed
+                self._legacy_delete_failed = True
+            if not first:
+                return
             logger.warning(
                 f"S3-кэш аннотаций: не удалось удалить запись старого формата ({e}) — "
                 "старые записи до конца запуска не удаляются, зеркало используется дальше."

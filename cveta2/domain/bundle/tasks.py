@@ -71,6 +71,18 @@ def _evidence(frame: pd.DataFrame, *, deleted: bool = False) -> list[_Evidence]:
     return evidence
 
 
+def _without_deletion_markers(frame: pd.DataFrame) -> pd.DataFrame:
+    """Drop the ``deleted`` rows of ``in_progress.csv``: markers, not annotations.
+
+    A pending deletion belongs to an unfinished task, which never counts as
+    completed; the completed deletion of a reopened image only marks it for
+    ``merge``. Neither may change which tasks a bundle lists.
+    """
+    if "instance_shape" not in frame.columns:
+        return frame
+    return frame[frame["instance_shape"] != "deleted"]
+
+
 def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
     """List retained tasks and fully superseded completed tasks.
 
@@ -80,7 +92,7 @@ def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
     images independently of subsequent validation rejection.
     """
     dataset = _evidence(tables.dataset)
-    in_progress = _evidence(tables.in_progress)
+    in_progress = _evidence(_without_deletion_markers(tables.in_progress))
     evidence = [
         *dataset,
         *_evidence(tables.obsolete),

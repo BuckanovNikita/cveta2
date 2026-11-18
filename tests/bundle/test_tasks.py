@@ -138,3 +138,17 @@ def test_clean_rows_cannot_resurrect_obsolete_annotations() -> None:
     source = tables(frame((2, "a", True)), obsolete=old)
     with pytest.raises(UploadError, match=r"dataset\.csv"):
         derive_tasks(source, old)
+
+
+def test_deletion_markers_in_progress_do_not_change_the_manifest() -> None:
+    """Pending and reopened deletion rows of in_progress.csv are markers, not task evidence."""
+    carried = frame((3, "x", True), (9, "x", False)).assign(instance_shape="box")
+    markers = frame((5, "x", True), (9, "z", False)).assign(instance_shape="deleted")
+    # Task 3 appears only through its carried boxes; counting task 5's marker
+    # as a completed annotation would supersede them and list task 3 obsolete.
+    without = tables(frame((4, "y", True)), in_progress=carried)
+    with_markers = tables(frame((4, "y", True)), in_progress=pd.concat([carried, markers], ignore_index=True))
+
+    expected = TaskManifest(included=[4], obsolete=[])
+    assert derive_tasks(without, without.dataset) == expected
+    assert derive_tasks(with_markers, with_markers.dataset) == expected

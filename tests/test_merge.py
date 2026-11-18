@@ -386,12 +386,49 @@ class TestMergeReopenedImages:
         merged = pd.read_csv(out)
         return set(merged["image_name"] + ":" + merged["instance_label"])
 
-    def test_case_one_is_dropped_only_with_the_in_progress_file(self, tmp_path: Path) -> None:
-        """Completed 3 annotates, completed 5 deletes, unfinished 9 holds it again."""
-        new = self._fetch(tmp_path, [("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)])
+    @pytest.mark.parametrize(
+        ("rows", "deletions"),
+        [
+            # Case 1: completed 3 annotates, completed 5 deletes, unfinished 9 holds it again.
+            pytest.param([("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)], id="case-1"),
+            # Task 5 annotated and then deleted the frame itself: no completed boxes are carried.
+            pytest.param([("a.jpg", 5, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)], id="deleted-by-its-own-task"),
+            # No completed task ever held the frame as a non-deleted one.
+            pytest.param([("a.jpg", 9, False)], [("a.jpg", 5, True)], id="no-completed-boxes"),
+        ],
+    )
+    def test_a_reopened_image_is_dropped_only_with_the_in_progress_file(
+        self, tmp_path: Path, rows: list[tuple[str, int, bool]], deletions: list[tuple[str, int, bool]]
+    ) -> None:
+        new = self._fetch(tmp_path, rows, deletions)
 
         assert self._merge(tmp_path, new, with_in_progress=False) == {"a.jpg:old_a", "b.jpg:old_b"}
         assert self._merge(tmp_path, new, with_in_progress=True) == {"b.jpg:old_b"}
+
+    def test_the_python_api_forwards_the_in_progress_file(self, tmp_path: Path) -> None:
+        import cveta2
+
+        new = self._fetch(tmp_path, [("a.jpg", 9, False)], [("a.jpg", 5, True)])
+        old = tmp_path / "old.csv"
+        write_dataset_csv(old, [_trow("a.jpg", task_id=3, label="old_a"), _trow("b.jpg", task_id=4, label="old_b")])
+
+        merged = cveta2.merge(old, new / "dataset.csv", tmp_path / "merged.csv", in_progress=new / "in_progress.csv")
+
+        assert merged["image_name"].tolist() == ["b.jpg"]
+
+    def test_a_pending_unfinished_deletion_drops_nothing(self, tmp_path: Path) -> None:
+        """Completed 3 annotates, unfinished 9 deletes: the deletion waits, the boxes stay."""
+        new = self._fetch(tmp_path, [("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 9, False)])
+
+        assert self._merge(tmp_path, new, with_in_progress=True) == {"a.jpg:cat", "b.jpg:old_b"}
+
+    def test_an_in_progress_file_of_an_older_cveta2_drops_nothing(self, tmp_path: Path) -> None:
+        """Rows without task_completed carry no reopen marker."""
+        new = self._fetch(tmp_path, [("c.jpg", 4, True)], [])
+        legacy = pd.DataFrame([{"image_name": "a.jpg", "task_id": 9, "instance_shape": "box"}])
+        legacy.to_csv(new / "in_progress.csv", index=False)
+
+        assert self._merge(tmp_path, new, with_in_progress=True) == {"a.jpg:old_a", "b.jpg:old_b", "c.jpg:cat"}
 
     def test_the_cli_option_reaches_the_merge(self, tmp_path: Path) -> None:
         from cveta2.interfaces.commands.merge import configure_merge, run_merge
@@ -415,6 +452,8 @@ class TestMergeReopenedImages:
             pytest.param([("a.jpg", 3, True), ("a.jpg", 9, False)], {"a.jpg:cat", "b.jpg:old_b"}, id="reannotation"),
             # The image's only task went back from completed to unfinished.
             pytest.param([("a.jpg", 3, False)], {"a.jpg:old_a", "b.jpg:old_b"}, id="task-sent-back"),
+            # The new fetch has nothing for the old image at all.
+            pytest.param([("c.jpg", 4, True)], {"a.jpg:old_a", "b.jpg:old_b", "c.jpg:cat"}, id="absent-from-fetch"),
         ],
     )
     def test_presence_in_progress_alone_drops_nothing(

@@ -152,7 +152,6 @@ def test_empty_dataframe_keeps_column_order() -> None:
 
 
 # One record per annotation row or deletion: (image, task_id, job finished).
-# One record per annotation row or deletion: (image, task_id, job finished).
 # ``None`` is an unknown job position (legacy rows without stage/state), which
 # holds its task back exactly like an unfinished one.
 _Record = tuple[str, int, bool | None]
@@ -165,7 +164,7 @@ _RECORDS = st.tuples(
 
 def _expected_partition(
     rows: list[_Record], deletions: list[_Record]
-) -> tuple[dict[str, set[int]], list[tuple[str, int]], list[tuple[str, int]]]:
+) -> tuple[dict[str, set[int]], list[tuple[str, int]], list[tuple[str, int]], list[tuple[str, int]]]:
     """Specify the partition: row positions per part, deleted and pending images.
 
     A task is complete when every row and deletion record of it is finished,
@@ -181,6 +180,7 @@ def _expected_partition(
       to obsolete.
     * Rows of unfinished tasks go to in_progress unless the image is deleted;
       unfinished deletions newer than the result are pending.
+    * A reopened image keeps its completed deletion as a marker.
     """
     unfinished = {task for _, task, done in rows + deletions if not done}
     removed = {(image, task) for image, task, _ in deletions}
@@ -191,6 +191,7 @@ def _expected_partition(
     }
     deleted: list[tuple[str, int]] = []
     pending: set[tuple[str, int]] = set()
+    reopened_by: list[tuple[str, int]] = []
     for image in {image for image, _, _ in rows + deletions}:
         mine = [(position, task) for position, (i, task, _) in enumerate(rows) if i == image]
         results = [(task, False) for _, task in mine if task not in unfinished]
@@ -214,13 +215,15 @@ def _expected_partition(
             else:
                 part = "dataset" if task == result_task else "obsolete"
             parts[part].add(position)
+        if reopened:
+            reopened_by.append((image, result_task))
         if is_deleted:
             deleted.append((image, result_task))
         else:
             pending |= {
                 (image, task) for i, task, _ in deletions if i == image and task in unfinished and task > result_task
             }
-    return parts, sorted(deleted), sorted(pending)
+    return parts, sorted(deleted), sorted(pending), sorted(reopened_by)
 
 
 def _status(done: bool | None) -> str:  # noqa: FBT001 - maps a drawn flag
@@ -286,7 +289,7 @@ def test_partition_matches_specification(rows: list[_Record], deletions: list[_R
     """
     result = _partition(rows, deletions)
 
-    parts, deleted, pending = _expected_partition(rows, deletions)
+    parts, deleted, pending, reopened = _expected_partition(rows, deletions)
     assert {
         "dataset": set(result.dataset["row"]),
         "obsolete": set(result.obsolete["row"]),
@@ -295,6 +298,9 @@ def test_partition_matches_specification(rows: list[_Record], deletions: list[_R
     assert len(result.dataset) + len(result.obsolete) + len(result.in_progress) == len(rows)
     assert [(d.image_name, d.task_id) for d in result.deleted_images] == deleted
     assert [(d.image_name, d.task_id) for d in result.pending_deletions] == pending
+    assert [(d.image_name, d.task_id, d.task_completed) for d in result.reopened_deletions] == [
+        (image, task, True) for image, task in reopened
+    ]
 
 
 def _tasks_by_part(result: PartitionResult) -> dict[str, list[int]]:
@@ -304,6 +310,7 @@ def _tasks_by_part(result: PartitionResult) -> dict[str, list[int]]:
         "in_progress": sorted(result.in_progress["task_id"]),
         "deleted": [d.task_id for d in result.deleted_images],
         "pending": [d.task_id for d in result.pending_deletions],
+        "reopened": [d.task_id for d in result.reopened_deletions],
     }
 
 
@@ -325,6 +332,7 @@ def test_completed_deletion_reopened_by_a_newer_unfinished_task() -> None:
         "in_progress": [3, 9],
         "deleted": [],
         "pending": [],
+        "reopened": [5],
     }
 
 
@@ -341,6 +349,7 @@ def test_unfinished_deletion_waits_for_its_task() -> None:
         "in_progress": [9],
         "deleted": [],
         "pending": [9],
+        "reopened": [],
     }
 
 
@@ -350,25 +359,25 @@ def test_unfinished_deletion_waits_for_its_task() -> None:
         pytest.param(
             [("a.jpg", 1, False)],
             [("a.jpg", 2, True)],
-            {"dataset": [], "obsolete": [1], "in_progress": [], "deleted": [2], "pending": []},
+            {"dataset": [], "obsolete": [1], "in_progress": [], "deleted": [2], "pending": [], "reopened": []},
             id="unfinished-task-older-than-the-completed-deletion",
         ),
         pytest.param(
             [],
             [("a.jpg", 1, True), ("a.jpg", 2, False)],
-            {"dataset": [], "obsolete": [], "in_progress": [], "deleted": [1], "pending": []},
+            {"dataset": [], "obsolete": [], "in_progress": [], "deleted": [1], "pending": [], "reopened": []},
             id="unfinished-deletion-after-a-completed-deletion",
         ),
         pytest.param(
             [("a.jpg", 2, False)],
             [("a.jpg", 1, True), ("a.jpg", 2, False)],
-            {"dataset": [], "obsolete": [2], "in_progress": [], "deleted": [1], "pending": []},
+            {"dataset": [], "obsolete": [2], "in_progress": [], "deleted": [1], "pending": [], "reopened": []},
             id="unfinished-task-that-annotates-and-deletes-does-not-reopen",
         ),
         pytest.param(
             [("a.jpg", 2, False)],
             [("a.jpg", 1, True)],
-            {"dataset": [], "obsolete": [], "in_progress": [2], "deleted": [], "pending": []},
+            {"dataset": [], "obsolete": [], "in_progress": [2], "deleted": [], "pending": [], "reopened": [1]},
             id="reopened-without-earlier-completed-boxes",
         ),
     ],
@@ -390,6 +399,7 @@ def test_unfinished_reannotation_keeps_the_completed_result() -> None:
         "in_progress": [9],
         "deleted": [],
         "pending": [],
+        "reopened": [],
     }
 
 

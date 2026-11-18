@@ -17,8 +17,11 @@ class PartitionResult:
     """Three-way partition of the annotation DataFrame.
 
     *pending_deletions* are deletions made by tasks that are not finished
-    yet. They decide nothing until their task completes; the writers append
-    them to ``in_progress.csv`` (see :func:`in_progress_table`).
+    yet. They decide nothing until their task completes. *reopened_deletions*
+    mark every image whose completed result is a deletion that a newer
+    unfinished task is undoing: one completed deletion record per image, with
+    ``task_completed=True``. The writers append both to ``in_progress.csv``
+    (see :func:`in_progress_table`).
     """
 
     dataset: "pd.DataFrame"
@@ -26,6 +29,7 @@ class PartitionResult:
     in_progress: "pd.DataFrame"
     deleted_images: "list[DeletedImage]" = field(default_factory=list)
     pending_deletions: "list[DeletedImage]" = field(default_factory=list)
+    reopened_deletions: "list[DeletedImage]" = field(default_factory=list)
 
 
 def _rows_are_finished(frame: "pd.DataFrame") -> "pd.Series[bool]":
@@ -268,16 +272,19 @@ def _pending_deletions(
 
 
 def in_progress_table(result: "PartitionResult") -> "pd.DataFrame":
-    """Return the ``in_progress.csv`` table: unfinished rows, then pending deletions.
+    """Return the ``in_progress.csv`` table: unfinished rows, then deletion markers.
 
-    Pending deletions are written as ``instance_shape="deleted"`` rows, as in
-    ``raw.csv``. Both parts are combined as objects so the annotation rows keep
-    their own cell text: a sparse deletion row would otherwise turn an integer
-    column such as ``z_order`` into floats.
+    Pending deletions (``task_completed=False``) and the completed deletions
+    of reopened images (``task_completed=True``) are written as
+    ``instance_shape="deleted"`` rows, as in ``raw.csv``. The parts are
+    combined as objects so the annotation rows keep their own cell text: a
+    sparse deletion row would otherwise turn an integer column such as
+    ``z_order`` into floats.
     """
-    if not result.pending_deletions:
+    markers = [*result.pending_deletions, *result.reopened_deletions]
+    if not markers:
         return result.in_progress
-    pending = pd.DataFrame([record.to_csv_row() for record in result.pending_deletions])
+    pending = pd.DataFrame([record.to_csv_row() for record in markers])
     columns = list(result.in_progress.columns)
     columns += [name for name in pending.columns if name not in columns]
     return pd.concat(
@@ -314,6 +321,9 @@ def partition_annotations_df(
     4. Rows of unfinished tasks of an image that is not deleted go to
        **in_progress**; unfinished deletions newer than the completed result
        become ``pending_deletions``.
+    5. Every reopened image keeps its completed deletion record in
+       ``reopened_deletions``, so readers can tell it from a plain
+       re-annotation even when no completed boxes were carried.
     """
     if df.empty:
         df = df.reindex(columns=df.columns.union(["image_name", "task_id", "job_stage", "job_state"], sort=False))
@@ -337,6 +347,10 @@ def partition_annotations_df(
     if unique_deleted:
         logger.debug(f"Images deleted in their latest completed task: {len(unique_deleted)}")
     pending = _pending_deletions(deleted_images, completed, deleted_image_names, decided_task)
+    reopened_deletions = [
+        record.model_copy(update={"task_completed": True})
+        for record in _filter_deleted_images(deleted_images, reopened, decision)
+    ]
 
     is_deleted = df["image_name"].isin(deleted_image_names)
     is_reopened = df["image_name"].isin(reopened)
@@ -355,7 +369,8 @@ def partition_annotations_df(
         f"obsolete={len(obsolete)} rows/{obsolete['image_name'].nunique()} images, "
         f"in_progress={len(in_progress)} rows/"
         f"{in_progress['image_name'].nunique()} images, "
-        f"deleted_images={len(unique_deleted)}, pending_deletions={len(pending)}",
+        f"deleted_images={len(unique_deleted)}, pending_deletions={len(pending)}, "
+        f"reopened_deletions={len(reopened_deletions)}",
     )
 
     return PartitionResult(
@@ -364,4 +379,5 @@ def partition_annotations_df(
         in_progress=in_progress.reset_index(drop=True),
         deleted_images=unique_deleted,
         pending_deletions=pending,
+        reopened_deletions=reopened_deletions,
     )

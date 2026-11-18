@@ -206,6 +206,20 @@ class TestComputeCutoff:
         result = client.list_new_completed_tasks(1, baseline.cutoff, baseline.known_task_ids)
         assert [task.id for task in result] == [4, 5, 9]
 
+    def test_the_completed_deletion_of_a_reopened_image_is_known(self, tmp_path: Path) -> None:
+        """Task 5 deleted the image and task 9 reopened it: task 5's result is in the fetch."""
+        write_dataset_csv(
+            tmp_path / "in_progress.csv",
+            [
+                {**_row(9, completed=False), "task_completed": False, "instance_shape": "box"},
+                {**_row(5), "task_completed": True, "instance_shape": "deleted"},
+            ],
+        )
+
+        baseline = compute_baseline(pd.DataFrame([_row(7)]), tmp_path / "dataset.csv")
+
+        assert baseline.known_task_ids == {5, 7}
+
     def test_a_task_in_progress_at_fetch_time_is_reported_once_completed(self, tmp_path: Path) -> None:
         """The baseline and the client together must surface the promised case.
 

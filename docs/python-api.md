@@ -11,14 +11,15 @@ import cveta2
 
 # Выгрузка проекта: пишет dataset/obsolete/in_progress/deleted CSV в out/,
 # возвращает PartitionResult (dataset / obsolete / in_progress / deleted_images /
-# pending_deletions)
+# pending_deletions / reopened_deletions)
 result = cveta2.fetch("my-project", output_dir="out")
 print(result.dataset)  # DataFrame актуальных аннотаций завершённых задач
 print(len(result.obsolete))  # устаревшие строки тоже доступны
 # Удаления из незавершённых задач ещё ничего не решают: их нет в deleted_images,
 # они лежат в pending_deletions (список DeletedImage). DataFrame in_progress
 # содержит только строки разметки; в in_progress.csv после них дописываются
-# эти удаления строками instance_shape="deleted".
+# эти удаления строками instance_shape="deleted". reopened_deletions — удаления
+# завершённых задач у изображений, снова взятых в работу (task_completed=True).
 print(result.pending_deletions)
 
 # Кэш аннотаций: cache="use" (по умолчанию) / "refresh" (= --force) / "off" (= --no-cache)

@@ -995,7 +995,9 @@ class TestJobFreshness:
 
         cache_dir = get_task_cache_dir(fake.project.id)
         assert [path.name for path in (cache_dir / f"task_{task_id}").glob("job_*.json")] == ["job_501.json"]
+        assert not (cache_dir / f"task_{task_id}" / "meta.json").exists()
         assert api.job_annotation_calls == [502]
+        assert _task_requests(api) == {"get_task_jobs": 2, "get_task_data_meta": 2, "get_task_issues": 2}
 
     def test_a_vanished_job_loses_its_entry(self, normal_fake: LoadedFixtures, tmp_path: Path) -> None:
         fake = normal_fake

@@ -138,3 +138,19 @@ def test_old_polygon_cache_is_removed_refetched_and_round_trips_without_warning_
         assert len(fake_s3.get_calls) == get_count + 2  # the job's shapes and the task's metadata
         assert capture_logs == []
         assert CachedAnnotationsEntry.model_validate_json(entry.read_bytes()) == local
+
+
+def test_an_uncached_fetch_warns_about_every_approximation(tmp_path: Path, capture_logs: list[str]) -> None:
+    """Without a cache every shape is downloaded, so its parsing warning is shown each run."""
+    fake = _polygon_fixture()
+    task = fake.tasks[0]
+    api = _PolygonApi(fake)
+
+    for output in ("first", "second"):
+        capture_logs.clear()
+        fetch_selected_tasks(
+            CvatClient(CFG, api=api),
+            FetchTarget(fake.project.id, fake.project.name, tmp_path / output),
+            FetchOptions(task_selector=[task.id], use_cache=False),
+        )
+        assert any("42" in warning and "приближение" in warning for warning in capture_logs), output
