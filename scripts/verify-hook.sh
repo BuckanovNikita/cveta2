@@ -13,8 +13,10 @@ if [ "$status" -ne 0 ]; then
     cat -- "$log"
     exit "$status"
 fi
-# testmon reports what it selected; pytest's closing line carries the counts.
-if ! grep -E '^(testmon: |=+ .+ in [0-9.]+s)' -- "$log"; then
+# testmon reports the files it compared, xdist the number of selected tests and
+# pytest's closing line the results. testmon drops unaffected tests before
+# collection, so no deselected count exists to print.
+if ! grep -E '^(testmon: |[0-9]+ workers \[[0-9]+ items\]|=+ .+ in [0-9.]+s)' -- "$log"; then
     echo 'No pytest summary in the verify output.'
 fi
 printf 'Full verify output: %s\n' "$log"
