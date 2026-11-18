@@ -24,7 +24,7 @@ pip install cveta2-<версия>-py3-none-any.whl
 Зависимости берутся с PyPI или внутреннего индекса.
 
 Подготовка и публикация датасетов (`verify --bundle`, `upload-dataset`, подкоманды
-`dataset`) работают с ClearML и требуют extra `clearml`:
+`dataset`, кроме `dataset list`) работают с ClearML и требуют extra `clearml`:
 
 ```bash
 uv add "cveta2[clearml] @ git+ssh://git@<host>/<org>/cveta2@vX.Y.Z"
@@ -34,6 +34,14 @@ uv add "cveta2[clearml] @ git+ssh://git@<host>/<org>/cveta2@vX.Y.Z"
 
 Этот файл описывает ветку `main`. Выпуск новых версий приостановлен, поэтому последний
 тег может отставать от неё: изменения после тега есть только в истории коммитов.
+Чтобы поставить версию новее тега, укажите вместо него хеш коммита из `main`:
+
+```bash
+uv add git+ssh://git@<host>/<org>/cveta2@<хеш-коммита>
+pip install git+ssh://git@<host>/<org>/cveta2@<хеш-коммита>
+```
+
+Хеш фиксирует установку: ветка `main` меняется, а коммит остаётся тем же.
 
 ## Быстрый старт
 
