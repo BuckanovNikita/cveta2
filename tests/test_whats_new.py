@@ -166,8 +166,8 @@ class TestComputeCutoff:
 
         Reading dataset.csv alone would leave every superseded task absent
         from ``known_task_ids``, so the unknown-id sweep would report them
-        on every single run.  ``in_progress.csv`` must stay unread: a task
-        listed there that has since completed is exactly what whats-new
+        on every single run.  An unfinished task in ``in_progress.csv``
+        stays unknown: once it completes it is exactly what whats-new
         exists to report.
         """
         write_dataset_csv(tmp_path / "obsolete.csv", [_row(4)])
@@ -179,6 +179,32 @@ class TestComputeCutoff:
 
         assert baseline.known_task_ids == {4, 6, 7}
         assert baseline.cutoff == 7
+
+    def test_completed_boxes_waiting_in_progress_are_known(self, tmp_path: Path) -> None:
+        """A completed task whose boxes wait in in_progress.csv is not new.
+
+        Its image was deleted by a completed task and reopened by a newer
+        unfinished one, so task 3 now appears only in in_progress.csv.
+        Only rows that explicitly say their task completed count: task 4
+        has an unfinished row too, and task 5's legacy row says nothing
+        about the whole task.
+        """
+        write_dataset_csv(
+            tmp_path / "in_progress.csv",
+            [
+                {**_row(3), "task_completed": True},
+                {**_row(4), "task_completed": True},
+                {**_row(4, completed=False), "task_completed": False},
+                _row(5),
+                {**_row(9, completed=False), "task_completed": False},
+            ],
+        )
+        baseline = compute_baseline(pd.DataFrame([_row(7)]), tmp_path / "dataset.csv")
+        client = _client_with_tasks([make_task(3), make_task(4), make_task(5), make_task(7), make_task(9)])
+
+        assert baseline.known_task_ids == {3, 7}
+        result = client.list_new_completed_tasks(1, baseline.cutoff, baseline.known_task_ids)
+        assert [task.id for task in result] == [4, 5, 9]
 
     def test_a_task_in_progress_at_fetch_time_is_reported_once_completed(self, tmp_path: Path) -> None:
         """The baseline and the client together must surface the promised case.

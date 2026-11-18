@@ -7,7 +7,7 @@ import pandas as pd
 from loguru import logger
 
 from cveta2.adapters.files.materialization import _confined_destination
-from cveta2.domain.baseline import SIBLING_CSV_NAMES
+from cveta2.domain.baseline import IN_PROGRESS_CSV_NAME, SIBLING_CSV_NAMES
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import CSV_COLUMNS, DeletedImage, ProjectAnnotations
 from cveta2.domain.output import (
@@ -17,7 +17,7 @@ from cveta2.domain.output import (
     CSV_WRITE_OPTIONS,
     format_counts,
 )
-from cveta2.domain.partition import PartitionResult
+from cveta2.domain.partition import PartitionResult, in_progress_table
 from cveta2.domain.paths import _canonical_frame_key, _local_name_from_key, build_s3_key, join_s3_key
 from cveta2.domain.storage import CloudStorageInfo
 
@@ -153,7 +153,7 @@ def write_partition_csvs(partition: PartitionResult, output_dir: Path) -> None:
     for df, name in [
         (partition.dataset, "dataset.csv"),
         (partition.obsolete, "obsolete.csv"),
-        (partition.in_progress, "in_progress.csv"),
+        (in_progress_table(partition), "in_progress.csv"),
     ]:
         save_csv(df, output_dir / name)
     _write_deleted_csv(partition.deleted_images, output_dir)
@@ -194,18 +194,26 @@ def read_deleted_names(path: Path | None) -> set[str]:
     return names
 
 
+def _read_baseline_sibling(sibling: Path) -> pd.DataFrame | None:
+    """Read one optional sibling CSV; a missing or unreadable one yields None."""
+    if not sibling.is_file():
+        return None
+    try:
+        return pd.read_csv(sibling, **CSV_READ_OPTIONS)
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeError, OSError) as exc:
+        logger.warning(f"{sibling} не прочитан ({exc}) — его задачи считаются новыми")
+        return None
+
+
 def read_baseline_siblings(path: Path) -> list[pd.DataFrame]:
     """Read optional completed-task CSVs, retaining existing degradation policy."""
-    frames: list[pd.DataFrame] = []
-    for name in SIBLING_CSV_NAMES:
-        sibling = path.parent / name
-        if not sibling.is_file():
-            continue
-        try:
-            frames.append(pd.read_csv(sibling, **CSV_READ_OPTIONS))
-        except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeError, OSError) as exc:
-            logger.warning(f"{sibling} не прочитан ({exc}) — его задачи считаются новыми")
-    return frames
+    frames = (_read_baseline_sibling(path.parent / name) for name in SIBLING_CSV_NAMES)
+    return [frame for frame in frames if frame is not None]
+
+
+def read_in_progress_sibling(path: Path) -> pd.DataFrame | None:
+    """Read the optional ``in_progress.csv`` next to *path*."""
+    return _read_baseline_sibling(path.parent / IN_PROGRESS_CSV_NAME)
 
 
 class LocalDatasetFiles:
@@ -220,3 +228,4 @@ class LocalDatasetFiles:
     write_dataset_and_deleted = staticmethod(write_dataset_and_deleted)
     read_deleted_names = staticmethod(read_deleted_names)
     read_baseline_siblings = staticmethod(read_baseline_siblings)
+    read_in_progress_sibling = staticmethod(read_in_progress_sibling)

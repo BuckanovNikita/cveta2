@@ -16,6 +16,7 @@ class _Evidence:
     image: str
     completed: bool
     deleted: bool
+    explicitly_completed: bool
 
 
 def _task_id(value: object) -> int:
@@ -34,6 +35,12 @@ def _finished(explicit: object, stage: object, state: object) -> bool:
     if isinstance(explicit, str):
         return explicit.casefold() == "true"
     return False
+
+
+def _explicitly_true(explicit: object) -> bool:
+    if is_missing(explicit):
+        return False
+    return _finished(explicit, None, None)
 
 
 def _evidence(frame: pd.DataFrame, *, deleted: bool = False) -> list[_Evidence]:
@@ -58,6 +65,7 @@ def _evidence(frame: pd.DataFrame, *, deleted: bool = False) -> list[_Evidence]:
                     row.get("job_state"),
                 ),
                 deleted,
+                _explicitly_true(row.get("task_completed")),
             )
         )
     return evidence
@@ -81,7 +89,11 @@ def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
     ]
     completed = {row.task_id for row in evidence if row.completed}
     completed.difference_update(row.task_id for row in evidence if not row.completed)
-    completed.difference_update(row.task_id for row in in_progress)
+    # Explicit completion describes every live job of the task, so such a row is
+    # a completed task's annotation waiting on a newer unfinished task. Rows
+    # without it keep the conservative rule: in_progress.csv may hold a task
+    # whose unfinished job left no other evidence.
+    completed.difference_update(row.task_id for row in in_progress if not row.explicitly_completed)
     represented: dict[int, set[str]] = {}
     latest: dict[str, int] = {}
     for row in evidence:

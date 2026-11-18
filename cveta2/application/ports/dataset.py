@@ -67,3 +67,7 @@ class DatasetFiles(Protocol):
     def read_baseline_siblings(self, path: Path) -> Sequence[pd.DataFrame]:
         """Read optional baseline CSVs with degradation reporting."""
         ...
+
+    def read_in_progress_sibling(self, path: Path) -> pd.DataFrame | None:
+        """Read the optional in-progress CSV next to *path* with degradation reporting."""
+        ...

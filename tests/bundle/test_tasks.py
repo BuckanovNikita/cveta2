@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from cveta2.domain.bundle.models import FetchTables, UploadError
+from cveta2.domain.bundle.models import FetchTables, TaskManifest, UploadError
 from cveta2.domain.bundle.tasks import derive_tasks
 
 
@@ -88,13 +88,27 @@ def test_integral_csv_numeric_ids_are_accepted_without_truncation() -> None:
     assert derive_tasks(source, source.dataset).included == [0, 12]
 
 
-def test_in_progress_partition_conflicts_fail_closed() -> None:
-    source = tables(
-        frame((2, "a", True)),
-        obsolete=frame((1, "a", True)),
-        in_progress=frame((1, "b", True)),
+def test_in_progress_rows_without_explicit_completion_fail_closed() -> None:
+    """A legacy in-progress row may belong to a task with an unseen unfinished job."""
+    legacy = pd.DataFrame(
+        {"task_id": [1], "image_name": ["a"], "job_stage": ["acceptance"], "job_state": ["completed"]},
     )
+    source = tables(frame((2, "a", True)), obsolete=frame((1, "a", True)), in_progress=legacy)
     assert derive_tasks(source, source.dataset).obsolete == []
+
+
+def test_completed_boxes_waiting_in_progress_still_supersede() -> None:
+    """Task 3's boxes of a reopened image wait in in_progress.csv; task 3 stays completed.
+
+    Task 3 also replaced task 1's annotation of another image, so task 1
+    remains fully superseded.
+    """
+    source = tables(
+        frame((3, "y", True)),
+        obsolete=frame((1, "y", True)),
+        in_progress=frame((3, "x", True), (9, "x", False)),
+    )
+    assert derive_tasks(source, source.dataset) == TaskManifest(included=[3], obsolete=[1])
 
 
 def test_missing_completion_and_null_legacy_fallback() -> None:

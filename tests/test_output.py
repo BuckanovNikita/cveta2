@@ -215,6 +215,33 @@ def test_write_partition_csvs_creates_nested_dir_and_is_repeatable(
         assert list(df["image_name"]) == [image], name
 
 
+def test_write_partition_csvs_appends_pending_deletions_to_in_progress(tmp_path: Path) -> None:
+    """A deletion by an unfinished task is written after its in-progress rows.
+
+    It decides nothing yet, so deleted.csv stays empty, and the annotation
+    rows written before it keep their integer cells.
+    """
+    partition = PartitionResult(
+        dataset=make_df([csv_row("kept.jpg")]),
+        obsolete=make_df([]),
+        in_progress=make_df([csv_row("wip.jpg", task_id=3, status="annotation", z_order=2)]),
+        pending_deletions=[make_deleted("kept.jpg", task_id=3, updated="2026-02-02", status="annotation")],
+    )
+
+    write_partition_csvs(partition, tmp_path)
+
+    in_progress = read_dataset_csv(tmp_path / "in_progress.csv", set(CSV_COLUMNS))
+    assert list(in_progress.columns) == list(CSV_COLUMNS)
+    assert in_progress[["image_name", "instance_shape"]].to_numpy().tolist() == [
+        ["wip.jpg", "box"],
+        ["kept.jpg", "deleted"],
+    ]
+    assert (tmp_path / "in_progress.csv").read_text(encoding="utf-8").splitlines()[1].split(",")[
+        list(CSV_COLUMNS).index("z_order")
+    ] == "2"
+    assert len(read_dataset_csv(tmp_path / "deleted.csv", set(CSV_COLUMNS))) == 0
+
+
 def test_write_partition_csvs_of_empty_fetch_are_readable(tmp_path: Path) -> None:
     """Partitioning an empty fetch writes files ``read_dataset_csv`` accepts.
 

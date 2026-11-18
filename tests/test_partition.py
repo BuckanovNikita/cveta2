@@ -8,7 +8,12 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from cveta2.domain.models import CSV_COLUMNS
-from cveta2.domain.partition import completed_task_ids, partition_annotations_df
+from cveta2.domain.partition import (
+    PartitionResult,
+    completed_task_ids,
+    in_progress_table,
+    partition_annotations_df,
+)
 from tests.helpers import csv_row, make_deleted, make_df
 
 # ---------------------------------------------------------------------------
@@ -153,46 +158,77 @@ _RECORDS = st.tuples(st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]), st.integers(1
 
 def _expected_partition(
     rows: list[_Record], deletions: list[_Record]
-) -> tuple[dict[str, set[int]], list[tuple[str, int]]]:
-    """Specify the partition: row positions per part, and the deleted images.
+) -> tuple[dict[str, set[int]], list[tuple[str, int]], list[tuple[str, int]]]:
+    """Specify the partition: row positions per part, deleted and pending images.
 
-    A task is complete when every row and deletion record of it is finished.
-    Per image the highest task id is the latest, and a deletion wins a tie
-    within its own task. A deleted image sends all its rows to obsolete;
-    otherwise unfinished tasks go to in_progress, the latest completed task
-    to dataset and older completed tasks to obsolete.
+    A task is complete when every row and deletion record of it is finished,
+    and only complete tasks decide an image. Its completed result is the
+    highest complete task id; a deletion wins a tie within its own task.
+
+    * Result "deleted": the image is deleted and all its rows are obsolete,
+      unless a newer unfinished task holds it as a live frame (a row with no
+      deletion in the same task). Then it is reopened: the newest complete
+      task holding it live goes to in_progress, the other complete rows
+      to obsolete.
+    * Result "annotated": that task goes to dataset, older complete tasks
+      to obsolete.
+    * Rows of unfinished tasks go to in_progress unless the image is deleted;
+      unfinished deletions newer than the result are pending.
     """
     unfinished = {task for _, task, done in rows + deletions if not done}
-    latest: dict[str, tuple[int, bool]] = {}
-    for records, is_deletion in ((rows, False), (deletions, True)):
-        for image, task, _ in records:
-            latest[image] = max(latest.get(image, (0, False)), (task, is_deletion))
-    deleted = {image: task for image, (task, gone) in latest.items() if gone}
-    newest_completed = {
-        image: max(t for i, t, _ in rows if i == image and t not in unfinished)
-        for image, _, _ in rows
-        if any(i == image and t not in unfinished for i, t, _ in rows)
-    }
+    removed = {(image, task) for image, task, _ in deletions}
     parts: dict[str, set[int]] = {
         "dataset": set(),
         "obsolete": set(),
         "in_progress": set(),
     }
-    for position, (image, task, _) in enumerate(rows):
-        if image in deleted:
-            part = "obsolete"
-        elif task in unfinished:
-            part = "in_progress"
-        elif task == newest_completed[image]:
-            part = "dataset"
+    deleted: list[tuple[str, int]] = []
+    pending: set[tuple[str, int]] = set()
+    for image in {image for image, _, _ in rows + deletions}:
+        mine = [(position, task) for position, (i, task, _) in enumerate(rows) if i == image]
+        results = [(task, False) for _, task in mine if task not in unfinished]
+        results += [(task, True) for i, task, _ in deletions if i == image and task not in unfinished]
+        # Drawn task ids start at 1, so task 0 stands for "no completed result".
+        result_task, removed_by_result = max(results, default=(0, False))
+        live_unfinished = [task for _, task in mine if task in unfinished and (image, task) not in removed]
+        reopened = removed_by_result and any(task > result_task for task in live_unfinished)
+        is_deleted = removed_by_result and not reopened
+        carried = max(
+            (task for _, task in mine if task not in unfinished and (image, task) not in removed),
+            default=None,
+        )
+        for position, task in mine:
+            if is_deleted:
+                part = "obsolete"
+            elif task in unfinished:
+                part = "in_progress"
+            elif reopened:
+                part = "in_progress" if task == carried else "obsolete"
+            else:
+                part = "dataset" if task == result_task else "obsolete"
+            parts[part].add(position)
+        if is_deleted:
+            deleted.append((image, result_task))
         else:
-            part = "obsolete"
-        parts[part].add(position)
-    return parts, sorted(deleted.items())
+            pending |= {
+                (image, task) for i, task, _ in deletions if i == image and task in unfinished and task > result_task
+            }
+    return parts, sorted(deleted), sorted(pending)
 
 
 def _status(done: bool) -> str:  # noqa: FBT001 - maps a drawn flag
     return "completed" if done else "annotation"
+
+
+def _partition(rows: list[_Record], deletions: list[_Record]) -> PartitionResult:
+    """Partition drawn records; task dates run against task ids on purpose."""
+    frame = _df(
+        [_row(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in rows]
+    ).assign(row=range(len(rows)))
+    records = [
+        make_deleted(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in deletions
+    ]
+    return partition_annotations_df(frame, records)
 
 
 @given(
@@ -210,6 +246,12 @@ def _status(done: bool) -> str:  # noqa: FBT001 - maps a drawn flag
 @example(rows=[("a.jpg", 1, True)], deletions=[("a.jpg", 2, True)] * 2)
 # An unfinished job seen only through a deletion record holds its task back.
 @example(rows=[("a.jpg", 1, True)], deletions=[("gone.jpg", 1, False)])
+# Case 1: deleted by completed task 3, reopened by unfinished task 5.
+@example(rows=[("a.jpg", 1, True), ("a.jpg", 2, True), ("a.jpg", 5, False)], deletions=[("a.jpg", 3, True)])
+# An unfinished task that also deletes the frame holds no live frame: still deleted.
+@example(rows=[("a.jpg", 1, True), ("a.jpg", 5, False)], deletions=[("a.jpg", 3, True), ("a.jpg", 5, False)])
+# Case 2: an unfinished deletion waits; the completed annotation stays.
+@example(rows=[("a.jpg", 1, True), ("a.jpg", 5, False)], deletions=[("a.jpg", 5, False)])
 def test_partition_matches_specification(rows: list[_Record], deletions: list[_Record]) -> None:
     """Every row lands in exactly the part the specification assigns.
 
@@ -217,16 +259,9 @@ def test_partition_matches_specification(rows: list[_Record], deletions: list[_R
     tasks, so a project-wide label edit that rewrites every date cannot
     scramble the partition.
     """
-    frame = _df(
-        [_row(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in rows]
-    ).assign(row=range(len(rows)))
-    records = [
-        make_deleted(image, task, f"2026-01-{31 - task:02d}T00:00:00", _status(done)) for image, task, done in deletions
-    ]
+    result = _partition(rows, deletions)
 
-    result = partition_annotations_df(frame, records)
-
-    parts, deleted = _expected_partition(rows, deletions)
+    parts, deleted, pending = _expected_partition(rows, deletions)
     assert {
         "dataset": set(result.dataset["row"]),
         "obsolete": set(result.obsolete["row"]),
@@ -234,6 +269,89 @@ def test_partition_matches_specification(rows: list[_Record], deletions: list[_R
     } == parts
     assert len(result.dataset) + len(result.obsolete) + len(result.in_progress) == len(rows)
     assert [(d.image_name, d.task_id) for d in result.deleted_images] == deleted
+    assert [(d.image_name, d.task_id) for d in result.pending_deletions] == pending
+
+
+def _tasks_by_part(result: PartitionResult) -> dict[str, list[int]]:
+    return {
+        "dataset": sorted(result.dataset["task_id"]),
+        "obsolete": sorted(result.obsolete["task_id"]),
+        "in_progress": sorted(result.in_progress["task_id"]),
+        "deleted": [d.task_id for d in result.deleted_images],
+        "pending": [d.task_id for d in result.pending_deletions],
+    }
+
+
+def test_completed_deletion_reopened_by_a_newer_unfinished_task() -> None:
+    """Case 1: the old boxes wait in in_progress with the re-annotation.
+
+    Completed task 3 annotated the image, completed task 5 deleted it and
+    unfinished task 9 holds it again. Nothing reaches dataset.csv or
+    deleted.csv until task 9 completes.
+    """
+    result = _partition(
+        rows=[("a.jpg", 3, True), ("a.jpg", 9, False)],
+        deletions=[("a.jpg", 5, True)],
+    )
+
+    assert _tasks_by_part(result) == {
+        "dataset": [],
+        "obsolete": [],
+        "in_progress": [3, 9],
+        "deleted": [],
+        "pending": [],
+    }
+
+
+def test_unfinished_deletion_waits_for_its_task() -> None:
+    """Case 2: the completed boxes stay in dataset; the deletion is pending."""
+    result = _partition(
+        rows=[("a.jpg", 3, True), ("a.jpg", 9, False)],
+        deletions=[("a.jpg", 9, False)],
+    )
+
+    assert _tasks_by_part(result) == {
+        "dataset": [3],
+        "obsolete": [],
+        "in_progress": [9],
+        "deleted": [],
+        "pending": [9],
+    }
+
+
+def test_unfinished_reannotation_keeps_the_completed_result() -> None:
+    """Without any deletion, a newer unfinished task leaves dataset.csv alone."""
+    result = _partition(rows=[("a.jpg", 3, True), ("a.jpg", 9, False)], deletions=[])
+
+    assert _tasks_by_part(result) == {
+        "dataset": [3],
+        "obsolete": [],
+        "in_progress": [9],
+        "deleted": [],
+        "pending": [],
+    }
+
+
+def test_in_progress_table_appends_pending_deletions_without_reformatting_rows() -> None:
+    """Pending deletions follow the unfinished rows as ``deleted`` rows.
+
+    The sparse deletion row must not turn the annotation rows' integer
+    columns into floats in the written table.
+    """
+    rows = [
+        csv_row("a.jpg", task_id=3, updated="2026-01-01T00:00:00", status="completed"),
+        csv_row("a.jpg", task_id=9, updated="2026-01-02T00:00:00", status="annotation"),
+    ]
+    frame = make_df(rows, columns=list(CSV_COLUMNS))
+    deleted = make_deleted("a.jpg", 9, "2026-01-02T00:00:00", "annotation")
+
+    result = partition_annotations_df(frame, [deleted])
+    table = in_progress_table(result)
+
+    assert table["instance_shape"].tolist() == ["box", "deleted"]
+    assert table["task_id"].tolist() == [9, 9]
+    unfinished_text = result.in_progress.to_csv(index=False).splitlines()
+    assert table.to_csv(index=False).splitlines()[: len(unfinished_text)] == unfinished_text
 
 
 def test_deletion_wins_tie_in_a_frame_too_large_for_a_stable_sort() -> None:

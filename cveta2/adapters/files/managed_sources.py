@@ -21,7 +21,7 @@ from cveta2.domain.managed.models import (
     TaskSnapshot,
 )
 from cveta2.domain.models import CSV_COLUMNS, DeletedImage
-from cveta2.domain.partition import partition_annotations_df
+from cveta2.domain.partition import in_progress_table, partition_annotations_df
 
 TABLE_NAMES = ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv")
 PROVENANCE_COLUMNS = (
@@ -118,7 +118,7 @@ class LocalSourceFiles:
         return {
             "dataset.csv": _csv(partitions.dataset),
             "obsolete.csv": _csv(partitions.obsolete),
-            "in_progress.csv": _csv(partitions.in_progress),
+            "in_progress.csv": _csv(in_progress_table(partitions)),
             "deleted.csv": _csv(
                 pd.DataFrame(
                     [record.to_csv_row() for record in partitions.deleted_images],
