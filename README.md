@@ -78,8 +78,10 @@ cveta2 fetch -o output/
 `in_progress.csv` вместе с новой. Подробнее — в
 [описании `fetch`](docs/cli.md#выгрузить-все-аннотации-проекта-cveta2-fetch).
 
-Одна строка CSV — один bounding box. Точный состав столбцов описан в
-[контракте датасета](docs/dataset-contract.md) (на английском).
+Одна строка CSV — один bounding box. Состав и порядок столбцов задаёт
+`cveta2.CSV_COLUMNS`. Их описание (на английском) осталось в
+[историческом контракте датасета](docs/dataset-contract.md): этот текст заморожен
+2026-11-17 и местами расходится с текущим поведением.
 
 Отдельные задачи выгружаются командой `fetch-task`. Она пишет только `dataset.csv`
 и `deleted.csv`:
@@ -239,7 +241,8 @@ print(result.dataset)
 - [docs/configuration.md](docs/configuration.md) — конфигурация и переменные окружения.
 - [docs/images-and-cache.md](docs/images-and-cache.md) — изображения из S3, кэш, публикация.
 - [docs/python-api.md](docs/python-api.md) — Python API.
-- [docs/dataset-contract.md](docs/dataset-contract.md) — формат CSV (на английском).
+- [docs/dataset-contract.md](docs/dataset-contract.md) — формат CSV (на английском);
+  исторический текст, заморожен 2026-11-17 и местами расходится с текущим поведением.
 - [CHANGELOG.md](CHANGELOG.md) — что менялось между выпущенными версиями.
 
 ## Разработка
