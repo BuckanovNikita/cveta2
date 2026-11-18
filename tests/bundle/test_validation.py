@@ -152,6 +152,24 @@ def test_training_media_quarantine(tmp_path: Path, kind: str, code: str) -> None
     assert code in {issue.code for issue in bundle.result.issues}
 
 
+def test_avif_training_image_is_accepted(tmp_path: Path) -> None:
+    good = row(tmp_path, "train.avif")
+    Image.new("RGB", (32, 32)).save(Path(str(good["image_path"])), format="AVIF")
+    frame = pd.DataFrame([good, row(tmp_path, "val.png", "val")])
+    bundle = validate_bundle(frame, metadata(), tmp_path)
+    assert bundle.result.broken_row_positions == ()
+    assert not bundle.blockers
+
+
+@pytest.mark.parametrize("extension", ["heic", "heif", "dng", "HEIC"])
+def test_extensions_without_a_decoder_are_quarantined(tmp_path: Path, extension: str) -> None:
+    bad = row(tmp_path, f"bad.{extension}")
+    frame = pd.DataFrame([bad, row(tmp_path, "train.png"), row(tmp_path, "val.png", "val")])
+    bundle = validate_bundle(frame, metadata(), tmp_path)
+    assert bundle.result.broken_row_positions == (0,)
+    assert "training_image_format" in {issue.code for issue in bundle.result.issues}
+
+
 def test_relative_paths_block_upload(tmp_path: Path) -> None:
     value = row(tmp_path, "train.png")
     value["image_path"] = "train.png"
