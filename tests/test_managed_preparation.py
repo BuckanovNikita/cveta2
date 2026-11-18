@@ -1,6 +1,7 @@
 """Managed preparation binds opaque transformations and original source evidence."""
 
 import hashlib
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -431,3 +432,20 @@ def test_preparation_records_policy_and_source_fingerprints(tmp_path: Path) -> N
     assert loaded.tasks is not None
     assert loaded.tasks.managed is not None
     assert loaded.tasks.managed.definition_hash == loaded.record.snapshot.definition_hash
+
+
+def test_load_rejects_published_metadata_bound_to_another_definition(tmp_path: Path) -> None:
+    """dataset.yaml carries the definition fingerprint the record was prepared with."""
+    summary, *_ = _prepare(tmp_path)
+    metadata_path = summary.directory / "dataset.yaml"
+    record_path = summary.directory / "preparation.json"
+    metadata = yaml.safe_load(metadata_path.read_text())
+    metadata["managed"]["definition_hash"] = "0" * 64
+    metadata_path.write_text(yaml.safe_dump(metadata))
+    record = json.loads(record_path.read_text())
+    record["payload_hashes"]["dataset.yaml"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+    record_path.write_text(json.dumps(record))
+    (summary.directory / "preparation.sha256").write_text(hashlib.sha256(record_path.read_bytes()).hexdigest())
+
+    with pytest.raises(ManagedError, match="metadata binding changed"):
+        LocalManagedPreparationFiles().load_prepared(summary.directory)

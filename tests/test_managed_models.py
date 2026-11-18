@@ -39,7 +39,10 @@ _SHARED: dict[str, Any] = {
             "api_url": "https://classes.example/api",
             "s3_roots": ["s3://images/a", "s3://images/b"],
             "empty_classes": [3, 1],
-            "overlaps": {"digest": {"source": "main", "members": ["main", "imported"]}},
+            "overlaps": {
+                "digest": {"source": "main", "members": ["main", "imported"]},
+                "another": {"source": None, "members": ["other", "main"]},
+            },
         }
     },
 }
@@ -86,10 +89,11 @@ _NEUTRAL: dict[str, Edit] = {
     "s3-root-order": lambda raw: _dataset(raw)["s3_roots"].reverse(),
     "empty-class-order": lambda raw: _dataset(raw)["empty_classes"].reverse(),
     "overlap-member-order": lambda raw: _dataset(raw)["overlaps"]["digest"]["members"].reverse(),
+    "overlap-order": lambda raw: _dataset(raw).update(overlaps=dict(reversed(_dataset(raw)["overlaps"].items()))),
 }
 _POLICY: dict[str, Edit] = {
     "splits": lambda raw: _dataset(raw).update(splits={"train": 0.8, "val": 0.1, "test": 0.1}),
-    "overlap-added": lambda raw: _dataset(raw)["overlaps"].update(other={"source": None, "members": ["main", "other"]}),
+    "overlap-added": lambda raw: _dataset(raw)["overlaps"].update(third={"source": None, "members": ["main", "other"]}),
     "overlap-choice": lambda raw: _dataset(raw)["overlaps"]["digest"].update(source="imported"),
     "empty-classes": lambda raw: _dataset(raw)["empty_classes"].append(7),
     "s3-roots": lambda raw: _dataset(raw)["s3_roots"].append("s3://images/c"),

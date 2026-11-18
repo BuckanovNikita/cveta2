@@ -828,3 +828,11 @@ def test_parent_published_with_the_previous_hash_scheme_refetches_once(workflow:
     workflow.cvat.annotation_reads.clear()
     api.fetch_dataset("combined", output_dir=tmp_path / "third", **workflow.options)
     assert workflow.cvat.annotation_reads == []
+
+
+def test_show_dataset_reports_the_definition_and_rejects_unknown_names(workflow: Workflow) -> None:
+    shown = api.show_dataset("combined", **workflow.options)
+    assert shown["definition"]["clearml"] == {"project": "CV/combined", "dataset": "annotations"}
+    assert (shown["parent_id"], shown["parent_version"]) == (None, None)
+    with pytest.raises(ManagedError, match="Unknown managed dataset: missing"):
+        api.show_dataset("missing", **workflow.options)
