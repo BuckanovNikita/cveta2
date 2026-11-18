@@ -3,7 +3,7 @@
 import hashlib
 import json
 import re
-from typing import Literal, Self
+from typing import Literal, Self, cast
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -97,6 +97,11 @@ class ProjectDefinition(StrictModel):
             ):
                 raise ValueError("Invalid shared ignored-task record")
         return values
+
+    @property
+    def ignored_task_ids(self) -> frozenset[int]:
+        """Task ids excluded from every source; the validator guarantees integers."""
+        return frozenset(cast("int", entry["id"]) for entry in self.ignore)
 
 
 class SourceDefinition(StrictModel):
@@ -268,20 +273,57 @@ class ManagedMetadata(StrictModel):
     assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)
 
 
-def definition_fingerprint(config: ProjectConfig, name: str) -> str:
-    """Bind only the chosen dataset and the project definitions it references."""
+def dataset_definition(config: ProjectConfig, name: str) -> DatasetDefinition:
+    """Resolve one named managed dataset or fail with an actionable error."""
     try:
-        definition = config.datasets[name]
+        return config.datasets[name]
     except KeyError as error:
         raise ManagedError(f"Unknown managed dataset: {name}") from error
-    projects = {
-        s.project: config.projects[s.project].model_dump(mode="json")
-        for s in definition.sources
-        if s.project is not None
-    }
-    content = {
-        "cvat": config.cvat.model_dump(mode="json"),
-        "dataset": definition.model_dump(mode="json"),
-        "projects": projects,
-    }
+
+
+def _digest(content: object) -> str:
     return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def source_fingerprint(config: ProjectConfig, definition: DatasetDefinition) -> str:
+    """Bind exactly what fetch reads, independently of source order.
+
+    Covers the CVAT server identity and, per source, its name, type, resolved
+    CVAT project id with its ignored task ids, and S3 object URI. Project keys,
+    display names, ignore bookkeeping (name, description, silent) and legacy
+    image/cache settings do not change the captured evidence.
+    """
+    sources: list[dict[str, object]] = []
+    for source in sorted(definition.sources, key=lambda item: item.name):
+        project = config.projects[source.project] if source.project is not None else None
+        sources.append(
+            {
+                "name": source.name,
+                "type": source.type,
+                "project_id": project.id if project is not None else None,
+                "ignored": sorted(project.ignored_task_ids) if project is not None else [],
+                "uri": source.uri,
+            }
+        )
+    return _digest({"cvat": config.cvat.model_dump(mode="json"), "sources": sources})
+
+
+def definition_fingerprint(config: ProjectConfig, definition: DatasetDefinition) -> str:
+    """Bind the source fingerprint and every policy prepare applies or publishes.
+
+    Order-free lists are normalized, so reordering roots, classes or overlap
+    members keeps a preparation publishable.
+    """
+    policy: dict[str, object] = {
+        "source": source_fingerprint(config, definition),
+        "clearml": definition.clearml.model_dump(mode="json"),
+        "api_url": definition.api_url,
+        "s3_roots": sorted(set(definition.s3_roots)),
+        "empty_classes": sorted(set(definition.empty_classes)),
+        "splits": definition.splits.model_dump(mode="json"),
+        "overlaps": {
+            digest: {"source": decision.source, "members": sorted(decision.members)}
+            for digest, decision in definition.overlaps.items()
+        },
+    }
+    return _digest(policy)

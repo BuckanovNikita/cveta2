@@ -3,9 +3,10 @@
 import hashlib
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Self, TypedDict
+from typing import Any, Self, TypedDict
 
 import pandas as pd
 import pytest
@@ -335,6 +336,12 @@ def workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workflow:
     return Workflow(personal, shared, images, cvat, s3, clearml)
 
 
+def _edit_shared(workflow: Workflow, edit: Callable[[dict[str, Any]], object]) -> None:
+    shared = yaml.safe_load(workflow.shared.read_text())
+    edit(shared)
+    workflow.shared.write_text(yaml.safe_dump(shared))
+
+
 def _legacy_parent(workflow: Workflow, dataset: pd.DataFrame | None = None) -> Path:
     """Install a standalone parent without managed extensions as the latest version."""
     parent = workflow.clearml.root / "legacy"
@@ -486,10 +493,10 @@ def test_feedback_failure_blocks_remote_publication(workflow: Workflow, tmp_path
 @pytest.mark.parametrize("change", ["definition", "parent", "cvat", "label-attribute", "s3", "image"])
 def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path, change: str) -> None:
     prepared = _prepare(workflow, tmp_path)
+    message = "fetch again|prepare again|validation"
     if change == "definition":
-        definition = yaml.safe_load(workflow.shared.read_text())
-        definition["datasets"]["combined"]["empty_classes"] = [7]
-        workflow.shared.write_text(yaml.safe_dump(definition))
+        _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[7]))
+        message = "Shared dataset policy changed; prepare again"
     elif change == "parent":
         workflow.clearml.root.mkdir()
         target = workflow.clearml.root / "competing"
@@ -507,7 +514,7 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
         workflow.s3.content += b"\n"
     else:
         Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
-    with pytest.raises(ManagedError):
+    with pytest.raises(ManagedError, match=message):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
 
@@ -711,3 +718,113 @@ def test_legacy_published_parent_refetches_all_tasks_and_preserves_splits(
     assert refreshed.assignments == assignments
     assert refreshed.registry is not None
     assert all(source.labels is not None for source in refreshed.sources if source.type == "cvat")
+
+
+def test_overlap_decision_added_after_a_failed_prepare_uses_the_same_fetch(workflow: Workflow, tmp_path: Path) -> None:
+    fetched = tmp_path / "fetched"
+    api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
+    transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
+    transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    # The imported CSV repeats an image that the main CVAT source also annotates.
+    duplicate = transformed["source_id"].eq("imported") & transformed["image_name"].eq("external-0.png")
+    transformed.loc[duplicate, ["image_name", "image_path"]] = ["task101-0.png", str(workflow.images / "task101-0.png")]
+    output = tmp_path / "transformed.csv"
+    transformed.to_csv(output, index=False)
+    with pytest.raises(ManagedError, match="Image overlap requires source selection"):
+        api.prepare_managed_dataset("combined", output, source=fetched, output_dir=tmp_path / "x", **workflow.options)
+    digest = hashlib.sha256((workflow.images / "task101-0.png").read_bytes()).hexdigest()
+    _edit_shared(
+        workflow,
+        lambda shared: shared["datasets"]["combined"].update(
+            overlaps={digest: {"source": "main", "members": ["imported", "main"]}}
+        ),
+    )
+    workflow.cvat.annotation_reads.clear()
+
+    prepared = api.prepare_managed_dataset(
+        "combined", output, source=fetched, output_dir=tmp_path / "prepared", **workflow.options
+    )
+
+    assert prepared.ready, prepared.report
+    assert workflow.cvat.annotation_reads == []
+    assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
+
+
+def _ignore_bookkeeping(shared: dict[str, Any]) -> None:
+    shared["projects"]["main"]["ignore"][0].update(name="renamed", description="edited", silent=True)
+
+
+def _reorder_sources(shared: dict[str, Any]) -> None:
+    shared["datasets"]["combined"]["sources"].reverse()
+
+
+@pytest.mark.parametrize("edit", [_ignore_bookkeeping, _reorder_sources], ids=["ignored-description", "source-order"])
+def test_edits_that_change_no_data_keep_fetch_preparation_and_reuse(
+    workflow: Workflow, tmp_path: Path, edit: Callable[[dict[str, Any]], None]
+) -> None:
+    _edit_shared(workflow, lambda shared: shared["projects"]["main"].update(ignore=[{"id": 999, "description": "x"}]))
+    prepared = _prepare(workflow, tmp_path)
+    _edit_shared(workflow, edit)
+
+    again = api.prepare_managed_dataset(
+        "combined",
+        tmp_path / "transformed.csv",
+        source=tmp_path / "fetched",
+        output_dir=tmp_path / "again",
+        **workflow.options,
+    )
+    published = api.publish_dataset(prepared, **workflow.options)
+    workflow.cvat.annotation_reads.clear()
+    refetched = api.fetch_dataset("combined", output_dir=tmp_path / "refetched", **workflow.options)
+
+    assert again.ready
+    assert published.dataset_id == "version-1"
+    assert workflow.cvat.annotation_reads == []
+    assert sorted(task for source in refetched["sources"] for task in source["reused"]) == [101, 102]
+
+
+def _move_source(shared: dict[str, Any]) -> None:
+    shared["datasets"]["combined"]["sources"][2]["uri"] = "s3://annotations/moved.csv"
+
+
+def _ignore_task(shared: dict[str, Any]) -> None:
+    shared["projects"]["other"]["ignore"] = [{"id": 999}]
+
+
+@pytest.mark.parametrize("edit", [_move_source, _ignore_task], ids=["source-uri", "ignored-id"])
+def test_source_edits_after_preparation_require_fetching_again(
+    workflow: Workflow, tmp_path: Path, edit: Callable[[dict[str, Any]], None]
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    _edit_shared(workflow, edit)
+    with pytest.raises(ManagedError, match="Source definition changed; fetch the managed dataset again"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_split_policy_change_after_preparation_requires_preparing_again(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    _edit_shared(
+        workflow,
+        lambda shared: shared["datasets"]["combined"].update(splits={"train": 0.5, "val": 0.3, "test": 0.2}),
+    )
+    with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_parent_published_with_the_previous_hash_scheme_refetches_once(workflow: Workflow, tmp_path: Path) -> None:
+    published = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    tasks_path = workflow.clearml.root / published.dataset_id / "tasks.yaml"
+    tasks = yaml.safe_load(tasks_path.read_text())
+    tasks["managed"]["definition_hash"] = hashlib.sha256(b"whole definition").hexdigest()
+    tasks_path.write_text(yaml.safe_dump(tasks))
+    workflow.cvat.annotation_reads.clear()
+
+    second = _prepare(workflow, tmp_path / "second")
+
+    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
+    assert api.publish_dataset(second, **workflow.options).dataset_id == "version-2"
+    workflow.cvat.annotation_reads.clear()
+    api.fetch_dataset("combined", output_dir=tmp_path / "third", **workflow.options)
+    assert workflow.cvat.annotation_reads == []

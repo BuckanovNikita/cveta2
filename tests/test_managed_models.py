@@ -1,13 +1,134 @@
 """Portable policy rejects ambiguous sources before any effects run."""
 
+import copy
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.domain.managed.evidence import require_complete_evidence
-from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SourceDefinition, SourceSnapshot, SplitPolicy
+from cveta2.domain.managed.models import (
+    ManagedError,
+    ManagedSnapshot,
+    ProjectConfig,
+    SourceDefinition,
+    SourceSnapshot,
+    SplitPolicy,
+    dataset_definition,
+    definition_fingerprint,
+    source_fingerprint,
+)
+
+_SHARED: dict[str, Any] = {
+    "cvat": {"host": "https://cvat.example", "organization": "team"},
+    "projects": {
+        "main": {"id": 12, "name": "Main", "ignore": [{"id": 5, "name": "broken", "description": "old"}, {"id": 3}]},
+        "other": {"id": 27},
+    },
+    "datasets": {
+        "combined": {
+            "sources": [
+                {"name": "main", "type": "cvat", "project": "main"},
+                {"name": "other", "type": "cvat", "project": "other"},
+                {"name": "imported", "type": "s3-csv", "uri": "s3://annotations/imported.csv"},
+            ],
+            "clearml": {"project": "CV/combined", "dataset": "annotations"},
+            "api_url": "https://classes.example/api",
+            "s3_roots": ["s3://images/a", "s3://images/b"],
+            "empty_classes": [3, 1],
+            "overlaps": {"digest": {"source": "main", "members": ["main", "imported"]}},
+        }
+    },
+}
+Edit = Callable[[dict[str, Any]], object]
+_DATASET = ("datasets", "combined")
+
+
+def _fingerprints(edit: Edit | None = None) -> tuple[str, str]:
+    raw = copy.deepcopy(_SHARED)
+    if edit is not None:
+        edit(raw)
+    config = ProjectConfig.model_validate(raw)
+    definition = dataset_definition(config, "combined")
+    return source_fingerprint(config, definition), definition_fingerprint(config, definition)
+
+
+def _dataset(raw: dict[str, Any]) -> dict[str, Any]:
+    dataset: dict[str, Any] = raw["datasets"]["combined"]
+    return dataset
+
+
+def _main(raw: dict[str, Any]) -> dict[str, Any]:
+    project: dict[str, Any] = raw["projects"]["main"]
+    return project
+
+
+_NEUTRAL: dict[str, Edit] = {
+    "source-order": lambda raw: _dataset(raw)["sources"].reverse(),
+    "ignored-task-bookkeeping": lambda raw: _main(raw)["ignore"][0].update(
+        name="renamed", description="new", silent=True
+    ),
+    "ignored-task-order": lambda raw: _main(raw)["ignore"].reverse(),
+    "project-bookkeeping": lambda raw: _main(raw).update(
+        name="Renamed", sync_root="s3://images/main", ignored_prefix="images/", task_cache_s3="s3://cache/main"
+    ),
+    "project-key": lambda raw: (
+        raw["projects"].update(renamed=raw["projects"].pop("main")),
+        _dataset(raw)["sources"][0].update(project="renamed"),
+    ),
+    "unrelated-project": lambda raw: raw["projects"].update(unused={"id": 99, "ignore": [{"id": 1}]}),
+    "unrelated-dataset": lambda raw: raw["datasets"].update(
+        unused={**copy.deepcopy(_dataset(raw)), "clearml": {"project": "CV/unused", "dataset": "annotations"}}
+    ),
+    "s3-root-order": lambda raw: _dataset(raw)["s3_roots"].reverse(),
+    "empty-class-order": lambda raw: _dataset(raw)["empty_classes"].reverse(),
+    "overlap-member-order": lambda raw: _dataset(raw)["overlaps"]["digest"]["members"].reverse(),
+}
+_POLICY: dict[str, Edit] = {
+    "splits": lambda raw: _dataset(raw).update(splits={"train": 0.8, "val": 0.1, "test": 0.1}),
+    "overlap-added": lambda raw: _dataset(raw)["overlaps"].update(other={"source": None, "members": ["main", "other"]}),
+    "overlap-choice": lambda raw: _dataset(raw)["overlaps"]["digest"].update(source="imported"),
+    "empty-classes": lambda raw: _dataset(raw)["empty_classes"].append(7),
+    "s3-roots": lambda raw: _dataset(raw)["s3_roots"].append("s3://images/c"),
+    "api-url": lambda raw: _dataset(raw).update(api_url="https://classes.example/v2"),
+    "clearml": lambda raw: _dataset(raw).update(clearml={"project": "CV/other", "dataset": "annotations"}),
+}
+_SOURCE: dict[str, Edit] = {
+    "host": lambda raw: raw["cvat"].update(host="https://cvat.other.example"),
+    "organization": lambda raw: raw["cvat"].update(organization=None),
+    "project-id": lambda raw: _main(raw).update(id=13),
+    "ignored-task-id": lambda raw: _main(raw)["ignore"].append({"id": 8}),
+    "source-uri": lambda raw: _dataset(raw)["sources"][2].update(uri="s3://annotations/other.csv"),
+    "source-name": lambda raw: _dataset(raw)["sources"][1].update(name="renamed"),
+    "source-removed": lambda raw: _dataset(raw)["sources"].pop(),
+}
+
+
+@pytest.mark.parametrize("edit", _NEUTRAL.values(), ids=_NEUTRAL.keys())
+def test_bookkeeping_and_order_change_no_fingerprint(edit: Edit) -> None:
+    assert _fingerprints(edit) == _fingerprints()
+
+
+@pytest.mark.parametrize("edit", _POLICY.values(), ids=_POLICY.keys())
+def test_policy_change_keeps_fetch_but_changes_definition(edit: Edit) -> None:
+    source, definition = _fingerprints(edit)
+    assert source == _fingerprints()[0]
+    assert definition != _fingerprints()[1]
+
+
+@pytest.mark.parametrize("edit", _SOURCE.values(), ids=_SOURCE.keys())
+def test_source_change_changes_both_fingerprints(edit: Edit) -> None:
+    source, definition = _fingerprints(edit)
+    assert source != _fingerprints()[0]
+    assert definition != _fingerprints()[1]
+
+
+def test_unknown_dataset_is_a_managed_error() -> None:
+    with pytest.raises(ManagedError, match="Unknown managed dataset"):
+        dataset_definition(ProjectConfig.model_validate(_SHARED), "missing")
 
 
 @pytest.mark.parametrize("missing_labels", [True, False], ids=["missing-labels", "mismatched-labels"])

@@ -257,7 +257,6 @@ class LocalManagedPreparationFiles:
             )
             if (
                 expected_snapshot != record.snapshot
-                or record.definition_hash != source_snapshot.definition_hash
                 or record.registry_hash != source_snapshot.registry_hash
                 or record.parent_id != source_snapshot.parent_id
             ):

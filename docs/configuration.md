@@ -84,6 +84,15 @@ datasets:
 внутри датасета, ссылки на источники и пары ClearML project/dataset не дублируются.
 В общем файле нет паролей, токенов или локальных каталогов.
 
+Не каждая правка набора требует повторного скачивания. Повторный `dataset fetch`
+скачивает все задачи заново только после изменения `cvat`, набора источников,
+их имён, типов, ID проектов и URI или ID исключённых задач. Правка
+`splits`, `overlaps`, `empty_classes`, `s3_roots`, `api_url` или `clearml` требует
+только нового `dataset prepare` с тем же результатом `fetch`. Порядок списков,
+имя проекта, `sync_root`, `ignored_prefix`, `task_cache_s3`, а также `name`,
+`description` и `silent` исключённой задачи на управляемый датасет не влияют.
+Подробности — в разделе [«Управляемый датасет»](cli.md#управляемый-датасет-cveta2-dataset).
+
 `sync_root`, `ignored_prefix`, `task_cache_s3`, исключения задач `ignore`,
 `empty_classes`, `splits` и `overlaps` принадлежат общему файлу. Локальные
 `images_root`/`tasks_root` и `image_cache` остаются личными. Явная команда

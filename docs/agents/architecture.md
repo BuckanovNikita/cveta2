@@ -358,6 +358,12 @@ ports and constructs production effects.
 and `interfaces/commands/managed.py` expose prompt-free API and Russian CLI
 presentation. Public facades expose the supported operations without becoming
 inner dependencies. Managed source evidence is embedded in tasks.yaml; no archive
-or image payload is added. Configuration fingerprints bind only the relevant
-resolved definition. Feedback resumes separately and must not confuse own issue
+or image payload is added. `domain/managed/models.py` owns two order-free configuration
+fingerprints, each with one implementation. The source fingerprint (snapshot
+`definition_hash`) binds only what fetch reads and decides task reuse and the
+prepare-time "fetch again" check. The definition fingerprint (preparation record
+and published `dataset.yaml` `definition_hash`) adds the policy prepare applies
+or publishes and is rechecked at publication. Ignore bookkeeping, project display
+names and legacy image/cache settings are in neither. A snapshot with a hash from
+an earlier scheme is not an error; it only disables task reuse once. Feedback resumes separately and must not confuse own issue
 writes with annotation freshness changes.

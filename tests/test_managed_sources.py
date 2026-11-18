@@ -34,7 +34,7 @@ from cveta2.domain.managed.models import (
     ProjectDefinition,
     SourceDefinition,
     TaskSnapshot,
-    definition_fingerprint,
+    source_fingerprint,
 )
 from cveta2.domain.models import CSV_COLUMNS, LabelAttributeInfo, LabelInfo, TaskInfo
 
@@ -163,7 +163,7 @@ def test_reuse_per_task_and_complete_mixed_source_provenance() -> None:
     assert len(frame) == 3  # same basename in different projects does not supersede
     assert frame.loc[frame.source_id.eq("extra"), "source_task_id"].tolist() == [""]
     assert frame.loc[frame.source_id.eq("main"), "source_project_id"].tolist() == ["12"]
-    assert first.definition_hash == definition_fingerprint(config, "combined")
+    assert first.definition_hash == source_fingerprint(config, definition)
     reader.downloads.clear()
     second, repeated = _fetch(config, definition, reader, previous=first, s3=s3)
     assert reader.downloads == []
@@ -191,6 +191,82 @@ def test_changes_invalidate_reuse(reason: str) -> None:
         refresh=reason == "force",
     )
     assert reader.downloads == [(12, 1)]
+
+
+def _edited(config: ProjectConfig, edit: str) -> tuple[ProjectConfig, DatasetDefinition]:
+    raw = config.model_dump(mode="json")
+    dataset = raw["datasets"]["combined"]
+    project = raw["projects"]["p"]
+    if edit == "ignored-description":
+        project["ignore"][0].update(name="renamed", description="edited", silent=True)
+    elif edit == "source-order":
+        dataset["sources"].reverse()
+    elif edit == "overlap-decision":
+        dataset["overlaps"] = {"digest": {"source": "main", "members": ["main", "extra"]}}
+    elif edit == "splits":
+        dataset["splits"] = {"train": 0.8, "val": 0.1, "test": 0.1, "seed": 7}
+    elif edit == "source-uri":
+        dataset["sources"][2]["uri"] = "s3://bucket/moved.csv"
+    elif edit == "ignored-id":
+        project["ignore"].append({"id": 99})
+    else:
+        raw["cvat"]["host"] = "https://cvat.moved.example"
+    edited = ProjectConfig.model_validate(raw)
+    return edited, edited.datasets["combined"]
+
+
+def _supplemental_with_ignored_task() -> tuple[ProjectConfig, DatasetDefinition]:
+    config, _ = _config(supplemental=True)
+    raw = config.model_dump(mode="json")
+    raw["projects"]["p"]["ignore"] = [{"id": 50, "description": "broken"}]
+    edited = ProjectConfig.model_validate(raw)
+    return edited, edited.datasets["combined"]
+
+
+@pytest.mark.parametrize("edit", ["ignored-description", "source-order", "overlap-decision", "splits"])
+def test_edits_fetch_does_not_read_keep_task_reuse(edit: str) -> None:
+    config, definition = _supplemental_with_ignored_task()
+    reader = _Cvat({12: [_task(1)], 27: [_task(2)]})
+    first, frame = _fetch(config, definition, reader)
+    reader.downloads.clear()
+    edited, edited_definition = _edited(config, edit)
+
+    second, repeated = _fetch(edited, edited_definition, reader, previous=first)
+
+    assert reader.downloads == []
+    assert second.definition_hash == first.definition_hash
+    assert sorted(repeated["source_id"]) == sorted(frame["source_id"])
+
+
+@pytest.mark.parametrize("edit", ["source-uri", "ignored-id", "host"])
+def test_edits_fetch_reads_refetch_every_task(edit: str) -> None:
+    config, definition = _supplemental_with_ignored_task()
+    reader = _Cvat({12: [_task(1)], 27: [_task(2)]})
+    first, _ = _fetch(config, definition, reader)
+    reader.downloads.clear()
+    edited, edited_definition = _edited(config, edit)
+
+    second, _ = _fetch(edited, edited_definition, reader, previous=first)
+
+    assert sorted(reader.downloads) == [(12, 1), (27, 2)]
+    assert second.definition_hash == source_fingerprint(edited, edited_definition) != first.definition_hash
+
+
+def test_previous_hash_scheme_refetches_once_and_keeps_assignments() -> None:
+    """Published parents from before the source fingerprint mismatch once, never fail."""
+    config, definition = _config()
+    reader = _Cvat({12: [_task(1)]})
+    first, _ = _fetch(config, definition, reader)
+    published = first.model_copy(update={"definition_hash": "0" * 64, "assignments": {"image-sha256": "train"}})
+    reader.downloads.clear()
+
+    refetched, _ = _fetch(config, definition, reader, previous=published)
+
+    assert reader.downloads == [(12, 1)]
+    assert refetched.assignments == {"image-sha256": "train"}
+    reader.downloads.clear()
+    _fetch(config, definition, reader, previous=refetched)
+    assert reader.downloads == []
 
 
 def test_original_superseded_rows_survive_and_deleted_tasks_are_removed() -> None:
