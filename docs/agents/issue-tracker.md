@@ -5,15 +5,12 @@ Use Linear team `SIP`, project `cveta2`, and GitHub repository
 and evidence in both directions. The [contract index](contracts.md) locates current
 product requirement documents. [Engineering policy](engineering.md) stays in Git.
 
-## Authority and cutover
+## Authority
 
-Linear project documents own the current product contract after the migration PR is
-human-merged and its acceptance criteria are satisfied. Until then the new documents
-are explicitly migration drafts; frozen repository originals retain historical
-provenance and supply the migration comparison baseline. The approved migration itself
-uses this workflow. Record the merged commit, review and contract activation in the
-migration issue; activate all contract documents and reconcile issue status together.
-Do not mark the migration complete merely because drafts or a PR exist.
+Linear project documents own the current product contract. The cutover completed on
+2026-11-17: the migration PR was human-merged, and SIP-66 records the merged commit,
+the review and the activation of all contract documents. Frozen repository originals
+retain historical provenance and supply the migration comparison baseline.
 
 Proposed requirements stay in issues until their implementation is merged and accepted.
 Then update the relevant current contract and index with source commit links. Preserve
