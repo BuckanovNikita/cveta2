@@ -18,4 +18,4 @@ Engineering and architecture policy remains in this directory. Russian usage gui
 
 ## Changes and outages
 
-Propose changes in Linear issues. Promote them into the current contract only after human merge and acceptance, recording the merged SHA. During a Linear outage, record the identity of a previously verified snapshot, continue investigation and isolated implementation, and defer requirement decisions, synchronization and merge readiness.
+Propose changes in Linear issues. Promote them into the current contract only after human merge and acceptance, recording the merged SHA. No automation performs that post-merge contract update; the session that follows the merge does it. During a Linear outage, record the identity of a previously verified snapshot, continue investigation and isolated implementation, and defer requirement decisions, synchronization and merge readiness.
