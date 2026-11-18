@@ -53,8 +53,9 @@ Default to one task branch and PR per cohesive feature, including multiple issue
 appropriate. Link every issue and map acceptance criteria to implementation/evidence.
 Keep included issues open until the shared PR merges and their criteria are satisfied.
 Agents may push task branches using the existing SSH remote and create PRs. Humans
-merge; agents must not merge locally into `main` or push `main`. Code release publication
-remains suspended and separately authorized. Explicit session restrictions prevail.
+merge; agents must not merge locally into `main` or push `main`. Each human merge into
+`main` releases automatically when its commits call for a version (see
+[engineering policy](engineering.md#releases)). Explicit session restrictions prevail.
 
 Use stacked PRs when separate review units or dependency sequencing help delivery.
 Record grouping and merge order in Linear before implementation; the first PR targets

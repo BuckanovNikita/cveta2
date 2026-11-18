@@ -2,7 +2,9 @@
 
 Date: 2026-11-09. Decision: accepted design. The session-owned infrastructure
 decision supersedes the original shared-stand cleanup model; the approved Linear/GitHub
-migration supersedes local fast-forward delivery and release execution. Historical rollout
+migration supersedes local fast-forward delivery and release execution. SIP-143 supersedes
+the release suspension below: a human merge into `main` releases through a GitHub Actions
+workflow, the only CI job, which runs no verification. Historical rollout
 evidence remains in [the frozen feature](../../specs/001-task-verification/plan.md).
 Current procedures live in [engineering policy](../agents/engineering.md).
 

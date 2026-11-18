@@ -126,7 +126,7 @@ verification may run within one worktree.
 - **FR-008**: Acceptance MUST require a clean tip, checks, packaging, randomized
   properties and full-suite coverage including live tests without a preceding
   duplicate affected-unit stage.
-- **FR-009 (amended by the approved workflow migration)**: Humans integrate GitHub PRs. Code releases are suspended. Replacement tooling must retain shared locking, semantic-release ownership, accepted-source checks and separate publication authorization. Any restored version/changelog/lockfile exception requires explicit release checks.
+- **FR-009 (amended by the approved workflow migration; amended by SIP-143)**: Humans integrate GitHub PRs. A human merge into `main` authorizes the release; GitHub Actions cuts it with semantic-release, which owns versions, tags and changelog. One concurrency group serializes releases. The release script's validation is the accepted-source check: a clean `main` equal to the remote, exactly one release commit changing only the version in `pyproject.toml` and `uv.lock` plus `CHANGELOG.md`, an annotated tag on it, refusal to replace a remote tag, and one atomic push. A release publishes only that commit and tag. Agents never push `main`, create tags or release locally.
 - **FR-010 (amended by the approved workflow migration)**: Authored guidance and skills MUST expose one Linear/PR completion procedure. Generated Spec Kit tools remain archived unchanged; the dataset glossary remains maintained domain vocabulary.
 - **FR-011**: Verification MUST use no persisted completion receipts or orchestration
   freshness to infer success. Mutation survivors remain advisory; tool errors

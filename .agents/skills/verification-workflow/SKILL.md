@@ -28,7 +28,7 @@ Policy and definitions live in [engineering guidance](../../../docs/agents/engin
    `acceptance` on the clean committed tip; it already includes checks, build,
    randomized properties and full-suite live coverage. Do not precede it with an
    equivalent affected-unit run. Follow `running-integration-tests` for live
-   lifecycle and cleanup. Code releases remain suspended; the `release` skill describes that restriction.
+   lifecycle and cleanup. A merge into `main` releases automatically; the `release` skill covers it.
 5. Report actual executed/selected checks and distinguish passed, failed,
    deferred and incomplete-cleanup outcomes. A deselected test is not a new test
    execution. An interruption is not success. Task freshness is never proof.

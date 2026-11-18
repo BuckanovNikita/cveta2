@@ -55,7 +55,8 @@ observation, reproduction where feasible, and verification of the original failu
 Compare the final diff, actual checks and independent review with acceptance criteria
 before completion; continue authorized implementation, documentation and verification
 without repeated stage prompts. Explicit session limits and host read-only modes take
-precedence. Code release is suspended; an implementation request does not authorize it.
+precedence. Releases follow the human merge into `main` ([Releases](#releases)); an
+implementation request authorizes no other release action.
 
 Keep completed history and immutable provenance. The historical consolidation checkpoint
 `f52c857` remains reachable for source comparison; do not rewrite past records to make
@@ -335,17 +336,34 @@ mutation outcome, remaining worktree state, and any pushed ref confirmed remotel
 
 ### Releases
 
-Code releases are suspended pending separately reviewed PR-based tooling. The configured
-semantic-release branch matcher rejects every branch before release processing. Ordinary
-build/check/acceptance tasks remain available. Read the `release` skill when a release
-is requested; do not restore the matcher or invoke the old merge-and-publish procedure
-as part of ordinary delivery.
+A release is cut automatically after a human merges a PR into `main`; the human merge
+is the authorization. There is no release PR and no local release step: agents never
+push `main`, never create or push tags and never run `semantic-release` in a mode that
+writes. Failed or deferred required acceptance blocks merge readiness and therefore
+release. The commit type decides the release (see [Commits](#commits)); the
+conventional parser also reads the commit messages listed in a squash-merge body, so
+check the PR title and the commits it squashes before merge.
 
-Replacement tooling must preserve semantic-release ownership of versions, tags and
-changelog, immutable accepted-source checks, shared release locking, bounded failure
-recovery and separate publication authorization. Publish only Git version tags, never
-GitHub Releases, release assets or packages. Failed or deferred required acceptance
-blocks release. The existing `release-check` command remains checks only; it does not
-authorize a release or restore the old verification exception. Any restored exception
-must remain limited to version/changelog/lockfile changes with explicit release checks,
-Conventional Commit validation and staging guards intact.
+[release.yml](../../.github/workflows/release.yml) runs on `pull_request_target` `closed`
+events only for PRs merged into `main`, in one concurrency group (`release-main`) that
+serializes releases and never cancels a running one; closely spaced merges may share one
+release. Only the release job has `contents: write`. It checks out `main` with full
+history and tags, installs the pinned python-semantic-release and runs
+`python -m scripts.release`, the accepted-source check, which:
+
+1. requires a clean `main` checkout equal to remote `main` and one `origin` URL for
+   fetch and push;
+2. runs `semantic-release version --no-push --no-vcs-release`; its build command
+   `python -m scripts.release_metadata` changes only the root package version in
+   `uv.lock`, next to `project.version` and `CHANGELOG.md` (changelog mode `update`
+   inserts the new release and leaves existing entries as written);
+3. succeeds without a commit or tag when no release is due;
+4. otherwise validates exactly one `chore(release): <version>` commit on the source that
+   touches only those files ([release_lock_guard.py](../../scripts/release_lock_guard.py))
+   and an annotated `v<version>` tag on it, refuses a moved remote `main` or an existing
+   remote tag, pushes both refs with one `git push --atomic --no-follow-tags`, and
+   confirms both remote identities.
+
+A release publishes that commit and annotated tag only: never a GitHub Release, asset
+or package. It never merges or rewrites history. The `release` skill covers inspecting
+a run and recovering a failed one.

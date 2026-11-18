@@ -35,8 +35,9 @@ and keep machine-specific settings out of portable policy.
 
 Agents may commit task-owned changes, push task branches and open GitHub PRs. Humans
 merge into `main`; agents do not deliver through local main merges or main pushes.
-Explicit session restrictions and host read-only modes take precedence. Code releases
-are suspended pending separately authorized PR-based release tooling.
+Explicit session restrictions and host read-only modes take precedence. A human merge
+into `main` releases automatically through GitHub Actions; agents never create tags or
+run a release locally.
 
 Use [verification-workflow](.agents/skills/verification-workflow/SKILL.md) before
 verification or completion claims. Task owns commands; prek owns hooks and message
@@ -57,7 +58,7 @@ Authored sources live in `.agents/skills/`; Claude symlinks use those same sourc
 - `mutation-testing`: changed-function mutation execution and survivor triage.
 - `running-integration-tests`: live CVAT, MinIO and ClearML sessions, preflight,
   namespace ownership, kept sessions and cleanup.
-- `release`: suspended release route and requirements for its replacement.
+- `release`: merge readiness for the release, inspecting and recovering the automatic release.
 
 For requirement rewrites, compare original meaning, conditions and scenario exceptions
 against their new authoritative homes; preserve compatibility and immutable provenance.

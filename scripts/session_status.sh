@@ -2,7 +2,7 @@
 # Session-start status for agent sessions (Claude and Codex SessionStart hooks).
 # Shows parallel work that a new session should know about before editing:
 # the branch against main, uncommitted changes, other worktrees and unmerged
-# branches, a held release lock and an active live-test run tag. At most about
+# branches and an active live-test run tag. At most about
 # ten lines; never fails the session.
 set -u
 root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
@@ -30,11 +30,6 @@ fi
 unmerged=$(git branch --no-merged main --format='%(refname:short)' 2>/dev/null | grep -vx "$branch" | head -4 | paste -sd ' ' -)
 if [ -n "$unmerged" ]; then
     echo "  unmerged branches: $unmerged"
-fi
-
-lock="$(git rev-parse --git-common-dir)/cveta2-release.lock"
-if [ -e "$lock" ] && command -v flock >/dev/null && ! flock -n "$lock" true; then
-    echo "  release lock held: another session is merging or releasing main"
 fi
 
 if [ -s tests/integration/.session ]; then

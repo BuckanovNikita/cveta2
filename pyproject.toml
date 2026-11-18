@@ -99,38 +99,41 @@ major_on_zero = false
 # The default release commit message is not a conventional commit, so it would
 # fail any later check over the range.
 commit_message = "chore(release): {version}"
-# semantic-release builds with a restricted environment; forward this explicit
-# release exception selector so the required check cannot silently disappear.
-build_command_env = ["CVETA2_RELEASE_CHECK"]
-# A release only moves the version and the tag; it builds no artifact, because
-# nothing publishes one. This hook exists solely to keep uv.lock honest:
-# uv.lock carries its own cveta2 version entry, which version_toml does not
-# touch, so without the re-lock the tagged commit ships a lockfile that
-# disagrees with pyproject.toml and the next `uv run` silently re-locks.
-# `git add` is what puts the lockfile inside the release commit instead of
-# leaving it dirty after.
-build_command = """
-set -e
-uv lock --upgrade-package "$PACKAGE_NAME"
-git add uv.lock
-if [ "${CVETA2_RELEASE_CHECK:-}" = 1 ]; then
-    git add pyproject.toml CHANGELOG.md
-    uv run --locked task --exit-code release-check
-fi
-"""
+no_git_verify = false
+# Releases run only in GitHub Actions (.github/workflows/release.yml through
+# scripts/release.py) and build nothing. uv.lock carries its own cveta2 version
+# entry, which version_toml does not touch; this command rewrites only that
+# entry and stages it, without resolving dependencies.
+build_command = "python -m scripts.release_metadata"
 
-# Releases are suspended until reviewed PR-based release tooling is installed.
-# Reject every branch before semantic-release can modify files or create tags.
+[tool.semantic_release.commit_parser_options]
+# GitHub squash merges list the merged commits in the body; read each one, so a PR
+# whose title is not a Conventional Commit still reaches the version and changelog.
+# Any body paragraph that starts like a Conventional Commit header counts as one.
+parse_squash_commits = true
+
 [tool.semantic_release.branches.main]
-match = "(?!)"
+match = "^main$"
+prerelease = false
+
+[tool.semantic_release.remote]
+ignore_token_for_push = true
 
 [tool.semantic_release.changelog]
+# "update" inserts each new release below the version-list marker and leaves
+# every existing entry as written.
+mode = "update"
 # The release commit itself, and the two types that describe no change a reader
 # of the changelog can act on.
 exclude_commit_patterns = [
     '''chore(?:\([^)]*?\))?: .+''',
     '''style(?:\([^)]*?\))?: .+''',
 ]
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+output_format = "md"
+mask_initial_release = false
 
 [tool.ruff]
 # Conservative syntax/lint baseline; runtime support is declared by requires-python.
