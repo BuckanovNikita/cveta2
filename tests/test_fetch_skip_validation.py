@@ -158,7 +158,7 @@ def _job(
     job_type: str = "annotation",
     frame: int = 0,
 ) -> RawJob:
-    return RawJob(job_id, frame, frame, stage, state, job_type)
+    return RawJob(job_id, frame, frame, stage, state, job_type, "2026-01-01T00:00:00+00:00")
 
 
 def test_accepts_finished_annotation_and_exports_fresh_completion(

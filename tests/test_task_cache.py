@@ -638,6 +638,26 @@ class TestS3Backend:
         assert failing.calls == 1
         assert sum("S3-кэш" in m for m in capture_logs) == 1
 
+    def test_a_denied_old_object_delete_keeps_the_mirror(self, tmp_path: Path, capture_logs: list[str]) -> None:
+        """A bucket that allows Get/Put but not Delete keeps serving the shared cache."""
+
+        class _NoDelete(FakeS3Client):
+            def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
+                self.delete_calls.append(f"{Bucket}/{Key}")
+                raise ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject")
+
+        fake_s3 = _NoDelete()
+        cache = TaskAnnotationCache(tmp_path / "local", s3=S3CacheBackend(fake_s3, "bkt", "pfx"))
+        for task_id in (1, 2):
+            cache.put(make_task(task_id, updated=_UPDATED), _scope(task_id), _shapes())
+
+        reader = TaskAnnotationCache(tmp_path / "reader", s3=cache._s3)
+        assert reader.get(make_task(2, updated=_UPDATED), _scope(2)) == _shapes()
+        assert fake_s3.put_calls == [f"bkt/{_s3_key(1)}", f"bkt/{_s3_key(2)}"]
+        assert fake_s3.delete_calls == [f"bkt/{_legacy_s3_key(1)}"]
+        assert sum("старого формата" in m for m in capture_logs) == 1
+        assert not any("недоступен" in m for m in capture_logs)
+
     def test_from_cloud_storage_none(self) -> None:
         assert S3CacheBackend.from_cloud_storage(None) is None
 
@@ -735,6 +755,31 @@ class TestFetchWithCache:
         raw = _entry(get_task_cache_dir(fake.project.id), fake.tasks[0].id).read_bytes()
         assert b"image_path" not in raw
         assert b"pfx/" not in raw
+
+    def test_shapes_without_frame_metadata_warn_on_every_fetch(self, tmp_path: Path, capture_logs: list[str]) -> None:
+        """The missing-frame summary is a consistency signal, so a cache hit repeats it."""
+        task = make_task()
+        api = FakeCvatApi(
+            LoadedFixtures(
+                project=ProjectInfo(id=1, name="audit-project"),
+                tasks=[task],
+                labels=[],
+                task_data={
+                    task.id: (
+                        RawDataMeta([RawFrame("a.jpg", 20, 20)]),
+                        RawAnnotations(shapes=[make_raw_shape(id=1, frame=0), make_raw_shape(id=2, frame=5)]),
+                    )
+                },
+            )
+        )
+        fake = LoadedFixtures(project=ProjectInfo(id=1, name="audit-project"), tasks=[task], labels=[], task_data={})
+        api.jobs[task.id] = [_job(task.id, start=0, stop=9)]
+
+        for out in ("first", "second"):
+            capture_logs.clear()
+            _fetch_task_cached(api, fake, tmp_path / out, FetchOptions())
+            assert sum("без метаданных кадра: 1" in message for message in capture_logs) == 1, out
+        assert api.annotation_calls == [task.id]
 
     def test_issues_are_read_live_on_every_fetch(self, tmp_path: Path) -> None:
         """Issues are not cached: a failed read neither blocks caching nor sticks."""
@@ -925,6 +970,20 @@ class TestJobFreshness:
 
         assert api.annotation_calls == [task_id, task_id]
         assert api.job_annotation_calls == []
+
+    def test_a_job_without_an_update_time_is_never_cached(self, normal_fake: LoadedFixtures, tmp_path: Path) -> None:
+        """An empty time always matches, so such a job's edits could not be noticed."""
+        fake = normal_fake
+        task_id = fake.tasks[0].id
+        api = FakeCvatApi(fake)
+        api.jobs[task_id] = [_job(501, start=0, stop=_HALF), _job(502, start=_HALF + 1, stop=7, updated_date="")]
+
+        for out in ("out1", "out2"):
+            _fetch_task_cached(api, fake, tmp_path / out, FetchOptions())
+
+        cache_dir = get_task_cache_dir(fake.project.id)
+        assert [path.name for path in (cache_dir / f"task_{task_id}").glob("job_*.json")] == ["job_501.json"]
+        assert api.job_annotation_calls == [502]
 
     def test_a_vanished_job_loses_its_entry(self, normal_fake: LoadedFixtures, tmp_path: Path) -> None:
         fake = normal_fake

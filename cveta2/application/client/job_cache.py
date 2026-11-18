@@ -34,8 +34,12 @@ def _finished(job: RawJob) -> bool:
 
 
 def _cacheable(scope: AnnotationScope) -> bool:
-    """Cache an entry only once every job it covers has finished review."""
-    return bool(scope.jobs) and all(_finished(job) for job in scope.jobs)
+    """Cache an entry only once every job it covers has finished review.
+
+    A job without an update time is never cached: an empty time always
+    matches, so an edit inside the job could go unnoticed.
+    """
+    return bool(scope.jobs) and all(_finished(job) and job.updated_date for job in scope.jobs)
 
 
 def separable_jobs(jobs: list[RawJob]) -> list[RawJob] | None:

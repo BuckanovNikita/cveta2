@@ -106,5 +106,6 @@ def _collect_shapes(
     if skipped_polygons:
         warn(f"Задача {ctx.task_id}: пропущено полигонов: {skipped_polygons}")
     if missing_frame_shapes:
-        warn(f"Задача {ctx.task_id}: пропущено аннотаций без метаданных кадра: {missing_frame_shapes}")
+        # Always a warning: cached shapes are checked against live frame metadata here.
+        logger.warning(f"Задача {ctx.task_id}: пропущено аннотаций без метаданных кадра: {missing_frame_shapes}")
     return result

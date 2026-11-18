@@ -142,6 +142,7 @@ class S3CacheBackend:
         self._key_prefix = key_prefix
         self._explicit_location = explicit_location
         self._disabled = s3_client is None
+        self._legacy_delete_failed = False
         self._unavailable: BotoCoreError | None = None
 
     @classmethod
@@ -217,13 +218,22 @@ class S3CacheBackend:
             self._disable(e)
 
     def delete_legacy(self, task_id: int) -> None:
-        """Drop the task's old per-task object (best effort)."""
-        if self._disabled or self._s3 is None:
+        """Drop the task's old per-task object (best effort).
+
+        A bucket may allow reads and writes but not deletes. A failure warns
+        once and stops further old-object deletes for the run; the mirror
+        itself stays in use.
+        """
+        if self._disabled or self._s3 is None or self._legacy_delete_failed:
             return
         try:
             _s3_delete_object(self._s3, self._bucket, self._key(_legacy_name(task_id)))
         except (ClientError, BotoCoreError, OSError) as e:
-            self._disable(e)
+            self._legacy_delete_failed = True
+            logger.warning(
+                f"S3-кэш аннотаций: не удалось удалить запись старого формата ({e}) — "
+                "старые записи до конца запуска не удаляются, зеркало используется дальше."
+            )
 
     def delete_task(self, task_id: int, *, strict: bool = False) -> None:
         """Drop every entry of a task and its old object; strict preflight must succeed or raise.
