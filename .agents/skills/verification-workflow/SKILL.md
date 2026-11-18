@@ -16,8 +16,10 @@ Policy and definitions live in [engineering guidance](../../../docs/agents/engin
 2. Run `fix` explicitly before staging; inspect safe fixes and formatting. Stage
    exact task-owned paths. Commit inputs must be fully staged with no nonignored
    untracked files. The Git shim rejects unsuitable inputs before prek runs.
-3. Use `verify` for development verification. The normal commit hook invokes it;
-   reuse that success when inputs remain unchanged. After an explicitly deferred
+3. Use `verify` for development verification. The normal commit hook invokes it and,
+   when it passes, prints the test selection and keeps the full output in the ignored
+   `.cache/verify-last.log`; reuse that success when inputs remain unchanged and
+   report the printed selection. After an explicitly deferred
    intermediate commit, clear `SKIP` and run it on final content. `test-full` is
    the conservative fallback when affected selection cannot represent an input.
 4. Before acceptance, use `mutation-testing` for changed product functions. Run

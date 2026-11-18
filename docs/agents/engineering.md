@@ -301,14 +301,18 @@ several writers share the checkout.
 
 ### Hooks
 
-Install with `bash scripts/install-hooks.sh`, which preserves the prior installation
-for rollback. The shared entry resolves the invoking worktree dynamically. Worktrees
+Install with `bash scripts/install-hooks.sh`. It saves a foreign or absent prior
+installation for rollback and makes no backup when it only refreshes its own
+dispatcher. The shared entry resolves the invoking worktree dynamically. Worktrees
 without this Task workflow continue through their existing prek configuration.
 The minimal staging shim only validates inputs and invokes prek: it never stages,
 deletes or stashes. Mandatory guards live in executable commands, not bypassable
 Task preconditions.
 
-The default hook is always-selected, serial `verify`. Conventional Commit validation
+The default hook is always-selected, serial `verify`. A passing hook prints testmon's
+selection line and pytest's counts, and keeps the full output in the ignored
+`.cache/verify-last.log` of that worktree. Report the selection from those lines.
+The log is informational and never establishes completion. Conventional Commit validation
 remains active: the hook dispatcher clears `SKIP` and `PREK_SKIP` for the `commit-msg`
 stage, so they defer pre-commit hooks only. Intentional lockfile-only updates use `build(deps):` and require no
 exception. Intermediate task commits may use `SKIP=verify` to defer development
