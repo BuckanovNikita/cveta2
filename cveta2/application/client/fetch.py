@@ -16,6 +16,7 @@ from cveta2.application.client.shared import (
     _is_rate_limited,
     _log_task_5xx_skip,
 )
+from cveta2.application.ports.cache import TaskMeta
 from cveta2.application.ports.execution import ConcurrentRunner
 from cveta2.domain.errors import CvatApiError, Cveta2Error, TaskNotFoundError
 from cveta2.domain.models import TaskAnnotations, TaskInfo
@@ -265,10 +266,12 @@ class _FetchMixin(_ClientBase):
     ) -> "tuple[TaskAnnotations, bool] | None":
         """Fetch a task, reading its shapes through *annotations* when given.
 
-        Returns the result and whether every shape came from the cache, or
-        ``None`` when the task was skipped (5xx with ``ctx.raise_on_failure``
-        not set). Frame metadata, jobs and issues are always read live: the
-        records, completion and job positions are rebuilt from them.
+        Returns the result and whether nothing but the jobs list had to be
+        read, or ``None`` when the task was skipped (5xx with
+        ``ctx.raise_on_failure`` not set). The jobs are always read live:
+        records, completion and job positions are rebuilt from them. Frame
+        metadata and issues come from the cache while the task and all jobs
+        are unchanged; an incomplete issue read is never cached.
 
         The jobs request is not optional the way issues are: ``job_stage``
         and ``job_state`` are what the partition reads to tell a finished
@@ -276,8 +279,9 @@ class _FetchMixin(_ClientBase):
         read is skipped rather than emitted as unreviewed.
         """
         try:
-            data_meta = api.get_task_data_meta(task.id)
             jobs = api.get_task_jobs(task.id)
+            meta = None if annotations is None else annotations.load_meta(task, jobs)
+            data_meta = api.get_task_data_meta(task.id) if meta is None else meta.data_meta
             if annotations is None:
                 shapes, from_cache = api.get_task_annotations(task.id), False
             else:
@@ -299,14 +303,20 @@ class _FetchMixin(_ClientBase):
             raise
 
         issues_complete = True
-        try:
-            issues = api.get_task_issues(task.id)
-        except CvatApiError as e:
-            logger.warning(
-                f"Не удалось получить issues задачи {task.id}: {e} — колонки issue_text/issue_state останутся пустыми"
-            )
-            issues = []
-            issues_complete = False
+        if meta is not None:
+            issues = meta.issues
+        else:
+            try:
+                issues = api.get_task_issues(task.id)
+            except CvatApiError as e:
+                logger.warning(
+                    f"Не удалось получить issues задачи {task.id}: {e} — "
+                    "колонки issue_text/issue_state останутся пустыми"
+                )
+                issues = []
+                issues_complete = False
+            if annotations is not None and issues_complete:
+                annotations.store_meta(task, jobs, TaskMeta(data_meta=data_meta, issues=issues))
 
         records, deleted = task_to_records(
             task, data_meta, shapes, ctx.label_names, ctx.attr_names, issues, jobs, replayed=from_cache
@@ -318,4 +328,4 @@ class _FetchMixin(_ClientBase):
             deleted_images=deleted,
             issues_complete=issues_complete,
         )
-        return result, from_cache
+        return result, from_cache and meta is not None

@@ -118,7 +118,8 @@ def test_old_polygon_cache_is_removed_refetched_and_round_trips_without_warning_
         shared = CachedAnnotationsEntry.model_validate_json(fake_s3.objects[key])
         assert [shape.id for shape in local.shapes] == [42]
         assert local == shared
-        assert fake_s3.put_calls == [key]
+        meta_key = key.replace(f"job_{task.id}.json", "meta.json")
+        assert fake_s3.put_calls == [key, meta_key]
 
         capture_logs.clear()
         get_count = len(fake_s3.get_calls)
@@ -134,6 +135,6 @@ def test_old_polygon_cache_is_removed_refetched_and_round_trips_without_warning_
         cached_s3 = fetch("s3-hit")
         pd.testing.assert_frame_equal(fresh, cached_s3)
         assert api.annotation_calls == [task.id]
-        assert len(fake_s3.get_calls) == get_count + 1
+        assert len(fake_s3.get_calls) == get_count + 2  # the job's shapes and the task's metadata
         assert capture_logs == []
         assert CachedAnnotationsEntry.model_validate_json(entry.read_bytes()) == local

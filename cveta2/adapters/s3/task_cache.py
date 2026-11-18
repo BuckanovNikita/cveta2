@@ -15,6 +15,7 @@ import shutil
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TypeVar
 
 from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
@@ -23,8 +24,8 @@ from pydantic import ValidationError
 from cveta2.adapters.files.shared import default_cache_base, replace_shared_bytes
 from cveta2.adapters.s3.types import S3Client
 from cveta2.adapters.s3.utils import list_s3_objects, make_s3_client, s3_get_bytes, s3_retry
-from cveta2.application.ports.cache import AnnotationScope
-from cveta2.application.ports.dtos import RawAnnotations, RawShape
+from cveta2.application.ports.cache import AnnotationScope, TaskMeta
+from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawIssue, RawJob, RawShape
 from cveta2.application.settings import CacheProjectSettings
 from cveta2.domain.cache import (
     _SOURCE_LOCAL,
@@ -49,13 +50,19 @@ class CachedAnnotationsEntry(CachedEntryHeader):
     shapes: list[RawShape]
 
 
-def _cached_jobs(scope: AnnotationScope) -> list[CachedJob]:
-    return [CachedJob.model_validate(dataclasses.asdict(job)) for job in scope.jobs]
+class CachedTaskMetaEntry(CachedEntryHeader):
+    """The task's frame metadata and complete issues, keyed on every job of the task."""
+
+    data_meta: RawDataMeta
+    issues: list[RawIssue]
 
 
-def _entry_name(task_id: int, scope: AnnotationScope) -> str:
-    """Return the entry path relative to the cache root."""
-    return f"task_{task_id}/{scope.name}.json"
+_Entry = TypeVar("_Entry", bound=CachedEntryHeader)
+_META = "meta"
+
+
+def _cached_jobs(jobs: Sequence[RawJob]) -> list[CachedJob]:
+    return [CachedJob.model_validate(dataclasses.asdict(job)) for job in jobs]
 
 
 def _legacy_name(task_id: int) -> str:
@@ -63,21 +70,21 @@ def _legacy_name(task_id: int) -> str:
     return f"task_{task_id}.json"
 
 
-def _parse_entry(raw: bytes, task: TaskInfo, scope: AnnotationScope, source: str) -> CachedAnnotationsEntry | None:
+def _parse_entry(  # noqa: PLR0913 - one validation for every entry kind
+    raw: bytes, model: type[_Entry], task: TaskInfo, jobs: list[CachedJob], *, label: str, source: str
+) -> _Entry | None:
     """Return the entry when it still describes the live task and jobs; log why not."""
     try:
-        entry = CachedAnnotationsEntry.model_validate_json(raw)
+        entry = model.model_validate_json(raw)
     except ValidationError as e:
         logger.warning(
-            f"{source}: запись {scope.name} задачи {task.id} не прошла валидацию "
-            f"({e.error_count()} ошибок) — аннотации будут загружены заново"
+            f"{source}: запись {label} задачи {task.id} не прошла валидацию "
+            f"({e.error_count()} ошибок) — данные будут загружены заново"
         )
         return None
-    reason = entry_mismatch(entry, task, _cached_jobs(scope))
+    reason = entry_mismatch(entry, task, jobs)
     if reason is not None:
-        logger.info(
-            f"{source}: запись {scope.name} задачи {task.id} устарела: {reason} — аннотации будут загружены заново"
-        )
+        logger.info(f"{source}: запись {label} задачи {task.id} устарела: {reason} — данные будут загружены заново")
         return None
     return entry
 
@@ -288,10 +295,8 @@ class TaskAnnotationCache:
 
     def get(self, task: TaskInfo, scope: AnnotationScope) -> RawAnnotations | None:
         """Return the cached shapes of *scope*, or None on miss."""
-        local = self._get_local(task, scope)
-        if local is not None:
-            return local
-        return self._get_s3(task, scope)
+        entry = self._read(task, scope.name, CachedAnnotationsEntry, _cached_jobs(scope.jobs))
+        return None if entry is None else RawAnnotations(shapes=entry.shapes)
 
     def put(self, task: TaskInfo, scope: AnnotationScope, annotations: RawAnnotations) -> None:
         """Cache *scope*'s shapes; the first write of a task also drops its old S3 object."""
@@ -299,22 +304,44 @@ class TaskAnnotationCache:
             schema_version=CACHE_SCHEMA_VERSION,
             task_id=task.id,
             task_updated_date=task.updated_date,
-            jobs=_cached_jobs(scope),
+            jobs=_cached_jobs(scope.jobs),
             cached_at=datetime.now(timezone.utc).isoformat(),
             shapes=list(annotations.shapes),
         )
+        self._write(task.id, scope.name, entry)
+
+    def get_meta(self, task: TaskInfo, jobs: Sequence[RawJob]) -> TaskMeta | None:
+        """Return the task's cached frame metadata and issues while task and all jobs are unchanged."""
+        entry = self._read(task, _META, CachedTaskMetaEntry, _cached_jobs(jobs))
+        return None if entry is None else TaskMeta(data_meta=entry.data_meta, issues=entry.issues)
+
+    def put_meta(self, task: TaskInfo, jobs: Sequence[RawJob], meta: TaskMeta) -> None:
+        """Cache the task's frame metadata and complete issues against all of its jobs."""
+        entry = CachedTaskMetaEntry(
+            schema_version=CACHE_SCHEMA_VERSION,
+            task_id=task.id,
+            task_updated_date=task.updated_date,
+            jobs=_cached_jobs(jobs),
+            cached_at=datetime.now(timezone.utc).isoformat(),
+            data_meta=meta.data_meta,
+            issues=list(meta.issues),
+        )
+        self._write(task.id, _META, entry)
+
+    def _write(self, task_id: int, label: str, entry: CachedEntryHeader) -> None:
         data = entry.model_dump_json().encode()
-        name = _entry_name(task.id, scope)
+        name = f"task_{task_id}/{label}.json"
         self._write_local(name, data)
         if self._s3 is not None:
             self._s3.put(name, data)
-            if task.id not in self._legacy_dropped:
-                self._legacy_dropped.add(task.id)
-                self._s3.delete_legacy(task.id)
+            if task_id not in self._legacy_dropped:
+                self._legacy_dropped.add(task_id)
+                self._s3.delete_legacy(task_id)
 
     def keep_only(self, task_id: int, scopes: Sequence[AnnotationScope]) -> None:
         """Delete the task's local entries other than *scopes* (vanished jobs, changed layout)."""
-        wanted = {f"{scope.name}.json" for scope in scopes}
+        # The task's metadata entry is checked against all jobs when read, never pruned here.
+        wanted = {f"{scope.name}.json" for scope in scopes} | {f"{_META}.json"}
         task_dir = self._local_dir / f"task_{task_id}"
         try:
             stale = [path for path in task_dir.glob("*.json") if path.name not in wanted]
@@ -385,39 +412,35 @@ class TaskAnnotationCache:
             logger.warning(f"Кэш аннотаций: не удалось удалить записей старого формата: {failed}")
         return removed
 
-    def _get_local(self, task: TaskInfo, scope: AnnotationScope) -> RawAnnotations | None:
-        """Read and validate the local entry; delete it when proven invalid.
+    def _read(self, task: TaskInfo, label: str, model: type[_Entry], jobs: list[CachedJob]) -> _Entry | None:
+        """Read a valid entry locally, else from S3 with a local backfill.
 
-        An entry that cannot be read at all (permissions, a truncated
-        mount) is a plain miss and is left on disk.
+        A local entry proven invalid is deleted; one that cannot be read at
+        all (permissions, a truncated mount) is a plain miss left on disk.
         """
-        path = self._local_dir / _entry_name(task.id, scope)
+        name = f"task_{task.id}/{label}.json"
+        path = self._local_dir / name
         try:
             raw = path.read_bytes()
         except FileNotFoundError:
-            return None
+            pass
         except OSError as e:
             logger.warning(f"Не удалось прочитать локальный кэш задачи {task.id}: {e}")
-            return None
-        entry = _parse_entry(raw, task, scope, _SOURCE_LOCAL)
-        if entry is None:
+        else:
+            entry = _parse_entry(raw, model, task, jobs, label=label, source=_SOURCE_LOCAL)
+            if entry is not None:
+                return entry
             self._unlink_quiet(path, task.id)
             return None
-        return RawAnnotations(shapes=entry.shapes)
-
-    def _get_s3(self, task: TaskInfo, scope: AnnotationScope) -> RawAnnotations | None:
-        """Read a valid entry from S3, backfilling the local cache on hit."""
         if self._s3 is None:
             return None
-        name = _entry_name(task.id, scope)
-        raw = self._s3.get(name)
-        if raw is None:
+        shared = self._s3.get(name)
+        if shared is None:
             return None
-        entry = _parse_entry(raw, task, scope, _SOURCE_S3)
-        if entry is None:
-            return None
-        self._write_local(name, raw)
-        return RawAnnotations(shapes=entry.shapes)
+        entry = _parse_entry(shared, model, task, jobs, label=label, source=_SOURCE_S3)
+        if entry is not None:
+            self._write_local(name, shared)
+        return entry
 
     def _write_local(self, name: str, data: bytes) -> None:
         """Atomically write the local entry (best effort)."""

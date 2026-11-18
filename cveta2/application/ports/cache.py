@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from cveta2.application.ports.dtos import RawAnnotations, RawJob
+from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawIssue, RawJob
 from cveta2.application.settings import CacheProjectSettings
 from cveta2.domain.models import TaskInfo
 from cveta2.domain.storage import CloudStorageInfo
@@ -29,6 +29,14 @@ class AnnotationScope:
         return "task" if self.whole_task else f"job_{self.jobs[0].id}"
 
 
+@dataclass(frozen=True)
+class TaskMeta:
+    """Frame metadata (with deleted frames) and complete issues of one task."""
+
+    data_meta: RawDataMeta
+    issues: list[RawIssue]
+
+
 class TaskCache(Protocol):
     """Cache raw annotations per job and invalidate stale task entries."""
 
@@ -40,8 +48,16 @@ class TaskCache(Protocol):
         """Cache the shapes of *scope* against the current task and jobs."""
         ...
 
+    def get_meta(self, task: TaskInfo, jobs: Sequence[RawJob]) -> TaskMeta | None:
+        """Return the task's cached frame metadata and issues while task and all jobs are unchanged."""
+        ...
+
+    def put_meta(self, task: TaskInfo, jobs: Sequence[RawJob], meta: TaskMeta) -> None:
+        """Cache the task's frame metadata and complete issues against the current task and jobs."""
+        ...
+
     def keep_only(self, task_id: int, scopes: Sequence[AnnotationScope]) -> None:
-        """Drop the task's local entries for jobs or layouts it no longer has."""
+        """Drop the task's local annotation entries for jobs or layouts it no longer has."""
         ...
 
     def invalidate(self, task_id: int, *, strict: bool = False) -> None:

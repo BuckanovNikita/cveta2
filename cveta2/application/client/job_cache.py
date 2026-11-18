@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
-from cveta2.application.ports.cache import AnnotationScope, TaskCache
+from cveta2.application.ports.cache import AnnotationScope, TaskCache, TaskMeta
 from cveta2.application.ports.dtos import RawAnnotations, RawJob, RawShape
 from cveta2.domain.models import COMPLETED_JOB_STAGE, COMPLETED_JOB_STATE
 
@@ -112,6 +112,21 @@ class CachedAnnotations:
         fetched = api.get_task_annotations(task.id)
         self._write(task, scope, fetched)
         return fetched, False
+
+    def load_meta(self, task: "TaskInfo", jobs: list[RawJob]) -> TaskMeta | None:
+        """Return the task's cached frame metadata and issues, or None to read them live.
+
+        Like a task-scope entry they are reused only while the task's update
+        time and every job are unchanged, and only once every job finished.
+        """
+        if not self.read or not _cacheable(AnnotationScope(jobs=tuple(jobs), whole_task=True)):
+            return None
+        return self.cache.get_meta(task, jobs)
+
+    def store_meta(self, task: "TaskInfo", jobs: list[RawJob], meta: TaskMeta) -> None:
+        """Cache frame metadata and issues; the caller passes only a complete issue read."""
+        if _cacheable(AnnotationScope(jobs=tuple(jobs), whole_task=True)):
+            self.cache.put_meta(task, jobs, meta)
 
     def _read(self, task: "TaskInfo", scope: AnnotationScope) -> RawAnnotations | None:
         if not self.read or not _cacheable(scope):

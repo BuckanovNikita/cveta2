@@ -392,10 +392,10 @@ def test_empty_task_summary_reports_elapsed_time(tmp_path: Path, capture_info_lo
     assert any("прошло 7.0 с" in message for message in capture_info_logs)
 
 
-def test_a_cache_hit_still_reports_incomplete_live_issues(
+def test_incomplete_live_issues_are_reported_and_not_cached(
     normal_fake: "LoadedFixtures",
 ) -> None:
-    """Issues are read live even when every shape comes from the cache."""
+    """Cached shapes with live metadata: a failed issue read is degraded, not cached."""
     task_id = normal_fake.tasks[0].id
     api = FakeCvatApi(normal_fake, fail_task_ids={task_id}, fail_methods=("get_task_issues",))
     client = CvatClient(CvatConfig(), api=api)
@@ -403,6 +403,7 @@ def test_a_cache_hit_still_reports_incomplete_live_issues(
     task = context.tasks[0]
     cache = Mock(spec=TaskCache)
     cache.get.return_value = RawAnnotations()
+    cache.get_meta.return_value = None
     target = FetchTarget(normal_fake.project.id, normal_fake.project.name, Path("unused"))
     deps = replace(
         fetch_dependencies(target, FetchOptions()),
@@ -415,7 +416,8 @@ def test_a_cache_hit_still_reports_incomplete_live_issues(
     assert result is not None
     assert not result.issues_complete
     assert stats.degraded_task_ids == [task.id]
-    assert (stats.cache_hits, stats.fetched, stats.hit_seconds) == (1, 0, 3.0)
+    assert (stats.cache_hits, stats.fetched, stats.fetch_seconds) == (0, 1, 3.0)
     assert api.annotation_calls == []
     assert api.job_annotation_calls == []
     cache.put.assert_not_called()
+    cache.put_meta.assert_not_called()

@@ -700,6 +700,12 @@ def _fetch_task_cached(
     return pd.read_csv(output_dir / "dataset.csv")
 
 
+def _task_requests(api: FakeCvatApi) -> dict[str, int]:
+    """Count the per-task reads besides annotations, which the call lists record."""
+    names = ("get_task_jobs", "get_task_data_meta", "get_task_issues")
+    return {name: api.call_counts[name] for name in names if api.call_counts[name]}
+
+
 class TestFetchWithCache:
     def test_second_fetch_reads_no_annotations_of_finished_jobs(
         self, normal_fake: LoadedFixtures, tmp_path: Path
@@ -714,8 +720,8 @@ class TestFetchWithCache:
 
         assert len(api.annotation_calls) == 1
         assert api.job_annotation_calls == []
-        # Completion and job positions are rebuilt from a fresh jobs list every time.
-        assert api.call_counts["get_task_jobs"] == 2
+        # A full hit costs exactly one request: the jobs list completion is rebuilt from.
+        assert _task_requests(api) == {"get_task_jobs": 2, "get_task_data_meta": 1, "get_task_issues": 1}
         pd.testing.assert_frame_equal(df1, df2)
         task_csv = tmp_path / "out2" / ".tasks" / f"task_{fake.tasks[0].id}.csv"
         assert task_csv.exists()
@@ -781,8 +787,8 @@ class TestFetchWithCache:
             assert sum("без метаданных кадра: 1" in message for message in capture_logs) == 1, out
         assert api.annotation_calls == [task.id]
 
-    def test_issues_are_read_live_on_every_fetch(self, tmp_path: Path) -> None:
-        """Issues are not cached: a failed read neither blocks caching nor sticks."""
+    def test_an_incomplete_issue_read_is_never_cached(self, tmp_path: Path) -> None:
+        """A failed issue read caches the shapes but not the task's metadata, so it is retried."""
         task = make_task()
         api = FakeCvatApi(
             LoadedFixtures(
@@ -813,14 +819,14 @@ class TestFetchWithCache:
         with patch.object(
             api,
             "get_task_issues",
-            side_effect=[CvatApiError("temporary", status_code=500), review, []],
+            side_effect=[CvatApiError("temporary", status_code=500), review],
         ) as issues:
             assert fetch("first").loc[0, "issue_text"] == ""
             assert list((tmp_path / "cache").rglob("job_*.json"))
+            assert not list((tmp_path / "cache").rglob("meta.json"))
             second, third = fetch("second"), fetch("third")
-        assert second.loc[0, "issue_text"] == "review this"
-        assert third.loc[0, "issue_text"] == ""
-        assert issues.call_count == 3
+        assert second.loc[0, "issue_text"] == third.loc[0, "issue_text"] == "review this"
+        assert issues.call_count == 2
         assert api.annotation_calls == [task.id]
 
 
@@ -872,7 +878,11 @@ class TestJobFreshness:
         _two_jobs(api, task_id)
         cold = _fetch_task_cached(api, fake, tmp_path / "cold", FetchOptions())
         cache_dir = get_task_cache_dir(fake.project.id)
-        assert {path.name for path in (cache_dir / f"task_{task_id}").iterdir()} == {"job_501.json", "job_502.json"}
+        assert {path.name for path in (cache_dir / f"task_{task_id}").iterdir()} == {
+            "job_501.json",
+            "job_502.json",
+            "meta.json",
+        }
 
         warm = _fetch_task_cached(api, fake, tmp_path / "warm", FetchOptions())
         _two_jobs(api, task_id, updated_date="2026-01-06T00:00:00")
@@ -880,6 +890,8 @@ class TestJobFreshness:
 
         assert api.annotation_calls == [task_id]
         assert api.job_annotation_calls == [502]
+        # Metadata and issues are keyed on every job, so the changed job refreshes them too.
+        assert _task_requests(api) == {"get_task_jobs": 3, "get_task_data_meta": 2, "get_task_issues": 2}
         pd.testing.assert_frame_equal(cold, warm)
         pd.testing.assert_frame_equal(cold, partial)
 
@@ -961,7 +973,7 @@ class TestJobFreshness:
         ]
         _fetch_task_cached(api, fake, tmp_path / "out1", FetchOptions())
         cache_dir = get_task_cache_dir(fake.project.id)
-        assert [path.name for path in (cache_dir / f"task_{task_id}").iterdir()] == ["task.json"]
+        assert sorted(path.name for path in (cache_dir / f"task_{task_id}").iterdir()) == ["meta.json", "task.json"]
 
         _fetch_task_cached(api, fake, tmp_path / "out2", FetchOptions())
         rejected = _job(509, start=second_start, stop=7, job_type=second_type, state="rejected")
@@ -996,7 +1008,7 @@ class TestJobFreshness:
         _fetch_task_cached(api, fake, tmp_path / "out2", FetchOptions())
 
         cache_dir = get_task_cache_dir(fake.project.id)
-        assert [path.name for path in (cache_dir / f"task_{task_id}").iterdir()] == ["job_501.json"]
+        assert sorted(path.name for path in (cache_dir / f"task_{task_id}").iterdir()) == ["job_501.json", "meta.json"]
 
 
 class TestLegacyEntries:
@@ -1274,7 +1286,11 @@ class TestFetchBuildsTheS3CacheBackend:
             fake_s3,
         )
 
-        assert fake_s3.put_calls == [f"bkt/{_s3_key(fake.tasks[0].id)}"]
+        task_id = fake.tasks[0].id
+        assert fake_s3.put_calls == [
+            f"bkt/{_s3_key(task_id)}",
+            f"bkt/pfx/.cveta2_cache/task_annotations/task_{task_id}/meta.json",
+        ]
 
     def test_the_configured_override_moves_the_s3_location(self, normal_fake: LoadedFixtures, tmp_path: Path) -> None:
         """``task_cache_s3`` must survive the trip from config to backend."""
@@ -1295,7 +1311,10 @@ class TestFetchBuildsTheS3CacheBackend:
         )
 
         task_id = fake.tasks[0].id
-        assert fake_s3.put_calls == [f"ml-cache/proj/task_annotations/task_{task_id}/job_{task_id}.json"]
+        assert fake_s3.put_calls == [
+            f"ml-cache/proj/task_annotations/task_{task_id}/job_{task_id}.json",
+            f"ml-cache/proj/task_annotations/task_{task_id}/meta.json",
+        ]
 
 
 class TestTaskMutationDropsTheS3Entry:

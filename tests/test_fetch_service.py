@@ -447,10 +447,10 @@ def _fetch_context(client: CvatClient, fake: LoadedFixtures) -> FetchContext:
     return client.prepare_fetch(fake.project.id, project_name=fake.project.name)
 
 
-def _warm_source(client: CvatClient, task: TaskInfo, tmp_path: Path) -> CachedAnnotations:
-    """Cache the task's finished jobs through one loader read."""
+def _warm_source(client: CvatClient, task: TaskInfo, ctx: FetchContext, tmp_path: Path) -> CachedAnnotations:
+    """Cache the task's shapes, frame metadata and issues through one fetch."""
     source = CachedAnnotations(TaskAnnotationCache(tmp_path / "cache"))
-    source.load(client.api, task, client.api.get_task_jobs(task.id))
+    assert client.fetch_task_through(client.api, task, ctx, source) is not None
     return source
 
 
@@ -476,7 +476,7 @@ class TestRetrieveTaskAccounting:
         task = ctx.tasks[0]
         source = None
         if cached:
-            source = _warm_source(client, task, tmp_path)
+            source = _warm_source(client, task, ctx, tmp_path)
         stats = _FetchStats(lock=Lock())
 
         deps = replace(
@@ -516,7 +516,7 @@ class TestRetrieveTaskAccounting:
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
-        cache = _warm_source(client, task, tmp_path).cache
+        cache = _warm_source(client, task, ctx, tmp_path).cache
         stats = _FetchStats(lock=Lock())
 
         _retrieve_task(
