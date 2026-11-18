@@ -22,16 +22,20 @@ if TYPE_CHECKING:
     from cveta2.domain.storage import DownloadStats
 
 
-def merge(
+def merge(  # noqa: PLR0913 - one keyword per merge option
     old: str | Path,
     new: str | Path,
     output: str | Path,
     *,
     deleted: str | Path | None = None,
+    in_progress: str | Path | None = None,
     by_task: bool = False,
 ) -> "pd.DataFrame":
-    """Merge two fetched datasets like ``cveta2 merge``."""
-    return merge_datasets(old, new, output, deleted=deleted, by_task=by_task)
+    """Merge two fetched datasets like ``cveta2 merge``.
+
+    *in_progress* is the new fetch's ``in_progress.csv`` (``--in-progress``).
+    """
+    return merge_datasets(old, new, output, deleted=deleted, in_progress=in_progress, by_task=by_task)
 
 
 def whats_new(

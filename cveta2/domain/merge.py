@@ -79,12 +79,29 @@ def _split_winners(
     return common_images, set()
 
 
+def reopened_images(in_progress: pd.DataFrame) -> set[str]:
+    """Return images the fetch reports as reopened after a completed deletion.
+
+    The partition writes rows of a *completed* task into ``in_progress.csv``
+    only for such an image: the boxes of its last completed annotation wait
+    there for the newer unfinished task. Rows of unfinished tasks, and legacy
+    rows without an explicit ``task_completed``, never count, so a plain
+    re-annotation or a task sent back to work keeps the old boxes.
+    """
+    if not {"image_name", "task_completed"}.issubset(in_progress.columns):
+        return set()
+    flags = in_progress["task_completed"]
+    explicit = flags.eq(other=True) | flags.astype(str).str.casefold().eq("true")
+    return set(in_progress.loc[explicit, "image_name"].dropna())
+
+
 def _merge_datasets(
     old: pd.DataFrame,
     new: pd.DataFrame,
     deleted: set[str],
     *,
     by_task: bool = False,
+    reopened: set[str] | None = None,
 ) -> pd.DataFrame:
     """Merge *old* and *new* datasets, removing images from *deleted*.
 
@@ -94,14 +111,19 @@ def _merge_datasets(
     ``--by-task`` mode (``by_task=True``):
         For images present in both datasets keep annotations from whichever
         dataset holds the higher ``task_id`` for that image.
+
+    Old rows of *reopened* images (see :func:`reopened_images`) are dropped
+    too: their completed result is a deletion that a newer unfinished task
+    is undoing, so the merged dataset holds nothing for them until it ends.
     """
+    dropped_old = deleted | (reopened or set())
     old_images: set[str] = set(old["image_name"].dropna().unique())
     new_images: set[str] = set(new["image_name"].dropna().unique())
     common_images = old_images & new_images
 
     keep_from_new, keep_from_old = _split_winners(old, new, common_images, by_task=by_task)
 
-    old_keep_mask = old["image_name"].isin((old_images - common_images - deleted) | (keep_from_old - deleted))
+    old_keep_mask = old["image_name"].isin((old_images - common_images - dropped_old) | (keep_from_old - dropped_old))
     new_keep_mask = new["image_name"].isin((new_images - deleted) - keep_from_old)
     merged: pd.DataFrame = pd.concat([old[old_keep_mask], new[new_keep_mask]], ignore_index=True)
     merged = _propagate_splits(merged, old, new, common_images)
@@ -113,6 +135,7 @@ def _merge_datasets(
         f"конфликт→new={len(keep_from_new - deleted)}, "
         f"конфликт→old={len(keep_from_old - deleted)}, "
         f"удалено={len((old_images | new_images) & deleted)}, "
+        f"снова в работе={len(old_images & (dropped_old - deleted))}, "
         f"итого строк={len(merged)}"
     )
     return merged

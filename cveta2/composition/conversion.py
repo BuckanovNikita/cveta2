@@ -85,16 +85,17 @@ def convert_from_yolo(
     )
 
 
-def merge_datasets(
+def merge_datasets(  # noqa: PLR0913 - mirrors the public merge options
     old: str | Path,
     new: str | Path,
     output: str | Path,
     *,
     deleted: str | Path | None = None,
+    in_progress: str | Path | None = None,
     by_task: bool = False,
 ) -> pd.DataFrame:
     """Compose production dependencies and merge dataset CSVs."""
-    return merge(old, new, output, deleted=deleted, by_task=by_task, files=LocalDatasetFiles())
+    return merge(old, new, output, deleted=deleted, in_progress=in_progress, by_task=by_task, files=LocalDatasetFiles())
 
 
 def compute_baseline(df: pd.DataFrame, path: Path) -> WhatsNewBaseline:

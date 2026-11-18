@@ -31,6 +31,16 @@ def configure_merge(parser: "argparse.ArgumentParser") -> None:
         help=("Path to deleted.csv — images listed there will be removed from the merged result."),
     )
     parser.add_argument(
+        "--in-progress",
+        type=str,
+        default=None,
+        help=(
+            "Путь к in_progress.csv новой выгрузки — старые изображения, которые удалила "
+            "завершённая задача, а более новая незавершённая снова взяла в работу, "
+            "не попадут в результат."
+        ),
+    )
+    parser.add_argument(
         "--output",
         "-o",
         required=True,
@@ -50,5 +60,6 @@ def run_merge(args: "argparse.Namespace") -> None:
         args.new,
         args.output,
         deleted=args.deleted,
+        in_progress=args.in_progress,
         by_task=args.by_task,
     )

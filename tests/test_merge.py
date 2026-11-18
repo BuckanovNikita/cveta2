@@ -1,5 +1,6 @@
 """Unit tests for merge: split propagation, by-task resolution, and I/O."""
 
+import argparse
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,11 +11,13 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from cveta2.adapters.files.dataset import read_deleted_names as _read_deleted_names
+from cveta2.adapters.files.dataset import write_partition_csvs
 from cveta2.application.use_cases.merge import merge_datasets as merge_with_files
 from cveta2.composition.conversion import merge_datasets
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.merge import _merge_datasets, _propagate_splits, _resolve_by_task
-from tests.helpers import csv_row, make_args, make_df, write_dataset_csv
+from cveta2.domain.partition import partition_annotations_df
+from tests.helpers import csv_row, make_args, make_deleted, make_df, write_dataset_csv
 
 _ID_OLD = 10
 _ID_NEW = 20
@@ -347,6 +350,82 @@ class TestMergeDatasetsIO:
             merge_datasets(paths["old"], paths["new"], tmp_path / "merged.csv", by_task=True)
 
 
+class TestMergeReopenedImages:
+    """``in_progress`` drops old images the new fetch reports as reopened after a completed deletion."""
+
+    @staticmethod
+    def _fetch(tmp_path: Path, rows: list[tuple[str, int, bool]], deletions: list[tuple[str, int, bool]]) -> Path:
+        """Partition fetched rows into the four CSVs, as ``cveta2 fetch`` writes them."""
+        frame = make_df(
+            [
+                csv_row(image, task_id=task, status="completed" if done else "annotation", task_completed=done)
+                for image, task, done in rows
+            ]
+        )
+        records = [
+            make_deleted(image, task, "2026-01-01", "completed" if done else "annotation").model_copy(
+                update={"task_completed": done}
+            )
+            for image, task, done in deletions
+        ]
+        out = tmp_path / "new"
+        write_partition_csvs(partition_annotations_df(frame, records), out)
+        return out
+
+    def _merge(self, tmp_path: Path, new: Path, *, with_in_progress: bool) -> set[str]:
+        old = tmp_path / "old.csv"
+        write_dataset_csv(old, [_trow("a.jpg", task_id=3, label="old_a"), _trow("b.jpg", task_id=4, label="old_b")])
+        out = tmp_path / "merged.csv"
+        merge_datasets(
+            old,
+            new / "dataset.csv",
+            out,
+            deleted=new / "deleted.csv",
+            in_progress=new / "in_progress.csv" if with_in_progress else None,
+        )
+        merged = pd.read_csv(out)
+        return set(merged["image_name"] + ":" + merged["instance_label"])
+
+    def test_case_one_is_dropped_only_with_the_in_progress_file(self, tmp_path: Path) -> None:
+        """Completed 3 annotates, completed 5 deletes, unfinished 9 holds it again."""
+        new = self._fetch(tmp_path, [("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)])
+
+        assert self._merge(tmp_path, new, with_in_progress=False) == {"a.jpg:old_a", "b.jpg:old_b"}
+        assert self._merge(tmp_path, new, with_in_progress=True) == {"b.jpg:old_b"}
+
+    def test_the_cli_option_reaches_the_merge(self, tmp_path: Path) -> None:
+        from cveta2.interfaces.commands.merge import configure_merge, run_merge
+
+        new = self._fetch(tmp_path, [("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)])
+        old = tmp_path / "old.csv"
+        write_dataset_csv(old, [_trow("a.jpg", task_id=3, label="old_a")])
+        parser = argparse.ArgumentParser()
+        configure_merge(parser)
+        out = tmp_path / "merged.csv"
+        argv = ["--old", str(old), "--new", str(new / "dataset.csv"), "-o", str(out)]
+
+        run_merge(parser.parse_args([*argv, "--in-progress", str(new / "in_progress.csv")]))
+
+        assert pd.read_csv(out).empty
+
+    @pytest.mark.parametrize(
+        ("rows", "expected"),
+        [
+            # Plain re-annotation: completed 3 stays in dataset.csv, unfinished 9 waits.
+            pytest.param([("a.jpg", 3, True), ("a.jpg", 9, False)], {"a.jpg:cat", "b.jpg:old_b"}, id="reannotation"),
+            # The image's only task went back from completed to unfinished.
+            pytest.param([("a.jpg", 3, False)], {"a.jpg:old_a", "b.jpg:old_b"}, id="task-sent-back"),
+        ],
+    )
+    def test_presence_in_progress_alone_drops_nothing(
+        self, tmp_path: Path, rows: list[tuple[str, int, bool]], expected: set[str]
+    ) -> None:
+        new = self._fetch(tmp_path, rows, [])
+
+        assert self._merge(tmp_path, new, with_in_progress=True) == expected
+        assert self._merge(tmp_path, new, with_in_progress=False) == expected
+
+
 # ---------------------------------------------------------------------------
 # CLI smoke — run_merge error path
 # ---------------------------------------------------------------------------
@@ -366,6 +445,7 @@ def test_run_merge_by_task_missing_column_exits(tmp_path: Path) -> None:
         new=str(new_path),
         output=str(tmp_path / "merged.csv"),
         deleted=None,
+        in_progress=None,
         by_task=True,
     )
 

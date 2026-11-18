@@ -50,6 +50,14 @@ cveta2.convert_to_coco("out/dataset.csv", "coco_out/")
 
 # Прочие операции
 cveta2.merge("old/dataset.csv", "new/dataset.csv", "merged.csv")
+# deleted= и in_progress= (in_progress.csv новой выгрузки) — как --deleted и --in-progress
+cveta2.merge(
+    "old/dataset.csv",
+    "new/dataset.csv",
+    "merged.csv",
+    deleted="new/deleted.csv",
+    in_progress="new/in_progress.csv",
+)
 news = cveta2.whats_new("my-project", "out/dataset.csv")
 for task in news.tasks:  # news.cutoff — task_id отсечки (int)
     print(task.id, task.name)
