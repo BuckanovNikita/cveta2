@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.partition import completed_task_ids
+from cveta2.domain.partition import completed_task_ids, usable_task_ids
 
 REQUIRED_COLUMNS = {"job_stage", "job_state", "task_id"}
 SIBLING_CSV_NAMES = ("obsolete.csv", "deleted.csv")
@@ -46,13 +46,13 @@ def compute_cutoff(df: pd.DataFrame, path: Path) -> int:
     all_ids = _task_ids(df)
     if not all_ids:
         raise Cveta2Error(f"Ошибка: столбец task_id в {path} пуст — невозможно определить задачу отсечки.")
-    completed_ids = _task_ids(df[df["task_id"].isin(completed_task_ids(df))])
+    completed_ids = _task_ids(df[usable_task_ids(df["task_id"]).isin(completed_task_ids(df))])
     return max(completed_ids or all_ids)
 
 
 def _task_ids(df: pd.DataFrame) -> set[int]:
     """Return the usable integer ``task_id`` values of *df*."""
-    return {int(v) for v in pd.to_numeric(df["task_id"], errors="coerce").dropna()}
+    return {int(v) for v in usable_task_ids(df["task_id"]).dropna()}
 
 
 def _known_task_ids(df: pd.DataFrame, siblings: Sequence[pd.DataFrame]) -> set[int]:

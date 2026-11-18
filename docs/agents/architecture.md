@@ -198,6 +198,7 @@ record to reconcile affected modules, actual changes, executed checks and review
 2. **Upload**: `interfaces/commands/upload.py` (or `interfaces/api/`) → `composition/workflows.py` → `application/use_cases/upload/orchestration.py:upload_dataset()` → `ApplicationClient.create_upload_task()` + `ApplicationClient.upload_task_annotations()`
    - A manifest is written to `~/.cache/cveta2/uploads/<host-hash>/project_<id>/<fingerprint>.json` before CVAT is touched, and the task id recorded the instant it exists — `create_upload_task` splits the CVAT call in two (`create_task`, then `attach_task_data`) so there is a checkpoint between them. Completion is recorded before cleanup; an unlink failure warns with the successful task and retains safe recovery bookkeeping. Schema v3 binds the normalized host and full upload intent; legacy manifests without that identity cannot authorize resume.
    - `--resume` validates the manifest's server/project identity and the task's project ownership, then asks CVAT what that task actually holds: frame mapping and complete normalized annotation content decide verified reuse or refusal (`put_task_shapes` appends, so partial or conflicting content must never be appended again), and issues are matched individually by `(frame, initial message, bbox)` with coordinate tolerance. `set_deleted_frames` and `update_job` are idempotent and simply redone.
+   - An exclusive `flock` on `<fingerprint>.lock` beside the manifest, taken through `ManifestStore.lock`, is held for the whole run, so a concurrent run of the same upload fails with `UploadInProgressError`; the kernel releases it when the process exits, and platforms without `fcntl` run unlocked with a warning.
    - Validates labelled bounding boxes and full recovery identity before external writes. Mandatory initial/create/task-ID checkpoints fail closed before the next CVAT write. Replacement of a confirmed missing task clears the old ID before recording a pending create, so a lost replacement reply cannot authorize another create. A 503 never authorizes replay of non-idempotent create/append operations, even with `Retry-After`; unknown create outcomes require operator reconciliation. The motivating post-write failure was simulated, not observed on the live stand.
    - Reads CSV, uploads images to S3 (into `YYYY-MM/` subfolders), creates CVAT task, uploads annotations
    - Label selection is frame-based: a selected label pulls in all annotations of its frames (co-occurring labels included and validated against project labels); `--labels all` selects every dataset label plus unannotated frames (a literal dataset label named `all` wins over the shortcut)
@@ -278,8 +279,10 @@ while retaining lexical validation and symlink escape rejection.
 Domain errors own immutable request diagnostics exposed through the exceptions
 facade. CVAT adapters capture actual failed HTTP calls, including nested pages and
 comments, sanitize allowlisted context and preserve causes. A per-pool request
-wrapper copies the effective retry policy and changes only raise_on_status; shared
-pool settings and retry method/budget restrictions remain intact. Bootstrap and
+wrapper copies the effective retry policy and disables raise_on_status; for methods
+other than GET, HEAD and OPTIONS the copy also disables read, other and status
+retries and Retry-After replays, keeping connect retries. Shared pool settings and
+retry method/budget restrictions remain intact. Bootstrap and
 already-used injected clients are covered; SDK version checks remain advisory.
 Context-local state is reset after each operation/request. Final 502/503/504 statuses
 reach established task-level 5xx policy, and required-read 429 still aborts.

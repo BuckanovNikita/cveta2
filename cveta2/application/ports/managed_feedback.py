@@ -63,6 +63,10 @@ class FeedbackLedger(Protocol):
         """Acknowledge a verified issue-only timestamp transition."""
         ...
 
+    def rebase(self, finding: FeedbackFinding, state: FeedbackTaskState) -> bool:
+        """Move a pending checkpoint to a live time explained by acknowledged writes."""
+        ...
+
     def effective_snapshot(self, snapshot: ManagedSnapshot) -> ManagedSnapshot:
         """Apply only acknowledged own-write timestamp transitions."""
         ...

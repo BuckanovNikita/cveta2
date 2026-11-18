@@ -19,6 +19,10 @@ _YOLO_BOX_FIELDS = 5
 _YOLO_CONF_FIELDS = 6
 
 
+class UnreadableLabelError(Cveta2Error):
+    """A YOLO label file exists but cannot be read or decoded as UTF-8."""
+
+
 class PixelBox(NamedTuple):
     """Pixel-coordinate bounding box (top-left, bottom-right)."""
 

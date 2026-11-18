@@ -53,6 +53,7 @@ def _known_delivery(
     finding: FeedbackFinding,
     before: FeedbackTaskState,
     remote: CvatFeedback,
+    ledger: FeedbackLedger,
 ) -> bool:
     """Validate a prior checkpoint and recognize already delivered findings."""
     if receipt is None:
@@ -67,7 +68,13 @@ def _known_delivery(
         # Later findings on this same task may have advanced its time. Do not
         # widen this receipt to acknowledge any unrelated timestamp changes.
         return True
-    if before.updated_date != receipt.before_date and not remote.issue_exists(finding):
+    if (
+        before.updated_date != receipt.before_date
+        and not remote.issue_exists(finding)
+        # Sibling issues on this task may have moved its time since this attempt
+        # began; only this ledger's acknowledged chain can explain that move.
+        and not ledger.rebase(finding, before)
+    ):
         raise ManagedError(f"Unacknowledged task change during feedback: {finding.task_id}")
     return False
 
@@ -76,7 +83,7 @@ def _deliver(finding: FeedbackFinding, *, remote: CvatFeedback, ledger: Feedback
     """Return True for a new issue and False for an already-present marker."""
     before = remote.inspect(finding)
     receipt = ledger.get_receipt(finding.marker)
-    if _known_delivery(receipt, finding, before, remote):
+    if _known_delivery(receipt, finding, before, remote, ledger):
         return False
     if remote.issue_exists(finding):
         if receipt is None:

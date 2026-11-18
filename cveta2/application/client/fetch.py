@@ -65,7 +65,7 @@ def _numeric_selector_ids(
     ids: list[int] = []
     for selector in selectors:
         text = str(selector).strip()
-        if not (isinstance(selector, int) or text.isdigit()):
+        if not (isinstance(selector, int) or text.isdecimal()):
             return None
         ids.append(int(text))
     return list(dict.fromkeys(ids))
@@ -204,7 +204,7 @@ class _FetchMixin(_ClientBase):
         Raises ``TaskNotFoundError`` when no task matches.
         """
         s = str(selector).strip()
-        if s.isdigit():
+        if s.isdecimal():
             task_id = int(s)
             for t in tasks:
                 if t.id == task_id:

@@ -19,6 +19,7 @@ EFFECT_IMPORTS = {
     "tempfile",
     "glob",
     "socket",
+    "asyncio",
     "subprocess",
     "threading",
     "multiprocessing",
@@ -42,8 +43,21 @@ EFFECT_CALLS = {
     "time.monotonic",
     "time.perf_counter",
     "time.sleep",
+    "time.time_ns",
+    "time.monotonic_ns",
+    "time.perf_counter_ns",
+    "time.process_time",
+    "time.process_time_ns",
+    "time.thread_time",
+    "time.thread_time_ns",
+    "time.strftime",
+    "time.localtime",
+    "time.gmtime",
+    "time.ctime",
+    "time.asctime",
     "datetime.datetime.now",
     "datetime.datetime.utcnow",
+    "datetime.datetime.today",
     "datetime.date.today",
 }
 FILE_METHODS = {
@@ -178,10 +192,10 @@ def _effect_call(call: ast.Call, aliases: dict[str, str], paths: set[str]) -> st
     leaf = name.rsplit(".", 1)[-1]
     if name in EFFECT_CALLS or leaf in FILE_METHODS | PANDAS_IO:
         return name or leaf
-    # DataFrame.rename and str.replace are pure; Path operations with these
-    # names are effects, identified from constructors, typed arguments or joins.
+    # DataFrame.rename, str.replace and ast.walk are pure; Path operations with
+    # these names are effects, identified from constructors, typed arguments or joins.
     if (
-        leaf in {"rename", "replace"}
+        leaf in {"rename", "replace", "walk"}
         and isinstance(call.func, ast.Attribute)
         and _path_expression(call.func.value, aliases, paths)
     ):

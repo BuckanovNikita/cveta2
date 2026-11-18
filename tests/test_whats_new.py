@@ -8,7 +8,8 @@ import pytest
 from cveta2.adapters.config.settings import CvatConfig
 from cveta2.composition.client import CvatClient
 from cveta2.composition.conversion import compute_baseline
-from cveta2.domain.baseline import compute_cutoff
+from cveta2.composition.files import read_dataset_csv
+from cveta2.domain.baseline import REQUIRED_COLUMNS, compute_cutoff
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import TaskInfo
 from cveta2.interfaces.commands.whats_new import run_whats_new
@@ -248,12 +249,18 @@ class TestComputeCutoff:
         baseline = compute_baseline(pd.DataFrame([_row(1)]), tmp_path / "dataset.csv")
         assert baseline.known_task_ids == {1, 20}
 
-    @pytest.mark.parametrize("obsolete", [None, 'a,b\n"unclosed\n'])
+    @pytest.mark.parametrize(
+        "obsolete",
+        [None, 'a,b\n"unclosed\n', b"image_name,task_id\n\xff\xfe,6\n"],
+        ids=["missing", "malformed", "invalid-utf8"],
+    )
     def test_a_missing_or_unreadable_sibling_does_not_stop_the_later_ones(
-        self, tmp_path: Path, obsolete: str | None
+        self, tmp_path: Path, obsolete: str | bytes | None
     ) -> None:
         """A bad obsolete.csv costs its own ids; deleted.csv after it is still read."""
-        if obsolete is not None:
+        if isinstance(obsolete, bytes):
+            (tmp_path / "obsolete.csv").write_bytes(obsolete)
+        elif obsolete is not None:
             (tmp_path / "obsolete.csv").write_text(obsolete, encoding="utf-8")
         write_dataset_csv(tmp_path / "deleted.csv", [_row(6)])
         df = pd.DataFrame([_row(7)])
@@ -261,6 +268,30 @@ class TestComputeCutoff:
         baseline = compute_baseline(df, tmp_path / "dataset.csv")
 
         assert baseline.known_task_ids == {6, 7}
+
+    @pytest.mark.parametrize("bad_cell", ["abc", "13.5", "inf", "-inf"])
+    def test_unusable_task_id_cells_are_ignored(self, tmp_path: Path, bad_cell: str) -> None:
+        """One unusable cell must neither fail the run nor hide the completed tasks.
+
+        A string cell turns the column into text, so the completed-task match
+        must compare numbers or the cutoff silently falls back to unfinished 20.
+        """
+        header = "image_name,task_id,job_stage,job_state\n"
+        csv_path = tmp_path / "dataset.csv"
+        csv_path.write_text(
+            header
+            + "a.jpg,12,acceptance,completed\n"
+            + "b.jpg,15,acceptance,completed\n"
+            + "c.jpg,20,annotation,new\n"
+            + f"d.jpg,{bad_cell},acceptance,completed\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "obsolete.csv").write_text(header + f"e.jpg,{bad_cell},acceptance,completed\n", encoding="utf-8")
+
+        baseline = compute_baseline(read_dataset_csv(csv_path, REQUIRED_COLUMNS), csv_path)
+
+        assert baseline.cutoff == 15
+        assert baseline.known_task_ids == {12, 15}
 
 
 # ---------------------------------------------------------------------------

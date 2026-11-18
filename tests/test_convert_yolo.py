@@ -51,6 +51,124 @@ class TestConversionRegressions:
 
         assert (output / "images/train/a.jpg").is_file()
 
+    @pytest.mark.parametrize("link_mode", ["copy", "hardlink", "symlink"])
+    def test_reexport_inside_image_dir_refreshes_from_the_source(
+        self, tmp_path: Path, link_mode: Literal["copy", "hardlink", "symlink"]
+    ) -> None:
+        """The previous output under ``--image-dir`` is never taken as the source."""
+        data = tmp_path / "data"
+        source = make_image(data / "raw" / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = data / "yolo"
+        convert_to_yolo(csv_path, output, image_dirs=[data], link_mode=link_mode)
+        source.unlink()
+        make_image(source, width=320, height=240)
+
+        convert_to_yolo(csv_path, output, image_dirs=[data], link_mode=link_mode)
+
+        placed = output / "images/train/a.jpg"
+        assert placed.read_bytes() == source.read_bytes()
+
+    @pytest.mark.parametrize("link_mode", ["copy", "symlink"])
+    def test_reexport_with_previous_split_as_image_dir_keeps_a_valid_image(
+        self, tmp_path: Path, link_mode: Literal["copy", "symlink"]
+    ) -> None:
+        images = tmp_path / "source"
+        source = make_image(images / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = tmp_path / "yolo"
+        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="symlink")
+
+        convert_to_yolo(csv_path, output, image_dirs=[output / "images/train", images], link_mode=link_mode)
+
+        placed = output / "images/train/a.jpg"
+        assert placed.read_bytes() == source.read_bytes()
+        assert placed.is_symlink() == (link_mode == "symlink")
+
+    def test_materializing_a_symlink_onto_itself_keeps_the_image(self, tmp_path: Path) -> None:
+        """Copying a destination link over itself copies its target instead of deleting it."""
+        source = make_image(tmp_path / "source" / "a.jpg")
+        placed = tmp_path / "out" / "a.jpg"
+        placed.parent.mkdir()
+        placed.symlink_to(source)
+
+        LocalConversionFiles.materialize_image(placed, placed, "copy")
+
+        assert not placed.is_symlink()
+        assert placed.read_bytes() == source.read_bytes()
+
+    @pytest.mark.parametrize("linked", ["labels", "labels/train", "labels/train/a.txt", "dataset.yaml"])
+    def test_symlinked_label_or_metadata_destination_is_rejected_before_any_write(
+        self, tmp_path: Path, linked: str
+    ) -> None:
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = tmp_path / "yolo"
+        external = tmp_path / "external"
+        external.mkdir()
+        victim = external / "a.txt"
+        victim.write_text("precious\n")
+        link = output / linked
+        link.parent.mkdir(parents=True)
+        if linked == "labels":
+            (external / "train").mkdir()
+            (external / "train" / "a.txt").write_text("precious\n")
+            link.symlink_to(external, target_is_directory=True)
+        elif linked == "labels/train":
+            link.symlink_to(external, target_is_directory=True)
+        else:
+            link.symlink_to(victim)
+        before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+
+        with pytest.raises(Cveta2Error, match=str(link)):
+            convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+
+        assert sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*")) == before
+        assert victim.read_text() == "precious\n"
+
+    @pytest.mark.parametrize("linked", ["images", "images/train"])
+    @pytest.mark.parametrize("existing", [False, True], ids=["new-image", "existing-image"])
+    def test_linked_image_directory_cannot_write_outside_the_export(
+        self, tmp_path: Path, linked: str, *, existing: bool
+    ) -> None:
+        source = tmp_path / "source"
+        make_image(source / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        output = tmp_path / "yolo"
+        external = tmp_path / "external"
+        external.mkdir()
+        image_dir = external / "train" if linked == "images" else external
+        image_dir.mkdir(exist_ok=True)
+        victim = image_dir / "a.jpg"
+        if existing:
+            victim.write_bytes(b"precious")
+        link = output / linked
+        link.parent.mkdir(parents=True)
+        link.symlink_to(external, target_is_directory=True)
+        before = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*"))
+
+        with pytest.raises(Cveta2Error, match=str(link)):
+            convert_to_yolo(csv_path, output, image_dirs=[source], link_mode="copy")
+
+        assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")) == before
+        assert victim.read_bytes() == b"precious" if existing else not victim.exists()
+
+    def test_linked_images_root_cannot_create_an_external_split_without_source_images(self, tmp_path: Path) -> None:
+        csv_path = write_convert_csv(tmp_path, [csv_row("missing.jpg", label="cat", split="train")])
+        external = tmp_path / "external"
+        external.mkdir()
+        output = tmp_path / "yolo"
+        output.mkdir()
+        (output / "images").symlink_to(external, target_is_directory=True)
+
+        with pytest.raises(Cveta2Error, match=str(output / "images")):
+            convert_to_yolo(csv_path, output, image_dirs=[], link_mode="copy")
+
+        assert list(external.iterdir()) == []
+        assert not (output / "labels").exists()
+        assert not (output / "dataset.yaml").exists()
+
     def test_box_row_takes_precedence_over_negative_row(self, tmp_path: Path) -> None:
         images = tmp_path / "source"
         make_image(images / "a.jpg")
@@ -863,6 +981,68 @@ class TestFromYoloDatasetSplits:
             convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
 
 
+class TestFromYoloUnreadableInputs:
+    """Undecodable or unreadable inputs are skipped or named, never a raw traceback."""
+
+    _NON_UTF8 = b"0 0.5 0.5 0.2 0.2 # \xff\xfe\n"
+
+    def test_undecodable_prediction_label_is_skipped_and_summarized(
+        self, tmp_path: Path, capture_logs: list[str]
+    ) -> None:
+        pred_dir = tmp_path / "preds"
+        for stem in ("a", "b", "c"):
+            make_image(pred_dir / f"{stem}.jpg")
+        (pred_dir / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+        (pred_dir / "b.txt").write_bytes(self._NON_UTF8)
+        (pred_dir / "c.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(pred_dir, out, read_all_sizes=False)
+
+        assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg", "c.jpg"]
+        assert any(str(pred_dir / "b.txt") in message for message in capture_logs)
+        assert any("нечитаемых файлов разметки: 1" in message for message in capture_logs)
+
+    def test_undecodable_dataset_label_skips_its_image(self, tmp_path: Path, capture_logs: list[str]) -> None:
+        """A label that cannot be read is not mistaken for "no boxes" (a none row)."""
+        root = tmp_path / "ds"
+        for stem in ("a", "b"):
+            make_image(root / "images" / "train" / f"{stem}.jpg")
+        _write_yolo_label(root, "train", "a", "0 0.5 0.5 0.2 0.2\n")
+        (root / "labels" / "train" / "b.txt").write_bytes(self._NON_UTF8)
+        _write_yolo_yaml(root, {0: "cat"}, ["train"])
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(root, out, read_all_sizes=False)
+
+        df = pd.read_csv(out)
+        assert df["image_name"].tolist() == ["a.jpg"]
+        assert df["instance_shape"].tolist() == ["box"]
+        assert any("нечитаемых файлов разметки: 1" in message for message in capture_logs)
+
+    def test_undecodable_split_list_names_the_file(self, tmp_path: Path) -> None:
+        root = tmp_path / "ds"
+        make_image(root / "images" / "train" / "a.jpg")
+        listing = root / "train.txt"
+        listing.write_bytes(b"./images/train/a.jpg\n./images/train/\xe9.jpg\n")
+        (root / "dataset.yaml").write_text(yaml.dump({"train": "train.txt", "names": {0: "cat"}}), encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match=str(listing)) as excinfo:
+            convert_from_yolo(root, tmp_path / "out.csv", read_all_sizes=False)
+        assert isinstance(excinfo.value.__cause__, UnicodeError)
+
+    def test_corrupt_image_names_the_file(self, tmp_path: Path) -> None:
+        pred_dir = tmp_path / "preds"
+        pred_dir.mkdir()
+        image = pred_dir / "a.jpg"
+        image.write_bytes(b"not an image")
+        (pred_dir / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match=str(image)) as excinfo:
+            convert_from_yolo(pred_dir, tmp_path / "out.csv", read_all_sizes=False)
+        assert isinstance(excinfo.value.__cause__, OSError)
+
+
 class TestFromYoloPredictions:
     """Tests for bare-.txt prediction mode."""
 
@@ -939,6 +1119,26 @@ class TestFromYoloPredictions:
         df = pd.read_csv(out)
         assert df["image_name"].tolist() == ["b.jpg"]
         assert df["frame_id"].tolist() == [0]
+
+    def test_image_suffix_case_and_tif_are_matched(self, tmp_path: Path) -> None:
+        """Uppercase, mixed-case and ``.tif`` image suffixes pair with their labels."""
+        pred_dir = tmp_path / "preds"
+        for name in ("A.JPG", "b.tif", "c.Png", "d.jPg", "e.pNg", "f.tIf", "g.jPeG"):
+            make_image(pred_dir / name)
+            (pred_dir / f"{Path(name).stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        out = tmp_path / "out.csv"
+        convert_from_yolo(pred_dir, out, names_file=self._names_file(tmp_path, {0: "cat"}), read_all_sizes=False)
+
+        assert pd.read_csv(out)["image_name"].tolist() == [
+            "A.JPG",
+            "b.tif",
+            "c.Png",
+            "d.jPg",
+            "e.pNg",
+            "f.tIf",
+            "g.jPeG",
+        ]
 
     def test_missing_image_is_collected_and_the_walk_continues(self, tmp_path: Path, capture_logs: list[str]) -> None:
         """A .txt with no matching image is reported, later files still load.

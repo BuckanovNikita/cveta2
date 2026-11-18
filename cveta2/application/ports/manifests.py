@@ -1,13 +1,33 @@
 """Durable upload checkpoint persistence."""
 
+from pathlib import Path
 from typing import Protocol
 
 from cveta2.domain.storage import CloudStorageInfo
 from cveta2.domain.upload import UploadManifest
 
 
+class UploadLock(Protocol):
+    """An exclusive hold on one upload, released when the run ends."""
+
+    def release(self) -> None:
+        """Let another run of the same upload proceed."""
+        ...
+
+
 class ManifestStore(Protocol):
     """Persist upload identity and mandatory recovery checkpoints."""
+
+    def lock(self, project_id: int, fingerprint: str, *, host: str) -> UploadLock:
+        """Hold the upload exclusively, raising ``UploadInProgressError`` when another run does.
+
+        The hold must not outlive a crashed process.
+        """
+        ...
+
+    def path(self, project_id: int, fingerprint: str, *, host: str) -> Path:
+        """Name where the manifest lives, so a refusal can point the operator at it."""
+        ...
 
     def load(self, project_id: int, fingerprint: str, *, host: str) -> UploadManifest | None:
         """Read the matching recovery manifest, returning None when absent."""

@@ -272,6 +272,22 @@ or restart deletion and never depend on earlier session data. Removing obsolete 
 profile variables is an operator responsibility. Suite assertions, CVAT SDK/server
 version and product dataset contracts are unaffected by the workflow migration.
 
+## Setup and cleanup safeguards
+
+Preflight admits only Ready, uncordoned nodes without an untolerated
+`NoSchedule` or `NoExecute` taint. Connectivity lost during later probes remains
+UNAVAILABLE; an authorization refusal remains ERROR.
+
+`CVETA2_SESSION_SEED_TIMEOUT` bounds stand verification, image download and
+seeding together. Socket activity does not extend this deadline. An interrupted
+or timed-out child gets a bounded cleanup grace period, then its entire owned
+process group is terminated, including descendants whose leader has exited.
+Teardown requests namespace deletion before stopping forwards and waiting for
+deletion. A namespace create with an uncertain result authorizes automatic
+cleanup only when its per-session token matches. Blocked setup is cleaned even
+when keeping was requested; a new kept run refuses an existing live session
+record rather than overwriting it.
+
 ## Session environment interface
 
 Every live test and helper reads these names; their values describe the current

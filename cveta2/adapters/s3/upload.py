@@ -17,7 +17,7 @@ from cveta2.adapters.s3.utils import (
     run_s3_transfers,
     s3_retry,
 )
-from cveta2.domain.paths import build_s3_key, pick_latest_duplicate
+from cveta2.domain.paths import join_s3_key, pick_latest_duplicate
 from cveta2.domain.storage import CloudStorageInfo, UploadStats
 
 _S3_DUPLICATE_CONTEXT = "S3"
@@ -98,9 +98,8 @@ def _upload_one_s3(s3: S3Client, local_path: Path, bucket: str, key: str) -> Non
 class S3Uploader:
     """Upload images to S3 cloud storage, skipping already-existing files.
 
-    Uses the same S3 key construction as :class:`ImageDownloader` (via
-    :func:`build_s3_key`) to ensure consistency between upload and
-    download paths.
+    Keys join the prefix and the prefix-relative ``server_file`` with
+    :func:`join_s3_key`, matching the keys the bucket listing reported.
     """
 
     def upload(
@@ -142,7 +141,7 @@ class S3Uploader:
 
         to_upload: list[Transfer] = []
         for name, local_path in images.items():
-            s3_key = build_s3_key(cs_info.prefix, name_to_server_file[name])
+            s3_key = join_s3_key(cs_info.prefix, name_to_server_file[name])
             if s3_key in existing_keys:
                 stats.skipped_existing += 1
             else:

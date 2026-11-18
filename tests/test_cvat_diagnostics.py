@@ -21,7 +21,7 @@ from cveta2.adapters.config.settings import CvatConfig
 from cveta2.adapters.cvat.connection import open_sdk_api
 from cveta2.adapters.cvat.diagnostics import _response_summary, _safe_endpoint
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
-from cveta2.adapters.cvat.transport import cvat_read
+from cveta2.adapters.cvat.transport import cvat_read, install_global_request_timeout
 from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
 from cveta2.application.client.fetch import _FetchMixin
 from cveta2.application.client.shared import FetchContext
@@ -42,6 +42,9 @@ def _server(route: Route) -> Iterator[tuple[str, list[tuple[str, str]]]]:
             self.respond()
 
         def do_POST(self) -> None:
+            self.respond()
+
+        def do_DELETE(self) -> None:
             self.respond()
 
         def respond(self) -> None:
@@ -592,3 +595,142 @@ def test_echoed_cookie_header_and_query_secrets_are_redacted(
         assert "[redacted]" in diagnostic.response_summary
         assert ("X-Correlation-Id", "[redacted]") in diagnostic.request_ids
         assert urlsplit(diagnostic.endpoint).query == ""
+
+
+_JOB_WITH_NULL_UPDATED_DATE = {
+    "url": "http://x/api/jobs/1",
+    "id": 1,
+    "task_id": 7,
+    "project_id": 1,
+    "assignee": None,
+    "guide_id": None,
+    "dimension": "2d",
+    "bug_tracker": None,
+    "status": "annotation",
+    "stage": "annotation",
+    "state": "new",
+    "mode": "annotation",
+    "frame_count": 1,
+    "start_frame": 0,
+    "stop_frame": 0,
+    "data_chunk_size": 1,
+    "data_compressed_chunk_type": "imageset",
+    "data_original_chunk_type": "imageset",
+    "created_date": "2026-01-01T00:00:00Z",
+    "updated_date": None,
+    "issues": {"url": "x", "count": 0},
+    "labels": {"url": "x"},
+    "type": "annotation",
+    "organization": None,
+    "target_storage": None,
+    "source_storage": None,
+    "assignee_updated_date": None,
+    "parent_job_id": None,
+    "consensus_replicas": 0,
+}
+
+
+def test_undeserializable_payload_becomes_cvat_api_error() -> None:
+    """A payload the SDK cannot parse must not cross the port as an SDK error."""
+    page = {"count": 1, "next": None, "previous": None, "results": [_JOB_WITH_NULL_UPDATED_DATE]}
+    with (
+        _server(lambda _method, _path: _json_reply(200, page)) as (host, _calls),
+        Client(host, check_server_version=False) as client,
+        pytest.raises(CvatApiError) as caught,
+    ):
+        SdkCvatApiAdapter(client).get_task_jobs(7)
+
+    assert caught.value.status_code == 0
+    assert isinstance(caught.value.__cause__, TypeError)
+
+
+def test_data_meta_with_null_chunks_updated_date_still_uses_raw_fallback() -> None:
+    meta = {
+        "chunks_updated_date": None,
+        "chunk_size": 1,
+        "size": 1,
+        "image_quality": 70,
+        "start_frame": 0,
+        "stop_frame": 0,
+        "frame_filter": "",
+        "frames": [{"name": "a.jpg", "width": 4, "height": 3, "related_files": 0, "has_related_context": False}],
+        "deleted_frames": [],
+        "included_frames": None,
+    }
+    with (
+        _server(lambda _method, _path: _json_reply(200, meta)) as (host, _calls),
+        Client(host, check_server_version=False) as client,
+    ):
+        result = SdkCvatApiAdapter(client).get_task_data_meta(7)
+
+    assert [(frame.name, frame.width, frame.height) for frame in result.frames] == [("a.jpg", 4, 3)]
+
+
+def test_mistyped_host_scheme_becomes_cvat_api_error_naming_the_host() -> None:
+    """The SDK rejects the scheme before any request; the CLI needs a typed error."""
+    config = CvatConfig(host="htps://cvat.example", username="user", password="password")
+
+    with pytest.raises(CvatApiError) as caught, open_sdk_api(config):
+        pass
+
+    assert "htps://cvat.example" in str(caught.value)
+    assert caught.value.__cause__ is not None
+    assert not isinstance(caught.value.__cause__, Cveta2Error)
+
+
+def test_delete_answered_503_with_retry_after_is_sent_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """urllib3 honours Retry-After for any method; a replayed DELETE then reports 404."""
+    monkeypatch.setattr(Retry, "sleep", lambda _self, _response=None: None)
+    reply = (503, {"Content-Type": "application/json", "Retry-After": "1"}, b'{"detail": "busy"}')
+    with (
+        _server(lambda _method, _path: reply) as (host, calls),
+        Client(host, check_server_version=False) as client,
+    ):
+        with pytest.raises(CvatApiError) as caught:
+            SdkCvatApiAdapter(client).delete_task(42)
+        assert caught.value.status_code == 503
+        assert calls == [("DELETE", "/api/tasks/42")]
+
+
+def test_pool_status_retries_apply_to_reads_but_not_to_delete() -> None:
+    with (
+        _server(lambda _method, _path: _json_reply(503, {"detail": "busy"})) as (host, calls),
+        Client(host, check_server_version=False) as client,
+    ):
+        pool = client.api_client.rest_client.pool_manager.connection_from_url(host)
+        policy = Retry(total=2, status_forcelist=[503], allowed_methods=None, backoff_factor=0)
+        pool.retries = policy
+        adapter = SdkCvatApiAdapter(client)
+
+        with pytest.raises(CvatApiError):
+            adapter.delete_task(42)
+        assert [method for method, _path in calls] == ["DELETE"]
+
+        calls.clear()
+        with pytest.raises(CvatApiError):
+            adapter.get_task_annotations(7)
+        assert [method for method, _path in calls] == ["GET", "GET", "GET"]
+        assert pool.retries is policy
+        assert policy.status is None
+        assert policy.respect_retry_after_header
+
+
+def test_delete_read_timeout_is_not_replayed() -> None:
+    release = threading.Event()
+
+    def route(_method: str, _path: str) -> Reply:
+        release.wait(timeout=2)
+        return _json_reply(204, {})
+
+    with (
+        _server(route) as (host, calls),
+        Client(host, check_server_version=False) as client,
+    ):
+        install_global_request_timeout(0.2)
+        try:
+            with pytest.raises(CvatApiError):
+                SdkCvatApiAdapter(client).delete_task(42)
+        finally:
+            release.set()
+            install_global_request_timeout(None)
+        assert calls == [("DELETE", "/api/tasks/42")]

@@ -29,6 +29,7 @@ from cveta2.composition.diagnostics import check_aws_credentials
 from cveta2.composition.files import default_cache_base
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.output import PREVIEW_LIMIT
+from cveta2.interfaces.commands.interactive._history import prompt_history_dir
 
 if TYPE_CHECKING:
     import argparse
@@ -88,10 +89,9 @@ def check_config() -> bool:
     # --- Config file existence ---
     if not config_path.is_file():
         logger.warning(f"Config file not found: {config_path}. Run 'cveta2 setup' or set env variables.")
-        cfg = CvatConfig.from_env()
     else:
         logger.info(f"Config file: {config_path}")
-        cfg = CvatConfig.load()
+    cfg = CvatConfig.load(config_path)
 
     problems: list[str] = []
 
@@ -179,9 +179,11 @@ def check_cache_permissions(*, fix: bool = False) -> bool:
 
     logger.info(f"doctor: {'fixing' if fix else 'checking'} cache group permissions in {len(roots)} location(s) …")
     unfixed: Counter[str] = Counter()
+    # Prompt history is per-user by design; it must not become group-writable.
+    excluded = frozenset({prompt_history_dir().resolve()})
 
     for label, root in roots.items():
-        result = _scan_permissions(root, fix=fix)
+        result = _scan_permissions(root, fix=fix, excluded=excluded)
         if result.fixed:
             logger.info(f"{label} ({root}): granted group access to {result.fixed} path(s)")
         broken = result.broken
@@ -214,8 +216,12 @@ class _ScanResult:
         return self.broken_dirs + self.broken_files
 
 
-def _scan_permissions(root_dir: Path, *, fix: bool = False) -> "_ScanResult":
-    """Walk *root_dir* checking group access, repairing owned paths when *fix*."""
+def _scan_permissions(root_dir: Path, *, fix: bool = False, excluded: "frozenset[Path]" = frozenset()) -> "_ScanResult":
+    """Walk *root_dir* checking group access, repairing owned paths when *fix*.
+
+    Directories whose resolved path is in *excluded* are skipped with their
+    contents.
+    """
     result = _ScanResult()
 
     def record_unreadable(error: OSError) -> None:
@@ -223,8 +229,9 @@ def _scan_permissions(root_dir: Path, *, fix: bool = False) -> "_ScanResult":
         if error.filename is not None:
             _check_one(Path(error.filename), is_dir=True, out=result.broken_dirs, fix=fix)
 
-    for root, _dirs, files in os.walk(root_dir, onerror=record_unreadable):
+    for root, dirs, files in os.walk(root_dir, onerror=record_unreadable):
         root_path = Path(root)
+        dirs[:] = [name for name in dirs if (root_path / name).resolve() not in excluded]
         result.fixed += _check_one(root_path, is_dir=True, out=result.broken_dirs, fix=fix)
         for fname in files:
             result.fixed += _check_one(root_path / fname, is_dir=False, out=result.broken_files, fix=fix)

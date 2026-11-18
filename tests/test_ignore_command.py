@@ -125,6 +125,11 @@ class TestRemove:
 
         assert any("не найдена" in line for line in capture_logs)
 
+    def test_a_non_decimal_digit_selector_is_treated_as_a_task_name(self, fake: LoadedFixtures) -> None:
+        """``'²'.isdigit()`` is true but ``int('²')`` raises ``ValueError``."""
+        with pytest.raises(TaskNotFoundError):
+            _run(fake, "--remove", "²")
+
 
 class TestList:
     def test_list_reports_entries_without_opening_a_client(

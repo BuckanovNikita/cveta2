@@ -19,6 +19,7 @@ import pytest
 from botocore.exceptions import ClientError
 
 from cveta2.adapters.files.manifests import (
+    get_upload_manifest_dir,
     list_manifests,
     new_manifest,
     save_manifest,
@@ -35,13 +36,14 @@ from cveta2.composition.workflows import upload_cvat_dataset, upload_dependencie
 from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.models import CSV_COLUMNS, LabelInfo, ProjectInfo
 from cveta2.domain.paths import build_s3_key
+from cveta2.domain.upload import UploadInProgressError
 from tests.fixtures.fake_cvat_api import FakeCvatApi, RecordedWrites
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import client_with_api, make_cs_info
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from cveta2.application.ports.dtos import NewIssue, RawDataMeta
     from cveta2.composition.client import CvatClient
@@ -297,6 +299,28 @@ class TestStageImages:
             "images/c.jpg",
             "images/z.jpg",
         ]
+
+    @pytest.mark.parametrize("local", [False, True], ids=["s3_only", "also_local"])
+    def test_a_server_file_that_repeats_the_prefix_keeps_its_listed_key(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, local: bool
+    ) -> None:
+        """``images/images/a.jpg`` lists as ``images/a.jpg`` relative to the prefix.
+
+        Re-reading that relative name as a full key dropped one ``images/``:
+        the image looked absent from S3, so the upload refused it, or it was
+        uploaded a second time under a key the task then did not bind.
+        """
+        key = f"{PREFIX}/{PREFIX}/a.jpg"
+        s3 = _ListCountingS3({f"{BUCKET}/{key}": b"seeded"})
+        make_s3(monkeypatch, s3)
+        search_dirs = [make_local_images(tmp_path, ["a.jpg"])] if local else []
+        request = make_request(image_names=["a.jpg"], search_dirs=search_dirs)
+
+        staged = _stage_images(make_client(), request, deps=upload_dependencies())
+
+        assert staged.task_image_names == [key]
+        assert staged.annotations["s3_image_path"].tolist() == [key]
+        assert s3.uploaded_keys == []
 
     def test_missing_cloud_storage_names_the_project(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """The cloud-storage error must carry the project it failed for.
@@ -848,6 +872,211 @@ class TestManifestLifecycle:
         assert capture_logs
 
 
+class TestUnsafeImageNames:
+    """An image name is a path below the search roots and the storage prefix."""
+
+    @pytest.mark.parametrize(
+        ("bad", "deleted"),
+        [
+            ("../private.jpg", False),
+            ("sub/../../private.jpg", False),
+            ("/etc/private.jpg", False),
+            ("C:/private.jpg", False),
+            ("sub\\private.jpg", False),
+            ("bad\x00.jpg", False),
+            ("", False),
+            ("../private.jpg", True),
+        ],
+        ids=["parent", "nested_parent", "absolute", "drive", "backslash", "nul", "empty", "deleted_parent"],
+    )
+    def test_is_refused_before_any_lookup_or_remote_effect(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str, *, deleted: bool
+    ) -> None:
+        s3 = _ListCountingS3()
+        make_s3(monkeypatch, s3)
+        client = make_client()
+        image_dir = make_local_images(tmp_path, ["a.jpg"])
+        request = (
+            make_request(image_names=["a.jpg"], deleted_names=[bad], search_dirs=[image_dir])
+            if deleted
+            else make_request(image_names=["a.jpg", bad], search_dirs=[image_dir])
+        )
+
+        with pytest.raises(Cveta2Error) as caught:
+            upload_cvat_dataset(client, request)
+
+        assert repr(bad) in str(caught.value)
+        assert "'a.jpg'" not in str(caught.value)
+        assert s3.list_calls == 0
+        assert s3.uploaded_keys == []
+        assert _writes_of(client).created_tasks == []
+        assert list_manifests(PROJECT_ID, host=client.host) == []
+
+    def test_a_subfolder_name_is_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        name = "2026-02/a.jpg"
+        image_dir = tmp_path / "images"
+        (image_dir / "2026-02").mkdir(parents=True)
+        (image_dir / name).write_bytes(b"x")
+        make_s3(monkeypatch, _ListCountingS3())
+
+        outcome = upload_cvat_dataset(make_client(), make_request(image_names=[name], search_dirs=[image_dir]))
+
+        assert outcome.images == 1
+
+
+@contextmanager
+def _create_answers(client: CvatClient, status: int) -> Iterator[None]:
+    """Make the next task create fail with *status* before any task id exists."""
+    original = client.api.create_task
+
+    def refuse(_spec: object) -> int:
+        raise CvatApiError(f"create answered {status}", status_code=status)
+
+    client.api.create_task = refuse  # type: ignore[assignment,method-assign]
+    try:
+        yield
+    finally:
+        client.api.create_task = original  # type: ignore[method-assign]
+
+
+@pytest.mark.parametrize("column", ["bbox_x_tl", "custom_numeric_property"])
+@pytest.mark.parametrize("value", [float("inf"), float("-inf")])
+def test_nonfinite_upload_intent_is_typed_before_remote_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, column: str, value: float
+) -> None:
+    client = make_client()
+    s3 = _ListCountingS3()
+    make_s3(monkeypatch, s3)
+    image_dir = make_local_images(tmp_path, ["a.jpg"])
+    row = annotation_row("a.jpg", instance_label="", instance_shape="none")
+    row[column] = value
+
+    with pytest.raises(Cveta2Error, match=r"a\.jpg") as caught:
+        upload_cvat_dataset(client, make_request(image_names=["a.jpg"], rows=[row], search_dirs=[image_dir]))
+
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert s3.list_calls == 0
+    assert s3.objects == {}
+    assert _writes_of(client).created_tasks == []
+    assert not get_upload_manifest_dir(PROJECT_ID, host=client.host).exists()
+
+
+class TestCreateRejection:
+    """A definitive refusal of the create is not an unknown outcome."""
+
+    @pytest.mark.parametrize("status", [400, 403, 409])
+    @pytest.mark.parametrize("resume", [False, True], ids=["rerun", "resume"])
+    def test_a_rejected_create_can_be_run_again(
+        self, monkeypatch: pytest.MonkeyPatch, status: int, *, resume: bool
+    ) -> None:
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+
+        with _create_answers(client, status), pytest.raises(CvatApiError):
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+        outcome = upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=resume))
+
+        assert len(_writes_of(client).created_tasks) == 1
+        assert outcome.task_id == NEW_TASK_ID
+        assert list_manifests(PROJECT_ID, host=client.host) == []
+
+    @pytest.mark.parametrize("status", [0, 408, 429, 500, 503])
+    @pytest.mark.parametrize("resume", [False, True], ids=["rerun", "resume"])
+    def test_an_uncertain_create_still_refuses_and_names_the_manifest(
+        self, monkeypatch: pytest.MonkeyPatch, status: int, *, resume: bool
+    ) -> None:
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+        request = make_request(image_names=["a.jpg"])
+        manifest_file = get_upload_manifest_dir(PROJECT_ID, host=client.host) / f"{request_fingerprint(request)}.json"
+
+        with _create_answers(client, status), pytest.raises(CvatApiError):
+            upload_cvat_dataset(client, request)
+        with pytest.raises(Cveta2Error) as caught:
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"], resume=resume))
+
+        assert str(manifest_file) in str(caught.value)
+        assert _writes_of(client).created_tasks == []
+        assert list_manifests(PROJECT_ID, host=client.host)[0].creation_pending
+
+
+class TestConcurrentUploads:
+    """Two runs of one upload would both pass the manifest check."""
+
+    @staticmethod
+    def _start_another_run_while_listing(
+        monkeypatch: pytest.MonkeyPatch, s3: _ListCountingS3, start: Callable[[], None]
+    ) -> None:
+        """Start *start* once, during the first run's bucket listing.
+
+        That is before the first run has saved any manifest, the window in
+        which both runs pass the "unfinished upload" check.
+        """
+        original = s3.list_objects_v2
+        started: list[bool] = []
+
+        def list_then_start(**kwargs: str) -> dict[str, Any]:
+            if not started:
+                started.append(True)
+                start()
+            return original(**kwargs)
+
+        monkeypatch.setattr(s3, "list_objects_v2", list_then_start)
+
+    def test_a_second_run_of_the_same_upload_is_refused_while_the_first_holds_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = make_client()
+        s3 = seeded_bucket(["a.jpg"])
+        make_s3(monkeypatch, s3)
+        refusals: list[UploadInProgressError] = []
+
+        def second_run() -> None:
+            with pytest.raises(UploadInProgressError) as caught:
+                upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+            refusals.append(caught.value)
+
+        self._start_another_run_while_listing(monkeypatch, s3, second_run)
+        outcome = upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+
+        assert len(refusals) == 1
+        assert len(_writes_of(client).created_tasks) == 1
+        assert outcome.task_id == NEW_TASK_ID
+
+    def test_a_different_upload_is_not_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = make_client()
+        s3 = seeded_bucket(["a.jpg", "b.jpg"])
+        make_s3(monkeypatch, s3)
+
+        def other_upload() -> None:
+            upload_cvat_dataset(client, make_request(image_names=["b.jpg"]))
+
+        self._start_another_run_while_listing(monkeypatch, s3, other_upload)
+
+        upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+
+        assert len(_writes_of(client).created_tasks) == 2
+
+    def test_the_lock_is_released_when_a_run_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+
+        with _create_answers(client, 400), pytest.raises(CvatApiError):
+            upload_cvat_dataset(client, make_request(image_names=["a.jpg"]))
+
+        assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"])).task_id == NEW_TASK_ID
+
+    def test_without_os_locks_the_upload_still_runs_unlocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Where ``fcntl`` is missing no lock file is touched at all."""
+        client = make_client()
+        make_s3(monkeypatch, seeded_bucket(["a.jpg"]))
+        monkeypatch.setattr("cveta2.adapters.files.manifests.fcntl", None)
+        monkeypatch.delattr("os.fchmod", raising=False)
+
+        assert upload_cvat_dataset(client, make_request(image_names=["a.jpg"])).task_id == NEW_TASK_ID
+        assert list(get_upload_manifest_dir(PROJECT_ID, host=client.host).glob("*.lock")) == []
+
+
 class TestS3FailureAbortsBeforeTaskCreation:
     def test_a_failed_transfer_stops_the_upload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Every name enters ``server_files`` whether it uploaded or not.
@@ -879,7 +1108,10 @@ class TestS3FailureAbortsBeforeTaskCreation:
 
         assert _writes_of(client).created_tasks == []
 
-    def test_an_image_found_nowhere_stops_the_upload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("deleted", [False, True])
+    def test_an_image_found_nowhere_stops_the_upload(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, deleted: bool
+    ) -> None:
         """A name that is neither local nor on S3 reaches the same dead end.
 
         Bound into the task anyway, CVAT would reject the data after the
@@ -894,11 +1126,16 @@ class TestS3FailureAbortsBeforeTaskCreation:
         with pytest.raises(Cveta2Error, match=r"c\.jpg") as caught:
             upload_cvat_dataset(
                 client,
-                make_request(image_names=["a.jpg", "c.jpg"], search_dirs=[image_dir]),
+                make_request(
+                    image_names=["a.jpg"] if deleted else ["a.jpg", "c.jpg"],
+                    deleted_names=["c.jpg"] if deleted else [],
+                    search_dirs=[image_dir],
+                ),
             )
 
         assert "a.jpg" not in str(caught.value)
-        assert s3.uploaded_keys == [current_month_key("a.jpg")]
+        assert s3.objects == {}
+        assert s3.uploaded_keys == []
         assert _writes_of(client).created_tasks == []
         assert list_manifests(PROJECT_ID, host=client.host) == []
 

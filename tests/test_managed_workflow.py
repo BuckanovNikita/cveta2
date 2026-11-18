@@ -25,9 +25,17 @@ from cveta2.application.ports.dtos import (
 )
 from cveta2.application.ports.managed_sources import S3Object
 from cveta2.composition import managed
-from cveta2.domain.bundle.models import ApiClass, DatasetParent, Publication
+from cveta2.domain.bundle.models import (
+    ApiClass,
+    ClassInfo,
+    DatasetMetadata,
+    DatasetParent,
+    ImageRoots,
+    Publication,
+)
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
+from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SplitPolicy
+from cveta2.domain.managed.policies import assign_splits
 from cveta2.domain.models import LabelAttributeInfo, LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
 from cveta2.interfaces.cli import main
@@ -52,6 +60,7 @@ class FakeCvat:
         self.annotation_reads: list[int] = []
         self.issues: dict[int, list[RawIssue]] = {101: [], 102: []}
         self.fail_issues = False
+        self.fail_frames: set[int] = set()
         self.advance_issue_timestamp = False
         self.labels = {
             project: [
@@ -132,7 +141,7 @@ class FakeCvat:
         return self.issues[task_id]
 
     def create_issue(self, issue: NewIssue) -> None:
-        if self.fail_issues:
+        if self.fail_issues or issue.frame in self.fail_frames:
             raise Cveta2Error("Simulated feedback failure")
         task_id = issue.job_id // 10
         self.issues[task_id].append(
@@ -187,12 +196,13 @@ class FakeClearML:
     def latest(self, project: str, name: str) -> DatasetParent | None:
         if self.latest_id is None:
             return None
+        metadata = self.root / self.latest_id / "dataset.yaml"
         return DatasetParent(
             self.latest_id,
             project,
             name,
             str(len(self.publications)),
-            self.root / self.latest_id / "dataset.yaml",
+            metadata if metadata.is_file() else None,
         )
 
     def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
@@ -210,8 +220,9 @@ class FakeClearML:
         self.latest_id = dataset_id
         return Publication(dataset_id, str(len(self.publications)))
 
-    def read_snapshot(self, dataset_id: str) -> ManagedSnapshot:
-        return LocalSourceFiles().read_snapshot(self.root / dataset_id / "tasks.yaml")
+    def read_snapshot(self, dataset_id: str) -> ManagedSnapshot | None:
+        path = self.root / dataset_id / "tasks.yaml"
+        return LocalSourceFiles().read_snapshot(path) if path.is_file() else None
 
     def read_files(self, dataset_id: str, names: tuple[str, ...]) -> dict[str, bytes]:
         return {name: (self.root / dataset_id / name).read_bytes() for name in names}
@@ -324,7 +335,29 @@ def workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workflow:
     return Workflow(personal, shared, images, cvat, s3, clearml)
 
 
-def _prepare(workflow: Workflow, tmp_path: Path, *, bad: bool = False) -> Path:
+def _legacy_parent(workflow: Workflow, dataset: pd.DataFrame | None = None) -> Path:
+    """Install a standalone parent without managed extensions as the latest version."""
+    parent = workflow.clearml.root / "legacy"
+    parent.mkdir(parents=True)
+    metadata = DatasetMetadata(
+        api_url="https://classes.example/api",
+        classes={"cat": ClassInfo(prod_id=7)},
+        images=ImageRoots(local_root=[str(workflow.images)]),
+    )
+    (parent / "dataset.yaml").write_text(yaml.safe_dump(metadata.model_dump(mode="json")))
+    published = pd.DataFrame(columns=["image_name", "image_path", "split"]) if dataset is None else dataset
+    published.to_csv(parent / "dataset.csv", index=False)
+    workflow.clearml.latest_id = "legacy"
+    return parent
+
+
+def _prepare(
+    workflow: Workflow,
+    tmp_path: Path,
+    *,
+    bad: bool = False,
+    bad_frames: tuple[str, ...] = ("0",),
+) -> Path:
     fetched = tmp_path / "fetched"
     result = api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
     assert result["rows"] == 30
@@ -332,7 +365,7 @@ def _prepare(workflow: Workflow, tmp_path: Path, *, bad: bool = False) -> Path:
     transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
     if bad:
         transformed.loc[
-            transformed["source_id"].eq("main") & transformed["source_frame_id"].astype(str).eq("0"),
+            transformed["source_id"].eq("main") & transformed["source_frame_id"].astype(str).isin(bad_frames),
             "bbox_x_br",
         ] = 1
     output = tmp_path / "transformed.csv"
@@ -385,6 +418,7 @@ def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workfl
         "tasks.yaml",
     }
     source = workflow.clearml.read_snapshot(result.dataset_id)
+    assert source is not None
     assert {item.type for item in source.sources} == {"cvat", "s3-csv"}
     workflow.cvat.annotation_reads.clear()
     reused = api.fetch_dataset("combined", output_dir=tmp_path / "again", **workflow.options)
@@ -476,6 +510,145 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
     with pytest.raises(ManagedError):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+def test_csv_only_parent_cannot_become_a_ready_preparation(workflow: Workflow, tmp_path: Path) -> None:
+    parent = _legacy_parent(workflow)
+    (parent / "dataset.yaml").unlink()
+    with pytest.raises(ManagedError, match=r"dataset\.yaml"):
+        _prepare(workflow, tmp_path)
+    assert not (tmp_path / "prepared").exists()
+
+
+def test_parent_that_lost_its_metadata_blocks_publication(workflow: Workflow, tmp_path: Path) -> None:
+    parent = _legacy_parent(workflow)
+    prepared = _prepare(workflow, tmp_path)
+    (parent / "dataset.yaml").unlink()
+    with pytest.raises(ManagedError, match=r"dataset\.yaml"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_legacy_parent_adoption_keeps_published_splits_of_unambiguous_images(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    paths = sorted(str(path) for path in workflow.images.iterdir())
+    hashes = {path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in paths}
+    seeded, _ = assign_splits(pd.DataFrame({"image_path": paths}), SplitPolicy(), hashes)
+    # Published splits deliberately differ from what seeded hashing would choose.
+    published = dict(zip(paths, seeded["split"].map({"train": "val", "val": "train", "test": "train"}), strict=True))
+    ambiguous = paths[0]
+    rows = [{"image_name": Path(path).name, "image_path": path, "split": split} for path, split in published.items()]
+    rows.append({"image_name": Path(ambiguous).name, "image_path": ambiguous, "split": "test"})
+    _legacy_parent(workflow, pd.DataFrame(rows))
+    prepared = _prepare(workflow, tmp_path)
+    result = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    splits = result.groupby("image_path")["split"].agg(set).to_dict()
+    assert {path: splits[path] for path in paths if path != ambiguous} == {
+        path: {published[path]} for path in paths if path != ambiguous
+    }
+    assert splits[ambiguous] == set(seeded.loc[seeded["image_path"].eq(ambiguous), "split"])
+    report = json.loads((prepared / "report.json").read_text())
+    assert report["parent_split_conflicts"] == 1
+
+
+def test_failed_feedback_is_delivered_after_a_sibling_issue_moved_the_task(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True, bad_frames=("0", "1"))
+    workflow.cvat.advance_issue_timestamp = True
+    workflow.cvat.fail_frames = {0}
+    first = api.report_dataset_errors(prepared, **workflow.options)
+    assert (first.created, len(first.failed)) == (1, 1)
+    workflow.cvat.fail_frames.clear()
+    retried = api.report_dataset_errors(prepared, **workflow.options)
+    assert (retried.created, retried.existing, retried.failed) == (1, 1, [])
+    assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [0, 1]
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+
+def test_unexplained_task_change_still_blocks_a_pending_delivery(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True, bad_frames=("0", "1"))
+    workflow.cvat.advance_issue_timestamp = True
+    workflow.cvat.fail_frames = {0}
+    api.report_dataset_errors(prepared, **workflow.options)
+    workflow.cvat.fail_frames.clear()
+    workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
+    with pytest.raises(ManagedError):
+        api.report_dataset_errors(prepared, **workflow.options)
+    assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
+    with pytest.raises(ManagedError):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def _fetch_and_transform(workflow: Workflow, tmp_path: Path) -> tuple[Path, Path]:
+    fetched = tmp_path / "fetched"
+    api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
+    transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
+    transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    transformed.loc[
+        transformed["source_id"].eq("main") & transformed["source_frame_id"].astype(str).eq("0"),
+        "bbox_x_br",
+    ] = 1
+    output = tmp_path / "transformed.csv"
+    transformed.to_csv(output, index=False)
+    return fetched, output
+
+
+@pytest.mark.parametrize("change_labels", [False, True])
+def test_feedback_from_an_inspection_does_not_stale_a_sibling_preparation(
+    workflow: Workflow, tmp_path: Path, *, change_labels: bool
+) -> None:
+    fetched, transformed = _fetch_and_transform(workflow, tmp_path)
+    inspection = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "inspection", **workflow.options
+    )
+    assert not inspection.ready
+    workflow.cvat.advance_issue_timestamp = True
+    assert api.report_dataset_errors(inspection.directory, **workflow.options).created == 1
+    prepared = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "prepared", clean=True, **workflow.options
+    )
+    assert prepared.ready
+    if change_labels:
+        label = workflow.cvat.labels[12][0]
+        attribute = label.attributes[0].model_copy(update={"default_value": "poor"})
+        workflow.cvat.labels[12][0] = label.model_copy(update={"attributes": [attribute]})
+        with pytest.raises(ManagedError, match="CVAT source changed"):
+            api.publish_dataset(prepared.directory, **workflow.options)
+        assert workflow.clearml.publications == []
+    else:
+        assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
+    assert len(workflow.cvat.issues[101]) == 1
+
+
+@pytest.mark.parametrize("publish_sibling", [False, True])
+def test_preparation_with_a_ledger_from_before_sharing_still_publishes(
+    workflow: Workflow, tmp_path: Path, *, publish_sibling: bool
+) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.advance_issue_timestamp = True
+    assert api.report_dataset_errors(prepared, **workflow.options).created == 1
+    (shared,) = (workflow.personal.parent / "managed-feedback").iterdir()
+    # Earlier versions kept the only ledger inside the preparation directory.
+    local = shared.rename(prepared / "feedback.json")
+    original_ledger = local.read_bytes()
+    repeated = api.report_dataset_errors(prepared, **workflow.options)
+    assert (repeated.created, repeated.existing, repeated.failed) == (0, 1, [])
+    target = prepared
+    if publish_sibling:
+        sibling = api.prepare_managed_dataset(
+            "combined",
+            tmp_path / "transformed.csv",
+            source=tmp_path / "fetched",
+            output_dir=tmp_path / "sibling",
+            clean=True,
+            **workflow.options,
+        )
+        assert sibling.ready
+        target = sibling.directory
+    assert api.publish_dataset(target, **workflow.options).dataset_id == "version-1"
+    assert len(workflow.cvat.issues[101]) == 1
+    assert local.read_bytes() == original_ledger
 
 
 @pytest.mark.parametrize("damage", ["missing-registry", "missing-labels", "changed-registry", "changed-labels"])

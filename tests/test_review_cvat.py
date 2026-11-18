@@ -854,8 +854,9 @@ def test_fresh_manifest_preserves_pending_false_identity_state(
 def test_nonfinite_semantic_property_is_not_serialized_as_upload_intent() -> None:
     annotations = rows()
     annotations["custom_numeric_property"] = float("inf")
-    with pytest.raises(ValueError, match="JSON"):
+    with pytest.raises(Cveta2Error) as caught:
         compute_fingerprint(["a.jpg"], [], [], annotations=annotations)
+    assert isinstance(caught.value.__cause__, ValueError)
 
 
 def test_disconnected_name_resolution_retains_cached_identity() -> None:

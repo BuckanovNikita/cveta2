@@ -158,8 +158,10 @@ commit hook still performs development verification.
 `test` uses testmon affected selection without a marker expression and excludes
 `tests/integration`, including its conftest. `test-full` runs all units while updating
 history. Testmon's environment namespace incorporates interpreter identity, locked
-dependencies, verification configuration, static test/package assets and complete
-relative source/test file membership. An unseen namespace needs a full baseline;
+dependencies, verification configuration, static test/package assets, complete
+relative source/test file membership and the content of `scripts/` and of pytest
+startup code (every `conftest.py` and each `-p` plugin of the pytest `addopts`),
+which no test records as a dependency. An unseen namespace needs a full baseline;
 returning to unchanged previously verified inputs may reuse matching history.
 Python-content dependency selection remains testmon's responsibility. If an input
 class cannot be reliably represented, use `test-full` conservatively. A deselected
@@ -182,7 +184,8 @@ exits 3, ERROR exits 1. Missing prerequisites, a missing context or a refused
 namespace permission are errors, not reasons to wait indefinitely. Preflight
 creates nothing. Recheck before every live run. Task-driven availability waiting
 remains bounded; explicitly requested operator waiting is separate. Readiness,
-seeding and teardown keep their own operation timeouts; the preflight deadline is
+seeding and teardown keep their own operation timeouts (`CVETA2_SESSION_READY_TIMEOUT`
+and `CVETA2_SESSION_SEED_TIMEOUT`; expiry is blocked setup); the preflight deadline is
 not an overall live-suite deadline.
 
 When infrastructure is unavailable, report the reason and deferred checks; continue
@@ -306,7 +309,8 @@ deletes or stashes. Mandatory guards live in executable commands, not bypassable
 Task preconditions.
 
 The default hook is always-selected, serial `verify`. Conventional Commit validation
-remains active. Intentional lockfile-only updates use `build(deps):` and require no
+remains active: the hook dispatcher clears `SKIP` and `PREK_SKIP` for the `commit-msg`
+stage, so they defer pre-commit hooks only. Intentional lockfile-only updates use `build(deps):` and require no
 exception. Intermediate task commits may use `SKIP=verify` to defer development
 verification explicitly; clear `SKIP` before final verification. There is no pre-push
 stage. Manual hook aliases, when present, route to Task; situational skills use Task

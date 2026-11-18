@@ -128,10 +128,10 @@ def run_ignore(args: "argparse.Namespace") -> None:
 
         if args.remove:
             stored = {entry.id: entry for entry in ignore_cfg.get_ignored_entries(project_name)}
-            stored_ids = {int(selector) for selector in args.remove if selector.isdigit()} & stored.keys()
+            stored_ids = {int(selector) for selector in args.remove if selector.isdecimal()} & stored.keys()
             removal_entries: list[IgnoredTask | TaskInfo] = [stored[task_id] for task_id in sorted(stored_ids)]
             remaining = [
-                selector for selector in args.remove if not selector.isdigit() or int(selector) not in stored_ids
+                selector for selector in args.remove if not selector.isdecimal() or int(selector) not in stored_ids
             ]
             if remaining:
                 removal_entries.extend(_resolve_selectors(client, project_id, remaining))

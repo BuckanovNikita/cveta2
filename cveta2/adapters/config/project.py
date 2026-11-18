@@ -9,16 +9,20 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 from typing import cast
 
 import yaml
-from pydantic import JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from cveta2.domain.managed.models import (
+    CvatIdentity,
     ManagedError,
     MigrationRequired,
     ProjectConfig,
@@ -38,21 +42,45 @@ _SHARED_KEYS = {"projects", "datasets", "sync_roots", "ignore", "clearml"}
 _POLICY_KEYS = {"ignored_prefix", "task_cache_s3"}
 
 
-def _check_nodes(node: yaml.Node, active: set[int]) -> None:
-    """Reject duplicate/non-string mapping keys and recursive aliases."""
+class SharedIdentityMismatchError(ManagedError):
+    """The personal CVAT host/organization differ from an existing shared file."""
+
+
+class SharedConfigConflictError(ManagedError):
+    """Another writer changed the shared policy this save would overwrite."""
+
+
+def _yaml_location(mark: yaml.Mark | None) -> str:
+    """Return a one-based ``, line N, column M`` suffix, or nothing without a mark."""
+    return "" if mark is None else f", line {mark.line + 1}, column {mark.column + 1}"
+
+
+def _yaml_error_location(error: yaml.YAMLError) -> str:
+    if isinstance(error, yaml.MarkedYAMLError):
+        return _yaml_location(error.problem_mark or error.context_mark)
+    return ""
+
+
+def _check_nodes(node: yaml.Node, active: set[int], path: Path) -> None:
+    """Reject duplicate/non-string mapping keys and recursive aliases.
+
+    Diagnostics name the file and position, never the offending key or value.
+    """
     if id(node) in active:
-        raise ManagedError("Recursive YAML configuration is unsupported")
+        raise ManagedError(f"Recursive YAML configuration is unsupported: {path}{_yaml_location(node.start_mark)}")
     active.add(id(node))
     if isinstance(node, yaml.MappingNode):
         keys: set[str] = set()
         for key, value in node.value:
             if not isinstance(key, yaml.ScalarNode) or key.tag != "tag:yaml.org,2002:str" or key.value in keys:
-                raise ManagedError("Configuration mapping keys must be unique strings")
+                raise ManagedError(
+                    f"Configuration mapping keys must be unique strings: {path}{_yaml_location(key.start_mark)}"
+                )
             keys.add(key.value)
-            _check_nodes(value, active)
+            _check_nodes(value, active, path)
     elif isinstance(node, yaml.SequenceNode):
         for item in node.value:
-            _check_nodes(item, active)
+            _check_nodes(item, active, path)
     active.remove(id(node))
 
 
@@ -67,16 +95,20 @@ def personal_config_path(path: Path | None = None) -> Path:
 
 def read_config(path: Path, *, missing_ok: bool = False) -> dict[str, object]:
     """Read a strict YAML mapping without exposing source scalars on failures."""
-    if missing_ok and not path.exists():
-        return {}
     try:
+        if missing_ok and not path.exists():
+            return {}
         content = path.read_bytes()
         node = yaml.compose(content, Loader=yaml.SafeLoader)
         if node is not None:
-            _check_nodes(node, set())
+            _check_nodes(node, set(), path)
         raw: object = yaml.safe_load(content)
-    except (OSError, UnicodeError, yaml.YAMLError) as error:
+    except (OSError, UnicodeError) as error:
         raise ManagedError(f"Cannot read configuration {path}: {type(error).__name__}") from error
+    except yaml.YAMLError as error:
+        raise ManagedError(
+            f"Cannot read configuration {path}: {type(error).__name__}{_yaml_error_location(error)}"
+        ) from error
     if raw is None:
         return {}
     if not isinstance(raw, dict):
@@ -165,16 +197,29 @@ def _yaml_bytes(data: dict[str, object]) -> bytes:
     return yaml.safe_dump(data, allow_unicode=True, sort_keys=False).encode("utf-8")
 
 
-def _stage_bytes(path: Path, content: bytes, purpose: str) -> Path:
-    """Create an exclusively claimed private stage beside its destination."""
+def _stage_bytes(path: Path, content: bytes, purpose: str, *, private: bool = True) -> Path:
+    """Create an exclusively claimed stage beside its destination.
+
+    Stages are owner-only unless *private* is False: a shared team file is
+    created through its stage, so that stage takes the umask-default mode.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.{purpose}-", delete=False) as stream:
-        temporary = Path(stream.name)
+    while True:
+        temporary = path.with_name(f".{path.name}.{purpose}-{secrets.token_hex(8)}")
         try:
+            descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600 if private else 0o666)
+        except FileExistsError:
+            continue
+        break
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
             stream.write(content)
-        except OSError:
-            temporary.unlink(missing_ok=True)
-            raise
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        # A full disk may surface only on flush/close; never leave a partial stage.
+        temporary.unlink(missing_ok=True)
+        raise
     return temporary
 
 
@@ -187,10 +232,15 @@ def _private_write(
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if not replace:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # Claim the name exclusively, then fill it by atomic replacement: an
+        # interrupted write leaves at worst an empty file, never partial bytes.
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
         try:
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(content)
+            claimed = _stage_bytes(path, content, "claim")
+            try:
+                claimed.replace(path)
+            finally:
+                claimed.unlink(missing_ok=True)
         except OSError:
             path.unlink(missing_ok=True)
             raise
@@ -209,17 +259,65 @@ def _private_write(
         temporary.unlink(missing_ok=True)
 
 
+def write_personal_file(path: Path, content: bytes) -> None:
+    """Replace a credential-bearing personal file atomically with owner-only access.
+
+    A failed write leaves the previous file untouched: the bytes go to a private
+    stage beside the destination first and only a complete stage replaces it.
+    """
+    _private_write(path, content, replace=True)
+
+
 def attach_project_config(personal_path: Path, project_path: Path) -> Path:
     """Validate and save an absolute reference without changing shared bytes."""
     selected = project_path.expanduser().resolve()
     raw = read_config(personal_path, missing_ok=True)
     validate_personal(raw, attached=True)
+    _validated_shared_file(selected)
+    return _save_attachment(personal_path, raw, selected)
+
+
+def attach_existing_project_config(personal_path: Path, project_path: Path) -> Path:
+    """Attach an existing shared file from the setup wizard.
+
+    A legacy personal file carries the CVAT host and organization the wizard
+    just saved.  When they equal the shared identity they are dropped in the
+    same atomic personal write that adds the reference; otherwise the
+    attachment is refused.  The shared file is never rewritten.
+    """
+    selected = project_path.expanduser().resolve()
+    raw = read_config(personal_path, missing_ok=True)
+    shared = _validated_shared_file(selected)
+    cvat = dict(_dict(raw.get("cvat")))
+    if "host" in cvat or "organization" in cvat:
+        try:
+            personal_identity = CvatIdentity.model_validate(
+                {"host": cvat.get("host"), "organization": cvat.get("organization")}
+            )
+        except ValidationError:
+            personal_identity = None
+        if personal_identity != shared.cvat:
+            raise SharedIdentityMismatchError(
+                f"CVAT host/organization in {personal_path} differ from shared configuration {selected}; "
+                "correct them in setup or choose the shared file of that server"
+            )
+        cvat.pop("host", None)
+        cvat.pop("organization", None)
+        raw = {**raw, "cvat": cvat}
+    validate_personal(raw, attached=True)
+    return _save_attachment(personal_path, raw, selected)
+
+
+def _validated_shared_file(selected: Path) -> ProjectConfig:
     try:
-        ProjectConfig.model_validate(read_config(selected))
+        return ProjectConfig.model_validate(read_config(selected))
     except ValidationError as error:
         raise ManagedError(f"Invalid shared project configuration: {selected}") from error
-    raw["schema_version"] = 1
-    raw["project_config"] = str(selected)
+
+
+def _save_attachment(personal_path: Path, raw: dict[str, object], selected: Path) -> Path:
+    """Write the versioned personal file that references *selected*."""
+    raw = {**raw, "schema_version": 1, "project_config": str(selected)}
     try:
         validate_personal(raw, attached=True)
     except ManagedError as error:
@@ -228,6 +326,26 @@ def attach_project_config(personal_path: Path, project_path: Path) -> Path:
         ) from error
     _private_write(personal_path, _yaml_bytes(raw), replace=True)
     return selected
+
+
+def _same_shared(path: Path, document: dict[str, object]) -> bool:
+    """Compare an existing shared file with a proposed document by meaning.
+
+    A hand-written file may omit null defaults or differ in formatting; only
+    an unvalidatable side falls back to comparing the raw mappings.
+    """
+    existing = read_config(path)
+    try:
+        return ProjectConfig.model_validate(existing) == ProjectConfig.model_validate(document)
+    except ValidationError:
+        return existing == document
+
+
+def _read_shared_bytes(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError as error:
+        raise ManagedError(f"Cannot read configuration {path}: {type(error).__name__}") from error
 
 
 def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinition]:
@@ -241,18 +359,116 @@ def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinitio
     return result
 
 
-def write_shared_project_fields(personal_path: Path, changes: dict[str, dict[str, object]]) -> Path:
-    """Explicit policy writers update shared fields; no personal shadow copies."""
+def _check_shared_policy_lock(descriptor: int, lock_path: Path) -> None:
+    """Reject links, special files and a lock name replaced while it was opened."""
+    opened = os.fstat(descriptor)
+    named = lock_path.lstat()
+    if (
+        not stat.S_ISREG(named.st_mode)
+        or not stat.S_ISREG(opened.st_mode)
+        or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)
+    ):
+        raise ManagedError(f"Shared configuration lock must be a regular nonsymlink file: {lock_path}")
+
+
+def _open_shared_policy_lock(path: Path, lock_path: Path) -> int:
+    """Open a stable regular lock inode, preserving the shared file's group access."""
+    flags = os.O_RDWR | (os.O_NOFOLLOW if os.name == "posix" else 0)
+    created = False
+    try:
+        descriptor = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+    except FileExistsError:
+        descriptor = os.open(lock_path, flags)
+    try:
+        _check_shared_policy_lock(descriptor, lock_path)
+        if created:
+            os.write(descriptor, b"0")
+            if os.name == "posix":
+                shared = path.stat()
+                os.fchown(descriptor, -1, shared.st_gid)
+                os.fchmod(descriptor, stat.S_IMODE(shared.st_mode))
+    except (OSError, ManagedError):
+        os.close(descriptor)
+        raise
+    else:
+        return descriptor
+
+
+@contextmanager
+def _shared_policy_lock(path: Path) -> Iterator[None]:
+    """Hold a nonblocking OS lock; process termination releases it automatically.
+
+    The sibling inode stays in place, because unlinking it would allow two
+    writers to lock different files. Only the open descriptor owns the hold.
+    """
+    lock_path = path.with_name(f".{path.name}.lock")
+    try:
+        descriptor = _open_shared_policy_lock(path, lock_path)
+    except OSError as error:
+        raise ManagedError(f"Cannot open shared configuration lock {lock_path}: {type(error).__name__}") from error
+    try:
+        try:
+            if sys.platform == "win32":
+                import msvcrt  # noqa: PLC0415 - platform-specific standard-library locking
+
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl  # noqa: PLC0415 - platform-specific standard-library locking
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise SharedConfigConflictError(
+                f"Cannot lock shared configuration {path}; another writer may be active. Retry the change."
+            ) from error
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def write_shared_project_fields(
+    personal_path: Path,
+    changes: dict[str, dict[str, object]],
+    *,
+    expected: dict[str, dict[str, object]] | None = None,
+) -> Path:
+    """Explicit policy writers update shared fields; no personal shadow copies.
+
+    *expected* holds the caller's view of each changed field before its edit.
+    A field another writer has since set to a different value is refused with
+    :class:`SharedConfigConflictError`, as is a file replaced during this save.
+    """
     path = project_config_path(personal_path)
     if path is None:
         raise ManagedError("No shared project configuration is selected")
-    config = load_project_config(personal_path)
+    with _shared_policy_lock(path):
+        return _write_shared_project_fields_locked(personal_path, path, changes, expected=expected)
+
+
+def _write_shared_project_fields_locked(
+    personal_path: Path,
+    path: Path,
+    changes: dict[str, dict[str, object]],
+    *,
+    expected: dict[str, dict[str, object]] | None,
+) -> Path:
+    """Read, merge and replace while cooperating policy writers are excluded."""
+    original = _read_shared_bytes(path)
+    config = load_project_config(personal_path, path)
     projects = dict(config.projects)
     aliases = shared_projects_by_name(config)
     for name, fields in changes.items():
         project = aliases.get(name)
         if project is None:
             raise ManagedError(f"Unknown shared project: {name}")
+        for field, value in fields.items():
+            current = getattr(project, field)
+            if expected is not None and current not in (expected[name][field], value):
+                raise SharedConfigConflictError(
+                    f"Shared configuration {path} changed since it was loaded: project {name!r}, field {field}; "
+                    "reload and repeat the change"
+                )
         key = next(key for key, value in projects.items() if value.id == project.id)
         projects[key] = ProjectDefinition.model_validate({**project.model_dump(), **fields})
     updated = ProjectConfig.model_validate(
@@ -265,6 +481,10 @@ def write_shared_project_fields(personal_path: Path, changes: dict[str, dict[str
     # replace a read-only file through its writable parent directory.
     if path.stat().st_mode & 0o222 == 0:
         raise ManagedError(f"Shared project configuration is read-only: {path}")
+    if expected is not None and _read_shared_bytes(path) != original:
+        raise SharedConfigConflictError(
+            f"Shared configuration {path} changed during this save; reload and repeat the change"
+        )
     _private_write(path, _yaml_bytes(updated.model_dump()), replace=True, preserve_permissions=True)
     return path
 
@@ -367,9 +587,10 @@ def _migration_projects(
         projects[key] = {
             "id": project_id,
             "name": name,
-            "sync_root": sync.get(name),
+            # Legacy readers treat a blank value as "not configured".
+            "sync_root": sync.get(name) or None,
             "ignore": ignore_rows,
-            **{field: policies.get(field) for field in _POLICY_KEYS},
+            **{field: policies.get(field) or None for field in _POLICY_KEYS},
         }
     return projects
 
@@ -449,8 +670,14 @@ def migration_proposal(personal_path: Path, project_path: Path | None = None) ->
         "datasets": {},
     }
     if not unresolved:
-        shared = ProjectConfig.model_validate(shared).model_dump()
-    if shared_path.exists() and read_config(shared_path) != shared:
+        try:
+            shared = ProjectConfig.model_validate(shared).model_dump()
+        except ValidationError as error:
+            unresolved.extend(
+                "Invalid shared value requires review: " + ".".join(str(part) for part in issue["loc"])
+                for issue in error.errors()
+            )
+    if shared_path.exists() and not _same_shared(shared_path, shared):
         unresolved.append("Existing shared configuration differs; reconcile it explicitly before migration")
     return MigrationProposal(
         personal_path,
@@ -466,27 +693,68 @@ def _journal_path(personal_path: Path) -> Path:
     return personal_path.with_name(f"{personal_path.name}.migration.json")
 
 
+class _MigrationJournal(BaseModel):
+    """Paths and hashes of one approved activation; never file contents."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    shared_path: Path
+    staged_shared: Path
+    staged_personal: Path
+    shared_hash: str
+    personal_hash: str
+    original_hash: str
+
+
+def _journal_recovery_hint(journal_path: Path, personal_path: Path) -> str:
+    return (
+        f"check {personal_path} and the shared file (restore the personal file from its .bak backup "
+        f"if it is damaged), then delete {journal_path} and run setup --migrate-config again"
+    )
+
+
+def _read_journal(journal_path: Path, personal_path: Path) -> _MigrationJournal:
+    """Parse the journal, turning damaged content into an actionable error."""
+    try:
+        return _MigrationJournal.model_validate_json(journal_path.read_bytes())
+    except (OSError, ValidationError) as error:
+        raise ManagedError(
+            f"Migration journal {journal_path} is unreadable or damaged ({type(error).__name__}); "
+            f"{_journal_recovery_hint(journal_path, personal_path)}"
+        ) from error
+
+
+def _read_stage(stage: Path, journal_path: Path, personal_path: Path) -> bytes:
+    try:
+        return stage.read_bytes()
+    except FileNotFoundError as error:
+        raise ManagedError(
+            f"Migration journal {journal_path} references a missing stage {stage}; "
+            f"{_journal_recovery_hint(journal_path, personal_path)}"
+        ) from error
+
+
 def recover_migration(personal_path: Path) -> bool:
     """Complete a previously approved activation using verified staged bytes."""
     journal_path = _journal_path(personal_path)
     if not journal_path.exists():
         return False
-    journal = cast("dict[str, str]", json.loads(journal_path.read_bytes()))
-    shared = Path(journal["shared_path"])
-    staged_shared = Path(journal["staged_shared"])
-    staged_personal = Path(journal["staged_personal"])
+    journal = _read_journal(journal_path, personal_path)
+    shared = journal.shared_path
+    staged_shared = journal.staged_shared
+    staged_personal = journal.staged_personal
     if shared.exists():
-        if _digest(shared.read_bytes()) != journal["shared_hash"]:
+        if _digest(shared.read_bytes()) != journal.shared_hash:
             raise ManagedError("Migration recovery found a conflicting shared file")
     else:
-        if _digest(staged_shared.read_bytes()) != journal["shared_hash"]:
+        if _digest(_read_stage(staged_shared, journal_path, personal_path)) != journal.shared_hash:
             raise ManagedError("Migration shared stage changed")
         os.link(staged_shared, shared)
     current_hash = _digest(personal_path.read_bytes())
-    if current_hash != journal["personal_hash"]:
-        if current_hash != journal["original_hash"]:
+    if current_hash != journal.personal_hash:
+        if current_hash != journal.original_hash:
             raise ManagedError("Personal configuration changed during migration recovery")
-        if _digest(staged_personal.read_bytes()) != journal["personal_hash"]:
+        if _digest(_read_stage(staged_personal, journal_path, personal_path)) != journal.personal_hash:
             raise ManagedError("Migration personal stage changed")
         staged_personal.replace(personal_path)
     staged_personal.unlink(missing_ok=True)
@@ -499,7 +767,9 @@ def _claim_migration_journal(proposal: MigrationProposal, personal_bytes: bytes,
     """Claim one approved transaction without replacing another writer's journal."""
     staged_personal = _stage_bytes(proposal.personal_path, personal_bytes, "migration")
     try:
-        staged_shared = _stage_bytes(proposal.shared_path, shared_bytes, "migration")
+        # The shared stage becomes the team file through a hard link, so it
+        # takes the umask-default mode; the personal stage holds credentials.
+        staged_shared = _stage_bytes(proposal.shared_path, shared_bytes, "migration", private=False)
     except OSError:
         staged_personal.unlink(missing_ok=True)
         raise
@@ -540,7 +810,7 @@ def activate_migration(proposal: MigrationProposal) -> Path:
     )
     if proposal.shared_path.exists() and proposal.shared_path.read_bytes() != shared_bytes:
         # Compare semantics as a pre-existing human file may use other formatting.
-        if read_config(proposal.shared_path) != proposal.shared:
+        if not _same_shared(proposal.shared_path, proposal.shared):
             raise ManagedError("Existing shared file differs; it will not be overwritten")
         shared_bytes = proposal.shared_path.read_bytes()
     if proposal.personal == read_config(proposal.personal_path):

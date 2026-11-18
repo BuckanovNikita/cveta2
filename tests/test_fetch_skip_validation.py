@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ProfileNotFound
 
 import cveta2
 from cveta2.adapters.execution.concurrency import configure_workers
@@ -582,3 +582,22 @@ def test_invalidation_failure_aborts_before_task_mutation(
     assert api.update_attempts == []
     assert api.annotation_calls == []
     assert not (tmp_path / "output").exists()
+
+
+def test_promotion_without_an_s3_client_aborts_before_task_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The barrier cannot prove the mirror is clear, so it must not write."""
+    monkeypatch.setenv("CVETA2_DISABLE_CACHE", "false")
+    api = PromotionApi({11: [_job(101)]})
+    config, _root = _custom_config(tmp_path, api.get_project(1))
+
+    def missing_profile(_endpoint: str | None) -> None:
+        raise ProfileNotFound(profile="absent")
+
+    monkeypatch.setattr("cveta2.adapters.s3.task_cache.make_s3_client", missing_profile)
+    with pytest.raises(Cveta2Error, match="кэш задачи 11"):
+        _run(api, tmp_path / "output", use_cache=True, config_path=config)
+    assert api.update_attempts == []
+    assert api.annotation_calls == []

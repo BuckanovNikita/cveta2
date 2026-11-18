@@ -8,8 +8,8 @@ paths (possibly owned by other users) are never touched.
 """
 
 import os
-import threading
 from pathlib import Path
+from tempfile import mkstemp
 
 from loguru import logger
 
@@ -58,17 +58,19 @@ def write_shared_bytes(path: Path, data: bytes) -> None:
 
 
 def replace_shared_bytes(path: Path, data: bytes) -> None:
-    """Write *data* under a per-writer temp name next to *path*, then rename it in.
+    """Write *data* through an exclusively created random sibling, then rename it in.
 
     A reader only ever sees the finished file: the bytes reach *path* by an
     atomic rename, and a write that fails midway takes its temp file with it
     before the error propagates.
     """
     ensure_shared_dir(path.parent)
-    tmp_path = path.with_name(f"{path.name}.tmp{os.getpid()}-{threading.get_ident()}")
+    descriptor, temporary = mkstemp(prefix=f"{path.name}.tmp", dir=path.parent)
+    tmp_path = Path(temporary)
     try:
-        write_shared_bytes(tmp_path, data)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+        _chmod_quiet(tmp_path, FILE_MODE)
         tmp_path.replace(path)
-    except OSError:
+    finally:
         tmp_path.unlink(missing_ok=True)
-        raise

@@ -86,7 +86,7 @@ def upload(  # noqa: PLR0913
             labels=tuple(labels),
             resume=resume,
         )
-        outcome = upload_cvat_dataset(c, request)
+        outcome = upload_cvat_dataset(c, request, config_path=config_path)
         return UploadResult(
             task_id=outcome.task_id,
             task_name=outcome.task_name,

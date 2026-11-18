@@ -2,8 +2,9 @@
 
 import importlib.resources
 import os
+import stat
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, TypedDict
+from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypedDict
 
 import yaml
 from loguru import logger
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from cveta2.adapters.config.project import (
     optional_project_config,
     shared_projects_by_name,
+    write_personal_file,
     write_shared_project_fields,
 )
 from cveta2.application.settings import (
@@ -24,7 +26,7 @@ from cveta2.domain.errors import (
     InteractiveModeRequiredError,
     MissingCredentialsError,
 )
-from cveta2.domain.managed.models import ManagedError, MigrationRequired, ProjectConfig
+from cveta2.domain.managed.models import ManagedError, MigrationRequired, ProjectConfig, ProjectDefinition
 
 if TYPE_CHECKING:
     from typing_extensions import Self
@@ -98,10 +100,14 @@ def _load_preset_data() -> dict[str, object]:
 
 def _load_raw_yaml(path: Path) -> dict[str, object]:
     """Load a YAML file and return its top-level mapping (or empty dict)."""
-    if not path.is_file():
-        return {}
     try:
-        data = yaml.safe_load(path.read_bytes()) or {}
+        if not path.is_file():
+            return {}
+        content = path.read_bytes()
+    except OSError as error:
+        raise Cveta2Error(f"Не удалось прочитать конфигурацию {path}: {type(error).__name__}.") from error
+    try:
+        data = yaml.safe_load(content) or {}
     except yaml.YAMLError as e:
         details = type(e).__name__
         if isinstance(e, yaml.MarkedYAMLError):
@@ -137,9 +143,37 @@ _YAML_DUMP: "_YamlDumpOptions" = {
 
 
 def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
-    """Write *data* as UTF-8 YAML, creating the config directory if needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(yaml.safe_dump(data, **_YAML_DUMP))
+    """Atomically write *data* as owner-only UTF-8 YAML, creating the config directory.
+
+    The personal file holds the CVAT password, so it is never group- or
+    world-readable, and a failed write keeps the previous file intact.
+    """
+    try:
+        write_personal_file(path, yaml.safe_dump(data, **_YAML_DUMP))
+    except OSError as error:
+        raise Cveta2Error(f"Не удалось записать конфигурацию {path}: {type(error).__name__}.") from error
+
+
+def _restrict_to_owner(path: Path) -> None:
+    """Remove group/other access from a password-bearing file the user owns.
+
+    Files written by older versions followed the umask (often ``0644``).  A
+    file owned by someone else, or a refused ``chmod``, is reported, not fatal.
+    """
+    if os.name != "posix":
+        return
+    try:
+        status = path.stat()
+        if not stat.S_IMODE(status.st_mode) & 0o077:
+            return
+        if status.st_uid != os.getuid():
+            logger.warning(f"Файл с паролем {path} доступен другим пользователям; ограничьте права до 0600.")
+            return
+        path.chmod(0o600)
+    except OSError as error:
+        logger.warning(f"Не удалось ограничить права файла с паролем {path}: {type(error).__name__}.")
+        return
+    logger.warning(f"Права файла с паролем {path} ограничены до 0600.")
 
 
 def _project_alias(project_key: str, shared: ProjectConfig) -> str:
@@ -179,10 +213,18 @@ def _shared_section(section: str, personal: object, shared: ProjectConfig) -> ob
     return personal
 
 
-def _split_cache_policy(values: dict[str, object], shared: ProjectConfig) -> dict[str, dict[str, object]]:
-    """Remove shared fields from serialized local cache values."""
+def _split_cache_policy(
+    values: dict[str, object], shared: ProjectConfig, loaded: object = None
+) -> dict[str, dict[str, object]]:
+    """Remove shared fields from serialized local cache values.
+
+    With *loaded* (the section as serialized when it was loaded), only policy
+    the caller edited since then counts as a change; otherwise every value
+    that differs from *shared* does.
+    """
     changes: dict[str, dict[str, object]] = {}
     projects = values.get("projects", {})
+    loaded_projects = _dict_value(_dict_value(loaded).get("projects"))
     if isinstance(projects, dict):
         aliases = shared_projects_by_name(shared)
         for name, fields in projects.items():
@@ -193,7 +235,11 @@ def _split_cache_policy(values: dict[str, object], shared: ProjectConfig) -> dic
                 selected_project = aliases.get(name)
                 if selected_project is None:
                     raise ManagedError(f"Unknown shared project: {name}")
-                changed = {key: value for key, value in policy.items() if value != getattr(selected_project, key)}
+                if loaded is None:
+                    changed = {key: value for key, value in policy.items() if value != getattr(selected_project, key)}
+                else:
+                    before = _dict_value(loaded_projects.get(name))
+                    changed = {key: value for key, value in policy.items() if value != before.get(key)}
                 if changed:
                     changes[name] = changed
     values["projects"] = (
@@ -202,25 +248,74 @@ def _split_cache_policy(values: dict[str, object], shared: ProjectConfig) -> dic
     return changes
 
 
-def _save_shared_section(path: Path, section: str, serialized: object, shared: ProjectConfig) -> object:
-    """Route explicit policy edits to shared storage; local saves do not shadow it."""
+def _dict_value(value: object) -> dict[str, object]:
+    return value if isinstance(value, dict) else {}
+
+
+def _snapshot_values(changes: dict[str, dict[str, object]], snapshot: ProjectConfig) -> dict[str, dict[str, object]]:
+    """Shared values of the changed fields as they were when the section loaded."""
+    aliases = shared_projects_by_name(snapshot)
+    expected: dict[str, dict[str, object]] = {}
+    for name, fields in changes.items():
+        project = aliases.get(name)
+        expected[name] = {
+            field: getattr(project, field)
+            if project is not None
+            else ProjectDefinition.model_fields[field].get_default(call_default_factory=True)
+            for field in fields
+        }
+    return expected
+
+
+class _SharedBaseline(NamedTuple):
+    """What a section saw when it last loaded or saved shared policy."""
+
+    snapshot: ProjectConfig  # the shared file
+    section: object  # the section's own serialized form
+
+
+def _save_shared_section(
+    path: Path,
+    section: str,
+    serialized: object,
+    shared: ProjectConfig,
+    baseline: _SharedBaseline | None = None,
+) -> object:
+    """Route explicit policy edits to shared storage; local saves do not shadow it.
+
+    With a *baseline*, only projects the caller edited since it was taken are
+    written, so another writer's later change to a different project survives;
+    a concurrent change to the same field is refused instead of overwritten.
+    Without one (a section built in memory) every value that differs from the
+    current shared file is written.
+    """
+    snapshot, loaded = baseline if baseline is not None else (None, None)
     changes: dict[str, dict[str, object]] = {}
     values = dict(serialized) if isinstance(serialized, dict) else {}
     if section in {"sync_roots", "ignore"}:
         field = "sync_root" if section == "sync_roots" else "ignore"
+        default: object = None if field == "sync_root" else []
         aliases = shared_projects_by_name(shared)
         unknown = set(values) - set(aliases)
         if unknown:
             raise ManagedError(f"Unknown shared projects: {sorted(unknown)}")
-        for key, project in shared.projects.items():
-            name = _project_alias(key, shared)
-            value = values.get(name, values.get(key, None if field == "sync_root" else []))
-            if value != getattr(project, field):
-                changes[name] = {field: value}
+        if snapshot is None:
+            for key, project in shared.projects.items():
+                name = _project_alias(key, shared)
+                value = values.get(name, values.get(key, default))
+                if value != getattr(project, field):
+                    changes[name] = {field: value}
+        else:
+            before = _dict_value(loaded)
+            for name in sorted(set(values) | set(before)):
+                value = values.get(name, default)
+                if value != before.get(name, default):
+                    changes[name] = {field: value}
     elif section == "cache":
-        changes = _split_cache_policy(values, shared)
+        changes = _split_cache_policy(values, shared, loaded if snapshot is not None else None)
     if changes:
-        write_shared_project_fields(path, changes)
+        expected = _snapshot_values(changes, snapshot) if snapshot is not None else None
+        write_shared_project_fields(path, changes, expected=expected)
     return values or None
 
 
@@ -234,6 +329,9 @@ class SectionConfig(BaseModel):
 
     section_key: ClassVar[str]
     save_log: ClassVar[str] = "Config saved to {path}"
+    # Shared policy as of the last load/save, so a save writes only this
+    # instance's edits (see ``_save_shared_section``).
+    _shared_baseline: _SharedBaseline | None = PrivateAttr(default=None)
 
     @classmethod
     def _wrap_raw(cls, raw: dict[str, object]) -> dict[str, object]:
@@ -264,9 +362,13 @@ class SectionConfig(BaseModel):
         raw = personal.get(cls.section_key)
         if shared is not None:
             raw = _shared_section(cls.section_key, raw, shared)
-        if not isinstance(raw, dict):
-            return cls()
-        return cls.model_validate(cls._wrap_raw(raw))
+        section = cls.model_validate(cls._wrap_raw(raw)) if isinstance(raw, dict) else cls()
+        if shared is not None:
+            section._remember_shared(shared)  # noqa: SLF001 - this factory owns the snapshot
+        return section
+
+    def _remember_shared(self, shared: ProjectConfig) -> None:
+        self._shared_baseline = _SharedBaseline(shared, self._to_raw())
 
     def save(self, config_path: Path | None = None) -> Path:
         """Update only this section of the config YAML, keeping the rest."""
@@ -275,7 +377,10 @@ class SectionConfig(BaseModel):
         serialized = self._to_raw()
         shared = optional_project_config(path)
         if shared is not None:
-            serialized = _save_shared_section(path, self.section_key, serialized, shared)
+            serialized = _save_shared_section(path, self.section_key, serialized, shared, self._shared_baseline)
+            refreshed = optional_project_config(path)
+            if refreshed is not None:
+                self._remember_shared(refreshed)
             if self.section_key in {"sync_roots", "ignore"}:
                 return path
         elif self.section_key in {"sync_roots", "ignore"} and serialized:
@@ -357,7 +462,14 @@ class CvatConfig(BaseModel):
         """Load config from a YAML file.  Returns empty config if file is missing."""
         cfg = cls._from_cvat_section(_load_raw_yaml(path))
         cfg._source_path = path  # noqa: SLF001 - this factory owns the model source
+        if cfg.password:
+            _restrict_to_owner(path)
         return cfg
+
+    @property
+    def source_path(self) -> Path | None:
+        """Personal file this configuration was loaded from, if any."""
+        return self._source_path
 
     @classmethod
     def from_env(cls) -> "CvatConfig":

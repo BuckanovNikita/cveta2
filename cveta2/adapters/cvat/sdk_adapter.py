@@ -151,7 +151,7 @@ class SdkCvatApiAdapter:
 
     @cvat_read
     def get_task_issues(self, task_id: int) -> list[RawIssue]:
-        """Return review issues for a task, each with its comment texts."""
+        """Return review issues for a task, each with its comment texts in creation order."""
         api_client = self.client.api_client
         issues = get_paginated_collection(
             api_client.issues_api.list_endpoint,
@@ -159,9 +159,16 @@ class SdkCvatApiAdapter:
         )
         result: list[RawIssue] = []
         for issue in issues:
-            comments = get_paginated_collection(
-                api_client.comments_api.list_endpoint,
-                issue_id=int(issue.id),
+            # The dataset contract joins comments in creation order, while
+            # CVAT lists them newest first by default. Ask for id order and
+            # sort locally too, in case a server ignores the parameter.
+            comments = sorted(
+                get_paginated_collection(
+                    api_client.comments_api.list_endpoint,
+                    issue_id=int(issue.id),
+                    sort="id",
+                ),
+                key=lambda c: int(c.id),
             )
             result.append(
                 RawIssue(

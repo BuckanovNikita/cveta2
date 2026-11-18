@@ -6,7 +6,7 @@ import errno
 import os
 import stat
 import threading
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
@@ -97,48 +97,56 @@ def test_replace_shared_bytes_overwrites_an_existing_file(tmp_path: Path) -> Non
     assert _temp_leftovers(tmp_path) == []
 
 
-def test_replace_shared_bytes_writes_through_a_name_unique_to_the_writer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    written: list[Path] = []
-
-    def record_then_write(path: Path, data: bytes) -> None:
-        written.append(path)
-        write_shared_bytes(path, data)
-
-    monkeypatch.setattr("cveta2.adapters.files.shared.write_shared_bytes", record_then_write)
+def test_replace_shared_bytes_does_not_follow_a_planted_temporary_symlink(tmp_path: Path) -> None:
     target = tmp_path / "entry.json"
+    victim = tmp_path / "private.txt"
+    victim.write_bytes(b"untouched")
+    planted = target.with_name(f"entry.json.tmp{os.getpid()}-{threading.get_ident()}")
+    planted.symlink_to(victim)
 
     replace_shared_bytes(target, b"payload")
 
-    expected_name = f"entry.json.tmp{os.getpid()}-{threading.get_ident()}"
-    assert written == [target.with_name(expected_name)]
+    assert victim.read_bytes() == b"untouched"
+    assert planted.is_symlink()
+    assert not target.is_symlink()
+    assert target.read_bytes() == b"payload"
+    assert set(tmp_path.iterdir()) == {target, victim, planted}
 
 
 def test_replace_shared_bytes_removes_the_partial_temp_file_on_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def write_a_prefix_then_fail(path: Path, data: bytes) -> None:
-        path.write_bytes(data[:3])
-        raise OSError(errno.ENOSPC, "No space left on device")
+    original_fdopen = os.fdopen
 
-    monkeypatch.setattr("cveta2.adapters.files.shared.write_shared_bytes", write_a_prefix_then_fail)
+    def open_failing_stream(descriptor: int, mode: str) -> IO[bytes]:
+        stream = original_fdopen(descriptor, mode)
+        original_write = stream.write
+
+        def write_a_prefix_then_fail(data: bytes) -> int:
+            original_write(data[:3])
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr(stream, "write", write_a_prefix_then_fail)
+        return stream
+
+    monkeypatch.setattr("cveta2.adapters.files.shared.os.fdopen", open_failing_stream)
     target = tmp_path / "entry.json"
+    target.write_bytes(b"old")
 
     with pytest.raises(OSError, match="No space left"):
         replace_shared_bytes(target, b"payload")
 
-    assert not target.exists()
+    assert target.read_bytes() == b"old"
     assert _temp_leftovers(tmp_path) == []
 
 
 def test_replace_shared_bytes_reraises_when_no_temp_file_was_created(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def refuse_to_write(_path: Path, _data: bytes) -> None:
+    def refuse_to_create(**_kwargs: object) -> tuple[int, str]:
         raise OSError(errno.ENOSPC, "No space left on device")
 
-    monkeypatch.setattr("cveta2.adapters.files.shared.write_shared_bytes", refuse_to_write)
+    monkeypatch.setattr("cveta2.adapters.files.shared.mkstemp", refuse_to_create)
     target = tmp_path / "entry.json"
 
     with pytest.raises(OSError, match="No space left"):

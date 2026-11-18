@@ -53,20 +53,23 @@ def _link_or_copy(src: Path, dst: Path, mode: str) -> None:
     """
     if mode not in {"auto", "reflink", "hardlink", "symlink", "copy"}:
         raise Cveta2Error(f"Неизвестный link-mode: {mode!r}")
-    if dst.exists() and src.samefile(dst) and not dst.is_symlink():
+    # Resolve first: *src* may be *dst* itself or a link to it, and must
+    # still name the real image after *dst* is unlinked below.
+    source = src.resolve()
+    if not dst.is_symlink() and dst.exists() and source.samefile(dst):
         return
     if dst.exists() or dst.is_symlink():
         dst.unlink()
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     if mode == "symlink":
-        dst.symlink_to(src.resolve())
+        dst.symlink_to(source)
     elif mode == "hardlink":
-        dst.hardlink_to(src)
+        dst.hardlink_to(source)
     elif mode == "copy":
-        shutil.copy2(src, dst)
+        shutil.copy2(source, dst)
     elif mode in {"reflink", "auto"}:
-        _reflink_or_fallback_copy(src, dst, allow_copy=mode == "auto")
+        _reflink_or_fallback_copy(source, dst, allow_copy=mode == "auto")
     else:
         raise Cveta2Error(f"Неизвестный link-mode: {mode!r}")
 

@@ -92,12 +92,37 @@ class TestFetchIssuesIntegration:
             )
 
         issue_id = _create_issue_via_sdk(task_id, frame=0, message=_ISSUE_MESSAGE)
+        reply = "ответ на исходное замечание"
+        sdk = _make_sdk_client()
+        try:
+            sdk.api_client.comments_api.create(cvat_models.CommentWriteRequest(issue=issue_id, message=reply))
+        finally:
+            sdk.close()
+        expected_text = f"{_ISSUE_MESSAGE}; {reply}"
 
         records = _fetch_frame_records(cfg, project_id, task_name, frame_id=0)
         assert records, "expected records for frame 0"
         for record in records:
-            assert record.issue_text == _ISSUE_MESSAGE
+            assert record.issue_text == expected_text
             assert record.issue_state == "open"
+
+        # Resume identifies the initial message even after a later reply.
+        issue_rows = pd.DataFrame(
+            [
+                {
+                    "image_name": IMAGE_NAMES[0],
+                    "issue_text": _ISSUE_MESSAGE,
+                    "issue_state": "new",
+                    "bbox_x_tl": 0.0,
+                    "bbox_y_tl": 0.0,
+                    "bbox_x_br": 10.0,
+                    "bbox_y_br": 10.0,
+                }
+            ]
+        )
+        with CvatClient(cfg) as client:
+            assert client.create_task_issues(task_id, issue_rows, skip_existing=True) == 0
+            assert len(client.api.get_task_issues(task_id)) == 1
 
         other = _fetch_frame_records(cfg, project_id, task_name, frame_id=1)
         for record in other:
@@ -107,7 +132,7 @@ class TestFetchIssuesIntegration:
 
         records = _fetch_frame_records(cfg, project_id, task_name, frame_id=0)
         for record in records:
-            assert record.issue_text == _ISSUE_MESSAGE
+            assert record.issue_text == expected_text
             assert record.issue_state == "resolved"
 
 

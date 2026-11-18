@@ -43,7 +43,11 @@ class CacheFactory(Protocol):
 
 
 class CacheInvalidator(Protocol):
-    """Invalidate the task identity across the applicable cache layers."""
+    """Invalidate the task identity across the applicable cache layers.
+
+    It runs after the remote write has succeeded, so expected cache failures
+    are reported as warnings and never raised.
+    """
 
     def __call__(
         self,

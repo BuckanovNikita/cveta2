@@ -29,8 +29,12 @@ serially; unit tests stay parallel. The autouse session fixture `live_run`
    waits for readiness within the cold-start deadline, starts loopback
    port-forwards, registers a regular CVAT user that owns one organization,
    and seeds the run. The namespace name is the run tag.
-3. Deletes the namespace after the last live test, waits until it is gone and
-   stops the port-forwards, unless `INTEGRATION_KEEP_DATA=1`.
+3. After the last live test, unless `INTEGRATION_KEEP_DATA=1`, requests
+   deletion of the namespace first, then stops the port-forwards and waits
+   until the namespace is gone. An interrupted or timed-out setup child
+   (stand verification, seeding) gets SIGINT or SIGTERM and a few seconds to
+   finish before it is killed, so teardown runs before an interrupted xdist
+   worker is force-exited.
 
 ```bash
 uv run --locked task --exit-code infra-check
@@ -52,8 +56,9 @@ L stop [<namespace>] # delete exactly that session namespace and stop its port-f
 ## Bounded preflight and deferral
 
 `infra-check` checks that `kubectl` exists, that the cluster answers `/readyz`,
-that the context may create and delete namespaces, and that a node's
-unrequested CPU and memory can admit the session quota's requests.
+that the context may create and delete namespaces, and that the unrequested CPU
+and memory of a schedulable node (not cordoned, Ready, without a `NoSchedule` or
+`NoExecute` taint) can admit the session quota's requests.
 `CVETA2_INFRA_CHECK_TIMEOUT` bounds the whole read-only check (60 seconds by
 default). It creates nothing. Task uses `--exit-code` to retain these results:
 
@@ -64,8 +69,11 @@ default). It creates nothing. Task uses `--exit-code` to retain these results:
 | ERROR | 1 | Diagnose a missing tool or context, refused namespace permission or unexpected failure. |
 
 Setup is bounded by `CVETA2_SESSION_READY_TIMEOUT` (300 seconds by default) for
-the services to become ready. Services not ready in time are blocked setup:
-the namespace is deleted and the run is UNAVAILABLE, never a test failure. A
+the services to become ready, and by `CVETA2_SESSION_SEED_TIMEOUT` (600 seconds
+by default) for stand verification, the coco8 download and seeding together.
+Services not ready in time, or seeding not finished in time, are blocked setup:
+the namespace is deleted (even with `INTEGRATION_KEEP_DATA=1`) and the run is
+UNAVAILABLE, never a test failure. A
 first pull of the CVAT server image may exceed the deadline; pull it once or
 raise the deadline. An availability result is not a test result. Loss of
 availability during setup is blocked setup; assertion failures are test
@@ -92,7 +100,9 @@ acceptance.
 ## Rules
 
 - **One session, one namespace.** The session acts only on the namespace it
-  created. `L stop` accepts only `cveta2-it-` names and deletes exactly the one
+  created. It labels that namespace with a random per-session token; after a
+  failed, timed-out or interrupted create it treats the namespace as its own,
+  and deletes it, only when the namespace carries that token. `L stop` accepts only `cveta2-it-` names and deletes exactly the one
   given or recorded; never delete another session's namespace, another
   project's namespace or a platform namespace.
 - **Quota first.** Every session namespace carries the quota and limit range
@@ -108,8 +118,9 @@ acceptance.
   `main` too. `INTEGRATION_KEEP_DATA=1` keeps it and records it in the
   gitignored `tests/integration/.session` (namespace and local ports, no
   credentials); it stays until `L stop`. `L up` always keeps.
-- **A kept session blocks `L up`** in this checkout while its namespace exists;
-  stop it first. A recorded namespace that vanished is forgotten automatically.
+- **A kept session blocks `L up`** and a pytest run with
+  `INTEGRATION_KEEP_DATA=1` in this checkout while its namespace exists; stop
+  it first. A recorded namespace that vanished is forgotten automatically.
 - **Vanished namespaces.** The platform may delete any project namespace 48
   hours after creation or after a cluster restart. A session never relies on
   an earlier one; a new session starts from scratch and `L stop` of a vanished

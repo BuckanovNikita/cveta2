@@ -55,6 +55,9 @@ class _TaskOpsMixin(_ClientBase):
 
         name_to_frame = session.name_to_frame
         frame_ids = sorted(name_to_frame[n] for n in image_names if n in name_to_frame)
+        unmatched = sorted(n for n in image_names if n not in name_to_frame)
+        if unmatched:
+            logger.warning(f"Задача {task_id}: изображения {unmatched} не найдены в задаче — пропускаем")
         return self._patch_deleted_frames(api, task_id, session.data_meta, frame_ids)
 
     def mark_frames_deleted_by_ids(

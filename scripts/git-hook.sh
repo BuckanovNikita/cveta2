@@ -16,4 +16,8 @@ if [ "$hook_type" = pre-commit ]; then
         exit 1
     fi
 fi
+if [ "$hook_type" = commit-msg ]; then
+    # SKIP and PREK_SKIP defer pre-commit hooks only; message validation always runs.
+    unset SKIP PREK_SKIP
+fi
 exec uv run --locked prek hook-impl --hook-dir "$hook_dir" --script-version 4 --hook-type "$hook_type" -- "$@"

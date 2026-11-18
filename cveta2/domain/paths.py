@@ -1,12 +1,13 @@
 """Pure filename and object-key rules."""
 
 from collections.abc import Iterable, Sequence
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TypeVar
 
 from loguru import logger
 
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.output import preview_names
 
 _T = TypeVar("_T")
 
@@ -95,6 +96,18 @@ def build_s3_key(prefix: str, frame_name: str) -> str:
     return f"{prefix_dir}{frame_name}"
 
 
+def join_s3_key(prefix: str, relative: str) -> str:
+    """Join a path known to be relative to *prefix* onto it.
+
+    Unlike :func:`build_s3_key`, a *relative* that itself starts with the
+    prefix folder is not mistaken for a full key: the server file
+    ``images/a.jpg`` under prefix ``images`` is ``images/images/a.jpg``.
+    """
+    if not prefix:
+        return relative
+    return f"{_key_prefix_dir(prefix)}{relative}"
+
+
 def strip_key_prefix(key: str, prefix: str) -> str:
     """Return *key* with a leading *prefix* removed, keeping subfolders.
 
@@ -115,6 +128,35 @@ def strip_key_prefix(key: str, prefix: str) -> str:
     if key == prefix_dir.removesuffix("/"):
         return ""
     return key
+
+
+def _is_unsafe_image_name(name: str) -> bool:
+    """Whether *name* could leave a search root or storage prefix."""
+    return (
+        not name
+        or "\x00" in name
+        or "\\" in name
+        or PurePosixPath(name).is_absolute()
+        or bool(PureWindowsPath(name).drive)
+        or ".." in name.split("/")
+    )
+
+
+def validate_upload_image_names(names: Iterable[str]) -> None:
+    """Reject image names that are not plain relative paths.
+
+    An upload looks each name up below local search roots and binds it below
+    the storage prefix, so an absolute path, a ``..`` component, a backslash,
+    a NUL byte or an empty name would reach outside both. Subfolders such as
+    ``2026-02/img.jpg`` stay valid.
+    """
+    unsafe = list(dict.fromkeys(name for name in names if _is_unsafe_image_name(str(name))))
+    if unsafe:
+        raise Cveta2Error(
+            f"Небезопасные имена изображений: {preview_names([repr(name) for name in unsafe])}. "
+            "Имя должно быть относительным путём "
+            "без '..', обратной косой черты и нулевого байта. Загрузка не начата."
+        )
 
 
 def _validate_relative_key(value: str, *, original: str) -> str:

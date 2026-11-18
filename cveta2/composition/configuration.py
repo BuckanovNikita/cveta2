@@ -2,7 +2,9 @@
 
 from cveta2.adapters.config.project import (
     MigrationProposal,
+    SharedIdentityMismatchError,
     activate_migration,
+    attach_existing_project_config,
     attach_project_config,
     load_project_config,
     migration_proposal,
@@ -59,9 +61,11 @@ __all__ = [
     "NetworkConfig",
     "OrgProjects",
     "SectionConfig",
+    "SharedIdentityMismatchError",
     "SyncRootsConfig",
     "UploadConfig",
     "activate_migration",
+    "attach_existing_project_config",
     "attach_project_config",
     "cache_dir_for_project",
     "get_config_path",

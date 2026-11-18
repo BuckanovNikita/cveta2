@@ -14,7 +14,7 @@ from contextvars import ContextVar
 from typing import Final, ParamSpec, TypeVar
 
 import urllib3.exceptions
-from cvat_sdk.api_client.exceptions import ApiException
+from cvat_sdk.api_client.exceptions import ApiException, OpenApiException
 from loguru import logger
 
 from cveta2.adapters.cvat.diagnostics import (
@@ -54,7 +54,14 @@ def _parse_retry_after(exc: ApiException) -> float | None:
 
 
 def _translate_api_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
-    """Convert SDK ``ApiException`` into :class:`CvatApiError`."""
+    """Convert SDK ``OpenApiException`` errors into :class:`CvatApiError`.
+
+    ``ApiException`` carries an HTTP status. The rest of the family
+    (``ApiTypeError``, ``ApiValueError`` and the like) reports a payload the
+    SDK could not build or deserialize; it has no status, so it is never
+    retried, and it no longer crosses the port as an SDK type. Methods that
+    recover from a known deserialization defect catch it before this point.
+    """
 
     @functools.wraps(func)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
@@ -68,6 +75,9 @@ def _translate_api_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
                 retry_after=_parse_retry_after(e),
                 diagnostics=exception_diagnostics(e),
             ) from e
+        except OpenApiException as e:
+            msg = f"CVAT SDK не смог обработать данные ответа или запроса: {describe_error(e)}"
+            raise CvatApiError(msg, diagnostics=exception_diagnostics(e)) from e
 
     return wrapper
 

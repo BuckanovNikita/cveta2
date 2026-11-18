@@ -11,7 +11,7 @@ from PIL import Image
 from cveta2.adapters.files.managed_preparation import LocalManagedPreparationFiles
 from cveta2.adapters.files.media import LocalMediaInspector
 from cveta2.application.use_cases.managed_preparation import prepare_managed
-from cveta2.domain.bundle.models import ApiClass, ClassInfo, DatasetMetadata, ImageRoots
+from cveta2.domain.bundle.models import ApiClass, ClassInfo, DatasetMetadata, ImageRoots, UploadError
 from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.managed.evidence import labels_fingerprint
 from cveta2.domain.managed.models import (
@@ -35,6 +35,20 @@ def _registry() -> list[ApiClass]:
     return [
         ApiClass(id=90, number=1, name="helmet", techClass=False, isPeriodical=False, isCritical=False, threshold=0.5)
     ]
+
+
+class FakeS3Roots:
+    """Record S3 root access checks; a listed root can be made inaccessible."""
+
+    def __init__(self, denied: frozenset[str] = frozenset()) -> None:
+        """Deny access to the given roots only."""
+        self.denied = denied
+        self.checked: list[str] = []
+
+    def check_root(self, root: str) -> None:
+        self.checked.append(root)
+        if root in self.denied:
+            raise UploadError(f"Cannot access S3 root {root}")
 
 
 def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata]:
@@ -129,6 +143,7 @@ def _prepare(
         registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
         clean=clean,
     )
     return result, config, transformed, source, metadata
@@ -175,6 +190,7 @@ def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
         registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
         clean=True,
     )
     assert result.ready
@@ -212,6 +228,7 @@ def test_bad_box_produces_attested_feedback_and_requires_cleanup(
         registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
     )
     assert not result.ready
     assert not (result.directory / "dataset.csv").exists()
@@ -249,6 +266,7 @@ def test_source_definition_and_registry_must_match_fetch(tmp_path: Path) -> None
             registry_hash="changed",
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
+            s3_roots=FakeS3Roots(),
         )
 
 
@@ -279,6 +297,7 @@ def test_incomplete_or_corrupt_source_records_cannot_be_prepared(tmp_path: Path,
             registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
+            s3_roots=FakeS3Roots(),
         )
     assert not output.exists()
 
@@ -297,6 +316,7 @@ def test_symlink_and_existing_destination_are_rejected(tmp_path: Path) -> None:
             registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
+            s3_roots=FakeS3Roots(),
         )
     payload = summary.directory / "dataset.csv"
     target = tmp_path / "replacement.csv"
@@ -305,3 +325,44 @@ def test_symlink_and_existing_destination_are_rejected(tmp_path: Path) -> None:
     payload.symlink_to(target)
     with pytest.raises(ManagedError):
         LocalManagedPreparationFiles().load_prepared(summary.directory)
+
+
+def test_preparation_inside_the_fetch_source_is_refused(tmp_path: Path) -> None:
+    """Review output never mixes with the source evidence it was derived from."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    with pytest.raises(ManagedError, match="outside the fetch source directory"):
+        prepare_managed(
+            config,
+            "demo",
+            transformed,
+            source / "source-snapshot.yaml",
+            source / "prepared",
+            metadata,
+            registry_hash=registry_fingerprint(_registry()),
+            files=LocalManagedPreparationFiles(),
+            media=LocalMediaInspector(),
+            s3_roots=FakeS3Roots(),
+        )
+    assert sorted(path.name for path in source.iterdir()) == ["source-snapshot.yaml"]
+
+
+def test_inaccessible_s3_root_blocks_preparation(tmp_path: Path) -> None:
+    """S3 roots are proven accessible at prepare time, not first at publication."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    roots = metadata.images.model_copy(update={"s3_root": ["s3://bucket/ok", "s3://bucket/denied"]})
+    s3_roots = FakeS3Roots(frozenset({"s3://bucket/denied"}))
+    with pytest.raises(UploadError):
+        prepare_managed(
+            config,
+            "demo",
+            transformed,
+            source,
+            tmp_path / "prepared",
+            metadata.model_copy(update={"images": roots}),
+            registry_hash=registry_fingerprint(_registry()),
+            files=LocalManagedPreparationFiles(),
+            media=LocalMediaInspector(),
+            s3_roots=s3_roots,
+        )
+    assert s3_roots.checked == ["s3://bucket/ok", "s3://bucket/denied"]
+    assert not (tmp_path / "prepared").exists()

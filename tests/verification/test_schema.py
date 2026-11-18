@@ -5,6 +5,8 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 
+from cveta2.application.client.context import _build_frame_issues
+from cveta2.application.ports.dtos import RawIssue
 from cveta2.domain.verification.cells import integer, is_missing, number
 from cveta2.domain.verification.schema import schema_for, schema_issues
 
@@ -216,6 +218,26 @@ def test_optional_empty_metadata_and_upload_issue_state_are_valid() -> None:
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    "resolved",
+    [(False, False), (False, True, False), (True, True, True)],
+    ids=["two-open", "three-mixed", "three-resolved"],
+)
+def test_fetched_multi_issue_state_passes_verification(resolved: tuple[bool, ...]) -> None:
+    issues = [
+        RawIssue(id=index, frame=0, resolved=state, comments=[f"comment {index}"])
+        for index, state in enumerate(resolved)
+    ]
+    text, state = _build_frame_issues(issues)[0]
+    assert schema_issues(pd.DataFrame([box(issue_text=text, issue_state=state)]), "cveta2") == []
+
+
+@pytest.mark.parametrize("value", ["open | new", "new | new", "open |", " | ", "open|resolved", "OPEN"])
+def test_malformed_multi_issue_state_is_reported(value: str) -> None:
+    issues = schema_issues(pd.DataFrame([box(issue_state=value)]), "cveta2")
+    assert any(i.code == "invalid_issue_state" for i in issues)
 
 
 def test_missing_columns_are_dataset_issues_even_in_empty_frame() -> None:

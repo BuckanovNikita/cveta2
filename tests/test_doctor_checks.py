@@ -24,6 +24,7 @@ from cveta2.interfaces.commands.doctor import (
     check_config,
     collect_cache_roots,
 )
+from tests.helpers import write_config_yaml
 
 # ---------------------------------------------------------------------------
 # check_config
@@ -50,13 +51,29 @@ def test_check_config(tmp_path: Path, cfg: CvatConfig, cache_dir: str | None, *,
             "cveta2.interfaces.commands.doctor.get_config_path",
             return_value=Path("/nonexistent"),
         ),
-        patch("cveta2.interfaces.commands.doctor.CvatConfig.from_env", return_value=cfg),
+        patch("cveta2.interfaces.commands.doctor.CvatConfig.load", return_value=cfg),
         patch(
             "cveta2.adapters.config.settings.ImageCacheConfig.load",
             return_value=ic_cfg,
         ),
     ):
         assert check_config() is expected
+
+
+def test_check_config_without_personal_file_uses_shared_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shared = write_config_yaml(tmp_path / "projects.yaml", schema_version=1, cvat={"host": "https://shared.example"})
+    personal = tmp_path / "missing-personal.yaml"
+    monkeypatch.setenv("CVETA2_CONFIG", str(personal))
+    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(shared))
+    monkeypatch.delenv("CVAT_HOST", raising=False)
+    monkeypatch.delenv("CVAT_ORGANIZATION", raising=False)
+    monkeypatch.setenv("CVAT_USERNAME", "user")
+    monkeypatch.setenv("CVAT_PASSWORD", "password")
+
+    assert check_config() is True
+    assert not personal.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -350,3 +367,29 @@ def test_aws_sdk_failure_is_translated_at_adapter_boundary() -> None:
         pytest.raises(Cveta2Error, match="Unable to locate credentials"),
     ):
         check_aws_credentials()
+
+
+def test_cache_permission_repair_leaves_per_user_prompt_history_alone() -> None:
+    from cveta2.composition.files import default_cache_base
+    from cveta2.interfaces.commands.interactive._history import history_for
+
+    previous_umask = os.umask(0o022)
+    try:
+        history = history_for("cvat-host")
+        history.store_string("https://cvat.example")
+        shared_entry = default_cache_base() / "tasks" / "entry.json"
+        shared_entry.parent.mkdir(parents=True)
+        shared_entry.write_text("{}", encoding="utf-8")
+    finally:
+        os.umask(previous_umask)
+    history_file = Path(os.fsdecode(history.filename))
+    history_modes = (stat.S_IMODE(history_file.stat().st_mode), stat.S_IMODE(history_file.parent.stat().st_mode))
+
+    assert check_cache_permissions(fix=True) is True
+
+    assert stat.S_IMODE(shared_entry.stat().st_mode) & 0o060 == 0o060
+    assert (stat.S_IMODE(history_file.stat().st_mode), stat.S_IMODE(history_file.parent.stat().st_mode)) == (
+        history_modes
+    )
+    assert history_modes[0] & 0o020 == 0
+    assert check_cache_permissions(fix=False) is True

@@ -375,16 +375,29 @@ class TestConvertAnnotations:
         """A task with no annotations must yield an empty list, never ``None``."""
         assert convert_annotations(SimpleNamespace(shapes=None)) == RawAnnotations(shapes=[])
 
+    def test_tags_and_tracks_keep_only_their_label_ids(self) -> None:
+        labeled_data = SimpleNamespace(
+            shapes=[make_sdk_shape(id=3, frame=1, label_id=4)],
+            tags=[SimpleNamespace(label_id=7), SimpleNamespace(label_id=4)],
+            tracks=[SimpleNamespace(label_id=9)],
+        )
+
+        result = convert_annotations(labeled_data)
+
+        assert [s.label_id for s in result.shapes] == [4]
+        assert result.tag_label_ids == [7, 4]
+        assert result.track_label_ids == [9]
+
     def test_adapter_warns_when_tracks_are_ignored(self, capture_logs: list[str]) -> None:
         client = MagicMock()
         client.api_client.tasks_api.retrieve_annotations.return_value = (
-            SimpleNamespace(shapes=[], tracks=[object(), object()]),
+            SimpleNamespace(shapes=[], tracks=[SimpleNamespace(label_id=5), SimpleNamespace(label_id=6)]),
             None,
         )
 
         result = SdkCvatApiAdapter(client).get_task_annotations(17)
 
-        assert result == RawAnnotations(shapes=[])
+        assert result == RawAnnotations(shapes=[], track_label_ids=[5, 6])
         assert len(capture_logs) == 1
         warning = capture_logs[0]
         assert "17" in warning
@@ -403,7 +416,7 @@ class TestConvertAnnotations:
                         points=[12, 30.5, 90.75, 10.25, 40.5, 80],
                     )
                 ],
-                tracks=[object()],
+                tracks=[SimpleNamespace(label_id=5)],
             ),
             None,
         )

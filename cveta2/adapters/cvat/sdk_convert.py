@@ -117,8 +117,20 @@ def data_meta_from_dict(data: dict[str, Any]) -> RawDataMeta:
 
 
 def convert_annotations(labeled_data: "cvat_models.LabeledData") -> RawAnnotations:
-    """Convert SDK labeled data to :class:`RawAnnotations`."""
-    return RawAnnotations(shapes=[convert_shape(s) for s in (labeled_data.shapes or [])])
+    """Convert SDK labeled data to :class:`RawAnnotations`.
+
+    ``tags`` and ``tracks`` are optional on the generated SDK model, and an
+    unset optional field raises ``AttributeError`` on access, so they are read
+    with ``getattr``: an intentional exception to the project style rule
+    "avoid getattr" at this opaque SDK boundary.
+    """
+    tags = getattr(labeled_data, "tags", None) or []
+    tracks = getattr(labeled_data, "tracks", None) or []
+    return RawAnnotations(
+        shapes=[convert_shape(s) for s in (labeled_data.shapes or [])],
+        tag_label_ids=[int(tag.label_id) for tag in tags],
+        track_label_ids=[int(track.label_id) for track in tracks],
+    )
 
 
 def convert_shape(shape: "cvat_models.LabeledShape") -> RawShape:

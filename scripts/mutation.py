@@ -10,7 +10,8 @@
 The pre-commit hook runs the first form, within a budget: at most
 ``--max-functions`` (default 8) changed functions are mutated and the rest are
 listed; mutmut stops after ``--budget-seconds`` (default 120), and mutants it
-did not reach by then count as "not run", not as survivors. Changed lines of
+did not reach by then count as "not run", not as survivors; a run that judges
+no mutant at all before the budget expires has no verdict and fails. Changed lines of
 staged ``cveta2/**/*.py`` files are mapped to the top-level functions and
 methods that contain them, and mutmut runs only their mutants. The verdict is
 advisory: surviving mutants are printed (the first few with diffs) and the run
@@ -310,7 +311,7 @@ def run_mutmut(
             if timer is not None:
                 timer.cancel()
                 timer.join()
-    if spent.is_set() and process.returncode != 0:
+    if spent.is_set():
         return None, "".join(tail)
     return process.returncode, "".join(tail)
 
@@ -353,9 +354,20 @@ def report(
     statuses: dict[str, str],
     functions: Sequence[str],
     show: ShowFn,
+    *,
+    budget_expired: bool,
 ) -> list[str]:
-    """Print the verdict; return the names of mutants that escaped."""
+    """Print the verdict; return the names of mutants that escaped.
+
+    Raises MutationError when the budget expired before any mutant was judged,
+    including before mutation metadata was written.
+    """
     selected = {n: s for n, s in statuses.items() if _selected(n, functions)}
+    unjudged = UNRUN_STATUSES | UNREACHED_STATUSES
+    if budget_expired and not any(status not in unjudged for status in selected.values()):
+        msg = ("no verdict: the budget expired before any mutant of the changed "
+               "functions was judged; rerun with a larger --budget-seconds (0: no limit).")  # fmt: skip
+        raise MutationError(msg)
     if not selected:
         print("The changed functions produce no mutants; nothing to do.")
         return []
@@ -461,7 +473,9 @@ def run(args: argparse.Namespace) -> int:
             text=True,
         ).stdout
         functions = [name for t in targets for name in t.names]
-        escaped = report(parse_results(results), functions, ShowFn(binary, workspace, env))
+        escaped = report(
+            parse_results(results), functions, ShowFn(binary, workspace, env), budget_expired=status is None
+        )
         if not escaped:
             return 0
         print()

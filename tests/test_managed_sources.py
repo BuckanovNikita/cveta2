@@ -284,6 +284,17 @@ def test_fresh_export_and_snapshot_roundtrip(tmp_path: Path) -> None:
         files.export(output, snapshot, frame)
 
 
+def test_export_reports_uncreatable_output_parent(tmp_path: Path) -> None:
+    config, definition = _config()
+    snapshot, frame = _fetch(config, definition, _Cvat({12: [_task(1)]}))
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("x")
+    output = blocker / "nested" / "fetched"
+    with pytest.raises(ManagedError, match="nested") as raised:
+        LocalSourceFiles().export(output, snapshot, frame)
+    assert isinstance(raised.value.__cause__, OSError)
+
+
 @pytest.mark.parametrize("missing", ["registry", "labels"])
 def test_legacy_snapshot_reads_but_refetches_all_tasks_and_keeps_assignments(tmp_path: Path, missing: str) -> None:
     config, definition = _config()
