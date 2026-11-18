@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, ParamValidationError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -183,3 +183,34 @@ def test_s3_sync_reports_a_denied_listing_without_traceback(
         CliApp().run(["s3-sync", "-p", "Dataset"])
 
     assert_clean_s3_exit(exited, denied, "denied-bucket", "raw/frames")
+
+
+def test_s3_sync_lets_a_defect_in_an_sdk_call_surface_unchanged(
+    tmp_path: Path,
+    test_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed request is a bug, not an S3 outage: it keeps its own traceback."""
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
+    from tests.fixtures.fake_cvat_api import FakeCvatApi
+    from tests.fixtures.fake_s3 import FakeS3Client
+
+    defect = ParamValidationError(report="Invalid type for parameter Key, value: None")
+
+    class _MalformedRequest(FakeS3Client):
+        def list_objects_v2(self, **_request: str) -> dict[str, object]:
+            raise defect
+
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _url=None: _MalformedRequest())
+    client = CvatClient(CvatConfig(), api=FakeCvatApi.from_tasks([], project_name="Dataset"))
+
+    with (
+        patch_cli_client(client),
+        patch.object(client, "detect_project_cloud_storage", return_value=make_cs_info()),
+        pytest.raises(ParamValidationError) as raised,
+    ):
+        CliApp().run(["s3-sync", "-p", "Dataset"])
+
+    assert raised.value is defect

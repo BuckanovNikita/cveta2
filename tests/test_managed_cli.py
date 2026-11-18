@@ -4,7 +4,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from botocore.exceptions import NoCredentialsError, ProfileNotFound
+from botocore.exceptions import (
+    NoCredentialsError,
+    NoRegionError,
+    PartialCredentialsError,
+    ProfileNotFound,
+    UnauthorizedSSOTokenError,
+)
 
 from cveta2.adapters.s3.managed_sources import S3CsvSources
 from cveta2.domain.managed.models import ManagedError
@@ -67,8 +73,14 @@ def test_failed_feedback_report_still_exits_two(tmp_path: Path, monkeypatch: pyt
 
 @pytest.mark.parametrize(
     "error",
-    [NoCredentialsError(), ProfileNotFound(profile="absent")],
-    ids=["no-credentials", "unknown-profile"],
+    [
+        NoCredentialsError(),
+        ProfileNotFound(profile="absent"),
+        PartialCredentialsError(provider="env", cred_var="AWS_SECRET_ACCESS_KEY"),
+        NoRegionError(),
+        UnauthorizedSSOTokenError(),
+    ],
+    ids=["no-credentials", "unknown-profile", "partial-credentials", "no-region", "sso-token"],
 )
 def test_s3_credential_failures_exit_two_naming_the_source(
     tmp_path: Path,

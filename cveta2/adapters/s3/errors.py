@@ -12,13 +12,45 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Final
 
-from boto3.exceptions import Boto3Error
-from botocore.exceptions import BotoCoreError, ClientError
+from boto3.exceptions import S3UploadFailedError
+from botocore.exceptions import (
+    ClientError,
+    CredentialRetrievalError,
+    HTTPClientError,
+    IncompleteReadError,
+    NoAuthTokenError,
+    NoCredentialsError,
+    NoRegionError,
+    PartialCredentialsError,
+    ProfileNotFound,
+    SSOError,
+    TokenRetrievalError,
+)
+from botocore.exceptions import ConnectionError as BotoConnectionError
 
 from cveta2.domain.errors import Cveta2Error
 
-S3_FAILURES: Final = (ClientError, BotoCoreError, Boto3Error)
-"""Every exception family the S3 SDK raises for an operational failure."""
+S3_FAILURES: Final = (
+    ClientError,
+    NoCredentialsError,
+    PartialCredentialsError,
+    ProfileNotFound,
+    CredentialRetrievalError,
+    TokenRetrievalError,
+    SSOError,
+    NoAuthTokenError,
+    NoRegionError,
+    BotoConnectionError,
+    HTTPClientError,
+    IncompleteReadError,
+    S3UploadFailedError,
+)
+"""Operational S3 failures: refusals, credentials, region and transport.
+
+SDK errors that reveal a defect in the caller, such as
+``ParamValidationError``, are deliberately absent so they keep surfacing
+as unexpected errors with their traceback.
+"""
 
 _CONTEXT_MARK: Final = "S3: "
 
