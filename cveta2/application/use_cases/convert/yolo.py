@@ -53,7 +53,7 @@ class _BoxAdjustments:
             )
         if self.dropped:
             logger.warning(
-                f"Пропущены боксы с нулевой шириной или высотой после обрезки: {self.dropped} "
+                f"Пропущены боксы с нулевой шириной или высотой после обрезки или округления: {self.dropped} "
                 f"({preview_names(self.dropped_images)})"
             )
 

@@ -579,7 +579,7 @@ class TestOutOfImageBoxes:
         assert any(": 1 (" in message and "gone.jpg" in message and "Пропущен" in message for message in capture_logs)
 
     def test_remaining_boxes_are_kept_and_both_counts_are_summarized(
-        self, tmp_path: Path, capture_logs: list[str]
+        self, tmp_path: Path, capture_logs: list[str], capture_info_logs: list[str]
     ) -> None:
         boxes = {
             "a.jpg": [
@@ -601,6 +601,9 @@ class TestOutOfImageBoxes:
         assert len(clipped) == len(dropped) == 1
         assert ": 3 (a.jpg, b.jpg)" in clipped[0]
         assert ": 3 (a.jpg, b.jpg)" in dropped[0]
+        summary = [message for message in capture_info_logs if message.startswith("Готово")]
+        assert len(summary) == 1
+        assert " 4 боксов" in summary[0]
 
 
 class TestFromYoloDataset:
