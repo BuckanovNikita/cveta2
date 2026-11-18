@@ -897,21 +897,30 @@ class TestJobFreshness:
         pd.testing.assert_frame_equal(off, cold)
         pd.testing.assert_frame_equal(off, warm)
 
-    @pytest.mark.parametrize("second_type", ["ground_truth", "consensus_replica"])
+    @pytest.mark.parametrize(
+        ("second_type", "second_start"),
+        [("ground_truth", 0), ("consensus_replica", 0), ("ground_truth", 6)],
+        ids=["ground-truth", "consensus", "ground-truth-own-range"],
+    )
     def test_inseparable_jobs_share_one_task_entry(
-        self, normal_fake: LoadedFixtures, tmp_path: Path, second_type: str
+        self, normal_fake: LoadedFixtures, tmp_path: Path, second_type: str, second_start: int
     ) -> None:
+        """Any non-annotation job makes the task one entry, even on frames of its own."""
         fake = normal_fake
         task_id = fake.tasks[0].id
         api = FakeCvatApi(fake)
-        api.jobs[task_id] = [_job(501, start=0, stop=7), _job(509, start=0, stop=7, job_type=second_type)]
+        first_stop = 7 if second_start == 0 else second_start - 1
+        api.jobs[task_id] = [
+            _job(501, start=0, stop=first_stop),
+            _job(509, start=second_start, stop=7, job_type=second_type),
+        ]
         _fetch_task_cached(api, fake, tmp_path / "out1", FetchOptions())
         cache_dir = get_task_cache_dir(fake.project.id)
         assert [path.name for path in (cache_dir / f"task_{task_id}").iterdir()] == ["task.json"]
 
         _fetch_task_cached(api, fake, tmp_path / "out2", FetchOptions())
-        rejected = _job(509, start=0, stop=7, job_type=second_type, state="rejected")
-        api.jobs[task_id] = [_job(501, start=0, stop=7), rejected]
+        rejected = _job(509, start=second_start, stop=7, job_type=second_type, state="rejected")
+        api.jobs[task_id] = [_job(501, start=0, stop=first_stop), rejected]
         _fetch_task_cached(api, fake, tmp_path / "out3", FetchOptions())
 
         assert api.annotation_calls == [task_id, task_id]

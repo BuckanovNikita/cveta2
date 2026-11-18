@@ -252,6 +252,15 @@ def _partition(rows: list[_Record], deletions: list[_Record]) -> PartitionResult
 @example(rows=[("a.jpg", 1, True), ("a.jpg", 5, False)], deletions=[("a.jpg", 3, True), ("a.jpg", 5, False)])
 # Case 2: an unfinished deletion waits; the completed annotation stays.
 @example(rows=[("a.jpg", 1, True), ("a.jpg", 5, False)], deletions=[("a.jpg", 5, False)])
+# Case 1 where the deleting task kept shapes on the frame: the earlier annotation is carried.
+@example(rows=[("a.jpg", 1, True), ("a.jpg", 3, True), ("a.jpg", 5, False)], deletions=[("a.jpg", 3, True)])
+# A deleted-frame row of one unfinished task does not hide a newer live one listed after it.
+@example(
+    rows=[("a.jpg", 1, True), ("a.jpg", 4, False), ("a.jpg", 5, False)],
+    deletions=[("a.jpg", 3, True), ("a.jpg", 4, False)],
+)
+# The newest unfinished task decides reopening, whatever the row order.
+@example(rows=[("a.jpg", 1, True), ("a.jpg", 5, False), ("a.jpg", 2, False)], deletions=[("a.jpg", 3, True)])
 def test_partition_matches_specification(rows: list[_Record], deletions: list[_Record]) -> None:
     """Every row lands in exactly the part the specification assigns.
 
