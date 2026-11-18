@@ -582,19 +582,25 @@ class TestOutOfImageBoxes:
         self, tmp_path: Path, capture_logs: list[str]
     ) -> None:
         boxes = {
-            "a.jpg": [(10.0, 20.0, 100.0, 200.0), (700.0, 20.0, 800.0, 200.0), (600.0, 20.0, 700.0, 200.0)],
+            "a.jpg": [
+                (10.0, 20.0, 100.0, 200.0),
+                (700.0, 20.0, 800.0, 200.0),
+                (600.0, 20.0, 700.0, 200.0),
+                (-5.0, 30.0, 50.0, 90.0),
+                (10.0, 500.0, 90.0, 600.0),
+            ],
             "b.jpg": [(-5.0, 20.0, 100.0, 200.0), (10.0, 480.0, 100.0, 500.0)],
         }
         out, result = _export_and_reimport(tmp_path, boxes)
 
-        assert len((out / "labels/train/a.txt").read_text().splitlines()) == 2
+        assert len((out / "labels/train/a.txt").read_text().splitlines()) == 3
         assert len((out / "labels/train/b.txt").read_text().splitlines()) == 1
-        assert sorted(result["image_name"]) == ["a.jpg", "a.jpg", "b.jpg"]
+        assert sorted(result["image_name"]) == ["a.jpg", "a.jpg", "a.jpg", "b.jpg"]
         clipped = [message for message in capture_logs if "обрезан" in message]
         dropped = [message for message in capture_logs if "Пропущен" in message]
         assert len(clipped) == len(dropped) == 1
-        assert ": 2 (a.jpg, b.jpg)" in clipped[0]
-        assert ": 2 (a.jpg, b.jpg)" in dropped[0]
+        assert ": 3 (a.jpg, b.jpg)" in clipped[0]
+        assert ": 3 (a.jpg, b.jpg)" in dropped[0]
 
 
 class TestFromYoloDataset:
