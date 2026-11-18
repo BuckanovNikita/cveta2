@@ -302,7 +302,9 @@ Stage exact task-owned paths (`git add -- <path>`). Messages are Conventional
 Commits, `type(scope)!: description`, with a lowercase type from the
 `conventional-pre-commit` args in `.pre-commit-config.yaml` (the commit-msg hook
 enforces them). Only `feat`, `fix`, `perf` and `!` move the version; a `!` needs a
-`BREAKING CHANGE:` footer for the changelog text. Reword git's default
+`BREAKING CHANGE:` footer for the changelog text. A `BREAKING CHANGE:` footer in any
+commit, including one listed inside a squash-merge body, also bumps (the minor while the
+version is 0.x). Reword git's default
 `Revert "..."` subject into a type. Use a unique temporary message file when
 several writers share the checkout.
 
@@ -367,3 +369,7 @@ history and tags, installs the pinned python-semantic-release and runs
 A release publishes that commit and annotated tag only: never a GitHub Release, asset
 or package. It never merges or rewrites history. The `release` skill covers inspecting
 a run and recovering a failed one.
+
+Branch protection on `main` without a bypass for the Actions token would block the
+release push. Nothing technical stops a local `semantic-release version` from pushing;
+that nobody releases locally is policy, not enforcement.

@@ -35,12 +35,19 @@ is answered by preparing a PR for that merge, never by a local release.
    the job on the refreshed `main` (`gh run rerun <run-id>`); an already published
    release reruns as a no-op. A conflicting remote tag needs investigation and a human
    decision before any rerun. If repository rules block the bot's push to `main`, report
-   that the release needs bot authorization; do not weaken human protections.
-5. Record the recovery and its outcome on the Linear issue.
+   that the release needs bot authorization; do not weaken human protections. Branch
+   protection on `main` without a bypass for the Actions token blocks every release push.
+5. A guard or path-validation failure (for example after a uv lock-format change)
+   repeats on every merge; fix the code through a PR instead of rerunning. A remote tag
+   `vX.Y.Z` that is not on `main` makes every run fail until a human removes it; agents
+   never delete tags.
+6. Record the recovery and its outcome on the Linear issue.
 
 ## Never
 
 - Push `main`, merge locally into `main`, or create, push, move or delete a tag.
 - Run `semantic-release` locally in a mode that writes; `--noop` dry runs are fine.
+  Nothing technical stops a local `semantic-release version` from pushing; this rule
+  is policy, not enforcement.
 - Force-push, rewrite history or reset unrelated work.
 - Publish a GitHub Release, release asset or package.

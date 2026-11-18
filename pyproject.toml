@@ -99,6 +99,8 @@ major_on_zero = false
 # The default release commit message is not a conventional commit, so it would
 # fail any later check over the range.
 commit_message = "chore(release): {version}"
+# Author, committer and tagger of the release commit and annotated tag.
+commit_author = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 no_git_verify = false
 # Releases run only in GitHub Actions (.github/workflows/release.yml through
 # scripts/release.py) and build nothing. uv.lock carries its own cveta2 version

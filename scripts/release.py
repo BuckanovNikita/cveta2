@@ -48,6 +48,9 @@ def validate_release(base: str, released: str) -> tuple[str, str]:
     if problems:
         raise ValueError("; ".join(problems))
     version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    subject = output("git", "log", "-1", "--format=%s", released)
+    if subject != f"chore(release): {version}":
+        raise ValueError(f"release commit subject {subject!r} is not 'chore(release): {version}'")
     tag = f"v{version}"
     if output("git", "cat-file", "-t", f"refs/tags/{tag}") != "tag":
         raise ValueError("release tag must be annotated")
