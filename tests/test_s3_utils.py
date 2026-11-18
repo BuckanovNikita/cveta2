@@ -269,7 +269,7 @@ class TestRunS3Transfers:
 
         assert (ok, failed) == (1, 1)
 
-    def test_each_failure_is_one_line_with_the_traceback_kept_for_debug(self) -> None:
+    def test_each_failure_is_one_line_with_the_traceback_kept_for_trace(self) -> None:
         """A denied object is named once with its error; the traceback is debug detail.
 
         With credentials that may list but not read, every object fails;
@@ -277,7 +277,7 @@ class TestRunS3Transfers:
         """
         denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "GetObject")
         records: list[Any] = []
-        handler = logger.add(records.append, level="DEBUG", format="{message}")
+        handler = logger.add(records.append, level="TRACE", format="{message}")
 
         def transfer(item: str) -> None:
             if item.startswith("bad"):
@@ -294,7 +294,10 @@ class TestRunS3Transfers:
         for name, record in zip(["bad-1", "bad-2"], errors, strict=True):
             assert name in record["message"]
             assert "AccessDenied" in record["message"]
-        detailed = [m.record for m in records if m.record["level"].name == "DEBUG" and m.record["exception"]]
+        # Nothing at the default CLI level (DEBUG and above) carries a traceback.
+        shown = logger.level("DEBUG").no
+        assert [m.record for m in records if m.record["level"].no >= shown and m.record["exception"]] == []
+        detailed = [m.record for m in records if m.record["level"].name == "TRACE" and m.record["exception"]]
         assert [r["exception"].value for r in detailed] == [denied, denied]
 
     def test_unexpected_error_aborts_the_run(self) -> None:
