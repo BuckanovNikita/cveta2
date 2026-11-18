@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -25,6 +27,7 @@ from cveta2.adapters.files.manifests import (
     new_manifest,
     save_manifest,
 )
+from cveta2.adapters.files.shared import replace_shared_bytes
 from cveta2.adapters.s3.task_cache import get_task_cache_dir
 from cveta2.application.use_cases.upload import (
     UploadOptions,
@@ -884,6 +887,49 @@ class TestResume:
 
         assert sleep.waits == [30.0]
         assert len(_writes_of(client).shapes[task_id]) == 1
+
+    def test_resume_after_a_failed_clearing_save_reuses_the_written_annotations(
+        self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+    ) -> None:
+        """The write succeeded but the pending mark could not be cleared, then the run died.
+
+        The stale mark must not cost a wait or a second write: the task
+        already holds exactly the expected shapes.
+        """
+        client = make_client()
+        names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+        marked: list[bool] = []
+
+        def refuse_clearing(target: Path, data: bytes) -> None:
+            pending = json.loads(data)["annotations_pending"]
+            if marked and not pending:
+                raise OSError("disk full")
+            if pending:
+                marked.append(True)
+            replace_shared_bytes(target, data)
+
+        # The run dies after the write, before it can record completion.
+        dies_after_write = Mock(side_effect=_InterruptedRunError)
+        with monkeypatch.context() as broken:
+            broken.setattr("cveta2.adapters.files.manifests.replace_shared_bytes", refuse_clearing)
+            with pytest.raises(_InterruptedRunError):
+                upload_dataset(
+                    client,
+                    make_request(image_names=names),
+                    deps=replace(upload_dependencies(sleep=_RecordingSleep()), invalidate=dies_after_write),
+                )
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0]
+        assert stranded.annotations_pending is True
+        assert any("disk full" in line for line in capture_logs)
+
+        sleep = _RecordingSleep()
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == []
+        assert outcome.task_id == stranded.task_id
+        assert outcome.annotations == len(names)
+        assert len(_writes_of(client).shapes[outcome.task_id]) == len(names)
 
     def test_a_schema_3_manifest_blocks_a_fresh_run_and_resumes_without_waiting(
         self, monkeypatch: pytest.MonkeyPatch
