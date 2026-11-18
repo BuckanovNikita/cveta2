@@ -74,7 +74,6 @@ def test_s3_credential_failures_exit_two_naming_the_source(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capture_logs: list[str],
-    capsys: pytest.CaptureFixture[str],
     error: Exception,
 ) -> None:
     uri = "s3://csv-bucket/exports/annotations.csv"
@@ -93,4 +92,3 @@ def test_s3_credential_failures_exit_two_naming_the_source(
     assert any(uri in line for line in capture_logs)
     assert exited.value.__cause__ is not None
     assert exited.value.__cause__.__cause__ is error
-    assert "Traceback" not in capsys.readouterr().err

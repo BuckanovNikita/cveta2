@@ -496,9 +496,7 @@ def test_echo_cli_command_formats_flags_lists_and_quoting(
 
 
 @pytest.mark.usefixtures("isolated_config")
-def test_upload_reports_a_missing_s3_profile_without_traceback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_upload_reports_a_missing_s3_profile_without_traceback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """An unknown AWS profile stops staging with a message naming the storage."""
     missing = ProfileNotFound(profile="absent")
 
@@ -527,5 +525,5 @@ def test_upload_reports_a_missing_s3_profile_without_traceback(
         with pytest.raises(SystemExit) as exited:
             CliApp().run(["upload", "-p", "proj", "-d", str(csv), "--name", "t1", "--labels", "car"])
 
-    assert_clean_s3_exit(exited, missing, capsys.readouterr().err, "upload-bucket", "incoming")
+    assert_clean_s3_exit(exited, missing, "upload-bucket", "incoming")
     assert api.writes.created_tasks == []

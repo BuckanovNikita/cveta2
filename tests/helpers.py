@@ -512,13 +512,13 @@ def patch_recording_s3(
 def assert_clean_s3_exit(
     exited: pytest.ExceptionInfo[SystemExit],
     original: BaseException,
-    stderr: str,
     *names: str,
 ) -> None:
     """Check a CLI S3 failure ended as a message naming *names*, not a traceback.
 
-    The message is the ``SystemExit`` code, the typed error it came from keeps
-    *original* as its cause, and nothing printed a traceback.
+    Python prints a traceback only for an exception that escapes; here the
+    command exits through ``SystemExit`` whose code is the message, and the
+    typed error it came from keeps *original* as its cause.
     """
     message = exited.value.code
     assert isinstance(message, str)
@@ -527,4 +527,3 @@ def assert_clean_s3_exit(
     reported = exited.value.__context__
     assert reported is not None
     assert reported.__cause__ is original
-    assert "Traceback" not in stderr

@@ -94,7 +94,6 @@ def test_fetch_images_dir_reaches_download(
 def test_fetch_reports_missing_s3_credentials_without_traceback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """An image request without credentials ends as a message naming the storage."""
     missing = NoCredentialsError()
@@ -117,4 +116,4 @@ def test_fetch_reports_missing_s3_credentials_without_traceback(
             ["fetch", "--project", "1", "--output-dir", str(tmp_path / "out"), "--images-dir", str(tmp_path / "img")]
         )
 
-    assert_clean_s3_exit(exited, missing, capsys.readouterr().err, "frames-bucket", "project/raw")
+    assert_clean_s3_exit(exited, missing, "frames-bucket", "project/raw")

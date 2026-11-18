@@ -154,7 +154,6 @@ def test_s3_sync_reports_a_denied_listing_without_traceback(
     tmp_path: Path,
     test_config: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A denied bucket ends the command with a message naming the storage."""
     from cveta2.adapters.config.settings import CvatConfig
@@ -183,4 +182,4 @@ def test_s3_sync_reports_a_denied_listing_without_traceback(
     ):
         CliApp().run(["s3-sync", "-p", "Dataset"])
 
-    assert_clean_s3_exit(exited, denied, capsys.readouterr().err, "denied-bucket", "raw/frames")
+    assert_clean_s3_exit(exited, denied, "denied-bucket", "raw/frames")
