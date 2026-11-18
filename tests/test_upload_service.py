@@ -1224,12 +1224,13 @@ class TestS3FailureAbortsBeforeTaskCreation:
         make_s3(monkeypatch, _FailingS3())
         image_dir = make_local_images(tmp_path, ["a.jpg"])
 
-        with pytest.raises(Cveta2Error, match="S3"):
+        with pytest.raises(Cveta2Error) as caught:
             upload_cvat_dataset(
                 client,
                 make_request(image_names=["a.jpg"], search_dirs=[image_dir]),
             )
 
+        assert f"s3://{BUCKET}/{PREFIX}" in str(caught.value)
         assert _writes_of(client).created_tasks == []
 
     @pytest.mark.parametrize("deleted", [False, True])
