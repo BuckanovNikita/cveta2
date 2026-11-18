@@ -158,3 +158,36 @@ def test_deletion_markers_in_progress_do_not_change_the_manifest() -> None:
     expected = TaskManifest(included=[4], obsolete=[])
     assert derive_tasks(without, without.dataset) == expected
     assert derive_tasks(with_markers, with_markers.dataset) == expected
+
+
+def test_a_legacy_pending_deletion_keeps_its_task_open() -> None:
+    """A pending deletion without task_completed is the only evidence that task 7 is unfinished."""
+
+    def rows(*records: tuple[int, str, str, str, str]) -> pd.DataFrame:
+        columns = ["task_id", "image_name", "instance_shape", "job_stage", "job_state"]
+        return pd.DataFrame(records, columns=columns).assign(task_completed="")
+
+    source = tables(
+        rows((2, "y.jpg", "box", "acceptance", "completed")),
+        obsolete=rows((7, "x.jpg", "box", "acceptance", "completed")),
+        in_progress=rows((7, "y.jpg", "deleted", "annotation", "new")),
+        deleted=rows((8, "x.jpg", "deleted", "acceptance", "completed")),
+    )
+
+    assert derive_tasks(source, source.dataset).obsolete == []
+
+
+@pytest.mark.parametrize(
+    ("flag", "is_marker"),
+    [(True, True), ("True", True), ("true", True), (False, False), ("", False), ("1", False), (1, False)],
+)
+def test_only_an_explicitly_true_deleted_row_is_a_reopen_marker(flag: object, *, is_marker: bool) -> None:
+    """A marker is skipped; any other flag keeps the row as evidence that task 5 is not finished.
+
+    Task 6 superseded task 5's only image, so task 5 is listed obsolete exactly
+    when nothing says it is unfinished.
+    """
+    deleted_row = pd.DataFrame([{"task_id": 5, "image_name": "x", "instance_shape": "deleted", "task_completed": flag}])
+    source = tables(frame((6, "z", True)), obsolete=frame((5, "z", True)), in_progress=deleted_row)
+
+    assert derive_tasks(source, source.dataset).obsolete == ([5] if is_marker else [])

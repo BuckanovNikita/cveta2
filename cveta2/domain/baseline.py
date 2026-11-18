@@ -8,6 +8,7 @@ import pandas as pd
 
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.partition import completed_task_ids, usable_task_ids
+from cveta2.domain.verification.cells import explicitly_true
 
 REQUIRED_COLUMNS = {"job_stage", "job_state", "task_id"}
 SIBLING_CSV_NAMES = ("obsolete.csv", "deleted.csv")
@@ -76,7 +77,7 @@ def _explicitly_completed_task_ids(frame: pd.DataFrame | None) -> set[int]:
     if frame is None or not {"task_id", "task_completed"}.issubset(frame.columns):
         return set()
     task_ids = usable_task_ids(frame["task_id"])
-    explicit = frame["task_completed"].eq(other=True)
+    explicit = frame["task_completed"].map(explicitly_true).astype(bool)
     return {int(t) for t in task_ids[explicit].dropna()} - {int(t) for t in task_ids[~explicit].dropna()}
 
 

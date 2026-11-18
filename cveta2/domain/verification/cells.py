@@ -17,6 +17,18 @@ def is_missing(value: object) -> bool:
     return isinstance(value, (float, np.floating)) and bool(np.isnan(value))
 
 
+def explicitly_true(value: object) -> bool:
+    """Whether a ``task_completed`` cell explicitly says true.
+
+    Only a boolean true or the text ``true`` in any letter case counts, so a
+    column that stayed text after a CSV round trip reads the same as a parsed
+    one. Empty cells, numbers such as ``1`` and any other text are not true.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    return isinstance(value, str) and value.casefold() == "true"
+
+
 def number(value: object) -> float | None:
     """Parse a finite real value without coercing or replacing the source cell."""
     if isinstance(value, (bool, np.bool_)) or not isinstance(value, (str, Real, Decimal)):

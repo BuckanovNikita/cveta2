@@ -15,7 +15,7 @@ from cveta2.adapters.files.dataset import write_partition_csvs
 from cveta2.application.use_cases.merge import merge_datasets as merge_with_files
 from cveta2.composition.conversion import merge_datasets
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.merge import _merge_datasets, _propagate_splits, _resolve_by_task
+from cveta2.domain.merge import _merge_datasets, _propagate_splits, _resolve_by_task, reopened_images
 from cveta2.domain.partition import partition_annotations_df
 from tests.helpers import csv_row, make_args, make_deleted, make_df, write_dataset_csv
 
@@ -463,6 +463,22 @@ class TestMergeReopenedImages:
 
         assert self._merge(tmp_path, new, with_in_progress=True) == expected
         assert self._merge(tmp_path, new, with_in_progress=False) == expected
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        pytest.param([True, False, None], {"r0"}, id="parsed-booleans"),
+        pytest.param(["True", "true", "False", ""], {"r0", "r1"}, id="text"),
+        pytest.param(["True", "odd", "1"], {"r0"}, id="text-with-an-odd-cell"),
+        pytest.param([1, 0, 1.0], set(), id="numbers-are-not-markers"),
+    ],
+)
+def test_only_explicitly_true_rows_mark_a_reopened_image(flags: list[object], expected: set[str]) -> None:
+    """Strict: counting a non-marker would wrongly drop old boxes."""
+    in_progress = pd.DataFrame({"image_name": [f"r{i}" for i in range(len(flags))], "task_completed": flags})
+
+    assert reopened_images(in_progress) == expected
 
 
 # ---------------------------------------------------------------------------

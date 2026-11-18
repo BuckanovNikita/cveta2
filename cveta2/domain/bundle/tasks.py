@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from cveta2.domain.bundle.models import FetchTables, TaskManifest, UploadError
-from cveta2.domain.verification.cells import integer, is_missing, number
+from cveta2.domain.verification.cells import explicitly_true, integer, is_missing, number
 
 
 @dataclass(frozen=True)
@@ -37,12 +37,6 @@ def _finished(explicit: object, stage: object, state: object) -> bool:
     return False
 
 
-def _explicitly_true(explicit: object) -> bool:
-    if is_missing(explicit):
-        return False
-    return _finished(explicit, None, None)
-
-
 def _evidence(frame: pd.DataFrame, *, deleted: bool = False) -> list[_Evidence]:
     if frame.empty:
         return []
@@ -65,22 +59,24 @@ def _evidence(frame: pd.DataFrame, *, deleted: bool = False) -> list[_Evidence]:
                     row.get("job_state"),
                 ),
                 deleted,
-                _explicitly_true(row.get("task_completed")),
+                explicitly_true(row.get("task_completed")),
             )
         )
     return evidence
 
 
 def _without_deletion_markers(frame: pd.DataFrame) -> pd.DataFrame:
-    """Drop the ``deleted`` rows of ``in_progress.csv``: markers, not annotations.
+    """Drop the reopen markers of ``in_progress.csv``: completed ``deleted`` rows.
 
-    A pending deletion belongs to an unfinished task, which never counts as
-    completed; the completed deletion of a reopened image only marks it for
-    ``merge``. Neither may change which tasks a bundle lists.
+    The completed deletion of a reopened image only marks it for ``merge`` and
+    must not change which tasks a bundle lists. A pending deletion stays: it
+    is evidence that its task is still open, the only such evidence when it
+    comes from an older cveta2 without ``task_completed``.
     """
-    if "instance_shape" not in frame.columns:
+    if not {"instance_shape", "task_completed"}.issubset(frame.columns):
         return frame
-    return frame[frame["instance_shape"] != "deleted"]
+    marker = (frame["instance_shape"] == "deleted") & frame["task_completed"].map(explicitly_true)
+    return frame[~marker]
 
 
 def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:

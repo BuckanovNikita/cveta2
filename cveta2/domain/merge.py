@@ -3,6 +3,8 @@
 import pandas as pd
 from loguru import logger
 
+from cveta2.domain.verification.cells import explicitly_true
+
 _TASK_ID_COLUMN = "task_id"
 
 
@@ -91,7 +93,7 @@ def reopened_images(in_progress: pd.DataFrame) -> set[str]:
     """
     if not {"image_name", "task_completed"}.issubset(in_progress.columns):
         return set()
-    explicit = in_progress["task_completed"].eq(other=True)
+    explicit = in_progress["task_completed"].map(explicitly_true).astype(bool)
     return set(in_progress.loc[explicit, "image_name"].dropna())
 
 
