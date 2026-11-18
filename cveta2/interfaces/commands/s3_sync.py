@@ -82,22 +82,31 @@ def run_s3_sync(args: "argparse.Namespace") -> None:
         raise Cveta2Error("Ошибка: --root требует явного указания проекта через --project.")
 
     project_filter = args.project.strip() if args.project else None
-    if project_filter:
-        with open_client() as client:
-            project_id, project_name, cs_info = resolve_project_and_cloud_storage(
-                client, project_filter, sync_root=args.root
-            )
-            targets = _resolve_sync_dirs(project_name)
-            if project_name not in targets:
-                raise Cveta2Error(
-                    f"Ошибка: для проекта {project_name!r} не настроен путь "
-                    f"кэширования изображений.\n"
-                    f"Добавьте image_cache.{project_name} или cache.images_root "
-                    f"в конфигурацию (cveta2 setup-cache)."
-                )
-            _sync_project(client, project_id, project_name, cs_info, targets[project_name])
-        return
+    failures = _sync_one(project_filter, args.root) if project_filter else _sync_all(args.root)
+    if failures:
+        raise Cveta2Error("\n".join(failures))
 
+
+def _sync_one(project_filter: str, sync_root: "str | None") -> list[str]:
+    """Sync the explicitly requested project; return its failure, if any."""
+    with open_client() as client:
+        project_id, project_name, cs_info = resolve_project_and_cloud_storage(
+            client, project_filter, sync_root=sync_root
+        )
+        targets = _resolve_sync_dirs(project_name)
+        if project_name not in targets:
+            raise Cveta2Error(
+                f"Ошибка: для проекта {project_name!r} не настроен путь "
+                f"кэширования изображений.\n"
+                f"Добавьте image_cache.{project_name} или cache.images_root "
+                f"в конфигурацию (cveta2 setup-cache)."
+            )
+        failure = _sync_project(client, project_id, project_name, cs_info, targets[project_name])
+    return [failure] if failure else []
+
+
+def _sync_all(sync_root: "str | None") -> list[str]:
+    """Sync every configured project; return the failures of those that had any."""
     projects_to_sync = _resolve_sync_dirs(None)
     if not projects_to_sync:
         raise Cveta2Error(
@@ -107,23 +116,28 @@ def run_s3_sync(args: "argparse.Namespace") -> None:
             "cveta2 setup-cache"
         )
 
+    skipped: list[str] = []
+    failures: list[str] = []
     with open_client() as client:
-        skipped: list[str] = []
         for project_name, target in projects_to_sync.items():
             logger.info(f"--- Синхронизация проекта: {project_name} ---")
             try:
                 project_id, _name, cs_info = resolve_project_and_cloud_storage(
-                    client, project_name, sync_root=args.root
+                    client, project_name, sync_root=sync_root
                 )
             except Cveta2Error as e:
                 logger.error(f"Проект {project_name!r}: не удалось определить ID — {e}")
                 skipped.append(project_name)
                 continue
 
-            if not _sync_project(client, project_id, project_name, cs_info, target):
+            failure = _sync_project(client, project_id, project_name, cs_info, target)
+            if failure is None:
                 skipped.append(project_name)
-        if skipped:
-            logger.warning(f"Синхронизация неполная: пропущены проекты {skipped}")
+            elif failure:
+                failures.append(failure)
+    if skipped:
+        logger.warning(f"Синхронизация неполная: пропущены проекты {skipped}")
+    return failures
 
 
 def _sync_project(
@@ -132,11 +146,17 @@ def _sync_project(
     project_name: str,
     cs_info: "CloudStorageInfo | None",
     target: "SyncTarget",
-) -> bool:
-    """Sync a resolved project; return False when it has no cloud storage."""
+) -> str | None:
+    """Sync a resolved project and describe any objects it failed to download.
+
+    Returns None when the project has no cloud storage (skipped), an empty
+    string when every object is local, and otherwise the error naming the
+    storage and the failed count.  The Python API returns the counters
+    unchanged; only the command turns failed objects into a failed run.
+    """
     if cs_info is None:
         logger.warning(f"Проект {project_name!r}: cloud storage не найден — пропускаем.")
-        return False
+        return None
     stats = client.sync_project_images(
         project_id,
         target.cache_dir,
@@ -144,4 +164,10 @@ def _sync_project(
         ignored_prefix=target.ignored_prefix,
     )
     logger.info(f"Проект {project_name!r}: {stats.summary()}")
-    return True
+    if not stats.failed:
+        return ""
+    return (
+        f"Ошибка: проект {project_name!r}: не удалось скачать {stats.failed} из {stats.total} "
+        f"объектов из s3://{cs_info.bucket}/{cs_info.prefix}. Повторите s3-sync: "
+        "скачанные файлы будут пропущены."
+    )

@@ -214,3 +214,67 @@ def test_s3_sync_lets_a_defect_in_an_sdk_call_surface_unchanged(
         CliApp().run(["s3-sync", "-p", "Dataset"])
 
     assert raised.value is defect
+
+
+def test_s3_sync_with_unreadable_objects_exits_naming_the_storage(
+    tmp_path: Path,
+    test_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Listing works but every object read is denied: the command must not succeed."""
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
+    from tests.fixtures.fake_cvat_api import FakeCvatApi
+    from tests.fixtures.fake_s3 import FakeS3Client
+
+    class _ListOnly(FakeS3Client):
+        def get_object(self, **_request: str) -> dict[str, object]:
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "GetObject")
+
+    storage = make_cs_info(bucket="list-only", prefix="raw/frames")
+    bucket = _ListOnly({f"list-only/raw/frames/{name}": b"x" for name in ("a.jpg", "b.jpg")})
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _url=None: bucket)
+    client = CvatClient(CvatConfig(), api=FakeCvatApi.from_tasks([], project_name="Dataset"))
+
+    with (
+        patch_cli_client(client),
+        patch.object(client, "detect_project_cloud_storage", return_value=storage),
+        pytest.raises(SystemExit) as exited,
+    ):
+        CliApp().run(["s3-sync", "-p", "Dataset"])
+
+    message = exited.value.code
+    assert isinstance(message, str)
+    assert "s3://list-only/raw/frames" in message
+    assert "2 из 2" in message
+
+
+def test_s3_sync_of_all_projects_finishes_the_rest_then_reports_failures(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    """One project's failed objects do not stop the others, but the run still fails."""
+    write_test_config(
+        test_config,
+        image_cache={"project-a": str(tmp_path / "a"), "project-b": str(tmp_path / "b")},
+    )
+    mock_client = _s3_sync_client()
+    mock_client.detect_project_cloud_storage.side_effect = [
+        make_cs_info(bucket="bucket-a", prefix="a"),
+        make_cs_info(bucket="bucket-b", prefix="b"),
+    ]
+    mock_client.sync_project_images.side_effect = [
+        DownloadStats(downloaded=1, cached=0, failed=3, total=4),
+        DownloadStats(downloaded=2, cached=0, failed=0, total=2),
+    ]
+
+    with patch_cli_client(mock_client), pytest.raises(SystemExit) as exited:
+        CliApp().run(["s3-sync"])
+
+    assert mock_client.sync_project_images.call_count == 2
+    message = exited.value.code
+    assert isinstance(message, str)
+    assert "s3://bucket-a/a" in message
+    assert "3 из 4" in message
+    assert "bucket-b" not in message
