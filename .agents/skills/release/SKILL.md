@@ -35,14 +35,14 @@ pushing it checks that remote `main` still equals the commit it released from. R
 run log and the remote refs (`git ls-remote origin refs/heads/main 'refs/tags/v*'`)
 before deciding which state applies.
 
-4. Failed before any push (a build command error, a moved `main`, a rejected branch
+4. Failed before any push (a configuration error, a moved `main`, a rejected branch
    push): nothing is published. The next merge releases everything still unreleased, or
    a human reruns the workflow on the current `main` (`gh run rerun <run-id>`). An error
-   in the build command or configuration repeats on every merge; fix it through a PR.
+   in the configuration repeats on every merge; fix it through a PR.
 5. The release commit reached `main` but the tag did not. This is a stop-and-report
    state: nothing more is merged until a human has pushed the tag for that release
    commit; agents never create or push tags. A human rerun with nothing merged in between
-   computes the same version, finds `pyproject.toml`, `uv.lock` and `CHANGELOG.md`
+   computes the same version, finds `cveta2/__init__.py` and `CHANGELOG.md`
    already current, makes no commit, tags the current `HEAD` and pushes only the tag.
    Merging first goes wrong:
    - after a `fix` merge the run computes the same version, finds it already in
