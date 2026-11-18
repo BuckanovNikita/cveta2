@@ -31,4 +31,4 @@ jobs:
       # semantic-release sets author, committer and tagger from commit_author in
       # pyproject.toml; the push uses the credential actions/checkout stored.
       - name: Version, changelog and tag
-        run: python -m scripts.release
+        run: semantic-release version --no-vcs-release

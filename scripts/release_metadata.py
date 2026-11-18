@@ -1,9 +1,9 @@
-"""Synchronize only the root lock version during semantic-release preparation.
+"""Write the release version into the cveta2 entry of uv.lock.
 
 semantic-release runs this as its ``build_command`` with ``NEW_VERSION`` set, after it
-has written ``project.version``. It rewrites the ``cveta2`` entry of ``uv.lock`` without
-resolving dependencies and stages the file, so the release commit carries a lock that
-agrees with the new version. Standard library only.
+has written ``project.version``. It rewrites only the ``cveta2`` entry of ``uv.lock``,
+without resolving dependencies, and stages the file, so the release commit carries a
+lock that agrees with the new version. Standard library only.
 """
 
 import os
@@ -12,7 +12,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from scripts.release_lock_guard import PACKAGE, lock_problems
+PACKAGE = "cveta2"
 
 
 def main() -> None:
@@ -22,17 +22,13 @@ def main() -> None:
         raise ValueError("semantic-release version must match project.version and be a stable version")
     path = Path("uv.lock")
     original = path.read_text(encoding="utf-8")
-    before = tomllib.loads(original)
-    roots = [package for package in before["package"] if package["name"] == PACKAGE]
+    roots = [package for package in tomllib.loads(original)["package"] if package["name"] == PACKAGE]
     if len(roots) != 1:
-        raise ValueError("lock must contain exactly one root package")
+        raise ValueError(f"uv.lock must contain exactly one {PACKAGE} package entry")
     pattern = rf'(?m)(^\[\[package\]\]\nname = "{re.escape(PACKAGE)}"\nversion = ")[^"]+("$)'
     updated, count = re.subn(pattern, lambda match: f"{match[1]}{version}{match[2]}", original)
     if count != 1:
-        raise ValueError("cannot locate the root lock version unambiguously")
-    problems = lock_problems(before, tomllib.loads(updated))
-    if problems:
-        raise ValueError("; ".join(problems))
+        raise ValueError(f"cannot locate the {PACKAGE} version in uv.lock unambiguously")
     path.write_text(updated, encoding="utf-8")
     subprocess.run(["git", "add", "--", "uv.lock"], check=True)  # noqa: S607 - git from PATH
 

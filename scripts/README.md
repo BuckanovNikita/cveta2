@@ -1,12 +1,12 @@
 # Скрипты (scripts/)
 
 Два инструмента разработки, оба запускаются из корня репозитория через
-`uv run python`, и скрипты выпуска версий, которые запускает только GitHub Actions.
+`uv run python`, и скрипт выпуска версий, который запускает только GitHub Actions.
 Остальная обвязка живёт там, где её используют:
 
 | Что | Где |
 |---|---|
-| Выпуск версии после слияния в `main` (`release.py`, `release_metadata.py`, `release_lock_guard.py`) | `.github/workflows/release.yml`, см. `docs/agents/engineering.md#releases` |
+| Версия пакета в `uv.lock` при выпуске (`release_metadata.py`, команда сборки semantic-release) | `.github/workflows/release.yml`, см. `docs/agents/engineering.md#releases` |
 | Проверка сообщения коммита | `.pre-commit-config.yaml` (готовый хук `conventional-pre-commit`) |
 | Проверка владения эффектами (дополняет import-linter) | `tests/architecture_effects.py`, запускается из `tests/test_architecture.py` |
 | Жизненный цикл живого прогона (up / stop / env; в pytest — фикстура сессии) | `tests/integration/lifecycle.py`, см. скилл `running-integration-tests` |

@@ -102,8 +102,8 @@ commit_message = "chore(release): {version}"
 # Author, committer and tagger of the release commit and annotated tag.
 commit_author = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 no_git_verify = false
-# Releases run only in GitHub Actions (.github/workflows/release.yml through
-# scripts/release.py) and build nothing. uv.lock carries its own cveta2 version
+# Releases run only in GitHub Actions (.github/workflows/release.yml) and build
+# nothing. uv.lock carries its own cveta2 version
 # entry, which version_toml does not touch; this command rewrites only that
 # entry and stages it, without resolving dependencies.
 build_command = "python -m scripts.release_metadata"

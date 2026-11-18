@@ -348,23 +348,15 @@ check the PR title and the commits it squashes before merge.
 
 [release.yml](../../.github/workflows/release.yml) runs on `pull_request_target` `closed`
 events only for PRs merged into `main`, in one concurrency group (`release-main`) that
-serializes releases and never cancels a running one; closely spaced merges may share one
+serializes runs and never cancels a running one; closely spaced merges may share one
 release. Only the release job has `contents: write`. It checks out `main` with full
 history and tags, installs the pinned python-semantic-release and runs
-`python -m scripts.release`, the accepted-source check, which:
-
-1. requires a clean `main` checkout equal to remote `main` and one `origin` URL for
-   fetch and push;
-2. runs `semantic-release version --no-push --no-vcs-release`; its build command
-   `python -m scripts.release_metadata` changes only the root package version in
-   `uv.lock`, next to `project.version` and `CHANGELOG.md` (changelog mode `update`
-   inserts the new release and leaves existing entries as written);
-3. succeeds without a commit or tag when no release is due;
-4. otherwise validates exactly one `chore(release): <version>` commit on the source that
-   touches only those files ([release_lock_guard.py](../../scripts/release_lock_guard.py))
-   and an annotated `v<version>` tag on it, refuses a moved remote `main` or an existing
-   remote tag, pushes both refs with one `git push --atomic --no-follow-tags`, and
-   confirms both remote identities.
+`semantic-release version --no-vcs-release`. semantic-release computes the version and,
+when a release is due, updates `project.version` in `pyproject.toml`, the `cveta2` entry
+of `uv.lock` (through its build command `python -m scripts.release_metadata`) and
+`CHANGELOG.md` (mode `update` inserts the new release and leaves existing entries as
+written), commits `chore(release): <version>`, creates the annotated `v<version>` tag,
+pushes `main` and then pushes the tag. When no release is due it changes nothing.
 
 A release publishes that commit and annotated tag only: never a GitHub Release, asset
 or package. It never merges or rewrites history. The `release` skill covers inspecting
