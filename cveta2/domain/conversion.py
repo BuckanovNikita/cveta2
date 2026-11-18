@@ -351,26 +351,55 @@ def _label_path_for_image(img_path: Path) -> Path:
     return img_path.with_suffix(".txt")
 
 
-def yolo_label_text(group: pd.DataFrame, label_map: dict[str, int], name_s: str) -> str:
-    """Format one image's boxes as deterministic six-decimal YOLO labels."""
+def _clip_to_image(box: PixelBox, img_w: int, img_h: int) -> PixelBox:
+    """Clamp every corner of *box* into ``[0, img_w] x [0, img_h]``."""
+    return PixelBox(
+        min(max(box.x_tl, 0.0), img_w),
+        min(max(box.y_tl, 0.0), img_h),
+        min(max(box.x_br, 0.0), img_w),
+        min(max(box.y_br, 0.0), img_h),
+    )
+
+
+class YoloLabels(NamedTuple):
+    """One image's YOLO label text and how many of its boxes were changed or left out."""
+
+    text: str
+    clipped: int
+    dropped: int
+
+
+def yolo_label_text(group: pd.DataFrame, label_map: dict[str, int], name_s: str) -> YoloLabels:
+    """Format one image's boxes as deterministic six-decimal YOLO labels.
+
+    Boxes crossing the image edge are clipped to it. A box whose width or
+    height is written as zero after clipping and rounding is left out, so every
+    written line stays within the ranges ``--from-yolo`` accepts.
+    """
     img_w = int(group.iloc[0]["image_width"])
     img_h = int(group.iloc[0]["image_height"])
     _require_positive_dimensions(img_w, img_h, name_s)
     lines: list[str] = []
+    clipped = 0
+    dropped = 0
     for _, row in group.iterrows():
-        class_id = label_map[row["instance_label"]]
-        yolo = _pixel_to_yolo(
-            PixelBox(
-                row["bbox_x_tl"],
-                row["bbox_y_tl"],
-                row["bbox_x_br"],
-                row["bbox_y_br"],
-            ),
-            img_w,
-            img_h,
+        original = PixelBox(
+            float(row["bbox_x_tl"]),
+            float(row["bbox_y_tl"]),
+            float(row["bbox_x_br"]),
+            float(row["bbox_y_br"]),
         )
-        lines.append(f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {yolo.w:.6f} {yolo.h:.6f}")
-    return "\n".join(lines) + "\n"
+        box = _clip_to_image(original, img_w, img_h)
+        yolo = _pixel_to_yolo(box, img_w, img_h)
+        width, height = f"{yolo.w:.6f}", f"{yolo.h:.6f}"
+        if float(width) <= 0 or float(height) <= 0:
+            dropped += 1
+            continue
+        clipped += box != original
+        class_id = label_map[row["instance_label"]]
+        lines.append(f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {width} {height}")
+    text = "\n".join(lines) + "\n" if lines else ""
+    return YoloLabels(text, clipped, dropped)
 
 
 class _YamlDumpOptions(TypedDict):
