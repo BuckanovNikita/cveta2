@@ -361,12 +361,17 @@ presentation. Public facades expose the supported operations without becoming
 inner dependencies. Managed source evidence is embedded in tasks.yaml; no archive
 or image payload is added. `domain/managed/models.py` owns two order-free configuration
 fingerprints, each with one implementation. The source fingerprint (snapshot
-`definition_hash`) binds only what fetch reads and decides task reuse and the
-prepare-time "fetch again" check. The definition fingerprint (preparation record
+`definition_hash`) binds only what fetch reads and drives the prepare-time and
+publication-time "fetch again" check. The definition fingerprint (preparation record
 and published `dataset.yaml` `definition_hash`) adds the policy prepare applies
 or publishes and is rechecked at publication. Ignore bookkeeping, project display
-names and legacy image/cache settings are in neither. A published parent snapshot
-with a hash from an earlier scheme is not an error; it only disables task reuse
-once. A local fetch directory or preparation from an earlier scheme fails the
-fetch-again check and needs one new fetch and prepare. Feedback resumes separately
+names and legacy image/cache settings are in neither. Fetch decides task reuse per
+source (name, type, CVAT project, labels, per-task freshness and ignores); only
+`refresh`, legacy evidence, a class registry change or a change of the CVAT host
+or organization reset every source. Composition passes the CVAT identity from the
+parent's published `dataset.yaml` managed section; when it is absent, a source
+fingerprint mismatch resets every source once. A published parent snapshot with
+a hash from an earlier scheme is therefore not an error. A local fetch directory
+or preparation from an earlier scheme fails the fetch-again check and needs one
+new fetch and prepare. Feedback resumes separately
 and must not confuse own issue writes with annotation freshness changes.

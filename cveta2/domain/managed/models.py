@@ -286,12 +286,15 @@ def _digest(content: object) -> str:
 
 
 def source_fingerprint(config: ProjectConfig, definition: DatasetDefinition) -> str:
-    """Bind exactly what fetch reads, independently of source order.
+    """Bind a fetched snapshot to exactly what fetch read, independently of source order.
 
     Covers the CVAT server identity and, per source, its name, type, resolved
     CVAT project id with its ignored task ids, and S3 object URI. Project keys,
     display names, ignore bookkeeping (name, description, silent) and legacy
-    image/cache settings do not change the captured evidence.
+    image/cache settings do not change the captured evidence. Preparation and
+    publication compare it to reject a snapshot fetched for another definition;
+    fetch reuse is decided per source and does not depend on this hash while
+    the previous CVAT identity is known.
     """
     sources: list[dict[str, object]] = []
     for source in sorted(definition.sources, key=lambda item: item.name):

@@ -2,7 +2,9 @@
 
 import hashlib
 import io
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock
 
 import pandas as pd
@@ -138,6 +140,7 @@ def _fetch(  # noqa: PLR0913
     reader: _Cvat,
     *,
     previous: ManagedSnapshot | None = None,
+    previous_cvat: CvatIdentity | None = None,
     s3: _S3 | None = None,
     registry: list[ApiClass] | None = None,
     refresh: bool = False,
@@ -150,6 +153,7 @@ def _fetch(  # noqa: PLR0913
         files=LocalSourceFiles(),
         registry=_registry() if registry is None else registry,
         previous=previous,
+        previous_cvat=previous_cvat,
         refresh=refresh,
     )
 
@@ -164,6 +168,7 @@ def test_reuse_per_task_and_complete_mixed_source_provenance() -> None:
     assert frame.loc[frame.source_id.eq("extra"), "source_task_id"].tolist() == [""]
     assert frame.loc[frame.source_id.eq("main"), "source_project_id"].tolist() == ["12"]
     assert first.definition_hash == source_fingerprint(config, definition)
+    assert (first.sources[2].etag, first.sources[2].version_id) == ("opaque-etag", "v1")
     reader.downloads.clear()
     second, repeated = _fetch(config, definition, reader, previous=first, s3=s3)
     assert reader.downloads == []
@@ -187,30 +192,45 @@ def test_changes_invalidate_reuse(reason: str) -> None:
         definition,
         reader,
         previous=first,
+        previous_cvat=config.cvat,
         registry=[_registry()[0].model_copy(update={"threshold": 0.75})] if reason == "registry" else _registry(),
         refresh=reason == "force",
     )
     assert reader.downloads == [(12, 1)]
 
 
+def _add_source(raw: dict[str, Any]) -> None:
+    raw["projects"]["r"] = {"id": 31}
+    raw["datasets"]["combined"]["sources"].append({"name": "third", "type": "cvat", "project": "r"})
+
+
+_EDITS: dict[str, Callable[[dict[str, Any]], object]] = {
+    "ignored-description": lambda raw: raw["projects"]["p"]["ignore"][0].update(
+        name="renamed", description="edited", silent=True
+    ),
+    "source-order": lambda raw: raw["datasets"]["combined"]["sources"].reverse(),
+    "overlap-decision": lambda raw: raw["datasets"]["combined"].update(
+        overlaps={"digest": {"source": "main", "members": ["main", "extra"]}}
+    ),
+    "splits": lambda raw: raw["datasets"]["combined"].update(splits={"train": 0.8, "val": 0.1, "test": 0.1, "seed": 7}),
+    "source-uri": lambda raw: raw["datasets"]["combined"]["sources"][2].update(uri="s3://bucket/moved.csv"),
+    "ignored-id": lambda raw: raw["projects"]["p"]["ignore"].append({"id": 3}),
+    "added-source": _add_source,
+    "renamed-source": lambda raw: raw["datasets"]["combined"]["sources"][1].update(name="renamed"),
+    "project-id": lambda raw: raw["projects"]["q"].update(id=31),
+    "swapped-projects": lambda raw: [
+        source.update(project={"p": "q", "q": "p"}[source["project"]])
+        for source in raw["datasets"]["combined"]["sources"][:2]
+    ],
+    "removed-source": lambda raw: raw["datasets"]["combined"]["sources"].pop(1),
+    "organization": lambda raw: raw["cvat"].update(organization="team"),
+    "host": lambda raw: raw["cvat"].update(host="https://cvat.moved.example"),
+}
+
+
 def _edited(config: ProjectConfig, edit: str) -> tuple[ProjectConfig, DatasetDefinition]:
     raw = config.model_dump(mode="json")
-    dataset = raw["datasets"]["combined"]
-    project = raw["projects"]["p"]
-    if edit == "ignored-description":
-        project["ignore"][0].update(name="renamed", description="edited", silent=True)
-    elif edit == "source-order":
-        dataset["sources"].reverse()
-    elif edit == "overlap-decision":
-        dataset["overlaps"] = {"digest": {"source": "main", "members": ["main", "extra"]}}
-    elif edit == "splits":
-        dataset["splits"] = {"train": 0.8, "val": 0.1, "test": 0.1, "seed": 7}
-    elif edit == "source-uri":
-        dataset["sources"][2]["uri"] = "s3://bucket/moved.csv"
-    elif edit == "ignored-id":
-        project["ignore"].append({"id": 99})
-    else:
-        raw["cvat"]["host"] = "https://cvat.moved.example"
+    _EDITS[edit](raw)
     edited = ProjectConfig.model_validate(raw)
     return edited, edited.datasets["combined"]
 
@@ -238,34 +258,85 @@ def test_edits_fetch_does_not_read_keep_task_reuse(edit: str) -> None:
     assert sorted(repeated["source_id"]) == sorted(frame["source_id"])
 
 
-@pytest.mark.parametrize("edit", ["source-uri", "ignored-id", "host"])
-def test_edits_fetch_reads_refetch_every_task(edit: str) -> None:
+def _three_projects() -> _Cvat:
+    return _Cvat(
+        {
+            12: [_task(1, "one.jpg"), _task(3, "three.jpg")],
+            27: [_task(2, "two.jpg")],
+            31: [_task(4, "four.jpg")],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("edit", "downloads"),
+    [
+        ("ignored-id", []),
+        ("source-uri", []),
+        ("added-source", [(31, 4)]),
+        ("renamed-source", [(27, 2)]),
+        ("project-id", [(31, 4)]),
+        ("swapped-projects", [(12, 1), (12, 3), (27, 2)]),
+        ("removed-source", []),
+        ("host", [(12, 1), (12, 3), (27, 2)]),
+        ("organization", [(12, 1), (12, 3), (27, 2)]),
+    ],
+)
+def test_source_edit_refetches_only_that_source_unless_the_server_changed(
+    edit: str, downloads: list[tuple[int, int]]
+) -> None:
     config, definition = _supplemental_with_ignored_task()
-    reader = _Cvat({12: [_task(1)], 27: [_task(2)]})
-    first, _ = _fetch(config, definition, reader)
+    reader = _three_projects()
+    s3 = _S3()
+    first, _ = _fetch(config, definition, reader, s3=s3)
     reader.downloads.clear()
     edited, edited_definition = _edited(config, edit)
 
-    second, _ = _fetch(edited, edited_definition, reader, previous=first)
+    second, _ = _fetch(edited, edited_definition, reader, previous=first, previous_cvat=config.cvat, s3=s3)
 
-    assert sorted(reader.downloads) == [(12, 1), (27, 2)]
+    assert sorted(reader.downloads) == downloads
+    assert s3.reads == 2
     assert second.definition_hash == source_fingerprint(edited, edited_definition) != first.definition_hash
 
 
-def test_previous_hash_scheme_refetches_once_and_keeps_assignments() -> None:
-    """Published parents from before the source fingerprint mismatch once, never fail."""
+def test_ignoring_a_live_task_drops_it_and_unignoring_fetches_only_it() -> None:
+    config, definition = _supplemental_with_ignored_task()
+    reader = _three_projects()
+    first, _ = _fetch(config, definition, reader)
+    reader.downloads.clear()
+    edited, edited_definition = _edited(config, "ignored-id")
+
+    ignored, frame = _fetch(edited, edited_definition, reader, previous=first, previous_cvat=config.cvat)
+
+    assert reader.downloads == []
+    assert set(ignored.sources[0].tasks) == {"1"}
+    assert "three.jpg" not in set(frame["image_name"])
+    restored, frame = _fetch(config, definition, reader, previous=ignored, previous_cvat=config.cvat)
+    assert reader.downloads == [(12, 3)]
+    assert set(restored.sources[0].tasks) == {"1", "3"}
+    assert "three.jpg" in set(frame["image_name"])
+
+
+@pytest.mark.parametrize(("identity", "downloads"), [("known", []), ("unknown", [(12, 1)])])
+def test_definition_hash_mismatch_resets_every_source_only_when_the_server_is_unknown(
+    identity: str, downloads: list[tuple[int, int]]
+) -> None:
+    """A snapshot whose hash differs never fails; without a published server identity it resets every source."""
     config, definition = _config()
     reader = _Cvat({12: [_task(1)]})
     first, _ = _fetch(config, definition, reader)
-    published = first.model_copy(update={"definition_hash": "0" * 64, "assignments": {"image-sha256": "train"}})
+    carried = {"assignments": {"image-sha256": "train"}, "image_hashes": {"/images/image.jpg": "image-sha256"}}
+    published = first.model_copy(update={"definition_hash": "0" * 64, **carried})
+    previous_cvat = config.cvat if identity == "known" else None
     reader.downloads.clear()
 
-    refetched, _ = _fetch(config, definition, reader, previous=published)
+    refetched, _ = _fetch(config, definition, reader, previous=published, previous_cvat=previous_cvat)
 
-    assert reader.downloads == [(12, 1)]
-    assert refetched.assignments == {"image-sha256": "train"}
+    assert reader.downloads == downloads
+    assert (refetched.assignments, refetched.image_hashes) == (carried["assignments"], carried["image_hashes"])
+    assert refetched.definition_hash == source_fingerprint(config, definition)
     reader.downloads.clear()
-    _fetch(config, definition, reader, previous=refetched)
+    _fetch(config, definition, reader, previous=refetched, previous_cvat=previous_cvat)
     assert reader.downloads == []
 
 
@@ -390,7 +461,7 @@ def test_legacy_snapshot_reads_but_refetches_all_tasks_and_keeps_assignments(tmp
     assert missing not in container.model_dump()
     reader.downloads.clear()
 
-    refreshed, _ = _fetch(config, definition, reader, previous=legacy)
+    refreshed, _ = _fetch(config, definition, reader, previous=legacy, previous_cvat=config.cvat)
 
     assert reader.downloads == [(12, 1)]
     assert refreshed.assignments == {"image-sha256": "train"}
