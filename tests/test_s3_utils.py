@@ -7,10 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import (
+    ClientError,
     ConnectionClosedError,
     EndpointConnectionError,
     IncompleteReadError,
 )
+from loguru import logger
 
 from cveta2.adapters.execution.concurrency import Workers, configure_workers
 from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
@@ -266,6 +268,34 @@ class TestRunS3Transfers:
         ok, failed = run_s3_transfers(["bad", "good"], transfer, str, desc="d", unit="u")
 
         assert (ok, failed) == (1, 1)
+
+    def test_each_failure_is_one_line_with_the_traceback_kept_for_debug(self) -> None:
+        """A denied object is named once with its error; the traceback is debug detail.
+
+        With credentials that may list but not read, every object fails;
+        a full traceback per object would bury the summary.
+        """
+        denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "GetObject")
+        records: list[Any] = []
+        handler = logger.add(records.append, level="DEBUG", format="{message}")
+
+        def transfer(item: str) -> None:
+            if item.startswith("bad"):
+                raise denied
+
+        try:
+            ok, failed = run_s3_transfers(["bad-1", "good", "bad-2"], transfer, str, desc="d", unit="u")
+        finally:
+            logger.remove(handler)
+
+        assert (ok, failed) == (1, 2)
+        errors = [m.record for m in records if m.record["level"].name == "ERROR"]
+        assert [r["exception"] for r in errors] == [None, None]
+        for name, record in zip(["bad-1", "bad-2"], errors, strict=True):
+            assert name in record["message"]
+            assert "AccessDenied" in record["message"]
+        detailed = [m.record for m in records if m.record["level"].name == "DEBUG" and m.record["exception"]]
+        assert [r["exception"].value for r in detailed] == [denied, denied]
 
     def test_unexpected_error_aborts_the_run(self) -> None:
         """A programming error must not be swallowed as a failed transfer."""

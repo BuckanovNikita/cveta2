@@ -69,7 +69,8 @@ def run_s3_transfers(
     This is the one fan-out both directions go through — uploads and
     downloads alike — so the worker count is read from the caller's runtime
     context rather than threaded through every caller. One object's failure
-    is logged and counted; the rest of the batch still runs.
+    is logged as one line naming it and its error, with the traceback at
+    debug level, and counted; the rest of the batch still runs.
     """
     outcomes = run_concurrent(
         items,
@@ -83,7 +84,10 @@ def run_s3_transfers(
         (item, outcome) for item, outcome in zip(items, outcomes, strict=True) if isinstance(outcome, Exception)
     ]
     for item, error in failures:
-        logger.opt(exception=error).error(f"Не удалось загрузить {describe(item)}")
+        # One line per object: with credentials that may list but not read,
+        # every object fails, and a traceback each would bury the summary.
+        logger.error(f"Не удалось загрузить {describe(item)}: {error}")
+        logger.opt(exception=error).debug(f"Трассировка ошибки для {describe(item)}")
     return len(items) - len(failures), len(failures)
 
 
