@@ -4,7 +4,7 @@
 
 ## Функции-команды (рекомендуемый способ)
 
-Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [контракт датасета](dataset-contract.md#dataset-format-and-fetch)).
+Модуль `cveta2` предоставляет функции верхнего уровня, повторяющие data-команды CLI (интерактивные `setup`/`setup-cache`/`doctor` аналогов не имеют). Они выполняют весь конвейер и записывают **те же самые** CSV-файлы, что и CLI. `fetch` возвращает `PartitionResult` со всеми четырьмя частями разбиения, `fetch_task` — все выгруженные строки одним `pandas.DataFrame` (колонки — `cveta2.CSV_COLUMNS`, см. [исторический контракт датасета](dataset-contract.md#dataset-format-and-fetch); текст заморожен 2026-11-17 и местами расходится с текущим поведением).
 
 ```python
 import cveta2
@@ -399,7 +399,8 @@ print(publication.dataset_id, publication.version)
 Ошибки операций относятся к `Cveta2Error`; известный ID созданной дочерней версии
 сохраняется в сообщении при последующем сбое. Точный порядок, состав пакета и
 действия при несовпадении описаны в [CLI](cli.md#опубликовать-подготовленный-пакет-cveta2-upload-dataset)
-и [контракте датасета](dataset-contract.md#standalone-publication-and-exit-codes).
+и [историческом контракте датасета](dataset-contract.md#standalone-publication-and-exit-codes)
+(текст заморожен 2026-11-17 и местами расходится с текущим поведением).
 
 ## Диагностика ошибок CVAT
 
