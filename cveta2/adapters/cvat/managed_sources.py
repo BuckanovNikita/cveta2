@@ -1,12 +1,10 @@
 """CVAT source metadata and full original task capture for managed datasets."""
 
-import hashlib
-import json
-
 import pandas as pd
 
 from cveta2.application.ports.cvat import CvatApiPort
 from cveta2.application.ports.managed_sources import ProjectState, TaskAssembler
+from cveta2.domain.managed.evidence import labels_fingerprint
 from cveta2.domain.managed.models import ManagedError, TaskSnapshot
 from cveta2.domain.models import CSV_COLUMNS, LabelInfo, TaskInfo
 
@@ -44,12 +42,10 @@ class CvatSources:
                     completed=completed,
                 )
             )
-        label_data = [label.model_dump(mode="json") for label in sorted(labels, key=lambda item: item.id)]
         return ProjectState(
             tasks=snapshots,
-            labels_fingerprint=hashlib.sha256(
-                json.dumps(label_data, sort_keys=True, ensure_ascii=False).encode()
-            ).hexdigest(),
+            labels_fingerprint=labels_fingerprint(labels),
+            labels=sorted(labels, key=lambda label: label.id),
         )
 
     def read_task(self, project_id: int, task: TaskSnapshot) -> TaskSnapshot:

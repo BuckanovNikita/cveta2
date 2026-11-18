@@ -329,6 +329,14 @@ preparation/feedback ports declare task metadata, CSV capture, media, snapshot a
 issue effects. Managed use cases orchestrate assembly, preparation, delivery and
 publication without discovering environment settings or constructing SDK clients.
 
+`domain/class_registry.py` owns complete typed registry records and their canonical
+fingerprint; the existing bundle-model import remains available. Managed snapshots
+retain those records and full CVAT label definitions alongside their fingerprints.
+The additive `registry` and per-source `labels` fields keep snapshot format version 1;
+missing fields identify legacy evidence, separately from valid empty lists. Legacy
+snapshots remain readable and retain split assignments, but new preparation and
+publication require a fresh capture with complete, fingerprint-consistent records.
+
 `adapters/config/project.py` owns strict personal/shared selection and reviewed
 legacy migration. Shared policy is authoritative; personal storage contains
 credentials, local paths and runtime preferences only. The migration journal

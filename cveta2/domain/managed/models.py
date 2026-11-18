@@ -15,7 +15,9 @@ from pydantic import (
     model_validator,
 )
 
+from cveta2.domain.class_registry import ApiClass
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import LabelInfo
 from cveta2.domain.paths import parse_sync_root
 
 _SPLIT_TOLERANCE = 1e-9
@@ -232,6 +234,7 @@ class SourceSnapshot(StrictModel):
     project_id: int | None = None
     tasks: dict[str, TaskSnapshot] = Field(default_factory=dict)
     labels_fingerprint: str = ""
+    labels: list[LabelInfo] | None = Field(default=None, exclude_if=lambda value: value is None)
     tables: dict[str, str] = Field(default_factory=dict)
     uri: str | None = None
     content_hash: str | None = None
@@ -247,6 +250,7 @@ class ManagedSnapshot(StrictModel):
     format_version: Literal[1] = 1
     definition_hash: str
     registry_hash: str
+    registry: list[ApiClass] | None = Field(default=None, exclude_if=lambda value: value is None)
     parent_id: str | None = None
     sources: list[SourceSnapshot]
     assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)

@@ -17,10 +17,13 @@ from cveta2.adapters.s3.managed_sources import S3CsvSources
 from cveta2.application.client.assembly import task_to_records
 from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
 from cveta2.application.ports.managed_sources import ProjectState, S3Object
+from cveta2.application.use_cases.managed_publication import registry_fingerprint
 from cveta2.application.use_cases.managed_sources import (
     fetch_sources,
 )
+from cveta2.domain.bundle.models import ApiClass
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.managed.evidence import labels_fingerprint
 from cveta2.domain.managed.models import (
     ClearMLDestination,
     CvatIdentity,
@@ -33,7 +36,11 @@ from cveta2.domain.managed.models import (
     TaskSnapshot,
     definition_fingerprint,
 )
-from cveta2.domain.models import CSV_COLUMNS, LabelInfo, TaskInfo
+from cveta2.domain.models import CSV_COLUMNS, LabelAttributeInfo, LabelInfo, TaskInfo
+
+
+def _registry() -> list[ApiClass]:
+    return [ApiClass(id=90, number=7, name="cat", techClass=False, isPeriodical=False, isCritical=False, threshold=0.5)]
 
 
 def _task(  # noqa: PLR0913
@@ -76,12 +83,13 @@ def _task(  # noqa: PLR0913
 class _Cvat:
     def __init__(self, projects: dict[int, list[TaskSnapshot]]) -> None:
         self.projects = projects
-        self.labels = dict.fromkeys(projects, "labels-v1")
+        self.labels = {project: [LabelInfo(id=1, name="cat")] for project in projects}
         self.downloads: list[tuple[int, int]] = []
 
     def inspect_project(self, project_id: int) -> ProjectState:
         return ProjectState(
             [task.model_copy(update={"tables": {}}) for task in self.projects[project_id]],
+            labels_fingerprint(self.labels[project_id]),
             self.labels[project_id],
         )
 
@@ -131,7 +139,7 @@ def _fetch(  # noqa: PLR0913
     *,
     previous: ManagedSnapshot | None = None,
     s3: _S3 | None = None,
-    registry_hash: str = "registry-v1",
+    registry: list[ApiClass] | None = None,
     refresh: bool = False,
 ) -> tuple[ManagedSnapshot, pd.DataFrame]:
     return fetch_sources(
@@ -140,7 +148,7 @@ def _fetch(  # noqa: PLR0913
         cvat=reader,
         s3=s3 or _S3(),
         files=LocalSourceFiles(),
-        registry_hash=registry_hash,
+        registry=_registry() if registry is None else registry,
         previous=previous,
         refresh=refresh,
     )
@@ -173,13 +181,13 @@ def test_changes_invalidate_reuse(reason: str) -> None:
     if reason == "metadata":
         reader.projects[12] = [_task(1, date="later")]
     if reason == "labels":
-        reader.labels[12] = "labels-v2"
+        reader.labels[12] = [LabelInfo(id=1, name="cat", color="#ff0000")]
     _fetch(
         config,
         definition,
         reader,
         previous=first,
-        registry_hash="registry-v2" if reason == "registry" else "registry-v1",
+        registry=[_registry()[0].model_copy(update={"threshold": 0.75})] if reason == "registry" else _registry(),
         refresh=reason == "force",
     )
     assert reader.downloads == [(12, 1)]
@@ -285,6 +293,104 @@ def test_export_reports_uncreatable_output_parent(tmp_path: Path) -> None:
     with pytest.raises(ManagedError, match="nested") as raised:
         LocalSourceFiles().export(output, snapshot, frame)
     assert isinstance(raised.value.__cause__, OSError)
+
+
+@pytest.mark.parametrize("missing", ["registry", "labels"])
+def test_legacy_snapshot_reads_but_refetches_all_tasks_and_keeps_assignments(tmp_path: Path, missing: str) -> None:
+    config, definition = _config()
+    reader = _Cvat({12: [_task(1)]})
+    first, _ = _fetch(config, definition, reader)
+    stored = first.model_dump(mode="json")
+    stored["assignments"] = {"image-sha256": "train"}
+    if missing == "registry":
+        stored.pop("registry")
+    else:
+        stored["sources"][0].pop("labels")
+    path = tmp_path / "legacy.yaml"
+    path.write_text(yaml.safe_dump(stored))
+    legacy = LocalSourceFiles().read_snapshot(path)
+    assert (legacy.registry if missing == "registry" else legacy.sources[0].labels) is None
+    container = legacy if missing == "registry" else legacy.sources[0]
+    assert missing not in container.model_dump()
+    reader.downloads.clear()
+
+    refreshed, _ = _fetch(config, definition, reader, previous=legacy)
+
+    assert reader.downloads == [(12, 1)]
+    assert refreshed.assignments == {"image-sha256": "train"}
+    assert refreshed.registry == _registry()
+    assert refreshed.sources[0].labels == reader.labels[12]
+
+
+def test_empty_records_are_present_evidence_and_can_be_reused() -> None:
+    config, definition = _config()
+    reader = _Cvat({12: [_task(1, empty=True)]})
+    reader.labels[12] = []
+    first, _ = _fetch(config, definition, reader, registry=[])
+    reader.downloads.clear()
+
+    second, _ = _fetch(config, definition, reader, registry=[], previous=first)
+
+    assert second.registry == []
+    assert second.sources[0].labels == []
+    assert reader.downloads == []
+    assert second.sources[0].reused == [1]
+
+
+@pytest.mark.parametrize("damage", ["registry", "labels"])
+def test_corrupt_parent_record_hashes_fail_before_task_capture(damage: str) -> None:
+    config, definition = _config()
+    reader = _Cvat({12: [_task(1)]})
+    first, _ = _fetch(config, definition, reader)
+    stored = first.model_dump(mode="json")
+    if damage == "registry":
+        stored["registry"][0]["threshold"] = 0.75
+    else:
+        stored["sources"][0]["labels"][0]["color"] = "#ffffff"
+    corrupted = ManagedSnapshot.model_validate(stored)
+    reader.downloads.clear()
+
+    with pytest.raises(ManagedError, match="fingerprint"):
+        _fetch(config, definition, reader, previous=corrupted)
+
+    assert reader.downloads == []
+
+
+def test_record_order_does_not_change_fingerprints_or_reuse() -> None:
+    config, definition = _config()
+    reader = _Cvat({12: [_task(1)]})
+    reader.labels[12].append(LabelInfo(id=2, name="dog"))
+    registry = [*_registry(), _registry()[0].model_copy(update={"id": 91, "number": 8, "name": "dog"})]
+    first, _ = _fetch(config, definition, reader, registry=registry)
+    reader.downloads.clear()
+    reader.labels[12].reverse()
+
+    second, _ = _fetch(config, definition, reader, previous=first, registry=list(reversed(registry)))
+
+    assert first.registry_hash == second.registry_hash == registry_fingerprint(registry)
+    assert first.sources[0].labels_fingerprint == second.sources[0].labels_fingerprint
+    assert reader.downloads == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("mutable", False), ("input_type", "text"), ("default_value", "poor"), ("values", ["good", "poor"])],
+)
+def test_label_attribute_change_invalidates_unchanged_task(field: str, value: object) -> None:
+    config, definition = _config()
+    reader = _Cvat({12: [_task(1)]})
+    attribute = LabelAttributeInfo(
+        id=4, name="quality", mutable=True, input_type="select", default_value="good", values=["good"]
+    )
+    reader.labels[12] = [LabelInfo(id=1, name="cat", attributes=[attribute])]
+    first, _ = _fetch(config, definition, reader)
+    reader.downloads.clear()
+    reader.labels[12] = [LabelInfo(id=1, name="cat", attributes=[attribute.model_copy(update={field: value})])]
+
+    second, _ = _fetch(config, definition, reader, previous=first)
+
+    assert reader.downloads == [(12, 1)]
+    assert second.sources[0].labels_fingerprint != first.sources[0].labels_fingerprint
 
 
 def test_s3_adapter_captures_opaque_etag_and_content_without_images() -> None:

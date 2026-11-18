@@ -1,0 +1,41 @@
+# Fixed full-record format_version=1 evidence from d8659e0 (2026-11-17).
+# Keep these persisted fingerprints fixed when changing serializer code.
+format_version: 1
+definition_hash: recorded-definition
+registry_hash: a1ec76fb4e9d72397f0b711e57f0df70023f5ae0d46644be37809396ebd95234
+registry:
+  - id: 91
+    number: 7
+    name: Кошка
+    techClass: false
+    isPeriodical: true
+    isCritical: false
+    threshold: 0.5
+parent_id: null
+sources:
+  - name: live
+    type: cvat
+    project_id: 12
+    tasks: {}
+    labels_fingerprint: 5ecef451e971cc2412204751b546758d53875e7b2f09535dfc01c85b676f2684
+    labels:
+      - id: 3
+        name: Кошка
+        color: '#123456'
+        attributes:
+          - id: 10
+            name: состояние
+            mutable: false
+            input_type: select
+            default_value: ''
+            values: ['', видно]
+        type: rectangle
+        svg: null
+        sublabels: []
+        project_id: 12
+        task_id: null
+        parent_id: null
+        has_parent: false
+    tables: {}
+assignments: {}
+image_hashes: {}

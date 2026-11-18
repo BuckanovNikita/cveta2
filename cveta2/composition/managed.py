@@ -1,7 +1,5 @@
 """Construct effects for managed datasets without discovering policy inward."""
 
-import hashlib
-import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -48,6 +46,7 @@ from cveta2.domain.bundle.models import (
     ImageRoots,
     Publication,
 )
+from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ProjectConfig
 from cveta2.domain.managed.policies import compare_frames
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
@@ -63,11 +62,6 @@ def _definition(config: ProjectConfig, name: str) -> DatasetDefinition:
         return config.datasets[name]
     except KeyError as error:
         raise ManagedError(f"Unknown managed dataset: {name}") from error
-
-
-def _registry_hash(records: list[ApiClass]) -> str:
-    content = [r.model_dump(mode="json") for r in sorted(records, key=lambda r: r.number)]
-    return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def _parent(
@@ -181,7 +175,7 @@ def fetch_dataset(
         snapshot, frame = fetch_sources(
             config,
             definition,
-            registry_hash=_registry_hash(records),
+            registry=records,
             cvat=CvatSources(client.api, task_to_records),
             s3=S3CsvSources(),
             files=files,
@@ -236,7 +230,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
         source,
         output_dir,
         _metadata(path, config, definition, records, previous, project_config),
-        registry_hash=_registry_hash(records),
+        registry_hash=registry_fingerprint(records),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=S3Roots(),

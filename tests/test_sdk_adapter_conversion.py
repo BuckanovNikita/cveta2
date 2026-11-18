@@ -14,6 +14,7 @@ import pytest
 import urllib3
 import urllib3.exceptions
 from cvat_sdk import Client
+from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.api_client.exceptions import ApiAttributeError, ApiException
 from cvat_sdk.core.exceptions import BackgroundRequestException
 
@@ -39,7 +40,7 @@ from cveta2.application.ports.dtos import (
     UploadTaskSpec,
 )
 from cveta2.domain.errors import CvatApiError, Cveta2Error
-from cveta2.domain.models import TaskInfo
+from cveta2.domain.models import LabelInfo, TaskInfo
 from tests.helpers import make_sdk_shape
 
 if TYPE_CHECKING:
@@ -75,6 +76,104 @@ class TestExtractUpdatedDate:
 
 
 class TestConvertLabel:
+    @pytest.mark.parametrize(("project_id", "task_id", "parent_id"), [(12, None, None), (None, 14, 7)])
+    def test_full_sdk_label_definition_survives_json_roundtrip(
+        self, project_id: int | None, task_id: int | None, parent_id: int | None
+    ) -> None:
+        attribute = cvat_models.Attribute(
+            id=10,
+            name="visibility",
+            mutable=False,
+            input_type=cvat_models.InputTypeEnum("select"),
+            default_value="",
+            values=["", "видимый", "hidden"],
+        )
+        sublabel = cvat_models.Sublabel(
+            id=3,
+            name="head",
+            color="#abcdef",
+            type="points",
+            has_parent=True,
+            attributes=[
+                cvat_models.Attribute(
+                    id=11,
+                    name="occluded",
+                    mutable=True,
+                    input_type=cvat_models.InputTypeEnum("checkbox"),
+                    default_value="false",
+                    values=["true", "false"],
+                )
+            ],
+        )
+        label = cvat_models.Label._from_openapi_data(
+            id=2,
+            name="person",
+            color="#123456",
+            type="skeleton",
+            svg='<svg><circle data-label-name="head" /></svg>',
+            attributes=[attribute],
+            sublabels=[sublabel],
+            project_id=project_id,
+            task_id=task_id,
+            parent_id=parent_id,
+            has_parent=False,
+        )
+
+        converted = convert_label(label)
+        result = LabelInfo.model_validate_json(converted.model_dump_json())
+
+        assert result.type == "skeleton"
+        assert result.svg == '<svg><circle data-label-name="head" /></svg>'
+        assert (result.project_id, result.task_id, result.parent_id) == (project_id, task_id, parent_id)
+        assert result.has_parent is False
+        assert result.attributes[0].model_dump() == {
+            "id": 10,
+            "name": "visibility",
+            "mutable": False,
+            "input_type": "select",
+            "default_value": "",
+            "values": ["", "видимый", "hidden"],
+        }
+        assert len(result.sublabels) == 1
+        child = result.sublabels[0]
+        assert (child.id, child.name, child.color, child.type, child.has_parent) == (
+            3,
+            "head",
+            "#abcdef",
+            "points",
+            True,
+        )
+        assert child.attributes[0].model_dump() == {
+            "id": 11,
+            "name": "occluded",
+            "mutable": True,
+            "input_type": "checkbox",
+            "default_value": "false",
+            "values": ["true", "false"],
+        }
+        assert child.sublabels == []
+
+    def test_sdk_optional_fields_can_be_absent(self) -> None:
+        label = cvat_models.Label(id=1, name="car")
+
+        assert convert_label(label) == LabelInfo(id=1, name="car")
+
+    @pytest.mark.parametrize("check_type", [True, False], ids=["enum", "raw-string"])
+    def test_sdk_attribute_input_type_preserves_enum_and_raw_string(self, *, check_type: bool) -> None:
+        attribute = cvat_models.Attribute(
+            id=10,
+            name="visibility",
+            mutable=False,
+            input_type="select",
+            values=["visible", "hidden"],
+            _check_type=check_type,
+        )
+        label = cvat_models.Label(id=1, name="car", attributes=[attribute])
+
+        converted = convert_label(label)
+
+        assert converted.attributes[0].input_type == "select"
+
     def test_basic_label(self) -> None:
         label = SimpleNamespace(id=1, name="car", color="#ff0000", attributes=[])
         result = convert_label(label)

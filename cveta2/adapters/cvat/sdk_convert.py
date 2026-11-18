@@ -59,11 +59,40 @@ def extract_updated_date(task: "cvat_models.TaskRead") -> str:
     return str(raw)
 
 
-def convert_label(label: "cvat_models.Label") -> LabelInfo:
-    """Convert an SDK label to :class:`LabelInfo`."""
-    raw_attrs = label.attributes or []
-    attrs = [LabelAttributeInfo(id=a.id, name=a.name or "") for a in raw_attrs]
-    return LabelInfo(id=label.id, name=label.name, attributes=attrs, color=label.color or "")
+def convert_label(label: "cvat_models.Label | cvat_models.Sublabel") -> LabelInfo:
+    """Preserve supported label definitions, including skeletons and attribute policy.
+
+    Generated SDK models raise AttributeError for omitted optional fields and
+    wrap some enum values in ModelSimple. Dynamic access is confined to this
+    SDK boundary so domain snapshots contain only portable values.
+    """
+    attrs = []
+    for attribute in getattr(label, "attributes", None) or []:
+        input_type = getattr(attribute, "input_type", None)
+        attrs.append(
+            LabelAttributeInfo(
+                id=attribute.id,
+                name=attribute.name or "",
+                mutable=getattr(attribute, "mutable", None),
+                input_type=getattr(input_type, "value", input_type),
+                default_value=getattr(attribute, "default_value", None),
+                values=list(getattr(attribute, "values", None) or []),
+            )
+        )
+    label_type = getattr(label, "type", None)
+    return LabelInfo(
+        id=label.id,
+        name=label.name,
+        attributes=attrs,
+        color=getattr(label, "color", None) or "",
+        type=getattr(label_type, "value", label_type),
+        svg=getattr(label, "svg", None),
+        sublabels=[convert_label(child) for child in getattr(label, "sublabels", None) or []],
+        project_id=getattr(label, "project_id", None),
+        task_id=getattr(label, "task_id", None),
+        parent_id=getattr(label, "parent_id", None),
+        has_parent=getattr(label, "has_parent", None),
+    )
 
 
 def _raw_frame(name: object, width: object, height: object) -> RawFrame:

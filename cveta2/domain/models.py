@@ -69,6 +69,10 @@ class LabelAttributeInfo(BaseModel):
 
     id: int
     name: str
+    mutable: bool | None = None
+    input_type: str | None = None
+    default_value: str | None = None
+    values: list[str] = Field(default_factory=list)
 
 
 class LabelInfo(BaseModel):
@@ -80,6 +84,13 @@ class LabelInfo(BaseModel):
     name: str
     color: str = ""
     attributes: "list[LabelAttributeInfo]" = Field(default_factory=list)
+    type: str | None = None
+    svg: str | None = None
+    sublabels: list["LabelInfo"] = Field(default_factory=list)
+    project_id: int | None = None
+    task_id: int | None = None
+    parent_id: int | None = None
+    has_parent: bool | None = None
 
     def format_display(self) -> str:
         """Human-readable label description for TUI menus."""

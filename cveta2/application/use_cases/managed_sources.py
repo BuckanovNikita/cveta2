@@ -10,6 +10,8 @@ from cveta2.application.ports.managed_sources import (
     S3CsvReader,
     SourceFiles,
 )
+from cveta2.domain.class_registry import ApiClass, registry_fingerprint
+from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
     DatasetDefinition,
     ManagedError,
@@ -59,6 +61,7 @@ def _cvat_source(  # noqa: PLR0913
     previous_tasks = (
         previous.tasks
         if previous is not None
+        and previous.labels is not None
         and previous.type == "cvat"
         and previous.project_id == project.id
         and previous.labels_fingerprint == state.labels_fingerprint
@@ -97,6 +100,7 @@ def _cvat_source(  # noqa: PLR0913
         project_id=project.id,
         tasks=tasks,
         labels_fingerprint=state.labels_fingerprint,
+        labels=state.labels,
         tables=files.project_tables(list(tasks.values())),
         fetched=fetched,
         reused=reused,
@@ -107,7 +111,7 @@ def fetch_sources(  # noqa: PLR0913
     config: ProjectConfig,
     definition: DatasetDefinition,
     *,
-    registry_hash: str,
+    registry: list[ApiClass],
     cvat: CvatSourceReader,
     s3: S3CsvReader,
     files: SourceFiles,
@@ -121,10 +125,17 @@ def fetch_sources(  # noqa: PLR0913
     rows. Fresh inventory removes deleted tasks; per-source partitioning keeps
     task IDs from one project from superseding records in another.
     """
+    registry_hash = registry_fingerprint(registry)
     definition_hash = source_definition_hash(config, definition)
+    legacy = previous is not None and (
+        previous.registry is None or any(source.type == "cvat" and source.labels is None for source in previous.sources)
+    )
+    if previous is not None and not legacy:
+        require_complete_evidence(previous)
     invalidated = (
         refresh
         or previous is None
+        or legacy
         or previous.registry_hash != registry_hash
         or previous.definition_hash != definition_hash
     )
@@ -161,9 +172,11 @@ def fetch_sources(  # noqa: PLR0913
     managed = ManagedSnapshot(
         definition_hash=definition_hash,
         registry_hash=registry_hash,
+        registry=sorted(registry, key=lambda record: record.number),
         parent_id=parent_id,
         sources=sources,
         assignments=previous.assignments if previous else {},
         image_hashes=previous.image_hashes if previous else {},
     )
+    require_complete_evidence(managed)
     return managed, frame

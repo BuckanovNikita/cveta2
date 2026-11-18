@@ -14,6 +14,7 @@ import pytest
 import yaml
 from PIL import Image
 
+from cveta2.adapters.class_api.http import HttpClassApi
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.application.ports.dtos import RawAnnotations, RawJob
@@ -169,6 +170,14 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
         api.fetch_dataset("combined", output_dir=fetched, **options)
         snapshot = LocalSourceFiles().read_snapshot(fetched)
         assert snapshot.parent_id is None, "configured sources must support cold start"
+        expected_registry = HttpClassApi().fetch(class_api)
+        assert snapshot.registry == expected_registry
+        sdk = _make_sdk_client()
+        try:
+            expected_labels = SdkCvatApiAdapter(sdk).get_project_labels(project.id)
+        finally:
+            sdk.close()
+        assert next(source for source in snapshot.sources if source.type == "cvat").labels == expected_labels
         frame = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
         assert set(frame["source_id"]) == {"cvat", "supplemental"}
         # An opaque external transform may choose one annotation per image and
@@ -251,6 +260,9 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
         assert set(remote.list_files()) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
         local = Path(remote.get_local_copy(use_soft_links=False))
         assert (local / "tasks.yaml").read_bytes() == (sibling / "tasks.yaml").read_bytes()
+        published_snapshot = LocalSourceFiles().read_snapshot(local / "tasks.yaml")
+        assert published_snapshot.registry == expected_registry
+        assert next(source for source in published_snapshot.sources if source.type == "cvat").labels == expected_labels
         assert {item.type for item in LocalSourceFiles().read_snapshot(local / "tasks.yaml").sources} == {
             "cvat",
             "s3-csv",
