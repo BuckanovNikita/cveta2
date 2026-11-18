@@ -21,8 +21,8 @@ policy owns engineering safeguards. Spec Kit is temporarily disabled. Preserve
 `specs/`, `.specify/` and archived tooling unchanged and outside active discovery.
 Reactivation requires explicit user instruction. Historical workflow instructions
 are inactive; historical product requirements remain preserved through the migration.
-The approved migration branch uses the new workflow; repository-wide authority changes
-only after human merge and accepted migration, with Linear drafts activated then.
+The migration is complete: Linear contract documents became the product authority on
+2026-11-17 after the human merge and acceptance recorded in SIP-66.
 
 ## Language and ownership
 

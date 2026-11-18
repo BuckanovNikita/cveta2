@@ -1,6 +1,6 @@
 # Конфигурация
 
-> После слияния и приёмки SIP-66 нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-draft-docsconfigurationmd-67789ec2f0b6). До этого документ Linear — черновик миграции. Это руководство продолжает обновляться.
+> Нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-docsconfigurationmd-67789ec2f0b6). Это руководство объясняет использование и продолжает обновляться.
 
 ## Личный и общий файлы
 

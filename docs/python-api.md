@@ -1,6 +1,6 @@
 # Python API
 
-> После слияния и приёмки SIP-66 нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-draft-docspython-apimd-a72b44e6c704). До этого документ Linear — черновик миграции. Это руководство продолжает обновляться.
+> Нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-docspython-apimd-a72b44e6c704). Это руководство объясняет использование и продолжает обновляться.
 
 ## Функции-команды (рекомендуемый способ)
 

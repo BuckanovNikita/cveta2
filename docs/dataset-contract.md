@@ -1,6 +1,6 @@
 # Dataset and public interface reference
 
-> Historical contract after migration cutover; [Linear topic](https://linear.app/sip-ds-team/document/contract-draft-docsdataset-contractmd-ffd41fecfde2) becomes authoritative only after SIP-66 is human-merged and accepted. This source body is preserved unchanged.
+> Historical contract since the 2026-11-17 migration cutover; the [Linear topic](https://linear.app/sip-ds-team/document/contract-docsdataset-contractmd-ffd41fecfde2) is authoritative. This source body is preserved unchanged.
 
 The [functional specification](../specs/baseline.md) describes the workflows and their
 state and failure rules. This reference supplies detailed public formats, API values
