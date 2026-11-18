@@ -2,6 +2,27 @@
 
 <!-- version list -->
 
+## v0.14.1 (2026-11-18)
+
+### Build System
+
+- **sdist**: Stop shipping the frozen contract files (SIP-144)
+  ([#17](https://github.com/BuckanovNikita/cveta2/pull/17),
+  [`4df7fd0`](https://github.com/BuckanovNikita/cveta2/commit/4df7fd00074a4214508170672f5bc0af11721217))
+
+### Continuous Integration
+
+- **release**: Pin checkout and setup-python to Node.js 24 releases (SIP-145)
+  ([#16](https://github.com/BuckanovNikita/cveta2/pull/16),
+  [`bf0ba54`](https://github.com/BuckanovNikita/cveta2/commit/bf0ba545109d0eb46289f377d3439a49efc34df3))
+
+### Performance Improvements
+
+- **managed**: Keep fetch reuse for sources whose definition did not change (SIP-147)
+  ([#18](https://github.com/BuckanovNikita/cveta2/pull/18),
+  [`9a06842`](https://github.com/BuckanovNikita/cveta2/commit/9a0684285414903406df19004efd984703b77fa6))
+
+
 ## v0.14.0 (2026-11-18)
 
 ### Bug Fixes
