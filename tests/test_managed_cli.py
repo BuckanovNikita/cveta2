@@ -92,3 +92,4 @@ def test_s3_credential_failures_exit_two_naming_the_source(
     assert any(uri in line for line in capture_logs)
     assert exited.value.__cause__ is not None
     assert exited.value.__cause__.__cause__ is error
+    assert not any("Traceback" in line for line in capture_logs)

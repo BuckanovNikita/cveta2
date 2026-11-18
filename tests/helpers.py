@@ -522,6 +522,7 @@ def assert_clean_s3_exit(
     """
     message = exited.value.code
     assert isinstance(message, str)
+    assert "Traceback" not in message
     for name in names:
         assert name in message
     reported = exited.value.__context__
