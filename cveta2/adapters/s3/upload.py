@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 
 from loguru import logger
 
+from cveta2.adapters.s3.errors import s3_operation
 from cveta2.adapters.s3.types import S3Client, Transfer
 from cveta2.adapters.s3.utils import (
     list_s3_objects,
@@ -59,8 +60,9 @@ def build_server_file_mapping(
         :meth:`S3Uploader.upload` skips every image whose key is among them.
 
     """
-    client = s3_client or make_s3_client(cs_info.endpoint_url or None)
-    objects = list_s3_objects(client, cs_info.bucket, cs_info.prefix)
+    with s3_operation("листинг хранилища для загрузки", cs_info.bucket, cs_info.prefix):
+        client = s3_client or make_s3_client(cs_info.endpoint_url or None)
+        objects = list_s3_objects(client, cs_info.bucket, cs_info.prefix)
     existing_keys: set[str] = {key for key, _name in objects}
     if pinned is not None:
         return dict(pinned), existing_keys
@@ -135,6 +137,17 @@ class S3Uploader:
         if not images:
             return UploadStats(total=0)
 
+        with s3_operation("загрузка изображений в S3", cs_info.bucket, cs_info.prefix):
+            return self._upload(cs_info, images, name_to_server_file, existing_keys)
+
+    @staticmethod
+    def _upload(
+        cs_info: CloudStorageInfo,
+        images: dict[str, Path],
+        name_to_server_file: dict[str, str],
+        existing_keys: set[str],
+    ) -> UploadStats:
+        """Upload the images missing from *existing_keys*; see :meth:`upload`."""
         stats = UploadStats(total=len(images))
 
         s3 = make_s3_client(cs_info.endpoint_url or None)

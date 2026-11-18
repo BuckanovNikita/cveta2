@@ -1,8 +1,5 @@
 """Assemble complete managed candidates while reusing unchanged task records."""
 
-import hashlib
-import json
-
 import pandas as pd
 
 from cveta2.application.ports.managed_sources import (
@@ -21,31 +18,8 @@ from cveta2.domain.managed.models import (
     SourceDefinition,
     SourceSnapshot,
     TaskSnapshot,
+    source_fingerprint,
 )
-
-
-def source_definition_hash(config: ProjectConfig, definition: DatasetDefinition) -> str:
-    """Bind source evidence to the resolved definition and source identities."""
-    payload = {
-        "cvat": config.cvat.model_dump(mode="json"),
-        "dataset": definition.model_dump(mode="json"),
-        "projects": {
-            source.project: config.projects[source.project].model_dump(mode="json")
-            for source in definition.sources
-            if source.type == "cvat" and source.project is not None
-        },
-    }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-
-
-def _ignored_task_ids(project: ProjectDefinition) -> set[int]:
-    ignored: set[int] = set()
-    for entry in project.ignore:
-        task_id = entry.get("id")
-        if isinstance(task_id, bool) or not isinstance(task_id, int) or task_id < 0:
-            raise ManagedError("Ignored task records require a nonnegative integer id")
-        ignored.add(task_id)
-    return ignored
 
 
 def _cvat_source(  # noqa: PLR0913
@@ -68,7 +42,7 @@ def _cvat_source(  # noqa: PLR0913
         and not refresh
         else {}
     )
-    ignored = _ignored_task_ids(project)
+    ignored = project.ignored_task_ids
     tasks: dict[str, TaskSnapshot] = {}
     fetched: list[int] = []
     reused: list[int] = []
@@ -126,7 +100,7 @@ def fetch_sources(  # noqa: PLR0913
     task IDs from one project from superseding records in another.
     """
     registry_hash = registry_fingerprint(registry)
-    definition_hash = source_definition_hash(config, definition)
+    definition_hash = source_fingerprint(config, definition)
     legacy = previous is not None and (
         previous.registry is None or any(source.type == "cvat" and source.labels is None for source in previous.sources)
     )

@@ -491,6 +491,121 @@ class TestToYolo:
         assert (out_dir / "labels" / "val" / "empty.txt").read_text() == ""
 
 
+def _export_and_reimport(
+    tmp_path: Path, boxes: dict[str, list[tuple[float, float, float, float]]]
+) -> tuple[Path, pd.DataFrame]:
+    """Export 640x480 images with the given boxes to YOLO, then import the result back."""
+    images = tmp_path / "source"
+    rows: list[dict[str, object]] = []
+    for name, coords in boxes.items():
+        make_image(images / name)
+        for x_tl, y_tl, x_br, y_br in coords:
+            rows.append(
+                csv_row(
+                    name,
+                    split="train",
+                    bbox_x_tl=x_tl,
+                    bbox_y_tl=y_tl,
+                    bbox_x_br=x_br,
+                    bbox_y_br=y_br,
+                    annotation_id=len(rows) + 1,
+                )
+            )
+    out = tmp_path / "yolo"
+    convert_to_yolo(write_convert_csv(tmp_path, rows), out, image_dirs=[images], link_mode="copy")
+    roundtrip = tmp_path / "roundtrip.csv"
+    convert_from_yolo(out, roundtrip)
+    return out, pd.read_csv(roundtrip)
+
+
+class TestOutOfImageBoxes:
+    """Boxes crossing the image edge are clipped; boxes left without area are dropped."""
+
+    @pytest.mark.parametrize(
+        ("box", "clipped"),
+        [
+            ((-20.0, 20.0, 100.0, 200.0), (0.0, 20.0, 100.0, 200.0)),
+            ((10.0, -30.0, 100.0, 200.0), (10.0, 0.0, 100.0, 200.0)),
+            ((600.0, 20.0, 700.0, 200.0), (600.0, 20.0, 640.0, 200.0)),
+            ((10.0, 400.0, 100.0, 520.0), (10.0, 400.0, 100.0, 480.0)),
+            ((-10.0, -10.0, 650.0, 490.0), (0.0, 0.0, 640.0, 480.0)),
+        ],
+    )
+    def test_box_crossing_the_edge_is_clipped_and_survives_reimport(
+        self,
+        tmp_path: Path,
+        box: tuple[float, float, float, float],
+        clipped: tuple[float, float, float, float],
+        capture_logs: list[str],
+    ) -> None:
+        out, result = _export_and_reimport(tmp_path, {"edge.jpg": [box]})
+
+        assert len((out / "labels/train/edge.txt").read_text().splitlines()) == 1
+        assert result["instance_shape"].tolist() == ["box"]
+        got = tuple(result.iloc[0][["bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"]])
+        assert got == pytest.approx(clipped, abs=0.011)
+        assert any(": 1 (" in message and "edge.jpg" in message and "обрезан" in message for message in capture_logs)
+
+    def test_box_on_the_image_border_is_not_clipped(self, tmp_path: Path, capture_logs: list[str]) -> None:
+        _, result = _export_and_reimport(tmp_path, {"full.jpg": [(0.0, 0.0, 640.0, 480.0)]})
+
+        got = tuple(result.iloc[0][["bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"]])
+        assert got == pytest.approx((0.0, 0.0, 640.0, 480.0), abs=0.011)
+        assert not capture_logs
+
+    @pytest.mark.parametrize(
+        "box",
+        [
+            pytest.param((700.0, 20.0, 800.0, 200.0), id="right-of-image"),
+            pytest.param((-50.0, 20.0, -10.0, 200.0), id="left-of-image"),
+            pytest.param((10.0, 500.0, 100.0, 600.0), id="below-image"),
+            pytest.param((640.0, 20.0, 700.0, 200.0), id="clips-to-zero-width"),
+            pytest.param((10.0, -40.0, 100.0, 0.0), id="clips-to-zero-height"),
+            pytest.param((639.9999, 20.0, 700.0, 200.0), id="clips-below-rounding"),
+            pytest.param((100.0, 20.0, 100.0003, 200.0), id="inside-below-rounding"),
+        ],
+    )
+    def test_box_without_area_is_dropped_and_the_image_kept(
+        self,
+        tmp_path: Path,
+        box: tuple[float, float, float, float],
+        capture_logs: list[str],
+    ) -> None:
+        out, result = _export_and_reimport(tmp_path, {"gone.jpg": [box]})
+
+        assert (out / "images/train/gone.jpg").is_file()
+        assert (out / "labels/train/gone.txt").read_text() == ""
+        assert result["instance_shape"].tolist() == ["none"]
+        assert any(": 1 (" in message and "gone.jpg" in message and "Пропущен" in message for message in capture_logs)
+
+    def test_remaining_boxes_are_kept_and_both_counts_are_summarized(
+        self, tmp_path: Path, capture_logs: list[str], capture_info_logs: list[str]
+    ) -> None:
+        boxes = {
+            "a.jpg": [
+                (10.0, 20.0, 100.0, 200.0),
+                (700.0, 20.0, 800.0, 200.0),
+                (600.0, 20.0, 700.0, 200.0),
+                (-5.0, 30.0, 50.0, 90.0),
+                (10.0, 500.0, 90.0, 600.0),
+            ],
+            "b.jpg": [(-5.0, 20.0, 100.0, 200.0), (10.0, 480.0, 100.0, 500.0)],
+        }
+        out, result = _export_and_reimport(tmp_path, boxes)
+
+        assert len((out / "labels/train/a.txt").read_text().splitlines()) == 3
+        assert len((out / "labels/train/b.txt").read_text().splitlines()) == 1
+        assert sorted(result["image_name"]) == ["a.jpg", "a.jpg", "a.jpg", "b.jpg"]
+        clipped = [message for message in capture_logs if "обрезан" in message]
+        dropped = [message for message in capture_logs if "Пропущен" in message]
+        assert len(clipped) == len(dropped) == 1
+        assert ": 3 (a.jpg, b.jpg)" in clipped[0]
+        assert ": 3 (a.jpg, b.jpg)" in dropped[0]
+        summary = [message for message in capture_info_logs if message.startswith("Готово")]
+        assert len(summary) == 1
+        assert " 4 боксов" in summary[0]
+
+
 class TestFromYoloDataset:
     """Tests for --from-yolo YOLO to CSV conversion."""
 

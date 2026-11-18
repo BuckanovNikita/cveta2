@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from cveta2.adapters.config.settings import CvatConfig
-from cveta2.adapters.files.manifests import delete_manifest
+from cveta2.adapters.files.manifests import delete_manifest, new_manifest
 from cveta2.application.client.session import TaskWriteSession
 from cveta2.application.ports.cvat import CvatApiPort
 from cveta2.application.ports.dtos import RawAnnotations, RawShape
@@ -113,9 +113,15 @@ def test_conflicting_shape_readback_never_appends() -> None:
     )
     session = TaskWriteSession(api, 99, _name_to_frame={"a.jpg": 0}, _labels=[LabelInfo(id=7, name="car")])
     staged = _StagedUpload(MagicMock(), rows(), ["a.jpg"], {"a.jpg": "a.jpg"})
+    manifest = new_manifest("", "identity", 7, "task", make_cs_info(), {}, [], host="http://cvat.invalid")
+    manifest.annotations_pending = True
+    deps = MagicMock()
     with pytest.raises(Cveta2Error):
-        _ensure_annotations(client, 99, staged, session, resuming=True)
+        _ensure_annotations(client, 99, staged, session, resuming=True, manifest=manifest, deps=deps)
     client.upload_task_annotations.assert_not_called()
+    # Shapes already present are judged at once; the pending wait is only for an empty task.
+    deps.sleep.assert_not_called()
+    deps.manifests.save.assert_not_called()
 
 
 @pytest.mark.parametrize("shape", [None, "deleted"])

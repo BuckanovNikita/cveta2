@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError, ParamValidationError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,6 +19,7 @@ from cveta2.domain.models import ProjectInfo
 from cveta2.domain.storage import DownloadStats
 from cveta2.interfaces.cli import CliApp
 from tests.helpers import (
+    assert_clean_s3_exit,
     make_cs_info,
     mock_client_ctx,
     patch_cli_client,
@@ -146,3 +148,175 @@ def test_s3_sync_uses_canonical_project_settings(
     assert kwargs["project_cloud_storage"].bucket == "override"
     assert kwargs["project_cloud_storage"].prefix == "raw/data"
     assert fake.organization_calls == ([spec.split("/", maxsplit=1)[0] or None] if "/" in spec else [])
+
+
+def test_s3_sync_reports_a_denied_listing_without_traceback(
+    tmp_path: Path,
+    test_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A denied bucket ends the command with a message naming the storage."""
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
+    from tests.fixtures.fake_cvat_api import FakeCvatApi
+    from tests.fixtures.fake_s3 import FakeS3Client
+
+    denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "ListObjectsV2")
+
+    class _DeniedBucket(FakeS3Client):
+        def list_objects_v2(self, **_request: str) -> dict[str, object]:
+            raise denied
+
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _url=None: _DeniedBucket())
+    client = CvatClient(CvatConfig(), api=FakeCvatApi.from_tasks([], project_name="Dataset"))
+
+    with (
+        patch_cli_client(client),
+        patch.object(
+            client,
+            "detect_project_cloud_storage",
+            return_value=make_cs_info(bucket="denied-bucket", prefix="raw/frames"),
+        ),
+        pytest.raises(SystemExit) as exited,
+    ):
+        CliApp().run(["s3-sync", "-p", "Dataset"])
+
+    assert_clean_s3_exit(exited, denied, "denied-bucket", "raw/frames")
+
+
+def test_s3_sync_lets_a_defect_in_an_sdk_call_surface_unchanged(
+    tmp_path: Path,
+    test_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed request is a bug, not an S3 outage: it keeps its own traceback."""
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
+    from tests.fixtures.fake_cvat_api import FakeCvatApi
+    from tests.fixtures.fake_s3 import FakeS3Client
+
+    defect = ParamValidationError(report="Invalid type for parameter Key, value: None")
+
+    class _MalformedRequest(FakeS3Client):
+        def list_objects_v2(self, **_request: str) -> dict[str, object]:
+            raise defect
+
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _url=None: _MalformedRequest())
+    client = CvatClient(CvatConfig(), api=FakeCvatApi.from_tasks([], project_name="Dataset"))
+
+    with (
+        patch_cli_client(client),
+        patch.object(client, "detect_project_cloud_storage", return_value=make_cs_info()),
+        pytest.raises(ParamValidationError) as raised,
+    ):
+        CliApp().run(["s3-sync", "-p", "Dataset"])
+
+    assert raised.value is defect
+
+
+def test_s3_sync_with_unreadable_objects_exits_naming_the_storage(
+    tmp_path: Path,
+    test_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Listing works but every object read is denied: the command must not succeed."""
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
+    from tests.fixtures.fake_cvat_api import FakeCvatApi
+    from tests.fixtures.fake_s3 import FakeS3Client
+
+    class _ListOnly(FakeS3Client):
+        def get_object(self, **_request: str) -> dict[str, object]:
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "GetObject")
+
+    storage = make_cs_info(bucket="list-only", prefix="raw/frames")
+    bucket = _ListOnly({f"list-only/raw/frames/{name}": b"x" for name in ("a.jpg", "b.jpg")})
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _url=None: bucket)
+    client = CvatClient(CvatConfig(), api=FakeCvatApi.from_tasks([], project_name="Dataset"))
+
+    with (
+        patch_cli_client(client),
+        patch.object(client, "detect_project_cloud_storage", return_value=storage),
+        pytest.raises(SystemExit) as exited,
+    ):
+        CliApp().run(["s3-sync", "-p", "Dataset"])
+
+    message = exited.value.code
+    assert isinstance(message, str)
+    assert "s3://list-only/raw/frames" in message
+    assert "2 из 2" in message
+
+
+def test_s3_sync_of_all_projects_finishes_the_rest_then_reports_failures(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    """One project's failed objects do not stop the others, but the run still fails."""
+    write_test_config(
+        test_config,
+        image_cache={"project-a": str(tmp_path / "a"), "project-b": str(tmp_path / "b")},
+    )
+    mock_client = _s3_sync_client()
+    mock_client.detect_project_cloud_storage.side_effect = [
+        make_cs_info(bucket="bucket-a", prefix="a"),
+        make_cs_info(bucket="bucket-b", prefix="b"),
+    ]
+    mock_client.sync_project_images.side_effect = [
+        DownloadStats(downloaded=1, cached=0, failed=3, total=4),
+        DownloadStats(downloaded=2, cached=0, failed=0, total=2),
+    ]
+
+    with patch_cli_client(mock_client), pytest.raises(SystemExit) as exited:
+        CliApp().run(["s3-sync"])
+
+    assert [c.args[0] for c in mock_client.sync_project_images.call_args_list] == [1, 1]
+    message = exited.value.code
+    assert isinstance(message, str)
+    assert "s3://bucket-a/a" in message
+    assert "3 из 4" in message
+    assert "bucket-b" not in message
+
+
+def test_s3_sync_root_overrides_the_storage_of_the_requested_project(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    mock_client = _s3_sync_client()
+    mock_client.detect_project_cloud_storage.return_value = make_cs_info(bucket="project-bucket", prefix="p")
+
+    with patch_cli_client(mock_client):
+        CliApp().run(["s3-sync", "-p", "Dataset", "--root", "s3://other-bucket/raw/data"])
+
+    storage = mock_client.sync_project_images.call_args.kwargs["project_cloud_storage"]
+    assert (storage.bucket, storage.prefix) == ("other-bucket", "raw/data")
+
+
+def test_s3_sync_of_all_projects_continues_past_an_unresolvable_project(
+    tmp_path: Path,
+    test_config: Path,
+    capture_logs: list[str],
+) -> None:
+    """A project CVAT does not know is skipped with a warning; the next one still syncs."""
+    from cveta2.domain.errors import Cveta2Error
+    from cveta2.domain.models import ProjectInfo
+
+    write_test_config(
+        test_config,
+        image_cache={"project-a": str(tmp_path / "a"), "project-b": str(tmp_path / "b")},
+    )
+    mock_client = _s3_sync_client()
+    mock_client.detect_project_cloud_storage.return_value = make_cs_info()
+    mock_client.find_project_by_name.side_effect = [
+        Cveta2Error("проект не найден"),
+        ProjectInfo(id=2, name="project-b"),
+    ]
+
+    with patch_cli_client(mock_client):
+        CliApp().run(["s3-sync"])
+
+    assert [c.args for c in mock_client.sync_project_images.call_args_list] == [(2, tmp_path / "b")]
+    assert any("project-a" in line for line in capture_logs)

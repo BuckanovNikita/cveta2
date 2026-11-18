@@ -1,6 +1,7 @@
 """Managed preparation binds opaque transformations and original source evidence."""
 
 import hashlib
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -26,6 +27,7 @@ from cveta2.domain.managed.models import (
     SourceSnapshot,
     TaskSnapshot,
     definition_fingerprint,
+    source_fingerprint,
 )
 from cveta2.domain.managed.preparation import PreparationSummary
 from cveta2.domain.models import LabelInfo
@@ -96,7 +98,7 @@ def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata
         },
     )
     snapshot = ManagedSnapshot(
-        definition_hash=definition_fingerprint(config, "demo"),
+        definition_hash=source_fingerprint(config, config.datasets["demo"]),
         registry_hash=registry_fingerprint(_registry()),
         registry=_registry(),
         sources=[
@@ -366,3 +368,84 @@ def test_inaccessible_s3_root_blocks_preparation(tmp_path: Path) -> None:
         )
     assert s3_roots.checked == ["s3://bucket/ok", "s3://bucket/denied"]
     assert not (tmp_path / "prepared").exists()
+
+
+def _prepare_with(
+    config: ProjectConfig, tmp_path: Path, transformed: Path, source: Path, metadata: DatasetMetadata
+) -> PreparationSummary:
+    return prepare_managed(
+        config,
+        "demo",
+        transformed,
+        source,
+        tmp_path / "prepared",
+        metadata,
+        registry_hash=registry_fingerprint(_registry()),
+        files=LocalManagedPreparationFiles(),
+        media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
+    )
+
+
+def _edit(config: ProjectConfig, edit: str) -> ProjectConfig:
+    raw = config.model_dump(mode="json")
+    dataset = raw["datasets"]["demo"]
+    if edit == "overlap-decision":
+        dataset["overlaps"] = {"digest": {"source": "main", "members": ["main", "other"]}}
+    elif edit == "splits":
+        dataset["splits"] = {"train": 0.5, "val": 0.5, "test": 0.0, "seed": 1}
+    elif edit == "project-bookkeeping":
+        raw["projects"]["p"].update(name="Renamed", sync_root="s3://images/p")
+    elif edit == "project-id":
+        raw["projects"]["p"]["id"] = 8
+    elif edit == "ignored-id":
+        raw["projects"]["p"]["ignore"] = [{"id": 99}]
+    else:
+        raw["cvat"]["organization"] = "moved"
+    return ProjectConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("edit", ["overlap-decision", "splits", "project-bookkeeping"])
+def test_policy_and_bookkeeping_edits_prepare_on_the_same_fetch(tmp_path: Path, edit: str) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    summary = _prepare_with(_edit(config, edit), tmp_path, transformed, source, metadata)
+    assert summary.ready
+
+
+@pytest.mark.parametrize("edit", ["project-id", "ignored-id", "organization"])
+def test_source_edits_require_fetching_again(tmp_path: Path, edit: str) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    with pytest.raises(ManagedError, match="Source definition changed; fetch the managed dataset again"):
+        _prepare_with(_edit(config, edit), tmp_path, transformed, source, metadata)
+    assert not (tmp_path / "prepared").exists()
+
+
+def test_preparation_records_policy_and_source_fingerprints(tmp_path: Path) -> None:
+    summary, config, *_ = _prepare(tmp_path)
+    loaded = LocalManagedPreparationFiles().load_prepared(summary.directory)
+    definition = config.datasets["demo"]
+    assert loaded.record.snapshot.definition_hash == source_fingerprint(config, definition)
+    assert loaded.record.definition_hash == definition_fingerprint(config, definition)
+    assert loaded.metadata is not None
+    assert loaded.metadata.managed is not None
+    assert loaded.metadata.managed.definition_hash == loaded.record.definition_hash
+    assert loaded.tasks is not None
+    assert loaded.tasks.managed is not None
+    assert loaded.tasks.managed.definition_hash == loaded.record.snapshot.definition_hash
+
+
+def test_load_rejects_published_metadata_bound_to_another_definition(tmp_path: Path) -> None:
+    """dataset.yaml carries the definition fingerprint the record was prepared with."""
+    summary, *_ = _prepare(tmp_path)
+    metadata_path = summary.directory / "dataset.yaml"
+    record_path = summary.directory / "preparation.json"
+    metadata = yaml.safe_load(metadata_path.read_text())
+    metadata["managed"]["definition_hash"] = "0" * 64
+    metadata_path.write_text(yaml.safe_dump(metadata))
+    record = json.loads(record_path.read_text())
+    record["payload_hashes"]["dataset.yaml"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+    record_path.write_text(json.dumps(record))
+    (summary.directory / "preparation.sha256").write_text(hashlib.sha256(record_path.read_bytes()).hexdigest())
+
+    with pytest.raises(ManagedError, match="metadata binding changed"):
+        LocalManagedPreparationFiles().load_prepared(summary.directory)

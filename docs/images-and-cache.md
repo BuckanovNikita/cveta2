@@ -1,6 +1,6 @@
 # Изображения, кэш и публикация
 
-> После слияния и приёмки SIP-66 нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-draft-docsimages-and-cachemd-533d3ab25cef). До этого документ Linear — черновик миграции. Это руководство продолжает обновляться.
+> Нормативные требования ведутся в [Linear](https://linear.app/sip-ds-team/document/contract-docsimages-and-cachemd-533d3ab25cef). Это руководство объясняет использование и продолжает обновляться.
 
 ## Загрузка изображений из S3
 

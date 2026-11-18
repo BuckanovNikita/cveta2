@@ -66,9 +66,12 @@ remain compatibility facades; canonical packages never import those facades.
     and the explicit read, non-idempotent-write and idempotent-write decorators;
     endpoint methods select one policy without changing wrapper order. All
     `cvat_sdk` imports stay here.
-  - `s3/{download,upload,images,task_cache,types,utils,diagnostics}.py` - Boto3/S3
+  - `s3/{download,upload,images,task_cache,types,utils,diagnostics,errors}.py` - Boto3/S3
     construction, direct-key downloads/listing fallback, upload/download/sync, shared annotation-cache
-    mirrors, per-object transfer/retry outcomes and credential diagnostics.
+    mirrors, per-object transfer/retry outcomes and credential diagnostics. `errors.py`
+    notes the operation and `s3://bucket/prefix` on escaping SDK failures without
+    changing their type, and supplies the CLI-only translation to `Cveta2Error`
+    that `composition/runtime.py` hands to the CLI boundary.
     `boto3`/`botocore` imports stay inside `adapters/s3/`.
   - `config/{settings,projects_cache}.py` - YAML/environment/preset loading and
     organization-keyed metadata cache (`organizations: [{slug, name, projects}]`;
@@ -355,6 +358,14 @@ ports and constructs production effects.
 and `interfaces/commands/managed.py` expose prompt-free API and Russian CLI
 presentation. Public facades expose the supported operations without becoming
 inner dependencies. Managed source evidence is embedded in tasks.yaml; no archive
-or image payload is added. Configuration fingerprints bind only the relevant
-resolved definition. Feedback resumes separately and must not confuse own issue
-writes with annotation freshness changes.
+or image payload is added. `domain/managed/models.py` owns two order-free configuration
+fingerprints, each with one implementation. The source fingerprint (snapshot
+`definition_hash`) binds only what fetch reads and decides task reuse and the
+prepare-time "fetch again" check. The definition fingerprint (preparation record
+and published `dataset.yaml` `definition_hash`) adds the policy prepare applies
+or publishes and is rechecked at publication. Ignore bookkeeping, project display
+names and legacy image/cache settings are in neither. A published parent snapshot
+with a hash from an earlier scheme is not an error; it only disables task reuse
+once. A local fetch directory or preparation from an earlier scheme fails the
+fetch-again check and needs one new fetch and prepare. Feedback resumes separately
+and must not confuse own issue writes with annotation freshness changes.

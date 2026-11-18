@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
+from botocore.exceptions import NoCredentialsError
 
 from cveta2.adapters.files.image_search import resolve_images
 from cveta2.adapters.s3.upload import S3Uploader, build_server_file_mapping
@@ -411,3 +412,27 @@ class TestS3Uploader:
         assert stats.failed == 1
         assert set(client.objects) == {"upload-bucket/project/images/good.jpg"}
         assert "bad.jpg (key=project/images/bad.jpg)" in "\n".join(capture_logs)
+
+    def test_missing_credentials_escape_unchanged_and_name_the_storage(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An SDK failure is not a per-file one: the batch stops with the original error.
+
+        The API keeps the botocore exception; only its note names the
+        operation and ``s3://bucket/prefix`` for the command line to report.
+        """
+        missing = NoCredentialsError()
+
+        class _NoCredentials(FakeS3Client):
+            def upload_file(self, *_transfer: str) -> None:
+                raise missing
+
+        patch_recording_s3(monkeypatch, "cveta2.adapters.s3.upload", _NoCredentials())
+        cs_info = _upload_cs_info()
+        images = {"a.jpg": _touch(tmp_path / "a.jpg")}
+
+        with pytest.raises(NoCredentialsError) as caught:
+            S3Uploader().upload(cs_info, images, {"a.jpg": "a.jpg"}, set())
+
+        assert caught.value is missing
+        assert any(f"s3://{cs_info.bucket}/{cs_info.prefix}" in note for note in caught.value.__notes__)

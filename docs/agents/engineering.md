@@ -39,10 +39,9 @@ implementation. Supporting skills contribute within this workflow.
 
 Spec Kit is temporarily disabled. Preserve `.specify/`, `specs/` and archived skills
 unchanged; do not invoke their stages or update their artifacts. Explicit user
-instruction is required to reactivate them. The migration branch follows the approved
-replacement workflow; the repository-wide authority cutover occurs only after human
-merge and satisfied migration acceptance criteria. Linear contract drafts remain
-explicitly drafts until that cutover.
+instruction is required to reactivate them. The authority cutover to Linear completed
+on 2026-11-17 with the human merge and acceptance recorded in SIP-66; the Linear
+contract documents are the current product contract.
 
 Set up each worktree with `uv sync --locked` and `bash scripts/install-hooks.sh`.
 The installer preserves the previous installation and resolves the invoking worktree;

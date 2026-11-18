@@ -31,7 +31,7 @@ dependencies = [
     "questionary>=2.0.0",
     "tqdm>=4.66.0",
     "tenacity>=9.1.4",
-    "Pillow>=10.0.0",
+    "Pillow>=11.3",
     "reflink-copy>=0.1.0",
 ]
 

@@ -30,7 +30,9 @@ from cveta2.domain.managed.models import (
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
+    dataset_definition,
     definition_fingerprint,
+    source_fingerprint,
 )
 from cveta2.domain.managed.preparation import FeedbackOutcome
 from cveta2.domain.verification.models import ValidationOptions
@@ -72,7 +74,7 @@ def _check_sources(
         )
         if project is None:
             raise ManagedError("Managed CVAT project no longer configured")
-        ignored = {entry.get("id") for entry in project.ignore}
+        ignored = project.ignored_task_ids
         state = services.cvat.inspect_project(source.project_id)
         live = {str(task.id): task for task in state.tasks if task.id not in ignored}
         if state.labels_fingerprint != source.labels_fingerprint or set(live) != set(source.tasks):
@@ -91,9 +93,11 @@ def _check_prepared(
     """Check policy, parent, original source facts and clean publication media."""
     record = loaded.record
     require_complete_evidence(record.snapshot)
-    if record.definition_hash != definition_fingerprint(config, record.name):
+    definition = dataset_definition(config, record.name)
+    if record.snapshot.definition_hash != source_fingerprint(config, definition):
+        raise ManagedError("Source definition changed; fetch the managed dataset again")
+    if record.definition_hash != definition_fingerprint(config, definition):
         raise ManagedError("Shared dataset policy changed; prepare again")
-    definition = config.datasets[record.name]
     parent = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (parent.dataset_id if parent else None) != record.parent_id:
         raise ManagedError("Latest ClearML parent changed; fetch and prepare again")
@@ -167,7 +171,7 @@ def publish_prepared(config: ProjectConfig, directory: Path, *, services: Manage
         raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")
     # Recheck sources after feedback, acknowledging only proven issue-only writes.
     _check_sources(config, services.ledger.effective_snapshot(loaded.record.snapshot), services)
-    definition = config.datasets[loaded.record.name]
+    definition = dataset_definition(config, loaded.record.name)
     latest = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (latest.dataset_id if latest else None) != loaded.record.parent_id:
         raise ManagedError("ClearML parent changed during feedback; prepare again")
