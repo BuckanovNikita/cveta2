@@ -39,15 +39,22 @@ before deciding which state applies.
    push): nothing is published. The next merge releases everything still unreleased, or
    a human reruns the workflow on the current `main` (`gh run rerun <run-id>`). An error
    in the build command or configuration repeats on every merge; fix it through a PR.
-5. The release commit reached `main` but the tag did not: the next run (a rerun or the
-   next merge) computes the same version from the last tag, finds `pyproject.toml`,
-   `uv.lock` and `CHANGELOG.md` already current, makes no commit, tags the current `HEAD`
-   of `main` and pushes only the tag. If other merges landed in between, the tag lands on
-   the newer `HEAD`, and a `feat` among them yields a higher version instead, leaving the
-   first version untagged. Report the state; only a human creates or pushes a tag by hand.
+5. The release commit reached `main` but the tag did not. This is a stop-and-report
+   state: nothing more is merged until a human has pushed the tag for that release
+   commit; agents never create or push tags. A human rerun with nothing merged in between
+   computes the same version, finds `pyproject.toml`, `uv.lock` and `CHANGELOG.md`
+   already current, makes no commit, tags the current `HEAD` and pushes only the tag.
+   Merging first goes wrong:
+   - after a `fix` merge the run computes the same version, finds it already in
+     `CHANGELOG.md`, makes no commit and tags the newer `HEAD`, so the tagged version
+     contains a fix that its changelog block does not list;
+   - after a `feat` or breaking merge (by source reading, not run) the next version is
+     higher, the first version is never tagged, and the new block probably repeats the
+     untagged version's entries because the range starts at the last existing tag.
 6. The tag for the computed version already exists: semantic-release prints
    `No release will be made, <version> has already been released!` and exits 0 without a
-   commit, tag or push. If that tag is not on `main`, every run that computes the same
+   commit, tag or push. The run ends green although nothing was released, so the run log,
+   not the run status, shows whether a release happened. If that tag is not on `main`, every run that computes the same
    version skips the same way until a human investigates and removes it.
 7. Branch protection or repository rules reject the bot's push: report that the release
    needs a bypass for the Actions token; do not weaken human protections. Branch

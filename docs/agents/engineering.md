@@ -360,7 +360,9 @@ pushes `main` and then pushes the tag. When no release is due it changes nothing
 
 A release publishes that commit and annotated tag only: never a GitHub Release, asset
 or package. It never merges or rewrites history. The `release` skill covers inspecting
-a run and recovering a failed one.
+a run and recovering a failed one. A release commit on `main` without its tag is a
+stop-and-report state: nothing more is merged until a human has pushed the tag for that
+commit.
 
 Branch protection on `main` without a bypass for the Actions token would block the
 release push. Nothing technical stops a local `semantic-release version` from pushing;
