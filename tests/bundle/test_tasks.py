@@ -91,7 +91,13 @@ def test_integral_csv_numeric_ids_are_accepted_without_truncation() -> None:
 def test_in_progress_rows_without_explicit_completion_fail_closed() -> None:
     """A legacy in-progress row may belong to a task with an unseen unfinished job."""
     legacy = pd.DataFrame(
-        {"task_id": [1], "image_name": ["a"], "job_stage": ["acceptance"], "job_state": ["completed"]},
+        {
+            "task_id": [1],
+            "image_name": ["a"],
+            "instance_shape": ["box"],
+            "job_stage": ["acceptance"],
+            "job_state": ["completed"],
+        },
     )
     source = tables(frame((2, "a", True)), obsolete=frame((1, "a", True)), in_progress=legacy)
     assert derive_tasks(source, source.dataset).obsolete == []
