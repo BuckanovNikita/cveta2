@@ -175,6 +175,12 @@ including live tests. It avoids a duplicate affected-unit run before that full s
 Code changes also require the mutation skill's explicit report. Survivors are advisory;
 tool errors and failing clean tests remain unresolved. These operations are not cached.
 
+A documentation-only change needs development verification only: neither acceptance
+nor a mutation report is required. Documentation-only means the change touches no
+product code, test, script, dependency or executable configuration; `pyproject.toml`,
+`Taskfile.yml`, `.pre-commit-config.yaml`, presets and skill scripts are not documentation. The `build` step
+of `verify` still covers the packaged documents. Every other change keeps the full gate.
+
 Deferred verification means a required live check could not run because infrastructure
 is temporarily unavailable: the cluster does not answer, the node cannot admit the
 session quota, a timeout, or session services that are not ready within the
@@ -192,7 +198,8 @@ When infrastructure is unavailable, report the reason and deferred checks; conti
 independent implementation, documentation, review and local checks. Retry at a meaningful
 verification milestone or after evidence of restored availability, without polling.
 Repair ordinary code failures within scope. When only blocked verification remains,
-stop and ask for the user's decision. Deferral blocks acceptance, merge and release.
+stop and ask for the user's decision. Deferral blocks acceptance, merge readiness and
+release until the check passes or the user waives it.
 Availability disappearing during setup is blocked setup; assertions remain test failures.
 Delete the session namespace if it exists and report incomplete cleanup separately.
 
@@ -301,14 +308,19 @@ several writers share the checkout.
 
 ### Hooks
 
-Install with `bash scripts/install-hooks.sh`, which preserves the prior installation
-for rollback. The shared entry resolves the invoking worktree dynamically. Worktrees
+Install with `bash scripts/install-hooks.sh`. It saves a foreign or absent prior
+installation for rollback and makes no backup when the installed hooks are already
+current. The shared entry resolves the invoking worktree dynamically. Worktrees
 without this Task workflow continue through their existing prek configuration.
 The minimal staging shim only validates inputs and invokes prek: it never stages,
 deletes or stashes. Mandatory guards live in executable commands, not bypassable
 Task preconditions.
 
-The default hook is always-selected, serial `verify`. Conventional Commit validation
+The default hook is always-selected, serial `verify`. A passing hook prints testmon's
+file comparison, the number of selected tests and pytest's result counts, and keeps
+the full output in the ignored `.cache/verify-last.log` of that worktree. Report the
+selection from those lines; testmon omits unaffected tests without counting them.
+The log is informational and never establishes completion. Conventional Commit validation
 remains active: the hook dispatcher clears `SKIP` and `PREK_SKIP` for the `commit-msg`
 stage, so they defer pre-commit hooks only. Intentional lockfile-only updates use `build(deps):` and require no
 exception. Intermediate task commits may use `SKIP=verify` to defer development

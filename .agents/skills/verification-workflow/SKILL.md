@@ -16,11 +16,15 @@ Policy and definitions live in [engineering guidance](../../../docs/agents/engin
 2. Run `fix` explicitly before staging; inspect safe fixes and formatting. Stage
    exact task-owned paths. Commit inputs must be fully staged with no nonignored
    untracked files. The Git shim rejects unsuitable inputs before prek runs.
-3. Use `verify` for development verification. The normal commit hook invokes it;
-   reuse that success when inputs remain unchanged. After an explicitly deferred
+3. Use `verify` for development verification. The normal commit hook invokes it and,
+   when it passes, prints the test selection and keeps the full output in the ignored
+   `.cache/verify-last.log`; reuse that success when inputs remain unchanged and
+   report the printed selection. After an explicitly deferred
    intermediate commit, clear `SKIP` and run it on final content. `test-full` is
    the conservative fallback when affected selection cannot represent an input.
-4. Before acceptance, use `mutation-testing` for changed product functions. Run
+4. A documentation-only change stops at step 3: it needs neither a mutation report
+   nor acceptance. For every other change, use `mutation-testing` for changed product
+   functions before acceptance. Run
    `acceptance` on the clean committed tip; it already includes checks, build,
    randomized properties and full-suite live coverage. Do not precede it with an
    equivalent affected-unit run. Follow `running-integration-tests` for live
@@ -33,7 +37,8 @@ Policy and definitions live in [engineering guidance](../../../docs/agents/engin
 live verification; keep its Linear acceptance incomplete and continue independent local work.
 Retry at a meaningful milestone or after restored availability, without polling.
 When only blocked verification remains, report the reason and ask for the user's
-decision. Deferred verification blocks acceptance, merge and release. Configuration
+decision. Deferred verification blocks acceptance, merge readiness and release until
+it passes or the user waives it. Configuration
 and authorization errors require diagnosis; a session whose services are not
 ready in time is blocked setup; assertions remain test failures.
 

@@ -8,11 +8,12 @@ repos:
   hooks:
   - id: verify
     name: Task development verification
-    entry: uv run --locked task --exit-code verify
+    entry: bash scripts/verify-hook.sh
     language: system
     pass_filenames: false
     always_run: true
     require_serial: true
+    verbose: true
   - id: integration-tests
     name: Task live integration
     entry: uv run --locked task --exit-code integration

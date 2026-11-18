@@ -37,12 +37,17 @@ states Backlog, Todo, In Progress, In Review, Done, Canceled and Duplicate, with
 Start dependent implementation only once its prerequisite is implemented and verified
 on the branch used as the base; merge dependencies remain explicit. Record actual
 checks, source/environment identities, exclusions, reuse reasons and limitations.
-Report required checks as passed, failed, deferred, waived or error; only an explicit
-user waiver may remove a required gate, and it is never a passing result.
+Report required checks as passed, failed, deferred, waived or error; only a user
+waiver may remove a required gate, and it is never a passing result. A waiver is
+either stated by the user or given by a human merge of a PR whose description lists
+that gate as not run; record the latter as waived by merge. Until then the agent
+reports such a PR as not merge-ready. Documentation-only changes need development
+verification only, as [engineering policy](engineering.md#acceptance-and-deferral) defines.
 
 Move to In Review when implementation and required verification are ready. Draft PRs may
 contain incomplete work; required deferred verification blocks merge readiness. Mark
-implementation issues Done only after changes reach `main` and acceptance is satisfied.
+implementation issues Done only after changes reach `main` and acceptance is satisfied
+or every missing gate is recorded as waived.
 Verification-only tasks complete on their recorded acceptance outcome.
 
 ## Branches and PRs

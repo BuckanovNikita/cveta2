@@ -117,8 +117,12 @@ verification may run within one worktree.
   preserve legacy hooks and retain a recoverable prior installation.
 - **FR-006**: Read-only preflight MUST preserve outcomes 0/3/1 and use a configurable
   overall deadline defaulting to 60 seconds; live runs MUST recheck availability.
-- **FR-007**: Deferred checks MUST be reported separately from failures, MUST block
-  acceptance/merge/release, and MUST allow independent local work to continue.
+- **FR-007 (amended by SIP-140)**: Deferred checks MUST be reported separately from
+  failures, MUST block acceptance, merge readiness and release until they pass or the
+  user waives them, and MUST allow independent local work to continue. A waiver,
+  including waiver by merge as [issue tracking](issue-tracker.md#planning-and-acceptance)
+  defines it, is recorded as waived and never as passed. Scenario 4 of User Story 3
+  is read with this amendment.
 - **FR-008**: Acceptance MUST require a clean tip, checks, packaging, randomized
   properties and full-suite coverage including live tests without a preceding
   duplicate affected-unit stage.
