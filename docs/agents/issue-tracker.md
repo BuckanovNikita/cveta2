@@ -46,7 +46,8 @@ verification only, as [engineering policy](engineering.md#acceptance-and-deferra
 
 Move to In Review when implementation and required verification are ready. Draft PRs may
 contain incomplete work; required deferred verification blocks merge readiness. Mark
-implementation issues Done only after changes reach `main` and acceptance is satisfied.
+implementation issues Done only after changes reach `main` and acceptance is satisfied
+or every missing gate is recorded as waived.
 Verification-only tasks complete on their recorded acceptance outcome.
 
 ## Branches and PRs

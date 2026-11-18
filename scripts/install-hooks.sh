@@ -4,7 +4,6 @@ set -eu
 cd "$(git rev-parse --show-toplevel)"
 hook_dir=$(git rev-parse --path-format=absolute --git-path hooks)
 mkdir -p "$hook_dir"
-marker='# cveta2 worktree dispatcher: no installation-worktree paths.'
 staged=$(mktemp -d "$hook_dir/cveta2-install.XXXXXX")
 trap 'rm -rf -- "$staged"' EXIT
 backup=
@@ -31,16 +30,19 @@ fi
 exec uv run --locked prek hook-impl --hook-dir "$hook_dir" --script-version 4 --hook-type "$hook_type" -- "$@"
 HOOK
     chmod +x "$staged/$hook_type"
-    # An installed dispatcher is this script's own output, recoverable from the
-    # repository, so only a foreign or absent hook is saved for rollback.
-    if [ -e "$hook_dir/$hook_type" ] && grep -qxF -- "$marker" "$hook_dir/$hook_type"; then
+    # A hook identical to the one being installed is this script's own output,
+    # so nothing is lost by replacing it. Anything else, including a link, a
+    # hand-edited dispatcher or no hook at all, is saved for rollback first.
+    installed="$hook_dir/$hook_type"
+    if [ ! -L "$installed" ] && [ -f "$installed" ] && cmp -s -- "$staged/$hook_type" "$installed"; then
         :
     else
         if [ -z "$backup" ]; then
             backup=$(mktemp -d "$hook_dir/cveta2-backup.XXXXXX")
+            printf 'Previous hooks are saved in: %s\n' "$backup"
         fi
-        if [ -e "$hook_dir/$hook_type" ]; then
-            cp -p -- "$hook_dir/$hook_type" "$backup/$hook_type"
+        if [ -e "$installed" ] || [ -L "$installed" ]; then
+            cp -P -p -- "$installed" "$backup/$hook_type"
         else
             touch "$backup/$hook_type.absent"
         fi
@@ -51,5 +53,5 @@ if [ -n "$backup" ]; then
     printf 'Installed worktree-aware hooks. Previous hooks: %s\n' "$backup"
     printf 'Rollback: restore each saved hook; remove hooks marked .absent.\n'
 else
-    printf 'Refreshed worktree-aware hooks. No foreign hook was replaced, so no backup was made.\n'
+    printf 'Worktree-aware hooks were already current. No hook was replaced, so no backup was made.\n'
 fi

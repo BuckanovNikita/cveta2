@@ -37,7 +37,8 @@ Policy and definitions live in [engineering guidance](../../../docs/agents/engin
 live verification; keep its Linear acceptance incomplete and continue independent local work.
 Retry at a meaningful milestone or after restored availability, without polling.
 When only blocked verification remains, report the reason and ask for the user's
-decision. Deferred verification blocks acceptance, merge and release. Configuration
+decision. Deferred verification blocks acceptance, merge readiness and release until
+it passes or the user waives it. Configuration
 and authorization errors require diagnosis; a session whose services are not
 ready in time is blocked setup; assertions remain test failures.
 

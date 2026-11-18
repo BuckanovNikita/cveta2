@@ -177,7 +177,8 @@ tool errors and failing clean tests remain unresolved. These operations are not 
 
 A documentation-only change needs development verification only: neither acceptance
 nor a mutation report is required. Documentation-only means the change touches no
-product code, test, script, dependency or executable configuration. The `build` step
+product code, test, script, dependency or executable configuration; `pyproject.toml`,
+`Taskfile.yml`, `.pre-commit-config.yaml`, presets and skill scripts are not documentation. The `build` step
 of `verify` still covers the packaged documents. Every other change keeps the full gate.
 
 Deferred verification means a required live check could not run because infrastructure
@@ -197,7 +198,8 @@ When infrastructure is unavailable, report the reason and deferred checks; conti
 independent implementation, documentation, review and local checks. Retry at a meaningful
 verification milestone or after evidence of restored availability, without polling.
 Repair ordinary code failures within scope. When only blocked verification remains,
-stop and ask for the user's decision. Deferral blocks acceptance, merge and release.
+stop and ask for the user's decision. Deferral blocks acceptance, merge readiness and
+release until the check passes or the user waives it.
 Availability disappearing during setup is blocked setup; assertions remain test failures.
 Delete the session namespace if it exists and report incomplete cleanup separately.
 
@@ -307,8 +309,8 @@ several writers share the checkout.
 ### Hooks
 
 Install with `bash scripts/install-hooks.sh`. It saves a foreign or absent prior
-installation for rollback and makes no backup when it only refreshes its own
-dispatcher. The shared entry resolves the invoking worktree dynamically. Worktrees
+installation for rollback and makes no backup when the installed hooks are already
+current. The shared entry resolves the invoking worktree dynamically. Worktrees
 without this Task workflow continue through their existing prek configuration.
 The minimal staging shim only validates inputs and invokes prek: it never stages,
 deletes or stashes. Mandatory guards live in executable commands, not bypassable
