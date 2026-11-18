@@ -22,7 +22,9 @@ Policy and definitions live in [engineering guidance](../../../docs/agents/engin
    report the printed selection. After an explicitly deferred
    intermediate commit, clear `SKIP` and run it on final content. `test-full` is
    the conservative fallback when affected selection cannot represent an input.
-4. Before acceptance, use `mutation-testing` for changed product functions. Run
+4. A documentation-only change stops at step 3: it needs neither a mutation report
+   nor acceptance. For every other change, use `mutation-testing` for changed product
+   functions before acceptance. Run
    `acceptance` on the clean committed tip; it already includes checks, build,
    randomized properties and full-suite live coverage. Do not precede it with an
    equivalent affected-unit run. Follow `running-integration-tests` for live

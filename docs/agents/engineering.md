@@ -175,6 +175,11 @@ including live tests. It avoids a duplicate affected-unit run before that full s
 Code changes also require the mutation skill's explicit report. Survivors are advisory;
 tool errors and failing clean tests remain unresolved. These operations are not cached.
 
+A documentation-only change needs development verification only: neither acceptance
+nor a mutation report is required. Documentation-only means the change touches no
+product code, test, script, dependency or executable configuration. The `build` step
+of `verify` still covers the packaged documents. Every other change keeps the full gate.
+
 Deferred verification means a required live check could not run because infrastructure
 is temporarily unavailable: the cluster does not answer, the node cannot admit the
 session quota, a timeout, or session services that are not ready within the
