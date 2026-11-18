@@ -2,6 +2,587 @@
 
 <!-- version list -->
 
+## v0.14.0 (2026-11-18)
+
+### Bug Fixes
+
+- **bundle**: Check reused yaml anchors once ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **bundle**: Keep pending deletions as evidence of an open task
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **bundle**: Report deeply nested yaml and json as upload errors
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **bundle**: Stop listing image extensions that cannot be decoded
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **cache**: Cache annotations per job and rebuild records every fetch
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **cache**: Cover invalidation when the cache settings cannot load
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cache**: Invalidate the cache that the selected configuration names
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cache**: Keep an unusable s3 mirror from breaking fetch and mutations
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cache**: Keep the mirror on denied deletes and skip undated jobs
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **cache**: Serve a fully cached task with one CVAT request
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **client**: Treat non-decimal digits in selectors as names
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **client**: Warn about image names mark-deleted cannot match
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Create the migrated shared team file with the umask mode
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Keep concurrent shared-policy edits instead of reverting them
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Keep legacy migration working with the stricter s3 roots
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Name the file and position in shared YAML diagnostics
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Reject malformed s3 roots when configuration loads
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Report a damaged migration journal with its recovery steps
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Report an unreadable config directory as a typed error
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Report unreadable or unwritable personal config as a typed error
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **config**: Save the personal config atomically and owner-only
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **convert**: Clip out-of-image boxes in YOLO export
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **convert**: Clip out-of-image boxes in YOLO export (SIP-78)
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **convert**: Confine local image lookup to the search directory
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **convert**: Match prediction images by suffix case-insensitively
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **convert**: Name rounding in the dropped-box warning
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **convert**: Never use the previous export as its own image source
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **convert**: Probe fixed suffix cases instead of listing the directory
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **convert**: Reject linked yolo label and metadata destinations
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **convert**: Skip unreadable yolo labels and name bad inputs
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cvat**: Report sdk connection setup failures as CvatApiError
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cvat**: Return issue comments in creation order
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cvat**: Stop urllib3 from replaying non-safe requests
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cvat**: Translate sdk deserialization errors into CvatApiError
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **dataset**: Exit 2 on managed dataset operational errors
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **dataset**: Report an uncreatable managed fetch output parent
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **doctor**: Leave the per-user prompt history out of cache permission checks
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **fetch**: Completed tasks decide deletions; annotation cache per job (SIP-85, SIP-82)
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **hooks**: Keep commit-message validation active when hooks are skipped
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Admit the session quota only on schedulable nodes
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Bound live-session seeding with a deadline
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Clean blocked setup after infrastructure loss
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Delete a namespace whose create was accepted but not confirmed
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Refuse to overwrite a kept session record from pytest
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Report lost connectivity after readyz as unavailable
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Stop seed children and request deletion first on interrupt
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Tear sessions down on SIGTERM and stop by name past a bad record
+  ([`d74addc`](https://github.com/BuckanovNikita/cveta2/commit/d74addc82076b67c6459c3a34bbf227f4380ead1))
+
+- **integration**: Treat a refused API connection as an unavailable cluster
+  ([`4bd3e32`](https://github.com/BuckanovNikita/cveta2/commit/4bd3e32d4c15352069798150ba6351a4c646e098))
+
+- **labels**: Require retyped names when the usage count is incomplete
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Bind fetch reuse and preparation to relevant fields only
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **managed**: Bind fetch reuse and preparation to relevant fields only (SIP-88)
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **managed**: Check s3 roots and source nesting at preparation
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Keep a legacy parent's published splits on adoption
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Preserve full label and registry evidence
+  ([#3](https://github.com/BuckanovNikita/cveta2/pull/3),
+  [`edeee69`](https://github.com/BuckanovNikita/cveta2/commit/edeee69bd20e5655653c4263fb864aef00dd7d54))
+
+- **managed**: Preserve full label and registry evidence (SIP-99)
+  ([#3](https://github.com/BuckanovNikita/cveta2/pull/3),
+  [`edeee69`](https://github.com/BuckanovNikita/cveta2/commit/edeee69bd20e5655653c4263fb864aef00dd7d54))
+
+- **managed**: Rebase pending feedback only to the end of its chain
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Reject parents without dataset.yaml
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Retry feedback after a sibling issue moved the task
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Share the feedback ledger across preparations of one fetch
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **mutation**: Fail a run whose budget expires before any mutant is judged
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **mutation**: Retain expiry after graceful worker exit
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **partition**: Let only completed tasks decide deletions
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **partition**: Mark every reopened image in in_progress.csv
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **review**: Close cumulative remediation gaps
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **review**: Integrate review remediation (SIP-68)
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **review**: Resolve independent integration findings
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **s3**: End CLI S3 failures with a message naming the storage
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **s3**: Keep the per-transfer traceback below the CLI's default level
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **s3**: Log one line per failed transfer, keeping the traceback at debug
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **s3**: Translate only operational S3 failures
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **s3,upload**: CLI S3 failures without traceback; annotation-write checkpoint on resume (SIP-80,
+  SIP-81) ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **s3-sync**: Fail the command when objects could not be downloaded
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **setup**: Attach an existing shared file from the setup wizard
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **setup**: Keep one-run environment overrides out of the attached-mode save
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **setup**: Treat closed standard input at a prompt as non-interactive
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **upload**: Drop the pending annotation mark when the task is replaced
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **upload**: Hold an exclusive lock for the whole upload run
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **upload**: Join prefix-relative server files onto the storage prefix
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **upload**: Let a definitively rejected task create run again
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **upload**: Name the storage when images fail to reach S3
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **upload**: Refuse unsafe image names before any lookup or remote effect
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **upload**: Report an unreadable --in-progress file as a typed error
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **upload**: Run unlocked without touching a lock file where fcntl is missing
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **upload**: Wait and re-check before resending interrupted annotations
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **verification**: Invalidate testmon history when pytest startup code changes
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **verify**: Accept the multi-issue issue_state that fetch writes
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **whats-new**: Ignore unusable task_id cells in the baseline
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **whats-new**: Skip a baseline sibling with invalid encoding
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+### Build System
+
+- **deps**: Pillow 13 and drop undecodable image extensions (SIP-84)
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **deps**: Upgrade Pillow to 13.0.0 and require 11.3 or newer
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+### Continuous Integration
+
+- **release**: Check the release subject and set the bot as author
+  ([#14](https://github.com/BuckanovNikita/cveta2/pull/14),
+  [`db3aca9`](https://github.com/BuckanovNikita/cveta2/commit/db3aca9de7fefc2247c3c9436b25f1a232afaf29))
+
+- **release**: Cut releases with semantic-release after merges into main
+  ([#14](https://github.com/BuckanovNikita/cveta2/pull/14),
+  [`db3aca9`](https://github.com/BuckanovNikita/cveta2/commit/db3aca9de7fefc2247c3c9436b25f1a232afaf29))
+
+- **release**: Cut releases with semantic-release after merges into main (SIP-143)
+  ([#14](https://github.com/BuckanovNikita/cveta2/pull/14),
+  [`db3aca9`](https://github.com/BuckanovNikita/cveta2/commit/db3aca9de7fefc2247c3c9436b25f1a232afaf29))
+
+- **release**: Run plain semantic-release without the wrapper script
+  ([#14](https://github.com/BuckanovNikita/cveta2/pull/14),
+  [`db3aca9`](https://github.com/BuckanovNikita/cveta2/commit/db3aca9de7fefc2247c3c9436b25f1a232afaf29))
+
+### Documentation
+
+- Apply independent review of the contract wording changes
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- Describe the 60/20/20 managed split as a default
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- Keep snapshot guidance focused on user actions
+  ([#3](https://github.com/BuckanovNikita/cveta2/pull/3),
+  [`edeee69`](https://github.com/BuckanovNikita/cveta2/commit/edeee69bd20e5655653c4263fb864aef00dd7d54))
+
+- State that the Linear contracts are active
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- State the Linear contracts are active and correct three guide statements (SIP-134, SIP-135,
+  SIP-136, SIP-139) ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **agents**: Define the documentation-only gate and waiver by merge
+  ([#6](https://github.com/BuckanovNikita/cveta2/pull/6),
+  [`ef038f1`](https://github.com/BuckanovNikita/cveta2/commit/ef038f11933efa224559f8ddeb98a28f70963f84))
+
+- **cache**: Describe invalidation and unavailable s3 mirror behaviour
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cli**: Describe wizard attachment and the prompt-history exclusion
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cli**: Keep the upload recovery notes as separate paragraphs
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **cli**: State that either a zero width or height stops the export
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **constitution**: Own one session namespace per live run
+  ([`dac09b3`](https://github.com/BuckanovNikita/cveta2/commit/dac09b38bdd29a14e5845739699a40811fe5ee0c))
+
+- **convert**: Describe export source exclusion and unreadable yolo inputs
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Describe legacy parent adoption and csv-only parents
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Scope when prepare or publish still need a new run
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **managed**: State when a policy edit needs a new fetch or lineage
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **plans**: Record the 2026-11-17 code review and its remediation plan
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **readme**: Align the rewritten guide with current behavior (SIP-89)
+  ([#5](https://github.com/BuckanovNikita/cveta2/pull/5),
+  [`66adb0a`](https://github.com/BuckanovNikita/cveta2/commit/66adb0a642c8b3bae5f8ccdab66a2088507e307e))
+
+- **readme**: Bring the rewritten Russian guide up to date (SIP-89)
+  ([#5](https://github.com/BuckanovNikita/cveta2/pull/5),
+  [`66adb0a`](https://github.com/BuckanovNikita/cveta2/commit/66adb0a642c8b3bae5f8ccdab66a2088507e307e))
+
+- **readme**: Correct the clearml extra scope and add install from main
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **readme**: Rewrite the user guide in plain language
+  ([#5](https://github.com/BuckanovNikita/cveta2/pull/5),
+  [`66adb0a`](https://github.com/BuckanovNikita/cveta2/commit/66adb0a642c8b3bae5f8ccdab66a2088507e307e))
+
+- **release**: Stop merging while a release commit lacks its tag
+  ([#14](https://github.com/BuckanovNikita/cveta2/pull/14),
+  [`db3aca9`](https://github.com/BuckanovNikita/cveta2/commit/db3aca9de7fefc2247c3c9436b25f1a232afaf29))
+
+- **specs**: Align lifecycle contract with the implemented commands
+  ([`3fdde91`](https://github.com/BuckanovNikita/cveta2/commit/3fdde91da96f9d39467e503c7ba39355267fa746))
+
+- **specs**: Correct measurement claims and kept-session design
+  ([`a8e9324`](https://github.com/BuckanovNikita/cveta2/commit/a8e9324aaaef7dec188e3b038835151825f0fb13))
+
+- **specs**: Record clean-tip acceptance of session-owned infrastructure
+  ([`911621d`](https://github.com/BuckanovNikita/cveta2/commit/911621d1b6d2c7fd3ecd2f663b87b415be46efe0))
+
+- **specs**: Record live verification of session-owned infrastructure
+  ([`739c964`](https://github.com/BuckanovNikita/cveta2/commit/739c964f9f0bd594fc9ab76672a1739f123ee778))
+
+- **specs**: Record test-phase interrupts and correct run attributions
+  ([`63cd255`](https://github.com/BuckanovNikita/cveta2/commit/63cd25522f29c566a25840a944f6486e7d3451ed))
+
+- **specs**: Specify session-owned live-test infrastructure
+  ([`283fc7e`](https://github.com/BuckanovNikita/cveta2/commit/283fc7e9f6dfe97dd740ed90eb82e52351ea829d))
+
+### Features
+
+- **cvat**: Read job update times and per-job annotations
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **merge**: Drop old images reopened after a completed deletion
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+### Refactoring
+
+- **convert**: Split per-directory image lookup out of resolve_images
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **managed**: Alias external registry field names
+  ([#3](https://github.com/BuckanovNikita/cveta2/pull/3),
+  [`edeee69`](https://github.com/BuckanovNikita/cveta2/commit/edeee69bd20e5655653c4263fb864aef00dd7d54))
+
+- **upload**: Extract task creation from _ensure_task
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+### Testing
+
+- Cover mutation gaps in config and class API
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- Pin reopen and layout edges found by mutation testing
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **architecture**: Flag clock, asyncio and path-walk effects in inner layers
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **bundle**: Give the legacy in-progress evidence a shape column
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **cli**: Check S3 exit messages and logs carry no traceback text
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **cli**: Stop reading stderr to prove an S3 exit has no traceback
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **convert**: Count several clipped and dropped boxes in one image
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **convert**: Cover output exclusion in both image lookup passes
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **doctor**: Decode the prompt history file name before building a path
+  ([#4](https://github.com/BuckanovNikita/cveta2/pull/4),
+  [`dda2fb2`](https://github.com/BuckanovNikita/cveta2/commit/dda2fb2dde7afd093175c6df62cd0f1bcc9b3623))
+
+- **integration**: Check a moved job reaches the next cached fetch
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **integration**: Deploy session-owned CVAT, MinIO and ClearML
+  ([`c8d26d8`](https://github.com/BuckanovNikita/cveta2/commit/c8d26d897708556c3be47f32a7457e7c407badc4))
+
+- **integration**: Report blocked setup once and keep its cause
+  ([`bbed6e0`](https://github.com/BuckanovNikita/cveta2/commit/bbed6e035ae3d9ebef116ec88f607a32dde275f6))
+
+- **managed**: Pin fingerprint order, metadata binding and dataset lookup
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **managed**: Protect persisted evidence compatibility
+  ([#3](https://github.com/BuckanovNikita/cveta2/pull/3),
+  [`edeee69`](https://github.com/BuckanovNikita/cveta2/commit/edeee69bd20e5655653c4263fb864aef00dd7d54))
+
+- **partition**: Pin the accepted edges of completed deletions
+  ([#15](https://github.com/BuckanovNikita/cveta2/pull/15),
+  [`25d0dbe`](https://github.com/BuckanovNikita/cveta2/commit/25d0dbec224978179d9b263d821a99319b9cbe65))
+
+- **s3**: Pin the storage note on a failure inside an upload batch
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **s3-sync**: Cover --root and a skipped project in the command
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+- **upload**: Resume after the pending mark could not be cleared
+  ([#13](https://github.com/BuckanovNikita/cveta2/pull/13),
+  [`14e3058`](https://github.com/BuckanovNikita/cveta2/commit/14e3058d5a3c20b07800f71570eb424e1cb0acb7))
+
+
 ## v0.13.3 (2026-11-09)
 
 ### Bug Fixes
