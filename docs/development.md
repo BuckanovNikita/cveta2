@@ -184,8 +184,9 @@ When infrastructure is unavailable:
   restored, without polling.
 - When only blocked verification remains, stop and ask for the user's decision.
 
-Loss of availability during setup is blocked setup; an assertion failure is a test
-failure. A successful preflight without executed live tests is not acceptance.
+Loss of availability during setup is blocked setup; once tests run, lost infrastructure
+and assertion failures are test failures. A successful preflight without executed live
+tests is not acceptance.
 
 ### Mutation report
 
