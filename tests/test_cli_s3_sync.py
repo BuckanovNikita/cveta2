@@ -272,9 +272,51 @@ def test_s3_sync_of_all_projects_finishes_the_rest_then_reports_failures(
     with patch_cli_client(mock_client), pytest.raises(SystemExit) as exited:
         CliApp().run(["s3-sync"])
 
-    assert mock_client.sync_project_images.call_count == 2
+    assert [c.args[0] for c in mock_client.sync_project_images.call_args_list] == [1, 1]
     message = exited.value.code
     assert isinstance(message, str)
     assert "s3://bucket-a/a" in message
     assert "3 из 4" in message
     assert "bucket-b" not in message
+
+
+def test_s3_sync_root_overrides_the_storage_of_the_requested_project(
+    tmp_path: Path,
+    test_config: Path,
+) -> None:
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    mock_client = _s3_sync_client()
+    mock_client.detect_project_cloud_storage.return_value = make_cs_info(bucket="project-bucket", prefix="p")
+
+    with patch_cli_client(mock_client):
+        CliApp().run(["s3-sync", "-p", "Dataset", "--root", "s3://other-bucket/raw/data"])
+
+    storage = mock_client.sync_project_images.call_args.kwargs["project_cloud_storage"]
+    assert (storage.bucket, storage.prefix) == ("other-bucket", "raw/data")
+
+
+def test_s3_sync_of_all_projects_continues_past_an_unresolvable_project(
+    tmp_path: Path,
+    test_config: Path,
+    capture_logs: list[str],
+) -> None:
+    """A project CVAT does not know is skipped with a warning; the next one still syncs."""
+    from cveta2.domain.errors import Cveta2Error
+    from cveta2.domain.models import ProjectInfo
+
+    write_test_config(
+        test_config,
+        image_cache={"project-a": str(tmp_path / "a"), "project-b": str(tmp_path / "b")},
+    )
+    mock_client = _s3_sync_client()
+    mock_client.detect_project_cloud_storage.return_value = make_cs_info()
+    mock_client.find_project_by_name.side_effect = [
+        Cveta2Error("проект не найден"),
+        ProjectInfo(id=2, name="project-b"),
+    ]
+
+    with patch_cli_client(mock_client):
+        CliApp().run(["s3-sync"])
+
+    assert [c.args for c in mock_client.sync_project_images.call_args_list] == [(2, tmp_path / "b")]
+    assert any("project-a" in line for line in capture_logs)
