@@ -84,6 +84,29 @@ datasets:
 внутри датасета, ссылки на источники и пары ClearML project/dataset не дублируются.
 В общем файле нет паролей, токенов или локальных каталогов.
 
+Не каждая правка набора требует повторного скачивания. Повторный `dataset fetch`
+скачивает все задачи заново только после изменения `cvat`, набора источников,
+их имён, типов, ID проектов и URI или ID исключённых задач. Правка
+`splits`, `overlaps`, `empty_classes`, `s3_roots`, `api_url` или `clearml` обычно
+требует только нового `dataset prepare` с тем же результатом `fetch`. Исключения:
+
+- `splits` у набора, уже опубликованного с управляемыми метаданными: `prepare`
+  отклоняет смену долей («Split policy changed; select a new dataset lineage»),
+  нужен набор с новым именем и новой линией версий;
+- `clearml`, указывающий на назначение с другим последним родителем: `prepare`
+  требует новый `fetch` («Source parent changed; fetch the managed dataset again»);
+- `api_url`, реестр классов которого отличается от сохранённого при `fetch`:
+  `prepare` требует новый `fetch` («Class registry changed; fetch the managed
+  dataset again»).
+
+Порядок списков,
+имя проекта, `sync_root`, `ignored_prefix`, `task_cache_s3`, а также `name`,
+`description` и `silent` исключённой задачи не требуют ни повторного скачивания,
+ни новой подготовки. Имя проекта при этом используется для поиска личных корней
+изображений: если после переименования они изменятся, `publish` потребует новой
+подготовки.
+Подробности — в разделе [«Управляемый датасет»](cli.md#управляемый-датасет-cveta2-dataset).
+
 `sync_root`, `ignored_prefix`, `task_cache_s3`, исключения задач `ignore`,
 `empty_classes`, `splits` и `overlaps` принадлежат общему файлу. Локальные
 `images_root`/`tasks_root` и `image_cache` остаются личными. Явная команда

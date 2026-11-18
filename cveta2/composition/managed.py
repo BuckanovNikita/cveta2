@@ -47,7 +47,7 @@ from cveta2.domain.bundle.models import (
     Publication,
 )
 from cveta2.domain.class_registry import registry_fingerprint
-from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ProjectConfig
+from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ProjectConfig, dataset_definition
 from cveta2.domain.managed.policies import compare_frames
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
 
@@ -55,13 +55,6 @@ from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummar
 def _selection(config_path: Path | None, project_config: Path | None) -> tuple[Path, ProjectConfig]:
     path = get_config_path(config_path)
     return path, load_project_config(path, project_config)
-
-
-def _definition(config: ProjectConfig, name: str) -> DatasetDefinition:
-    try:
-        return config.datasets[name]
-    except KeyError as error:
-        raise ManagedError(f"Unknown managed dataset: {name}") from error
 
 
 def _parent(
@@ -137,7 +130,7 @@ def list_datasets(*, config_path: Path | None = None, project_config: Path | Non
 def show_dataset(name: str, *, config_path: Path | None = None, project_config: Path | None = None) -> dict[str, Any]:
     """Show exact configured mapping and finalized parent."""
     _, config = _selection(config_path, project_config)
-    definition = _definition(config, name)
+    definition = dataset_definition(config, name)
     parent, _ = _parent(definition)
     return {
         "name": name,
@@ -152,7 +145,7 @@ def dataset_versions(
 ) -> list[dict[str, str | None]]:
     """List finalized exact-destination versions."""
     _, config = _selection(config_path, project_config)
-    definition = _definition(config, name)
+    definition = dataset_definition(config, name)
     return ClearMLStore().versions(definition.clearml.project, definition.clearml.dataset)
 
 
@@ -166,7 +159,7 @@ def fetch_dataset(
 ) -> dict[str, Any]:
     """Capture every source and preserve independent original evidence."""
     path, config = _selection(config_path, project_config)
-    definition = _definition(config, name)
+    definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
     parent, _ = _parent(definition)
     previous = ClearMLSources().read_snapshot(parent.dataset_id) if parent else None
@@ -212,7 +205,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
 ) -> PreparationSummary:
     """Prepare transformed input using supplied policy and constructed effects."""
     path, config = _selection(config_path, project_config)
-    definition = _definition(config, name)
+    definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
     parent, previous = _parent(definition)
     if previous and previous.managed and previous.managed.definition.splits != definition.splits:
@@ -298,7 +291,7 @@ def _prepared_effects(
     path, config = _selection(config_path, project_config)
     files = LocalManagedPreparationFiles()
     loaded = files.load_prepared(prepared)
-    definition = _definition(config, loaded.record.name)
+    definition = dataset_definition(config, loaded.record.name)
     local_roots = _image_roots(path, config, definition, project_config).local_root
     with _client(path, project_config) as client:
         yield (

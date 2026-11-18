@@ -23,7 +23,9 @@ from cveta2.domain.managed.models import (
     ManagedError,
     ManagedMetadata,
     ProjectConfig,
+    dataset_definition,
     definition_fingerprint,
+    source_fingerprint,
 )
 from cveta2.domain.managed.policies import (
     ParentSplits,
@@ -141,12 +143,12 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     clean: bool = False,
 ) -> PreparationSummary:
     """Split, validate and persist a fresh preparation without remote mutation."""
-    definition_hash = definition_fingerprint(config, name)
-    definition = config.datasets[name]
+    definition = dataset_definition(config, name)
+    definition_hash = definition_fingerprint(config, definition)
     captured = files.capture(transformed, source)
     snapshot = captured.snapshot
     require_complete_evidence(snapshot)
-    if snapshot.definition_hash != definition_hash:
+    if snapshot.definition_hash != source_fingerprint(config, definition):
         raise ManagedError("Source definition changed; fetch the managed dataset again")
     if snapshot.registry_hash != registry_hash:
         raise ManagedError("Class registry changed; fetch the managed dataset again")
