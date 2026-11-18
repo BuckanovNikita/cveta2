@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from cveta2.domain.class_registry import ApiClass as ApiClass  # noqa: PLC0414 - preserve the existing model import.
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.models import ManagedMetadata, ManagedSnapshot
 from cveta2.domain.verification.models import ValidationResult
@@ -19,19 +20,6 @@ class UploadError(Cveta2Error):
 
 class UploadCancelled(Cveta2Error):  # noqa: N818 - cancellation contract name.
     """The user declined a required decision or closed interactive input."""
-
-
-class ApiClass(BaseModel):
-    """The class API identity uses number, independently of its internal id."""
-
-    model_config = ConfigDict(strict=True, extra="ignore", frozen=True)
-    id: int
-    number: int
-    name: str = Field(min_length=1)
-    techClass: bool  # noqa: N815 - external registry field.
-    isPeriodical: bool  # noqa: N815 - external registry field.
-    isCritical: bool  # noqa: N815 - external registry field.
-    threshold: float = Field(allow_inf_nan=False)
 
 
 class ClassInfo(BaseModel):

@@ -9,7 +9,7 @@ import pandas as pd
 
 from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawIssue, RawJob
 from cveta2.domain.managed.models import ManagedSnapshot, SourceSnapshot, TaskSnapshot
-from cveta2.domain.models import AnnotationRecord, DeletedImage, TaskInfo
+from cveta2.domain.models import AnnotationRecord, DeletedImage, LabelInfo, TaskInfo
 
 TaskAssembler = Callable[
     [
@@ -31,6 +31,7 @@ class ProjectState:
 
     tasks: list[TaskSnapshot]
     labels_fingerprint: str
+    labels: list[LabelInfo]
 
 
 @dataclass(frozen=True)

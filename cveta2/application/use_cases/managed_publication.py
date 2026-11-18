@@ -1,7 +1,5 @@
 """Recheck managed preparations and deliver feedback before exact publication."""
 
-import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,8 +20,12 @@ from cveta2.application.use_cases.managed_feedback import (
     reconcile_pending,
     report_findings,
 )
-from cveta2.domain.bundle.models import ApiClass, Publication
+from cveta2.domain.bundle.models import Publication
 from cveta2.domain.bundle.validation import validate_bundle
+from cveta2.domain.class_registry import (
+    registry_fingerprint as registry_fingerprint,  # noqa: PLC0414 - existing import.
+)
+from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
     ManagedError,
     ManagedSnapshot,
@@ -49,12 +51,6 @@ class ManagedPublicationServices:
     feedback: CvatFeedback
     ledger: FeedbackLedger
     local_roots: list[str]
-
-
-def registry_fingerprint(records: list[ApiClass]) -> str:
-    """Compare complete class records independent of registry response order."""
-    content = [record.model_dump(mode="json") for record in sorted(records, key=lambda record: record.number)]
-    return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def _check_sources(
@@ -94,6 +90,7 @@ def _check_prepared(
 ) -> None:
     """Check policy, parent, original source facts and clean publication media."""
     record = loaded.record
+    require_complete_evidence(record.snapshot)
     if record.definition_hash != definition_fingerprint(config, record.name):
         raise ManagedError("Shared dataset policy changed; prepare again")
     definition = config.datasets[record.name]
