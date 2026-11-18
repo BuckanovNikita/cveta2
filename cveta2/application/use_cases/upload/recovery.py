@@ -132,6 +132,8 @@ def _create_task(
     # A confirmed missing old task is not the identity of its replacement.
     # A lost create reply must leave an unknown ID, never the old one.
     manifest.task_id = None
+    # An interrupted annotation write belonged to the old task; the new one is empty.
+    manifest.annotations_pending = False
     manifest.creation_pending = True
     deps.manifests.save(manifest, required=True)
     try:

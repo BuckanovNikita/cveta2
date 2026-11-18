@@ -1317,6 +1317,27 @@ class TestResumeAfterManualDeletion:
         assert outcome.images == len(names)
         assert list_manifests(PROJECT_ID, host=client.host) == []
 
+    def test_a_replacement_for_a_task_with_an_interrupted_write_does_not_wait(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pending annotation mark belongs to the deleted task, not its replacement."""
+        client = make_client()
+        names = ["a.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+
+        with _dies_uploading_annotations(client), pytest.raises(_InterruptedRunError):
+            upload_cvat_dataset(client, make_request(image_names=names))
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
+        assert stranded is not None
+        client.delete_task(stranded)
+
+        sleep = _RecordingSleep()
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == []
+        assert len(_writes_of(client).created_tasks) == 2
+        assert outcome.annotations == len(names)
+
     def test_another_error_reading_the_task_still_surfaces(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Only 404 means "gone"; a 500 must not be read as one."""
         client = make_client()
