@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cveta2"
-version = "0.14.1"
+dynamic = ["version"]
 description = "CVAT project annotation utilities"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
@@ -47,6 +47,11 @@ Issues = "https://github.com/BuckanovNikita/cveta2/issues"
 [project.scripts]
 cveta2 = "cveta2.cli:main"
 
+# The version lives in the package, so neither this file nor uv.lock repeats it
+# and a release changes no dependency metadata.
+[tool.hatch.version]
+path = "cveta2/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["cveta2"]
 
@@ -79,7 +84,6 @@ dev = [
     "vulture>=2.16",
     "import-linter>=2.13",
     "pytest-cov>=7.1.0",
-    "python-semantic-release>=10.6.1",
     "prek>=0.5.10",
     "pytest-testmon>=2.3.0",
     "pytest-randomly>=5.0.0",
@@ -91,7 +95,7 @@ dev = [
 
 [tool.semantic_release]
 tag_format = "v{version}"
-version_toml = ["pyproject.toml:project.version"]
+version_variables = ["cveta2/__init__.py:__version__"]
 commit_parser = "conventional"
 # 0.x stays 0.x: a breaking change bumps the minor, never to 1.0.0 on its own.
 # Both are spelled out rather than left to the defaults, which have moved
@@ -104,11 +108,8 @@ commit_message = "chore(release): {version}"
 # Author, committer and tagger of the release commit and annotated tag.
 commit_author = "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
 no_git_verify = false
-# Releases run only in GitHub Actions (.github/workflows/release.yml) and build
-# nothing. uv.lock carries its own cveta2 version
-# entry, which version_toml does not touch; this command rewrites only that
-# entry and stages it, without resolving dependencies.
-build_command = "python -m scripts.release_metadata"
+# Releases run only in GitHub Actions (.github/workflows/release.yml). There is no
+# build command: a release stamps the version file and the changelog, nothing else.
 
 [tool.semantic_release.commit_parser_options]
 # GitHub squash merges list the merged commits in the body; read each one, so a PR
