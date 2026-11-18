@@ -9,10 +9,13 @@ observable.
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -24,13 +27,16 @@ from cveta2.adapters.files.manifests import (
     new_manifest,
     save_manifest,
 )
+from cveta2.adapters.files.shared import replace_shared_bytes
 from cveta2.adapters.s3.task_cache import get_task_cache_dir
 from cveta2.application.use_cases.upload import (
     UploadOptions,
+    UploadOutcome,
     UploadPlan,
     UploadRequest,
     _stage_images,
     request_fingerprint,
+    upload_dataset,
 )
 from cveta2.composition.workflows import upload_cvat_dataset, upload_dependencies
 from cveta2.domain.errors import CvatApiError, Cveta2Error
@@ -45,7 +51,7 @@ from tests.helpers import client_with_api, make_cs_info
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from cveta2.application.ports.dtos import NewIssue, RawDataMeta
+    from cveta2.application.ports.dtos import NewIssue, NewShape, RawDataMeta
     from cveta2.composition.client import CvatClient
     from cveta2.domain.storage import CloudStorageInfo
 
@@ -60,6 +66,8 @@ SEEDED_SERVER_FILE = "2020-01/a.jpg"
 SEEDED_KEY = f"{PREFIX}/{SEEDED_SERVER_FILE}"
 # The task id FakeCvatApi allocates for the first task of an empty project.
 NEW_TASK_ID = 1
+# The manifest schema the pending annotation mark was added to without a bump.
+SCHEMA_3 = 3
 
 
 def current_month_key(name: str) -> str:
@@ -610,18 +618,54 @@ def _seed_manifest_for(client: CvatClient, request: UploadRequest, task_id: int)
 
 
 @contextmanager
-def _dies_uploading_annotations(client: CvatClient) -> Iterator[None]:
-    """Die after the frames are attached but before the shapes go up."""
-    original = client.api.put_task_shapes
+def _dies_uploading_annotations(client: CvatClient, *, lands: bool = False) -> Iterator[list[NewShape]]:
+    """Die inside the annotation write, keeping the shapes it was sent.
 
-    def die(_task_id: int, _shapes: object) -> None:
+    Without *lands* the write never reached CVAT; with it, CVAT stored the
+    shapes and only the reply was lost.  The yielded list receives the
+    shapes either way, so a test can replay them as a write landing late.
+    """
+    original = client.api.put_task_shapes
+    sent: list[NewShape] = []
+
+    def die(task_id: int, shapes: list[NewShape]) -> None:
+        sent.extend(shapes)
+        if lands:
+            original(task_id, shapes)
         raise _InterruptedRunError
 
-    client.api.put_task_shapes = die  # type: ignore[assignment]
+    client.api.put_task_shapes = die  # type: ignore[method-assign]
     try:
-        yield
+        yield sent
     finally:
         client.api.put_task_shapes = original  # type: ignore[method-assign]
+
+
+class _RecordingSleep:
+    """Injected resume wait: records each delay and may act during it."""
+
+    def __init__(self, during: Callable[[], None] | None = None) -> None:
+        self.waits: list[float] = []
+        self._during = during
+
+    def __call__(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        if self._during is not None:
+            self._during()
+
+
+def _upload_waiting_with(client: CvatClient, request: UploadRequest, sleep: _RecordingSleep) -> UploadOutcome:
+    """Run the upload with *sleep* standing in for the real resume wait."""
+    return upload_dataset(client, request, deps=upload_dependencies(sleep=sleep))
+
+
+def _drop_pending_mark(client: CvatClient) -> None:
+    """Rewrite the one manifest as a schema-3 file, which has no pending mark."""
+    (path,) = get_upload_manifest_dir(PROJECT_ID, host=client.host).glob("*.json")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    del raw["annotations_pending"]
+    assert raw["schema_version"] == SCHEMA_3
+    path.write_text(json.dumps(raw), encoding="utf-8")
 
 
 def _resume_request(image_names: list[str]) -> UploadRequest:
@@ -765,11 +809,13 @@ class TestResume:
         with pytest.raises(Cveta2Error, match="кадры"):
             upload_cvat_dataset(client, _resume_request(["a.jpg"]))
 
-    def test_resume_uploads_annotations_the_first_run_never_reached(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The task is complete but empty: crashed between attach and shapes.
+    def test_resume_waits_then_uploads_annotations_the_first_run_never_reached(
+        self, monkeypatch: pytest.MonkeyPatch, capture_info_logs: list[str]
+    ) -> None:
+        """The run died inside the annotation write, which never landed.
 
-        Skipping here would leave a task of frames with no annotations at
-        all, which looks finished and is not.
+        An empty task cannot prove the write did not happen, so resume waits
+        once, reads the task again and only then sends the shapes, once.
         """
         client = make_client()
         names = ["a.jpg", "b.jpg"]
@@ -777,13 +823,137 @@ class TestResume:
 
         with _dies_uploading_annotations(client), pytest.raises(_InterruptedRunError):
             upload_cvat_dataset(client, make_request(image_names=names))
-        stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0]
+        assert stranded.annotations_pending is True
 
-        outcome = upload_cvat_dataset(client, _resume_request(names))
+        sleep = _RecordingSleep()
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
 
-        assert outcome.task_id == stranded
+        assert sleep.waits == [30.0]
+        assert any("30" in line and "аннотац" in line for line in capture_info_logs)
+        assert outcome.task_id == stranded.task_id
         assert outcome.annotations == len(names)
+        assert len(_writes_of(client).shapes[outcome.task_id]) == len(names)
         assert _writes_of(client).deleted_tasks == []
+
+    def test_resume_reuses_a_lost_reply_annotation_write(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The shapes landed and only the reply was lost: nothing is sent again."""
+        client = make_client()
+        names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+
+        with _dies_uploading_annotations(client, lands=True), pytest.raises(_InterruptedRunError):
+            upload_cvat_dataset(client, make_request(image_names=names))
+
+        sleep = _RecordingSleep()
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == []
+        assert outcome.annotations == len(names)
+        assert len(_writes_of(client).shapes[outcome.task_id]) == len(names)
+
+    def test_resume_reuses_annotations_that_land_during_the_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The interrupted write commits while resume waits; it is not repeated."""
+        client = make_client()
+        names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+        with _dies_uploading_annotations(client) as sent, pytest.raises(_InterruptedRunError):
+            upload_cvat_dataset(client, make_request(image_names=names))
+        task_id = list_manifests(PROJECT_ID, host=client.host)[0].task_id
+        assert task_id is not None
+
+        sleep = _RecordingSleep(lambda: client.api.put_task_shapes(task_id, sent))
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == [30.0]
+        assert outcome.annotations == len(names)
+        assert len(_writes_of(client).shapes[task_id]) == len(names)
+
+    def test_resume_refuses_different_annotations_that_land_during_the_wait(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Shapes that appear during the wait but differ stop the upload."""
+        client = make_client()
+        names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+        with _dies_uploading_annotations(client) as sent, pytest.raises(_InterruptedRunError):
+            upload_cvat_dataset(client, make_request(image_names=names))
+        task_id = list_manifests(PROJECT_ID, host=client.host)[0].task_id
+        assert task_id is not None
+
+        sleep = _RecordingSleep(lambda: client.api.put_task_shapes(task_id, sent[:1]))
+        with pytest.raises(Cveta2Error, match="не совпадают"):
+            _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == [30.0]
+        assert len(_writes_of(client).shapes[task_id]) == 1
+
+    def test_resume_after_a_failed_clearing_save_reuses_the_written_annotations(
+        self, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+    ) -> None:
+        """The write succeeded but the pending mark could not be cleared, then the run died.
+
+        The stale mark must not cost a wait or a second write: the task
+        already holds exactly the expected shapes.
+        """
+        client = make_client()
+        names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+        marked: list[bool] = []
+
+        def refuse_clearing(target: Path, data: bytes) -> None:
+            pending = json.loads(data)["annotations_pending"]
+            if marked and not pending:
+                raise OSError("disk full")
+            if pending:
+                marked.append(True)
+            replace_shared_bytes(target, data)
+
+        # The run dies after the write, before it can record completion.
+        dies_after_write = Mock(side_effect=_InterruptedRunError)
+        with monkeypatch.context() as broken:
+            broken.setattr("cveta2.adapters.files.manifests.replace_shared_bytes", refuse_clearing)
+            with pytest.raises(_InterruptedRunError):
+                upload_dataset(
+                    client,
+                    make_request(image_names=names),
+                    deps=replace(upload_dependencies(sleep=_RecordingSleep()), invalidate=dies_after_write),
+                )
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0]
+        assert stranded.annotations_pending is True
+        assert any("disk full" in line for line in capture_logs)
+
+        sleep = _RecordingSleep()
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == []
+        assert outcome.task_id == stranded.task_id
+        assert outcome.annotations == len(names)
+        assert len(_writes_of(client).shapes[outcome.task_id]) == len(names)
+
+    def test_a_schema_3_manifest_blocks_a_fresh_run_and_resumes_without_waiting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A state file written before the pending mark existed keeps working.
+
+        It still names the task, so a plain re-run cannot create a second
+        one; without the mark an empty task gets its annotations at once.
+        """
+        client = make_client()
+        names = ["a.jpg", "b.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+        with _dies_uploading_annotations(client), pytest.raises(_InterruptedRunError):
+            upload_cvat_dataset(client, make_request(image_names=names))
+        _drop_pending_mark(client)
+
+        with pytest.raises(Cveta2Error, match="--resume"):
+            _upload_waiting_with(client, make_request(image_names=names), _RecordingSleep())
+        sleep = _RecordingSleep()
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == []
+        assert len(_writes_of(client).created_tasks) == 1
+        assert len(_writes_of(client).shapes[outcome.task_id]) == len(names)
 
     def test_resume_without_a_matching_manifest_reports_the_others(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The likely mistake is a different CSV, so name what *is* pending."""
@@ -1100,12 +1270,13 @@ class TestS3FailureAbortsBeforeTaskCreation:
         make_s3(monkeypatch, _FailingS3())
         image_dir = make_local_images(tmp_path, ["a.jpg"])
 
-        with pytest.raises(Cveta2Error, match="S3"):
+        with pytest.raises(Cveta2Error) as caught:
             upload_cvat_dataset(
                 client,
                 make_request(image_names=["a.jpg"], search_dirs=[image_dir]),
             )
 
+        assert f"s3://{BUCKET}/{PREFIX}" in str(caught.value)
         assert _writes_of(client).created_tasks == []
 
     @pytest.mark.parametrize("deleted", [False, True])
@@ -1192,6 +1363,27 @@ class TestResumeAfterManualDeletion:
 
         assert outcome.images == len(names)
         assert list_manifests(PROJECT_ID, host=client.host) == []
+
+    def test_a_replacement_for_a_task_with_an_interrupted_write_does_not_wait(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pending annotation mark belongs to the deleted task, not its replacement."""
+        client = make_client()
+        names = ["a.jpg"]
+        make_s3(monkeypatch, seeded_bucket(names))
+
+        with _dies_uploading_annotations(client), pytest.raises(_InterruptedRunError):
+            upload_cvat_dataset(client, make_request(image_names=names))
+        stranded = list_manifests(PROJECT_ID, host=client.host)[0].task_id
+        assert stranded is not None
+        client.delete_task(stranded)
+
+        sleep = _RecordingSleep()
+        outcome = _upload_waiting_with(client, _resume_request(names), sleep)
+
+        assert sleep.waits == []
+        assert len(_writes_of(client).created_tasks) == 2
+        assert outcome.annotations == len(names)
 
     def test_another_error_reading_the_task_still_surfaces(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Only 404 means "gone"; a 500 must not be read as one."""

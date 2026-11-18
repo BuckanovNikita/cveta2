@@ -123,7 +123,8 @@ def _stage_images(
             # never reached S3 would still be bound into the task and only
             # surface as a processing failure — after the task exists.
             raise Cveta2Error(
-                f"Ошибка: {stats.failed} изображений не загрузились на S3. "
+                f"Ошибка: {stats.failed} изображений не загрузились на S3 "
+                f"(s3://{cs_info.bucket}/{cs_info.prefix}). "
                 f"Задача не создана; повторите команду, уже загруженные "
                 f"изображения будут пропущены."
             )
