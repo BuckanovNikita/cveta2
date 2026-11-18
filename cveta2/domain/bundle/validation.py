@@ -16,15 +16,14 @@ from cveta2.domain.verification.models import (
 )
 from cveta2.domain.verification.validation import validate_dataframe
 
-# Portable consumer contract, inspected in clearml-yolo dataset_records.py.
+# Portable consumer contract, inspected in clearml-yolo dataset_records.py, without
+# the extensions Pillow cannot decode (heic, heif, dng): listing those would promise
+# support while every such image is quarantined as unreadable.
 _MIN_SIDE = 10
 _NATIVE_EXTENSIONS = frozenset(
     {
         "avif",
         "bmp",
-        "dng",
-        "heic",
-        "heif",
         "jp2",
         "jpeg",
         "jpg",
