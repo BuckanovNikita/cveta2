@@ -12,6 +12,8 @@ from cveta2.adapters.config.settings import cache_dir_for_project
 from cveta2.adapters.s3.download import S3Syncer
 from cveta2.adapters.s3.task_cache import TaskAnnotationCache
 from cveta2.adapters.s3.utils import run_s3_transfers
+from cveta2.application.ports.cache import AnnotationScope
+from cveta2.application.ports.dtos import RawJob
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.storage import CloudStorageInfo
 
@@ -28,13 +30,17 @@ def test_upload_wrapper_accounted_and_peer_finishes() -> None:
     assert sorted(seen) == ["bad", "good"]
 
 
+_JOB_SCOPE = AnnotationScope(jobs=(RawJob(1, 0, 0, "acceptance", "completed"),))
+
+
 def test_invalid_local_cache_cannot_unlink_is_miss(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from cveta2.domain.models import TaskInfo
 
     task = TaskInfo(id=1, name="task", status="completed", updated_date="today", subset="")
-    (tmp_path / "task_1.json").write_text("broken")
+    (tmp_path / "task_1").mkdir()
+    (tmp_path / "task_1" / "job_1.json").write_text("broken")
     monkeypatch.setattr(Path, "unlink", Mock(side_effect=PermissionError("readonly")))
-    assert TaskAnnotationCache(tmp_path).get(task) is None
+    assert TaskAnnotationCache(tmp_path).get(task, _JOB_SCOPE) is None
 
 
 @pytest.mark.parametrize("key", ["root//a.jpg", "root/./a.jpg", "root/../a.jpg"])
@@ -119,16 +125,16 @@ def test_nonroot_corrupt_readonly_cache_falls_back(tmp_path: Path) -> None:
     from cveta2.domain.models import TaskInfo
 
     directory = tmp_path / "readonly"
-    directory.mkdir()
-    path = directory / "task_1.json"
+    (directory / "task_1").mkdir(parents=True)
+    path = directory / "task_1" / "job_1.json"
     path.write_text("broken")
-    directory.chmod(0o555)
+    (directory / "task_1").chmod(0o555)
     try:
         task = TaskInfo(id=1, name="task", status="completed", updated_date="today", subset="")
-        assert TaskAnnotationCache(directory).get(task) is None
+        assert TaskAnnotationCache(directory).get(task, _JOB_SCOPE) is None
         assert path.read_text() == "broken"
     finally:
-        directory.chmod(0o755)
+        (directory / "task_1").chmod(0o755)
 
 
 @pytest.mark.parametrize("workers", [1, 4])

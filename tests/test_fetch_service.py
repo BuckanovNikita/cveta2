@@ -23,6 +23,7 @@ from cveta2.adapters.config.settings import CvatConfig
 from cveta2.adapters.execution.concurrency import configure_workers
 from cveta2.adapters.files.dataset import read_dataset_csv
 from cveta2.adapters.s3.task_cache import TaskAnnotationCache
+from cveta2.application.client.job_cache import CachedAnnotations
 from cveta2.application.ports.dtos import (
     RawAnnotations,
     RawDataMeta,
@@ -33,7 +34,6 @@ from cveta2.application.use_cases.fetch import (
     FetchDependencies,
     FetchOptions,
     FetchTarget,
-    _CachePolicy,
     _FetchStats,
     _retrieve_task,
 )
@@ -46,7 +46,6 @@ from cveta2.domain.models import (
     DeletedImage,
     ProjectAnnotations,
     ProjectInfo,
-    TaskAnnotations,
     TaskInfo,
 )
 from cveta2.domain.partition import (
@@ -194,8 +193,8 @@ def test_fetch_to_partition_restore_and_three_way(
       numbers the tasks ascending in the order named below, so
       ``all-removed`` is the earlier task and ``normal`` the later one;
     - a non-completed task fetched alongside produces ``in_progress`` rows;
-    - an externally-injected deletion from a task id above every fixture
-      task wins, sending its images to ``deleted``/``obsolete``.
+    - an externally-injected completed deletion from a task id above every
+      fixture task wins, sending its images to ``deleted``/``obsolete``.
     """
     fake = build_fake(
         coco8_fixtures,
@@ -209,6 +208,9 @@ def test_fetch_to_partition_restore_and_three_way(
         task_id=999,
         task_name="external-delete",
         task_updated_date="2026-03-01T00:00:00+00:00",
+        job_stage="acceptance",
+        job_state="completed",
+        task_completed=True,
         frame_id=0,
         image_name=_IMAGE_NAMES[0],
     )
@@ -445,11 +447,11 @@ def _fetch_context(client: CvatClient, fake: LoadedFixtures) -> FetchContext:
     return client.prepare_fetch(fake.project.id, project_name=fake.project.name)
 
 
-def _fetched(client: CvatClient, task: TaskInfo, ctx: FetchContext) -> TaskAnnotations:
-    """Fetch one task, failing the test rather than the type checker on a skip."""
-    result = client.fetch_one_task(client.api, task, ctx)
-    assert result is not None
-    return result
+def _warm_source(client: CvatClient, task: TaskInfo, ctx: FetchContext, tmp_path: Path) -> CachedAnnotations:
+    """Cache the task's shapes, frame metadata and issues through one fetch."""
+    source = CachedAnnotations(TaskAnnotationCache(tmp_path / "cache"))
+    assert client.fetch_task_through(client.api, task, ctx, source) is not None
+    return source
 
 
 def _accounting_dependencies(fake: LoadedFixtures) -> FetchDependencies:
@@ -472,19 +474,17 @@ class TestRetrieveTaskAccounting:
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
-        policy = _CachePolicy()
+        source = None
         if cached:
-            cache = TaskAnnotationCache(tmp_path / "cache")
-            cache.put(task, _fetched(client, task, ctx))
-            policy = _CachePolicy(cache=cache)
+            source = _warm_source(client, task, ctx, tmp_path)
         stats = _FetchStats(lock=Lock())
 
         deps = replace(
             _accounting_dependencies(fake),
             clock=_ScriptedClock([100.0, 101.5, 200.0, 203.0]).monotonic,
         )
-        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
-        assert _retrieve_task(client, task, ctx, policy, stats, deps=deps) is not None
+        assert _retrieve_task(client, task, ctx, source, stats, deps=deps) is not None
+        assert _retrieve_task(client, task, ctx, source, stats, deps=deps) is not None
 
         counted = (2, pytest.approx(4.5))
         idle = (0, 0.0)
@@ -503,7 +503,7 @@ class TestRetrieveTaskAccounting:
             clock=_ScriptedClock([100.0, 102.0]).monotonic,
         )
 
-        assert _retrieve_task(client, ctx.tasks[0], ctx, _CachePolicy(), stats, deps=deps) is None
+        assert _retrieve_task(client, ctx.tasks[0], ctx, None, stats, deps=deps) is None
 
         assert stats.skipped_task_ids == [ctx.tasks[0].id]
         assert stats.skipped_seconds == 2.0
@@ -516,15 +516,14 @@ class TestRetrieveTaskAccounting:
         client = CvatClient(CvatConfig(), api=FakeCvatApi(fake))
         ctx = _fetch_context(client, fake)
         task = ctx.tasks[0]
-        cache = TaskAnnotationCache(tmp_path / "cache")
-        cache.put(task, _fetched(client, task, ctx))
+        cache = _warm_source(client, task, ctx, tmp_path).cache
         stats = _FetchStats(lock=Lock())
 
         _retrieve_task(
             client,
             task,
             ctx,
-            _CachePolicy(cache=cache, force=True),
+            CachedAnnotations(cache, read=False),
             stats,
             deps=_accounting_dependencies(fake),
         )
@@ -890,17 +889,23 @@ def test_annotated_frames_preserve_unfinished_ground_truth_job(tmp_path: Path) -
 
 
 def test_deleted_frames_preserve_unfinished_ground_truth_job(tmp_path: Path) -> None:
-    """Deleting every frame does not make an unfinished job disappear."""
+    """Deleting every frame does not make an unfinished job disappear.
+
+    The unfinished task's deletion decides nothing yet: it waits in
+    in_progress.csv instead of deleted.csv, still marked unfinished.
+    """
     result = _fetch_with_jobs(
         tmp_path,
         _UNFINISHED_GROUND_TRUTH,
         get_task_data_meta=RawDataMeta([RawFrame("a.jpg", 20, 20)], deleted_frames=[0]),
     )
 
-    assert len(result.deleted_images) == 1
-    assert completed_task_ids(result.dataset, result.deleted_images) == set()
-    saved = pd.read_csv(tmp_path / "output" / "deleted.csv")
-    assert saved["task_completed"].tolist() == [False]
+    assert result.deleted_images == []
+    assert len(result.pending_deletions) == 1
+    assert completed_task_ids(result.dataset, result.pending_deletions) == set()
+    saved = pd.read_csv(tmp_path / "output" / "in_progress.csv")
+    assert saved[["instance_shape", "task_completed"]].to_numpy().tolist() == [["deleted", False]]
+    assert pd.read_csv(tmp_path / "output" / "deleted.csv").empty
 
 
 @pytest.mark.parametrize("legacy_value", [None, float("nan")])

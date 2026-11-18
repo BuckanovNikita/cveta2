@@ -9,7 +9,7 @@ Requires a running, seeded CVAT (see uv run python -m tests.integration.lifecycl
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -20,6 +20,7 @@ from cvat_sdk.core.helpers import get_paginated_collection
 from cveta2.adapters.config.settings import CvatConfig
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from cveta2.adapters.s3.task_cache import get_task_cache_dir
+from cveta2.application.ports.dtos import NewShape
 from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
 from cveta2.composition.client import CvatClient
 from cveta2.composition.workflows import fetch_selected_tasks
@@ -172,6 +173,93 @@ def _task_updated_date(adapter: SdkCvatApiAdapter, project_id: int, task_name: s
     return next(t for t in tasks if t.name == task_name).updated_date
 
 
+def _two_job_task_with_boxes(cfg: CvatConfig, project_id: int, cloud_storage_id: int, name: str) -> int:
+    """Create a finished four-frame task of two jobs with one box in each job."""
+    with CvatClient(cfg) as client:
+        task_id = client.create_upload_task(
+            project_id=project_id,
+            name=name,
+            image_names=IMAGE_NAMES[:4],
+            cloud_storage_id=cloud_storage_id,
+            segment_size=2,
+        )
+        label_id = client.api.get_project_labels(project_id)[0].id
+        client.api.put_task_shapes(
+            task_id,
+            [
+                NewShape(frame=0, label_id=label_id, points=[1, 1, 5, 5]),
+                NewShape(frame=3, label_id=label_id, points=[2, 2, 6, 6]),
+            ],
+        )
+    _complete_task_jobs(task_id)
+    return task_id
+
+
+_COUNTED_READS = (
+    "get_task_jobs",
+    "get_task_data_meta",
+    "get_task_issues",
+    "get_task_annotations",
+    "get_job_annotations",
+)
+
+
+class _SpiedSession:
+    """Cached fetches of one live task whose per-task CVAT reads are counted."""
+
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task_name: str) -> None:
+        self.project_id, self.project_name, self.cs_info, self.cfg = _get_project_and_storage()
+        self.task_name = task_name
+        self._tmp_path = tmp_path
+        self._sdk_client = _make_sdk_client()
+        self.adapter = SdkCvatApiAdapter(self._sdk_client)
+        self.spies = {name: MagicMock(wraps=getattr(self.adapter, name)) for name in _COUNTED_READS}
+        for name, spy in self.spies.items():
+            monkeypatch.setattr(self.adapter, name, spy)
+        self._client = CvatClient(self.cfg, api=self.adapter)
+        self._storage = patch(
+            "cveta2.composition.client.CvatClient.detect_project_cloud_storage",
+            return_value=_cs_info_for_host(self.cs_info),
+        )
+
+    def __enter__(self) -> Self:
+        self._storage.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._storage.stop()
+        self._sdk_client.close()
+
+    def fetch(self, out: str, *, use_cache: bool = True) -> pd.DataFrame:
+        fetch_selected_tasks(
+            self._client,
+            FetchTarget(self.project_id, self.project_name, self._tmp_path / out, None),
+            FetchOptions(task_selector=[self.task_name], use_cache=use_cache),
+        )
+        return pd.read_csv(self._tmp_path / out / "dataset.csv")
+
+    def counts(self) -> dict[str, int]:
+        return {name: spy.call_count for name, spy in self.spies.items() if spy.call_count}
+
+    def reset(self) -> None:
+        for spy in self.spies.values():
+            spy.reset_mock()
+
+    def task_updated_date(self) -> str:
+        return _task_updated_date(self.adapter, self.project_id, self.task_name)
+
+
+def _spied_two_job_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task_name: str
+) -> tuple[_SpiedSession, int]:
+    """Create a finished two-job task with boxes and a counted, cache-enabled session for it."""
+    monkeypatch.delenv("CVETA2_DISABLE_CACHE", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    session = _SpiedSession(tmp_path, monkeypatch, task_name)
+    task_id = _two_job_task_with_boxes(session.cfg, session.project_id, session.cs_info.id, task_name)
+    return session, task_id
+
+
 class TestFetchTaskCacheLive:
     """Live round-trip of the task-annotation cache across two fetches."""
 
@@ -200,6 +288,8 @@ class TestFetchTaskCacheLive:
 
             spy = MagicMock(wraps=adapter.get_task_annotations)
             monkeypatch.setattr(adapter, "get_task_annotations", spy)
+            job_spy = MagicMock(wraps=adapter.get_job_annotations)
+            monkeypatch.setattr(adapter, "get_job_annotations", job_spy)
             client = CvatClient(cfg, api=adapter)
             options = FetchOptions(task_selector=[task_name])
             with patch(
@@ -212,8 +302,8 @@ class TestFetchTaskCacheLive:
                     options,
                 )
                 assert spy.call_count == 1
-                entry = get_task_cache_dir(project_id) / f"task_{task_id}.json"
-                assert entry.exists(), "first fetch must persist a local cache entry"
+                entries = list((get_task_cache_dir(project_id) / f"task_{task_id}").glob("job_*.json"))
+                assert entries, "first fetch must persist a local cache entry per finished job"
 
                 fetch_selected_tasks(
                     client,
@@ -221,12 +311,82 @@ class TestFetchTaskCacheLive:
                     options,
                 )
                 assert spy.call_count == 1, "second fetch must be served from cache"
+                assert job_spy.call_count == 0, "an unchanged finished job must not be read again"
         finally:
             sdk_client.close()
 
         df1 = pd.read_csv(tmp_path / "out1" / "dataset.csv")
         df2 = pd.read_csv(tmp_path / "out2" / "dataset.csv")
         pd.testing.assert_frame_equal(df1, df2)
+
+    def test_a_job_state_change_on_a_cached_task_is_noticed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A state-only change keeps the task "completed" with its date; the next fetch must see it (SIP-82).
+
+        This is the case the old status-gated cache served stale: the stage
+        stays ``acceptance``, so CVAT keeps the task status. Before the change
+        the test proves a warm hit costs one request (the jobs list) and that
+        cache-off, cold and warm fetches give identical rows in identical
+        order, the live check that the job endpoint numbers frames within the
+        task as the task endpoint does.
+        """
+        session, task_id = _spied_two_job_session(tmp_path, monkeypatch, "integration-cache-job-state-test")
+        jobs = sorted(session.adapter.get_task_jobs(task_id), key=lambda job: job.start_frame)
+        assert len(jobs) == 2, f"expected two jobs, got {jobs}"
+        second = jobs[1]
+        with session:
+            cold = session.fetch("cold")
+            cache_dir = get_task_cache_dir(session.project_id) / f"task_{task_id}"
+            assert sorted(path.name for path in cache_dir.glob("job_*.json")) == sorted(
+                f"job_{job.id}.json" for job in jobs
+            )
+            session.reset()
+            warm = session.fetch("warm")
+            assert session.counts() == {"get_task_jobs": 1}, "a warm hit must cost exactly the jobs request"
+            off = session.fetch("off", use_cache=False)
+            pd.testing.assert_frame_equal(off, cold)
+            pd.testing.assert_frame_equal(off, warm)
+            assert (cold["instance_shape"] == "box").sum() == 2
+
+            before_date = session.task_updated_date()
+            session.adapter.update_job(second.id, state="rejected")
+            date_moved = session.task_updated_date() != before_date
+            session.reset()
+            moved = session.fetch("moved")
+            job_reads = [call.args[0] for call in session.spies["get_job_annotations"].call_args_list]
+
+        assert not moved["task_completed"].any(), "the rejected job must make the cached task unfinished"
+        second_rows = moved[moved["frame_id"].between(second.start_frame, second.stop_frame)]
+        assert set(second_rows["job_stage"]) == {"acceptance"}
+        assert set(second_rows["job_state"]) == {"rejected"}
+        columns = ["image_name", "instance_shape", "bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"]
+        pd.testing.assert_frame_equal(moved[columns], off[columns])
+        # Metadata and issues are keyed on every job, so both branches read them again.
+        if date_moved:
+            expected = {"get_task_jobs": 1, "get_task_data_meta": 1, "get_task_issues": 1, "get_task_annotations": 1}
+            assert session.counts() == expected, "branch: CVAT moved the task date, every entry is stale"
+        else:
+            expected = {"get_task_jobs": 1, "get_task_data_meta": 1, "get_task_issues": 1, "get_job_annotations": 1}
+            assert session.counts() == expected, "branch: task date unchanged, only the rejected job is read"
+            assert job_reads == [second.id]
+
+    def test_a_shape_edit_on_a_cached_task_is_noticed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A box added to a finished, cached job must appear in the next fetch."""
+        session, task_id = _spied_two_job_session(tmp_path, monkeypatch, "integration-cache-shape-edit-test")
+        with session:
+            session.fetch("cold")
+            session.reset()
+            session.fetch("warm")
+            assert session.counts() == {"get_task_jobs": 1}, "a warm hit must cost exactly the jobs request"
+            label_id = session.adapter.get_project_labels(session.project_id)[0].id
+            session.adapter.put_task_shapes(task_id, [NewShape(frame=2, label_id=label_id, points=[3, 3, 7, 7])])
+            session.reset()
+            edited = session.fetch("edited")
+
+        boxes = edited[edited["instance_shape"] == "box"]
+        assert sorted(boxes["frame_id"]) == [0, 2, 3]
+        assert session.counts().get("get_task_annotations", 0) + session.counts().get("get_job_annotations", 0) >= 1
 
     def test_a_project_label_edit_refreshes_cache_without_changing_partition(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

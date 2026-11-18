@@ -36,6 +36,7 @@ from cveta2.application.ports.dtos import (
     RawAttribute,
     RawDataMeta,
     RawFrame,
+    RawJob,
     RawShape,
     UploadTaskSpec,
 )
@@ -404,6 +405,40 @@ class TestConvertAnnotations:
         assert "2" in warning
         assert "rectangle" in warning
         assert "polygon" in warning
+
+    def test_job_annotations_come_from_the_job_endpoint(self, capture_logs: list[str]) -> None:
+        client = MagicMock()
+        client.api_client.jobs_api.retrieve_annotations.return_value = (
+            SimpleNamespace(shapes=[make_sdk_shape(id=3, frame=12, label_id=4)], tracks=[SimpleNamespace(label_id=5)]),
+            None,
+        )
+
+        result = SdkCvatApiAdapter(client).get_job_annotations(31)
+
+        client.api_client.jobs_api.retrieve_annotations.assert_called_once_with(31)
+        assert [(s.id, s.frame) for s in result.shapes] == [(3, 12)]
+        assert len(capture_logs) == 1
+        assert "31" in capture_logs[0]
+
+    def test_jobs_carry_their_update_time(self) -> None:
+        client = MagicMock()
+        job = SimpleNamespace(
+            id=8,
+            start_frame=0,
+            stop_frame=9,
+            stage="acceptance",
+            state="completed",
+            type="annotation",
+            updated_date=datetime(2026, 11, 18, 12, 30, tzinfo=timezone.utc),
+        )
+        client.api_client.jobs_api.list_endpoint.call_with_http_info.return_value = (
+            SimpleNamespace(results=[job], next=None),
+            SimpleNamespace(status=200, msg="OK"),
+        )
+
+        jobs = SdkCvatApiAdapter(client).get_task_jobs(4)
+
+        assert jobs == [RawJob(8, 0, 9, "acceptance", "completed", "annotation", "2026-11-18T12:30:00+00:00")]
 
     def test_adapter_retains_standalone_polygon_beside_ignored_tracks(self) -> None:
         client = MagicMock()

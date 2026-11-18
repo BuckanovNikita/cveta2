@@ -39,7 +39,7 @@ def convert_task(task: "cvat_models.TaskRead") -> TaskInfo:
     )
 
 
-def extract_updated_date(task: "cvat_models.TaskRead") -> str:
+def extract_updated_date(task: "cvat_models.TaskRead | cvat_models.JobRead") -> str:
     """Normalize ``updated_date`` / ``updated_at`` to ISO string.
 
     Uses ``getattr`` because the CVAT SDK renamed ``updated_date`` to

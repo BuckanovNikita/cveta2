@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from cveta2.domain.bundle.models import FetchTables, UploadError
+from cveta2.domain.bundle.models import FetchTables, TaskManifest, UploadError
 from cveta2.domain.bundle.tasks import derive_tasks
 
 
@@ -88,13 +88,33 @@ def test_integral_csv_numeric_ids_are_accepted_without_truncation() -> None:
     assert derive_tasks(source, source.dataset).included == [0, 12]
 
 
-def test_in_progress_partition_conflicts_fail_closed() -> None:
-    source = tables(
-        frame((2, "a", True)),
-        obsolete=frame((1, "a", True)),
-        in_progress=frame((1, "b", True)),
+def test_in_progress_rows_without_explicit_completion_fail_closed() -> None:
+    """A legacy in-progress row may belong to a task with an unseen unfinished job."""
+    legacy = pd.DataFrame(
+        {
+            "task_id": [1],
+            "image_name": ["a"],
+            "instance_shape": ["box"],
+            "job_stage": ["acceptance"],
+            "job_state": ["completed"],
+        },
     )
+    source = tables(frame((2, "a", True)), obsolete=frame((1, "a", True)), in_progress=legacy)
     assert derive_tasks(source, source.dataset).obsolete == []
+
+
+def test_completed_boxes_waiting_in_progress_still_supersede() -> None:
+    """Task 3's boxes of a reopened image wait in in_progress.csv; task 3 stays completed.
+
+    Task 3 also replaced task 1's annotation of another image, so task 1
+    remains fully superseded.
+    """
+    source = tables(
+        frame((3, "y", True)),
+        obsolete=frame((1, "y", True)),
+        in_progress=frame((3, "x", True), (9, "x", False)),
+    )
+    assert derive_tasks(source, source.dataset) == TaskManifest(included=[3], obsolete=[1])
 
 
 def test_missing_completion_and_null_legacy_fallback() -> None:
@@ -124,3 +144,50 @@ def test_clean_rows_cannot_resurrect_obsolete_annotations() -> None:
     source = tables(frame((2, "a", True)), obsolete=old)
     with pytest.raises(UploadError, match=r"dataset\.csv"):
         derive_tasks(source, old)
+
+
+def test_deletion_markers_in_progress_do_not_change_the_manifest() -> None:
+    """Pending and reopened deletion rows of in_progress.csv are markers, not task evidence."""
+    carried = frame((3, "x", True), (9, "x", False)).assign(instance_shape="box")
+    markers = frame((5, "x", True), (9, "z", False)).assign(instance_shape="deleted")
+    # Task 3 appears only through its carried boxes; counting task 5's marker
+    # as a completed annotation would supersede them and list task 3 obsolete.
+    without = tables(frame((4, "y", True)), in_progress=carried)
+    with_markers = tables(frame((4, "y", True)), in_progress=pd.concat([carried, markers], ignore_index=True))
+
+    expected = TaskManifest(included=[4], obsolete=[])
+    assert derive_tasks(without, without.dataset) == expected
+    assert derive_tasks(with_markers, with_markers.dataset) == expected
+
+
+def test_a_legacy_pending_deletion_keeps_its_task_open() -> None:
+    """A pending deletion without task_completed is the only evidence that task 7 is unfinished."""
+
+    def rows(*records: tuple[int, str, str, str, str]) -> pd.DataFrame:
+        columns = ["task_id", "image_name", "instance_shape", "job_stage", "job_state"]
+        return pd.DataFrame(records, columns=columns).assign(task_completed="")
+
+    source = tables(
+        rows((2, "y.jpg", "box", "acceptance", "completed")),
+        obsolete=rows((7, "x.jpg", "box", "acceptance", "completed")),
+        in_progress=rows((7, "y.jpg", "deleted", "annotation", "new")),
+        deleted=rows((8, "x.jpg", "deleted", "acceptance", "completed")),
+    )
+
+    assert derive_tasks(source, source.dataset).obsolete == []
+
+
+@pytest.mark.parametrize(
+    ("flag", "is_marker"),
+    [(True, True), ("True", True), ("true", True), (False, False), ("", False), ("1", False), (1, False)],
+)
+def test_only_an_explicitly_true_deleted_row_is_a_reopen_marker(flag: object, *, is_marker: bool) -> None:
+    """A marker is skipped; any other flag keeps the row as evidence that task 5 is not finished.
+
+    Task 6 superseded task 5's only image, so task 5 is listed obsolete exactly
+    when nothing says it is unfinished.
+    """
+    deleted_row = pd.DataFrame([{"task_id": 5, "image_name": "x", "instance_shape": "deleted", "task_completed": flag}])
+    source = tables(frame((6, "z", True)), obsolete=frame((5, "z", True)), in_progress=deleted_row)
+
+    assert derive_tasks(source, source.dataset).obsolete == ([5] if is_marker else [])

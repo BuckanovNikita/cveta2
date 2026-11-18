@@ -14,6 +14,7 @@ import pandas as pd
 from loguru import logger
 
 from cveta2.application.client import ApplicationClient as CvatClient
+from cveta2.application.client.job_cache import CachedAnnotations
 from cveta2.application.client.shared import FetchContext
 from cveta2.application.ports.cache import CacheFactory, TaskCache
 from cveta2.application.ports.execution import ConcurrentRunner
@@ -216,14 +217,18 @@ def _fetch_core(
     started = deps.clock()
     cache_settings = deps.cache_settings
     cache = _build_task_cache(client, project_id, options, cache_settings, deps=deps)
-    policy = _CachePolicy(cache=cache, force=options.force)
+    if cache is not None:
+        legacy = cache.remove_legacy_entries()
+        if legacy:
+            logger.info(f"Кэш аннотаций: удалено записей старого формата: {legacy}")
+    source = None if cache is None else CachedAnnotations(cache, read=not options.force)
     logger.info(f"Подготовка кэша аннотаций: прошло {deps.clock() - started:.1f} с")
 
     result = _fetch_and_save_tasks(
         client,
         ctx,
         target.output_dir,
-        policy,
+        source,
         save_tasks=options.save_tasks,
         deps=deps,
     )
@@ -276,25 +281,6 @@ def _build_task_cache(
     if not options.use_cache or not deps.cache_enabled:
         return None
     return deps.caches.create(project_id, client.detect_project_cloud_storage(project_id), cache_settings)
-
-
-@dataclass(frozen=True)
-class _CachePolicy:
-    """How the fetch loop uses the task-annotation cache."""
-
-    cache: TaskCache | None = None
-    force: bool = False
-
-    def read(self, task: TaskInfo) -> TaskAnnotations | None:
-        """Return a cached result, or None when reading is disabled/absent."""
-        if self.force or self.cache is None:
-            return None
-        return self.cache.get(task)
-
-    def write(self, task: TaskInfo, result: TaskAnnotations) -> None:
-        """Perform the declared workflow operation."""
-        if self.cache is not None:
-            self.cache.put(task, result)
 
 
 @dataclass
@@ -364,41 +350,37 @@ def _retrieve_task(  # noqa: PLR0913
     client: CvatClient,
     task: TaskInfo,
     ctx: FetchContext,
-    policy: _CachePolicy,
+    source: CachedAnnotations | None,
     stats: _FetchStats,
     *,
     deps: FetchDependencies,
 ) -> TaskAnnotations | None:
-    """Return a task's annotations from cache or a live fetch, updating *stats*.
+    """Return a task's annotations, its shapes through *source* when caching, updating *stats*.
 
-    Returns ``None`` when a live fetch skipped the task (5xx).  Fresh
-    results are cached before path population so shared S3 entries stay
-    machine-independent.
+    A task counts as a cache hit when none of its shapes had to be
+    downloaded. Returns ``None`` when the fetch skipped the task (5xx).
+    Only raw shapes are cached, so shared S3 entries stay machine-independent.
     """
     started = deps.clock()
-    cached = policy.read(task)
-    if cached is not None:
-        stats.record_hit(deps.clock() - started)
-        if not cached.issues_complete:
-            stats.record_degraded(task.id)
-        return cached
-
-    fetched = client.fetch_one_task(client.api, task, ctx)
+    fetched = client.fetch_task_through(client.api, task, ctx, source)
     if fetched is None:
         stats.record_skip(task.id, deps.clock() - started)
         return None
-    policy.write(task, fetched)
-    stats.record_fetch(deps.clock() - started)
-    if not fetched.issues_complete:
+    result, from_cache = fetched
+    if from_cache:
+        stats.record_hit(deps.clock() - started)
+    else:
+        stats.record_fetch(deps.clock() - started)
+    if not result.issues_complete:
         stats.record_degraded(task.id)
-    return fetched
+    return result
 
 
 def _fetch_and_save_tasks(  # noqa: PLR0913
     client: CvatClient,
     ctx: FetchContext,
     output_dir: Path,
-    policy: _CachePolicy,
+    source: CachedAnnotations | None,
     *,
     deps: FetchDependencies,
     save_tasks: bool,
@@ -410,7 +392,7 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
     returned in task order regardless of completion order, so the merged
     output does not depend on which task happened to finish first.
 
-    Completed tasks are served from *policy*'s cache when possible. Only
+    Finished jobs' shapes are served from *source*'s cache when possible. Only
     *save_tasks* accesses ``.tasks/``: an ordinary fetch leaves a pre-existing
     directory untouched, including files belonging to previous runs.
 
@@ -427,7 +409,7 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
 
     def process(task: TaskInfo) -> TaskAnnotations | None:
         """Perform the declared workflow operation."""
-        result = _retrieve_task(client, task, ctx, policy, stats, deps=deps)
+        result = _retrieve_task(client, task, ctx, source, stats, deps=deps)
         if result is not None and tasks_dir is not None:
             deps.files.write_task_csv(task, result, tasks_dir)
         return result

@@ -1,5 +1,6 @@
 """Unit tests for merge: split propagation, by-task resolution, and I/O."""
 
+import argparse
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,11 +11,13 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from cveta2.adapters.files.dataset import read_deleted_names as _read_deleted_names
+from cveta2.adapters.files.dataset import write_partition_csvs
 from cveta2.application.use_cases.merge import merge_datasets as merge_with_files
 from cveta2.composition.conversion import merge_datasets
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.merge import _merge_datasets, _propagate_splits, _resolve_by_task
-from tests.helpers import csv_row, make_args, make_df, write_dataset_csv
+from cveta2.domain.merge import _merge_datasets, _propagate_splits, _resolve_by_task, reopened_images
+from cveta2.domain.partition import partition_annotations_df
+from tests.helpers import csv_row, make_args, make_deleted, make_df, write_dataset_csv
 
 _ID_OLD = 10
 _ID_NEW = 20
@@ -347,6 +350,137 @@ class TestMergeDatasetsIO:
             merge_datasets(paths["old"], paths["new"], tmp_path / "merged.csv", by_task=True)
 
 
+class TestMergeReopenedImages:
+    """``in_progress`` drops old images the new fetch reports as reopened after a completed deletion."""
+
+    @staticmethod
+    def _fetch(tmp_path: Path, rows: list[tuple[str, int, bool]], deletions: list[tuple[str, int, bool]]) -> Path:
+        """Partition fetched rows into the four CSVs, as ``cveta2 fetch`` writes them."""
+        frame = make_df(
+            [
+                csv_row(image, task_id=task, status="completed" if done else "annotation", task_completed=done)
+                for image, task, done in rows
+            ]
+        )
+        records = [
+            make_deleted(image, task, "2026-01-01", "completed" if done else "annotation").model_copy(
+                update={"task_completed": done}
+            )
+            for image, task, done in deletions
+        ]
+        out = tmp_path / "new"
+        write_partition_csvs(partition_annotations_df(frame, records), out)
+        return out
+
+    def _merge(self, tmp_path: Path, new: Path, *, with_in_progress: bool) -> set[str]:
+        old = tmp_path / "old.csv"
+        write_dataset_csv(old, [_trow("a.jpg", task_id=3, label="old_a"), _trow("b.jpg", task_id=4, label="old_b")])
+        out = tmp_path / "merged.csv"
+        merge_datasets(
+            old,
+            new / "dataset.csv",
+            out,
+            deleted=new / "deleted.csv",
+            in_progress=new / "in_progress.csv" if with_in_progress else None,
+        )
+        merged = pd.read_csv(out)
+        return set(merged["image_name"] + ":" + merged["instance_label"])
+
+    @pytest.mark.parametrize(
+        ("rows", "deletions"),
+        [
+            # Case 1: completed 3 annotates, completed 5 deletes, unfinished 9 holds it again.
+            pytest.param([("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)], id="case-1"),
+            # Task 5 annotated and then deleted the frame itself: no completed boxes are carried.
+            pytest.param([("a.jpg", 5, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)], id="deleted-by-its-own-task"),
+            # No completed task ever held the frame as a non-deleted one.
+            pytest.param([("a.jpg", 9, False)], [("a.jpg", 5, True)], id="no-completed-boxes"),
+        ],
+    )
+    def test_a_reopened_image_is_dropped_only_with_the_in_progress_file(
+        self, tmp_path: Path, rows: list[tuple[str, int, bool]], deletions: list[tuple[str, int, bool]]
+    ) -> None:
+        new = self._fetch(tmp_path, rows, deletions)
+
+        assert self._merge(tmp_path, new, with_in_progress=False) == {"a.jpg:old_a", "b.jpg:old_b"}
+        assert self._merge(tmp_path, new, with_in_progress=True) == {"b.jpg:old_b"}
+
+    def test_the_python_api_forwards_the_in_progress_file(self, tmp_path: Path) -> None:
+        import cveta2
+
+        new = self._fetch(tmp_path, [("a.jpg", 9, False)], [("a.jpg", 5, True)])
+        old = tmp_path / "old.csv"
+        write_dataset_csv(old, [_trow("a.jpg", task_id=3, label="old_a"), _trow("b.jpg", task_id=4, label="old_b")])
+
+        merged = cveta2.merge(old, new / "dataset.csv", tmp_path / "merged.csv", in_progress=new / "in_progress.csv")
+
+        assert merged["image_name"].tolist() == ["b.jpg"]
+
+    def test_a_pending_unfinished_deletion_drops_nothing(self, tmp_path: Path) -> None:
+        """Completed 3 annotates, unfinished 9 deletes: the deletion waits, the boxes stay."""
+        new = self._fetch(tmp_path, [("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 9, False)])
+
+        assert self._merge(tmp_path, new, with_in_progress=True) == {"a.jpg:cat", "b.jpg:old_b"}
+
+    def test_an_in_progress_file_of_an_older_cveta2_drops_nothing(self, tmp_path: Path) -> None:
+        """Rows without task_completed carry no reopen marker."""
+        new = self._fetch(tmp_path, [("c.jpg", 4, True)], [])
+        legacy = pd.DataFrame([{"image_name": "a.jpg", "task_id": 9, "instance_shape": "box"}])
+        legacy.to_csv(new / "in_progress.csv", index=False)
+
+        assert self._merge(tmp_path, new, with_in_progress=True) == {"a.jpg:old_a", "b.jpg:old_b", "c.jpg:cat"}
+
+    def test_the_cli_option_reaches_the_merge(self, tmp_path: Path) -> None:
+        from cveta2.interfaces.commands.merge import configure_merge, run_merge
+
+        new = self._fetch(tmp_path, [("a.jpg", 3, True), ("a.jpg", 9, False)], [("a.jpg", 5, True)])
+        old = tmp_path / "old.csv"
+        write_dataset_csv(old, [_trow("a.jpg", task_id=3, label="old_a")])
+        parser = argparse.ArgumentParser()
+        configure_merge(parser)
+        out = tmp_path / "merged.csv"
+        argv = ["--old", str(old), "--new", str(new / "dataset.csv"), "-o", str(out)]
+
+        run_merge(parser.parse_args([*argv, "--in-progress", str(new / "in_progress.csv")]))
+
+        assert pd.read_csv(out).empty
+
+    @pytest.mark.parametrize(
+        ("rows", "expected"),
+        [
+            # Plain re-annotation: completed 3 stays in dataset.csv, unfinished 9 waits.
+            pytest.param([("a.jpg", 3, True), ("a.jpg", 9, False)], {"a.jpg:cat", "b.jpg:old_b"}, id="reannotation"),
+            # The image's only task went back from completed to unfinished.
+            pytest.param([("a.jpg", 3, False)], {"a.jpg:old_a", "b.jpg:old_b"}, id="task-sent-back"),
+            # The new fetch has nothing for the old image at all.
+            pytest.param([("c.jpg", 4, True)], {"a.jpg:old_a", "b.jpg:old_b", "c.jpg:cat"}, id="absent-from-fetch"),
+        ],
+    )
+    def test_presence_in_progress_alone_drops_nothing(
+        self, tmp_path: Path, rows: list[tuple[str, int, bool]], expected: set[str]
+    ) -> None:
+        new = self._fetch(tmp_path, rows, [])
+
+        assert self._merge(tmp_path, new, with_in_progress=True) == expected
+        assert self._merge(tmp_path, new, with_in_progress=False) == expected
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        pytest.param([True, False, None], {"r0"}, id="parsed-booleans"),
+        pytest.param(["True", "true", "False", ""], {"r0", "r1"}, id="text"),
+        pytest.param(["True", "odd", "1"], {"r0"}, id="text-with-an-odd-cell"),
+        pytest.param([1, 0, 1.0], set(), id="numbers-are-not-markers"),
+    ],
+)
+def test_only_explicitly_true_rows_mark_a_reopened_image(flags: list[object], expected: set[str]) -> None:
+    """Strict: counting a non-marker would wrongly drop old boxes."""
+    in_progress = pd.DataFrame({"image_name": [f"r{i}" for i in range(len(flags))], "task_completed": flags})
+
+    assert reopened_images(in_progress) == expected
+
+
 # ---------------------------------------------------------------------------
 # CLI smoke — run_merge error path
 # ---------------------------------------------------------------------------
@@ -366,6 +500,7 @@ def test_run_merge_by_task_missing_column_exits(tmp_path: Path) -> None:
         new=str(new_path),
         output=str(tmp_path / "merged.csv"),
         deleted=None,
+        in_progress=None,
         by_task=True,
     )
 

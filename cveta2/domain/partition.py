@@ -14,12 +14,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class PartitionResult:
-    """Three-way partition of the annotation DataFrame."""
+    """Three-way partition of the annotation DataFrame.
+
+    *pending_deletions* are deletions made by tasks that are not finished
+    yet. They decide nothing until their task completes. *reopened_deletions*
+    mark every image whose completed result is a deletion that a newer
+    unfinished task is undoing: one completed deletion record per image, with
+    ``task_completed=True``. The writers append both to ``in_progress.csv``
+    (see :func:`in_progress_table`).
+    """
 
     dataset: "pd.DataFrame"
     obsolete: "pd.DataFrame"
     in_progress: "pd.DataFrame"
     deleted_images: "list[DeletedImage]" = field(default_factory=list)
+    pending_deletions: "list[DeletedImage]" = field(default_factory=list)
+    reopened_deletions: "list[DeletedImage]" = field(default_factory=list)
 
 
 def _rows_are_finished(frame: "pd.DataFrame") -> "pd.Series[bool]":
@@ -130,7 +140,7 @@ def _latest_task_per_image(
     df: "pd.DataFrame",
     deleted_images: "list[DeletedImage]",
 ) -> "pd.DataFrame":
-    """Return the latest task per ``image_name`` across df rows and deletions.
+    """Return the latest task per ``image_name`` across *df* rows and deletions.
 
     Two different tasks can no longer tie, so the only tie left is within a
     single task: a frame that task annotated and also marked deleted.
@@ -198,6 +208,94 @@ def _filter_deleted_images(
     return unique
 
 
+def _carried_rows(
+    df: "pd.DataFrame",
+    candidates: "pd.Series[bool]",
+    deletion_pairs: set[tuple[str, int]],
+) -> "pd.Series[bool]":
+    """Mark the rows of the newest task that holds each image as a live frame.
+
+    Among *candidates*, a row whose own task also deleted the image is the
+    retained shape of a deleted frame, not a live annotation, so it never
+    counts.
+    """
+    task_ids = usable_task_ids(df["task_id"])
+    live = candidates & pd.Series(
+        [
+            pd.notna(task) and (image, int(task)) not in deletion_pairs
+            for image, task in zip(df["image_name"], task_ids, strict=True)
+        ],
+        index=df.index,
+        dtype=bool,
+    )
+    newest = task_ids[live].groupby(df["image_name"][live]).max()
+    carried: pd.Series[bool] = live & task_ids.eq(df["image_name"].map(newest))
+    return carried
+
+
+def _newest_live_task(
+    df: "pd.DataFrame",
+    rows: "pd.Series[bool]",
+    deletion_pairs: set[tuple[str, int]],
+) -> dict[str, int]:
+    """Return per image the highest task that holds it as a live frame among *rows*."""
+    newest: dict[str, int] = {}
+    selected = df[rows]
+    for image, task in zip(selected["image_name"], usable_task_ids(selected["task_id"]), strict=True):
+        if pd.isna(task) or (image, int(task)) in deletion_pairs:
+            continue
+        newest[image] = max(newest.get(image, int(task)), int(task))
+    return newest
+
+
+def _pending_deletions(
+    deleted_images: "list[DeletedImage]",
+    completed: set[int],
+    deleted_image_names: set[str],
+    decided_task: dict[str, int],
+) -> "list[DeletedImage]":
+    """Return unfinished deletions newer than the image's completed result.
+
+    One record per image and task, ordered by image then task. An image
+    already in ``deleted.csv`` has nothing left to delete, and a deletion
+    older than the completed result is superseded by it.
+    """
+    pending: dict[tuple[str, int], DeletedImage] = {}
+    for record in deleted_images:
+        key = (record.image_name, record.task_id)
+        if record.task_id in completed or record.image_name in deleted_image_names or key in pending:
+            continue
+        if record.task_id < decided_task.get(record.image_name, -1):
+            continue
+        pending[key] = record
+    return [pending[key] for key in sorted(pending)]
+
+
+def in_progress_table(result: "PartitionResult") -> "pd.DataFrame":
+    """Return the ``in_progress.csv`` table: unfinished rows, then deletion markers.
+
+    Pending deletions (``task_completed=False``) and the completed deletions
+    of reopened images (``task_completed=True``) are written as
+    ``instance_shape="deleted"`` rows, as in ``raw.csv``. The parts are
+    combined as objects so the annotation rows keep their own cell text: a
+    sparse deletion row would otherwise turn an integer column such as
+    ``z_order`` into floats.
+    """
+    markers = [*result.pending_deletions, *result.reopened_deletions]
+    if not markers:
+        return result.in_progress
+    pending = pd.DataFrame([record.to_csv_row() for record in markers])
+    columns = list(result.in_progress.columns)
+    columns += [name for name in pending.columns if name not in columns]
+    return pd.concat(
+        [
+            result.in_progress.reindex(columns=columns).astype(object),
+            pending.reindex(columns=columns).astype(object),
+        ],
+        ignore_index=True,
+    )
+
+
 def partition_annotations_df(
     df: "pd.DataFrame",
     deleted_images: "list[DeletedImage]",
@@ -207,42 +305,63 @@ def partition_annotations_df(
     Required columns in *df*: ``image_name``, ``task_id``, ``job_stage``,
     ``job_state``.
 
-    Algorithm
-    ---------
-    1. :func:`_latest_task_per_image` finds the latest task per ``image_name``
-       across *df* rows and ``deleted_images`` (deletions win ties).
-    2. If that latest task is a deletion → the image is "deleted": all its rows
-       go to **obsolete** and it is collected via :func:`_filter_deleted_images`.
-    3. For non-deleted images:
-       - rows of tasks with an unfinished job (see
-         :func:`completed_task_ids`) → **in_progress**
-       - :func:`_split_completed` sends the *latest completed task* per image to
-         **dataset** and the rest to **obsolete**.
+    Only completed tasks (see :func:`completed_task_ids`) decide an image:
+
+    1. :func:`_latest_task_per_image` over completed rows and completed
+       deletions finds each image's completed result (highest task id;
+       a deletion wins a tie inside its own task).
+    2. A result that is a deletion makes the image **deleted**: all its rows
+       go to **obsolete** and its record to ``deleted_images``. The exception:
+       a newer unfinished task that holds the image as a live frame reopens
+       it. A reopened image is in nobody's deleted list; the rows of its
+       newest completed task that holds it live move to **in_progress**, its
+       other completed rows go to **obsolete**.
+    3. Otherwise the latest completed task goes to **dataset** and older
+       completed tasks to **obsolete**.
+    4. Rows of unfinished tasks of an image that is not deleted go to
+       **in_progress**; unfinished deletions newer than the completed result
+       become ``pending_deletions``.
+    5. Every reopened image keeps its completed deletion record in
+       ``reopened_deletions``, so readers can tell it from a plain
+       re-annotation even when no completed boxes were carried.
     """
     if df.empty:
         df = df.reindex(columns=df.columns.union(["image_name", "task_id", "job_stage", "job_state"], sort=False))
 
-    latest_per_image = _latest_task_per_image(df, deleted_images)
+    completed = completed_task_ids(df, deleted_images)
+    is_completed = df["task_id"].isin(completed)
+    deletion_pairs = {(record.image_name, record.task_id) for record in deleted_images}
 
-    deleted_image_names: set[str] = set(latest_per_image.index[latest_per_image["_is_deleted"] == 1])
-
-    unique_deleted = _filter_deleted_images(
-        deleted_images,
-        deleted_image_names,
-        latest_per_image,
+    decision = _latest_task_per_image(
+        df[is_completed],
+        [record for record in deleted_images if record.task_id in completed],
     )
+    # Completed tasks are usable integer ids by construction of ``completed``.
+    decided_task = {str(name): int(task) for name, task in decision["task_id"].items()}
+    deleted_by_completed = decision.index[decision["_is_deleted"] == 1]
+    newest_unfinished = _newest_live_task(df, ~is_completed, deletion_pairs)
+    reopened = {name for name in deleted_by_completed if newest_unfinished.get(name, -1) > decided_task[name]}
+    deleted_image_names = set(deleted_by_completed) - reopened
+
+    unique_deleted = _filter_deleted_images(deleted_images, deleted_image_names, decision)
     if unique_deleted:
-        logger.debug(f"Images deleted in their latest task: {len(unique_deleted)}")
+        logger.debug(f"Images deleted in their latest completed task: {len(unique_deleted)}")
+    pending = _pending_deletions(deleted_images, completed, deleted_image_names, decided_task)
+    reopened_deletions = [
+        record.model_copy(update={"task_completed": True})
+        for record in _filter_deleted_images(deleted_images, reopened, decision)
+    ]
 
     is_deleted = df["image_name"].isin(deleted_image_names)
-    is_completed = df["task_id"].isin(completed_task_ids(df, deleted_images))
+    is_reopened = df["image_name"].isin(reopened)
+    is_carried = _carried_rows(df, is_reopened & is_completed, deletion_pairs)
 
-    obsolete_deleted = df[is_deleted]
-    in_progress = df[~is_deleted & ~is_completed]
-    completed_non_deleted = df[~is_deleted & is_completed]
-
-    dataset, obsolete_stale = _split_completed(completed_non_deleted)
-    obsolete = pd.concat([obsolete_deleted, obsolete_stale], ignore_index=True)
+    dataset, obsolete_stale = _split_completed(df[~is_deleted & ~is_reopened & is_completed])
+    in_progress = df[(~is_deleted & ~is_completed) | is_carried]
+    obsolete = pd.concat(
+        [df[is_deleted], obsolete_stale, df[is_reopened & is_completed & ~is_carried]],
+        ignore_index=True,
+    )
 
     logger.debug(
         f"Partition result: "
@@ -250,7 +369,8 @@ def partition_annotations_df(
         f"obsolete={len(obsolete)} rows/{obsolete['image_name'].nunique()} images, "
         f"in_progress={len(in_progress)} rows/"
         f"{in_progress['image_name'].nunique()} images, "
-        f"deleted_images={len(unique_deleted)}",
+        f"deleted_images={len(unique_deleted)}, pending_deletions={len(pending)}, "
+        f"reopened_deletions={len(reopened_deletions)}",
     )
 
     return PartitionResult(
@@ -258,4 +378,6 @@ def partition_annotations_df(
         obsolete=obsolete.reset_index(drop=True),
         in_progress=in_progress.reset_index(drop=True),
         deleted_images=unique_deleted,
+        pending_deletions=pending,
+        reopened_deletions=reopened_deletions,
     )

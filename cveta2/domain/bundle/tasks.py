@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from cveta2.domain.bundle.models import FetchTables, TaskManifest, UploadError
-from cveta2.domain.verification.cells import integer, is_missing, number
+from cveta2.domain.verification.cells import explicitly_true, integer, is_missing, number
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,7 @@ class _Evidence:
     image: str
     completed: bool
     deleted: bool
+    explicitly_completed: bool
 
 
 def _task_id(value: object) -> int:
@@ -58,9 +59,24 @@ def _evidence(frame: pd.DataFrame, *, deleted: bool = False) -> list[_Evidence]:
                     row.get("job_state"),
                 ),
                 deleted,
+                explicitly_true(row.get("task_completed")),
             )
         )
     return evidence
+
+
+def _without_deletion_markers(frame: pd.DataFrame) -> pd.DataFrame:
+    """Drop the reopen markers of ``in_progress.csv``: completed ``deleted`` rows.
+
+    The completed deletion of a reopened image only marks it for ``merge`` and
+    must not change which tasks a bundle lists. A pending deletion stays: it
+    is evidence that its task is still open, the only such evidence when it
+    comes from an older cveta2 without ``task_completed``.
+    """
+    if not {"instance_shape", "task_completed"}.issubset(frame.columns):
+        return frame
+    marker = (frame["instance_shape"] == "deleted") & frame["task_completed"].map(explicitly_true)
+    return frame[~marker]
 
 
 def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
@@ -72,7 +88,7 @@ def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
     images independently of subsequent validation rejection.
     """
     dataset = _evidence(tables.dataset)
-    in_progress = _evidence(tables.in_progress)
+    in_progress = _evidence(_without_deletion_markers(tables.in_progress))
     evidence = [
         *dataset,
         *_evidence(tables.obsolete),
@@ -81,7 +97,11 @@ def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
     ]
     completed = {row.task_id for row in evidence if row.completed}
     completed.difference_update(row.task_id for row in evidence if not row.completed)
-    completed.difference_update(row.task_id for row in in_progress)
+    # Explicit completion describes every live job of the task, so such a row is
+    # a completed task's annotation waiting on a newer unfinished task. Rows
+    # without it keep the conservative rule: in_progress.csv may hold a task
+    # whose unfinished job left no other evidence.
+    completed.difference_update(row.task_id for row in in_progress if not row.explicitly_completed)
     represented: dict[int, set[str]] = {}
     latest: dict[str, int] = {}
     for row in evidence:

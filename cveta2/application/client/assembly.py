@@ -24,10 +24,16 @@ def task_to_records(  # noqa: PLR0913, PLR0917
     attr_names: dict[int, str],
     issues: "list[RawIssue] | None" = None,
     jobs: "list[RawJob] | None" = None,
+    *,
+    replayed: bool = False,
 ) -> "tuple[list[AnnotationRecord], list[DeletedImage]]":
-    """Build annotation records and deleted list for one task."""
+    """Build annotation records and deleted list for one task.
+
+    *replayed* marks shapes served from the annotation cache, whose
+    per-shape warnings were already shown when they were downloaded.
+    """
     ctx = _TaskContext.from_raw(task, data_meta, label_names, attr_names, issues, jobs)
-    task_annotations = _collect_shapes(annotations.shapes, ctx)
+    task_annotations = _collect_shapes(annotations.shapes, ctx, replayed=replayed)
     deleted_ids = set(data_meta.deleted_frames)
     frames = ctx.frames
     task_deleted = [
