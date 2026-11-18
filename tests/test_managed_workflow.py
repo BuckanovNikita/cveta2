@@ -195,7 +195,7 @@ class FakeClearML:
         self.publications: list[str] = []
 
     def latest(self, project: str, name: str) -> DatasetParent | None:
-        if self.latest_id is None:
+        if self.latest_id is None or (project, name) != ("CV/combined", "annotations"):
             return None
         metadata = self.root / self.latest_id / "dataset.yaml"
         return DatasetParent(
@@ -802,12 +802,14 @@ def test_source_edits_after_preparation_require_fetching_again(
     assert workflow.clearml.publications == []
 
 
-def test_split_policy_change_after_preparation_requires_preparing_again(workflow: Workflow, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "splits", [{"train": 0.5, "val": 0.3, "test": 0.2}, {"seed": 7}], ids=["proportions", "seed-only"]
+)
+def test_split_policy_change_after_preparation_requires_preparing_again(
+    workflow: Workflow, tmp_path: Path, splits: dict[str, float]
+) -> None:
     prepared = _prepare(workflow, tmp_path)
-    _edit_shared(
-        workflow,
-        lambda shared: shared["datasets"]["combined"].update(splits={"train": 0.5, "val": 0.3, "test": 0.2}),
-    )
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(splits=splits))
     with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
@@ -836,3 +838,46 @@ def test_show_dataset_reports_the_definition_and_rejects_unknown_names(workflow:
     assert (shown["parent_id"], shown["parent_version"]) == (None, None)
     with pytest.raises(ManagedError, match="Unknown managed dataset: missing"):
         api.show_dataset("missing", **workflow.options)
+
+
+def _publish_then_prepare_child(workflow: Workflow, tmp_path: Path) -> Path:
+    """Publish version-1, then prepare its child from a fetch that names it as parent."""
+    api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    return _prepare(workflow, tmp_path / "child")
+
+
+def test_split_change_under_a_managed_parent_needs_a_new_lineage(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _publish_then_prepare_child(workflow, tmp_path)
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(splits={"seed": 7}))
+
+    with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
+        api.publish_dataset(prepared, **workflow.options)
+    with pytest.raises(ManagedError, match="Split policy changed; select a new dataset lineage"):
+        api.prepare_managed_dataset(
+            "combined",
+            tmp_path / "child" / "transformed.csv",
+            source=tmp_path / "child" / "fetched",
+            output_dir=tmp_path / "again",
+            **workflow.options,
+        )
+    assert workflow.clearml.publications == ["version-1"]
+
+
+def test_destination_with_another_parent_needs_a_new_fetch(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _publish_then_prepare_child(workflow, tmp_path)
+    _edit_shared(
+        workflow,
+        lambda shared: shared["datasets"]["combined"].update(clearml={"project": "CV/moved", "dataset": "annotations"}),
+    )
+
+    with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
+        api.publish_dataset(prepared, **workflow.options)
+    with pytest.raises(ManagedError, match="Source parent changed; fetch the managed dataset again"):
+        api.prepare_managed_dataset(
+            "combined",
+            tmp_path / "child" / "transformed.csv",
+            source=tmp_path / "child" / "fetched",
+            output_dir=tmp_path / "again",
+            **workflow.options,
+        )
+    assert workflow.clearml.publications == ["version-1"]

@@ -171,7 +171,7 @@ def publish_prepared(config: ProjectConfig, directory: Path, *, services: Manage
         raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")
     # Recheck sources after feedback, acknowledging only proven issue-only writes.
     _check_sources(config, services.ledger.effective_snapshot(loaded.record.snapshot), services)
-    definition = config.datasets[loaded.record.name]
+    definition = dataset_definition(config, loaded.record.name)
     latest = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (latest.dataset_id if latest else None) != loaded.record.parent_id:
         raise ManagedError("ClearML parent changed during feedback; prepare again")

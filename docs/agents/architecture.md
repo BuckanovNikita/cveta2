@@ -364,6 +364,8 @@ fingerprints, each with one implementation. The source fingerprint (snapshot
 prepare-time "fetch again" check. The definition fingerprint (preparation record
 and published `dataset.yaml` `definition_hash`) adds the policy prepare applies
 or publishes and is rechecked at publication. Ignore bookkeeping, project display
-names and legacy image/cache settings are in neither. A snapshot with a hash from
-an earlier scheme is not an error; it only disables task reuse once. Feedback resumes separately and must not confuse own issue
-writes with annotation freshness changes.
+names and legacy image/cache settings are in neither. A published parent snapshot
+with a hash from an earlier scheme is not an error; it only disables task reuse
+once. A local fetch directory or preparation from an earlier scheme fails the
+fetch-again check and needs one new fetch and prepare. Feedback resumes separately
+and must not confuse own issue writes with annotation freshness changes.
