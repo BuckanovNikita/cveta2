@@ -1,6 +1,7 @@
 """YOLO conversion orchestration with explicit filesystem effects."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -11,6 +12,7 @@ from cveta2.application.ports.conversion import ConversionFiles
 from cveta2.application.use_cases.convert.common import _SizeCache, prepare_export
 from cveta2.domain.conversion import (
     UnreadableLabelError,
+    YoloLabels,
     _label_path_for_image,
     _make_csv_row_base,
     _normalize_class_names,
@@ -24,6 +26,38 @@ from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.output import preview_names
 
 
+@dataclass
+class _BoxAdjustments:
+    """Clipped and dropped box counts of one export, with the affected image names."""
+
+    clipped: int = 0
+    dropped: int = 0
+    clipped_images: list[str] = field(default_factory=list)
+    dropped_images: list[str] = field(default_factory=list)
+
+    def record(self, image_name: str, labels: YoloLabels) -> None:
+        """Add one image's counts."""
+        self.clipped += labels.clipped
+        self.dropped += labels.dropped
+        if labels.clipped:
+            self.clipped_images.append(image_name)
+        if labels.dropped:
+            self.dropped_images.append(image_name)
+
+    def warn(self) -> None:
+        """Summarize clipped and dropped boxes, each in one warning line."""
+        if self.clipped:
+            logger.warning(
+                f"Боксы, выходящие за границы изображения, обрезаны по ним: {self.clipped} "
+                f"({preview_names(self.clipped_images)})"
+            )
+        if self.dropped:
+            logger.warning(
+                f"Пропущены боксы с нулевой шириной или высотой после обрезки или округления: {self.dropped} "
+                f"({preview_names(self.dropped_images)})"
+            )
+
+
 def _write_box_labels(  # noqa: PLR0913, PLR0917
     box_df: pd.DataFrame,
     output_dir: Path,
@@ -32,10 +66,11 @@ def _write_box_labels(  # noqa: PLR0913, PLR0917
     link_mode: str,
     images_processed: set[str],
     files: ConversionFiles,
-) -> None:
+) -> _BoxAdjustments:
     """Write YOLO label files and place images for box annotations."""
+    adjustments = _BoxAdjustments()
     if box_df.empty:
-        return
+        return adjustments
     for (raw_name, raw_split), group in box_df.groupby(["image_name", "split"]):
         name_s, split_s = str(raw_name), str(raw_split)
 
@@ -45,7 +80,10 @@ def _write_box_labels(  # noqa: PLR0913, PLR0917
             images_processed.add(name_s)
 
         label_path = output_dir / "labels" / split_s / f"{Path(name_s).stem}.txt"
-        files.write_output_text(label_path, yolo_label_text(group, label_map, name_s))
+        labels = yolo_label_text(group, label_map, name_s)
+        files.write_output_text(label_path, labels.text)
+        adjustments.record(name_s, labels)
+    return adjustments
 
 
 def _write_none_labels(  # noqa: PLR0913
@@ -116,7 +154,7 @@ def convert_to_yolo(
     none_df = ctx.df[ctx.df["instance_shape"] == "none"].copy()
 
     images_processed: set[str] = set()
-    _write_box_labels(
+    adjustments = _write_box_labels(
         box_df,
         ctx.output_dir,
         ctx.label_map,
@@ -137,8 +175,9 @@ def convert_to_yolo(
     files.prune_yolo_output(ctx)
     _write_dataset_yaml(ctx.output_dir, ctx.splits, ctx.label_map, files)
 
+    adjustments.warn()
     logger.info(
-        f"Готово: {len(images_processed)} изображений, {len(box_df)} боксов, "
+        f"Готово: {len(images_processed)} изображений, {len(box_df) - adjustments.dropped} боксов, "
         f"{len(ctx.label_map)} классов -> {ctx.output_dir}"
     )
     return ctx.output_dir
