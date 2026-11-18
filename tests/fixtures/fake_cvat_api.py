@@ -138,6 +138,9 @@ class FakeCvatApi:
         self._lock = threading.Lock()
         self.call_counts: Counter[str] = Counter()
         self.annotation_calls: list[int] = []
+        self.job_annotation_calls: list[int] = []
+        # Per-task job lists that replace the default single job.
+        self.jobs: dict[int, list[RawJob]] = {}
         self.writes = RecordedWrites()
         self.organizations: list[OrganizationInfo] = []
         self.organization: str | None = None
@@ -267,18 +270,24 @@ class FakeCvatApi:
         return list(self._labels)
 
     def get_task_jobs(self, task_id: int) -> list[RawJob]:
-        """Return a single job spanning all frames of the task.
+        """Return the task's jobs: ``self.jobs`` when set, else one job over all frames.
 
-        Its ``(stage, state)`` is whichever pair CVAT would have turned
-        into the task's seeded status, so a fixture that asks for a
-        completed task gets jobs that read as completed.
+        The default job's ``(stage, state)`` is whichever pair CVAT would
+        have turned into the task's seeded status, so a fixture that asks
+        for a completed task gets jobs that read as completed. Its id is
+        the task id and its ``updated_date`` the task's.
         """
+        self._raise_if_failing("get_task_jobs", task_id)
+        return list(self._jobs_of(task_id))
+
+    def _jobs_of(self, task_id: int) -> list[RawJob]:
         from cveta2.application.ports.dtos import RawJob
 
-        self._raise_if_failing("get_task_jobs", task_id)
+        if task_id in self.jobs:
+            return self.jobs[task_id]
         data_meta, _annotations = self._task_data[task_id]
-        status = next((t.status for t in self._tasks if t.id == task_id), "")
-        stage, state = job_position_for_status(status)
+        task = next((t for t in self._tasks if t.id == task_id), None)
+        stage, state = job_position_for_status(task.status if task else "")
         return [
             RawJob(
                 id=task_id,
@@ -286,8 +295,23 @@ class FakeCvatApi:
                 stop_frame=len(data_meta.frames),
                 stage=stage,
                 state=state,
+                updated_date=task.updated_date if task else "",
             )
         ]
+
+    def get_job_annotations(self, job_id: int) -> RawAnnotations:
+        """Return the shapes of the task's annotations that fall in the job's frame range."""
+        for task_id in self._task_data:
+            for job in self._jobs_of(task_id):
+                if job.id != job_id:
+                    continue
+                self.job_annotation_calls.append(job_id)
+                self._raise_if_failing("get_job_annotations", task_id)
+                _data_meta, annotations = self._task_data[task_id]
+                return RawAnnotations(
+                    shapes=[s for s in annotations.shapes if job.start_frame <= s.frame <= job.stop_frame],
+                )
+        raise CvatApiError(f"Job not found: {job_id}", status_code=404)
 
     def get_task_size(self, task_id: int) -> int:
         """Return the number of frames in a task.

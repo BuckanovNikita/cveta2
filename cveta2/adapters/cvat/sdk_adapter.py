@@ -15,6 +15,7 @@ from cveta2.adapters.cvat.sdk_convert import (
     convert_label,
     convert_task,
     data_meta_from_dict,
+    extract_updated_date,
 )
 from cveta2.adapters.cvat.sdk_requests import (
     build_data_request,
@@ -150,6 +151,18 @@ class SdkCvatApiAdapter:
         return convert_annotations(labeled_data)
 
     @cvat_read
+    def get_job_annotations(self, job_id: int) -> "RawAnnotations":
+        """Return the shapes of one job; CVAT numbers their frames within the task."""
+        labeled_data, _ = self.client.api_client.jobs_api.retrieve_annotations(job_id)
+        tracks = labeled_data.tracks or []
+        if tracks:
+            logger.warning(
+                f"Job {job_id}: проигнорировано треков CVAT: {len(tracks)}; "
+                f"поддерживаются только отдельные rectangle и polygon shapes"
+            )
+        return convert_annotations(labeled_data)
+
+    @cvat_read
     def get_task_issues(self, task_id: int) -> list[RawIssue]:
         """Return review issues for a task, each with its comment texts in creation order."""
         api_client = self.client.api_client
@@ -229,6 +242,7 @@ class SdkCvatApiAdapter:
                 stage=str(job.stage or ""),
                 state=str(job.state or ""),
                 type=str(job.type or "annotation"),
+                updated_date=extract_updated_date(job),
             )
             for job in jobs
         ]

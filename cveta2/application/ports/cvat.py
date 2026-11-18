@@ -69,6 +69,10 @@ class CvatApiPort(Protocol):
         """Return shapes for a task."""
         ...
 
+    def get_job_annotations(self, job_id: int) -> "RawAnnotations":
+        """Return the shapes of one job, on task frame numbers."""
+        ...
+
     def get_task_issues(self, task_id: int) -> "list[RawIssue]":
         """Return review issues (with comment texts) for a task."""
         ...

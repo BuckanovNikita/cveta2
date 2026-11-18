@@ -83,6 +83,7 @@ class RawJob:
 
     ``stage`` and ``state`` default to empty so the write paths, which
     build jobs only to address them, need not invent a review position.
+    ``updated_date`` is CVAT's last-change time of the job (ISO text).
     """
 
     id: int
@@ -91,6 +92,7 @@ class RawJob:
     stage: str = ""
     state: str = ""
     type: str = "annotation"
+    updated_date: str = ""
 
 
 @dataclass(frozen=True, slots=True)
