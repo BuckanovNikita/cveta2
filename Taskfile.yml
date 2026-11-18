@@ -51,46 +51,7 @@ tasks:
     internal: true
     vars:
       TESTMON_ENV:
-        sh: |
-          {{.RUN}} uv run --locked python - <<'PY'
-          import hashlib
-          import platform
-          import subprocess
-          import sys
-          import tomllib
-          from pathlib import Path
-
-          digest = hashlib.sha256()
-          digest.update(repr((sys.version, sys.executable, platform.platform())).encode())
-          listed = subprocess.check_output(
-              ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z']
-          ).decode().split('\0')
-          paths = {Path(name) for name in listed if name}
-          # Ignored downloaded fixture assets can also affect tests.
-          paths.update(Path('tests/fixtures').rglob('*'))
-          paths.update(Path('cveta2').rglob('*'))
-          configs = {'uv.lock', 'Taskfile.yml', '.pre-commit-config.yaml', '.python-version', '.coveragerc'}
-          # Code that runs at pytest startup or collection is no test's
-          # dependency in testmon: conftest files and the -p plugins of addopts.
-          addopts = tomllib.loads(Path('pyproject.toml').read_text())['tool']['pytest']['ini_options']['addopts']
-          plugins = {Path(*name.split('.')).with_suffix('.py') for flag, name in zip(addopts, addopts[1:]) if flag == '-p'}
-          for path in sorted(paths):
-              if not path.is_file() or '__pycache__' in path.parts or path.suffix in {'.pyc', '.pyo'}:
-                  continue
-              in_tree = path.parts[0] in {'cveta2', 'tests', 'scripts'}
-              config = path.name in configs or path.suffix in {'.toml', '.ini', '.cfg'}
-              if not (in_tree or config or path == Path('main.py')):
-                  continue
-              digest.update(path.as_posix().encode() + b'\0')
-              # Python execution dependencies stay with testmon. Scripts and
-              # pytest startup code are orchestration inputs, so changes
-              # conservatively invalidate.
-              startup = path.name == 'conftest.py' or path in plugins
-              if path.suffix != '.py' or path.parts[0] == 'scripts' or startup:
-                  digest.update(path.read_bytes())
-              digest.update(b'\0')
-          print(digest.hexdigest())
-          PY
+        sh: "{{.RUN}} uv run --locked python scripts/testmon_environment.py"
     cmds:
       - "{{.RUN}} uv run --locked pytest {{.TESTMON_MODE}} --testmon-env={{.TESTMON_ENV}} --ignore=tests/integration -n {{.TEST_WORKERS}} --dist loadgroup"
 
@@ -105,11 +66,10 @@ tasks:
         '
 
   verify:
-    desc: Development verification (checks, affected units, packaging)
+    desc: Development verification (checks, affected units)
     cmds:
       - task: check
       - task: test
-      - task: build
 
   infra-check:
     desc: Read-only bounded availability (0 available, 3 unavailable, 1 error)

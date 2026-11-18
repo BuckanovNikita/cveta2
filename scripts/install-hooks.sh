@@ -14,20 +14,12 @@ for hook_type in pre-commit commit-msg; do
 set -eu
 hook_dir=$(cd "$(dirname "$0")" && pwd)
 hook_type=$(basename "$0")
-root=$(git rev-parse --show-toplevel)
-cd "$root"
-export UV_PROJECT_ENVIRONMENT="$root/.venv"
-# A deleted working-tree file must not masquerade as a legacy checkout.
-if [ -f Taskfile.yml ] || git cat-file -e HEAD:Taskfile.yml 2>/dev/null ||
-    git cat-file -e :Taskfile.yml 2>/dev/null; then
-    if [ ! -f Taskfile.yml ] || [ ! -f scripts/git-hook.sh ]; then
-        echo 'Task workflow files are missing; restore them before committing.' >&2
-        exit 1
-    fi
-    exec bash scripts/git-hook.sh "$hook_type" "$hook_dir" "$@"
+cd "$(git rev-parse --show-toplevel)"
+if [ ! -f Taskfile.yml ] || [ ! -f scripts/git-hook.sh ]; then
+    echo 'Task workflow files are missing: restore them, or commit from a checkout that has them.' >&2
+    exit 1
 fi
-# Older worktrees keep their own prek configuration and environment.
-exec uv run --locked prek hook-impl --hook-dir "$hook_dir" --script-version 4 --hook-type "$hook_type" -- "$@"
+exec bash scripts/git-hook.sh "$hook_type" "$hook_dir" "$@"
 HOOK
     chmod +x "$staged/$hook_type"
     # A hook identical to the one being installed is this script's own output,

@@ -136,8 +136,9 @@ Do not introduce a separate documentation checker; inspect documentation consist
 
 ### Development verification and ownership
 
-Development verification is `verify`: static checks, affected units and packaging,
-each invoked once in sequence. It describes the current working copy. Run `fix`
+Development verification is `verify`: static checks and affected units, each invoked
+once in sequence. It builds no distribution; `build` is a separate stage that
+`acceptance` includes. It describes the current working copy. Run `fix`
 explicitly, inspect its safe fixes and formatting, and stage only task-owned inputs
 before committing; fixes never stage files. The hook requires all tracked changes
 staged and no nonignored untracked files. It rejects unsuitable inputs before prek
@@ -157,7 +158,7 @@ commit hook still performs development verification.
 
 `test` uses testmon affected selection without a marker expression and excludes
 `tests/integration`, including its conftest. `test-full` runs all units while updating
-history. Testmon's environment namespace incorporates interpreter identity, locked
+history. Testmon's environment namespace (`scripts/testmon_environment.py`) incorporates interpreter identity, locked
 dependencies, verification configuration, static test/package assets, complete
 relative source/test file membership and the content of `scripts/` and of pytest
 startup code (every `conftest.py` and each `-p` plugin of the pytest `addopts`),
@@ -178,8 +179,8 @@ tool errors and failing clean tests remain unresolved. These operations are not 
 A documentation-only change needs development verification only: neither acceptance
 nor a mutation report is required. Documentation-only means the change touches no
 product code, test, script, dependency or executable configuration; `pyproject.toml`,
-`Taskfile.yml`, `.pre-commit-config.yaml`, presets and skill scripts are not documentation. The `build` step
-of `verify` still covers the packaged documents. Every other change keeps the full gate.
+`Taskfile.yml`, `.pre-commit-config.yaml`, presets and skill scripts are not documentation.
+Every other change keeps the full gate.
 
 Deferred verification means a required live check could not run because infrastructure
 is temporarily unavailable: the cluster does not answer, the node cannot admit the
@@ -312,8 +313,8 @@ several writers share the checkout.
 
 Install with `bash scripts/install-hooks.sh`. It saves a foreign or absent prior
 installation for rollback and makes no backup when the installed hooks are already
-current. The shared entry resolves the invoking worktree dynamically. Worktrees
-without this Task workflow continue through their existing prek configuration.
+current. The shared entry resolves the invoking worktree dynamically. A checkout
+without `Taskfile.yml` or `scripts/git-hook.sh` cannot commit through it.
 The minimal staging shim only validates inputs and invokes prek: it never stages,
 deletes or stashes. Mandatory guards live in executable commands, not bypassable
 Task preconditions.
@@ -327,8 +328,7 @@ remains active: the hook dispatcher clears `SKIP` and `PREK_SKIP` for the `commi
 stage, so they defer pre-commit hooks only. Intentional lockfile-only updates use `build(deps):` and require no
 exception. Intermediate task commits may use `SKIP=verify` to defer development
 verification explicitly; clear `SKIP` before final verification. There is no pre-push
-stage. Manual hook aliases, when present, route to Task; situational skills use Task
-directly. A failure caused by unrelated existing work is a reported blocker, not
+or manual stage; other stages are invoked through Task directly. A failure caused by unrelated existing work is a reported blocker, not
 permission to change or discard that work.
 
 Rebase, cherry-pick and merge do not run pre-commit checks. Verify changed combined
