@@ -275,6 +275,16 @@ with CvatClient() as client:
     print(f"Синхронизировано: {stats.downloaded} новых, {stats.cached} уже было")
 ```
 
+Отказ S3 в доступе, отсутствие учётных данных или профиля AWS и недоступный
+endpoint при скачивании, синхронизации и загрузке изображений (`fetch`,
+`download_images`, `sync_project_images`, `upload`) доходят до вызывающего кода
+исходными исключениями botocore/boto3 (`ClientError`, `NoCredentialsError`,
+`ProfileNotFound`, `EndpointConnectionError` и т.п.), а не `Cveta2Error`.
+К исключению добавлена заметка (`__notes__`) с операцией и адресом
+`s3://bucket/prefix`. Ошибки отдельных файлов при передаче по-прежнему
+считаются в `failed`. Источник `s3-csv` управляемых датасетов сообщает о
+недоступности, включая отсутствие учётных данных или профиля, через `ManagedError`.
+
 
 ## Совместимость операций
 

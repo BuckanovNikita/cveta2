@@ -4,7 +4,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from botocore.exceptions import NoCredentialsError, ProfileNotFound
 
+from cveta2.adapters.s3.managed_sources import S3CsvSources
 from cveta2.domain.managed.models import ManagedError
 from cveta2.interfaces import managed_datasets
 from cveta2.interfaces.cli import main
@@ -61,3 +63,34 @@ def test_failed_feedback_report_still_exits_two(tmp_path: Path, monkeypatch: pyt
     with pytest.raises(SystemExit) as exited:
         main(["dataset", "report-errors", str(tmp_path)])
     assert exited.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "error",
+    [NoCredentialsError(), ProfileNotFound(profile="absent")],
+    ids=["no-credentials", "unknown-profile"],
+)
+def test_s3_credential_failures_exit_two_naming_the_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capture_logs: list[str],
+    capsys: pytest.CaptureFixture[str],
+    error: Exception,
+) -> None:
+    uri = "s3://csv-bucket/exports/annotations.csv"
+
+    class _NoCredentials:
+        def get_object(self, **_kwargs: object) -> object:
+            raise error
+
+    def fetch(*_args: object, **_kwargs: object) -> object:
+        return S3CsvSources(client=_NoCredentials()).read_object(uri)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(managed_datasets, "fetch_dataset", fetch)
+    with pytest.raises(SystemExit) as exited:
+        main(["dataset", "fetch", "combined", "--output-dir", str(tmp_path / "out")])
+    assert exited.value.code == 2
+    assert any(uri in line for line in capture_logs)
+    assert exited.value.__cause__ is not None
+    assert exited.value.__cause__.__cause__ is error
+    assert "Traceback" not in capsys.readouterr().err

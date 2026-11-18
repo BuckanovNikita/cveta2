@@ -15,6 +15,7 @@ from cveta2.adapters.execution.concurrency import Workers, run_concurrent
 from cveta2.adapters.execution.retry import network_retry
 from cveta2.adapters.files.materialization import _confined_destination
 from cveta2.adapters.files.shared import ensure_shared_dir, replace_shared_bytes
+from cveta2.adapters.s3.errors import s3_operation
 from cveta2.adapters.s3.types import Transfer
 from cveta2.adapters.s3.utils import (
     _NOT_FOUND_CODES,
@@ -206,6 +207,16 @@ class ImageDownloader:
                     "как failed. Укажите project_id при вызове download_images."
                 )
             return {}
+        with s3_operation("загрузка изображений из S3", project_cloud_storage.bucket, project_cloud_storage.prefix):
+            return self._download_from(pending, stats, project_cloud_storage)
+
+    def _download_from(
+        self,
+        pending: "dict[str, str]",
+        stats: "DownloadStats",
+        project_cloud_storage: "CloudStorageInfo",
+    ) -> "dict[str, str]":
+        """Download *pending* from the project storage; see :meth:`_download_all`."""
         s3_client = make_s3_client(project_cloud_storage.endpoint_url or None)
         resolved: dict[str, str] = {}
         if len(pending) <= _DIRECT_KEY_PROBE_LIMIT:
@@ -389,6 +400,11 @@ class S3Syncer:
 
         Returns counters of downloaded / cached / failed files.
         """
+        with s3_operation("синхронизация", cs_info.bucket, cs_info.prefix):
+            return self._sync(cs_info)
+
+    def _sync(self, cs_info: "CloudStorageInfo") -> "DownloadStats":
+        """List and download the objects missing locally; see :meth:`sync`."""
         s3 = make_s3_client(cs_info.endpoint_url or None)
         objects = list_s3_objects(s3, cs_info.bucket, cs_info.prefix)
         if not objects:

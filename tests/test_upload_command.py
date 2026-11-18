@@ -10,8 +10,11 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+from botocore.exceptions import ProfileNotFound
 
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import LabelInfo, ProjectInfo
+from cveta2.interfaces.cli import CliApp
 from cveta2.interfaces.commands import upload as upload_command
 from cveta2.interfaces.commands._helpers import echo_cli_command
 from cveta2.interfaces.commands.upload import (
@@ -20,7 +23,9 @@ from cveta2.interfaces.commands.upload import (
     _resolve_task_name,
     run_upload,
 )
-from tests.helpers import write_config_yaml
+from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.fixtures.fake_cvat_project import LoadedFixtures
+from tests.helpers import assert_clean_s3_exit, client_with_api, make_cs_info, write_config_yaml
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -488,3 +493,39 @@ def test_echo_cli_command_formats_flags_lists_and_quoting(
     )
     out = capsys.readouterr().out
     assert out == "cveta2 upload -p 'my proj' --labels car 'no annotation' --complete\n"
+
+
+@pytest.mark.usefixtures("isolated_config")
+def test_upload_reports_a_missing_s3_profile_without_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An unknown AWS profile stops staging with a message naming the storage."""
+    missing = ProfileNotFound(profile="absent")
+
+    def no_profile(_endpoint_url: str | None = None) -> object:
+        raise missing
+
+    monkeypatch.setattr("cveta2.adapters.s3.upload.make_s3_client", no_profile)
+    fixtures = LoadedFixtures(
+        project=ProjectInfo(id=1, name="proj"),
+        tasks=[],
+        labels=[LabelInfo(id=1, name="car")],
+        task_data={},
+    )
+    api = FakeCvatApi(fixtures, cloud_storage=make_cs_info(bucket="upload-bucket", prefix="incoming"))
+    csv = tmp_path / "dataset.csv"
+    csv.write_text(
+        "image_name,instance_label,bbox_x_tl,bbox_y_tl,bbox_x_br,bbox_y_br\na.jpg,car,1,1,5,5\n",
+        encoding="utf-8",
+    )
+
+    with (
+        patch("cveta2.interfaces.commands.upload.open_client") as open_client,
+        patch("cveta2.interfaces.commands.upload.resolve_project", return_value=(1, "proj")),
+    ):
+        open_client.return_value.__enter__.return_value = client_with_api(api)
+        with pytest.raises(SystemExit) as exited:
+            CliApp().run(["upload", "-p", "proj", "-d", str(csv), "--name", "t1", "--labels", "car"])
+
+    assert_clean_s3_exit(exited, missing, capsys.readouterr().err, "upload-bucket", "incoming")
+    assert api.writes.created_tasks == []

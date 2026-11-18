@@ -507,3 +507,24 @@ def patch_recording_s3(
     factory = RecordingS3Factory(fake_s3)
     monkeypatch.setattr(f"{target}.make_s3_client", factory)
     return factory
+
+
+def assert_clean_s3_exit(
+    exited: pytest.ExceptionInfo[SystemExit],
+    original: BaseException,
+    stderr: str,
+    *names: str,
+) -> None:
+    """Check a CLI S3 failure ended as a message naming *names*, not a traceback.
+
+    The message is the ``SystemExit`` code, the typed error it came from keeps
+    *original* as its cause, and nothing printed a traceback.
+    """
+    message = exited.value.code
+    assert isinstance(message, str)
+    for name in names:
+        assert name in message
+    reported = exited.value.__context__
+    assert reported is not None
+    assert reported.__cause__ is original
+    assert "Traceback" not in stderr

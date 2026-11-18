@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,6 +19,7 @@ from cveta2.domain.models import ProjectInfo
 from cveta2.domain.storage import DownloadStats
 from cveta2.interfaces.cli import CliApp
 from tests.helpers import (
+    assert_clean_s3_exit,
     make_cs_info,
     mock_client_ctx,
     patch_cli_client,
@@ -146,3 +148,39 @@ def test_s3_sync_uses_canonical_project_settings(
     assert kwargs["project_cloud_storage"].bucket == "override"
     assert kwargs["project_cloud_storage"].prefix == "raw/data"
     assert fake.organization_calls == ([spec.split("/", maxsplit=1)[0] or None] if "/" in spec else [])
+
+
+def test_s3_sync_reports_a_denied_listing_without_traceback(
+    tmp_path: Path,
+    test_config: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A denied bucket ends the command with a message naming the storage."""
+    from cveta2.adapters.config.settings import CvatConfig
+    from cveta2.composition.client import CvatClient
+    from tests.fixtures.fake_cvat_api import FakeCvatApi
+    from tests.fixtures.fake_s3 import FakeS3Client
+
+    denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "ListObjectsV2")
+
+    class _DeniedBucket(FakeS3Client):
+        def list_objects_v2(self, **_request: str) -> dict[str, object]:
+            raise denied
+
+    write_test_config(test_config, image_cache={"Dataset": str(tmp_path / "images")})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _url=None: _DeniedBucket())
+    client = CvatClient(CvatConfig(), api=FakeCvatApi.from_tasks([], project_name="Dataset"))
+
+    with (
+        patch_cli_client(client),
+        patch.object(
+            client,
+            "detect_project_cloud_storage",
+            return_value=make_cs_info(bucket="denied-bucket", prefix="raw/frames"),
+        ),
+        pytest.raises(SystemExit) as exited,
+    ):
+        CliApp().run(["s3-sync", "-p", "Dataset"])
+
+    assert_clean_s3_exit(exited, denied, capsys.readouterr().err, "denied-bucket", "raw/frames")
