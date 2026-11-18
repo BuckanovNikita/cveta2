@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
+from cveta2.composition.runtime import cli_external_failures
 from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces.commands.convert import configure_convert, run_convert
 from cveta2.interfaces.commands.doctor import configure_doctor, run_doctor
@@ -229,11 +230,13 @@ class CliApp:
 
         Domain errors (:class:`Cveta2Error`) raised by any command surface
         here as a clean ``sys.exit`` message, so individual commands never
-        embed exit plumbing.
+        embed exit plumbing.  External SDK failures (S3) are translated to
+        such errors first; the Python API keeps raising them unchanged.
         """
         handler: Callable[[argparse.Namespace], None] = args.handler
         try:
-            handler(args)
+            with cli_external_failures():
+                handler(args)
         except Cveta2Error as e:
             sys.exit(str(e))
         except ValidationError as error:

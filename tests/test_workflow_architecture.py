@@ -1,5 +1,6 @@
 """Recording ports pin upload workflow effects and recovery write ordering."""
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
@@ -18,11 +19,15 @@ from cveta2.application.use_cases.upload import (
     upload_dataset,
 )
 from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.models import LabelInfo
 from cveta2.domain.storage import CloudStorageInfo
 from cveta2.domain.upload import UploadManifest, new_manifest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+_BOX = {"bbox_x_tl": 1.0, "bbox_y_tl": 1.0, "bbox_x_br": 5.0, "bbox_y_br": 5.0}
 
 
 def _upload_setup() -> tuple[Mock, UploadRequest, UploadDependencies, list[str]]:
@@ -55,6 +60,12 @@ def _upload_setup() -> tuple[Mock, UploadRequest, UploadDependencies, list[str]]
     def checkpoint(manifest: UploadManifest, *, required: bool = False) -> None:
         if manifest.completed_counts is not None:
             events.append("save-completed")
+        elif manifest.annotations_pending:
+            events.append("save-annotations-pending")
+        elif manifest.task_id is not None and "annotations" in events:
+            # Clearing the mark after a successful write is best effort.
+            events.append("save-annotations-done")
+            return
         elif manifest.task_id is not None:
             events.append("save-id")
         elif manifest.creation_pending:
@@ -81,7 +92,7 @@ def _upload_setup() -> tuple[Mock, UploadRequest, UploadDependencies, list[str]]
 
     client.upload_task_annotations.side_effect = write_annotations
     invalidator = Mock(side_effect=lambda *_args, **_kwargs: events.append("invalidate"))
-    deps = UploadDependencies(remote, files, manifests, invalidator)
+    deps = UploadDependencies(remote, files, manifests, invalidator, Mock(side_effect=AssertionError))
     return client, request, deps, events
 
 
@@ -106,6 +117,49 @@ def test_fresh_upload_durably_records_intent_pending_and_id_before_writes() -> N
     cast("Mock", deps.storage).upload.assert_not_called()
 
 
+def test_annotation_write_is_bracketed_by_a_required_pending_mark() -> None:
+    """The append-only shape write is announced durably before it is sent."""
+    client, request, deps, events = _upload_setup()
+    labelled = pd.DataFrame([{"image_name": "a.jpg", "instance_label": "car", **_BOX}])
+    request = replace(request, plan=replace(request.plan, annotations=labelled))
+    cast("Mock", deps.files).enrich_dataframe_paths.return_value = labelled
+    client.get_project_labels.return_value = [LabelInfo(id=1, name="car")]
+
+    upload_dataset(client, request, deps=deps)
+
+    assert events[events.index("attach") :] == [
+        "attach",
+        "save-annotations-pending",
+        "annotations",
+        "save-annotations-done",
+        "invalidate",
+        "save-completed",
+        "delete",
+    ]
+
+
+def test_failed_required_annotation_checkpoint_prevents_the_write() -> None:
+    """Without a durable pending mark the shapes are never sent."""
+    client, request, deps, events = _upload_setup()
+    labelled = pd.DataFrame([{"image_name": "a.jpg", "instance_label": "car", **_BOX}])
+    request = replace(request, plan=replace(request.plan, annotations=labelled))
+    cast("Mock", deps.files).enrich_dataframe_paths.return_value = labelled
+    client.get_project_labels.return_value = [LabelInfo(id=1, name="car")]
+    original_save = cast("Mock", deps.manifests).save.side_effect
+
+    def fail_pending(manifest: UploadManifest, *, required: bool = False) -> None:
+        original_save(manifest, required=required)
+        if manifest.annotations_pending:
+            raise Cveta2Error("checkpoint failed")
+
+    cast("Mock", deps.manifests).save.side_effect = fail_pending
+    with pytest.raises(Cveta2Error, match="checkpoint failed"):
+        upload_dataset(client, request, deps=deps)
+
+    assert events[-1] == "save-annotations-pending"
+    client.upload_task_annotations.assert_not_called()
+
+
 def test_failed_required_creation_checkpoint_prevents_remote_creation() -> None:
     """A failed durable creation-intent write cannot leave an ambiguous new task."""
     client, request, deps, events = _upload_setup()
@@ -128,8 +182,6 @@ def test_failed_required_creation_checkpoint_prevents_remote_creation() -> None:
 
 def test_ambiguous_resume_stops_before_storage_or_remote_writes() -> None:
     """A pending unknown create identity cannot authorize duplicate creation."""
-    from dataclasses import replace
-
     from cveta2.application.use_cases.upload import request_fingerprint
 
     client, request, deps, events = _upload_setup()
@@ -164,8 +216,6 @@ def test_completed_manifest_cleanup_returns_outcome_without_replaying_writes(
     resume: bool,
 ) -> None:
     """Completed durable counts suppress all writes after failed prior cleanup."""
-    from dataclasses import replace
-
     from cveta2.application.use_cases.upload import request_fingerprint
 
     client, request, deps, events = _upload_setup()

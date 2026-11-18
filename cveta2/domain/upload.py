@@ -39,6 +39,9 @@ class UploadManifest(BaseModel):
     mapping_identity: str = ""
     intent_complete: bool = False
     creation_pending: bool = False
+    # Added within schema 3: a file written before it reads as "not pending",
+    # and an older release ignores the field, so the version stays unchanged.
+    annotations_pending: bool = False
     completed_counts: tuple[int, int, int] | None = None
 
     def describe(self) -> str:

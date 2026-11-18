@@ -4,6 +4,7 @@ import hashlib
 from typing import Protocol, cast
 from urllib.parse import urlsplit
 
+from cveta2.adapters.s3.errors import S3_FAILURES
 from cveta2.adapters.s3.types import S3Client
 from cveta2.adapters.s3.utils import S3_TRANSFER_ERRORS, make_s3_client, s3_retry
 from cveta2.application.ports.managed_sources import S3Object
@@ -50,5 +51,5 @@ class S3CsvSources:
         parts = urlsplit(uri)
         try:
             return self._capture(parts.netloc, parts.path.removeprefix("/"))
-        except (*S3_TRANSFER_ERRORS, AttributeError, TypeError) as error:
+        except (*S3_TRANSFER_ERRORS, *S3_FAILURES, AttributeError, TypeError) as error:
             raise ManagedError(f"Cannot read required S3 CSV source: {uri}") from error
