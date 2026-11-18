@@ -1360,7 +1360,9 @@ def prepare(root: Path, *, notify: Callable[[str], None]) -> Session:
         unavailable: InfrastructureUnavailableError | None = None
         if task_driven and not isinstance(setup_error, SetupBlockedError) and isinstance(setup_error, LifecycleError):
             unavailable = _outage_after(root)
-        _teardown_after(session, delete=isinstance(setup_error, SetupBlockedError) or not keep_data())
+        _teardown_after(
+            session, delete=unavailable is not None or isinstance(setup_error, SetupBlockedError) or not keep_data()
+        )
         if isinstance(setup_error, SetupBlockedError):
             first, *rest = setup_error.lines
             raise SetupBlockedError(f"UNAVAILABLE: live setup blocked: {first}", *rest) from setup_error
