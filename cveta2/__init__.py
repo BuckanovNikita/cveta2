@@ -3,6 +3,10 @@
 from importlib import import_module
 from typing import TYPE_CHECKING
 
+# The package version. hatchling reads it at build time and semantic-release
+# rewrites it in the release commit.
+__version__ = "0.14.1"
+
 __all__ = [
     "CSV_COLUMNS",
     "JOB_STAGES",

@@ -352,8 +352,9 @@ serializes runs and never cancels a running one; closely spaced merges may share
 release. Only the release job has `contents: write`. It checks out `main` with full
 history and tags, installs the pinned python-semantic-release and runs
 `semantic-release version --no-vcs-release`. semantic-release computes the version and,
-when a release is due, updates `project.version` in `pyproject.toml`, the `cveta2` entry
-of `uv.lock` (through its build command `python -m scripts.release_metadata`) and
+when a release is due, updates `__version__` in `cveta2/__init__.py` (the package version
+is dynamic: hatchling reads it from that file, so `pyproject.toml` and `uv.lock` hold no
+version and the release runs no build command) and
 `CHANGELOG.md` (mode `update` inserts the new release and leaves existing entries as
 written), commits `chore(release): <version>`, creates the annotated `v<version>` tag,
 pushes `main` and then pushes the tag. When no release is due it changes nothing.
