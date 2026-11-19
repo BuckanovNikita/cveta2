@@ -5,7 +5,8 @@ every test here ``integration`` and puts it in the ``live`` xdist group, so one
 worker runs them serially while unit tests stay parallel. The autouse session
 fixture ``live_run`` starts one session through ``tests/integration/lifecycle.py``
 before the first live test - its own namespace with CVAT, MinIO and ClearML,
-waiting, with a notice, while the cluster is unavailable - and deletes it after
+after one bounded preflight in Task runs (``CVETA2_TASK_VERIFICATION=1``) and
+otherwise waiting, with a notice, while the cluster is unavailable - and deletes it after
 the last unless ``INTEGRATION_KEEP_DATA=1``. Everything else reads the
 ``CVAT_INTEGRATION_*``, ``MINIO_*`` and ``CLEARML_*`` variables it exports.
 """

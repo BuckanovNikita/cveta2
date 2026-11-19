@@ -26,7 +26,7 @@ def convert_task(task: "cvat_models.TaskRead") -> TaskInfo:
     ``project_id`` is read via ``getattr`` because CVAT SDK generated
     models raise ``AttributeError`` for unset optional fields.  This is
     an intentional exception to the project style rule "avoid getattr"
-    (see CLAUDE.md).
+    (see AGENTS.md).
     """
     raw_project_id = getattr(task, "project_id", None)
     return TaskInfo(
@@ -46,7 +46,7 @@ def extract_updated_date(task: "cvat_models.TaskRead | cvat_models.JobRead") -> 
     ``updated_at`` between versions, and the returned value may be a
     ``datetime`` (with ``.isoformat()``) or a plain string depending on
     the SDK release.  This is an intentional exception to the project
-    style rule "avoid getattr" (see CLAUDE.md).
+    style rule "avoid getattr" (see AGENTS.md).
     """
     raw: object | None = getattr(task, "updated_date", None)
     if raw is None:
@@ -168,7 +168,7 @@ def extract_creator_username(item: object) -> str:
     be a user object, a dict, or absent (in which case ``owner`` is
     used).  The user object itself may expose ``username`` or ``name``.
     This is an intentional exception to the project style rule
-    "avoid getattr" (see CLAUDE.md).
+    "avoid getattr" (see AGENTS.md).
     """
     user_obj = getattr(item, "created_by", None) or getattr(item, "owner", None)
     if user_obj is None:

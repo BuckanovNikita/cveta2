@@ -56,18 +56,8 @@ tests/integration/.session
 
 # Claude Code agent worktrees
 .claude/worktrees/
+# Locally installed agent tooling
 .agents/**
-!.agents/skills/
-# Authored project skills: the source lives here; .claude/skills/<name> symlinks to it.
-!.agents/skills/mutation-testing/
-!.agents/skills/mutation-testing/**
-!.agents/skills/release/
-!.agents/skills/release/**
-!.agents/skills/running-integration-tests/
-!.agents/skills/running-integration-tests/**
-!.agents/skills/verification-workflow/
-!.agents/skills/verification-workflow/**
-# Spec Kit is archived outside active skill discovery; personal skills remain ignored.
 
 # pytest-testmon dependency database, one per worktree
 .testmondata

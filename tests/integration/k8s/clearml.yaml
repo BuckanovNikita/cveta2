@@ -1,6 +1,6 @@
 # ClearML for one live-test session: API server, file server and their stores
 # (MongoDB, Elasticsearch, Redis), all emptyDir; no web UI, agent,
-# async-delete service or GPU (specs/002-own-test-infra/research.md, R4).
+# async-delete service or GPU: the dataset tests need none of them.
 # Configured through environment only. lifecycle.py generates the Secret
 # clearml-credentials per session: the server's `apiserver` and `tests`
 # credential pairs and the auth token secret; the tests use the `tests` pair.
