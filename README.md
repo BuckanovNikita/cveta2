@@ -252,7 +252,7 @@ unset UV_PROJECT_ENVIRONMENT              # использовать .venv эт�
 uv sync --locked
 bash scripts/install-hooks.sh
 uv run --locked task --exit-code fix      # автоисправления и форматирование
-uv run --locked task --exit-code verify   # проверки кода, затронутые тесты, сборка
+uv run --locked task --exit-code verify   # проверки кода и затронутые тесты
 ```
 
 Хук перед коммитом запускает `verify` и не пропускает коммит, пока в рабочем дереве

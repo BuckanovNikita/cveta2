@@ -14,35 +14,6 @@ repos:
     always_run: true
     require_serial: true
     verbose: true
-  - id: integration-tests
-    name: Task live integration
-    entry: uv run --locked task --exit-code integration
-    language: system
-    pass_filenames: false
-    always_run: true
-    stages: [manual]
-  - id: acceptance-tests
-    name: Task clean-tip acceptance
-    entry: uv run --locked task --exit-code acceptance
-    language: system
-    pass_filenames: false
-    always_run: true
-    stages: [manual]
-  - id: property-exploration
-    name: Task property exploration
-    entry: uv run --locked task --exit-code properties
-    language: system
-    pass_filenames: false
-    always_run: true
-    stages: [manual]
-  - id: mutmut
-    name: Task changed-function mutation (advisory)
-    entry: uv run --locked task --exit-code mutation
-    language: system
-    pass_filenames: false
-    always_run: true
-    stages: [manual]
-    verbose: true
 - repo: https://github.com/compilerla/conventional-pre-commit
   rev: v4.5.0
   hooks:

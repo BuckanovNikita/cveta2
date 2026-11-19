@@ -20,7 +20,8 @@ clear evidence, isolated worktrees and successful live acceptance.
 Task owns sequential commands; prek owns Git hooks and message validation. Use
 explicit safe fixes before staging and one serial verification hook. A minimal
 Git entry shim rejects unsuitable staged inputs before prek can hide them and
-resolves each invoking worktree, retaining legacy behavior and rollback.
+resolves each invoking worktree, retaining rollback. SIP-150 removed the legacy-worktree
+fallback, the manual hook stages and the packaging step of `verify`.
 
 Keep Ruff/mypy incremental behavior and testmon Python dependency selection.
 Namespace inputs outside testmon's tracking by interpreter, lock/configuration,

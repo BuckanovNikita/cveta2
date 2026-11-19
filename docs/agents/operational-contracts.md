@@ -55,12 +55,13 @@ changed-input, failure and interrupted runs and their actual execution counts.
 ### User Story 2 - Commit in isolated worktrees (Priority: P2)
 
 A contributor commits fully staged repository inputs with checks applying to the
-invoking worktree, while older worktrees retain their previous workflow.
+invoking worktree. SIP-150 removed the fallback for worktrees that predate the Task
+workflow.
 
 **Why this priority**: Prevent claims about staged content that was not verified.
 
 **Independent Test**: Exercise staged, partially staged, untracked and ignored
-inputs, and new and legacy worktree hook paths, in disposable repositories.
+inputs and the worktree hook path in disposable repositories.
 
 **Acceptance Scenarios**:
 
@@ -68,8 +69,8 @@ inputs, and new and legacy worktree hook paths, in disposable repositories.
    starts, **then** it is rejected before the hook runner can hide inputs.
 2. **Given** two worktrees, **when** their hooks run, **then** each uses its own
    configuration, environment and mutable verification data.
-3. **Given** an older worktree, **when** shared hooks run, **then** its existing
-   configuration remains usable and the prior hook installation is recoverable.
+3. **Given** a replaced hook installation, **when** the installer runs, **then** the
+   prior hook installation is recoverable.
 
 ### User Story 3 - Defer unavailable live verification (Priority: P3)
 
@@ -114,7 +115,8 @@ verification may run within one worktree.
 - **FR-004**: Commits MUST reject unstaged tracked and nonignored untracked inputs
   before running verification; Conventional Commit validation MUST remain active.
 - **FR-005**: Worktrees MUST isolate mutable environments, history and caches,
-  preserve legacy hooks and retain a recoverable prior installation.
+  and retain a recoverable prior installation. (Amended by SIP-150: hooks of
+  worktrees that predate the Task workflow are no longer preserved.)
 - **FR-006**: Read-only preflight MUST preserve outcomes 0/3/1 and use a configurable
   overall deadline defaulting to 60 seconds; live runs MUST recheck availability.
 - **FR-007 (amended by SIP-140)**: Deferred checks MUST be reported separately from
