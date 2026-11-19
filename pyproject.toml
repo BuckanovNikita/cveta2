@@ -58,15 +58,13 @@ packages = ["cveta2"]
 # Without an explicit list hatchling sweeps every file that git does not ignore,
 # so tests, scripts and fixtures would ship inside every sdist. The leading
 # slash anchors a pattern at the repository root; a bare "README.md" would also
-# match every nested README. The frozen historical contracts (specs/baseline.md,
-# docs/dataset-contract.md) stay out: a packaged copy would contradict the
-# packaged code.
+# match every nested README.
 [tool.hatch.build.targets.sdist]
 include = [
     "/cveta2",
     "/README.md",
     "/CHANGELOG.md",
-    "/GLOSSARY.md",
+    "/DOCS.md",
     "/pyproject.toml",
 ]
 
