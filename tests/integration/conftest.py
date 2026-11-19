@@ -39,11 +39,11 @@ LIVE_EXPORTED_VARIABLE = "CVETA2_LIVE_EXPORTED"
 
 
 def _notify(request: pytest.FixtureRequest, message: str) -> None:
-    """Show *message* now, past output capture and a buffering hook runner.
+    """Show *message* now, past output capture and a buffering runner.
 
-    prek, like pre-commit, shows a hook's output only when the hook ends, so a
+    A buffering runner shows a child's output only when the child ends, so a
     terminal (``/dev/tty``) gets the notice directly; the stderr copy reaches
-    the hook log and agent sessions without a terminal.
+    a captured log and agent sessions without a terminal.
     """
     line = f"\n==> {message}\n"
     try:

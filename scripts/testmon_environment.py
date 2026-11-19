@@ -17,7 +17,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-CONFIG_NAMES = {"uv.lock", "Taskfile.yml", ".pre-commit-config.yaml", ".python-version", ".coveragerc"}
+CONFIG_NAMES = {"uv.lock", "Taskfile.yml", ".python-version", ".coveragerc"}
 CONFIG_SUFFIXES = {".toml", ".ini", ".cfg"}
 TREES = {"cveta2", "tests", "scripts"}
 

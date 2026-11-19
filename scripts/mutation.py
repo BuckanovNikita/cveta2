@@ -7,7 +7,7 @@
     uv run python scripts/mutation.py --keep --strict  # keep it; fail on survivors
     uv run python scripts/mutation.py --budget-seconds 0 --max-functions 0  # no limits
 
-The pre-commit hook runs the first form, within a budget: at most
+The ``mutation`` Task stage runs the first form, within a budget: at most
 ``--max-functions`` (default 8) changed functions are mutated and the rest are
 listed; mutmut stops after ``--budget-seconds`` (default 120), and mutants it
 did not reach by then count as "not run", not as survivors; a run that judges
@@ -282,7 +282,7 @@ def run_mutmut(
 ) -> tuple[int | None, str]:
     """Stream ``mutmut run``; return its status (None: budget spent) and tail.
 
-    Captured output (pre-commit) would otherwise hold every spinner redraw, so
+    Captured output (a non-terminal run) would otherwise hold every spinner redraw, so
     only what a terminal would have left on each line is printed. mutmut runs
     in its own session; with a budget, a timer interrupts that process group
     once the budget is spent, and the mutants judged so far keep their results.

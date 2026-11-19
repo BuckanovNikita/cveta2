@@ -84,7 +84,6 @@ dev = [
     "vulture>=2.16",
     "import-linter>=2.13",
     "pytest-cov>=7.1.0",
-    "prek>=0.5.10",
     "pytest-testmon>=2.3.0",
     "pytest-randomly>=5.0.0",
     "clearml[s3]>=2.1.12,<3",
