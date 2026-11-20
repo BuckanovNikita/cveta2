@@ -255,7 +255,7 @@ invalid_split строка 0: Expected train, val or test (an empty split is all
 ### Что нужно
 
 - Установленный пакет с дополнением `clearml`: `pip install "cveta2[clearml]"`. Без него команда завершается с ошибкой `Install cveta2[clearml] and configure the ClearML SDK before uploading`.
-- Настроенный ClearML SDK. cveta2 не передаёт ClearML свои настройки: SDK читает свою конфигурацию сам (например, переменные `CLEARML_API_HOST`, `CLEARML_FILES_HOST`, `CLEARML_API_ACCESS_KEY`, `CLEARML_API_SECRET_KEY`). Через ClearML SDK проверяется и доступ к корням S3.
+- Настроенный ClearML SDK. cveta2 не передаёт ClearML свои настройки: SDK читает свою конфигурацию сам (например, переменные `CLEARML_API_HOST`, `CLEARML_FILES_HOST`, `CLEARML_API_ACCESS_KEY`, `CLEARML_API_SECRET_KEY`). Через ClearML SDK проверяется и доступ к корням S3. Пока в проекте ClearML нет ни одного датасета, SDK печатает предупреждение `No projects were found with name(s): ...`. Это не ошибка: проект появится при первой публикации.
 - Каталог полной выгрузки со всеми четырьмя файлами. В `dataset.csv` у каждой строки должен быть split `train`, `val` или `test`, а `image_path` — абсолютный локальный путь к изображению. `fetch` оставляет `split` пустым, поэтому заполните его сами. Формат файлов — на странице [Формат данных](../dataset-format.md#файлы-полной-выгрузки).
 - Адрес API классов — реестра классов ([class registry](../../GLOSSARY.md)).
 
@@ -288,11 +288,11 @@ invalid_split строка 0: Expected train, val or test (an empty split is all
    | `image_quarantined` | Остальные строки изображения с отклонённой строкой. | нет |
 
 10. Затем проверяются блокирующие условия ([blocker](../../GLOSSARY.md)). Любое из них делает подготовку неготовой даже с `--clean`:
-    - у какой-то строки нет split `train`, `val` или `test`;
-    - структурная ошибка в CSV;
-    - после отклонения не осталось изображений;
-    - нет ни одного изображения в `train` или в `val` (`test` не обязателен);
-    - в `train` нет ни одного bbox.
+    - у какой-то строки нет split `train`, `val` или `test`: `Every input row must have a valid train, val or test split assignment.`;
+    - структурная ошибка в CSV: `Input CSV has structural validation errors.`;
+    - после отклонения не осталось изображений: `No valid images remain for upload.`;
+    - нет ни одного изображения в `train` или в `val` (`test` не обязателен): `Required train split has no valid images.` или `Required val split has no valid images.`;
+    - в `train` нет ни одного bbox: `At least one valid training box is required.`
 11. Из четырёх файлов выводится список задач датасета ([task manifest](../../GLOSSARY.md), `tasks.yaml`): задачи, строки которых остались в очищенном `dataset.csv`, и завершённые задачи ([completed task](../../GLOSSARY.md)), все изображения которых заменены более новыми результатами.
 12. Подготовка готова (`ready`), если нет блокирующих условий и либо очистка не нужна, либо задан `--clean`.
 13. Команда создаёт каталог `--output-dir` и пишет в него файлы. Она ничего не создаёт в ClearML и ничего не меняет в S3 и CVAT.
