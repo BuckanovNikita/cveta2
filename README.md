@@ -4,7 +4,7 @@
 bbox-аннотации проекта в CSV, скачивает изображения из S3, создаёт задачи (tasks) в CVAT из
 готового CSV, конвертирует разметку в YOLO и COCO, проверяет датасет и публикует его в ClearML.
 
-Документация: [docs/README.md](docs/README.md).
+Документация: [docs/README.md](docs/README.md). Термины: [GLOSSARY.md](GLOSSARY.md).
 
 ## Установка
 
@@ -31,16 +31,16 @@ uv add "cveta2[clearml] @ git+ssh://git@<host>/<org>/cveta2@vX.Y.Z"
 ## Быстрый старт
 
 ```bash
-cveta2 setup                               # подключение к CVAT
-cveta2 setup-cache                         # куда складывать изображения
-cveta2 doctor                              # проверить настройки
-cveta2 fetch --project "My project" -o output/   # выгрузить разметку проекта в CSV
-cveta2 convert --to-yolo -d output/dataset.csv -o yolo/   # CSV → YOLO
+cveta2 setup --project-config ~/team/project-config.yaml   # подключить общую конфигурацию команды
+cveta2 setup                                               # логин и пароль CVAT (в терминале)
+cveta2 setup-cache                                         # куда складывать изображения (в терминале)
+cveta2 doctor                                              # проверить настройки
+cveta2 fetch -p "Retail shelves" -o output/                # выгрузить разметку в CSV, изображения — в кэш
 ```
 
 `fetch` пишет в `output/` четыре CSV-файла; их состав описан в
-[формате датасета](docs/dataset-format.md). Полные сценарии — в
-[docs/workflows.md](docs/workflows.md).
+[формате данных](docs/dataset-format.md). Перед конвертацией в YOLO или COCO назначьте split:
+`fetch` оставляет его пустым. Как это сделать и что дальше — в [сценариях работы](docs/workflows.md).
 
 ## Команды
 
@@ -58,7 +58,7 @@ cveta2 convert --to-yolo -d output/dataset.csv -o yolo/   # CSV → YOLO
 | [`convert`](docs/commands/convert.md) | Конвертировать CSV в YOLO и COCO, YOLO в CSV |
 | [`labels`](docs/commands/labels.md) | Посмотреть и изменить метки (labels) проекта |
 | [`ignore`](docs/commands/ignore.md) | Вести список задач, которые `fetch` пропускает |
-| [`task`](docs/commands/task.md) | Изменить задачу: удалить кадры, аннотации метки, саму задачу, сменить статус |
+| [`task`](docs/commands/task.md) | Изменить задачу: пометить кадры удалёнными, удалить аннотации метки или задачу, сменить stage и state |
 | [`verify`](docs/commands/verify.md) | Проверить CSV или подготовить датасет к публикации |
 | [`upload-dataset`](docs/commands/upload-dataset.md) | Опубликовать подготовленный датасет в ClearML |
 | [`dataset`](docs/commands/dataset.md) | Управлять именованными датасетами: выгрузка, подготовка, публикация |

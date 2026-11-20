@@ -101,7 +101,7 @@ _Russian_: кэш аннотаций
 _Avoid_: task cache (in prose), fetch cache
 
 **Sync root**:
-The `s3://bucket/prefix` (or bare prefix within the project bucket) whose objects `s3-sync` copies into the image cache.
+The `s3://bucket/prefix` (or bare prefix within the project bucket) whose objects `s3-sync` copies into the image cache; when none is set, the project's cloud storage bucket and prefix are used.
 _Russian_: корень синхронизации (sync root)
 _Avoid_: S3 root, bucket path
 
@@ -121,6 +121,11 @@ _Avoid_: upload state, upload log, journal
 A rerun of the same `upload` that continues from its upload manifest instead of starting over.
 _Russian_: возобновление загрузки
 _Avoid_: retry, restart
+
+**Upload fingerprint**:
+The hash of everything that changes what an `upload` does (frames in order, deleted frames, labels, annotation rows, task name, `upload` settings, `--complete` and `--mark-all-deleted`); it names the upload manifest file, so a resume finds its manifest only when all of these are the same.
+_Russian_: отпечаток загрузки
+_Avoid_: upload ID, checksum
 
 ### Verification
 
@@ -148,6 +153,11 @@ _Avoid_: fixed CSV, valid CSV
 The explicit consent (`--clean`) to drop broken rows and apply repairs; without it a result that needs cleanup is not ready.
 _Russian_: подтверждение очистки
 _Avoid_: auto-fix
+
+**Blocker**:
+A condition found while preparing a bundle that makes the preparation not ready (`ready: false`); it is listed under `blockers` in `report.json` and stops publication.
+_Russian_: блокирующее условие
+_Avoid_: blocking error, fatal issue
 
 ### Classes
 
