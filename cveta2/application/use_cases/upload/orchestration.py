@@ -1,4 +1,15 @@
-"""Execute the upload stages in their required recovery checkpoint order."""
+"""Execute the upload stages in their required recovery checkpoint order.
+
+Keep this order when editing: name and box validation and the fingerprint
+precede the lock; the lock is held for the whole run; input validation and
+the manifest and resume-target checks run before the first S3 write; a required
+manifest save precedes the create request, the task ID is saved before data
+attachment, and a required pending mark precedes any shape write that sends
+shapes. Completion counts are saved before the manifest is deleted, so a failed
+deletion never loses the outcome or allows a second task. Only an append that a
+required checkpoint covers may be sent; nothing is retried from an unknown
+create outcome.
+"""
 
 from loguru import logger
 
@@ -70,9 +81,10 @@ def upload_dataset(client: CvatClient, request: UploadRequest, *, deps: UploadDe
     deleted frames, optionally completes the task, and invalidates the
     local annotation cache entry.
 
-    A manifest of the run is written before CVAT is touched and updated the
-    moment a task id exists, so ``resume=True`` can continue an upload that
-    died partway.  It is removed once the upload finishes.
+    The full intent is saved to a manifest after image staging and before the
+    first CVAT write, and the task id is saved the moment the create request
+    returns, so ``resume=True`` can continue an upload that died partway.  The
+    manifest is removed once the upload finishes.
     """
     validate_upload_image_names([*request.plan.image_names, *request.plan.deleted_names])
     validate_upload_boxes(request.plan.annotations)

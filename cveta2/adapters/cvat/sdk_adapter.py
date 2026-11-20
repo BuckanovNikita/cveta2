@@ -201,7 +201,7 @@ class SdkCvatApiAdapter:
         Uses ``getattr`` because ``source_storage`` may be an SDK object,
         a dict, or absent depending on the CVAT/SDK version.  This is an
         intentional exception to the project style rule "avoid getattr"
-        (see CLAUDE.md).
+        (see AGENTS.md).
         """
         project = self.client.projects.retrieve(project_id)
         source_storage = getattr(project, "source_storage", None)

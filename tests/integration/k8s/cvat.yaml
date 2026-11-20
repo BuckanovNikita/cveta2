@@ -1,5 +1,5 @@
-# CVAT for one live-test session: the minimal component set the suite needs
-# (specs/002-own-test-infra/research.md, R2): the backend server, the `import`
+# CVAT for one live-test session: the minimal component set the suite needs:
+# the backend server, the `import`
 # and `chunks` workers (tests read frames with quality="original"), the
 # initializer Job (migrations), OPA, Redis, kvrocks and PostgreSQL. No
 # frontend, analytics, serverless functions, Ingress or other workers.

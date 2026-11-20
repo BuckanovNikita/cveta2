@@ -10,7 +10,7 @@ def parse_cloud_storage(cs_raw: object) -> CloudStorageInfo:
 
     Uses ``getattr`` because the CVAT SDK cloud storage object is opaque
     and its attributes vary across SDK versions.  This is an intentional
-    exception to the project style rule "avoid getattr" (see CLAUDE.md).
+    exception to the project style rule "avoid getattr" (see AGENTS.md).
 
     Also used by ``tests/integration/clone_project_to_s3.py``.
     """
