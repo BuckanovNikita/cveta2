@@ -1,29 +1,12 @@
 # cveta2 agent instructions
 
-cveta2 is a Python >=3.12,<3.14 CLI and Python API for CVAT annotation projects. It
-fetches bounding-box annotations, partitions them by task completion state, downloads
-images from S3, converts to and from YOLO and COCO, uploads tasks, manages project labels
-and verifies, prepares and publishes datasets to ClearML. [README.md](README.md) (Russian)
+cveta2 is a Python CLI and Python API for CVAT annotation projects. It fetches
+bounding-box annotations, partitions them by task completion state, downloads images
+from S3, converts to and from YOLO and COCO, uploads tasks, manages project labels and
+verifies, prepares and publishes datasets to ClearML. [README.md](README.md) (Russian)
 is the user guide. [DOCS.md](DOCS.md) is the reference: architecture, terms, decisions,
 CLI, configuration, formats, live infrastructure and release operations. Read the
 matching DOCS.md section before changing that area.
-
-## Repository layout
-
-- `cveta2/`: the package. `domain/` (pure policies), `application/{ports,client,use_cases}`
-  plus `settings.py`/`results.py`, `adapters/{cvat,s3,config,files,execution,clearml,class_api}`,
-  `composition/`, `interfaces/{cli.py,commands/,api/}`, `presets/default.yaml`, and the
-  public top-level facades (`api.py`, `cli.py`, `client.py`, `config.py`, ...).
-- `tests/`: unit tests. `tests/integration/` holds the live tests, `lifecycle.py` (live
-  session tool) and `k8s/` (manifests). `tests/fixtures/`, `tests/helpers.py`: shared data.
-- `scripts/`: `testmon_environment.py` (testmon fingerprint), `mutation.py` (mutation
-  report), `benchmark_fetch.py`, `session_status.sh` (agent SessionStart status).
-- `Taskfile.yml`: owns every check command and its order. `pyproject.toml`: dependencies,
-  tool config, import contracts, semantic-release config.
-- `.github/workflows/release.yml`: the only CI job (release on merge).
-- `.claude/settings.json`, `.codex/hooks.json`: run `scripts/session_status.sh` at session
-  start. It lists the branch against `main`, uncommitted paths, other worktrees, unmerged
-  branches and a kept live session; listed changes may belong to another session.
 
 ## Environment
 
@@ -41,45 +24,15 @@ matching DOCS.md section before changing that area.
 
 There are no git hooks. Run checks directly. Task stages:
 `uv run --locked task --exit-code <stage>` (`--exit-code` keeps child exit codes).
+`Taskfile.yml` owns every stage, its commands and their order.
 
-| Stage | Runs |
-| --- | --- |
-| `fix` | `ruff check --fix --no-unsafe-fixes .`, `ruff format .`; never stages |
-| `check` | `uv lock --check`, `ruff check .`, `ruff format --check .`, `lint-imports`, `mypy .`, `vulture`, `deptry .` |
-| `test` | testmon-affected unit tests, `--ignore=tests/integration -n $CVETA2_TEST_WORKERS --dist loadgroup` |
-| `test-full` | every unit test, refreshing testmon history (`--testmon-noselect`) |
-| `verify` | `check`, then `test` (development verification; no build) |
-| `build` | `uv build` into a temporary directory |
-| `properties` | unit tests with `HYPOTHESIS_PROFILE=explore -p no:randomly` |
-| `mutation` | `scripts/mutation.py`; arguments after `--` |
-| `infra-check` | read-only live-cluster preflight |
-| `integration` | `infra-check`, then `CVETA2_TASK_VERIFICATION=1 pytest tests/integration` |
-| `acceptance` | clean tip, `check`, `build`, `properties`, `infra-check`, full suite with `--cov` including live tests, clean tip |
-
-Direct equivalents (same tools, no Task):
-
-```bash
-uv lock --check
-uv run --locked ruff check . && uv run --locked ruff format --check .
-uv run --locked lint-imports
-uv run --locked mypy .
-uv run --locked vulture
-uv run --locked deptry .
-uv run --locked pytest --ignore=tests/integration -n 2 --dist loadgroup   # all units, no testmon
-uv build --out-dir "$(mktemp -d)"
-uv run --locked pytest tests/test_architecture.py   # after changing module boundaries
-# commit subjects on the branch (prints offenders):
-git log --format=%s main..HEAD | grep -vE '^(build|chore|ci|docs|feat|fix|perf|refactor|style|test)(\([^)]+\))?!?: .+' && echo 'bad subject'
-git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tree clean before commit
-```
-
-- `CVETA2_TEST_WORKERS` (default 2) sets xdist workers; choose it from the machine's
+- `CVETA2_TEST_WORKERS` sets xdist workers; choose it from the machine's
   reported load. There is no shared heavy-job lock.
 - Before every commit run `fix`, inspect its edits, stage exact task-owned paths
   (`git add -- <path>`), then run `verify` on the final content. Nothing enforces this or
   the commit message format; it is policy. Do not edit files while `verify` runs.
   `verify` checks the working tree, not the index: before relying on it for a commit,
-  leave no unstaged tracked changes or untracked non-ignored files (the clean-tree command).
+  leave no unstaged tracked changes or untracked non-ignored files.
 - Intermediate task commits may defer `verify`; the final content must pass it.
 - Task keeps no freshness cache. Task state, timestamps, `.cache/` logs and interrupted
   runs never establish success. A testmon-deselected test is not an executed test; use
@@ -94,10 +47,7 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
 
 ### Mutation report
 
-- `mutation` mutates only changed top-level `cveta2/` functions in a fresh workspace
-  exported from the index: at most 8 functions (`--max-functions`), 120 s
-  (`--budget-seconds`). Default compares staged content with `HEAD`; `-- --base main`
-  covers the branch; `-- --keep --strict` keeps the workspace and fails on survivors.
+- Scope, limits and flags: the `scripts/mutation.py` docstring and `--help`.
 - Exit 0 report (survivors advisory), 1 survivors under `--strict`, 2 tool, config,
   clean-test failure or "no verdict" (rerun with a larger budget).
 - Survivors are advisory. Triage only behavioural ones. Never add a test only to kill a
@@ -110,10 +60,9 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
 
 ### Live tests
 
-- Exit codes of `infra-check` (`python -m tests.integration.lifecycle check`, bounded by
-  `CVETA2_INFRA_CHECK_TIMEOUT`, default 60 s): 0 AVAILABLE, 3 UNAVAILABLE (cluster silent,
-  node cannot admit the quota, timeout), 1 ERROR (missing kubectl/context, namespace
-  permission refused, unexpected failure). Diagnose ERROR; never wait on it.
+- Exit codes of `infra-check`: 0 AVAILABLE, 3 UNAVAILABLE (cluster silent, node cannot
+  admit the quota, timeout), 1 ERROR (missing kubectl/context, namespace permission
+  refused, unexpected failure). Diagnose ERROR; never wait on it.
 - UNAVAILABLE or blocked setup means deferred, not failed. Deferred live checks block
   acceptance, merge readiness and release until they pass or the user waives them.
   Continue independent work, retry at a milestone without polling, and ask the user when
@@ -125,10 +74,6 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
   `infra-check` first and keep `CVETA2_TASK_VERIFICATION=1` and `--dist loadgroup`.
   Live tests are the `live` xdist group; never split it across workers (each worker would
   start its own session). Targeted unit runs exclude `tests/integration` by directory.
-- Each session owns one namespace `cveta2-it-<UTC yyyymmdd-hhmmss>-<4 hex>` in the
-  `docker-desktop` cluster, applies `tests/integration/k8s/quota.yaml` before any workload
-  and deletes the namespace on success, failure and interruption unless
-  `INTEGRATION_KEEP_DATA=1`.
 - Never act on a namespace this session did not create (another session's, another
   project's, or a platform namespace). Never use the cluster's dedicated ClearML or
   MongoDB. Never request `nvidia.com/gpu`. Never restart Docker Desktop or change cluster
@@ -144,20 +89,12 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
   `/mnt/wsl/data/k8s-volumes`; loopback port-forward only (no Ingress, NodePort, host
   port, local CA). The CVAT server version (`cvat/server:v2.59.1`) stays pinned;
   upgrading any service is a separate change.
-- Do not add repository tests of tooling (lifecycle.py, manifests, Taskfile, scripts).
 
 ## Architecture boundaries
 
-- Layers (import-linter, `pyproject.toml`): public facades → interfaces → composition →
-  adapters → application → domain; inside application: use_cases → client → ports →
-  settings/results. Canonical packages never import the top-level facades or the package
-  root. Sibling packages stay acyclic.
-- SDK owners: `cvat_sdk` only in `cveta2/adapters/cvat/`; `boto3`/`botocore` only in
-  `adapters/s3/`; `clearml` only in `adapters/clearml/` (imported lazily, so CSV
-  verification works without the `clearml` extra); `questionary` only in
-  `interfaces/commands/interactive/`. Adapter groups cvat/s3/config/clearml/class_api never
-  import each other; they may use `files` and `execution`. Adapters never import
-  `application.client` or `application.use_cases`.
+- Layers, SDK owners and adapter independence are the import-linter contracts in
+  `pyproject.toml`. `clearml` is imported lazily, so CSV verification works without the
+  `clearml` extra.
 - Domain and application use only lexical paths, in-memory pandas, Pydantic and Loguru.
   File/pandas IO, config and env discovery, SDK/network IO, clocks, prompts and threads
   belong to adapters, composition or interfaces. Inject runners, clocks and locks
@@ -181,8 +118,8 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
   Never swallow failures: `warning` for degraded results, summarize skipped loop items.
 - Avoid `getattr`: dynamic attribute access only at opaque third-party SDK boundaries,
   with a comment saying why.
-- Ruff `ALL` with the configured ignores, safe fixes before formatting; mypy `strict`,
-  overrides scoped to affected modules, stubs over `ignore_missing_imports` or `Any`.
+- mypy overrides stay scoped to affected modules; stubs over `ignore_missing_imports`
+  or `Any`.
 - uv: `uv add`/`uv remove` in the right group or extra, inspect the lock diff, never
   `uv lock --upgrade` to repair a lock. Remove code only with evidence of no consumers.
 - Tests observe caller-visible behavior; extend existing modules, reuse `tests/fixtures/`
@@ -191,7 +128,7 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
 - Preserve `tests.env_isolation` (redirects HOME and XDG before imports) and the autouse
   config/cache/worker fixtures in `tests/conftest.py`; tests never touch a real
   `~/.config/cveta2/config.yaml`. `CVETA2_LIVE_EXPORTED` hides live-session variables from
-  unit tests. Reproduce pytest-randomly with `--randomly-seed=<seed>`.
+  unit tests.
 
 ## Product rules that bind code changes
 
@@ -249,7 +186,6 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
 
 ## Known pitfalls
 
-- An inherited `UV_PROJECT_ENVIRONMENT` makes uv use another worktree's environment.
 - A focused live run without `CVETA2_TASK_VERIFICATION=1` waits on an unavailable cluster.
 - A kept session (`lifecycle up` or `INTEGRATION_KEEP_DATA=1`) blocks `up` and keep-mode
   pytest in that checkout until `lifecycle stop`.
@@ -257,7 +193,6 @@ git diff --quiet && test -z "$(git ls-files --others --exclude-standard)"   # tr
 - Without the `AWS_*` session variables, live S3 tests fail with `NoCredentialsError`.
 - The `release` workflow exits green with "already been released" when the tag exists;
   read the run log, not the status.
-- `mutation` without `--base main` covers only staged changes against `HEAD`.
 
 ## Working agreement
 - At the start of work, state the worktree path, the current branch and its relation to the default branch; say when remote refs were not fetched.
