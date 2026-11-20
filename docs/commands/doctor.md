@@ -1,0 +1,142 @@
+# cveta2 doctor
+
+Проверяет конфигурацию, ключи S3 и права на каталоги кэша. Запустите её после [`cveta2 setup`](setup.md) или когда другие команды падают с ошибками конфигурации.
+
+## Примеры
+
+Проверить настройки:
+
+```bash
+cveta2 doctor
+```
+
+Проверить и выдать группе права на свои файлы в кэше:
+
+```bash
+cveta2 doctor --cache
+```
+
+Проверить другой личный файл:
+
+```bash
+CVETA2_CONFIG=~/alt/config.yaml cveta2 doctor
+```
+
+## Синтаксис и аргументы
+
+```text
+cveta2 doctor [-h] [--cache]
+```
+
+| Аргумент | По умолчанию | Описание |
+|---|---|---|
+| `--cache` | выкл. | Исправить права в кэше: добавить группе права на чтение и запись (для каталогов ещё и на вход) на всё, чем владеете вы, и назвать владельцев остальных путей. Проверка кэша выполняется даже при `CVETA2_DISABLE_CACHE=true`. |
+| `-h`, `--help` | | Показать справку. |
+
+Флага для пути к личному файлу у команды нет. Она читает файл из `CVETA2_CONFIG` или `~/.config/cveta2/config.yaml` и общий файл, выбранный как обычно (см. [Конфигурация](../configuration.md)).
+
+## Как это работает
+
+Команда выполняет три проверки по порядку. Обязательна только первая.
+
+1. **Конфигурация (обязательная).**
+   - Если личного файла нет, пишет предупреждение `Config file not found: <путь>. Run 'cveta2 setup' or set env variables.` и продолжает с переменными окружения.
+   - Читает настройки CVAT так же, как другие команды: значения по умолчанию, личный файл, общий файл, окружение.
+   - Проверяет, что задан адрес CVAT и есть и логин, и пароль.
+   - Для каждого проекта из `image_cache` сообщает, есть ли каталог. Отсутствие каталога — только предупреждение.
+   - К CVAT команда не подключается. Неверный пароль или недоступный сервер она не обнаружит.
+2. **Ключи AWS (необязательная).** Просит boto3 найти ключи доступа обычным способом и выводит профиль, регион и первые и последние 4 символа ключа. Сам S3 не запрашивает.
+3. **Права кэша (необязательная).** Пропускается при `CVETA2_DISABLE_CACHE=true` без `--cache`. Проверяет существующие каталоги: `image_cache.<проект>`, `cache.images_root`, `cache.tasks_root`, корни из `cache.projects` и собственный кэш cveta2 (`$XDG_CACHE_HOME/cveta2` или `~/.cache/cveta2`). Вложенный каталог отдельно не проверяется. Каталог истории ввода `prompt_history` пропускается. Файлам нужны права группы `rw`, каталогам — `rwx`.
+   - Без `--cache` только сообщает о нарушениях и их владельцах.
+   - С `--cache` добавляет недостающие права группы на пути, владелец которых вы. Пути других пользователей не трогает и называет их владельцев: им нужно запустить `cveta2 doctor --cache` самим.
+
+Каталоги кэша описаны на странице [Изображения и кэши](../images-and-cache.md).
+
+## Результат
+
+Команда ничего не пишет на диск, кроме исправления прав с `--cache`. Итог выводится последней строкой:
+
+```text
+doctor: обязательные проверки пройдены
+```
+
+или
+
+```text
+doctor: обязательные проверки не пройдены
+```
+
+Пример вывода для рабочей конфигурации, где у каталога кэша нет прав группы:
+
+```text
+doctor: checking configuration …
+Config file: /home/alice/.config/cveta2/config.yaml
+image_cache: no projects configured (optional)
+Config: OK
+doctor: AWS — необязательная проверка
+doctor: checking AWS credentials …
+AWS: credentials OK — profile=default, region=us-east-1, access_key=AKIA…MPLE
+doctor: checking cache group permissions in 1 location(s) …
+cache.images_root (/home/alice/data/images): 1 dir(s) and 0 file(s) not group-accessible. Owners: alice (1 items)
+  drwxr-xr-x  alice  /home/alice/data/images
+1 path(s) you own can be repaired here: run 'cveta2 doctor --cache'
+doctor: необязательная проверка кэша не пройдена
+doctor: обязательные проверки пройдены
+```
+
+С `--cache` для того же каталога (показаны только строки проверки кэша и итог):
+
+```text
+doctor: fixing cache group permissions in 1 location(s) …
+cache.images_root (/home/alice/data/images): granted group access to 1 path(s)
+doctor: обязательные проверки пройдены
+```
+
+### Коды завершения
+
+| Код | Когда |
+|---|---|
+| `0` | Обязательная проверка конфигурации пройдена. Необязательные проверки AWS и кэша на код не влияют. |
+| `1` | Проверка конфигурации не пройдена: нет логина или пароля, ошибка в личном или общем файле, конфликт переменных окружения с общим файлом. |
+
+## Интерактивный и неинтерактивный режим
+
+Команда ничего не спрашивает и одинаково работает с `CVETA2_NO_INTERACTIVE=true` и без него.
+
+## Частые ошибки
+
+| Сообщение | Причина | Что сделать |
+|---|---|---|
+| `config: No credentials: provide CVAT_USERNAME + CVAT_PASSWORD` | Нет логина или пароля ни в личном файле, ни в окружении. | Запустите [`cveta2 setup`](setup.md) или задайте `CVAT_USERNAME` и `CVAT_PASSWORD`. |
+| `doctor: обязательная проверка конфигурации недоступна: Cannot read configuration <путь>: FileNotFoundError` | Общий файл, на который указывает `CVETA2_PROJECT_CONFIG` или `project_config`, не найден. Проверка кэша в этом случае тоже не выполняется: `doctor: необязательная проверка кэша недоступна: ...`. Код завершения `1`. | Проверьте путь или подключите файл заново: `cveta2 setup --project-config PATH`. |
+| `doctor: обязательная проверка конфигурации недоступна: CVAT identity environment overrides conflict with shared project configuration` | `CVAT_HOST` или `CVAT_ORGANIZATION` не совпадают с общим файлом. | Уберите эти переменные. |
+| `doctor: обязательная проверка конфигурации недоступна: Shared project policy/identity cannot be stored in personal configuration` | В личном файле с `schema_version: 1` есть `cvat.host`, `cvat.organization` или ключи общего файла. | Удалите эти ключи из личного файла. |
+| `doctor: обязательная проверка конфигурации недоступна: Versioned personal configuration requires a shared project_config reference` | В личном файле `schema_version: 1`, но общий файл не выбран. | Подключите общий файл: `cveta2 setup --project-config PATH`. |
+| `doctor: обязательная проверка конфигурации недоступна: Ошибка чтения YAML-конфигурации <путь>: ParserError, строка 4, столбец 2.` | Синтаксическая ошибка YAML в личном файле. | Исправьте файл в указанном месте. |
+| `doctor: обязательная проверка конфигурации недоступна: Legacy mixed configuration requires verification: cveta2 setup --migrate-config` | Старый формат с ключами общего файла. | Запустите `cveta2 setup --migrate-config`. |
+| `AWS: no credentials found. Configure via AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env vars, ~/.aws/credentials, or an IAM role.` | boto3 не нашёл ключи S3. Код завершения не меняется. | Задайте ключи одним из названных способов. |
+| `These users own the remaining paths and must run 'cveta2 doctor --cache' themselves: <пользователи>` | В кэше есть пути других пользователей без прав группы. | Попросите названных пользователей запустить `cveta2 doctor --cache`. |
+
+Если адрес CVAT не задан нигде, проверка его не отвергает: подставляется адрес по умолчанию из пакета `http://localhost:8080` (см. [Конфигурация](../configuration.md#значения-по-умолчанию-из-пакета)).
+
+## Из Python
+
+Отдельной функции для `doctor` нет. Проверить логин и пароль можно так:
+
+```python
+import cveta2
+
+try:
+    cveta2.CvatConfig.load().require_credentials()
+except cveta2.MissingCredentialsError as error:
+    print(error)
+```
+
+`MissingCredentialsError` — подкласс `cveta2.Cveta2Error`. Подробнее — на странице [Python API](../python-api.md).
+
+## См. также
+
+- [Конфигурация](../configuration.md)
+- [`cveta2 setup`](setup.md)
+- [Изображения и кэши](../images-and-cache.md)
+- [Глоссарий](../../GLOSSARY.md)
