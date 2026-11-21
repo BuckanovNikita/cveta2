@@ -243,6 +243,7 @@ def test_upload_section_round_trips_non_default_values(tmp_path: Path) -> None:
         pytest.param({"images_per_job": 0}, id="zero-images-per-job"),
         pytest.param({"images_per_job": -5}, id="negative-images-per-job"),
         pytest.param({"image_quality": 101}, id="over-full-quality"),
+        pytest.param({"image_quality": 0}, id="zero-quality"),
         pytest.param({"image_quality": -1}, id="negative-quality"),
     ],
 )
@@ -253,13 +254,20 @@ def test_unusable_upload_settings_are_rejected_at_load(tmp_path: Path, section: 
     job-count estimate, so a hand-written ``0`` used to surface either as a
     CVAT rejection or as ``ZeroDivisionError`` — after the task had already
     been created. ``image_quality`` is the CVAT chunk quality, documented as
-    0-100 by ``create_upload_task`` — so 0 stays legal and only the ends of
-    that range are enforced.
+    1-100 since CVAT 2.65 rejects 0 — so both ends of that range are enforced.
     """
     config_path = write_config_yaml(tmp_path / "custom.yaml", upload=section)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=next(iter(section))):
         UploadConfig.load(config_path)
+
+
+@pytest.mark.parametrize("quality", [1, 100])
+def test_upload_image_quality_bounds_load(tmp_path: Path, quality: int) -> None:
+    """The ends of the CVAT range 1-100 are accepted."""
+    config_path = write_config_yaml(tmp_path / "custom.yaml", upload={"image_quality": quality})
+
+    assert UploadConfig.load(config_path).image_quality == quality
 
 
 def test_saving_an_all_default_section_removes_it(tmp_path: Path) -> None:

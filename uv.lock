@@ -284,21 +284,19 @@ wheels = [
 
 [[package]]
 name = "cvat-sdk"
-version = "2.73.0"
+version = "2.82.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "packaging" },
     { name = "pillow" },
     { name = "platformdirs" },
-    { name = "python-dateutil" },
     { name = "tqdm" },
-    { name = "typing-extensions" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/ec/6d45923a9e14c9e9c407204a5e19da6234c9fba6dd8e4b924b559087857e/cvat_sdk-2.73.0.tar.gz", hash = "sha256:7d105fe2dbd436135aafce6233a39a6f5961df66ce89dfeace0df1c20df33960", size = 257153, upload-time = "2026-08-12T17:29:20.934Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/39/de4d01fea4b3650f025068abeb93442efec474f407aa82dce2e4af285df3/cvat_sdk-2.82.0.tar.gz", hash = "sha256:cb680f9f7efed4f0f4b7c60816912170883b18c65dddfbd6a8f2a240465b6bd9", size = 306562, upload-time = "2026-11-05T14:07:04.137Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/bc/71e65a33d8b26c7659b81831416154cdf1ba6a614e036297c5b9c2e78f4f/cvat_sdk-2.73.0-py3-none-any.whl", hash = "sha256:370e2e3d15a3bdf362259b74d84023c52420e3d176114c4421c62b303cb047f8", size = 811213, upload-time = "2026-08-12T17:29:18.043Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/46/0a252448a6b3089d27ce4dc7a7e405c94a7b2364d749d2a24b4d2c855201/cvat_sdk-2.82.0-py3-none-any.whl", hash = "sha256:c2ca83028120d56acc5bad41810b505631b82715ba4cfed3ddf59e1bfbff35d6", size = 1022865, upload-time = "2026-11-05T14:07:00.462Z" },
 ]
 
 [[package]]
@@ -350,7 +348,7 @@ dev = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.42.49" },
     { name = "clearml", extras = ["s3"], marker = "extra == 'clearml'", specifier = ">=2.1.12,<3" },
-    { name = "cvat-sdk", specifier = ">=2.59.1" },
+    { name = "cvat-sdk", specifier = ">=2.82.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "pandas", specifier = ">=2.1.1" },
     { name = "pandera", extras = ["pandas"], specifier = ">=0.34.1,<0.35" },

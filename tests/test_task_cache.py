@@ -956,8 +956,8 @@ class TestJobFreshness:
 
     @pytest.mark.parametrize(
         ("second_type", "second_start"),
-        [("ground_truth", 0), ("consensus_replica", 0), ("ground_truth", 6)],
-        ids=["ground-truth", "consensus", "ground-truth-own-range"],
+        [("ground_truth", 0), ("replica", 0), ("ground_truth", 6)],
+        ids=["ground-truth", "replica", "ground-truth-own-range"],
     )
     def test_inseparable_jobs_share_one_task_entry(
         self, normal_fake: LoadedFixtures, tmp_path: Path, second_type: str, second_start: int
