@@ -2,6 +2,110 @@
 
 <!-- version list -->
 
+## v0.15.0 (2026-11-21)
+
+### Build System
+
+- Ship DOCS.md instead of GLOSSARY.md in the sdist
+  ([#21](https://github.com/BuckanovNikita/cveta2/pull/21),
+  [`118177c`](https://github.com/BuckanovNikita/cveta2/commit/118177cc96ed4a055a60083a755f94ce98db57b9))
+
+- **release**: Keep the version in the package so a release leaves uv.lock alone (SIP-149)
+  ([#20](https://github.com/BuckanovNikita/cveta2/pull/20),
+  [`332dfb0`](https://github.com/BuckanovNikita/cveta2/commit/332dfb025388cb117a55f72618b900f60fc600b9))
+
+### Documentation
+
+- Add a short Russian README so the package builds again (SIP-161)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add configuration and cache pages with setup, setup-cache and doctor (SIP-164)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add details found in a serial live re-check (SIP-160)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add Russian user documentation for the CLI, Python API and dataset format (SIP-160)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the dataset command page for managed datasets (SIP-169)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the domain glossary with the Russian wording of each term (SIP-162)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the fetch, fetch-task, whats-new and s3-sync command pages (SIP-166)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the labels, ignore and task command pages (SIP-165)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the Python API page (SIP-170) ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the upload, merge and convert command pages (SIP-167)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the verify and upload-dataset command pages (SIP-168)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Add the workflows page and docs index, finish the README and glossary (SIP-171)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Compress agent instructions and docs into AGENTS.md and DOCS.md
+  ([#21](https://github.com/BuckanovNikita/cveta2/pull/21),
+  [`118177c`](https://github.com/BuckanovNikita/cveta2/commit/118177cc96ed4a055a60083a755f94ce98db57b9))
+
+- Compress agent instructions and docs into AGENTS.md and DOCS.md (SIP-159)
+  ([#21](https://github.com/BuckanovNikita/cveta2/pull/21),
+  [`118177c`](https://github.com/BuckanovNikita/cveta2/commit/118177cc96ed4a055a60083a755f94ce98db57b9))
+
+- Correct three statements found in review (SIP-160)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Describe the CSV columns, full-fetch files and prepared dataset directory (SIP-163)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- Drop facts the repository already states from AGENTS.md and DOCS.md
+  ([`a1f7ddf`](https://github.com/BuckanovNikita/cveta2/commit/a1f7ddfe2f21edacdbf2ea67cd7c72347995bed8))
+
+- Drop the manual restrictions section from the upload page (SIP-160)
+  ([#22](https://github.com/BuckanovNikita/cveta2/pull/22),
+  [`027616d`](https://github.com/BuckanovNikita/cveta2/commit/027616d5dea7130f459fe97298c525d79760696e))
+
+- **agents**: Add agent skills setup with Linear as the issue tracker
+  ([`dfdc890`](https://github.com/BuckanovNikita/cveta2/commit/dfdc890051ec28f2b3193d8ed961c7b12b2b4683))
+
+### Features
+
+- **cvat**: Require CVAT 2.82.0 (SIP-216)
+  ([`24753f6`](https://github.com/BuckanovNikita/cveta2/commit/24753f69b2a789d03aca3cdb2364312d5efea6f6))
+
+### Refactoring
+
+- Lint as Python 3.12 and adopt PEP 695 generics and Self (SIP-213)
+  ([#24](https://github.com/BuckanovNikita/cveta2/pull/24),
+  [`79df55b`](https://github.com/BuckanovNikita/cveta2/commit/79df55b44bb62fe24990a148699afbe7ad535f4d))
+
+### Breaking Changes
+
+- **cvat**: The minimum supported CVAT server is 2.82.0, and upload.image_quality: 0 is rejected
+  when the configuration is loaded (the allowed range is 1-100).
+
+
 ## v0.14.1 (2026-11-18)
 
 ### Build System
