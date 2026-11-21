@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v0.15.1 (2026-11-21)
+
+### Bug Fixes
+
+- Fail on missing images, share one bbox clip rule, reject non-canonical upload names (SIP-172,
+  SIP-173, SIP-235) ([#31](https://github.com/BuckanovNikita/cveta2/pull/31),
+  [`9492a39`](https://github.com/BuckanovNikita/cveta2/commit/9492a39fe1416fc9b924e4a2bf3938e0a188c749))
+
+### Refactoring
+
+- Declare type aliases with the type statement (SIP-215)
+  ([`245f181`](https://github.com/BuckanovNikita/cveta2/commit/245f181089bf33a8c18012bf85bea1e1b5be5ad3))
+
+- Enforce @override on overriding methods (SIP-214)
+  ([#25](https://github.com/BuckanovNikita/cveta2/pull/25),
+  [`6debf17`](https://github.com/BuckanovNikita/cveta2/commit/6debf1757f8f238a200211ab09aab4a5986ac661))
+
+### Testing
+
+- **integration**: Move the live-test stack to CVAT server 2.82.0 (SIP-231)
+  ([#30](https://github.com/BuckanovNikita/cveta2/pull/30),
+  [`c5e9df1`](https://github.com/BuckanovNikita/cveta2/commit/c5e9df1fede1e3e93ac713a57d58804e86e025df))
+
+
 ## v0.15.0 (2026-11-21)
 
 ### Build System
