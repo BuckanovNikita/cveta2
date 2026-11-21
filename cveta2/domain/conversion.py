@@ -385,9 +385,8 @@ class YoloLabels(NamedTuple):
 def yolo_label_text(group: pd.DataFrame, label_map: dict[str, int], name_s: str) -> YoloLabels:
     """Format one image's boxes as deterministic six-decimal YOLO labels.
 
-    Boxes crossing the image edge are clipped to it. A box whose width or
-    height is written as zero after clipping and rounding is left out, so every
-    written line stays within the ranges ``--from-yolo`` accepts.
+    Boxes crossing the image edge are clipped to it. A box left under 1 px
+    wide or high is left out, the rule ``coco_split_data`` applies too.
     """
     img_w = int(group.iloc[0]["image_width"])
     img_h = int(group.iloc[0]["image_height"])
@@ -402,15 +401,14 @@ def yolo_label_text(group: pd.DataFrame, label_map: dict[str, int], name_s: str)
             float(row["bbox_x_br"]),
             float(row["bbox_y_br"]),
         )
-        box = _clip_to_image(original, img_w, img_h)
-        yolo = _pixel_to_yolo(box, img_w, img_h)
-        width, height = f"{yolo.w:.6f}", f"{yolo.h:.6f}"
-        if float(width) <= 0 or float(height) <= 0:
+        box = _fit_to_image(original, img_w, img_h)
+        if box is None:
             dropped += 1
             continue
         clipped += box != original
+        yolo = _pixel_to_yolo(box, img_w, img_h)
         class_id = label_map[row["instance_label"]]
-        lines.append(f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {width} {height}")
+        lines.append(f"{class_id} {yolo.xc:.6f} {yolo.yc:.6f} {yolo.w:.6f} {yolo.h:.6f}")
     text = "\n".join(lines) + "\n" if lines else ""
     return YoloLabels(text, clipped, dropped)
 

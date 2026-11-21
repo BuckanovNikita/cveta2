@@ -61,7 +61,7 @@ def convert_to_coco(
     owned = files.coco_owned_paths(ctx)
     files.prepare_coco_output(ctx.output_dir)
     split_dir_map: dict[str, str] = {"val": "valid"}
-    adjustments = _BoxAdjustments("меньше 1 px по ширине или высоте после обрезки")
+    adjustments = _BoxAdjustments()
     for split in ctx.splits:
         dir_name = split_dir_map.get(split, split)
         split_dir = ctx.output_dir / dir_name

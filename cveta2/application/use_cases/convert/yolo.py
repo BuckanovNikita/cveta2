@@ -34,7 +34,7 @@ def _write_box_labels(  # noqa: PLR0913, PLR0917
     files: ConversionFiles,
 ) -> _BoxAdjustments:
     """Write YOLO label files and place images for box annotations."""
-    adjustments = _BoxAdjustments("с нулевой шириной или высотой после обрезки или округления")
+    adjustments = _BoxAdjustments()
     if box_df.empty:
         return adjustments
     for (raw_name, raw_split), group in box_df.groupby(["image_name", "split"]):

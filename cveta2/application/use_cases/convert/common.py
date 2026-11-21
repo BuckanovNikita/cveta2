@@ -20,7 +20,6 @@ from cveta2.domain.output import preview_names
 class _BoxAdjustments:
     """Clipped and dropped box counts of one export, with the affected image names."""
 
-    dropped_reason: str
     clipped: int = 0
     dropped: int = 0
     clipped_images: list[str] = field(default_factory=list)
@@ -44,7 +43,8 @@ class _BoxAdjustments:
             )
         if self.dropped:
             logger.warning(
-                f"Пропущены боксы {self.dropped_reason}: {self.dropped} ({preview_names(self.dropped_images)})"
+                f"Пропущены боксы меньше 1 px по ширине или высоте после обрезки: {self.dropped} "
+                f"({preview_names(self.dropped_images)})"
             )
 
 

@@ -529,7 +529,7 @@ def _export_and_reimport(
 
 
 class TestOutOfImageBoxes:
-    """Boxes crossing the image edge are clipped; boxes left without area are dropped."""
+    """Boxes crossing the image edge are clipped; boxes left under 1 px wide or high are dropped."""
 
     @pytest.mark.parametrize(
         ("box", "clipped"),
@@ -571,11 +571,13 @@ class TestOutOfImageBoxes:
             pytest.param((10.0, 500.0, 100.0, 600.0), id="below-image"),
             pytest.param((640.0, 20.0, 700.0, 200.0), id="clips-to-zero-width"),
             pytest.param((10.0, -40.0, 100.0, 0.0), id="clips-to-zero-height"),
-            pytest.param((639.9999, 20.0, 700.0, 200.0), id="clips-below-rounding"),
-            pytest.param((100.0, 20.0, 100.0003, 200.0), id="inside-below-rounding"),
+            pytest.param((639.5, 20.0, 700.0, 200.0), id="clips-under-one-pixel-wide"),
+            pytest.param((10.0, 479.5, 100.0, 520.0), id="clips-under-one-pixel-high"),
+            pytest.param((100.0, 20.0, 100.5, 200.0), id="inside-under-one-pixel-wide"),
+            pytest.param((100.0, 20.0, 200.0, 20.99), id="inside-just-under-one-pixel-high"),
         ],
     )
-    def test_box_without_area_is_dropped_and_the_image_kept(
+    def test_box_under_one_pixel_is_dropped_and_the_image_kept(
         self,
         tmp_path: Path,
         box: tuple[float, float, float, float],
@@ -587,6 +589,22 @@ class TestOutOfImageBoxes:
         assert (out / "labels/train/gone.txt").read_text() == ""
         assert result["instance_shape"].tolist() == ["none"]
         assert any(": 1 (" in message and "gone.jpg" in message and "Пропущен" in message for message in capture_logs)
+
+    @pytest.mark.parametrize(
+        "box",
+        [
+            pytest.param((100.0, 20.0, 101.0, 21.0), id="one-pixel"),
+            # 11.1 - 10.1 is just under 1 in binary floating point.
+            pytest.param((10.1, 20.3, 11.1, 21.3), id="one-pixel-at-fractional-coordinates"),
+            pytest.param((100.0, 20.0, 100.996, 200.0), id="one-pixel-at-two-decimals"),
+            pytest.param((639.0, 479.0, 700.0, 520.0), id="clips-to-one-pixel"),
+        ],
+    )
+    def test_box_of_one_pixel_is_kept(self, tmp_path: Path, box: tuple[float, float, float, float]) -> None:
+        """The 1 px rule measures a side rounded to two decimals, as ``--to-coco`` does."""
+        out, _ = _export_and_reimport(tmp_path, {"small.jpg": [box]})
+
+        assert len((out / "labels/train/small.txt").read_text().splitlines()) == 1
 
     def test_remaining_boxes_are_kept_and_both_counts_are_summarized(
         self, tmp_path: Path, capture_logs: list[str], capture_info_logs: list[str]
@@ -679,11 +697,11 @@ _LABELS = st.sampled_from(["cat", "dog", "001", "NA"])
 
 @st.composite
 def _labelled_box(draw: st.DrawFn) -> tuple[str, float, float, float, float]:
-    """Draw a label and a quarter-pixel box inside a 640x480 image."""
+    """Draw a label and a box on a quarter-pixel grid, at least 1 px each way, inside a 640x480 image."""
     x_tl = draw(st.integers(0, 639 * 4)) / 4
     y_tl = draw(st.integers(0, 479 * 4)) / 4
-    x_br = draw(st.integers(int(x_tl * 4) + 1, 640 * 4)) / 4
-    y_br = draw(st.integers(int(y_tl * 4) + 1, 480 * 4)) / 4
+    x_br = draw(st.integers(int(x_tl * 4) + 4, 640 * 4)) / 4
+    y_br = draw(st.integers(int(y_tl * 4) + 4, 480 * 4)) / 4
     return draw(_LABELS), x_tl, y_tl, x_br, y_br
 
 
