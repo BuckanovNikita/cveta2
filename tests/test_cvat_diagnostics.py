@@ -30,8 +30,8 @@ from cveta2.domain.errors import CvatApiError, CvatRequestDiagnostics, Cveta2Err
 from cveta2.exceptions import CvatRequestDiagnostics as PublicDiagnostics
 from tests.helpers import make_task
 
-Reply = tuple[int, dict[str, str], bytes]
-Route = Callable[[str, str], Reply]
+type Reply = tuple[int, dict[str, str], bytes]
+type Route = Callable[[str, str], Reply]
 
 
 @contextmanager

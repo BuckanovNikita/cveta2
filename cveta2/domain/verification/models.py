@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from cveta2.domain.errors import Cveta2Error
 
-Profile = Literal["cveta2", "clearml-yolo"]
+type Profile = Literal["cveta2", "clearml-yolo"]
 
 
 class ValidationOptions(BaseModel):

@@ -199,7 +199,7 @@ def check_cache_permissions(*, fix: bool = False) -> bool:
     return False
 
 
-_BrokenList = list[tuple[Path, str]]
+type _BrokenList = list[tuple[Path, str]]
 
 
 @dataclass
