@@ -69,7 +69,7 @@ def reviewed_seed_project(clearml_run: RunSettings) -> Iterator[ProjectInfo]:
             for job in reversed(restore_jobs):
                 try:
                     adapter.update_job(job.id, stage=job.stage, state=job.state)
-                except Cveta2Error as error:  # noqa: PERF203 - restore every job.
+                except Cveta2Error as error:
                     errors.append(f"job {job.id}: {error}")
         finally:
             sdk.close()

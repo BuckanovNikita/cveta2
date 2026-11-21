@@ -1,7 +1,7 @@
 """Internal data structures used while processing a CVAT task."""
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from cveta2.domain.models import COMPLETED_JOB_STAGE, COMPLETED_JOB_STATE
 
@@ -87,7 +87,7 @@ class _TaskContext:
         attr_names: dict[int, str],
         issues: "list[RawIssue] | None" = None,
         jobs: "list[RawJob] | None" = None,
-    ) -> "_TaskContext":
+    ) -> Self:
         """Build context from DTO objects."""
         return cls(
             frames=dict(enumerate(data_meta.frames)),

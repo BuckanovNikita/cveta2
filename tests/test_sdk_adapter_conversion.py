@@ -5,7 +5,7 @@ Uses SimpleNamespace to mock CVAT SDK objects without importing cvat_sdk.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -58,7 +58,7 @@ class TestExtractUpdatedDate:
         assert extract_updated_date(task) == "2026-01-15T10:00:00"
 
     def test_datetime_attr(self) -> None:
-        dt = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 3, 1, 12, 0, 0, tzinfo=UTC)
         task = SimpleNamespace(updated_date=dt)
         assert extract_updated_date(task) == dt.isoformat()
 
@@ -429,7 +429,7 @@ class TestConvertAnnotations:
             stage="acceptance",
             state="completed",
             type="annotation",
-            updated_date=datetime(2026, 11, 18, 12, 30, tzinfo=timezone.utc),
+            updated_date=datetime(2026, 11, 18, 12, 30, tzinfo=UTC),
         )
         client.api_client.jobs_api.list_endpoint.call_with_http_info.return_value = (
             SimpleNamespace(results=[job], next=None),

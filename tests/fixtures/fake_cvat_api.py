@@ -10,7 +10,7 @@ import dataclasses
 import threading
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from cveta2.application.ports.dtos import (
     RawAnnotations,
@@ -154,7 +154,7 @@ class FakeCvatApi:
         *,
         project_name: str = "fake",
         other_projects: Sequence[ProjectInfo] = (),
-    ) -> FakeCvatApi:
+    ) -> Self:
         """Create a fake API serving only a project with the given tasks.
 
         ``other_projects`` are additional entries for ``list_projects`` that own

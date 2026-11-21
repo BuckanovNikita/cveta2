@@ -31,8 +31,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Self
 
 from cvat_sdk.api_client.exceptions import ApiException
 from cvat_sdk.core.client import Client
@@ -61,7 +61,7 @@ class StandSettings(BaseModel):
     organization: str
 
     @classmethod
-    def from_env(cls) -> StandSettings:
+    def from_env(cls) -> Self:
         keys = {
             "host": "CVAT_INTEGRATION_HOST",
             "username": "CVAT_INTEGRATION_USER",
@@ -91,7 +91,7 @@ class Listing(BaseModel):
     project_id: int | None = None
 
     def age(self) -> str:
-        delta = datetime.now(timezone.utc) - self.created
+        delta = datetime.now(UTC) - self.created
         hours = int(delta.total_seconds() // 3600)
         if hours >= 24:
             return f"{hours // 24}d{hours % 24}h"

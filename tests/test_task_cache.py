@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import stat
 from dataclasses import asdict, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import import_module
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
@@ -215,7 +215,7 @@ class TestLocalCache:
 
         entry = CachedAnnotationsEntry.model_validate_json(_entry(cache_dir).read_bytes())
 
-        assert datetime.fromisoformat(entry.cached_at).tzinfo == timezone.utc
+        assert datetime.fromisoformat(entry.cached_at).tzinfo == UTC
 
     def test_entry_records_the_job_it_was_cached_against(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / "cache"

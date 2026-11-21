@@ -1,7 +1,7 @@
 """Shared S3 utilities used by both image_downloader and image_uploader."""
 
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any, Final, TypeVar
+from typing import TYPE_CHECKING, Any, Final
 
 import boto3
 from boto3.exceptions import S3UploadFailedError
@@ -30,7 +30,6 @@ if TYPE_CHECKING:
 
     from cveta2.adapters.s3.types import S3Client
 
-_T = TypeVar("_T")
 
 # KeyError covers malformed S3 responses (missing "Body"/"Contents" keys),
 # which surface exactly like transport failures for a transfer.  ClientError
@@ -56,10 +55,10 @@ S3_TRANSFER_ERRORS: "Final" = (
 _RETRYABLE_S3_CODES: "Final" = frozenset({"SlowDown", "RequestTimeout", "RequestTimeTooSkewed", "InternalError", "503"})
 
 
-def run_s3_transfers(
-    items: "Sequence[_T]",
-    transfer: "Callable[[_T], None]",
-    describe: "Callable[[_T], str]",
+def run_s3_transfers[T](
+    items: "Sequence[T]",
+    transfer: "Callable[[T], None]",
+    describe: "Callable[[T], str]",
     *,
     desc: "str",
     unit: "str",

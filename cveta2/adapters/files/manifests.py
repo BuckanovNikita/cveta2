@@ -3,7 +3,7 @@
 import hashlib
 import importlib
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
@@ -199,7 +199,7 @@ def new_manifest(  # noqa: PLR0913, PLR0917
         task_image_names,
         host=host,
         intent_complete=intent_complete,
-        started_at=datetime.now(timezone.utc).isoformat(),
+        started_at=datetime.now(UTC).isoformat(),
     )
 
 

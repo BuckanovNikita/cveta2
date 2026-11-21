@@ -1,7 +1,8 @@
 """Public API connection contracts."""
 
+from typing import Self
+
 import pytest
-from typing_extensions import Self
 
 import cveta2
 from cveta2.domain.errors import (

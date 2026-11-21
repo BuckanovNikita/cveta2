@@ -14,9 +14,9 @@ import dataclasses
 import shutil
 import threading
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypeVar
+from typing import Self
 
 from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
@@ -58,7 +58,6 @@ class CachedTaskMetaEntry(CachedEntryHeader):
     issues: list[RawIssue]
 
 
-_Entry = TypeVar("_Entry", bound=CachedEntryHeader)
 _META = "meta"
 
 
@@ -71,9 +70,9 @@ def _legacy_name(task_id: int) -> str:
     return f"task_{task_id}.json"
 
 
-def _parse_entry(  # noqa: PLR0913 - one validation for every entry kind
-    raw: bytes, model: type[_Entry], task: TaskInfo, jobs: list[CachedJob], *, label: str, source: str
-) -> _Entry | None:
+def _parse_entry[Entry: CachedEntryHeader](  # noqa: PLR0913 - one validation for every entry kind
+    raw: bytes, model: type[Entry], task: TaskInfo, jobs: list[CachedJob], *, label: str, source: str
+) -> Entry | None:
     """Return the entry when it still describes the live task and jobs; log why not."""
     try:
         entry = model.model_validate_json(raw)
@@ -160,7 +159,7 @@ class S3CacheBackend:
         cls,
         cs_info: CloudStorageInfo | None,
         task_cache_s3: str | None = None,
-    ) -> "S3CacheBackend | None":
+    ) -> Self | None:
         """Build a backend from CVAT cloud storage info (None when absent).
 
         *task_cache_s3* (the ``cache.projects.<name>.task_cache_s3``
@@ -191,7 +190,7 @@ class S3CacheBackend:
         key_prefix: str,
         *,
         explicit_location: bool = False,
-    ) -> "S3CacheBackend":
+    ) -> Self:
         """Build a backend, or an unavailable one when no client can be made."""
         try:
             client = make_s3_client(endpoint_url)
@@ -312,7 +311,7 @@ class TaskAnnotationCache:
             task_id=task.id,
             task_updated_date=task.updated_date,
             jobs=_cached_jobs(scope.jobs),
-            cached_at=datetime.now(timezone.utc).isoformat(),
+            cached_at=datetime.now(UTC).isoformat(),
             shapes=list(annotations.shapes),
         )
         self._write(task.id, scope.name, entry)
@@ -329,7 +328,7 @@ class TaskAnnotationCache:
             task_id=task.id,
             task_updated_date=task.updated_date,
             jobs=_cached_jobs(jobs),
-            cached_at=datetime.now(timezone.utc).isoformat(),
+            cached_at=datetime.now(UTC).isoformat(),
             data_meta=meta.data_meta,
             issues=list(meta.issues),
         )
@@ -419,7 +418,9 @@ class TaskAnnotationCache:
             logger.warning(f"Кэш аннотаций: не удалось удалить записей старого формата: {failed}")
         return removed
 
-    def _read(self, task: TaskInfo, label: str, model: type[_Entry], jobs: list[CachedJob]) -> _Entry | None:
+    def _read[Entry: CachedEntryHeader](
+        self, task: TaskInfo, label: str, model: type[Entry], jobs: list[CachedJob]
+    ) -> Entry | None:
         """Read a valid entry locally, else from S3 with a local backfill.
 
         A local entry proven invalid is deleted; one that cannot be read at

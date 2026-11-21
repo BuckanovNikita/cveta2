@@ -10,7 +10,7 @@ CRUD loop can continue.
 import getpass
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypeVar
+from typing import TYPE_CHECKING, Literal
 
 from cveta2.composition.configuration import require_interactive
 from cveta2.domain.errors import InteractiveModeRequiredError
@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from cveta2.interfaces.commands.interactive._questionary import Choice
 
 OnCancel = Literal["exit", "none"]
-_Answer = TypeVar("_Answer")
 
 # Shared captions. These stay named rather than inline because they are
 # *parameter defaults*, the one presentation surface
@@ -35,7 +34,7 @@ _NOTHING_SELECTED = "Ничего не выбрано."
 _NO_TERMINAL_HINT = "Задайте CVAT_USERNAME/CVAT_PASSWORD или запустите команду в терминале."
 
 
-def _ask(hint: str, ask: "Callable[[], _Answer]") -> _Answer:
+def _ask[Answer](hint: str, ask: "Callable[[], Answer]") -> Answer:
     """Run one prompt; closed standard input becomes the typed interactive error.
 
     A cron or CI job that forgot ``CVETA2_NO_INTERACTIVE`` reaches the prompt

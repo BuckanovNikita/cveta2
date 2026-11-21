@@ -4,7 +4,7 @@ import importlib.resources
 import os
 import stat
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypedDict
+from typing import ClassVar, NamedTuple, Self, TypedDict
 
 import yaml
 from loguru import logger
@@ -27,9 +27,6 @@ from cveta2.domain.errors import (
     MissingCredentialsError,
 )
 from cveta2.domain.managed.models import ManagedError, MigrationRequired, ProjectConfig, ProjectDefinition
-
-if TYPE_CHECKING:
-    from typing_extensions import Self
 
 CONFIG_DIR = Path.home() / ".config" / "cveta2"
 CONFIG_PATH = CONFIG_DIR / "config.yaml"
@@ -354,7 +351,7 @@ class SectionConfig(BaseModel):
         return self._dump() or None
 
     @classmethod
-    def load(cls, config_path: Path | None = None, *, project_path: Path | None = None) -> "Self":
+    def load(cls, config_path: Path | None = None, *, project_path: Path | None = None) -> Self:
         """Load this section from the config YAML (defaults when absent)."""
         path = get_config_path(config_path)
         personal = _load_raw_yaml(path)
@@ -450,7 +447,7 @@ class CvatConfig(BaseModel):
         return value.rstrip("/")
 
     @classmethod
-    def _from_cvat_section(cls, data: dict[str, object]) -> "CvatConfig":
+    def _from_cvat_section(cls, data: dict[str, object]) -> Self:
         """Build from a raw YAML top-level dict (reads the ``cvat`` key)."""
         cvat_section = data.get("cvat")
         if not isinstance(cvat_section, dict):
@@ -458,7 +455,7 @@ class CvatConfig(BaseModel):
         return cls(**{k: v for k, v in cvat_section.items() if k in cls.model_fields})
 
     @classmethod
-    def from_file(cls, path: Path = CONFIG_PATH) -> "CvatConfig":
+    def from_file(cls, path: Path = CONFIG_PATH) -> Self:
         """Load config from a YAML file.  Returns empty config if file is missing."""
         cfg = cls._from_cvat_section(_load_raw_yaml(path))
         cfg._source_path = path  # noqa: SLF001 - this factory owns the model source
@@ -472,7 +469,7 @@ class CvatConfig(BaseModel):
         return self._source_path
 
     @classmethod
-    def from_env(cls) -> "CvatConfig":
+    def from_env(cls) -> Self:
         """Build config from environment variables."""
         return cls(
             host=os.environ.get("CVAT_HOST", ""),
@@ -542,7 +539,7 @@ class CvatConfig(BaseModel):
         logger.info(f"Config saved to {path}")
         return path
 
-    def require_credentials(self) -> "CvatConfig":
+    def require_credentials(self) -> Self:
         """Return self when credentials are present; raise otherwise.
 
         Never prompts.  The CLI layer prompts for missing credentials
@@ -834,7 +831,7 @@ class NetworkConfig(SectionConfig):
     retry_max_wait: float = Field(default=30.0, gt=0)
 
     @classmethod
-    def resolve(cls, config_path: Path | None = None, *, project_path: Path | None = None) -> "NetworkConfig":
+    def resolve(cls, config_path: Path | None = None, *, project_path: Path | None = None) -> Self:
         """Load the section, then let environment variables override it.
 
         ``SectionConfig.load`` reads the config file only; these knobs are
