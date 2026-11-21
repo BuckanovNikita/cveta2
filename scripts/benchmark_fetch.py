@@ -21,7 +21,7 @@ from collections import Counter
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 from unittest.mock import patch
 
 from loguru import logger
@@ -85,18 +85,22 @@ class _TimedCvat(FakeCvatApi):
         super().__init__(fixtures)
         self._delay = delay
 
+    @override
     def _enter(self, method: str) -> None:
         time.sleep(self._delay)
         super()._enter(method)
 
+    @override
     def _raise_if_failing(self, method: str, task_id: int) -> None:
         time.sleep(self._delay)
         super()._raise_if_failing(method, task_id)
 
+    @override
     def get_project_labels(self, _project_id: int) -> list[LabelInfo]:
         self._enter("get_project_labels")
         return super().get_project_labels(_project_id)
 
+    @override
     def get_project_cloud_storage(self, _project_id: int) -> CloudStorageInfo:
         self._enter("get_project_cloud_storage")
         return _STORAGE
@@ -117,15 +121,18 @@ class _TimedS3(FakeS3Client):
         super().__init__(objects, keyed_by_bucket=False)
         self._delay = delay
 
-    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+    @override
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         time.sleep(self._delay)
         super().get_object(Bucket=Bucket, Key=Key)
         return {"Body": _Body(self.objects[Key])}
 
-    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+    @override
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         time.sleep(self._delay)
         return super().head_object(Bucket=Bucket, Key=Key)
 
+    @override
     def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
         time.sleep(self._delay)
         return super().list_objects_v2(**kwargs)
@@ -165,14 +172,17 @@ class _CountedFiles(LocalWorkflowFiles):
         with self._lock:
             self.counts[operation] += 1
 
+    @override
     def prepare_tasks(self, output_dir: Path) -> Path:
         self._record("prepare_tasks")
         return super().prepare_tasks(output_dir)
 
+    @override
     def write_task_csv(self, task: TaskInfo, result: TaskAnnotations, tasks_dir: Path) -> None:
         self._record("task_csv_writes")
         super().write_task_csv(task, result, tasks_dir)
 
+    @override
     def cleanup_tasks(self, tasks_dir: Path) -> None:
         self._record("cleanup_tasks")
         super().cleanup_tasks(tasks_dir)

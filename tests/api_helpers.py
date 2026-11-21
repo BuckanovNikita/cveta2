@@ -1,6 +1,6 @@
 """Public API api helpers contracts."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import cveta2
 from cveta2.application.ports.dtos import LabelPatch
@@ -47,21 +47,25 @@ class _ProjectScopedApi(FakeCvatApi):
         if project_id != self.project_id:
             raise CvatApiError(f"no such project: {project_id!r}", status_code=404)
 
+    @override
     def get_project_tasks(self, _project_id: int) -> "list[TaskInfo]":
         """Return the project's tasks, refusing any other project id."""
         self._check_project(_project_id)
         return super().get_project_tasks(_project_id)
 
+    @override
     def get_project_labels(self, _project_id: int) -> "list[LabelInfo]":
         """Return the project's labels, refusing any other project id."""
         self._check_project(_project_id)
         return super().get_project_labels(_project_id)
 
+    @override
     def get_project_cloud_storage(self, _project_id: int) -> "CloudStorageInfo | None":
         """Return the configured cloud storage, refusing any other project id."""
         self._check_project(_project_id)
         return self._cloud_storage
 
+    @override
     def patch_project_labels(
         self,
         project_id: int,

@@ -1,6 +1,7 @@
 """Construct the supported CVAT client from resolved configuration and adapters."""
 
 from dataclasses import replace
+from typing import override
 
 import pandas as pd
 
@@ -48,11 +49,13 @@ class CvatClient(ApplicationClient):
         )
 
     @property
+    @override
     def host(self) -> str:
         """Read the retained public configuration, matching session construction."""
         return self._cfg.host or ""
 
     @property
+    @override
     def default_organization(self) -> str | None:
         """Read the configured default independently of session organization."""
         return self._cfg.organization
@@ -66,7 +69,8 @@ class CvatClient(ApplicationClient):
             raise_on_failure=should_raise_on_fetch_failure(),
         )
 
-    def prepare_fetch(  # noqa: PLR0913
+    @override
+    def prepare_fetch(
         self,
         project_id: int,
         *,
@@ -87,6 +91,7 @@ class CvatClient(ApplicationClient):
             project_name=project_name,
         )
 
+    @override
     def set_task_jobs_status(
         self,
         task_id: int,
@@ -98,6 +103,7 @@ class CvatClient(ApplicationClient):
         self._refresh_runtime_settings()
         return super().set_task_jobs_status(task_id, stage=stage, state=state)
 
+    @override
     def create_task_issues(
         self,
         task_id: int,

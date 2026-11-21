@@ -1,7 +1,7 @@
 """Image requests abort, while interrupted bodies and local writes are counted."""
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from botocore.exceptions import (
@@ -47,7 +47,8 @@ class _FailingRequest(FakeS3Client):
         self.error = error
         self.attempts = 0
 
-    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+    @override
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         self.get_calls.append(f"{Bucket}/{Key}")
         self.attempts += 1
         raise self.error
@@ -97,7 +98,8 @@ class _BodyFailure(FakeS3Client):
         self.recover = recover
         self.attempts = 0
 
-    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+    @override
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         self.attempts += 1
         if self.recover and self.attempts > 1:
             return super().get_object(Bucket=Bucket, Key=Key)
@@ -154,7 +156,8 @@ def test_missing_code_during_body_read_is_not_a_missing_key(tmp_path: "Path", mo
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "Body")
 
     class FailedBodyClient(FakeS3Client):
-        def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        @override
+        def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
             self.get_calls.append(f"{Bucket}/{Key}")
             return {"Body": FailedBody()}
 
@@ -174,7 +177,8 @@ def test_direct_failures_missing_keys_and_fallback_failures_accumulate(
     """
 
     class MixedClient(FakeS3Client):
-        def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+        @override
+        def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
             if Key in {"images/broken1.jpg", "images/broken2.jpg"}:
                 return {"Body": _BrokenBody()}
             if Key == "images/nested/vanish.jpg":

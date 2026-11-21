@@ -5,7 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import stat
-from typing import IO, TYPE_CHECKING, Any, NamedTuple
+from typing import IO, TYPE_CHECKING, Any, NamedTuple, override
 
 import pytest
 
@@ -70,7 +70,8 @@ class _UnreadableKeysS3Client(FakeS3Client):
         super().__init__(objects, keyed_by_bucket=keyed_by_bucket)
         self._unreadable = frozenset(unreadable)
 
-    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+    @override
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         """Serve the object unless its key was marked unreadable."""
         if Key in self._unreadable:
             raise KeyError(Key)

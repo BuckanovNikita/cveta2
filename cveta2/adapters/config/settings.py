@@ -4,7 +4,7 @@ import importlib.resources
 import os
 import stat
 from pathlib import Path
-from typing import ClassVar, NamedTuple, Self, TypedDict
+from typing import ClassVar, NamedTuple, Self, TypedDict, override
 
 import yaml
 from loguru import logger
@@ -404,9 +404,11 @@ class _ProjectsSection(SectionConfig):
     """Section whose YAML value is directly the ``projects`` mapping."""
 
     @classmethod
+    @override
     def _wrap_raw(cls, raw: dict[str, object]) -> dict[str, object]:
         return {"projects": raw}
 
+    @override
     def _to_raw(self) -> object | None:
         return self._dump().get("projects") or None
 
@@ -618,6 +620,7 @@ class CacheConfig(SectionConfig):
             return {}
         return {str(k): v if isinstance(v, (dict, CacheProjectSettings)) else {} for k, v in value.items()}
 
+    @override
     def _to_raw(self) -> object | None:
         data = self._dump()
         projects = data.get("projects")

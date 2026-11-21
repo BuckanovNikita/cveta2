@@ -178,6 +178,7 @@ warn_unused_configs = true
 # packages and fails with a duplicate-module error. vendor/ is only a leftover
 # CVAT checkout in older clones - mypy, unlike ruff, ignores .gitignore.
 exclude = ["vendor/", "local/", "mutants/"]
+enable_error_code = ["explicit-override"]
 
 [[tool.mypy.overrides]]
 module = ["cvat_sdk.*"]

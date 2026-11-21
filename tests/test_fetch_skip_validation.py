@@ -4,7 +4,7 @@ import shutil
 import threading
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pandas as pd
 import pytest
@@ -73,6 +73,7 @@ class PromotionApi(FakeCvatApi):
         self.before_update: Callable[[int], None] | None = None
         self.completion_at_annotations: list[dict[int, bool]] = []
 
+    @override
     def get_project_tasks(self, project_id: int) -> list[TaskInfo]:
         tasks = super().get_project_tasks(project_id)
         if self.fail_project_reads:
@@ -89,6 +90,7 @@ class PromotionApi(FakeCvatApi):
             for task in tasks
         ]
 
+    @override
     def get_task_jobs(self, task_id: int) -> list[RawJob]:
         self._raise_if_failing("get_task_jobs", task_id)
         self.job_reads.append(task_id)
@@ -96,6 +98,7 @@ class PromotionApi(FakeCvatApi):
             raise CvatApiError("jobs denied", status_code=403)
         return list(self.jobs[task_id])
 
+    @override
     def get_task_annotations(self, task_id: int) -> RawAnnotations:
         self.completion_at_annotations.append(
             {
@@ -105,6 +108,7 @@ class PromotionApi(FakeCvatApi):
         )
         return super().get_task_annotations(task_id)
 
+    @override
     def update_job(self, job_id: int, *, stage: str | None = None, state: str | None = None) -> None:
         self.update_attempts.append(job_id)
         if self.before_update is not None:
@@ -304,6 +308,7 @@ class ConcurrentPromotionApi(PromotionApi):
         self.max_active = 0
         self.pair = threading.Barrier(2)
 
+    @override
     def get_task_jobs(self, task_id: int) -> list[RawJob]:
         with self._lock:
             first_read = task_id not in self.first_reads
@@ -533,7 +538,8 @@ def test_partial_mutation_failure_leaves_both_cache_layers_invalidated(
 
 
 class FailingDeleteS3(FakeS3Client):
-    def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
+    @override
+    def delete_object(self, *, Bucket: str, Key: str) -> None:
         self.delete_calls.append(self._store_key(Bucket, Key))
         raise ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject")
 

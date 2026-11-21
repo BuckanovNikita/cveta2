@@ -9,7 +9,7 @@ Implements the subset of the boto3 S3 client used by cveta2
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from botocore.exceptions import ClientError
 
@@ -141,6 +141,7 @@ class PagedFakeS3Client(FakeS3Client):
         self._expected_token: str | None = None
         self.list_calls: list[dict[str, str]] = []
 
+    @override
     def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
         self.list_calls.append(dict(kwargs))
         unknown = sorted(set(kwargs) - _LIST_PARAMETERS)

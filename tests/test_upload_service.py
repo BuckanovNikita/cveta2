@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, override
 from unittest.mock import Mock
 
 import pandas as pd
@@ -98,18 +98,21 @@ class _ProjectScopedFake(FakeCvatApi):
         self._cloud_storage = cloud_storage
         self.data_meta_calls: list[int] = []
 
+    @override
     def get_project_labels(self, _project_id: int) -> list[LabelInfo]:
         """Return the fixture labels only for the fixture project."""
         if _project_id != self._project.id:
             return []
         return list(self._labels)
 
+    @override
     def get_project_cloud_storage(self, _project_id: int) -> CloudStorageInfo | None:
         """Return the configured storage only for the fixture project."""
         if _project_id != self._project.id:
             return None
         return self._cloud_storage
 
+    @override
     def get_task_data_meta(self, task_id: int) -> RawDataMeta:
         """Record the fetch, then delegate to the in-memory task store."""
         self.data_meta_calls.append(task_id)
@@ -130,11 +133,13 @@ class _ListCountingS3(FakeS3Client):
         self.list_calls = 0
         self.uploaded_keys: list[str] = []
 
+    @override
     def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
         """Count the listing, then delegate."""
         self.list_calls += 1
         return super().list_objects_v2(**kwargs)
 
+    @override
     def upload_file(self, filename: str, bucket: str, key: str) -> None:
         """Record the key and store the file, rejecting a non-file path.
 
@@ -1257,6 +1262,7 @@ class TestS3FailureAbortsBeforeTaskCreation:
         """
 
         class _FailingS3(_ListCountingS3):
+            @override
             def upload_file(self, filename: str, _bucket: str, _key: str) -> None:
                 # AccessDenied rather than a transport error: the retry
                 # policy correctly backs off on the latter, and this test is

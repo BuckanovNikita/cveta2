@@ -7,7 +7,7 @@ assert the wiring reaches (or skips) ``download_images``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 from unittest.mock import MagicMock
 
 import pytest
@@ -99,6 +99,7 @@ def test_fetch_reports_missing_s3_credentials_without_traceback(
     missing = NoCredentialsError()
 
     class _NoCredentials(FakeS3Client):
+        @override
         def get_object(self, **_request: str) -> dict[str, Any]:
             raise missing
 
