@@ -32,7 +32,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, Self
 from urllib.parse import urlencode
 
 import boto3
@@ -102,7 +102,7 @@ class SeedSettings(BaseModel):
     minio_bucket: str
 
     @classmethod
-    def from_env(cls) -> SeedSettings:
+    def from_env(cls) -> Self:
         values = {field: os.environ.get(env, "").strip() for field, env in ENV_KEYS.items()}
         missing = [ENV_KEYS[field] for field, value in values.items() if not value]
         if missing:

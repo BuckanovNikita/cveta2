@@ -2,17 +2,14 @@
 
 from collections.abc import Iterable, Sequence
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import TypeVar
 
 from loguru import logger
 
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.output import preview_names
 
-_T = TypeVar("_T")
 
-
-def pick_latest_duplicate(context: str, name: str, candidates: Sequence[_T]) -> _T:
+def pick_latest_duplicate[T](context: str, name: str, candidates: Sequence[T]) -> T:
     """Return the lexicographic max of *candidates*, warning when several exist.
 
     Both the uploader and the downloader resolve duplicate basenames the
@@ -27,13 +24,13 @@ def pick_latest_duplicate(context: str, name: str, candidates: Sequence[_T]) -> 
     return winner
 
 
-def names_with_basename_fallback(pairs: Iterable[tuple[str, _T]]) -> dict[str, _T]:
+def names_with_basename_fallback[T](pairs: Iterable[tuple[str, T]]) -> dict[str, T]:
     """Map each name to its value, also keyed by basename (first wins).
 
     Basename fallback handles subfolder frame names
     (e.g. ``"2026-02/img.jpg"`` is also accessible via ``"img.jpg"``).
     """
-    result: dict[str, _T] = {}
+    result: dict[str, T] = {}
     for name, value in pairs:
         result[name] = value
         base = PurePosixPath(name).name

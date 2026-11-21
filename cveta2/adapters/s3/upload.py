@@ -5,7 +5,7 @@ and S3 utilities from :mod:`cveta2.adapters.s3.utils`.
 """
 
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from loguru import logger
@@ -87,7 +87,7 @@ def _resolve_duplicate_basenames(names: Iterable[str]) -> dict[str, str]:
 
 def _assign_month_folder(image_name: str) -> str:
     """Place a new image into the current UTC month folder (``YYYY-MM/name``)."""
-    month_prefix = datetime.now(tz=timezone.utc).strftime("%Y-%m")
+    month_prefix = datetime.now(tz=UTC).strftime("%Y-%m")
     return f"{month_prefix}/{image_name}"
 
 

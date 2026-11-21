@@ -11,7 +11,7 @@ import math
 import threading
 from collections.abc import Callable
 from contextvars import ContextVar
-from typing import Final, ParamSpec, TypeVar
+from typing import Final
 
 import urllib3.exceptions
 from cvat_sdk.api_client.exceptions import ApiException, OpenApiException
@@ -26,9 +26,6 @@ from cveta2.adapters.cvat.diagnostics import (
 )
 from cveta2.adapters.execution.retry import network_retry
 from cveta2.domain.errors import CvatApiError
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 
 
 def _parse_retry_after(exc: ApiException) -> float | None:
@@ -53,7 +50,7 @@ def _parse_retry_after(exc: ApiException) -> float | None:
     return delay if math.isfinite(delay) and delay >= 0 else None
 
 
-def _translate_api_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
+def _translate_api_errors[**P, R](func: "Callable[P, R]") -> "Callable[P, R]":
     """Convert SDK ``OpenApiException`` errors into :class:`CvatApiError`.
 
     ``ApiException`` carries an HTTP status. The rest of the family
@@ -64,7 +61,7 @@ def _translate_api_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
     """
 
     @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return func(*args, **kwargs)
         except ApiException as e:
@@ -114,7 +111,7 @@ def _should_retry_idempotent_write(exc: BaseException) -> bool:
     return isinstance(exc, CvatApiError) and exc.status_code in _READ_RETRY_STATUS
 
 
-def _translate_transport_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
+def _translate_transport_errors[**P, R](func: "Callable[P, R]") -> "Callable[P, R]":
     """Convert a transport failure that outlived the retry budget into ``CvatApiError``.
 
     Sits *outside* the retry decorator: ``_should_retry_read`` must still see
@@ -122,7 +119,7 @@ def _translate_transport_errors(func: "Callable[_P, _R]") -> "Callable[_P, _R]":
     """
 
     @functools.wraps(func)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return func(*args, **kwargs)
         except _TRANSPORT_ERRORS as e:
@@ -196,16 +193,16 @@ def install_request_capture() -> None:
         _GlobalTimeout.installed = True
 
 
-def cvat_read(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def cvat_read[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Retry transient reads, translating exhausted transport failures last."""
     return operation_context(_translate_transport_errors(_api_retry(_translate_api_errors(func))))
 
 
-def cvat_non_idempotent_write(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def cvat_non_idempotent_write[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Retry writes only after a proven refusal, never after an ambiguous result."""
     return operation_context(_translate_transport_errors(_write_retry(_translate_api_errors(func))))
 
 
-def cvat_idempotent_write(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def cvat_idempotent_write[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Retry transient status failures while replacing the same explicit values."""
     return operation_context(_translate_transport_errors(_idempotent_write_retry(_translate_api_errors(func))))

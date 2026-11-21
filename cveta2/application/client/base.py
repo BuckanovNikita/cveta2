@@ -7,7 +7,7 @@ Every mixin inherits :class:`_ClientBase` so ``self._require_api`` and
 
 from contextlib import ExitStack
 from types import TracebackType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 from cveta2.application.client.session import TaskWriteSession
 from cveta2.application.ports.client import ClientSettings, CvatSessionFactory
@@ -15,8 +15,6 @@ from cveta2.application.ports.execution import ConcurrentRunner
 from cveta2.application.ports.images import ImageReadPort
 
 if TYPE_CHECKING:
-    from typing_extensions import Self
-
     from cveta2.application.ports.cvat import CvatApiPort
     from cveta2.domain.storage import CloudStorageInfo
 
@@ -44,7 +42,7 @@ class _ClientBase:
         self._exit_stack: ExitStack | None = None
         self._cloud_storage_memo: dict[int, CloudStorageInfo | None] = {}
 
-    def __enter__(self) -> "Self":
+    def __enter__(self) -> Self:
         """Open a persistent SDK connection for the lifetime of this block."""
         if self._api is not None:
             # DI api provided -- nothing to open.

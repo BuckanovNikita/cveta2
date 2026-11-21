@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.cookies import CookieError, SimpleCookie
 from itertools import pairwise
-from typing import ParamSpec, TypeVar, cast
+from typing import cast
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import urllib3
@@ -25,8 +25,6 @@ from urllib3.util import Retry
 
 from cveta2.domain.errors import CvatApiError, CvatRequestDiagnostics
 
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 _SUMMARY_LIMIT = 512
 _ENDPOINT_LIMIT = 1024
 _HEADER_LIMIT = 128
@@ -93,12 +91,12 @@ _REQUEST_FAILURE: ContextVar[CvatRequestDiagnostics | None] = ContextVar("cveta2
 _REQUEST_ACTIVE: ContextVar[bool] = ContextVar("cveta2_cvat_request_active", default=False)
 
 
-def operation_context(func: Callable[_P, _R]) -> Callable[_P, _R]:
+def operation_context[**P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Scope an operation name and its typed resource arguments to this call."""
     signature = inspect.signature(func)
 
     @functools.wraps(func)
-    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
         values = signature.bind(*args, **kwargs).arguments
         ids = tuple(
             (name, value) for name, value in values.items() if name in _RESOURCE_NAMES and isinstance(value, int)
@@ -372,7 +370,7 @@ def install_pool_capture(manager: urllib3.PoolManager) -> None:
         manager.request = request  # type: ignore[method-assign]
 
 
-def capture_rest_call(func: Callable[[], _R]) -> _R:
+def capture_rest_call[R](func: Callable[[], R]) -> R:
     """Attach diagnostics to this REST failure and always clear request context."""
     token = _REQUEST_FAILURE.set(None)
     active_token = _REQUEST_ACTIVE.set(True)

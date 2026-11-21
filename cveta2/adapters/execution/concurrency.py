@@ -8,15 +8,12 @@ it is the caller's to supply.
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import ContextVar, copy_context
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING
 
 from tqdm import tqdm
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-
-_T = TypeVar("_T")
-_R = TypeVar("_R")
 
 
 _WORKERS: ContextVar[tuple[int, int]] = ContextVar("cveta2_workers", default=(1, 1))
@@ -48,11 +45,11 @@ def configure_workers(*, s3: int, cvat: int) -> None:
     _WORKERS.set((max(s3, 1), max(cvat, 1)))
 
 
-def _capture(
-    work: "Callable[[_T], _R]",
-    item: "_T",
+def _capture[T, R](
+    work: "Callable[[T], R]",
+    item: "T",
     catch: tuple[type[Exception], ...],
-) -> "_R | Exception":
+) -> "R | Exception":
     """Run *work*, returning a caught failure instead of raising it."""
     try:
         return work(item)
@@ -60,15 +57,15 @@ def _capture(
         return error
 
 
-def run_concurrent(  # noqa: PLR0913
-    items: "Sequence[_T]",
-    work: "Callable[[_T], _R]",
+def run_concurrent[T, R](  # noqa: PLR0913
+    items: "Sequence[T]",
+    work: "Callable[[T], R]",
     *,
     max_workers: int,
     catch: tuple[type[Exception], ...],
     desc: str,
     unit: str,
-) -> "list[_R | Exception]":
+) -> "list[R | Exception]":
     """Run *work* over *items* with at most *max_workers* threads.
 
     Results line up positionally with *items* however the threads happen to
@@ -82,7 +79,7 @@ def run_concurrent(  # noqa: PLR0913
     if max_workers <= 1:
         return [_capture(work, item, catch) for item in tqdm(items, desc=desc, unit=unit, leave=False)]
 
-    outcomes: dict[int, _R | Exception] = {}
+    outcomes: dict[int, R | Exception] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         pending = {pool.submit(copy_context().run, work, item): index for index, item in enumerate(items)}
         try:

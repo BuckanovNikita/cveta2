@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, Self
 
 from pydantic import BaseModel
 
@@ -40,7 +40,7 @@ class RunSettings(BaseModel):
     api_host: str
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] = os.environ) -> RunSettings:
+    def from_env(cls, environ: Mapping[str, str] = os.environ) -> Self:
         values = {key: environ.get(key, "").strip() for key in REQUIRED_ENV}
         missing = [key for key, value in values.items() if not value]
         if missing:

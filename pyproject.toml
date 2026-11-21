@@ -138,8 +138,6 @@ output_format = "md"
 mask_initial_release = false
 
 [tool.ruff]
-# Conservative syntax/lint baseline; runtime support is declared by requires-python.
-target-version = "py310"
 line-length = 120
 # vendor/ and local/ need no entry here: both are gitignored, and ruff
 # respects .gitignore. mutants/ is gitignored too but must stay listed --
@@ -159,11 +157,6 @@ ignore = [
     "CPY001",  # missing-copyright-notice - this project ships no per-file headers
 ]
 fixable = ["ALL"]
-
-[tool.ruff.lint.isort]
-# Development scripts use stdlib tomllib on the supported Python >=3.12;
-# the conservative py310 lint baseline needs this classification explicitly.
-extra-standard-library = ["tomllib"]
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]

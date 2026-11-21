@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
@@ -21,14 +21,14 @@ if TYPE_CHECKING:
 
 _MONTH_PREFIX_RE = re.compile(r"\d{4}-\d{2}/.+")
 
-_FIXED_UTC_NOW = datetime(2026, 3, 1, 0, 30, tzinfo=timezone.utc)
+_FIXED_UTC_NOW = datetime(2026, 3, 1, 0, 30, tzinfo=UTC)
 _ONE_HOUR_WEST = timezone(timedelta(hours=-1))
 
 
 class _FixedClock:
     """``datetime`` stand-in whose month depends on the requested timezone.
 
-    ``now(tz=timezone.utc)`` lands in 2026-03 while any other timezone
+    ``now(tz=UTC)`` lands in 2026-03 while any other timezone
     (including the naive ``tz=None`` a mutation produces) lands in
     2026-02, so the ``tz=`` argument becomes observable without freezing
     the real clock.
@@ -37,7 +37,7 @@ class _FixedClock:
     @staticmethod
     def now(tz: timezone | None = None) -> datetime:
         """Return the frozen instant, converted out of UTC unless asked for UTC."""
-        if tz is timezone.utc:
+        if tz is UTC:
             return _FIXED_UTC_NOW
         return _FIXED_UTC_NOW.astimezone(_ONE_HOUR_WEST)
 

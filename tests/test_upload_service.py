@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import Mock
@@ -72,7 +72,7 @@ SCHEMA_3 = 3
 
 def current_month_key(name: str) -> str:
     """S3 key a brand-new image gets: ``<prefix>/<current UTC month>/<name>``."""
-    month = datetime.now(tz=timezone.utc).strftime("%Y-%m")
+    month = datetime.now(tz=UTC).strftime("%Y-%m")
     return f"{PREFIX}/{month}/{name}"
 
 
