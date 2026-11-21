@@ -154,7 +154,7 @@ def test_empty_dataframe_keeps_column_order() -> None:
 # One record per annotation row or deletion: (image, task_id, job finished).
 # ``None`` is an unknown job position (legacy rows without stage/state), which
 # holds its task back exactly like an unfinished one.
-_Record = tuple[str, int, bool | None]
+type _Record = tuple[str, int, bool | None]
 _RECORDS = st.tuples(
     st.sampled_from(["a.jpg", "b.jpg", "c.jpg"]),
     st.integers(1, 5),

@@ -82,7 +82,7 @@ class Storage:
         self.checked.append(root)
 
 
-Scenario = tuple[Path, PrepareOptions, BundleServices, Store, Classes]
+type Scenario = tuple[Path, PrepareOptions, BundleServices, Store, Classes]
 
 
 @pytest.fixture

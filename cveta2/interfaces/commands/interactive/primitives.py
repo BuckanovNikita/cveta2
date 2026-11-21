@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     from cveta2.interfaces.commands.interactive._questionary import Choice
 
-OnCancel = Literal["exit", "none"]
+type OnCancel = Literal["exit", "none"]
 
 # Shared captions. These stay named rather than inline because they are
 # *parameter defaults*, the one presentation surface

@@ -7,7 +7,7 @@ from typing import Protocol
 
 from cveta2.application.ports.cvat import CvatApiPort
 
-CvatSessionFactory = Callable[[], AbstractContextManager[CvatApiPort]]
+type CvatSessionFactory = Callable[[], AbstractContextManager[CvatApiPort]]
 
 
 @dataclass(frozen=True)

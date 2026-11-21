@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from cveta2.composition.client import CvatClient
 from cveta2.domain.models import TaskInfo
 
-CacheMode = Literal["use", "refresh", "off"]
+type CacheMode = Literal["use", "refresh", "off"]
 """Task-annotation cache modes for :func:`fetch` / :func:`fetch_task`."""
 
 

@@ -11,7 +11,7 @@ from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawIssue,
 from cveta2.domain.managed.models import ManagedSnapshot, SourceSnapshot, TaskSnapshot
 from cveta2.domain.models import AnnotationRecord, DeletedImage, LabelInfo, TaskInfo
 
-TaskAssembler = Callable[
+type TaskAssembler = Callable[
     [
         TaskInfo,
         RawDataMeta,
