@@ -100,7 +100,7 @@ class _WriteMixin(_ClientBase):
         segment_size:
             Maximum frames per job (CVAT auto-creates multiple jobs).
         image_quality:
-            JPEG compression quality for CVAT image chunks (0-100).
+            JPEG compression quality for CVAT image chunks (1-100).
         on_created:
             Called with the new task id after the task exists but before
             its frames are attached, so a caller tracking recovery state

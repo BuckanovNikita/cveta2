@@ -428,7 +428,7 @@ def test_bootstrap_redacts_unlabeled_echoed_request_credentials() -> None:
             return _json_reply(
                 200,
                 {
-                    "version": "2.59.1",
+                    "version": "2.82.0",
                     "name": "CVAT",
                     "description": "test",
                     "logo_url": "",
@@ -626,7 +626,6 @@ _JOB_WITH_NULL_UPDATED_DATE = {
     "source_storage": None,
     "assignee_updated_date": None,
     "parent_job_id": None,
-    "consensus_replicas": 0,
 }
 
 

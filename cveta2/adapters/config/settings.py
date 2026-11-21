@@ -808,9 +808,8 @@ class UploadConfig(SectionConfig):
     # ZeroDivisionError after the task was already created. Rejecting it at
     # load time names the setting instead.
     images_per_job: int = Field(default=100, gt=0)
-    # 0-100 is the range create_upload_task documents for the CVAT chunk
-    # quality, so 0 is valid here and only the upper bound is added.
-    image_quality: int = Field(default=100, ge=0, le=100)
+    # CVAT rejects a chunk quality of 0 since 2.65, so the range is 1-100.
+    image_quality: int = Field(default=100, ge=1, le=100)
 
 
 class NetworkConfig(SectionConfig):

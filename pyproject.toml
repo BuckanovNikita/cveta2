@@ -22,7 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "boto3>=1.42.49",
-    "cvat-sdk>=2.59.1",
+    "cvat-sdk>=2.82.0",
     "loguru>=0.7.3",
     "pandas>=2.1.1",
     "pandera[pandas]>=0.34.1,<0.35",
