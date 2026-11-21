@@ -256,6 +256,36 @@ def _from_yolo_dataset(
     files.write_conversion_csv(rows, output_path)
 
 
+def _prediction_images(
+    input_dir: Path, search_dirs: list[Path], unreadable: list[Path], *, files: ConversionFiles
+) -> list[tuple[list[list[float]], Path]]:
+    """Pair the boxes of every non-empty prediction file with its image, in file order.
+
+    Raises ``Cveta2Error`` when a prediction file has no image, before any
+    image is read.
+    """
+    label_files = files.prediction_labels(input_dir)
+    if not label_files:
+        raise Cveta2Error(f"Ошибка: не найдено .txt файлов в {input_dir}")
+
+    predictions: list[tuple[list[list[float]], Path]] = []
+    missing: list[str] = []
+    for label_path in label_files:
+        labels = _labels_or_skip(label_path, unreadable, files=files)
+        if not labels:
+            continue
+        img_path = files.find_image_by_stem(label_path.stem, [input_dir, *search_dirs], subdirs=["images"])
+        if img_path is None:
+            missing.append(label_path.stem)
+        else:
+            predictions.append((labels, img_path))
+    if missing:
+        raise Cveta2Error(
+            f"Ошибка: не найдены изображения для {len(missing)} файлов: {preview_names(missing)}. CSV не записан."
+        )
+    return predictions
+
+
 def _from_yolo_predictions(  # noqa: PLR0913
     input_dir: Path,
     output_path: Path,
@@ -268,33 +298,14 @@ def _from_yolo_predictions(  # noqa: PLR0913
     """Convert bare YOLO prediction .txt files to CSV."""
     class_names = files.load_class_names(names_file) if names_file else {}
     search_dirs = [Path(directory) for directory in image_dirs or ()]
-
-    label_files = files.prediction_labels(input_dir)
-    if not label_files:
-        raise Cveta2Error(f"Ошибка: не найдено .txt файлов в {input_dir}")
+    unreadable: list[Path] = []
+    predictions = _prediction_images(input_dir, search_dirs, unreadable, files=files)
 
     sizes = _SizeCache(files=files, read_all=read_all_sizes)
 
     rows: list[dict[str, object]] = []
-    frame_id = 0
     annotation_id = 1
-    missing_images: list[str] = []
-    unreadable: list[Path] = []
-
-    for label_path in label_files:
-        labels = _labels_or_skip(label_path, unreadable, files=files)
-        if not labels:
-            continue
-
-        img_path = files.find_image_by_stem(
-            label_path.stem,
-            [input_dir, *search_dirs],
-            subdirs=["images"],
-        )
-        if img_path is None:
-            missing_images.append(label_path.stem)
-            continue
-
+    for frame_id, (labels, img_path) in enumerate(predictions):
         img_w, img_h = sizes.get(img_path)
         _require_positive_dimensions(img_w, img_h, img_path.name)
         for fields in labels:
@@ -311,13 +322,7 @@ def _from_yolo_predictions(  # noqa: PLR0913
                 )
             )
             annotation_id += 1
-        frame_id += 1
 
-    if missing_images:
-        raise Cveta2Error(
-            f"Ошибка: не найдены изображения для {len(missing_images)} файлов: {preview_names(missing_images)}. "
-            "CSV не записан."
-        )
     _warn_unreadable_labels(unreadable)
 
     files.write_conversion_csv(rows, output_path)

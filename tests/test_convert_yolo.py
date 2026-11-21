@@ -1307,6 +1307,17 @@ class TestFromYoloPredictions:
 
         assert not out.exists()
 
+    def test_missing_image_is_reported_before_any_image_is_read(self, tmp_path: Path) -> None:
+        """An unreadable image elsewhere in the input does not hide the missing one."""
+        pred_dir = tmp_path / "preds"
+        (pred_dir / "images").mkdir(parents=True)
+        (pred_dir / "images" / "a.jpg").write_bytes(b"not an image")
+        for stem in ("a", "b"):
+            (pred_dir / f"{stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match="не найдены изображения для 1 файлов: b"):
+            convert_from_yolo(pred_dir, tmp_path / "out.csv", read_all_sizes=True)
+
     def test_directory_without_txt_files_is_rejected(self, tmp_path: Path) -> None:
         """An input dir holding no .txt at all aborts with an explanation."""
         pred_dir = tmp_path / "preds"
