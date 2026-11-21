@@ -4,15 +4,16 @@
 # initializer Job (migrations), OPA, Redis, kvrocks and PostgreSQL. No
 # frontend, analytics, serverless functions, Ingress or other workers.
 #
-# Derived once from the upstream CVAT Helm chart at v2.59.1 (`helm template`
-# with analytics, nuclio, traefik, ingress and the postgresql and redis
+# Derived from the upstream CVAT Helm chart at v2.82.0 (`helm template` with
+# analytics, clickhouse, nuclio, traefik, ingress and the postgresql and redis
 # subcharts disabled), then maintained here as plain YAML. lifecycle.py
 # applies it with `kubectl -n <session namespace> apply` after quota.yaml and
 # after generating the Secrets cvat-postgres-secret, cvat-redis-secret and
 # cvat-kvrocks-secret. Everything is emptyDir except the one claim the server
 # and both workers share, which names `hostpath`. SMOKESCREEN_OPTS lets the
-# backend reach the session MinIO on its private Service address. Upgrading
-# CVAT is a separate change.
+# backend reach the session MinIO on its private Service address. To move to
+# another CVAT version, render the chart at the old and the new tag with the
+# same disabled components and port the rendered difference.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -232,7 +233,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
       - name: kvrocks
-        image: apache/kvrocks:2.12.1
+        image: apache/kvrocks:2.15.0
         imagePullPolicy: IfNotPresent
         args:
         - --requirepass
@@ -273,7 +274,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: opa
+  name: cvat-opa-service
   labels:
     app.kubernetes.io/part-of: cveta2-integration
     app.kubernetes.io/component: cvat-opa
@@ -380,13 +381,13 @@ spec:
     spec:
       initContainers:
       - name: user-data-permission-fix
-        image: busybox:1.36
+        image: busybox:1.36.1
         imagePullPolicy: IfNotPresent
         command:
-        - /bin/chmod
-        - -R
-        - '777'
-        - /home/django
+        - /bin/sh
+        - -c
+        args:
+        - chmod -R 777 /home/django
         volumeMounts:
         - mountPath: /home/django/data
           name: cvat-backend-data
@@ -397,9 +398,6 @@ spec:
         - mountPath: /home/django/logs
           name: cvat-backend-data
           subPath: logs
-        - mountPath: /home/django/tmp_storage
-          name: cvat-backend-data
-          subPath: tmp_storage
         resources:
           requests:
             cpu: 10m
@@ -409,7 +407,7 @@ spec:
             memory: 64Mi
       containers:
       - name: cvat-backend
-        image: cvat/server:v2.59.1
+        image: cvat/server:v2.82.0
         imagePullPolicy: IfNotPresent
         args:
         - run
@@ -454,9 +452,25 @@ spec:
             secretKeyRef:
               name: cvat-postgres-secret
               key: password
+        - name: CVAT_NUM_PROXIES
+          value: '1'
+        - name: CVAT_OPA_URL
+          value: http://cvat-opa-service:8181
         - name: SMOKESCREEN_OPTS
           value: --unsafe-allow-private-ranges
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         volumeMounts:
+        - mountPath: /tmp/cvat
+          name: cvat-backend-run
+        - mountPath: /home/django/static
+          name: cvat-backend-static
         - mountPath: /home/django/data
           name: cvat-backend-data
           subPath: data
@@ -475,6 +489,30 @@ spec:
           limits:
             cpu: '2'
             memory: 1536Mi
+      - name: cvat-nginx
+        image: cvat/server:v2.82.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - run
+        - nginx
+        volumeMounts:
+        - mountPath: /tmp/cvat
+          name: cvat-backend-run
+        - mountPath: /home/django/static
+          name: cvat-backend-static
+          readOnly: true
+        - mountPath: /home/django/data
+          name: cvat-backend-data
+          subPath: data
+        securityContext:
+          runAsNonRoot: true
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
         ports:
         - containerPort: 8080
         readinessProbe:
@@ -491,6 +529,10 @@ spec:
           initialDelaySeconds: 60
           periodSeconds: 15
       volumes:
+      - name: cvat-backend-run
+        emptyDir: {}
+      - name: cvat-backend-static
+        emptyDir: {}
       - name: cvat-backend-data
         persistentVolumeClaim:
           claimName: cvat-backend-data
@@ -518,13 +560,13 @@ spec:
     spec:
       initContainers:
       - name: user-data-permission-fix
-        image: busybox:1.36
+        image: busybox:1.36.1
         imagePullPolicy: IfNotPresent
         command:
-        - /bin/chmod
-        - -R
-        - '777'
-        - /home/django
+        - /bin/sh
+        - -c
+        args:
+        - chmod -R 777 /home/django
         volumeMounts:
         - mountPath: /home/django/data
           name: cvat-backend-data
@@ -535,9 +577,6 @@ spec:
         - mountPath: /home/django/logs
           name: cvat-backend-data
           subPath: logs
-        - mountPath: /home/django/tmp_storage
-          name: cvat-backend-data
-          subPath: tmp_storage
         resources:
           requests:
             cpu: 10m
@@ -547,12 +586,13 @@ spec:
             memory: 64Mi
       containers:
       - name: cvat-backend
-        image: cvat/server:v2.59.1
+        image: cvat/server:v2.82.0
         imagePullPolicy: IfNotPresent
         args:
         - run
         - worker
         - import
+        - --with-scheduler
         env:
         - name: ALLOWED_HOSTS
           value: '*'
@@ -593,8 +633,22 @@ spec:
             secretKeyRef:
               name: cvat-postgres-secret
               key: password
+        - name: CVAT_NUM_PROXIES
+          value: '1'
+        - name: CVAT_OPA_URL
+          value: http://cvat-opa-service:8181
         - name: SMOKESCREEN_OPTS
           value: --unsafe-allow-private-ranges
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NUMPROCS
+          value: '1'
         volumeMounts:
         - mountPath: /home/django/data
           name: cvat-backend-data
@@ -605,9 +659,6 @@ spec:
         - mountPath: /home/django/logs
           name: cvat-backend-data
           subPath: logs
-        - mountPath: /home/django/tmp_storage
-          name: cvat-backend-data
-          subPath: tmp_storage
         securityContext:
           runAsNonRoot: true
         resources:
@@ -620,10 +671,11 @@ spec:
         livenessProbe:
           exec:
             command:
-            - python
-            - manage.py
+            - django-admin
             - workerprobe
             - import
+            - --expected-num-workers
+            - '1'
           initialDelaySeconds: 30
           periodSeconds: 120
           timeoutSeconds: 10
@@ -655,13 +707,13 @@ spec:
     spec:
       initContainers:
       - name: user-data-permission-fix
-        image: busybox:1.36
+        image: busybox:1.36.1
         imagePullPolicy: IfNotPresent
         command:
-        - /bin/chmod
-        - -R
-        - '777'
-        - /home/django
+        - /bin/sh
+        - -c
+        args:
+        - chmod -R 777 /home/django
         volumeMounts:
         - mountPath: /home/django/data
           name: cvat-backend-data
@@ -672,9 +724,6 @@ spec:
         - mountPath: /home/django/logs
           name: cvat-backend-data
           subPath: logs
-        - mountPath: /home/django/tmp_storage
-          name: cvat-backend-data
-          subPath: tmp_storage
         resources:
           requests:
             cpu: 10m
@@ -684,7 +733,7 @@ spec:
             memory: 64Mi
       containers:
       - name: cvat-backend
-        image: cvat/server:v2.59.1
+        image: cvat/server:v2.82.0
         imagePullPolicy: IfNotPresent
         args:
         - run
@@ -730,8 +779,22 @@ spec:
             secretKeyRef:
               name: cvat-postgres-secret
               key: password
+        - name: CVAT_NUM_PROXIES
+          value: '1'
+        - name: CVAT_OPA_URL
+          value: http://cvat-opa-service:8181
         - name: SMOKESCREEN_OPTS
           value: --unsafe-allow-private-ranges
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NUMPROCS
+          value: '1'
         volumeMounts:
         - mountPath: /home/django/data
           name: cvat-backend-data
@@ -742,9 +805,6 @@ spec:
         - mountPath: /home/django/logs
           name: cvat-backend-data
           subPath: logs
-        - mountPath: /home/django/tmp_storage
-          name: cvat-backend-data
-          subPath: tmp_storage
         securityContext:
           runAsNonRoot: true
         resources:
@@ -757,10 +817,11 @@ spec:
         livenessProbe:
           exec:
             command:
-            - python
-            - manage.py
+            - django-admin
             - workerprobe
             - chunks
+            - --expected-num-workers
+            - '1'
           initialDelaySeconds: 30
           periodSeconds: 120
           timeoutSeconds: 10
@@ -787,7 +848,7 @@ spec:
       restartPolicy: OnFailure
       containers:
       - name: cvat-backend
-        image: cvat/server:v2.59.1
+        image: cvat/server:v2.82.0
         imagePullPolicy: IfNotPresent
         args:
         - init
@@ -831,8 +892,20 @@ spec:
             secretKeyRef:
               name: cvat-postgres-secret
               key: password
+        - name: CVAT_NUM_PROXIES
+          value: '1'
+        - name: CVAT_OPA_URL
+          value: http://cvat-opa-service:8181
         - name: SMOKESCREEN_OPTS
           value: --unsafe-allow-private-ranges
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         securityContext:
           runAsNonRoot: true
         resources:
