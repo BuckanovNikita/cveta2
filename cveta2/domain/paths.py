@@ -128,23 +128,28 @@ def strip_key_prefix(key: str, prefix: str) -> str:
 
 
 def _is_unsafe_image_name(name: str) -> bool:
-    """Whether *name* could leave a search root or storage prefix."""
+    """Whether *name* is anything but a canonical relative path.
+
+    An empty, ``.`` or ``..`` component covers the empty name, an absolute
+    path, a doubled or trailing slash, and traversal.
+    """
     return (
-        not name
-        or "\x00" in name
+        "\x00" in name
         or "\\" in name
-        or PurePosixPath(name).is_absolute()
         or bool(PureWindowsPath(name).drive)
-        or ".." in name.split("/")
+        or any(part in {"", ".", ".."} for part in name.split("/"))
     )
 
 
 def validate_upload_image_names(names: Iterable[str]) -> None:
-    """Reject image names that are not plain relative paths.
+    """Reject image names that are not canonical relative paths.
 
     An upload looks each name up below local search roots and binds it below
     the storage prefix, so an absolute path, a ``..`` component, a backslash,
-    a NUL byte or an empty name would reach outside both. Subfolders such as
+    a NUL byte or an empty name would reach outside both. A ``.`` or empty
+    component stays inside, but CVAT refuses such a cloud-storage path
+    ("path is not in canonical form") after the images are already in the
+    bucket, and the downloader refuses the same key. Subfolders such as
     ``2026-02/img.jpg`` stay valid.
     """
     unsafe = list(dict.fromkeys(name for name in names if _is_unsafe_image_name(str(name))))
@@ -152,7 +157,7 @@ def validate_upload_image_names(names: Iterable[str]) -> None:
         raise Cveta2Error(
             f"Небезопасные имена изображений: {preview_names([repr(name) for name in unsafe])}. "
             "Имя должно быть относительным путём "
-            "без '..', обратной косой черты и нулевого байта. Загрузка не начата."
+            "без '.', '..', пустых частей, обратной косой черты и нулевого байта. Загрузка не начата."
         )
 
 
