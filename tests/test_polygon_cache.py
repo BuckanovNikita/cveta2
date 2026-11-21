@@ -1,6 +1,7 @@
 """Polygon payloads refresh old caches and survive local/shared cache hits."""
 
 from pathlib import Path
+from typing import override
 from unittest.mock import patch
 
 import pandas as pd
@@ -39,6 +40,7 @@ def _enable_cache(_disable_task_cache: None, monkeypatch: pytest.MonkeyPatch) ->
 class _PolygonApi(FakeCvatApi):
     """Expose project storage so real fetch orchestration builds the S3 cache."""
 
+    @override
     def get_project_cloud_storage(self, _project_id: int) -> CloudStorageInfo:
         return _STORAGE
 

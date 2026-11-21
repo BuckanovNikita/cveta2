@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from http.cookies import CookieError, SimpleCookie
 from itertools import pairwise
-from typing import cast
+from typing import cast, override
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import urllib3
@@ -318,6 +318,7 @@ class _DiagnosticApiException(ApiException):  # type: ignore[misc]
         self.body = error.body
         self._cveta2_diagnostics = diagnostic
 
+    @override
     def __str__(self) -> str:
         return format_diagnostics(self._cveta2_diagnostics)
 

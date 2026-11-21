@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, override
 
 import pandas as pd
 import pytest
@@ -417,6 +417,7 @@ def test_csv_reader_stops_after_first_eof(tmp_path: Path, monkeypatch: pytest.Mo
 
         ended = False
 
+        @override
         def read(self, size: int | None = -1) -> bytes:
             if self.ended:
                 raise AssertionError("reader continued after EOF")

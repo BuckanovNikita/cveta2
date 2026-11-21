@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 from unittest.mock import MagicMock
 
 import pytest
@@ -573,6 +573,7 @@ def test_a_failed_subfolder_listing_aborts_the_whole_listing() -> None:
     """
 
     class _FlakyListing(FakeS3Client):
+        @override
         def list_objects_v2(self, **kwargs: str) -> dict[str, Any]:
             if kwargs.get("Prefix", "").endswith("2026-02/"):
                 raise OSError("listing failed")

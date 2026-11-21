@@ -7,7 +7,7 @@ import stat
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 from unittest.mock import patch
 
 import pandas as pd
@@ -414,7 +414,8 @@ class _ClientErrorS3Client(FakeS3Client):
         super().__init__()
         self._error_response = error_response
 
-    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
+    @override
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         self.get_calls.append(f"{Bucket}/{Key}")
         raise ClientError(self._error_response, "GetObject")
 
@@ -642,7 +643,8 @@ class TestS3Backend:
         """A bucket that allows Get/Put but not Delete keeps serving the shared cache."""
 
         class _NoDelete(FakeS3Client):
-            def delete_object(self, *, Bucket: str, Key: str) -> None:  # noqa: N803
+            @override
+            def delete_object(self, *, Bucket: str, Key: str) -> None:
                 self.delete_calls.append(f"{Bucket}/{Key}")
                 raise ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject")
 

@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import override
 from uuid import uuid4
 
 import pandas as pd
@@ -80,6 +81,7 @@ def class_api() -> Iterator[str]:
             self.end_headers()
             self.wfile.write(payload)
 
+        @override
         def log_message(self, _format: str, *_args: object) -> None:
             pass
 

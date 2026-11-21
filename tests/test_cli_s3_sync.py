@@ -6,7 +6,7 @@ section) is covered by ``tests/test_sync_root_override.py``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -164,6 +164,7 @@ def test_s3_sync_reports_a_denied_listing_without_traceback(
     denied = ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "ListObjectsV2")
 
     class _DeniedBucket(FakeS3Client):
+        @override
         def list_objects_v2(self, **_request: str) -> dict[str, object]:
             raise denied
 
@@ -199,6 +200,7 @@ def test_s3_sync_lets_a_defect_in_an_sdk_call_surface_unchanged(
     defect = ParamValidationError(report="Invalid type for parameter Key, value: None")
 
     class _MalformedRequest(FakeS3Client):
+        @override
         def list_objects_v2(self, **_request: str) -> dict[str, object]:
             raise defect
 
@@ -228,6 +230,7 @@ def test_s3_sync_with_unreadable_objects_exits_naming_the_storage(
     from tests.fixtures.fake_s3 import FakeS3Client
 
     class _ListOnly(FakeS3Client):
+        @override
         def get_object(self, **_request: str) -> dict[str, object]:
             raise ClientError({"Error": {"Code": "AccessDenied", "Message": "Access Denied"}}, "GetObject")
 

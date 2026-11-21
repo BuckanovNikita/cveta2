@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, override
 
 import pytest
 from botocore.exceptions import NoCredentialsError
@@ -60,6 +60,7 @@ class _UnwritableKeysS3Client(FakeS3Client):
         super().__init__(objects)
         self._unwritable = frozenset(unwritable)
 
+    @override
     def upload_file(self, filename: str, bucket: str, key: str) -> None:
         """Store the file unless its key was marked unwritable."""
         if key in self._unwritable:
@@ -424,6 +425,7 @@ class TestS3Uploader:
         missing = NoCredentialsError()
 
         class _NoCredentials(FakeS3Client):
+            @override
             def upload_file(self, *_transfer: str) -> None:
                 raise missing
 

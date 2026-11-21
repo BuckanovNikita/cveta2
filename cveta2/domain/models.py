@@ -2,7 +2,7 @@
 
 import json
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, TypedDict, override
 
 from pydantic import (
     BaseModel,
@@ -215,6 +215,7 @@ class BBoxAnnotation(_ImageRecordBase):
     image_path: str | None = None
     attributes: dict[str, str]
 
+    @override
     def to_csv_row(self) -> dict[str, str | int | float | bool | None]:
         """Convert BBoxAnnotation to a flat dict for CSV (attributes as JSON)."""
         row = self.model_dump()

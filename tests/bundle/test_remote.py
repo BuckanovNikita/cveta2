@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, override
 from unittest.mock import Mock
 
 import pytest
@@ -52,6 +52,7 @@ def http_api() -> Iterator[str]:
             }[self.path]
             self.wfile.write(payload.encode())
 
+        @override
         def log_message(self, *_args: Any) -> None:
             pass
 

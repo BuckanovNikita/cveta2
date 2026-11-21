@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import override
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
@@ -57,6 +58,7 @@ def _server(route: Route) -> Iterator[tuple[str, list[tuple[str, str]]]]:
             self.end_headers()
             self.wfile.write(body)
 
+        @override
         def log_message(self, _format: str, *args: object) -> None:
             pass
 
