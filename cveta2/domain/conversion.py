@@ -361,6 +361,19 @@ def _clip_to_image(box: PixelBox, img_w: int, img_h: int) -> PixelBox:
     )
 
 
+def _fit_to_image(box: PixelBox, img_w: int, img_h: int) -> PixelBox | None:
+    """Clip *box* to the image, or return ``None`` when it is then under 1 px wide or high.
+
+    A side is measured rounded to two decimals, the precision of CSV
+    coordinates, so a 1 px box at fractional coordinates is not lost to
+    floating-point error.
+    """
+    clipped = _clip_to_image(box, img_w, img_h)
+    if round(clipped.x_br - clipped.x_tl, 2) < 1 or round(clipped.y_br - clipped.y_tl, 2) < 1:
+        return None
+    return clipped
+
+
 class YoloLabels(NamedTuple):
     """One image's YOLO label text and how many of its boxes were changed or left out."""
 
@@ -423,32 +436,59 @@ def yolo_dataset_text(output_dir: Path, splits: list[str], label_map: dict[str, 
     return yaml.dump(yaml_data, **_YAML_DUMP)
 
 
-def coco_split_data(split_df: pd.DataFrame, label_map: dict[str, int]) -> dict[str, list[dict[str, object]]]:
-    """Build deterministic COCO image, annotation and category records."""
+class CocoSplit(NamedTuple):
+    """One split's COCO records and, per image name, how many of its boxes were clipped or left out."""
+
+    data: dict[str, list[dict[str, object]]]
+    clipped: dict[str, int]
+    dropped: dict[str, int]
+
+
+def coco_split_data(split_df: pd.DataFrame, label_map: dict[str, int]) -> CocoSplit:
+    """Build deterministic COCO image, annotation and category records.
+
+    Boxes crossing the image edge are clipped to it. A box left under 1 px wide
+    or high is left out; its image stays listed and annotation ids stay
+    consecutive.
+    """
     images_list: list[dict[str, object]] = []
     image_id_map: dict[str, int] = {}
+    image_sizes: dict[str, tuple[int, int]] = {}
     first_rows = split_df.groupby("image_name").first()
     for img_id, image_name in enumerate(sorted(split_df["image_name"].unique()), start=1):
         name_s = str(image_name)
         first_row = first_rows.loc[image_name]
         image_id_map[name_s] = img_id
+        image_sizes[name_s] = (int(first_row["image_width"]), int(first_row["image_height"]))
         images_list.append(
             {
                 "id": img_id,
                 "file_name": name_s,
-                "width": int(first_row["image_width"]),
-                "height": int(first_row["image_height"]),
+                "width": image_sizes[name_s][0],
+                "height": image_sizes[name_s][1],
             }
         )
 
     annotations_list: list[dict[str, object]] = []
+    clipped: dict[str, int] = {}
+    dropped: dict[str, int] = {}
     split_boxes = split_df[split_df["instance_shape"] == "box"]
     ann_id = 0
     for _, row in split_boxes.iterrows():
         name_s = str(row["image_name"])
-        if name_s not in image_id_map:
+        original = PixelBox(
+            float(row["bbox_x_tl"]),
+            float(row["bbox_y_tl"]),
+            float(row["bbox_x_br"]),
+            float(row["bbox_y_br"]),
+        )
+        box = _fit_to_image(original, *image_sizes[name_s])
+        if box is None:
+            dropped[name_s] = dropped.get(name_s, 0) + 1
             continue
-        coco = _pixel_to_coco(PixelBox(row["bbox_x_tl"], row["bbox_y_tl"], row["bbox_x_br"], row["bbox_y_br"]))
+        if box != original:
+            clipped[name_s] = clipped.get(name_s, 0) + 1
+        coco = _pixel_to_coco(box)
         ann_id += 1
         annotations_list.append(
             {
@@ -471,11 +511,12 @@ def coco_split_data(split_df: pd.DataFrame, label_map: dict[str, int]) -> dict[s
         for name, cat_id in sorted(label_map.items(), key=lambda x: x[1])
     ]
 
-    return {
+    data = {
         "images": images_list,
         "annotations": annotations_list,
         "categories": categories_list,
     }
+    return CocoSplit(data, clipped, dropped)
 
 
 class _JsonDumpOptions(TypedDict):

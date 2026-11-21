@@ -33,11 +33,11 @@ _LABELS = st.sampled_from(["zebra", "apple", "001", "NA"])
 
 @st.composite
 def _labelled_box(draw: st.DrawFn) -> tuple[str, float, float, float, float]:
-    """Draw a label and a quarter-pixel box inside a 640x480 image."""
+    """Draw a label and a box on a quarter-pixel grid, at least 1 px each way, inside a 640x480 image."""
     x_tl = draw(st.integers(0, 639 * 4)) / 4
     y_tl = draw(st.integers(0, 479 * 4)) / 4
-    x_br = draw(st.integers(int(x_tl * 4) + 1, 640 * 4)) / 4
-    y_br = draw(st.integers(int(y_tl * 4) + 1, 480 * 4)) / 4
+    x_br = draw(st.integers(int(x_tl * 4) + 4, 640 * 4)) / 4
+    y_br = draw(st.integers(int(y_tl * 4) + 4, 480 * 4)) / 4
     return draw(_LABELS), x_tl, y_tl, x_br, y_br
 
 
@@ -228,3 +228,141 @@ class TestToCoco:
             convert_to_coco(csv_path, output, image_dirs=[images], link_mode="copy")
 
         assert output_tree(output) == before
+
+
+type _Box = tuple[float, float, float, float]
+
+
+def _export_boxes(
+    tmp_path: Path, boxes: dict[str, tuple[str, list[_Box]]]
+) -> dict[str, dict[str, list[dict[str, object]]]]:
+    """Export 640x480 images, each with its split and boxes, and return the COCO JSON of every split directory."""
+    images = tmp_path / "source"
+    rows: list[dict[str, object]] = []
+    for name, (split, coords) in boxes.items():
+        make_image(images / name)
+        for x_tl, y_tl, x_br, y_br in coords:
+            rows.append(
+                csv_row(
+                    name,
+                    split=split,
+                    bbox_x_tl=x_tl,
+                    bbox_y_tl=y_tl,
+                    bbox_x_br=x_br,
+                    bbox_y_br=y_br,
+                    annotation_id=len(rows) + 1,
+                )
+            )
+    out = tmp_path / "coco"
+    convert_to_coco(write_convert_csv(tmp_path, rows), out, image_dirs=[images], link_mode="copy")
+    return {
+        path.parent.name: json.loads(path.read_text(encoding="utf-8")) for path in out.glob("*/_annotations.coco.json")
+    }
+
+
+class TestOutOfImageBoxes:
+    """Boxes crossing the image edge are clipped; boxes left under 1 px wide or high are dropped."""
+
+    @pytest.mark.parametrize(
+        ("box", "bbox", "area"),
+        [
+            ((-20.0, 20.0, 100.0, 200.0), [0.0, 20.0, 100.0, 180.0], 18000.0),
+            ((10.0, -30.0, 100.0, 200.0), [10.0, 0.0, 90.0, 200.0], 18000.0),
+            ((600.0, 20.0, 700.0, 200.0), [600.0, 20.0, 40.0, 180.0], 7200.0),
+            ((10.0, 400.0, 100.0, 520.0), [10.0, 400.0, 90.0, 80.0], 7200.0),
+            ((-10.0, -10.0, 650.0, 490.0), [0.0, 0.0, 640.0, 480.0], 307200.0),
+        ],
+    )
+    def test_box_crossing_the_edge_is_written_clipped(
+        self, tmp_path: Path, box: _Box, bbox: list[float], area: float, capture_logs: list[str]
+    ) -> None:
+        coco = _export_boxes(tmp_path, {"edge.jpg": ("train", [box])})["train"]
+
+        assert [(a["bbox"], a["area"]) for a in coco["annotations"]] == [(bbox, area)]
+        assert len(capture_logs) == 1
+        assert "обрезан" in capture_logs[0]
+        assert capture_logs[0].endswith(": 1 (edge.jpg)")
+
+    def test_box_on_the_image_border_is_not_clipped(self, tmp_path: Path, capture_logs: list[str]) -> None:
+        coco = _export_boxes(tmp_path, {"full.jpg": ("train", [(0.0, 0.0, 640.0, 480.0)])})["train"]
+
+        assert [a["bbox"] for a in coco["annotations"]] == [[0.0, 0.0, 640.0, 480.0]]
+        assert not capture_logs
+
+    @pytest.mark.parametrize(
+        "box",
+        [
+            pytest.param((700.0, 20.0, 800.0, 200.0), id="right-of-image"),
+            pytest.param((-50.0, 20.0, -10.0, 200.0), id="left-of-image"),
+            pytest.param((10.0, 500.0, 100.0, 600.0), id="below-image"),
+            pytest.param((640.0, 20.0, 700.0, 200.0), id="clips-to-zero-width"),
+            pytest.param((10.0, -40.0, 100.0, 0.0), id="clips-to-zero-height"),
+            pytest.param((639.5, 20.0, 700.0, 200.0), id="clips-under-one-pixel-wide"),
+            pytest.param((10.0, 479.5, 100.0, 520.0), id="clips-under-one-pixel-high"),
+            pytest.param((100.0, 20.0, 100.5, 200.0), id="inside-under-one-pixel-wide"),
+            pytest.param((100.0, 20.0, 200.0, 20.99), id="inside-just-under-one-pixel-high"),
+        ],
+    )
+    def test_box_under_one_pixel_is_dropped_and_the_image_kept(
+        self, tmp_path: Path, box: _Box, capture_logs: list[str]
+    ) -> None:
+        coco = _export_boxes(tmp_path, {"gone.jpg": ("train", [box])})["train"]
+
+        assert coco["annotations"] == []
+        assert [image["file_name"] for image in coco["images"]] == ["gone.jpg"]
+        assert (tmp_path / "coco/train/gone.jpg").is_file()
+        assert len(capture_logs) == 1
+        assert "Пропущен" in capture_logs[0]
+        assert capture_logs[0].endswith(": 1 (gone.jpg)")
+
+    @pytest.mark.parametrize(
+        ("box", "bbox"),
+        [
+            pytest.param((100.0, 20.0, 101.0, 21.0), [100.0, 20.0, 1.0, 1.0], id="one-pixel"),
+            # 11.1 - 10.1 is just under 1 in binary floating point.
+            pytest.param((10.1, 20.3, 11.1, 21.3), [10.1, 20.3, 1.0, 1.0], id="one-pixel-at-fractional-coordinates"),
+            pytest.param((100.0, 20.0, 100.996, 200.0), [100.0, 20.0, 1.0, 180.0], id="written-as-one-pixel"),
+            pytest.param((639.0, 479.0, 700.0, 520.0), [639.0, 479.0, 1.0, 1.0], id="clips-to-one-pixel"),
+        ],
+    )
+    def test_box_written_as_one_pixel_is_kept(self, tmp_path: Path, box: _Box, bbox: list[float]) -> None:
+        """The 1 px rule looks at the size as written, with two decimals."""
+        coco = _export_boxes(tmp_path, {"small.jpg": ("train", [box])})["train"]
+
+        assert [a["bbox"] for a in coco["annotations"]] == [bbox]
+
+    def test_remaining_boxes_keep_consecutive_ids_and_both_counts_are_summarized_once(
+        self, tmp_path: Path, capture_logs: list[str], capture_info_logs: list[str]
+    ) -> None:
+        boxes: dict[str, tuple[str, list[_Box]]] = {
+            "a.jpg": (
+                "train",
+                [
+                    (10.0, 20.0, 100.0, 200.0),
+                    (700.0, 20.0, 800.0, 200.0),
+                    (600.0, 20.0, 700.0, 200.0),
+                    (-5.0, 30.0, 50.0, 90.0),
+                    (10.0, 500.0, 90.0, 600.0),
+                ],
+            ),
+            "b.jpg": ("val", [(-5.0, 20.0, 100.0, 200.0), (10.0, 480.0, 100.0, 500.0), (20.0, 30.0, 60.0, 90.0)]),
+            "c.jpg": ("val", [(639.5, 20.0, 700.0, 200.0)]),
+        }
+        coco = _export_boxes(tmp_path, boxes)
+
+        assert [(a["id"], a["bbox"]) for a in coco["train"]["annotations"]] == [
+            (1, [10.0, 20.0, 90.0, 180.0]),
+            (2, [600.0, 20.0, 40.0, 180.0]),
+            (3, [0.0, 30.0, 50.0, 60.0]),
+        ]
+        assert [(a["id"], a["image_id"], a["bbox"]) for a in coco["valid"]["annotations"]] == [
+            (1, 1, [0.0, 20.0, 100.0, 180.0]),
+            (2, 1, [20.0, 30.0, 40.0, 60.0]),
+        ]
+        assert [image["file_name"] for image in coco["valid"]["images"]] == ["b.jpg", "c.jpg"]
+        clipped = [message for message in capture_logs if "обрезан" in message]
+        dropped = [message for message in capture_logs if "Пропущен" in message]
+        assert len(capture_logs) == len(clipped) + len(dropped) == 2
+        assert clipped[0].endswith(": 3 (a.jpg, b.jpg)")
+        assert dropped[0].endswith(": 4 (a.jpg, b.jpg, c.jpg)")
+        assert any(m.startswith("Split valid: 2 изображений, 2 аннотаций") for m in capture_info_logs)

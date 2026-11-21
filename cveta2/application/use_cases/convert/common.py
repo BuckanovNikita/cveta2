@@ -1,6 +1,7 @@
 """Conversion preparation and dimension caching over supplied ports."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from loguru import logger
@@ -13,6 +14,38 @@ from cveta2.domain.conversion import (
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.output import preview_names
+
+
+@dataclass
+class _BoxAdjustments:
+    """Clipped and dropped box counts of one export, with the affected image names."""
+
+    dropped_reason: str
+    clipped: int = 0
+    dropped: int = 0
+    clipped_images: list[str] = field(default_factory=list)
+    dropped_images: list[str] = field(default_factory=list)
+
+    def record(self, image_name: str, *, clipped: int, dropped: int) -> None:
+        """Add one image's counts."""
+        self.clipped += clipped
+        self.dropped += dropped
+        if clipped:
+            self.clipped_images.append(image_name)
+        if dropped:
+            self.dropped_images.append(image_name)
+
+    def warn(self) -> None:
+        """Summarize clipped and dropped boxes, each in one warning line."""
+        if self.clipped:
+            logger.warning(
+                f"Боксы, выходящие за границы изображения, обрезаны по ним: {self.clipped} "
+                f"({preview_names(self.clipped_images)})"
+            )
+        if self.dropped:
+            logger.warning(
+                f"Пропущены боксы {self.dropped_reason}: {self.dropped} ({preview_names(self.dropped_images)})"
+            )
 
 
 class _SizeCache:

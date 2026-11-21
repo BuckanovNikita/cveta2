@@ -8,7 +8,7 @@ import pandas as pd
 from loguru import logger
 
 from cveta2.application.ports.conversion import ConversionFiles
-from cveta2.application.use_cases.convert.common import prepare_export
+from cveta2.application.use_cases.convert.common import _BoxAdjustments, prepare_export
 from cveta2.domain.conversion import coco_metadata_text, coco_split_data
 
 
@@ -19,12 +19,15 @@ def _write_coco_split(  # noqa: PLR0913, PLR0917
     found: dict[str, Path],
     link_mode: str,
     files: ConversionFiles,
+    adjustments: _BoxAdjustments,
 ) -> None:
-    """Write COCO JSON and place images for a single split."""
+    """Write COCO JSON and place images for a single split, adding its box counts to *adjustments*."""
     for name in sorted(split_df["image_name"].unique()):
         name_s = str(name)
         files.materialize_image(found[name_s], split_dir / name_s, link_mode)
-    coco_json = coco_split_data(split_df, label_map)
+    coco_json, clipped, dropped = coco_split_data(split_df, label_map)
+    for name_s in sorted(clipped.keys() | dropped.keys()):
+        adjustments.record(name_s, clipped=clipped.get(name_s, 0), dropped=dropped.get(name_s, 0))
     json_path = split_dir / "_annotations.coco.json"
     files.write_output_text(json_path, coco_metadata_text(coco_json))
 
@@ -58,6 +61,7 @@ def convert_to_coco(
     owned = files.coco_owned_paths(ctx)
     files.prepare_coco_output(ctx.output_dir)
     split_dir_map: dict[str, str] = {"val": "valid"}
+    adjustments = _BoxAdjustments("меньше 1 px по ширине или высоте после обрезки")
     for split in ctx.splits:
         dir_name = split_dir_map.get(split, split)
         split_dir = ctx.output_dir / dir_name
@@ -69,8 +73,10 @@ def convert_to_coco(
             ctx.found,
             ctx.link_mode,
             files,
+            adjustments,
         )
 
     files.prune_coco_output(ctx, owned)
+    adjustments.warn()
     logger.info(f"Готово: COCO датасет сохранён в {ctx.output_dir}")
     return ctx.output_dir
