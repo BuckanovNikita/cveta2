@@ -17,7 +17,7 @@ from cveta2.domain.models import (
 )
 from tests.helpers import make_bbox
 
-ImageRecord = BBoxAnnotation | ImageWithoutAnnotations | DeletedImage
+type ImageRecord = BBoxAnnotation | ImageWithoutAnnotations | DeletedImage
 
 # ---------------------------------------------------------------------------
 # BBoxAnnotation.to_csv_row

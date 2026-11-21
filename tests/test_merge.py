@@ -51,7 +51,7 @@ def _no_task_id_row(image: str) -> dict[str, object]:
 
 _IMAGES = ["a.jpg", "b.jpg", "c.jpg"]
 # One annotation row: (image, task id, split).
-_Row = tuple[str, int, str | None]
+type _Row = tuple[str, int, str | None]
 _side = st.lists(
     st.tuples(
         st.sampled_from(_IMAGES),

@@ -46,7 +46,7 @@ _SHARED: dict[str, Any] = {
         }
     },
 }
-Edit = Callable[[dict[str, Any]], object]
+type Edit = Callable[[dict[str, Any]], object]
 _DATASET = ("datasets", "combined")
 
 

@@ -103,17 +103,17 @@ class LabelInfo(BaseModel):
         return "  ".join(parts)
 
 
-Split = Literal["train", "val", "test"]
+type Split = Literal["train", "val", "test"]
 """Allowed values for the ``split`` field (our convention for dataset splits)."""
 
 
-JobStage = Literal["annotation", "validation", "acceptance"]
+type JobStage = Literal["annotation", "validation", "acceptance"]
 """CVAT-native job stage values."""
 
 JOB_STAGES: "tuple[JobStage, ...]" = ("annotation", "validation", "acceptance")
 """All valid CVAT job stages (runtime counterpart of :data:`JobStage`)."""
 
-JobState = Literal["new", "in progress", "completed", "rejected"]
+type JobState = Literal["new", "in progress", "completed", "rejected"]
 """CVAT-native job state values."""
 
 JOB_STATES: "tuple[JobState, ...]" = ("new", "in progress", "completed", "rejected")
@@ -298,7 +298,7 @@ class DeletedImage(_ImageRecordBase):
     image_path: str | None = None
 
 
-AnnotationRecord = Annotated[
+type AnnotationRecord = Annotated[
     BBoxAnnotation | ImageWithoutAnnotations,
     Discriminator("instance_shape"),
 ]

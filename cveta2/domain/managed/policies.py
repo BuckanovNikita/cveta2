@@ -14,8 +14,8 @@ import pandas as pd
 
 from cveta2.domain.managed.models import ManagedError, OverlapDecision, SplitPolicy
 
-SplitName = Literal["train", "val", "test"]
-RowKey = tuple[tuple[str, str], ...]
+type SplitName = Literal["train", "val", "test"]
+type RowKey = tuple[tuple[str, str], ...]
 
 
 class RowComparison(TypedDict):
