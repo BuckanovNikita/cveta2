@@ -43,6 +43,7 @@ from cveta2.domain.conversion import (
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import CSV_COLUMNS
+from cveta2.interfaces.cli import CliApp
 from cveta2.interfaces.commands.convert import run_convert
 from tests.helpers import (
     csv_row,
@@ -474,3 +475,20 @@ def test_run_convert_missing_split_exits(tmp_path: Path) -> None:
 
     with pytest.raises(Cveta2Error, match="не задан split"):
         run_convert(args)
+
+
+@pytest.mark.parametrize("direction", ["--to-yolo", "--to-coco"])
+def test_convert_with_a_missing_image_exits_with_an_error(tmp_path: Path, direction: str) -> None:
+    """The command fails instead of exiting 0 with a dataset that names absent files."""
+    images = tmp_path / "images"
+    images.mkdir()
+    csv_path = write_convert_csv(tmp_path, [csv_row("ghost.jpg", label="cat", split="train")])
+    output = tmp_path / "out"
+    argv = ["convert", direction, "-d", str(csv_path), "-o", str(output), "--image-dir", str(images)]
+
+    with pytest.raises(SystemExit) as exited:
+        CliApp().run(argv)
+
+    # A message as the exit code is what makes the process status 1.
+    assert "не найдено 1 изображений: ghost.jpg" in str(exited.value.code)
+    assert not output.exists()

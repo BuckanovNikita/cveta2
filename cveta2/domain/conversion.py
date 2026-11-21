@@ -150,7 +150,7 @@ def _validate_export_box(row: pd.Series, csv_path: Path) -> None:
 
 
 class ExportContext(NamedTuple):
-    """Shared state prepared by ``prepare_export``."""
+    """Shared state prepared by ``prepare_export``; ``found`` holds a source for every image of ``df``."""
 
     df: pd.DataFrame
     output_dir: Path

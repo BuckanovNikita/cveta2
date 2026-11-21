@@ -23,8 +23,7 @@ def _write_coco_split(  # noqa: PLR0913, PLR0917
     """Write COCO JSON and place images for a single split."""
     for name in sorted(split_df["image_name"].unique()):
         name_s = str(name)
-        if name_s in found:
-            files.materialize_image(found[name_s], split_dir / name_s, link_mode)
+        files.materialize_image(found[name_s], split_dir / name_s, link_mode)
     coco_json = coco_split_data(split_df, label_map)
     json_path = split_dir / "_annotations.coco.json"
     files.write_output_text(json_path, coco_metadata_text(coco_json))

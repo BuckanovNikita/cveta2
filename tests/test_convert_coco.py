@@ -11,9 +11,11 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from cveta2.composition.conversion import convert_to_coco
+from cveta2.domain.errors import Cveta2Error
 from tests.helpers import (
     csv_row,
     make_image,
+    output_tree,
     write_convert_csv,
 )
 
@@ -190,3 +192,39 @@ class TestToCoco:
             convert_to_coco(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
 
         assert (out_dir / "train" / "_annotations.coco.json").is_file()
+
+    @pytest.mark.parametrize("shape", ["box", "none"])
+    def test_missing_image_aborts_before_any_write(self, tmp_path: Path, shape: str) -> None:
+        """A CSV image found in no search directory is an error, not an ``images`` entry without a file."""
+        img_dir = tmp_path / "images"
+        make_image(img_dir / "here.jpg")
+        rows = [
+            csv_row("here.jpg", split="train"),
+            csv_row("phantom.jpg", shape=shape, split="val"),
+            csv_row("ghost.jpg", shape=shape, split="val"),
+        ]
+        csv_path = write_convert_csv(tmp_path, rows)
+        out_dir = tmp_path / "coco_out"
+
+        with pytest.raises(Cveta2Error, match=r"не найдено 2 изображений: ghost\.jpg, phantom\.jpg"):
+            convert_to_coco(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
+
+        assert not out_dir.exists()
+
+    def test_reexport_with_a_missing_image_leaves_the_previous_export_unchanged(self, tmp_path: Path) -> None:
+        """The image a previous run placed is not a source: the rerun fails before any write or prune."""
+        images = tmp_path / "source"
+        make_image(images / "a.jpg")
+        make_image(images / "b.jpg")
+        rows = [csv_row("a.jpg", label="cat", split="train"), csv_row("b.jpg", label="cat", split="train")]
+        output = tmp_path / "coco"
+        convert_to_coco(write_convert_csv(tmp_path, rows), output, image_dirs=[images], link_mode="copy")
+        before = output_tree(output)
+        (images / "a.jpg").unlink()
+        # Going through, this run would relabel a.jpg, move it to valid/ and prune train/.
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="dog", split="val")])
+
+        with pytest.raises(Cveta2Error, match=r"не найдено 1 изображений: a\.jpg"):
+            convert_to_coco(csv_path, output, image_dirs=[images], link_mode="copy")
+
+        assert output_tree(output) == before

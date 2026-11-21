@@ -74,7 +74,7 @@ def _write_box_labels(  # noqa: PLR0913, PLR0917
     for (raw_name, raw_split), group in box_df.groupby(["image_name", "split"]):
         name_s, split_s = str(raw_name), str(raw_split)
 
-        if name_s in found and name_s not in images_processed:
+        if name_s not in images_processed:
             dst = output_dir / "images" / split_s / name_s
             files.materialize_image(found[name_s], dst, link_mode)
             images_processed.add(name_s)
@@ -103,7 +103,7 @@ def _write_none_labels(  # noqa: PLR0913
         image_name = str(row["image_name"])
         split = str(row["split"])
 
-        if image_name in found and image_name not in images_processed:
+        if image_name not in images_processed:
             dst = output_dir / "images" / split / image_name
             files.materialize_image(found[image_name], dst, link_mode)
             images_processed.add(image_name)
@@ -206,6 +206,27 @@ def _warn_unreadable_labels(unreadable: list[Path]) -> None:
         )
 
 
+def _dataset_images(
+    ds_config: dict[object, object], dataset_root: Path, *, files: ConversionFiles
+) -> list[tuple[str, Path]]:
+    """List ``(split, image)`` for every declared split, in split then declaration order.
+
+    Raises ``Cveta2Error`` when a listed image is absent from disk, before any
+    label or image is read.
+    """
+    images: list[tuple[str, Path]] = []
+    for split_key in ("train", "val", "test"):
+        split_val = ds_config.get(split_key)
+        if split_val:
+            images.extend((split_key, path) for path in files.split_images(split_val, dataset_root))
+    missing = [str(path) for _, path in images if not files.image_available(path)]
+    if missing:
+        raise Cveta2Error(
+            f"Ошибка: не найдено {len(missing)} изображений из списка: {preview_names(missing)}. CSV не записан."
+        )
+    return images
+
+
 def _from_yolo_dataset(
     yaml_path: Path,
     output_path: Path,
@@ -230,49 +251,40 @@ def _from_yolo_dataset(
     annotation_id = 1
     unreadable: list[Path] = []
 
-    for split_key in ("train", "val", "test"):
-        split_val = ds_config.get(split_key)
-        if not split_val:
+    for split_key, img_path in _dataset_images(ds_config, dataset_root, files=files):
+        labels = _labels_or_skip(_label_path_for_image(img_path), unreadable, files=files)
+        if labels is None:
             continue
+        img_w, img_h = sizes.get(img_path)
+        _require_positive_dimensions(img_w, img_h, img_path.name)
 
-        for img_path in files.split_images(split_val, dataset_root):
-            if not files.image_available(img_path):
-                logger.warning(f"Изображение из списка не найдено: {img_path}")
-                continue
-
-            labels = _labels_or_skip(_label_path_for_image(img_path), unreadable, files=files)
-            if labels is None:
-                continue
-            img_w, img_h = sizes.get(img_path)
-            _require_positive_dimensions(img_w, img_h, img_path.name)
-
-            if not labels:
+        if not labels:
+            rows.append(
+                _make_csv_row_base(
+                    "none",
+                    img_path.name,
+                    (img_w, img_h),
+                    split=split_key,
+                    frame_id=frame_id,
+                )
+            )
+        else:
+            for fields in labels:
                 rows.append(
-                    _make_csv_row_base(
-                        "none",
-                        img_path.name,
-                        (img_w, img_h),
-                        split=split_key,
-                        frame_id=frame_id,
+                    _yolo_fields_to_row(
+                        fields,
+                        class_names,
+                        img_path,
+                        img_w,
+                        img_h,
+                        split_key,
+                        frame_id,
+                        annotation_id,
                     )
                 )
-            else:
-                for fields in labels:
-                    rows.append(
-                        _yolo_fields_to_row(
-                            fields,
-                            class_names,
-                            img_path,
-                            img_w,
-                            img_h,
-                            split_key,
-                            frame_id,
-                            annotation_id,
-                        )
-                    )
-                    annotation_id += 1
+                annotation_id += 1
 
-            frame_id += 1
+        frame_id += 1
 
     _warn_unreadable_labels(unreadable)
     files.write_conversion_csv(rows, output_path)
@@ -336,7 +348,10 @@ def _from_yolo_predictions(  # noqa: PLR0913
         frame_id += 1
 
     if missing_images:
-        logger.warning(f"Не найдены изображения для {len(missing_images)} файлов: {preview_names(missing_images)}")
+        raise Cveta2Error(
+            f"Ошибка: не найдены изображения для {len(missing_images)} файлов: {preview_names(missing_images)}. "
+            "CSV не записан."
+        )
     _warn_unreadable_labels(unreadable)
 
     files.write_conversion_csv(rows, output_path)

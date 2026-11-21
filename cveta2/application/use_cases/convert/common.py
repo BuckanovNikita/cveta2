@@ -50,6 +50,8 @@ def prepare_export(  # noqa: PLR0913
     """Load CSV, validate splits, build label map, and resolve images.
 
     *label_start* controls the first class ID (0 for YOLO, 1 for COCO).
+    Raises ``Cveta2Error`` when an image is found in no search directory, so
+    an export never starts with an image it cannot place.
     """
     csv_path = Path(dataset)
     out_dir = Path(output_dir)
@@ -72,7 +74,9 @@ def prepare_export(  # noqa: PLR0913
     # The previous output must never serve as its own image source.
     found, missing = files.resolve_images(set(df["image_name"].unique()), search_dirs, exclude=out_dir)
     if missing:
-        logger.warning(f"Не найдено {len(missing)} изображений: {preview_names(missing)}")
+        raise Cveta2Error(
+            f"Ошибка: не найдено {len(missing)} изображений: {preview_names(missing)}. Выгрузка не начата."
+        )
 
     splits = sorted(df["split"].unique())
     logger.info(f"Сплиты: {splits}")
