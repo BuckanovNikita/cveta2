@@ -27,6 +27,7 @@ from cveta2.domain.errors import Cveta2Error
 from tests.helpers import (
     csv_row,
     make_image,
+    output_tree,
     write_convert_csv,
 )
 
@@ -39,17 +40,23 @@ _TWO_BOXES = "0 0.5 0.5 0.2 0.2\n1 0.25 0.25 0.1 0.1\n"
 class TestConversionRegressions:
     """Exercise filesystem and CSV contracts across complete conversions."""
 
-    def test_reexport_reuses_current_image_when_source_is_unavailable(self, tmp_path: Path) -> None:
+    def test_reexport_with_a_missing_image_leaves_the_previous_export_unchanged(self, tmp_path: Path) -> None:
+        """The image a previous run placed is not a source: the rerun fails before any write or prune."""
         images = tmp_path / "source"
         make_image(images / "a.jpg")
-        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
+        make_image(images / "b.jpg")
+        rows = [csv_row("a.jpg", label="cat", split="train"), csv_row("b.jpg", label="cat", split="train")]
         output = tmp_path / "yolo"
-        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+        convert_to_yolo(write_convert_csv(tmp_path, rows), output, image_dirs=[images], link_mode="copy")
+        before = output_tree(output)
         (images / "a.jpg").unlink()
+        # Going through, this run would relabel a.jpg, move it to val and prune b.jpg.
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="dog", split="val")])
 
-        convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
+        with pytest.raises(Cveta2Error, match=r"не найдено 1 изображений: a\.jpg"):
+            convert_to_yolo(csv_path, output, image_dirs=[images], link_mode="copy")
 
-        assert (output / "images/train/a.jpg").is_file()
+        assert output_tree(output) == before
 
     @pytest.mark.parametrize("link_mode", ["copy", "hardlink", "symlink"])
     def test_reexport_inside_image_dir_refreshes_from_the_source(
@@ -154,8 +161,10 @@ class TestConversionRegressions:
         assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")) == before
         assert victim.read_bytes() == b"precious" if existing else not victim.exists()
 
-    def test_linked_images_root_cannot_create_an_external_split_without_source_images(self, tmp_path: Path) -> None:
-        csv_path = write_convert_csv(tmp_path, [csv_row("missing.jpg", label="cat", split="train")])
+    def test_linked_images_root_cannot_create_an_external_split(self, tmp_path: Path) -> None:
+        source = tmp_path / "source"
+        make_image(source / "a.jpg")
+        csv_path = write_convert_csv(tmp_path, [csv_row("a.jpg", label="cat", split="train")])
         external = tmp_path / "external"
         external.mkdir()
         output = tmp_path / "yolo"
@@ -163,7 +172,7 @@ class TestConversionRegressions:
         (output / "images").symlink_to(external, target_is_directory=True)
 
         with pytest.raises(Cveta2Error, match=str(output / "images")):
-            convert_to_yolo(csv_path, output, image_dirs=[], link_mode="copy")
+            convert_to_yolo(csv_path, output, image_dirs=[source], link_mode="copy")
 
         assert list(external.iterdir()) == []
         assert not (output / "labels").exists()
@@ -431,22 +440,23 @@ class TestToYolo:
                 link_mode="copy",
             )
 
-    @pytest.mark.parametrize(("shape", "label_text"), [("box", None), ("none", "")])
-    def test_missing_image_still_writes_labels(self, tmp_path: Path, shape: str, label_text: str | None) -> None:
-        """A CSV row whose image is absent from disk is labelled but not copied."""
+    @pytest.mark.parametrize("shape", ["box", "none"])
+    def test_missing_image_aborts_before_any_write(self, tmp_path: Path, shape: str) -> None:
+        """A CSV image found in no search directory is an error, not a label without an image."""
         img_dir = tmp_path / "images"
-        img_dir.mkdir()
-        rows = [csv_row("ghost.jpg", shape=shape, split="val")]
+        make_image(img_dir / "here.jpg")
+        rows = [
+            csv_row("here.jpg", split="train"),
+            csv_row("phantom.jpg", shape=shape, split="val"),
+            csv_row("ghost.jpg", shape=shape, split="val"),
+        ]
         csv_path = write_convert_csv(tmp_path, rows)
-
         out_dir = tmp_path / "yolo_out"
-        convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
 
-        label = out_dir / "labels" / "val" / "ghost.txt"
-        assert label.is_file()
-        if label_text is not None:
-            assert label.read_text() == label_text
-        assert not (out_dir / "images" / "val" / "ghost.jpg").exists()
+        with pytest.raises(Cveta2Error, match=r"не найдено 2 изображений: ghost\.jpg, phantom\.jpg"):
+            convert_to_yolo(csv_path, out_dir, image_dirs=[str(img_dir)], link_mode="copy")
+
+        assert not out_dir.exists()
 
     def test_image_in_two_splits_is_placed_only_once(self, tmp_path: Path) -> None:
         """An image listed under two splits lands in the first split's dir only.
@@ -519,7 +529,7 @@ def _export_and_reimport(
 
 
 class TestOutOfImageBoxes:
-    """Boxes crossing the image edge are clipped; boxes left without area are dropped."""
+    """Boxes crossing the image edge are clipped; boxes left under 1 px wide or high are dropped."""
 
     @pytest.mark.parametrize(
         ("box", "clipped"),
@@ -561,11 +571,13 @@ class TestOutOfImageBoxes:
             pytest.param((10.0, 500.0, 100.0, 600.0), id="below-image"),
             pytest.param((640.0, 20.0, 700.0, 200.0), id="clips-to-zero-width"),
             pytest.param((10.0, -40.0, 100.0, 0.0), id="clips-to-zero-height"),
-            pytest.param((639.9999, 20.0, 700.0, 200.0), id="clips-below-rounding"),
-            pytest.param((100.0, 20.0, 100.0003, 200.0), id="inside-below-rounding"),
+            pytest.param((639.5, 20.0, 700.0, 200.0), id="clips-under-one-pixel-wide"),
+            pytest.param((10.0, 479.5, 100.0, 520.0), id="clips-under-one-pixel-high"),
+            pytest.param((100.0, 20.0, 100.5, 200.0), id="inside-under-one-pixel-wide"),
+            pytest.param((100.0, 20.0, 200.0, 20.99), id="inside-just-under-one-pixel-high"),
         ],
     )
-    def test_box_without_area_is_dropped_and_the_image_kept(
+    def test_box_under_one_pixel_is_dropped_and_the_image_kept(
         self,
         tmp_path: Path,
         box: tuple[float, float, float, float],
@@ -577,6 +589,22 @@ class TestOutOfImageBoxes:
         assert (out / "labels/train/gone.txt").read_text() == ""
         assert result["instance_shape"].tolist() == ["none"]
         assert any(": 1 (" in message and "gone.jpg" in message and "Пропущен" in message for message in capture_logs)
+
+    @pytest.mark.parametrize(
+        "box",
+        [
+            pytest.param((100.0, 20.0, 101.0, 21.0), id="one-pixel"),
+            # 11.1 - 10.1 is just under 1 in binary floating point.
+            pytest.param((10.1, 20.3, 11.1, 21.3), id="one-pixel-at-fractional-coordinates"),
+            pytest.param((100.0, 20.0, 100.996, 200.0), id="one-pixel-at-two-decimals"),
+            pytest.param((639.0, 479.0, 700.0, 520.0), id="clips-to-one-pixel"),
+        ],
+    )
+    def test_box_of_one_pixel_is_kept(self, tmp_path: Path, box: tuple[float, float, float, float]) -> None:
+        """The 1 px rule measures a side rounded to two decimals, as ``--to-coco`` does."""
+        out, _ = _export_and_reimport(tmp_path, {"small.jpg": [box]})
+
+        assert len((out / "labels/train/small.txt").read_text().splitlines()) == 1
 
     def test_remaining_boxes_are_kept_and_both_counts_are_summarized(
         self, tmp_path: Path, capture_logs: list[str], capture_info_logs: list[str]
@@ -669,11 +697,11 @@ _LABELS = st.sampled_from(["cat", "dog", "001", "NA"])
 
 @st.composite
 def _labelled_box(draw: st.DrawFn) -> tuple[str, float, float, float, float]:
-    """Draw a label and a quarter-pixel box inside a 640x480 image."""
+    """Draw a label and a box on a quarter-pixel grid, at least 1 px each way, inside a 640x480 image."""
     x_tl = draw(st.integers(0, 639 * 4)) / 4
     y_tl = draw(st.integers(0, 479 * 4)) / 4
-    x_br = draw(st.integers(int(x_tl * 4) + 1, 640 * 4)) / 4
-    y_br = draw(st.integers(int(y_tl * 4) + 1, 480 * 4)) / 4
+    x_br = draw(st.integers(int(x_tl * 4) + 4, 640 * 4)) / 4
+    y_br = draw(st.integers(int(y_tl * 4) + 4, 480 * 4)) / 4
     return draw(_LABELS), x_tl, y_tl, x_br, y_br
 
 
@@ -966,20 +994,26 @@ class TestFromYoloDatasetSplits:
 
         assert pd.read_csv(out)["image_name"].tolist() == ["a.jpg", "b.jpg"]
 
-    def test_missing_first_listed_image_does_not_hide_later_image(self, tmp_path: Path) -> None:
+    def test_listed_image_missing_on_disk_aborts_before_the_csv_is_written(self, tmp_path: Path) -> None:
+        """Every listed image that is absent is counted, and no partial CSV is left behind."""
         root = tmp_path / "ds"
         self._labelled(root, "train", "present")
         listing = root / "train.txt"
-        listing.write_text("images/train/missing.jpg\nimages/train/present.jpg\n", encoding="utf-8")
+        listing.write_text(
+            "images/train/missing.jpg\nimages/train/present.jpg\nimages/train/gone.jpg\n", encoding="utf-8"
+        )
         (root / "dataset.yaml").write_text(
             yaml.dump({"train": "train.txt", "names": {0: "cat"}}),
             encoding="utf-8",
         )
-
         out = tmp_path / "out.csv"
-        convert_from_yolo(root, out, read_all_sizes=True)
 
-        assert pd.read_csv(out)["image_name"].tolist() == ["present.jpg"]
+        with pytest.raises(Cveta2Error, match="не найдено 2 изображений") as error:
+            convert_from_yolo(root, out, read_all_sizes=True)
+
+        assert "missing.jpg" in str(error.value)
+        assert "gone.jpg" in str(error.value)
+        assert not out.exists()
 
     def test_direct_image_split_and_extension_filter(self, tmp_path: Path) -> None:
         root = tmp_path / "ds"
@@ -1255,27 +1289,34 @@ class TestFromYoloPredictions:
             "g.jPeG",
         ]
 
-    def test_missing_image_is_collected_and_the_walk_continues(self, tmp_path: Path, capture_logs: list[str]) -> None:
-        """A .txt with no matching image is reported, later files still load.
-
-        Nothing produced a missing image here, so the ``missing_images`` list
-        was never appended to and the skip never had to resume.
-        """
+    def test_prediction_without_an_image_aborts_before_the_csv_is_written(self, tmp_path: Path) -> None:
+        """Every prediction file with no image is counted, and no partial CSV is left behind."""
         pred_dir = tmp_path / "preds"
         make_image(pred_dir / "images" / "b.jpg")
-        (pred_dir / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
-        (pred_dir / "b.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
-
+        for stem in ("a", "b", "c"):
+            (pred_dir / f"{stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
         out = tmp_path / "out.csv"
-        convert_from_yolo(
-            pred_dir,
-            out,
-            names_file=self._names_file(tmp_path, {0: "cat"}),
-            read_all_sizes=False,
-        )
 
-        assert pd.read_csv(out)["image_name"].tolist() == ["b.jpg"]
-        assert any("Не найдены изображения для 1" in m for m in capture_logs)
+        with pytest.raises(Cveta2Error, match="не найдены изображения для 2 файлов: a, c"):
+            convert_from_yolo(
+                pred_dir,
+                out,
+                names_file=self._names_file(tmp_path, {0: "cat"}),
+                read_all_sizes=False,
+            )
+
+        assert not out.exists()
+
+    def test_missing_image_is_reported_before_any_image_is_read(self, tmp_path: Path) -> None:
+        """An unreadable image elsewhere in the input does not hide the missing one."""
+        pred_dir = tmp_path / "preds"
+        (pred_dir / "images").mkdir(parents=True)
+        (pred_dir / "images" / "a.jpg").write_bytes(b"not an image")
+        for stem in ("a", "b"):
+            (pred_dir / f"{stem}.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+
+        with pytest.raises(Cveta2Error, match="не найдены изображения для 1 файлов: b"):
+            convert_from_yolo(pred_dir, tmp_path / "out.csv", read_all_sizes=True)
 
     def test_directory_without_txt_files_is_rejected(self, tmp_path: Path) -> None:
         """An input dir holding no .txt at all aborts with an explanation."""

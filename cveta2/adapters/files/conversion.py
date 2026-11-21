@@ -183,9 +183,9 @@ def _validate_yolo_image_output(ctx: ExportContext) -> None:
             raise Cveta2Error(f"Ошибка: небезопасный каталог изображений YOLO: {link}")
         linked_splits[split] = link
     for name, split in set(ctx.df[["image_name", "split"]].itertuples(index=False, name=None)):
-        source = ctx.found.get(name)
-        if source is None or split not in linked_splits:
+        if split not in linked_splits:
             continue
+        source = ctx.found[name]
         destination = images / split / name
         # Materialization preserves an existing regular same-file destination.
         # Every other case would unlink or create a file through the directory alias.

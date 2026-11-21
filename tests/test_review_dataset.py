@@ -24,6 +24,14 @@ from cveta2.domain.errors import Cveta2Error
 from tests.helpers import csv_row, make_image, write_convert_csv
 
 
+def _source(tmp_path: Path, *names: str) -> list[Path]:
+    """Create the named source images and return the search directories holding them."""
+    images = tmp_path / "source"
+    for name in names:
+        make_image(images / name)
+    return [images]
+
+
 def _clone_helper() -> ModuleType:
     """Load the integration clone helper, a standalone script, by path."""
     path = Path(__file__).resolve().parent / "integration" / "clone_project_to_s3.py"
@@ -124,7 +132,7 @@ def test_coco_rejects_unsafe_previous_metadata(tmp_path: Path, name: object) -> 
     text = json.dumps({"images": [{"file_name": name}]})
     metadata.write_text(text)
     with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
+        convert_to_coco(csv, output, image_dirs=_source(tmp_path, "a.jpg"))
     assert str(metadata) in str(error.value)
     assert metadata.read_text() == text
 
@@ -336,7 +344,7 @@ def test_coco_preserves_unowned_empty_split_directory(tmp_path: Path) -> None:
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
     output = tmp_path / "output"
     (output / "valid").mkdir(parents=True)
-    convert_to_coco(csv, output)
+    convert_to_coco(csv, output, image_dirs=_source(tmp_path, "a.jpg"))
     assert (output / "valid").is_dir()
 
 
@@ -346,8 +354,8 @@ def test_coco_rejects_symlink_cleanup_parent(tmp_path: Path) -> None:
     outside.mkdir()
     alias = tmp_path / "alias"
     alias.symlink_to(outside, target_is_directory=True)
-    with pytest.raises(Cveta2Error):
-        convert_to_coco(csv, alias / "output")
+    with pytest.raises(Cveta2Error, match=str(alias)):
+        convert_to_coco(csv, alias / "output", image_dirs=_source(tmp_path, "a.jpg"))
     assert not (outside / "output").exists()
 
 
@@ -366,7 +374,7 @@ def test_coco_rejects_corrupt_or_ambiguous_metadata(tmp_path: Path, content: str
     metadata.parent.mkdir(parents=True)
     metadata.write_text(content)
     with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
+        convert_to_coco(csv, output, image_dirs=_source(tmp_path, "a.jpg"))
     assert str(metadata) in str(error.value)
     assert metadata.read_text() == content
 
@@ -401,10 +409,15 @@ def test_coco_rejects_reserved_or_invalid_current_name_before_writes(tmp_path: P
     output.mkdir()
     sentinel = output / "sentinel"
     sentinel.write_bytes(b"keep")
-    with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
+    source = tmp_path / "source"
+    source.mkdir()
     if name == "_annotations.coco.json":
-        assert name in str(error.value)
+        # The name is findable, so the export gets as far as the reserved-name check.
+        (source / name).write_bytes(b"image")
+    with pytest.raises(Cveta2Error) as error:
+        convert_to_coco(csv, output, image_dirs=[source])
+    if name == "_annotations.coco.json":
+        assert f"совпадает с метаданными COCO: {name}" in str(error.value)
     assert list(output.iterdir()) == [sentinel]
     assert sentinel.read_bytes() == b"keep"
 
@@ -554,7 +567,7 @@ def test_export_accepts_one_pixel_dimensions(tmp_path: Path, export: Any) -> Non
         [csv_row("one.jpg", shape="none", split="train", image_width=1, image_height=1)],
     )
     output = tmp_path / "out"
-    export(csv, output)
+    export(csv, output, image_dirs=_source(tmp_path, "one.jpg"))
     assert output.is_dir()
 
 
@@ -614,7 +627,7 @@ def test_export_valid_box_axes_are_independent(tmp_path: Path, export: Any) -> N
             )
         ],
     )
-    assert export(csv, tmp_path / "out").is_dir()
+    assert export(csv, tmp_path / "out", image_dirs=_source(tmp_path, "box.jpg")).is_dir()
 
 
 @pytest.mark.parametrize("export", [convert_to_coco, convert_to_yolo])
@@ -680,7 +693,7 @@ def test_coco_unowned_image_collision_rejected_with_context(tmp_path: Path, spli
         destination.write_bytes(b"unrelated")
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="val" if split == "valid" else split)])
     with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
+        convert_to_coco(csv, output, image_dirs=_source(tmp_path, "a.jpg"))
     assert str(destination) in str(error.value)
     assert not (directory / "_annotations.coco.json").exists()
     assert destination.is_symlink() if dangling else destination.read_bytes() == b"unrelated"
@@ -713,7 +726,7 @@ def test_coco_unsafe_destination_types_rejected_with_context(tmp_path: Path, kin
         unsafe = alias
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
     with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
+        convert_to_coco(csv, output, image_dirs=_source(tmp_path, "a.jpg"))
     assert str(unsafe) in str(error.value)
     assert not (output / "train").exists()
 
@@ -726,18 +739,19 @@ def test_coco_owned_image_directory_rejected_with_context(tmp_path: Path) -> Non
     metadata.write_text('{"images": [{"file_name": "a.jpg"}]}')
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
     with pytest.raises(Cveta2Error) as error:
-        convert_to_coco(csv, output)
+        convert_to_coco(csv, output, image_dirs=_source(tmp_path, "a.jpg"))
     assert str(destination) in str(error.value)
     assert destination.is_dir()
 
 
 def test_coco_prunes_missing_owned_image_without_error(tmp_path: Path) -> None:
+    images = _source(tmp_path, "absent.jpg", "a.jpg")
     csv = write_convert_csv(tmp_path, [csv_row("absent.jpg", split="test")])
     output = tmp_path / "out"
-    convert_to_coco(csv, output)
-    assert not (output / "test/absent.jpg").exists()
+    convert_to_coco(csv, output, image_dirs=images, link_mode="copy")
+    (output / "test/absent.jpg").unlink()
     csv = write_convert_csv(tmp_path, [csv_row("a.jpg", split="train")])
-    convert_to_coco(csv, output)
+    convert_to_coco(csv, output, image_dirs=images, link_mode="copy")
     assert not (output / "test").exists()
     assert (output / "train/_annotations.coco.json").is_file()
 

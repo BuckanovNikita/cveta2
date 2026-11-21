@@ -442,6 +442,14 @@ def write_convert_csv(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
     return write_dataset_csv(tmp_path / "dataset.csv", rows, columns=CSV_COLUMNS)
 
 
+def output_tree(root: Path) -> dict[str, bytes | None]:
+    """Snapshot every path below *root*: file bytes by relative path, ``None`` for a directory."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes() if path.is_file() else None
+        for path in sorted(root.rglob("*"))
+    }
+
+
 def make_args(**kwargs: object) -> argparse.Namespace:
     """Build an argparse.Namespace from keyword arguments."""
     return argparse.Namespace(**kwargs)

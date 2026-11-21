@@ -1,6 +1,7 @@
 """Conversion preparation and dimension caching over supplied ports."""
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from loguru import logger
@@ -13,6 +14,38 @@ from cveta2.domain.conversion import (
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.output import preview_names
+
+
+@dataclass
+class _BoxAdjustments:
+    """Clipped and dropped box counts of one export, with the affected image names."""
+
+    clipped: int = 0
+    dropped: int = 0
+    clipped_images: list[str] = field(default_factory=list)
+    dropped_images: list[str] = field(default_factory=list)
+
+    def record(self, image_name: str, *, clipped: int, dropped: int) -> None:
+        """Add one image's counts."""
+        self.clipped += clipped
+        self.dropped += dropped
+        if clipped:
+            self.clipped_images.append(image_name)
+        if dropped:
+            self.dropped_images.append(image_name)
+
+    def warn(self) -> None:
+        """Summarize clipped and dropped boxes, each in one warning line."""
+        if self.clipped:
+            logger.warning(
+                f"Боксы, выходящие за границы изображения, обрезаны по ним: {self.clipped} "
+                f"({preview_names(self.clipped_images)})"
+            )
+        if self.dropped:
+            logger.warning(
+                f"Пропущены боксы меньше 1 px по ширине или высоте после обрезки: {self.dropped} "
+                f"({preview_names(self.dropped_images)})"
+            )
 
 
 class _SizeCache:
@@ -50,6 +83,8 @@ def prepare_export(  # noqa: PLR0913
     """Load CSV, validate splits, build label map, and resolve images.
 
     *label_start* controls the first class ID (0 for YOLO, 1 for COCO).
+    Raises ``Cveta2Error`` when an image is found in no search directory, so
+    an export never starts with an image it cannot place.
     """
     csv_path = Path(dataset)
     out_dir = Path(output_dir)
@@ -72,7 +107,9 @@ def prepare_export(  # noqa: PLR0913
     # The previous output must never serve as its own image source.
     found, missing = files.resolve_images(set(df["image_name"].unique()), search_dirs, exclude=out_dir)
     if missing:
-        logger.warning(f"Не найдено {len(missing)} изображений: {preview_names(missing)}")
+        raise Cveta2Error(
+            f"Ошибка: не найдено {len(missing)} изображений: {preview_names(missing)}. Выгрузка не начата."
+        )
 
     splits = sorted(df["split"].unique())
     logger.info(f"Сплиты: {splits}")
