@@ -10,6 +10,8 @@ from cveta2.adapters.config.project import (
     activate_migration,
     attach_existing_project_config,
     attach_project_config,
+    create_global_config,
+    find_project_key,
     global_config_from_env,
     load_global_config,
     load_project_config,
@@ -17,9 +19,12 @@ from cveta2.adapters.config.project import (
     optional_global_config,
     optional_project_config,
     project_config_path,
+    project_key_for,
     read_local_overrides,
     recover_migration,
     select_spelling,
+    write_local_overrides,
+    write_shared_project_fields,
 )
 from cveta2.adapters.config.projects_cache import (
     PERSONAL_WORKSPACE_SLUG,
@@ -98,6 +103,8 @@ __all__ = [
     "attach_existing_project_config",
     "attach_project_config",
     "cache_dir_for_project",
+    "create_global_config",
+    "find_project_key",
     "get_config_path",
     "get_projects_cache_path",
     "global_config_from_env",
@@ -113,6 +120,7 @@ __all__ = [
     "optional_project_config",
     "override_leaves",
     "project_config_path",
+    "project_key_for",
     "project_publication",
     "read_local_overrides",
     "recover_migration",
@@ -122,6 +130,8 @@ __all__ = [
     "select_spelling",
     "should_raise_on_fetch_failure",
     "update_org_projects",
+    "write_local_overrides",
+    "write_shared_project_fields",
 ]
 
 

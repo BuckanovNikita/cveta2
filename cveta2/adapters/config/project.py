@@ -7,6 +7,7 @@ migration journal records only paths and hashes; secret-bearing stages/backups
 are private files, and the shared target is always claimed exclusively.
 """
 
+import copy
 import hashlib
 import json
 import os
@@ -30,7 +31,7 @@ from cveta2.domain.managed.models import (
     ProjectConfig,
     ProjectDefinition,
 )
-from cveta2.domain.managed.overrides import LocalOverrides, apply_local_overrides
+from cveta2.domain.managed.overrides import OVERRIDABLE_PROJECT_FIELDS, LocalOverrides, apply_local_overrides
 
 _PERSONAL_KEYS = {
     "schema_version",
@@ -504,57 +505,176 @@ def _shared_policy_lock(path: Path) -> Iterator[None]:
         os.close(descriptor)
 
 
-def write_shared_project_fields(
+_PROJECT_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+_GLOBAL_SETTINGS = frozenset({"local_overrides", "cvat.host", "cvat.organization"})
+
+
+def project_key_for(name: str, project_id: int) -> str:
+    """Key a project by its CVAT name when that is a safe identifier, else by its ID."""
+    return name if _PROJECT_KEY.fullmatch(name) else f"project-{project_id}"
+
+
+def find_project_key(config: ProjectConfig, spec: str) -> str | None:
+    """Find a project by its key, then its ``name``, then its decimal ``id``."""
+    if spec in config.projects:
+        return spec
+    named = [key for key, project in config.projects.items() if project.name == spec]
+    if len(named) > 1:
+        raise ManagedError(f"Ambiguous shared project name: {spec}")
+    if named:
+        return named[0]
+    if spec.isascii() and spec.isdecimal():
+        return next((key for key, project in config.projects.items() if project.id == int(spec)), None)
+    return None
+
+
+def _get_dotted(mapping: dict[str, object], path: tuple[str, ...]) -> object:
+    """Return the value at *path*, or ``None`` when any segment is absent."""
+    value: object = mapping
+    for segment in path:
+        value = _dict(value).get(segment)
+    return value
+
+
+def _set_dotted(mapping: dict[str, object], path: tuple[str, ...], value: object) -> None:
+    """Set the leaf at *path*; ``None`` removes it and prunes the parents it leaves empty."""
+    head, *rest = path
+    if not rest:
+        if value is None:
+            mapping.pop(head, None)
+        else:
+            mapping[head] = value
+        return
+    child = mapping.get(head)
+    if not isinstance(child, dict):
+        if value is None:
+            return
+        child = {}
+        mapping[head] = child
+    _set_dotted(cast("dict[str, object]", child), tuple(rest), value)
+    if value is None and not child:
+        mapping.pop(head)
+
+
+def _segments(path: str) -> tuple[str, ...]:
+    return tuple(path.split("."))
+
+
+def write_shared_project_fields(  # noqa: PLR0913 - every write to the global file passes through one locked save
     personal_path: Path,
     changes: dict[str, dict[str, object]],
     *,
     expected: dict[str, dict[str, object]] | None = None,
+    settings: dict[str, object] | None = None,
+    new_projects: dict[str, ProjectDefinition] | None = None,
+    global_path: Path | None = None,
 ) -> Path:
     """Explicit policy writers update shared fields; no personal shadow copies.
 
-    *expected* holds the caller's view of each changed field before its edit.
-    A field another writer has since set to a different value is refused with
+    *changes* maps a project (key, name or decimal ID) to dotted field paths
+    inside its definition, such as ``publication.clearml.dataset``; ``None``
+    removes a leaf so its default applies. *settings* sets top-level values
+    (``local_overrides``, ``cvat.host``, ``cvat.organization``) and
+    *new_projects* adds definitions. *global_path* writes that file instead of
+    the selected one.
+
+    *expected* holds the caller's view of each changed leaf before its edit.
+    A leaf another writer has since set to a different value is refused with
     :class:`SharedConfigConflictError`, as is a file replaced during this save.
     """
-    path = project_config_path(personal_path)
+    unknown = sorted(set(settings or {}) - _GLOBAL_SETTINGS)
+    if unknown:
+        raise ManagedError(f"Неизвестные настройки общей конфигурации: {', '.join(unknown)}")
+    path = global_path.expanduser().resolve() if global_path is not None else project_config_path(personal_path)
     if path is None:
         raise ManagedError("No shared project configuration is selected")
     with _shared_policy_lock(path):
-        return _write_shared_project_fields_locked(personal_path, path, changes, expected=expected)
+        return _write_shared_project_fields_locked(
+            personal_path,
+            path,
+            changes,
+            expected=expected,
+            settings=settings or {},
+            new_projects=new_projects or {},
+        )
 
 
-def _write_shared_project_fields_locked(
+def _check_expected(
+    path: Path,
+    projects: dict[str, object],
+    keys: dict[str, str],
+    changes: dict[str, dict[str, object]],
+    expected: dict[str, dict[str, object]],
+) -> None:
+    """Refuse a leaf another writer changed since the caller loaded it."""
+    for name, fields in changes.items():
+        for field, value in fields.items():
+            current = _get_dotted(_dict(projects[keys[name]]), _segments(field))
+            if current not in (expected[name][field], value):
+                raise SharedConfigConflictError(
+                    f"Shared configuration {path} changed since it was loaded: project {name!r}, field {field}; "
+                    "reload and repeat the change"
+                )
+
+
+def _add_new_projects(
+    path: Path, config: ProjectConfig, projects: dict[str, object], new_projects: dict[str, ProjectDefinition]
+) -> None:
+    """Add definitions whose key and CVAT ID are both new to the global file."""
+    ids = {project.id for project in config.projects.values()}
+    for key, definition in new_projects.items():
+        if key in projects:
+            raise ManagedError(f"Проект {key} уже описан в общей конфигурации {path}")
+        if definition.id in ids:
+            raise ManagedError(f"Проект с ID {definition.id} уже описан в общей конфигурации {path}")
+        ids.add(definition.id)
+        projects[key] = definition.model_dump(mode="json")
+
+
+def _validated_change(path: Path, document: dict[str, object]) -> ProjectConfig:
+    """Validate the changed global document, naming the invalid fields."""
+    try:
+        return ProjectConfig.model_validate(document)
+    except ValidationError as error:
+        issues = error.errors()
+        prefix = f"Общая конфигурация {path} после изменения некорректна"
+        fields = ", ".join(".".join(str(part) for part in issue["loc"]) for issue in issues if issue["loc"])
+        if not fields:
+            # A model-level rule, such as the destination-pair collision, names no field.
+            raise ManagedError(f"{prefix}: {issues[0]['msg']}") from error
+        raise ManagedError(f"{prefix}; поля: {fields}") from error
+
+
+def _write_shared_project_fields_locked(  # noqa: PLR0913 - the locked half of write_shared_project_fields
     personal_path: Path,
     path: Path,
     changes: dict[str, dict[str, object]],
     *,
     expected: dict[str, dict[str, object]] | None,
+    settings: dict[str, object],
+    new_projects: dict[str, ProjectDefinition],
 ) -> Path:
     """Read, merge and replace while cooperating policy writers are excluded."""
     original = _read_shared_bytes(path)
     # The raw file is the baseline: a local override must never reach the team file.
     config = load_global_config(personal_path, path)
-    projects = dict(config.projects)
-    aliases = shared_projects_by_name(config)
-    for name, fields in changes.items():
-        project = aliases.get(name)
-        if project is None:
+    document = config.model_dump(mode="json")
+    projects = cast("dict[str, object]", document["projects"])
+    _add_new_projects(path, config, projects, new_projects)
+    keys: dict[str, str] = {}
+    for name in changes:
+        key = find_project_key(config, name)
+        if key is None:
             raise ManagedError(f"Unknown shared project: {name}")
+        keys[name] = key
+    if expected is not None:
+        _check_expected(path, projects, keys, changes, expected)
+    for name, fields in changes.items():
         for field, value in fields.items():
-            current = getattr(project, field)
-            if expected is not None and current not in (expected[name][field], value):
-                raise SharedConfigConflictError(
-                    f"Shared configuration {path} changed since it was loaded: project {name!r}, field {field}; "
-                    "reload and repeat the change"
-                )
-        key = next(key for key, value in projects.items() if value.id == project.id)
-        projects[key] = ProjectDefinition.model_validate({**project.model_dump(), **fields})
-    updated = ProjectConfig.model_validate(
-        {
-            **config.model_dump(),
-            "projects": {k: p.model_dump() for k, p in projects.items()},
-        }
-    )
+            _set_dotted(cast("dict[str, object]", projects[keys[name]]), _segments(field), value)
+    for setting, value in settings.items():
+        _set_dotted(document, _segments(setting), value)
+    updated = _validated_change(path, document)
     # Mode-bit check gives a useful refusal even when an elevated process could
     # replace a read-only file through its writable parent directory.
     if path.stat().st_mode & 0o222 == 0:
@@ -565,6 +685,72 @@ def _write_shared_project_fields_locked(
         )
     _private_write(path, _yaml_bytes(updated.model_dump()), replace=True, preserve_permissions=True)
     return path
+
+
+def create_global_config(personal_path: Path, global_path: Path, identity: CvatIdentity) -> Path:
+    """Create a new team file that allows local overrides, then attach it.
+
+    The name is claimed exclusively, so an existing file is never replaced;
+    when the attachment is refused the new file is removed again.
+    """
+    global_path = global_path.expanduser().resolve()
+    refusal = f"Файл {global_path} уже существует; подключите его: cveta2 setup --global-config {global_path}"
+    if global_path.exists():
+        raise ManagedError(refusal)
+    content = _yaml_bytes(ProjectConfig(local_overrides=True, cvat=identity).model_dump())
+    # The team file takes the umask-default mode; it holds no credentials.
+    stage = _stage_bytes(global_path, content, "create", private=False)
+    try:
+        os.link(stage, global_path)
+    except FileExistsError as error:
+        raise ManagedError(refusal) from error
+    finally:
+        stage.unlink(missing_ok=True)
+    try:
+        return attach_existing_project_config(personal_path, global_path)
+    except BaseException:
+        global_path.unlink(missing_ok=True)
+        raise
+
+
+def write_local_overrides(
+    personal_path: Path,
+    project_key: str,
+    changes: dict[str, object],
+    *,
+    global_path: Path | None = None,
+) -> Path:
+    """Set or remove the user's own overrides of one project's publication settings.
+
+    *changes* maps dotted paths under ``overrides.projects.<project_key>`` to
+    values; ``None`` removes a leaf and prunes the parents it leaves empty.
+    Setting a value is refused unless the global file allows overrides and the
+    result merges into a valid configuration. Removing only is always allowed,
+    so a user can clean up overrides the global file does not accept.
+    """
+    raw = read_config(personal_path, missing_ok=True)
+    raw_global = load_global_config(personal_path, global_path)
+    for field in changes:
+        head = _segments(field)[0]
+        if head not in OVERRIDABLE_PROJECT_FIELDS:
+            raise ManagedError(
+                f"Локально переопределяются только настройки публикации; {head} задаётся в общей конфигурации: "
+                "cveta2 setup --global …"
+            )
+    if project_key not in raw_global.projects:
+        raise ManagedError(
+            f"Нет описания проекта {project_key} в общей конфигурации; добавьте его: cveta2 setup --global --project …"
+        )
+    sets_value = any(value is not None for value in changes.values())
+    new_raw = copy.deepcopy(raw)
+    for field, value in changes.items():
+        _set_dotted(new_raw, ("overrides", "projects", project_key, *_segments(field)), value)
+    validate_personal(new_raw, attached=True)
+    if sets_value:
+        # Refuses a switched-off global file, collisions and incomplete blocks before anything is written.
+        apply_local_overrides(raw_global, read_local_overrides(new_raw))
+    _private_write(personal_path, _yaml_bytes(new_raw), replace=True)
+    return personal_path
 
 
 @dataclass(frozen=True)
@@ -633,7 +819,7 @@ def _migration_projects(
             unresolved.append(f"Project {name!r} requires an unambiguous cached CVAT identity")
             continue
         project_id = ids.pop()
-        key = name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", name) else f"project-{project_id}"
+        key = project_key_for(name, project_id)
         if key in projects:
             unresolved.append(
                 f"Project key collision for {name!r}: {key!r}; review the legacy identities before migration"
