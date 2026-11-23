@@ -12,6 +12,7 @@ from cveta2.adapters.config.project import (
     create_global_config,
     find_project_key,
     load_global_config,
+    load_project_config,
     project_key_for,
     read_config,
     write_local_overrides,
@@ -338,6 +339,19 @@ def test_write_local_overrides_refuses_an_unknown_project(tmp_path: Path) -> Non
         write_local_overrides(cfg, "other", {"publication.clearml.dataset": "mine"})
 
     assert cfg.read_bytes() == before
+
+
+def test_removing_an_override_of_a_project_no_longer_in_the_global_file(tmp_path: Path) -> None:
+    global_file = team(tmp_path / "team.yaml", publication=_PUBLICATION)
+    overrides: dict[str, object] = {"projects": {"gone": {"publication": {"clearml": {"dataset": "mine"}}}}}
+    cfg = personal(tmp_path / "config.yaml", global_file, overrides)
+    with pytest.raises(ManagedError, match="gone"):
+        load_project_config(cfg)
+
+    write_local_overrides(cfg, "gone", {"publication.clearml.dataset": None})
+
+    assert "overrides" not in read_config(cfg)
+    assert load_project_config(cfg).projects["retail"].publication is not None
 
 
 def test_override_write_that_collides_is_refused_before_writing(tmp_path: Path) -> None:

@@ -737,11 +737,12 @@ def write_local_overrides(
                 f"Локально переопределяются только настройки публикации; {head} задаётся в общей конфигурации: "
                 "cveta2 setup --global …"
             )
-    if project_key not in raw_global.projects:
+    sets_value = any(value is not None for value in changes.values())
+    # Removing stays possible for a project the team has since deleted, so a stale override can be repaired.
+    if sets_value and project_key not in raw_global.projects:
         raise ManagedError(
             f"Нет описания проекта {project_key} в общей конфигурации; добавьте его: cveta2 setup --global --project …"
         )
-    sets_value = any(value is not None for value in changes.values())
     new_raw = copy.deepcopy(raw)
     for field, value in changes.items():
         _set_dotted(new_raw, ("overrides", "projects", project_key, *_segments(field)), value)
