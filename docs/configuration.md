@@ -61,6 +61,25 @@ cveta2 setup --global-config ~/team/project-config.yaml
 
 Команда проверяет общий файл и записывает в личный файл `schema_version: 1` и абсолютный путь в `global_config` (старый ключ `project_config` удаляется). Сам общий файл она не меняет. Подробности — в [`cveta2 setup`](commands/setup.md).
 
+Если общего файла ещё нет, его создаёт `--global` с адресом CVAT. Новый файл разрешает локальные переопределения (`local_overrides: true`) и сразу подключается:
+
+```bash
+cveta2 setup --global --global-config ~/team/project-config.yaml --host https://cvat.example.com --organization my-team
+```
+
+Ключи общего файла записываются командой `cveta2 setup --global` по одному флагу на ключ, без ручной правки YAML:
+
+| Ключ | Команда |
+|---|---|
+| `local_overrides` | `cveta2 setup --global --local-overrides on` (или `off`) |
+| `cvat.host`, `cvat.organization` | `cveta2 setup --global --host URL --organization SLUG` |
+| `projects.<ключ>.sync_root`, `.ignored_prefix`, `.task_cache_s3` | `cveta2 setup --global --project P --sync-root s3://bucket/prefix --ignored-prefix PREFIX --task-cache-s3 s3://bucket/cache` |
+| `projects.<ключ>.publication.clearml.project`, `.clearml.dataset`, `.clearml.output_uri` | `cveta2 setup --global --project P --clearml-project Retail/Datasets --dataset-name retail-shelves --output-uri s3://bucket/.clearml` |
+| `projects.<ключ>.publication.api_url` | `cveta2 setup --global --project P --api-url https://classes.example.com/api` |
+| `projects.<ключ>.publication.empty_classes`, `.s3_roots` | `cveta2 setup --global --project P --empty-class 12 --empty-class 13 --s3-root s3://bucket/images` |
+
+`--unset <флаг без -->` удаляет ключ, `--unset publication` — весь блок публикации. Проект без описания получает его при первой записи: ID и имя берутся из `projects.yaml` или из CVAT.
+
 ## Личная конфигурация
 
 ### Пример
@@ -220,6 +239,17 @@ overrides:
 ```
 
 Переопределить можно любое значение внутри `projects.<ключ>.publication`: `clearml.project`, `clearml.dataset`, `clearml.output_uri`, `api_url`, `empty_classes` и `s3_roots`. Всё остальное берётся только из общего файла: `id`, `name`, `sync_root`, `ignored_prefix`, `task_cache_s3`, список `ignore`, раздел `cvat` и раздел `datasets`. Так все в команде скачивают одни и те же данные. Другой ключ в `overrides` — ошибка `Некорректный раздел overrides личной конфигурации; поля: <ключи>`; ключ проекта, которого нет в общем файле, тоже отклоняется.
+
+Переопределение записывает и удаляет `cveta2 setup` с `--project` и без `--global`:
+
+| Ключ в `overrides.projects.<ключ>.publication` | Команда |
+|---|---|
+| `clearml.project`, `clearml.dataset`, `clearml.output_uri` | `cveta2 setup --project retail --clearml-project Retail/Datasets --dataset-name retail-shelves-alice --output-uri s3://bucket/.clearml` |
+| `api_url` | `cveta2 setup --project retail --api-url https://classes.example.com/api` |
+| `empty_classes`, `s3_roots` | `cveta2 setup --project retail --empty-class 5 --s3-root s3://bucket/images` |
+| одно значение / весь блок | `cveta2 setup --project retail --unset dataset-name` / `cveta2 setup --project retail --unset publication` |
+
+Удаление работает всегда, даже когда общий файл переопределения не разрешает. Значения `sync_root`, `ignored_prefix` и `task_cache_s3` локально не записываются: команда отвечает ошибкой и предлагает `cveta2 setup --global`.
 
 Значения сливаются по одному: заданное значение заменяет значение из общего файла, остальные остаются общими. В примере выше `clearml.project`, `api_url` и прочие настройки публикации берутся из общего файла. Список заменяется целиком: `empty_classes: [5]` в личном файле при `empty_classes: [12, 13]` в общем даёт `[5]`.
 

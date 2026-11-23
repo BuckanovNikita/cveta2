@@ -1,6 +1,5 @@
 """Strict configuration ownership and user-reviewed migration regressions."""
 
-import argparse
 import json
 import multiprocessing
 import os
@@ -48,7 +47,7 @@ from cveta2.domain.managed.models import (
 )
 from cveta2.interfaces.commands import setup
 from cveta2.interfaces.commands.interactive import primitives, wizard
-from tests.helpers import write_config_yaml, write_split_config_yaml
+from tests.helpers import parse_cli_args, write_config_yaml, write_split_config_yaml
 
 
 def write(path: Path, data: dict[str, object]) -> Path:
@@ -147,7 +146,7 @@ def test_attach_is_noninteractive_and_does_not_modify_shared(tmp_path: Path, mon
     cfg = write(tmp_path / "personal.yaml", {"network": {"s3_workers": 2}})
     before = target.read_bytes()
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-    setup.run_setup(argparse.Namespace(config=str(cfg), project_config=target, migrate_config=False))
+    setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--project-config", str(target)))
     assert target.read_bytes() == before
     assert read_config(cfg)["global_config"] == str(target)
     assert read_config(cfg)["network"] == {"s3_workers": 2}
@@ -267,7 +266,7 @@ def test_migration_cancel_and_stale_preview(tmp_path: Path, monkeypatch: pytest.
     cfg = legacy(tmp_path / "personal.yaml")
     original = cfg.read_bytes()
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: False)
-    setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None))
+    setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--migrate-config"))
     assert cfg.read_bytes() == original
     assert not (tmp_path / "project-config.yaml").exists()
     proposal = migration_proposal(cfg)
@@ -999,7 +998,7 @@ def test_damaged_migration_journal_is_a_recoverable_typed_error(
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
 
     with pytest.raises(ManagedError) as caught:
-        setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None))
+        setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--migrate-config"))
 
     assert str(journal) in str(caught.value)
     assert "setup --migrate-config" in str(caught.value)
@@ -1046,7 +1045,7 @@ def _run_wizard(monkeypatch: pytest.MonkeyPatch, cfg: Path, team: Path, organiza
     monkeypatch.setattr(wizard, "prompt_password", lambda: "private")
     monkeypatch.setattr(primitives, "path", lambda *_args, **_kwargs: team)
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
-    setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=False, project_config=None))
+    setup.run_setup(parse_cli_args("setup", "--config", str(cfg)))
 
 
 def test_wizard_attaches_an_existing_shared_file_with_the_same_identity(

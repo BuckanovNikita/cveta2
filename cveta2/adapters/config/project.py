@@ -663,7 +663,8 @@ def _write_shared_project_fields_locked(  # noqa: PLR0913 - the locked half of w
     _add_new_projects(path, config, projects, new_projects)
     keys: dict[str, str] = {}
     for name in changes:
-        key = find_project_key(config, name)
+        # A definition added by this same write is changed under its new key.
+        key = name if name in new_projects else find_project_key(config, name)
         if key is None:
             raise ManagedError(f"Unknown shared project: {name}")
         keys[name] = key

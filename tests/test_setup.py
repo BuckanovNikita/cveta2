@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import os
 import resource
 import signal
@@ -19,16 +18,17 @@ from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands import setup as setup_cmd
 from cveta2.interfaces.commands.interactive import _questionary, primitives, wizard
 from cveta2.interfaces.commands.setup import run_setup, run_setup_cache
-from tests.helpers import write_config_yaml
+from tests.helpers import parse_cli_args, write_config_yaml
 
 if TYPE_CHECKING:
+    import argparse
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
-def _args(config_path: Path, *, reset: bool = False, list_only: bool = False) -> argparse.Namespace:
-    """Build a setup-command Namespace mirroring the CLI parser defaults."""
-    return argparse.Namespace(config=str(config_path), reset=reset, list_only=list_only)
+def _args(config_path: Path, *, command: str = "setup-cache", reset: bool = False) -> argparse.Namespace:
+    """Parse a ``setup`` or ``setup-cache`` command line with the real CLI parser."""
+    return parse_cli_args(command, "--config", str(config_path), *(["--reset"] if reset else []))
 
 
 # Yes/No tokens the wizard treats as an affirmative confirm answer.
@@ -67,22 +67,23 @@ def feed_inputs(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str
 
 
 @pytest.mark.parametrize(
-    ("command", "hint"),
+    ("name", "command", "hint"),
     [
-        (run_setup, wizard.SETUP_HINT),
-        (run_setup_cache, wizard.CACHE_HINT),
+        ("setup", run_setup, wizard.SETUP_HINT),
+        ("setup-cache", run_setup_cache, wizard.CACHE_HINT),
     ],
 )
 def test_setup_commands_refuse_non_interactive_with_wizard_hint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    name: str,
     command: Callable[[argparse.Namespace], None],
     hint: str,
 ) -> None:
     """The top-level guard names the same hint the wizard prompts would."""
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     with pytest.raises(InteractiveModeRequiredError) as excinfo:
-        command(_args(tmp_path / "config.yaml"))
+        command(_args(tmp_path / "config.yaml", command=name))
     assert str(excinfo.value).endswith(hint)
 
 
@@ -111,7 +112,7 @@ def run_setup_with_inputs(
     """Run run_setup with scripted input answers; return prompt log."""
     prompts = feed_inputs(monkeypatch, [*answers, ""])
     monkeypatch.setattr(primitives, "prompt_password", lambda _prompt: "secret")
-    run_setup(_args(config_path))
+    run_setup(_args(config_path, command="setup"))
     return prompts
 
 
@@ -409,7 +410,7 @@ def test_attached_setup_does_not_persist_one_run_environment_overrides(
     feed_inputs(monkeypatch, [""])
     monkeypatch.setattr(primitives, "prompt_password", lambda _prompt: "")
 
-    run_setup(_args(config_path))
+    run_setup(_args(config_path, command="setup"))
 
     saved = CvatConfig.from_file(config_path)
     assert saved.password == "file-password"
@@ -433,7 +434,7 @@ def test_setup_with_closed_stdin_is_a_typed_interactive_error(
         monkeypatch.setattr("getpass.getpass", _closed_stdin)
 
     with pytest.raises(InteractiveModeRequiredError) as caught:
-        run_setup(_args(tmp_path / "config.yaml"))
+        run_setup(_args(tmp_path / "config.yaml", command="setup"))
 
     assert "CVETA2_NO_INTERACTIVE=true." not in str(caught.value)
     assert not (tmp_path / "config.yaml").exists()

@@ -528,7 +528,8 @@ class CvatConfig(BaseModel):
         shared = optional_project_config(path)
         if shared is not None and (self.host != shared.cvat.host or self.organization != shared.cvat.organization):
             raise ManagedError("CVAT identity must be changed in shared project configuration")
-        cvat_data: dict[str, str | float] = {} if shared is not None else {"host": self.host}
+        # An empty host is never written: the key alone would mark the file as legacy-attached.
+        cvat_data: dict[str, str | float] = {"host": self.host} if shared is None and self.host else {}
         if self.organization and shared is None:
             cvat_data["organization"] = self.organization
         if self.username:

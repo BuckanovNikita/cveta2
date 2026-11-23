@@ -200,6 +200,19 @@ def test_writer_adds_a_new_project_definition(tmp_path: Path) -> None:
     assert global_file.read_bytes() == before
 
 
+def test_writer_changes_a_definition_it_adds_in_the_same_write(tmp_path: Path) -> None:
+    cfg, _ = _setup(tmp_path)
+
+    write_shared_project_fields(
+        cfg,
+        {"project-321": {"sync_root": "s3://b/n"}},
+        new_projects={"project-321": ProjectDefinition(id=321, name="New shelves")},
+    )
+
+    added = load_global_config(cfg).projects["project-321"]
+    assert (added.id, added.name, added.sync_root) == (321, "New shelves", "s3://b/n")
+
+
 def test_writer_writes_an_unattached_file_by_explicit_path(tmp_path: Path) -> None:
     global_file = team(tmp_path / "team.yaml", local_overrides=None)
     cfg = personal(tmp_path / "config.yaml", None)
