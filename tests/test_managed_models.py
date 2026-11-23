@@ -21,6 +21,8 @@ from cveta2.domain.managed.models import (
     SourceSnapshot,
     dataset_definition,
     definition_fingerprint,
+    has_url_userinfo,
+    hide_url_userinfo,
     source_fingerprint,
 )
 
@@ -258,6 +260,93 @@ def test_publication_api_url_rejects_credentials() -> None:
 def test_output_uri_rejects_embedded_credentials_and_empty(output_uri: str) -> None:
     with pytest.raises(ValidationError):
         ClearMLDestination(project="p", dataset="d", output_uri=output_uri)
+
+
+# Secrets often hold an unencoded "/", "?" or "#", which ends the authority for urlsplit.
+_USERINFO = [
+    "https://u:p@cvat.example.com",
+    "https://user@cvat.example.com",
+    "s3://AKIAEXAMPLE:wJalr/K7MDENG@bucket/.clearml",
+    "https://user:pa/ss@cvat.example.com",
+    "https://user:pa?ss@cvat.example.com",
+    "https://user:p#ss@cvat.example.com",
+    "https://u:p@[::1",
+    "user:pass@cvat.example.com",
+    "key:secret@bucket/x",
+    # A secret that starts with digits looks like a port; it is flagged all the same.
+    "https://u:12/34@cvat.example.com",
+]
+
+
+@pytest.mark.parametrize("value", _USERINFO)
+def test_url_userinfo_is_detected(value: str) -> None:
+    assert has_url_userinfo(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://cvat.example.com/a@b",
+        "https://classes.example.com/api?x=a@b",
+        "https://classes.example.com/api#a@b",
+        "s3://minio:9000/bucket/x",
+        "s3://bucket/prefix",
+        "bare/prefix",
+        "https://[::1]:8080/api",
+    ],
+)
+def test_an_at_sign_in_the_path_or_query_is_not_userinfo(value: str) -> None:
+    assert not has_url_userinfo(value)
+    assert hide_url_userinfo(value) == value
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        ("s3://AKIAEXAMPLE:wJalr/K7MDENG@bucket/.clearml", "s3://***@bucket/.clearml"),
+        ("https://user:p#ss@cvat.example.com", "https://***@cvat.example.com"),
+        ("https://u:p@[::1", "https://***@[::1"),
+        ("user:pass@cvat.example.com", "***@cvat.example.com"),
+        # Cannot be split and has no "@": hidden whole.
+        ("https://[::1", "***"),
+    ],
+)
+def test_hide_url_userinfo(value: str, shown: str) -> None:
+    assert hide_url_userinfo(value) == shown
+
+
+@pytest.mark.parametrize("value", [v for v in _USERINFO if v.startswith("https://")])
+def test_publication_api_url_rejects_every_userinfo_form(value: str) -> None:
+    raw = _global()
+    raw["projects"]["retail"]["publication"]["api_url"] = value
+
+    with pytest.raises(ValidationError, match="without embedded credentials"):
+        ProjectConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("host", [v for v in _USERINFO if v.startswith("https://")])
+def test_cvat_host_rejects_every_userinfo_form(host: str) -> None:
+    raw = _global()
+    raw["cvat"]["host"] = host
+
+    with pytest.raises(ValidationError, match="without credentials"):
+        ProjectConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("output_uri", _USERINFO)
+def test_output_uri_rejects_every_userinfo_form(output_uri: str) -> None:
+    with pytest.raises(ValidationError, match="without embedded credentials"):
+        ClearMLDestination(project="p", dataset="d", output_uri=output_uri)
+
+
+def test_url_validators_accept_an_at_sign_in_the_path_or_query() -> None:
+    raw = _global()
+    raw["projects"]["retail"]["publication"]["api_url"] = "https://classes.example.com/api?owner=a@b"
+    raw["projects"]["retail"]["publication"]["clearml"]["output_uri"] = "s3://bucket/team@lab/.clearml"
+
+    publication = ProjectConfig.model_validate(raw).projects["retail"].publication
+    assert publication is not None
+    assert publication.api_url == "https://classes.example.com/api?owner=a@b"
 
 
 def test_new_fields_are_not_serialized_at_default() -> None:

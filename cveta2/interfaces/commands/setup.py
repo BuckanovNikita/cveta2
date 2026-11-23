@@ -2,6 +2,7 @@
 
 import copy
 import json
+import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,7 +20,6 @@ from cveta2.composition.configuration import (
     activate_migration,
     apply_local_overrides,
     attach_existing_project_config,
-    attach_project_config,
     cache_dir_for_project,
     create_global_config,
     find_project_key,
@@ -287,6 +287,24 @@ def validate_setup_request(args: "argparse.Namespace", *, attached: bool) -> Non
     selected = global_config_from_args(args) or global_config_from_env()
     if global_scope and args.host is None and selected is not None and not selected.expanduser().exists():
         raise Cveta2Error(f"Файла общей конфигурации {selected} нет; создайте его: {_CREATION_FORM}")
+    if global_scope and selected is None:
+        _check_saved_global_file(args)
+
+
+def _check_saved_global_file(args: "argparse.Namespace") -> None:
+    """Refuse a ``--global`` run when the personal key names a global file that is gone.
+
+    Checked before any lock is taken: a lock file created beside the missing
+    file would keep owner-only access and later lock teammates out of it.
+    ``--host`` does not create the file here, only at a path from the flag or
+    the environment, so the suggested command names the path.
+    """
+    saved = project_config_path(config_path_from_args(args))
+    if saved is not None and not saved.exists():
+        raise Cveta2Error(
+            f"Файла общей конфигурации {saved} нет; создайте его: cveta2 setup --global "
+            f"--global-config {shlex.quote(str(saved))} --host URL [--organization SLUG]"
+        )
 
 
 def _run_migration(config_path: Path, project_path: Path | None) -> None:
@@ -332,8 +350,15 @@ def _create_global_file(args: "argparse.Namespace", config_path: Path, target: P
 def run_setup(args: "argparse.Namespace") -> None:
     """Write the given option values, attach or create a global file, or run the wizard.
 
-    Every refusal happens before the first write: the request is validated
-    as if the file it attaches or creates were already selected.
+    The option combinations are checked before the first write, as if the file
+    this run attaches or creates were already selected. Checks that need the
+    written state come later, so three paths write one file and then fail:
+    creating a global file and then adding a project that neither
+    ``projects.yaml`` nor CVAT knows; attaching a global file and then writing
+    a local override it does not allow; and changing the local overrides and
+    then saving the personal sections while the personal file still holds
+    overrides the global file does not allow. None leaves a state worse than
+    the start, and re-running the command after the cause is fixed converges.
     """
     config_path = config_path_from_args(args)
     global_path = global_config_from_args(args)
@@ -362,7 +387,7 @@ def run_setup(args: "argparse.Namespace") -> None:
         args.host = args.organization = None
         global_path = target
     elif attaching and global_path is not None:
-        selected = attach_project_config(config_path, global_path)
+        selected = attach_existing_project_config(config_path, global_path)
         logger.info(f"Общая конфигурация подключена: {selected}")
     if _given(args) or _unset(args):
         apply_setup_options(args, config_path, global_path)
@@ -534,7 +559,7 @@ def _check_remaining_override(
         fix = (
             "Сначала удалите или измените совпадающее переопределение другого проекта."
             if "publication" in fields
-            else f"Удалите весь блок: cveta2 setup --project {spec} --unset publication; если назначение "
+            else f"Удалите весь блок: cveta2 setup --project {shlex.quote(spec)} --unset publication; если назначение "
             "совпало с переопределением другого проекта, сначала удалите или измените его."
         )
         raise Cveta2Error(
@@ -557,7 +582,8 @@ def _write_local(
         key = spec
     if key is None:
         raise Cveta2Error(
-            f"Нет описания проекта {spec} в общей конфигурации; добавьте его: cveta2 setup --global --project {spec}"
+            f"Нет описания проекта {spec} в общей конфигурации; добавьте его: "
+            f"cveta2 setup --global --project {shlex.quote(spec)}"
         )
     if removing:
         _check_remaining_override(raw_global, overrides, key, fields, spec)

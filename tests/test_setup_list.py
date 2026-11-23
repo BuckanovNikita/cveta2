@@ -265,3 +265,86 @@ def test_list_hides_credentials_in_global_and_override_urls(tmp_path: Path, caps
     assert ListedValue("projects.retail.publication.s3_roots", "[s3://***@my-bucket/a, s3://b/c]", "override") in listed
     run_setup(parse_cli_args("setup", "--config", str(cfg), "--list"))
     assert _URL_SECRET not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        (f"https://user:pa/{_URL_SECRET}@cvat.example.com", "https://***@cvat.example.com"),
+        (f"https://user:pa?{_URL_SECRET}@cvat.example.com", "https://***@cvat.example.com"),
+        (f"https://user:pa#{_URL_SECRET}@cvat.example.com", "https://***@cvat.example.com"),
+        (f"https://u:{_URL_SECRET}@[::1", "https://***@[::1"),
+        (f"user:{_URL_SECRET}@cvat.example.com", "***@cvat.example.com"),
+    ],
+)
+@pytest.mark.parametrize("source", ["personal", "environment"])
+def test_list_hides_malformed_credentials_in_the_cvat_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    source: str,
+    case: tuple[str, str],
+) -> None:
+    url, shown = case
+    cvat: dict[str, object] = {"username": "alice"}
+    if source == "personal":
+        cvat["host"] = url
+    else:
+        monkeypatch.setenv("CVAT_HOST", url)
+    cfg = write(tmp_path / "config.yaml", {"cvat": cvat})
+
+    run_setup(parse_cli_args("setup", "--config", str(cfg), "--list"))
+
+    out = capsys.readouterr().out
+    assert f"cvat.host = {shown}" in out
+    assert _URL_SECRET not in out
+
+
+def test_list_hides_a_secret_with_a_slash_in_refused_and_global_urls(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    secret = f"AKIAEXAMPLE:wJalr/{_URL_SECRET}"
+    global_file = team(tmp_path / "team.yaml", local_overrides=False)
+    data = yaml.safe_load(global_file.read_text(encoding="utf-8"))
+    data["projects"]["bakery"]["task_cache_s3"] = f"s3://{secret}@my-bucket/cache"
+    write(global_file, data)
+    cfg = write(
+        tmp_path / "config.yaml",
+        {
+            "schema_version": 1,
+            "global_config": str(global_file),
+            # The global file does not allow overrides, so these are listed unmerged, as not applied.
+            "overrides": {
+                "projects": {
+                    "retail": {
+                        "publication": {
+                            "clearml": {"output_uri": f"s3://{secret}@bucket/.clearml"},
+                            "api_url": f"https://{secret}@classes.example.com/api",
+                            "s3_roots": [f"s3://{secret}@my-bucket/a", "s3://b/c"],
+                        }
+                    }
+                }
+            },
+        },
+    )
+
+    listed = list_configuration(cfg)
+
+    values = {(v.key, v.applied): v.value for v in listed}
+    assert values["projects.bakery.task_cache_s3", True] == "s3://***@my-bucket/cache"
+    assert values["projects.retail.publication.clearml.output_uri", False] == "s3://***@bucket/.clearml"
+    assert values["projects.retail.publication.api_url", False] == "https://***@classes.example.com/api"
+    assert values["projects.retail.publication.s3_roots", False] == "[s3://***@my-bucket/a, s3://b/c]"
+    run_setup(parse_cli_args("setup", "--config", str(cfg), "--list"))
+    assert _URL_SECRET not in capsys.readouterr().out
+
+
+def test_list_shows_values_of_other_keys_with_an_at_sign_unchanged(tmp_path: Path) -> None:
+    cfg = write(
+        tmp_path / "config.yaml",
+        {"cvat": {"host": "https://cvat.example.com", "username": "alice:dev@example.com"}},
+    )
+
+    listed = list_configuration(cfg)
+
+    assert ListedValue("cvat.username", "alice:dev@example.com", "personal") in listed

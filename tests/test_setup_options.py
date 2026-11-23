@@ -731,6 +731,102 @@ def test_global_config_with_options_attaches_then_writes(tmp_path: Path) -> None
     assert CvatConfig.from_file(cfg).username == "bob"
 
 
+def test_global_config_attaches_a_personal_file_with_the_same_cvat_identity(tmp_path: Path) -> None:
+    # What `cveta2 setup --host … --organization …` or the personal wizard leaves behind.
+    cfg = unattached(tmp_path)
+    global_file = team(tmp_path / "team.yaml")
+    before = global_file.read_bytes()
+
+    run(cfg, "--global-config", str(global_file))
+
+    saved = read_config(cfg)
+    assert saved["schema_version"] == 1
+    assert saved["global_config"] == str(global_file.resolve())
+    assert saved["cvat"] == {"username": "alice", "password": "private"}
+    assert global_file.read_bytes() == before
+
+
+def test_global_config_refuses_a_personal_file_with_another_cvat_identity(tmp_path: Path) -> None:
+    cfg = write(
+        tmp_path / "config.yaml",
+        {"cvat": {"host": "https://other.example", "organization": _ORGANIZATION, "username": "alice"}},
+    )
+    global_file = team(tmp_path / "team.yaml")
+    before = files(tmp_path)
+
+    with pytest.raises(Cveta2Error, match="differ from shared configuration"):
+        run(cfg, "--global-config", str(global_file))
+
+    assert files(tmp_path) == before
+
+
+def test_global_config_still_requires_migration_for_shared_keys_in_the_personal_file(tmp_path: Path) -> None:
+    cfg = write(
+        tmp_path / "config.yaml",
+        {
+            "cvat": {"host": _HOST, "organization": _ORGANIZATION, "username": "alice"},
+            "sync_roots": {"Retail shelves": "s3://my-bucket/images"},
+        },
+    )
+    global_file = team(tmp_path / "team.yaml")
+    before = files(tmp_path)
+
+    with pytest.raises(MigrationRequired):
+        run(cfg, "--global-config", str(global_file))
+
+    assert files(tmp_path) == before
+
+
+def moved_global_file(tmp_path: Path) -> tuple[Path, Path]:
+    """Write a personal file whose ``global_config`` names a global file that is gone."""
+    missing = tmp_path / "team dir" / "moved.yaml"
+    missing.parent.mkdir()
+    cfg = write(
+        tmp_path / "config.yaml",
+        {"schema_version": 1, "global_config": str(missing), "cvat": {"username": "alice", "password": "private"}},
+    )
+    return cfg, missing
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--local-overrides", "on"], ["--host", _HOST], ["-p", "retail", "--sync-root", "s3://b/r"], []],
+)
+def test_global_write_to_a_missing_file_selected_by_the_personal_key_is_refused(
+    tmp_path: Path, argv: list[str]
+) -> None:
+    cfg, missing = moved_global_file(tmp_path)
+    before = files(tmp_path)
+
+    with pytest.raises(Cveta2Error) as caught:
+        run(cfg, "--global", *argv)
+
+    message = str(caught.value)
+    assert f"Файла общей конфигурации {missing} нет" in message
+    assert f"cveta2 setup --global --global-config '{missing}' --host URL" in message
+    # No lock file is left beside the missing file.
+    assert files(tmp_path) == before
+
+
+def test_the_suggested_command_creates_the_missing_global_file(tmp_path: Path) -> None:
+    cfg, missing = moved_global_file(tmp_path)
+
+    run(cfg, "--global", "--global-config", str(missing), "--host", _HOST, "--organization", _ORGANIZATION)
+    run(cfg, "--global", "--local-overrides", "off")
+
+    assert load_global_config(cfg).cvat.host == _HOST
+    assert read_config(cfg)["global_config"] == str(missing.resolve())
+
+
+def test_suggested_commands_quote_the_project(tmp_path: Path) -> None:
+    cfg, _ = attached(tmp_path, publication=_PUBLICATION)
+
+    with pytest.raises(Cveta2Error) as caught:
+        run(cfg, "--project", "Bakery shelves", "--dataset-name", "mine")
+
+    assert "cveta2 setup --global --project 'Bakery shelves'" in str(caught.value)
+
+
 def test_legacy_mixed_personal_file_still_requires_migration(tmp_path: Path) -> None:
     cfg = write(
         tmp_path / "config.yaml",

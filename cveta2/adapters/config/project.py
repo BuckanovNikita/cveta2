@@ -13,6 +13,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import stat
 import sys
 from collections.abc import Iterator
@@ -226,7 +227,10 @@ def project_config_path(personal_path: Path | None = None, project_path: Path | 
         selected = select_spelling(saved_new, saved_old, new_name="global_config", old_name="project_config")
     validate_personal(raw, attached=selected is not None)
     if raw.get("schema_version") == 1 and selected is None:
-        raise ManagedError("Versioned personal configuration requires a shared project_config reference")
+        raise ManagedError(
+            "В личном файле schema_version: 1, но общая конфигурация не выбрана (ключ global_config); "
+            "подключите её: cveta2 setup --global-config PATH или задайте CVETA2_GLOBAL_CONFIG"
+        )
     return selected.expanduser().resolve() if selected is not None else None
 
 
@@ -695,7 +699,10 @@ def create_global_config(personal_path: Path, global_path: Path, identity: CvatI
     when the attachment is refused the new file is removed again.
     """
     global_path = global_path.expanduser().resolve()
-    refusal = f"Файл {global_path} уже существует; подключите его: cveta2 setup --global-config {global_path}"
+    refusal = (
+        f"Файл {global_path} уже существует; подключите его: "
+        f"cveta2 setup --global-config {shlex.quote(str(global_path))}"
+    )
     if global_path.exists():
         raise ManagedError(refusal)
     content = _yaml_bytes(ProjectConfig(local_overrides=True, cvat=identity).model_dump())

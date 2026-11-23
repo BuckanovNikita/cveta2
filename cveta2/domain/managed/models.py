@@ -35,6 +35,60 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+_HIDDEN_USERINFO = "***"
+
+
+def has_url_userinfo(value: str) -> bool:
+    """Say whether a URL-typed value may carry a login or password before its host.
+
+    ``urlsplit`` ends the authority at the first ``/``, ``?`` or ``#``, so it
+    misses a secret that holds one of them unencoded (AWS secret keys often
+    hold ``/``). The rule here looks at the text after ``scheme://``, or at the
+    whole value when it has no scheme, and says yes when it has an ``@`` and:
+
+    - the ``@`` comes before the first ``/``, ``?`` or ``#`` (ordinary userinfo,
+      also before a malformed host such as ``[::1``); or
+    - the text before the last ``@`` contains ``:`` (a password that holds
+      ``/``, ``?`` or ``#``); or
+    - ``urlsplit`` finds a username or password, or cannot parse the value.
+
+    A value without ``@`` never has userinfo. An ``@`` only in the path or
+    query (``https://host/a@b``, ``?x=a@b``) is not userinfo. The rule
+    over-detects on purpose: ``https://host:8080/a@b`` is flagged, since a
+    secret that starts with digits looks like a port.
+    """
+    if "@" not in value:
+        return False
+    scheme = _URL_SCHEME.match(value)
+    rest = value[scheme.end() :] if scheme else value
+    authority_end = min((i for i in map(rest.find, "/?#") if i >= 0), default=len(rest))
+    if "@" in rest[:authority_end] or ":" in rest.rpartition("@")[0]:
+        return True
+    try:
+        parts = urlsplit(value)
+        return bool(parts.username or parts.password)
+    except ValueError:
+        return True
+
+
+def hide_url_userinfo(value: str) -> str:
+    """Return a URL-typed value with any userinfo (see :func:`has_url_userinfo`) replaced by ``***``.
+
+    Everything from after ``scheme://`` up to the last ``@`` is hidden; a value
+    that cannot be parsed and has no ``@`` is hidden whole.
+    """
+    if not has_url_userinfo(value):
+        try:
+            urlsplit(value)
+        except ValueError:
+            return _HIDDEN_USERINFO
+        return value
+    scheme = _URL_SCHEME.match(value)
+    prefix = scheme.group() if scheme else ""
+    return f"{prefix}{_HIDDEN_USERINFO}@{value.rpartition('@')[2]}"
+
+
 class CvatIdentity(StrictModel):
     """One shared CVAT server and optional organization."""
 
@@ -51,16 +105,20 @@ class CvatIdentity(StrictModel):
     @classmethod
     def public_host(cls, value: str) -> str:
         """Keep credentials out of the shared server identity."""
+        if has_url_userinfo(value):
+            raise ValueError("CVAT host must be HTTP(S) without credentials")
         parts = urlsplit(value)
-        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
             raise ValueError("CVAT host must be HTTP(S) without credentials")
         return value.rstrip("/")
 
 
 def _public_http_url(value: str) -> str:
     """Do not permit credential-bearing endpoints in portable policy."""
+    if has_url_userinfo(value):
+        raise ValueError("Class API must be HTTP(S) without embedded credentials")
     parts = urlsplit(value)
-    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
         raise ValueError("Class API must be HTTP(S) without embedded credentials")
     return value
 
@@ -78,8 +136,7 @@ class ClearMLDestination(StrictModel):
         """Accept any ClearML storage scheme, but keep credentials out of shared policy."""
         if value is None:
             return value
-        parts = urlsplit(value)
-        if not value or parts.username or parts.password:
+        if not value or has_url_userinfo(value):
             raise ValueError("ClearML output URI must be nonempty and without embedded credentials")
         return value
 
@@ -210,7 +267,12 @@ class DatasetDefinition(StrictModel):
 
 
 class ProjectConfig(StrictModel):
-    """Authoritative shared configuration, never merged with personal policy."""
+    """The global file: authoritative team policy without credentials or local paths.
+
+    Readers see it merged with the user's local overrides of publication
+    settings (see ``cveta2.domain.managed.overrides``) when ``local_overrides``
+    allows them; no other personal value is ever merged into it.
+    """
 
     schema_version: Literal[1] = 1
     local_overrides: bool = Field(default=False, exclude_if=lambda value: not value)

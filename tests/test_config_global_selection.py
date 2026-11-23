@@ -171,3 +171,17 @@ def test_migration_accepts_a_legacy_file_that_selects_with_global_config(tmp_pat
     proposal = migration_proposal(_legacy(tmp_path / "personal.yaml", global_config="team.yaml"))
 
     assert proposal.unresolved == ()
+
+
+def test_a_versioned_personal_file_without_a_reference_names_the_key_and_the_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("CVETA2_GLOBAL_CONFIG", "CVETA2_PROJECT_CONFIG"):
+        monkeypatch.delenv(name, raising=False)
+    cfg = _personal(tmp_path / "personal.yaml")
+
+    with pytest.raises(ManagedError) as caught:
+        project_config_path(cfg)
+
+    assert "global_config" in str(caught.value)
+    assert "cveta2 setup --global-config PATH" in str(caught.value)

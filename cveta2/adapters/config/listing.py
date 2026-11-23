@@ -11,7 +11,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
-from urllib.parse import urlsplit, urlunsplit
 
 from cveta2.adapters.config.project import (
     find_project_key,
@@ -31,7 +30,7 @@ from cveta2.adapters.config.settings import (
     _parse_timeout_env,
 )
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.models import ProjectConfig
+from cveta2.domain.managed.models import ProjectConfig, hide_url_userinfo
 from cveta2.domain.managed.overrides import LocalOverrides, apply_local_overrides, override_leaves
 
 type ValueOrigin = Literal["default", "personal", "global", "override", "environment"]
@@ -54,23 +53,32 @@ class ListedValue:
     applied: bool = True
 
 
-def _hide_userinfo(text: str) -> str:
-    """Replace the userinfo of a URL (any scheme) with ``***``; other text is returned as is."""
-    try:
-        parts = urlsplit(text)
-    except ValueError:
-        return text
-    if "@" not in parts.netloc:
-        return text
-    host = parts.netloc.rpartition("@")[2]
-    return urlunsplit(parts._replace(netloc=f"{_HIDDEN}@{host}"))
+_URL_FIELDS = frozenset(
+    {
+        ("sync_root",),
+        ("task_cache_s3",),
+        ("publication", "clearml", "output_uri"),
+        ("publication", "api_url"),
+        ("publication", "s3_roots"),
+    }
+)
 
 
-def _render(value: object) -> str:
-    """Render one value; credentials inside a URL are never shown, whichever file or variable holds them."""
+def _is_url_key(path: tuple[str, ...]) -> bool:
+    """Say whether *path* names a URL-typed value, the only kind whose userinfo is hidden."""
+    return path == ("cvat", "host") or (path[:1] == ("projects",) and path[2:] in _URL_FIELDS)
+
+
+def _render(path: tuple[str, ...], value: object) -> str:
+    """Render one value; the userinfo of a URL-typed value is never shown, whichever file or variable holds it.
+
+    Other values are shown as they are: a username such as ``alice@example.com``
+    stays readable.
+    """
+    hide = hide_url_userinfo if _is_url_key(path) else str
     if isinstance(value, list):
-        return "[" + ", ".join(_hide_userinfo(str(item)) for item in cast("list[object]", value)) + "]"
-    return _hide_userinfo(str(value))
+        return "[" + ", ".join(hide(str(item)) for item in cast("list[object]", value)) + "]"
+    return hide(str(value))
 
 
 def _dict(value: object) -> dict[str, object]:
@@ -128,11 +136,11 @@ class _Lister:
             origin = "default"
         if value is None:
             return
-        self.values.append(ListedValue(".".join(path), _HIDDEN if hidden else _render(value), origin))
+        self.values.append(ListedValue(".".join(path), _HIDDEN if hidden else _render(path, value), origin))
 
     def personal_value(self, path: tuple[str, ...], value: object) -> None:
         """Add a value that only the personal file holds, under a key the file may spell differently."""
-        self.values.append(ListedValue(".".join(path), _render(value), "personal"))
+        self.values.append(ListedValue(".".join(path), _render(path, value), "personal"))
 
 
 def _cvat(lister: _Lister, personal: dict[str, object], shared: ProjectConfig | None) -> None:
@@ -202,7 +210,7 @@ def _projects(
             for path, value in _leaves(("projects", key, "publication"), project.publication.model_dump(mode="json")):
                 lister.add(path, value, override=".".join(path) in overridden)
         for path, value in _leaves(("projects", key), refused.get(key, {})):
-            lister.values.append(ListedValue(".".join(path), _render(value), "override", applied=False))
+            lister.values.append(ListedValue(".".join(path), _render(path, value), "override", applied=False))
 
 
 def list_configuration(

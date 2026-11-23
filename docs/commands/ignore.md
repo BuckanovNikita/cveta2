@@ -160,7 +160,7 @@ Unknown shared projects: ['Retail shelves']
 Проекта нет в разделе `projects` общей конфигурации. Список не сохранён. Перед этой ошибкой команда всё равно печатает `... добавлена в ignore-список ...` — не верьте этой строке. Попросите того, кто ведёт общую конфигурацию, добавить описание проекта.
 
 ```text
-Versioned personal configuration requires a shared project_config reference
+В личном файле schema_version: 1, но общая конфигурация не выбрана (ключ global_config); подключите её: cveta2 setup --global-config PATH или задайте CVETA2_GLOBAL_CONFIG
 ```
 
 В личной конфигурации не подключён общий файл. Подключите его через [`cveta2 setup --global-config`](setup.md).

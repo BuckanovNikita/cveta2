@@ -97,6 +97,7 @@ __all__ = [
     "OrgProjects",
     "ProjectOverride",
     "PublicationOverride",
+    "PublicationSettings",
     "SectionConfig",
     "SharedIdentityMismatchError",
     "SyncRootsConfig",
