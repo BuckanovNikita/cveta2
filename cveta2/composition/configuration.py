@@ -3,18 +3,23 @@
 from pathlib import Path
 
 from cveta2.adapters.config.project import (
+    GLOBAL_CONFIG_ENV,
+    LEGACY_GLOBAL_CONFIG_ENV,
     MigrationProposal,
     SharedIdentityMismatchError,
     activate_migration,
     attach_existing_project_config,
     attach_project_config,
+    global_config_from_env,
     load_global_config,
     load_project_config,
     migration_proposal,
     optional_global_config,
     optional_project_config,
+    project_config_path,
     read_local_overrides,
     recover_migration,
+    select_spelling,
 )
 from cveta2.adapters.config.projects_cache import (
     PERSONAL_WORKSPACE_SLUG,
@@ -65,6 +70,8 @@ from cveta2.domain.managed.overrides import (
 __all__ = [
     "CONFIG_DIR",
     "CONFIG_PATH",
+    "GLOBAL_CONFIG_ENV",
+    "LEGACY_GLOBAL_CONFIG_ENV",
     "OVERRIDABLE_PROJECT_FIELDS",
     "PERSONAL_WORKSPACE_SLUG",
     "PERSONAL_WORKSPACE_TITLE",
@@ -93,6 +100,7 @@ __all__ = [
     "cache_dir_for_project",
     "get_config_path",
     "get_projects_cache_path",
+    "global_config_from_env",
     "images_cache_dir_from",
     "is_cache_disabled",
     "is_interactive_disabled",
@@ -104,12 +112,14 @@ __all__ = [
     "optional_global_config",
     "optional_project_config",
     "override_leaves",
+    "project_config_path",
     "project_publication",
     "read_local_overrides",
     "recover_migration",
     "require_interactive",
     "resolve_images_cache_dir",
     "save_orgs_cache",
+    "select_spelling",
     "should_raise_on_fetch_failure",
     "update_org_projects",
 ]

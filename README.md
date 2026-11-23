@@ -26,7 +26,7 @@ ClearML SDK ставится вместе с пакетом, а его подк�
 ## Быстрый старт
 
 ```bash
-cveta2 setup --project-config ~/team/project-config.yaml   # подключить общую конфигурацию команды
+cveta2 setup --global-config ~/team/project-config.yaml   # подключить общую конфигурацию команды
 cveta2 setup                                               # логин и пароль CVAT (в терминале)
 cveta2 setup-cache                                         # куда складывать изображения (в терминале)
 cveta2 doctor                                              # проверить настройки

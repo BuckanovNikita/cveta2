@@ -1,5 +1,6 @@
 """Shared argument declarations for the incoming CLI command families."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,3 +33,19 @@ def add_config_arg(parser: "argparse.ArgumentParser") -> None:
 def add_list_arg(parser: "argparse.ArgumentParser", help_text: str) -> None:
     """Add the shared ``--list`` argument."""
     parser.add_argument("--list", dest="list_only", action="store_true", help=help_text)
+
+
+def add_global_config_arg(parser: "argparse.ArgumentParser") -> None:
+    """Add ``--global-config`` and its old spelling ``--project-config``."""
+    parser.add_argument(
+        "--global-config",
+        dest="global_config",
+        type=Path,
+        help="Глобальная конфигурация: общий файл проектов и наборов данных команды.",
+    )
+    parser.add_argument(
+        "--project-config",
+        dest="project_config",
+        type=Path,
+        help="Старое написание --global-config.",
+    )

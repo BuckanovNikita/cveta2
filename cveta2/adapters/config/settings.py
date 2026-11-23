@@ -385,7 +385,7 @@ class SectionConfig(BaseModel):
                 return path
         elif self.section_key in {"sync_roots", "ignore"} and serialized:
             raise MigrationRequired(
-                "Project policy requires shared configuration; attach it with setup --project-config"
+                "Project policy requires shared configuration; attach it with setup --global-config"
             )
         elif self.section_key == "cache" and isinstance(serialized, dict):
             projects = serialized.get("projects", {})

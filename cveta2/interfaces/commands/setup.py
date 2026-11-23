@@ -26,7 +26,7 @@ from cveta2.composition.configuration import (
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces.commands._bootstrap import open_client
-from cveta2.interfaces.commands._helpers import config_path_from_args
+from cveta2.interfaces.commands._helpers import config_path_from_args, global_config_from_args
 from cveta2.interfaces.commands.interactive import primitives, wizard
 
 if TYPE_CHECKING:
@@ -35,13 +35,13 @@ if TYPE_CHECKING:
     from cveta2.domain.models import ProjectInfo
 
 
-from cveta2.interfaces.commands._parsers import add_config_arg, add_list_arg
+from cveta2.interfaces.commands._parsers import add_config_arg, add_global_config_arg, add_list_arg
 
 
 def configure_setup(parser: "argparse.ArgumentParser") -> None:
     """Declare personal setup and attach-only shared configuration options."""
     add_config_arg(parser)
-    parser.add_argument("--project-config", type=Path, help="Общий YAML проектов и соответствий.")
+    add_global_config_arg(parser)
     parser.add_argument(
         "--migrate-config",
         action="store_true",
@@ -84,7 +84,7 @@ def _run_migration(config_path: Path, project_path: Path | None) -> None:
 def run_setup(args: "argparse.Namespace") -> None:
     """Interactively ask user for CVAT credentials and core settings."""
     config_path = config_path_from_args(args)
-    project_path = getattr(args, "project_config", None)
+    project_path = global_config_from_args(args)
     if getattr(args, "migrate_config", False):
         _run_migration(config_path, project_path)
         return

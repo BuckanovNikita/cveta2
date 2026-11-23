@@ -527,7 +527,7 @@ def test_section_save_keeps_cyrillic_unescaped(tmp_path: Path) -> None:
 
     cfg.save(cfg_path)
 
-    reference = yaml.safe_load(cfg_path.read_bytes())["project_config"]
+    reference = yaml.safe_load(cfg_path.read_bytes())["global_config"]
     text = Path(reference).read_text(encoding="utf-8")
     assert "Партия 3" in text
     assert "Дубликаты" in text

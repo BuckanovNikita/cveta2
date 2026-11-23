@@ -6,12 +6,12 @@
 
 ## 1. Первая выгрузка и данные для обучения
 
-Вы получили общую конфигурацию ([shared configuration](../GLOSSARY.md)) от команды и хотите получить из проекта CVAT данные в формате YOLO.
+Вы получили общую конфигурацию ([global configuration](../GLOSSARY.md)) от команды и хотите получить из проекта CVAT данные в формате YOLO.
 
 1. Подключите общую конфигурацию. Эта команда работает и без терминала:
 
    ```bash
-   cveta2 setup --project-config ~/team/project-config.yaml
+   cveta2 setup --global-config ~/team/project-config.yaml
    ```
 
    Затем введите логин и пароль CVAT. `cveta2 setup` без аргументов спрашивает их в терминале. Подробнее — [setup](commands/setup.md), ключи файлов — [Конфигурация](configuration.md).

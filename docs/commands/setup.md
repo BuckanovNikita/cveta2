@@ -1,13 +1,13 @@
 # cveta2 setup
 
-Сохраняет логин и пароль CVAT в личную конфигурацию ([personal configuration](../../GLOSSARY.md)) и подключает общую конфигурацию ([shared configuration](../../GLOSSARY.md)). Запустите её один раз на новой машине или когда сменился пароль. Ключи обоих файлов описаны на странице [Конфигурация](../configuration.md).
+Сохраняет логин и пароль CVAT в личную конфигурацию ([personal configuration](../../GLOSSARY.md)) и подключает общую конфигурацию ([global configuration](../../GLOSSARY.md)). Запустите её один раз на новой машине или когда сменился пароль. Ключи обоих файлов описаны на странице [Конфигурация](../configuration.md).
 
 ## Примеры
 
 Подключить общий файл, полученный от команды (работает и без терминала):
 
 ```bash
-cveta2 setup --project-config ~/team/project-config.yaml
+cveta2 setup --global-config ~/team/project-config.yaml
 ```
 
 Ввести логин и пароль CVAT (в терминале):
@@ -25,25 +25,26 @@ cveta2 setup --migrate-config
 ## Синтаксис и аргументы
 
 ```text
-cveta2 setup [-h] [--config CONFIG] [--project-config PROJECT_CONFIG] [--migrate-config]
+cveta2 setup [-h] [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--migrate-config]
 ```
 
 | Аргумент | По умолчанию | Описание |
 |---|---|---|
 | `--config CONFIG` | `CVETA2_CONFIG` или `~/.config/cveta2/config.yaml` | Личный файл, который команда читает и записывает. |
-| `--project-config PROJECT_CONFIG` | нет | Без `--migrate-config`: подключить этот общий файл и выйти, ничего не спрашивая. С `--migrate-config`: куда записать общий файл при переносе. |
+| `--global-config GLOBAL_CONFIG` | нет | Без `--migrate-config`: подключить этот общий файл и выйти, ничего не спрашивая. С `--migrate-config`: куда записать общий файл при переносе. |
+| `--project-config PROJECT_CONFIG` | нет | Старое написание `--global-config`. Если заданы оба флага с разными путями, команда останавливается: `Заданы оба варианта: --global-config=<путь> и --project-config=<путь>, и они различаются. ...` |
 | `--migrate-config` | выкл. | Перенести старую конфигурацию из одного файла в личный и общий файлы. |
 | `-h`, `--help` | | Показать справку. |
 
 ## Как это работает
 
-Команда работает в одном из трёх режимов. Флаг `--migrate-config` проверяется первым, потом `--project-config`.
+Команда работает в одном из трёх режимов. Флаг `--migrate-config` проверяется первым, потом `--global-config`.
 
-### Подключение общего файла (`--project-config`)
+### Подключение общего файла (`--global-config`)
 
 1. Читает личный файл (если его нет, считает его пустым).
 2. Читает и проверяет общий файл. Ошибка в общем файле останавливает команду.
-3. Записывает в личный файл `schema_version: 1` и абсолютный путь в `project_config`. Остальное содержимое личного файла сохраняется.
+3. Записывает в личный файл `schema_version: 1` и абсолютный путь в `global_config`. Старый ключ `project_config`, если он был, удаляется. Остальное содержимое личного файла сохраняется.
 4. Общий файл не меняется. Выводит `Общая конфигурация подключена: <путь>`.
 
 Если в личном файле есть `cvat.host` или `cvat.organization` либо ключи общего файла, команда не подключает файл и требует `--migrate-config`.
@@ -65,7 +66,7 @@ cveta2 setup [-h] [--config CONFIG] [--project-config PROJECT_CONFIG] [--migrate
 3. Записывает раздел `cvat` в личный файл с правами `0600`. Остальные разделы сохраняются. `cvat.request_timeout` сохраняется без изменений. Выводит `Готово! Конфигурация сохранена в <путь>`.
 4. Если общий файл не был подключён, спрашивает `Общий YAML проектов (пусто — пропустить):`.
    - Пусто — команда завершается.
-   - Путь к существующему файлу — подключает его. Адрес и организация, которые вы ввели, должны совпасть с общим файлом. Тогда они удаляются из личного файла, и в нём остаются `schema_version: 1` и `project_config`.
+   - Путь к существующему файлу — подключает его. Адрес и организация, которые вы ввели, должны совпасть с общим файлом. Тогда они удаляются из личного файла, и в нём остаются `schema_version: 1` и `global_config`.
    - Путь к несуществующему файлу — строит предложение переноса (как `--migrate-config`), выводит его и спрашивает `Подтвердить разделение и подключение?` (по умолчанию «нет»). При «да» создаёт общий файл по этому пути с адресом, организацией и проектами, ID которых известны из `projects.yaml`, и подключает его.
 
 Логин и пароль cveta2 не проверяет на сервере: команда только записывает их. Проверить подключение можно любой командой, которая обращается к CVAT, например [`cveta2 labels`](labels.md).
@@ -84,7 +85,7 @@ cveta2 setup [-h] [--config CONFIG] [--project-config PROJECT_CONFIG] [--migrate
        "cvat": {"username": "<redacted>", "password": "<redacted>"},
        "cache": {"images_root": "/home/user/data", "projects": {}},
        "schema_version": 1,
-       "project_config": "/home/user/.config/cveta2/project-config.yaml"
+       "global_config": "/home/user/.config/cveta2/project-config.yaml"
      },
      "shared": {
        "schema_version": 1,
@@ -126,15 +127,15 @@ cveta2 setup [-h] [--config CONFIG] [--project-config PROJECT_CONFIG] [--migrate
 
 Мастер настройки и `--migrate-config` работают только в терминале. С `CVETA2_NO_INTERACTIVE=true` они сразу завершаются с кодом 1. Без терминала (но без `CVETA2_NO_INTERACTIVE=true`) мастер завершается с кодом 1 на первом вопросе, а `--migrate-config` сначала выводит предложение переноса и завершается с кодом 1 на вопросе о подтверждении; файлы не меняются.
 
-Без терминала доступно только подключение общего файла: `cveta2 setup --project-config PATH`. Логин и пароль в этом случае задайте через `CVAT_USERNAME` и `CVAT_PASSWORD` или впишите в раздел `cvat` личного файла вручную (см. [Конфигурация](../configuration.md)).
+Без терминала доступно только подключение общего файла: `cveta2 setup --global-config PATH`. Логин и пароль в этом случае задайте через `CVAT_USERNAME` и `CVAT_PASSWORD` или впишите в раздел `cvat` личного файла вручную (см. [Конфигурация](../configuration.md)).
 
 ## Частые ошибки
 
 | Сообщение | Причина | Что сделать |
 |---|---|---|
-| `Interactive prompt required but CVETA2_NO_INTERACTIVE=true. The 'setup' command is fully interactive. ...` | Мастер или перенос запущены в неинтерактивном режиме. | Запустите в терминале без `CVETA2_NO_INTERACTIVE=true` или используйте `--project-config` и переменные окружения. |
+| `Interactive prompt required but CVETA2_NO_INTERACTIVE=true. The 'setup' command is fully interactive. ...` | Мастер или перенос запущены в неинтерактивном режиме. | Запустите в терминале без `CVETA2_NO_INTERACTIVE=true` или используйте `--global-config` и переменные окружения. |
 | `Interactive prompt required but standard input is closed. ...` | Нет терминала (cron, CI). | То же. |
-| `Cannot read configuration <путь>: FileNotFoundError` | Файла по пути `--project-config` нет. | Проверьте путь к общему файлу. |
+| `Cannot read configuration <путь>: FileNotFoundError` | Файла по пути `--global-config` нет. | Проверьте путь к общему файлу. |
 | `Invalid shared project configuration: <путь>` | Общий файл не прошёл проверку. | Сообщите тому, кто ведёт общий файл. |
 | `Legacy mixed configuration requires verification: cveta2 setup --migrate-config` | В личном файле есть адрес CVAT или ключи общего файла. | Запустите `cveta2 setup --migrate-config`. |
 | `CVAT host/organization in <личный файл> differ from shared configuration <общий файл>; correct them in setup or choose the shared file of that server` | В мастере введён другой адрес или организация, чем в общем файле. | Запустите мастер ещё раз с данными из общего файла или выберите общий файл своего сервера. |

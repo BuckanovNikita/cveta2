@@ -149,7 +149,7 @@ def test_attach_is_noninteractive_and_does_not_modify_shared(tmp_path: Path, mon
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
     setup.run_setup(argparse.Namespace(config=str(cfg), project_config=target, migrate_config=False))
     assert target.read_bytes() == before
-    assert read_config(cfg)["project_config"] == str(target)
+    assert read_config(cfg)["global_config"] == str(target)
     assert read_config(cfg)["network"] == {"s3_workers": 2}
 
 
@@ -856,7 +856,7 @@ def test_new_policy_save_requires_attached_shared_file(tmp_path: Path, section: 
     with pytest.raises(MigrationRequired) as error:
         config.save(path)
     if section in {"sync", "ignore"}:
-        assert {"setup", "--project-config"}.issubset(str(error.value).split())
+        assert {"setup", "--global-config"}.issubset(str(error.value).split())
     assert not path.exists()
 
 
@@ -1061,7 +1061,7 @@ def test_wizard_attaches_an_existing_shared_file_with_the_same_identity(
     assert team.read_bytes() == before
     saved = read_config(cfg)
     assert saved["schema_version"] == 1
-    assert saved["project_config"] == str(team.resolve())
+    assert saved["global_config"] == str(team.resolve())
     assert saved["cvat"] == {"username": "alice", "password": "private"}
     loaded = CvatConfig.load(cfg)
     assert (loaded.host, loaded.organization, loaded.password) == ("https://cvat.example", "team", "private")
@@ -1081,6 +1081,7 @@ def test_wizard_refuses_an_existing_shared_file_with_another_identity(
     assert "other-team" not in str(caught.value)
     assert team.read_bytes() == before
     assert "project_config" not in read_config(cfg)
+    assert "global_config" not in read_config(cfg)
 
 
 def test_migration_accepts_a_semantically_equal_hand_written_shared_file(tmp_path: Path) -> None:
@@ -1098,7 +1099,7 @@ def test_migration_accepts_a_semantically_equal_hand_written_shared_file(tmp_pat
     assert proposal.unresolved == ()
     activate_migration(proposal)
     assert team.read_bytes() == before
-    assert read_config(cfg)["project_config"] == str(team.resolve())
+    assert read_config(cfg)["global_config"] == str(team.resolve())
 
 
 # ---------------------------------------------------------------------------
