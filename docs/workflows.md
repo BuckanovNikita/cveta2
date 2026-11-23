@@ -218,7 +218,7 @@
 | Что нужно в общей конфигурации | ничего | запись в разделе `datasets` |
 | Вход | каталог полной выгрузки одного проекта | источники ([source](../GLOSSARY.md)) датасета: проекты CVAT и CSV в S3 |
 | Классы, корни изображений | флаги `verify` или вопросы в терминале | из общей конфигурации |
-| split | назначаете вы | стабильный split ([stable split](../GLOSSARY.md)), назначает cveta2 |
+| split | назначаете вы | назначаете вы; у опубликованных изображений cveta2 переносит опубликованный split ([stable split](../GLOSSARY.md)) |
 | Замечания в CVAT | нет | замечания к кадрам ([feedback finding](../GLOSSARY.md)) как issue |
 
 Выбирайте управляемый датасет, если команда описала его в разделе `datasets` общей конфигурации: все, кто его публикует, работают с одними и теми же источниками, классами и split. Ручная подготовка подходит, когда записи нет, а вам нужно опубликовать одну выгрузку проекта.
@@ -286,6 +286,11 @@
    paths = {p.name: str(p.resolve()) for p in images_dir.rglob("*") if p.is_file()}
    df["image_path"] = df["image_name"].map(paths)
 
+   # Split новых изображений назначаете вы — правило здесь только пример.
+   # У изображений, уже опубликованных в родительской версии, cveta2 запишет опубликованный split.
+   names = sorted(df["image_name"].unique())
+   df["split"] = df["image_name"].map({name: "val" if i % 5 == 0 else "train" for i, name in enumerate(names)})
+
    df.to_csv(dst, index=False)
    print("без файла:", df["image_path"].isna().sum())
    ```
@@ -303,7 +308,7 @@
      --output-dir output/prepared --clean
    ```
 
-   Управляемая подготовка ([managed preparation](../GLOSSARY.md)) сама назначает split: заполнять его не нужно. В JSON смотрите `"ready"`: `true` и код `0` — можно публиковать; `false` и код `1` — причины в `"blockers"`. Подробнее — [prepare](commands/dataset.md#prepare).
+   Управляемая подготовка ([managed preparation](../GLOSSARY.md)) переносит опубликованный split на уже опубликованные изображения; split новых изображений заполняете вы в преобразованном CSV. В JSON смотрите `"ready"`: `true` и код `0` — можно публиковать; `false` и код `1` — причины в `"blockers"`. Подробнее — [prepare](commands/dataset.md#prepare).
 
 4. Отправьте замечания к кадрам в CVAT:
 

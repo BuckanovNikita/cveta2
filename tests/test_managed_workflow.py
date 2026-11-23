@@ -35,8 +35,7 @@ from cveta2.domain.bundle.models import (
     Publication,
 )
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SplitPolicy
-from cveta2.domain.managed.policies import assign_splits
+from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
 from cveta2.domain.models import LabelAttributeInfo, LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
 from cveta2.interfaces.cli import main
@@ -358,6 +357,13 @@ def _legacy_parent(workflow: Workflow, dataset: pd.DataFrame | None = None) -> P
     return parent
 
 
+def _hand_splits(frame: pd.DataFrame) -> pd.DataFrame:
+    """Give every row of an image the split a user would set by hand, by name order."""
+    names = sorted(set(frame["image_name"]))
+    chosen = {name: ("train", "train", "train", "val", "test")[index % 5] for index, name in enumerate(names)}
+    return frame.assign(split=frame["image_name"].map(chosen))
+
+
 def _prepare(
     workflow: Workflow,
     tmp_path: Path,
@@ -376,7 +382,7 @@ def _prepare(
             "bbox_x_br",
         ] = 1
     output = tmp_path / "transformed.csv"
-    transformed.to_csv(output, index=False)
+    _hand_splits(transformed).to_csv(output, index=False)
     prepared = tmp_path / "prepared"
     summary = api.prepare_managed_dataset(
         "combined",
@@ -549,10 +555,10 @@ def test_legacy_parent_adoption_keeps_published_splits_of_unambiguous_images(
     workflow: Workflow, tmp_path: Path
 ) -> None:
     paths = sorted(str(path) for path in workflow.images.iterdir())
-    hashes = {path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in paths}
-    seeded, _ = assign_splits(pd.DataFrame({"image_path": paths}), SplitPolicy(), hashes)
-    # Published splits deliberately differ from what seeded hashing would choose.
-    published = dict(zip(paths, seeded["split"].map({"train": "val", "val": "train", "test": "train"}), strict=True))
+    hand = _hand_splits(pd.DataFrame({"image_name": [Path(path).name for path in paths], "image_path": paths}))
+    by_hand = dict(zip(hand["image_path"], hand["split"], strict=True))
+    # Published splits deliberately differ from the hand splits of the transformed CSV.
+    published = {path: {"train": "val", "val": "train", "test": "train"}[by_hand[path]] for path in paths}
     ambiguous = paths[0]
     rows = [{"image_name": Path(path).name, "image_path": path, "split": split} for path, split in published.items()]
     rows.append({"image_name": Path(ambiguous).name, "image_path": ambiguous, "split": "test"})
@@ -563,7 +569,7 @@ def test_legacy_parent_adoption_keeps_published_splits_of_unambiguous_images(
     assert {path: splits[path] for path in paths if path != ambiguous} == {
         path: {published[path]} for path in paths if path != ambiguous
     }
-    assert splits[ambiguous] == set(seeded.loc[seeded["image_path"].eq(ambiguous), "split"])
+    assert splits[ambiguous] == {by_hand[ambiguous]}
     report = json.loads((prepared / "report.json").read_text())
     assert report["parent_split_conflicts"] == 1
 
@@ -606,7 +612,7 @@ def _fetch_and_transform(workflow: Workflow, tmp_path: Path) -> tuple[Path, Path
         "bbox_x_br",
     ] = 1
     output = tmp_path / "transformed.csv"
-    transformed.to_csv(output, index=False)
+    _hand_splits(transformed).to_csv(output, index=False)
     return fetched, output
 
 
@@ -738,7 +744,7 @@ def test_overlap_decision_added_after_a_failed_prepare_uses_the_same_fetch(workf
     duplicate = transformed["source_id"].eq("imported") & transformed["image_name"].eq("external-0.png")
     transformed.loc[duplicate, ["image_name", "image_path"]] = ["task101-0.png", str(workflow.images / "task101-0.png")]
     output = tmp_path / "transformed.csv"
-    transformed.to_csv(output, index=False)
+    _hand_splits(transformed).to_csv(output, index=False)
     with pytest.raises(ManagedError, match="Image overlap requires source selection"):
         api.prepare_managed_dataset("combined", output, source=fetched, output_dir=tmp_path / "x", **workflow.options)
     digest = hashlib.sha256((workflow.images / "task101-0.png").read_bytes()).hexdigest()
@@ -811,19 +817,6 @@ def test_source_edits_after_preparation_require_fetching_again(
     assert workflow.clearml.publications == []
 
 
-@pytest.mark.parametrize(
-    "splits", [{"train": 0.5, "val": 0.3, "test": 0.2}, {"seed": 7}], ids=["proportions", "seed-only"]
-)
-def test_split_policy_change_after_preparation_requires_preparing_again(
-    workflow: Workflow, tmp_path: Path, splits: dict[str, float]
-) -> None:
-    prepared = _prepare(workflow, tmp_path)
-    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(splits=splits))
-    with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
-        api.publish_dataset(prepared, **workflow.options)
-    assert workflow.clearml.publications == []
-
-
 def _other_definition_hash(_shared: dict[str, Any], parent: Path) -> None:
     tasks = yaml.safe_load((parent / "tasks.yaml").read_text())
     tasks["managed"]["definition_hash"] = hashlib.sha256(b"whole definition").hexdigest()
@@ -881,21 +874,18 @@ def _publish_then_prepare_child(workflow: Workflow, tmp_path: Path) -> Path:
     return _prepare(workflow, tmp_path / "child")
 
 
-def test_split_change_under_a_managed_parent_needs_a_new_lineage(workflow: Workflow, tmp_path: Path) -> None:
-    prepared = _publish_then_prepare_child(workflow, tmp_path)
-    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(splits={"seed": 7}))
-
-    with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
-        api.publish_dataset(prepared, **workflow.options)
-    with pytest.raises(ManagedError, match="Split policy changed; select a new dataset lineage"):
-        api.prepare_managed_dataset(
-            "combined",
-            tmp_path / "child" / "transformed.csv",
-            source=tmp_path / "child" / "fetched",
-            output_dir=tmp_path / "again",
-            **workflow.options,
-        )
-    assert workflow.clearml.publications == ["version-1"]
+def test_parent_published_by_0_15_is_read_and_its_splits_propagate(workflow: Workflow, tmp_path: Path) -> None:
+    first = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    metadata_path = workflow.clearml.root / first.dataset_id / "dataset.yaml"
+    metadata = yaml.safe_load(metadata_path.read_text())
+    metadata["managed"]["definition"]["splits"] = {"train": 0.6, "val": 0.2, "test": 0.2, "seed": 42}
+    moved = next(iter(metadata["managed"]["assignments"]))
+    metadata["managed"]["assignments"][moved] = "test"
+    metadata_path.write_text(yaml.safe_dump(metadata))
+    child = _prepare(workflow, tmp_path / "child")
+    rows = pd.read_csv(child / "dataset.csv", keep_default_na=False)
+    hashes = rows["image_path"].map(lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest())
+    assert set(rows.loc[hashes.eq(moved), "split"]) == {"test"}
 
 
 def test_destination_with_another_parent_needs_a_new_fetch(workflow: Workflow, tmp_path: Path) -> None:

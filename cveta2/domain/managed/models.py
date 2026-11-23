@@ -20,8 +20,6 @@ from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import LabelInfo
 from cveta2.domain.paths import parse_sync_root
 
-_SPLIT_TOLERANCE = 1e-9
-
 
 class ManagedError(Cveta2Error):
     """A managed definition, source, preparation or feedback cannot proceed."""
@@ -142,22 +140,6 @@ class ClearMLDestination(StrictModel):
     dataset: str = Field(min_length=1)
 
 
-class SplitPolicy(StrictModel):
-    """Stable hash targets; published assignments are never rebalanced."""
-
-    train: float = Field(default=0.6, ge=0, le=1)
-    val: float = Field(default=0.2, ge=0, le=1)
-    test: float = Field(default=0.2, ge=0, le=1)
-    seed: int = 42
-
-    @model_validator(mode="after")
-    def total(self) -> Self:
-        """Require a complete probability distribution and usable train/val."""
-        if abs(self.train + self.val + self.test - 1) > _SPLIT_TOLERANCE or not self.train or not self.val:
-            raise ValueError("Splits must sum to one with positive train and val")
-        return self
-
-
 class OverlapDecision(StrictModel):
     """Choose one source or exclude content; bind to exact participating sources."""
 
@@ -173,7 +155,6 @@ class DatasetDefinition(StrictModel):
     api_url: str = Field(min_length=1)
     s3_roots: list[str] = Field(default_factory=list)
     empty_classes: list[int] = Field(default_factory=list)
-    splits: SplitPolicy = Field(default_factory=SplitPolicy)
     overlaps: dict[str, OverlapDecision] = Field(default_factory=dict)
 
     @field_validator("api_url")
@@ -202,6 +183,19 @@ class ProjectConfig(StrictModel):
     cvat: CvatIdentity
     projects: dict[str, ProjectDefinition] = Field(default_factory=dict)
     datasets: dict[str, DatasetDefinition] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_split_policy(cls, data: object) -> object:
+        """Name a split policy left from cveta2 0.15 so the user deletes it."""
+        if isinstance(data, dict) and isinstance(datasets := data.get("datasets"), dict):
+            for name, dataset in datasets.items():
+                if isinstance(dataset, dict) and "splits" in dataset:
+                    raise ManagedError(
+                        f"datasets.{name}.splits is no longer supported; delete the key from the shared "
+                        "configuration: splits are not assigned automatically any more"
+                    )
+        return data
 
     @model_validator(mode="after")
     def references(self) -> Self:
@@ -272,6 +266,14 @@ class ManagedMetadata(StrictModel):
     cvat: CvatIdentity
     assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)
 
+    @field_validator("definition", mode="before")
+    @classmethod
+    def drop_legacy_splits(cls, value: object) -> object:
+        """Read a definition published by cveta2 0.15, whose split policy no longer applies."""
+        if isinstance(value, dict):
+            return {key: item for key, item in value.items() if key != "splits"}
+        return value
+
 
 def dataset_definition(config: ProjectConfig, name: str) -> DatasetDefinition:
     """Resolve one named managed dataset or fail with an actionable error."""
@@ -323,7 +325,6 @@ def definition_fingerprint(config: ProjectConfig, definition: DatasetDefinition)
         "api_url": definition.api_url,
         "s3_roots": sorted(set(definition.s3_roots)),
         "empty_classes": sorted(set(definition.empty_classes)),
-        "splits": definition.splits.model_dump(mode="json"),
         "overlaps": {
             digest: {"source": decision.source, "members": sorted(decision.members)}
             for digest, decision in definition.overlaps.items()

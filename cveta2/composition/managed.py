@@ -210,8 +210,6 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
     parent, previous = _parent(definition)
-    if previous and previous.managed and previous.managed.definition.splits != definition.splits:
-        raise ManagedError("Split policy changed; select a new dataset lineage")
     parent_rows = None
     if parent is not None and previous is not None and previous.managed is None:
         parent_rows = read_csv_bytes(

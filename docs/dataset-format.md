@@ -93,7 +93,7 @@ Issues завершённой задачи берутся из кэша анно
 
 - fetch и fetch-task столбец не заполняют.
 - Для `convert` и для `verify --bundle` split заполняете вы. `convert` останавливается с ошибкой, если у изображения split пустой или недопустимый. `verify --bundle` требует хотя бы одно изображение `train` и одно `val`.
-- `dataset prepare` назначает стабильный split ([stable split](../GLOSSARY.md)): split зависит от хеша содержимого изображения, а split уже опубликованных изображений сохраняется. Ваши значения при этом перезаписываются. Число заменённых значений попадает в отчёт как `split_replacements`.
+- `dataset prepare` переносит опубликованный split по содержимому изображения (SHA-256) и записывает его поверх вашего значения; число замен — `split_replacements`. Split нового изображения берётся из вашего CSV; пустой split делает подготовку неготовой.
 - `convert --from-yolo` для датасета YOLO берёт split из раздела `train`, `val` или `test` его YAML. Для отдельных файлов предсказаний YOLO (без YAML) split остаётся пустым.
 
 ### Имя и пути изображения
@@ -245,7 +245,7 @@ prepared/
 |---|---|---|
 | Копия входа | `sources/` с четырьмя файлами | `transformed.csv` и `source-snapshot.yaml` |
 | `preparation.json` | только если ready, `format_version: 1` | всегда, `format_version: 2`, с полем `ready` |
-| split | ваш, из CSV | назначается заново (стабильный split) |
+| split | ваш, из CSV | ваш, из CSV; у опубликованных изображений — опубликованный ([stable split](../GLOSSARY.md)) |
 | Ключ `managed` в `dataset.yaml` и `tasks.yaml` | нет | есть |
 | Публикация | `upload-dataset` | `dataset publish` |
 

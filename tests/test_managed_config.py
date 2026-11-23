@@ -170,6 +170,24 @@ def test_personal_cannot_override_shared(tmp_path: Path, fields: dict[str, objec
         CvatConfig.load(cfg)
 
 
+def test_shared_file_with_a_splits_key_is_rejected_naming_the_key(tmp_path: Path) -> None:
+    """A split policy left from cveta2 0.15 is named so the user can delete it."""
+    target = shared(tmp_path / "shared.yaml")
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))
+    data["datasets"]["combined"] = {
+        "sources": [{"name": "main", "type": "cvat", "project": "main"}],
+        "clearml": {"project": "CV/combined", "dataset": "annotations"},
+        "api_url": "https://classes.example/api",
+        "splits": {"seed": 7},
+    }
+    write(target, data)
+    cfg = personal(tmp_path / "personal.yaml", target)
+    expected = r"datasets\.combined\.splits is no longer supported; delete the key"
+    with pytest.raises(ManagedError, match=expected) as error:
+        load_project_config(cfg, target)
+    assert "fields:" not in str(error.value)
+
+
 def test_shared_identity_and_policy_readers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Existing readers receive shared policies and personal credentials/local paths."""
     target = shared(tmp_path / "shared.yaml")

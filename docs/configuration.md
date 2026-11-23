@@ -162,7 +162,7 @@ datasets:
 
 ### Раздел `datasets`
 
-Каждая запись описывает управляемый датасет: источники ([source](../GLOSSARY.md)) — проекты CVAT или CSV в S3, назначение в ClearML (`clearml.project`, `clearml.dataset`), адрес API классов (`api_url`), корни S3 изображений (`s3_roots`), исключённые классы (`empty_classes`), доли и seed для split (`splits`) и решения о пересечении (`overlaps`). Источник типа `cvat` ссылается на ключ из `projects`. Все поля и правила описаны на странице [`cveta2 dataset`](commands/dataset.md).
+Каждая запись описывает управляемый датасет: источники ([source](../GLOSSARY.md)) — проекты CVAT или CSV в S3, назначение в ClearML (`clearml.project`, `clearml.dataset`), адрес API классов (`api_url`), корни S3 изображений (`s3_roots`), исключённые классы (`empty_classes`) и решения о пересечении (`overlaps`). Источник типа `cvat` ссылается на ключ из `projects`. Все поля и правила описаны на странице [`cveta2 dataset`](commands/dataset.md).
 
 ## Значения по умолчанию из пакета
 

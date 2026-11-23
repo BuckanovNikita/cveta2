@@ -194,7 +194,7 @@ _Russian_: ручная подготовка
 _Avoid_: standalone preparation, ad hoc preparation
 
 **Managed dataset**:
-A dataset whose sources, ClearML destination, class API, S3 roots, empty classes, split policy and overlap decisions are defined by name in the shared configuration and handled by the `dataset` commands.
+A dataset whose sources, ClearML destination, class API, S3 roots, empty classes and overlap decisions are defined by name in the shared configuration and handled by the `dataset` commands.
 _Russian_: управляемый датасет
 _Avoid_: configured dataset, named dataset
 
@@ -219,9 +219,9 @@ _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
 **Stable split**:
-A train/val/test assignment computed by hashing image content with the split policy's seed; once published, an image's assignment is never rebalanced.
+An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. Nothing assigns a split to a new image automatically.
 _Russian_: стабильный split
-_Avoid_: random split, rebalancing
+_Avoid_: random split, rebalancing, split policy
 
 **Overlap decision**:
 A reviewed choice, for content found in several sources, of which source owns it or that it is excluded.

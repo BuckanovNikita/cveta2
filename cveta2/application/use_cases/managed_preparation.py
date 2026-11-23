@@ -29,8 +29,10 @@ from cveta2.domain.managed.models import (
 )
 from cveta2.domain.managed.policies import (
     ParentSplits,
-    assign_splits,
+    SplitName,
     parent_splits,
+    propagate_splits,
+    rebuild_assignments,
     resolve_overlaps,
 )
 from cveta2.domain.managed.preparation import (
@@ -124,6 +126,28 @@ def _tasks(clean: pd.DataFrame, captured: CapturedManagedInput) -> TaskManifest:
     return TaskManifest(included=sorted(included), obsolete=sorted(obsolete - included))
 
 
+def published_assignments(
+    parent_metadata: DatasetMetadata | None,
+    parent_rows: pd.DataFrame | None,
+    approved: DatasetMetadata,
+    files: ManagedPreparationFiles,
+) -> tuple[dict[str, SplitName], ParentSplits | None]:
+    """Return the parent's published splits by content identity.
+
+    A managed parent records them; a parent without a ``managed`` block is
+    adopted from its published rows, reading images under the roots
+    *approved* on this machine, and only unambiguous content is carried.
+    """
+    if parent_metadata is None:
+        return {}, None
+    if parent_metadata.managed is not None:
+        return dict(parent_metadata.managed.assignments), None
+    if parent_rows is None:
+        raise ManagedError("Parent published rows are required to keep its splits")
+    legacy = parent_splits(parent_rows, files.parent_image_hashes(parent_rows, approved))
+    return legacy.assignments, legacy
+
+
 def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     config: ProjectConfig,
     name: str,
@@ -142,7 +166,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     parent_rows: pd.DataFrame | None = None,
     clean: bool = False,
 ) -> PreparationSummary:
-    """Split, validate and persist a fresh preparation without remote mutation."""
+    """Propagate published splits, validate and persist a fresh preparation without remote mutation."""
     definition = dataset_definition(config, name)
     definition_hash = definition_fingerprint(config, definition)
     captured = files.capture(transformed, source)
@@ -156,25 +180,17 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         raise ManagedError("Source parent changed; fetch the managed dataset again")
     if parent_id is not None and parent_metadata is None:
         raise ManagedError(f"Parent {parent_id} lacks dataset.yaml; choose a new dataset name")
-    previous = dict(snapshot.assignments)
-    if parent_metadata is not None and parent_metadata.managed is not None:
-        if parent_metadata.managed.definition.splits != definition.splits:
-            raise ManagedError("Split policy changed; choose a new dataset lineage")
-        previous.update(parent_metadata.managed.assignments)
     files.check_roots(captured.frame, metadata)
     for root in metadata.images.s3_root:
         s3_roots.check_root(root)
-    legacy: ParentSplits | None = None
-    if parent_metadata is not None and parent_metadata.managed is None:
-        if parent_rows is None:
-            raise ManagedError(f"Parent {parent_id} published rows are required to keep its splits")
-        # Adoption without managed evidence: carry only unambiguous content identity.
-        legacy = parent_splits(parent_rows, files.parent_image_hashes(parent_rows, metadata))
-        previous.update(legacy.assignments)
+    if parent_metadata is not None and parent_metadata.managed is None and parent_rows is None:
+        raise ManagedError(f"Parent {parent_id} published rows are required to keep its splits")
+    history: dict[str, str] = dict(snapshot.assignments)
+    published, legacy = published_assignments(parent_metadata, parent_rows, metadata, files)
+    history.update(published)
     image_hashes = files.image_hashes(captured.frame)
     frame = resolve_overlaps(captured.frame, image_hashes.identities, definition.overlaps)
-    split_frame, assignments = assign_splits(frame, definition.splits, image_hashes.identities, previous)
-    replacements = int((frame["split"] != split_frame["split"]).sum()) if "split" in frame else 0
+    split_frame, replacements = propagate_splits(frame, image_hashes.identities, history)
     inspection = media.inspect(
         split_frame,
         profile="clearml-yolo",
@@ -193,10 +209,8 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         for path in set(validation.result.clean.get("image_path", []))
         if path in image_hashes.readable
     }
-    accepted_assignments = {
-        digest: value for digest, value in assignments.items() if not digest.startswith("unreadable:")
-    }
-    prepared_snapshot = snapshot.model_copy(update={"assignments": accepted_assignments, "image_hashes": actual_hashes})
+    assignments = rebuild_assignments(validation.result.clean, image_hashes.readable, history)
+    prepared_snapshot = snapshot.model_copy(update={"assignments": assignments, "image_hashes": actual_hashes})
     prepared_metadata = metadata.model_copy(
         update={
             "managed": ManagedMetadata(
@@ -204,7 +218,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
                 definition_hash=definition_hash,
                 definition=definition,
                 cvat=config.cvat,
-                assignments=accepted_assignments,
+                assignments=assignments,
             )
         }
     )

@@ -53,7 +53,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> PreparationSummary:
-    """Assign managed splits and verify arbitrary externally transformed rows."""
+    """Propagate published splits and verify arbitrary externally transformed rows."""
     return managed.prepare_managed_dataset(
         name,
         csv,
