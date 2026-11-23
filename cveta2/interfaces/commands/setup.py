@@ -494,9 +494,15 @@ def _check_remaining_override(
     try:
         apply_local_overrides(allowed, LocalOverrides.model_validate({"projects": remaining}))
     except ManagedError as error:
+        # A whole block cannot become incomplete; only a collision with another override remains.
+        fix = (
+            "Сначала удалите или измените совпадающее переопределение другого проекта."
+            if "publication" in fields
+            else f"Удалите весь блок: cveta2 setup --project {spec} --unset publication; если назначение "
+            "совпало с переопределением другого проекта, сначала удалите или измените его."
+        )
         raise Cveta2Error(
-            f"Без {', '.join(fields)} локальные переопределения станут некорректными: {error}. "
-            f"Задайте другое значение или удалите весь блок: cveta2 setup --project {spec} --unset publication"
+            f"Без {', '.join(fields)} локальные переопределения станут некорректными: {error}. {fix}"
         ) from error
 
 
@@ -517,7 +523,7 @@ def _write_local(
         raise Cveta2Error(
             f"Нет описания проекта {spec} в общей конфигурации; добавьте его: cveta2 setup --global --project {spec}"
         )
-    if removing and "publication" not in fields:
+    if removing:
         _check_remaining_override(raw_global, overrides, key, fields, spec)
     written = write_local_overrides(config_path, key, fields, global_path=global_path)
     names = ", ".join(f"overrides.projects.{key}.{field}" for field in fields)

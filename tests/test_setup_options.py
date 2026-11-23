@@ -537,6 +537,22 @@ def test_unset_that_collides_with_another_projects_override_is_refused(tmp_path:
     assert load_project_config(cfg).projects["a"].publication is not None
 
 
+def test_unset_of_a_whole_block_that_collides_with_another_projects_override_is_refused(tmp_path: Path) -> None:
+    cfg = two_published_projects(tmp_path, _dataset_overrides(a="x", b="a"))
+    before = cfg.read_bytes()
+
+    with pytest.raises(Cveta2Error) as caught:
+        run(cfg, "-p", "a", "--unset", "publication")
+
+    assert "R/a" in str(caught.value)
+    assert "переопределение другого проекта" in str(caught.value)
+    assert cfg.read_bytes() == before
+
+    run(cfg, "-p", "b", "--unset", "publication")
+    run(cfg, "-p", "a", "--unset", "publication")
+    assert "overrides" not in read_config(cfg)
+
+
 def test_unset_is_accepted_when_the_overrides_are_already_invalid(tmp_path: Path) -> None:
     cfg = two_published_projects(tmp_path, _dataset_overrides(a="b"))
     with pytest.raises(Cveta2Error, match="R/b"):
