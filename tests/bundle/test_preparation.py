@@ -51,6 +51,8 @@ class Store:
     def __init__(self) -> None:
         """Initialize an empty remote lineage."""
         self.directory: Path | None = None
+        self.files: tuple[str, ...] = ()
+        self.output_uri: str | None = None
         self.parent: DatasetParent | None = None
         self.published: dict[str, bytes] = {}
         self.calls = 0
@@ -61,11 +63,25 @@ class Store:
     def latest(self, _project: str, _name: str) -> DatasetParent | None:
         return self.parent
 
-    def publish(self, _project: str, _name: str, _parent_id: str | None, directory: Path) -> Publication:
+    def publish(
+        self,
+        _project: str,
+        _name: str,
+        _parent_id: str | None,
+        directory: Path,
+        *,
+        files: tuple[str, ...],
+        output_uri: str | None = None,
+    ) -> Publication:
         self.directory = directory
+        self.files = files
+        self.output_uri = output_uri
         self.calls += 1
         self.published = {p.name: p.read_bytes() for p in directory.iterdir()}
         return Publication("child", "1.0.0")
+
+    def parent_file(self, _parent: DatasetParent, _filename: str) -> Path | None:
+        return None
 
 
 class Storage:
@@ -300,7 +316,17 @@ def test_private_stage_is_removed_on_publication_failure(
     prepare_dataset(source, prepared, options, services)
     stages: list[Path] = []
 
-    def fail_publish(_project: str, _name: str, _parent: str | None, directory: Path) -> Publication:
+    def fail_publish(
+        _project: str,
+        _name: str,
+        _parent: str | None,
+        directory: Path,
+        *,
+        files: tuple[str, ...],
+        output_uri: str | None = None,
+    ) -> Publication:
+        assert files
+        assert output_uri is None
         stages.append(directory)
         assert directory.is_dir()
         raise UploadError("child creation failed")

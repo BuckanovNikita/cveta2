@@ -19,6 +19,7 @@ from cveta2.domain.bundle.models import (
     UploadError,
 )
 from cveta2.domain.bundle.preparation import (
+    PAYLOAD_NAMES,
     BundleDraft,
     Decision,
     MissingDecisions,
@@ -212,4 +213,5 @@ def upload_dataset(directory: Path, services: BundleServices) -> Publication:
             options.dataset_name or "",
             bundle.record.parent_id,
             bundle.directory,
+            files=PAYLOAD_NAMES,
         )

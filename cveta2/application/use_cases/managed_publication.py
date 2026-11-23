@@ -21,6 +21,7 @@ from cveta2.application.use_cases.managed_feedback import (
     report_findings,
 )
 from cveta2.domain.bundle.models import Publication
+from cveta2.domain.bundle.preparation import PAYLOAD_NAMES
 from cveta2.domain.bundle.validation import validate_bundle
 from cveta2.domain.class_registry import (
     registry_fingerprint as registry_fingerprint,  # noqa: PLC0414 - existing import.
@@ -184,4 +185,5 @@ def publish_prepared(config: ProjectConfig, directory: Path, *, services: Manage
             definition.clearml.dataset,
             None if loaded.record.first else loaded.record.parent_id,
             staging,
+            files=PAYLOAD_NAMES,
         )

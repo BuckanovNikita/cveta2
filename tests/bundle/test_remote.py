@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from cveta2.adapters.class_api.http import HttpClassApi
 from cveta2.adapters.clearml.bundle import ClearMLStore, S3Roots
-from cveta2.domain.bundle.models import UploadCancelled, UploadError
+from cveta2.domain.bundle.models import DatasetParent, UploadCancelled, UploadError
 
 
 @pytest.fixture
@@ -197,15 +197,19 @@ def test_latest_does_not_download_when_metadata_absent(sdk: SimpleNamespace) -> 
     sdk.parent.get_local_copy.assert_not_called()
 
 
+THREE = ("dataset.csv", "dataset.yaml", "tasks.yaml")
+FOUR = (*THREE, "sources.tar.gz")
+
+
 @pytest.fixture
 def bundle(tmp_path: Path) -> Path:
-    for filename in ("dataset.csv", "dataset.yaml", "tasks.yaml", "report.json"):
+    for filename in (*FOUR, "report.json"):
         (tmp_path / filename).write_text(filename)
     return tmp_path
 
 
 def test_publication_replaces_child_manifest_preserves_parent(sdk: SimpleNamespace, bundle: Path) -> None:
-    result = ClearMLStore().publish("project", "dataset", "parent", bundle)
+    result = ClearMLStore().publish("project", "dataset", "parent", bundle, files=THREE)
     assert result.dataset_id == "child"
     assert result.version == "1.0.1"
     sdk.factory.create.assert_called_once_with(
@@ -213,13 +217,28 @@ def test_publication_replaces_child_manifest_preserves_parent(sdk: SimpleNamespa
     )
     sdk.child.remove_files.assert_called_once_with(dataset_path="*", recursive=True)
     assert [call.kwargs["path"] for call in sdk.child.add_files.call_args_list] == [
-        str(bundle / name) for name in ("dataset.csv", "dataset.yaml", "tasks.yaml")
+        str(bundle / name) for name in THREE
     ]
     sdk.child.upload.assert_called_once_with(retries=0)
     sdk.child.finalize.assert_called_once_with(raise_on_error=True, auto_upload=False)
     sdk.parent.remove_files.assert_not_called()
     sdk.parent.add_files.assert_not_called()
     sdk.parent.upload.assert_not_called()
+
+
+def test_publication_of_four_files_passes_output_uri(sdk: SimpleNamespace, bundle: Path) -> None:
+    sdk.child.list_files.side_effect = [["old.csv"], [], list(FOUR), list(FOUR), list(FOUR)]
+    result = ClearMLStore().publish(
+        "project", "dataset", "parent", bundle, files=FOUR, output_uri="s3://bucket/.clearml"
+    )
+    assert result.dataset_id == "child"
+    sdk.factory.create.assert_called_once_with(
+        dataset_project="project",
+        dataset_name="dataset",
+        parent_datasets=["parent"],
+        output_uri="s3://bucket/.clearml",
+    )
+    assert [call.kwargs["path"] for call in sdk.child.add_files.call_args_list] == [str(bundle / name) for name in FOUR]
 
 
 @pytest.mark.parametrize("stage", ["upload", "finalize"])
@@ -233,7 +252,7 @@ def test_publication_failure_reports_created_id_without_retry(
     else:
         operation.return_value = failure
     with pytest.raises(UploadError, match="child"):
-        ClearMLStore().publish("project", "dataset", "parent", bundle)
+        ClearMLStore().publish("project", "dataset", "parent", bundle, files=THREE)
     sdk.factory.create.assert_called_once()
     operation.assert_called_once()
     if stage == "upload":
@@ -247,7 +266,7 @@ def test_interrupted_publication_retains_created_id_and_does_not_retry(
     operation = getattr(sdk.child, stage)
     operation.side_effect = KeyboardInterrupt
     with pytest.raises(UploadCancelled, match="child") as caught:
-        ClearMLStore().publish("project", "dataset", "parent", bundle)
+        ClearMLStore().publish("project", "dataset", "parent", bundle, files=THREE)
     assert "inspect" in str(caught.value).lower()
     operation.assert_called_once()
     sdk.factory.create.assert_called_once()
@@ -258,14 +277,15 @@ def test_interrupted_publication_retains_created_id_and_does_not_retry(
 def test_publication_rejects_manifest_survivors(sdk: SimpleNamespace, bundle: Path) -> None:
     sdk.child.list_files.side_effect = [["external.jpg"], ["external.jpg"]]
     with pytest.raises(UploadError, match="child"):
-        ClearMLStore().publish("project", "dataset", "parent", bundle)
+        ClearMLStore().publish("project", "dataset", "parent", bundle, files=THREE)
     sdk.child.upload.assert_not_called()
 
 
-def test_missing_bundle_file_blocks_before_creation(sdk: SimpleNamespace, bundle: Path) -> None:
+@pytest.mark.parametrize("files", [THREE, FOUR])
+def test_missing_bundle_file_blocks_before_creation(sdk: SimpleNamespace, bundle: Path, files: tuple[str, ...]) -> None:
     (bundle / "tasks.yaml").unlink()
-    with pytest.raises(UploadError):
-        ClearMLStore().publish("project", "dataset", None, bundle)
+    with pytest.raises(UploadError, match=r"tasks\.yaml"):
+        ClearMLStore().publish("project", "dataset", None, bundle, files=files)
     sdk.factory.create.assert_not_called()
 
 
@@ -306,14 +326,14 @@ def test_s3_sdk_error_is_actionable(sdk: SimpleNamespace) -> None:
 def test_sdk_upload_none_success_requires_no_pending_files(sdk: SimpleNamespace, bundle: Path) -> None:
     # ClearML's normal successful upload returns None, despite its bool annotation.
     sdk.child.upload.return_value = None
-    assert ClearMLStore().publish("project", "dataset", None, bundle).dataset_id == "child"
+    assert ClearMLStore().publish("project", "dataset", None, bundle, files=THREE).dataset_id == "child"
     assert sdk.factory.create.call_args.kwargs["parent_datasets"] == []
 
 
 def test_dirty_upload_blocks_finalization(sdk: SimpleNamespace, bundle: Path) -> None:
     sdk.child.is_dirty.return_value = True
     with pytest.raises(UploadError, match="child"):
-        ClearMLStore().publish("project", "dataset", "parent", bundle)
+        ClearMLStore().publish("project", "dataset", "parent", bundle, files=THREE)
     sdk.child.finalize.assert_not_called()
 
 
@@ -325,20 +345,20 @@ def test_upload_losing_a_file_blocks_finalization(sdk: SimpleNamespace, bundle: 
         ["dataset.csv", "dataset.yaml"],
     ]
     with pytest.raises(UploadError, match="child"):
-        ClearMLStore().publish("project", "dataset", None, bundle)
+        ClearMLStore().publish("project", "dataset", None, bundle, files=THREE)
     sdk.child.finalize.assert_not_called()
 
 
 def test_false_final_state_is_failure(sdk: SimpleNamespace, bundle: Path) -> None:
     sdk.child.is_final.return_value = False
     with pytest.raises(UploadError, match="child"):
-        ClearMLStore().publish("project", "dataset", None, bundle)
+        ClearMLStore().publish("project", "dataset", None, bundle, files=THREE)
 
 
 def test_parent_id_returned_as_child_is_never_mutated(sdk: SimpleNamespace, bundle: Path) -> None:
     sdk.child.id = "parent"
     with pytest.raises(UploadError, match="refusing mutation"):
-        ClearMLStore().publish("project", "dataset", "parent", bundle)
+        ClearMLStore().publish("project", "dataset", "parent", bundle, files=THREE)
     sdk.child.list_files.assert_not_called()
     sdk.child.remove_files.assert_not_called()
     sdk.child.add_files.assert_not_called()
@@ -383,3 +403,26 @@ def test_invalid_s3_roots_fail_before_sdk_call(sdk: SimpleNamespace, root: str) 
     with pytest.raises(UploadError):
         S3Roots().check_root(root)
     sdk.storage.list.assert_not_called()
+
+
+def test_parent_file_downloads_one_file_of_the_exact_version(sdk: SimpleNamespace, tmp_path: Path) -> None:
+    sdk.parent.list_files.return_value = ["dataset.csv", "dataset.yaml"]
+    (tmp_path / "dataset.csv").write_text("csv")
+    parent = DatasetParent("parent", "project", "dataset", "1.0.0", None)
+    assert ClearMLStore().parent_file(parent, "dataset.csv") == tmp_path / "dataset.csv"
+    sdk.factory.get.assert_called_once_with(dataset_id="parent")
+    sdk.parent.get_local_copy.assert_called_once_with(files=["dataset.csv"], use_soft_links=False, raise_on_error=True)
+
+
+def test_parent_file_absent_from_listing_is_none(sdk: SimpleNamespace) -> None:
+    sdk.parent.list_files.return_value = ["dataset.yaml"]
+    parent = DatasetParent("parent", "project", "dataset", "1.0.0", None)
+    assert ClearMLStore().parent_file(parent, "dataset.csv") is None
+    sdk.parent.get_local_copy.assert_not_called()
+
+
+def test_parent_file_sdk_error_is_upload_error(sdk: SimpleNamespace) -> None:
+    sdk.factory.get.side_effect = RuntimeError("authentication failed")
+    parent = DatasetParent("parent", "project", "dataset", "1.0.0", None)
+    with pytest.raises(UploadError, match=r"dataset\.csv"):
+        ClearMLStore().parent_file(parent, "dataset.csv")

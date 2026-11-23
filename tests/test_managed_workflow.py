@@ -193,6 +193,8 @@ class FakeClearML:
         self.latest_id: str | None = None
         self.publications: list[str] = []
         self.parents: list[str | None] = []
+        # Per publication, in order: the file list and output_uri the caller passed.
+        self.published_calls: list[tuple[tuple[str, ...], str | None]] = []
 
     def latest(self, project: str, name: str) -> DatasetParent | None:
         if self.latest_id is None or (project, name) != ("CV/combined", "annotations"):
@@ -206,7 +208,17 @@ class FakeClearML:
             metadata if metadata.is_file() else None,
         )
 
-    def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
+    def publish(  # noqa: PLR0913
+        self,
+        project: str,
+        name: str,
+        parent_id: str | None,
+        directory: Path,
+        *,
+        files: tuple[str, ...],
+        output_uri: str | None = None,
+    ) -> Publication:
+        self.published_calls.append((files, output_uri))
         assert project == "CV/combined"
         assert name == "annotations"
         self.parents.append(parent_id)
@@ -220,6 +232,9 @@ class FakeClearML:
         self.publications.append(dataset_id)
         self.latest_id = dataset_id
         return Publication(dataset_id, str(len(self.publications)))
+
+    def parent_file(self, _parent: DatasetParent, _filename: str) -> Path | None:
+        return None
 
     def read_snapshot(self, dataset_id: str) -> ManagedSnapshot | None:
         path = self.root / dataset_id / "tasks.yaml"
@@ -435,6 +450,11 @@ def test_setup_attach_and_cli_list_never_modify_shared_config(
     assert len(definitions[0]["sources"]) == 3
     assert workflow.shared.read_bytes() == original
     assert workflow.cvat.annotation_reads == []
+
+
+def test_managed_publish_passes_three_files_without_output_uri(workflow: Workflow, tmp_path: Path) -> None:
+    api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    assert workflow.clearml.published_calls == [(("dataset.csv", "dataset.yaml", "tasks.yaml"), None)]
 
 
 def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workflow: Workflow, tmp_path: Path) -> None:

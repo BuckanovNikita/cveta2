@@ -43,8 +43,24 @@ class DatasetStore(Protocol):
         """Return latest finalized nonarchived exact parent; errors are not absence."""
         ...
 
-    def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
-        """Publish only payload files, reporting known child IDs on failure."""
+    def publish(  # noqa: PLR0913
+        self,
+        project: str,
+        name: str,
+        parent_id: str | None,
+        directory: Path,
+        *,
+        files: tuple[str, ...],
+        output_uri: str | None = None,
+    ) -> Publication:
+        """Publish only the listed files, reporting known child IDs on failure."""
+        ...
+
+    def parent_file(self, parent: DatasetParent, filename: str) -> Path | None:
+        """Return a local copy of one file of that exact version, or None when it is not listed.
+
+        SDK and download errors raise UploadError; they never mean "absent".
+        """
         ...
 
 
