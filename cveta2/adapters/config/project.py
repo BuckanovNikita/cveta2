@@ -664,7 +664,7 @@ def migration_proposal(personal_path: Path, project_path: Path | None = None) ->
             selected,
             _digest(original),
             raw,
-            load_project_config(personal_path, selected).model_dump(),
+            load_global_config(personal_path, selected).model_dump(),
             (),
         )
     cvat = _dict(raw.get("cvat"))

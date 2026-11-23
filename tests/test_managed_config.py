@@ -21,11 +21,13 @@ from cveta2.adapters.config.project import (
     SharedIdentityMismatchError,
     activate_migration,
     attach_project_config,
+    load_global_config,
     load_project_config,
     migration_proposal,
     project_config_path,
     read_config,
     recover_migration,
+    write_shared_project_fields,
 )
 from cveta2.adapters.config.settings import (
     CacheConfig,
@@ -1361,3 +1363,104 @@ def test_migration_reports_an_unusable_legacy_root_for_review(tmp_path: Path) ->
     with pytest.raises(ManagedError, match="unresolved"):
         activate_migration(proposal)
     assert path.read_bytes() == original
+
+
+# Team writes use the raw global file as their baseline
+# ---------------------------------------------------------------------------
+
+_RETAIL_PUBLICATION: dict[str, object] = {
+    "clearml": {"project": "Retail/Datasets", "dataset": "retail-shelves"},
+    "api_url": "https://classes.example.com/api",
+}
+
+
+def _overridden(tmp_path: Path) -> tuple[Path, Path]:
+    """Write a global file that allows overrides and a personal file overriding one leaf."""
+    team = write(
+        tmp_path / "team.yaml",
+        {
+            "schema_version": 1,
+            "local_overrides": True,
+            "cvat": {"host": "https://cvat.example.com", "organization": "my-team"},
+            "projects": {
+                "retail": {
+                    "id": 123,
+                    "name": "Retail shelves",
+                    "sync_root": "s3://my-bucket/images",
+                    "publication": _RETAIL_PUBLICATION,
+                }
+            },
+            "datasets": {},
+        },
+    )
+    cfg = write(
+        tmp_path / "config.yaml",
+        {
+            "schema_version": 1,
+            "project_config": str(team),
+            "cvat": {"username": "alice", "password": "private"},
+            "overrides": {"projects": {"retail": {"publication": {"clearml": {"dataset": "retail-shelves-alice"}}}}},
+        },
+    )
+    return cfg, team
+
+
+def _dataset_name(path: Path) -> object:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["projects"]["retail"]["publication"]["clearml"]["dataset"]
+
+
+def test_team_write_never_copies_a_local_override_into_the_global_file(tmp_path: Path) -> None:
+    cfg, team = _overridden(tmp_path)
+
+    ignore = IgnoreConfig.load(cfg)
+    ignore.add_task("Retail shelves", 9, "t9")
+    ignore.save(cfg)
+
+    document = yaml.safe_load(team.read_text(encoding="utf-8"))
+    assert [entry["id"] for entry in document["projects"]["retail"]["ignore"]] == [9]
+    assert _dataset_name(team) == "retail-shelves"
+
+    before = team.read_bytes()
+    cache = CacheConfig.load(cfg)
+    cache.images_root = Path("/local/images")
+    cache.save(cfg)
+    assert team.read_bytes() == before
+
+    write_shared_project_fields(cfg, {"retail": {"sync_root": "s3://my-bucket/new"}})
+    assert load_global_config(cfg).projects["retail"].sync_root == "s3://my-bucket/new"
+    assert _dataset_name(team) == "retail-shelves"
+
+
+def test_override_does_not_trip_the_conflict_check(tmp_path: Path) -> None:
+    cfg, team = _overridden(tmp_path)
+    roots = SyncRootsConfig.load(cfg)
+
+    write_shared_project_fields(cfg, {"retail": {"ignore": [{"id": 5, "name": "five"}]}})
+    roots.projects["Retail shelves"] = "s3://my-bucket/moved"
+    roots.save(cfg)
+
+    document = yaml.safe_load(team.read_text(encoding="utf-8"))["projects"]["retail"]
+    assert document["sync_root"] == "s3://my-bucket/moved"
+    assert [entry["id"] for entry in document["ignore"]] == [5]
+    assert _dataset_name(team) == "retail-shelves"
+
+
+def test_team_write_adds_no_new_keys_to_an_untouched_file(tmp_path: Path) -> None:
+    target = shared(tmp_path / "shared.yaml")
+    cfg = personal(tmp_path / "personal.yaml", target)
+
+    ignore = IgnoreConfig.load(cfg)
+    ignore.add_task("Main project", 9, "t9")
+    ignore.save(cfg)
+
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert {"schema_version", "cvat", "projects", "datasets"} >= set(document)
+    assert all("publication" not in project for project in document["projects"].values())
+
+
+def test_migration_preview_of_a_versioned_file_shows_the_raw_global_file(tmp_path: Path) -> None:
+    cfg, _team = _overridden(tmp_path)
+
+    proposal = migration_proposal(cfg)
+
+    assert proposal.shared == load_global_config(cfg).model_dump()
