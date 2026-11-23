@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from cveta2.adapters.config.listing import ListedValue, ValueOrigin, list_configuration
 from cveta2.adapters.config.project import (
     GLOBAL_CONFIG_ENV,
     LEGACY_GLOBAL_CONFIG_ENV,
@@ -88,6 +89,7 @@ __all__ = [
     "IgnoreConfig",
     "IgnoredTask",
     "ImageCacheConfig",
+    "ListedValue",
     "LocalOverrides",
     "LocalOverridesDisabledError",
     "MigrationProposal",
@@ -99,6 +101,7 @@ __all__ = [
     "SharedIdentityMismatchError",
     "SyncRootsConfig",
     "UploadConfig",
+    "ValueOrigin",
     "activate_migration",
     "apply_local_overrides",
     "attach_existing_project_config",
@@ -112,6 +115,7 @@ __all__ = [
     "images_cache_dir_from",
     "is_cache_disabled",
     "is_interactive_disabled",
+    "list_configuration",
     "load_global_config",
     "load_orgs_cache",
     "load_project_config",

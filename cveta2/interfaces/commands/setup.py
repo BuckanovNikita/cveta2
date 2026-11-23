@@ -2,6 +2,7 @@
 
 import copy
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -25,6 +26,7 @@ from cveta2.composition.configuration import (
     find_project_key,
     get_projects_cache_path,
     global_config_from_env,
+    list_configuration,
     load_global_config,
     load_projects_cache,
     migration_proposal,
@@ -109,6 +111,15 @@ _WHOLE_PUBLICATION = SetupOption("publication", "unset", "publication", "publica
 UNSET_NAMES: tuple[str, ...] = (*(option.name for option in SETUP_OPTIONS), "publication")
 _BY_NAME = {option.name: option for option in (*SETUP_OPTIONS, _WHOLE_PUBLICATION)}
 
+_ORIGIN_RU = {
+    "default": "по умолчанию",
+    "personal": "личная",
+    "global": "общая",
+    "override": "локальное переопределение",
+    "environment": "окружение",
+}
+_NOT_APPLIED = "не применяется: общая конфигурация не разрешает переопределения"
+
 _CREATION_FORM = "cveta2 setup --global --global-config PATH --host URL [--organization SLUG]"
 _HIDDEN_PROMPT_HINT = "Задайте пароль через CVAT_PASSWORD или запустите cveta2 setup --password в терминале."
 
@@ -132,6 +143,7 @@ def configure_setup(parser: "argparse.ArgumentParser") -> None:
         help="Записывать в общую конфигурацию команды, а не в личную.",
     )
     add_project_arg(parser, "Проект CVAT: ключ общей конфигурации, имя или ID.")
+    add_list_arg(parser, "Показать итоговую конфигурацию и откуда взято каждое значение; ничего не записывает.")
     parser.add_argument(
         "--unset",
         dest="unset",
@@ -212,6 +224,22 @@ def _check_migration_alone(args: "argparse.Namespace") -> None:
         )
 
 
+def _check_list_alone(args: "argparse.Namespace") -> None:
+    """Refuse ``--list`` with anything that writes: it only shows the configuration."""
+    if not args.list_only:
+        return
+    given = _given(args)
+    writing = (
+        (given[0][0].flag if given else None)
+        or ("--unset" if args.unset else None)
+        or ("--reset" if args.reset else None)
+        or ("--global" if args.global_scope else None)
+        or ("--migrate-config" if args.migrate_config else None)
+    )
+    if writing is not None:
+        raise Cveta2Error(f"--list только показывает настройки и не сочетается с {writing}; уберите {writing}.")
+
+
 def _first(requested: list[SetupOption], scopes: tuple[str, ...]) -> SetupOption | None:
     return next((option for option in requested if option.scope in scopes), None)
 
@@ -223,6 +251,7 @@ def validate_setup_request(args: "argparse.Namespace", *, attached: bool) -> Non
     run attaches or creates it. Every row applies to ``--unset`` operands as
     to the option flags of the same name.
     """
+    _check_list_alone(args)
     _check_migration_alone(args)
     given = [option for option, _ in _given(args)]
     requested = [*given, *_unset(args)]
@@ -320,6 +349,11 @@ def run_setup(args: "argparse.Namespace") -> None:
     """
     config_path = config_path_from_args(args)
     global_path = global_config_from_args(args)
+    if args.list_only:
+        # Read-only: dispatched before creation and attachment; --global-config only selects.
+        validate_setup_request(args, attached=global_path is not None)
+        _print_listing(config_path, global_path, args.project)
+        return
     if args.migrate_config:
         _check_migration_alone(args)
         _run_migration(config_path, global_path)
@@ -346,6 +380,16 @@ def run_setup(args: "argparse.Namespace") -> None:
         apply_setup_options(args, config_path, global_path)
     elif target is None and not attaching:
         _run_wizard(config_path)
+
+
+def _print_listing(config_path: Path, global_path: Path | None, project: str | None) -> None:
+    listed = list_configuration(config_path, global_path=global_path, project=project)
+    selected = project_config_path(config_path, global_path)
+    if selected is not None:
+        sys.stdout.write(f"Общая конфигурация: {selected}\n")
+    for v in listed:
+        origin = _ORIGIN_RU[v.origin] if v.applied else f"{_ORIGIN_RU[v.origin]}; {_NOT_APPLIED}"
+        sys.stdout.write(f"{v.key} = {v.value}  ({origin})\n")
 
 
 def apply_setup_options(args: "argparse.Namespace", config_path: Path, global_path: Path | None) -> None:

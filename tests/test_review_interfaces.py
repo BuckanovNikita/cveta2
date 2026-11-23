@@ -338,7 +338,7 @@ def test_unreadable_personal_config_is_a_typed_cli_error(
     monkeypatch.setenv("CVETA2_CONFIG", str(config))
     try:
         with pytest.raises(SystemExit) as exit_info:
-            CliApp().run(["setup-cache", "--list"])
+            CliApp().run(["setup", "--list"])
     finally:
         target.chmod(0o700)
     assert str(config) in str(exit_info.value.code)
