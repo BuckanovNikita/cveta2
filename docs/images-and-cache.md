@@ -16,7 +16,7 @@ cveta2 хранит на диске три вида данных: изображ
 
 В имени проекта символы `/`, `\` и `%` кодируются как `%2F`, `%5C` и `%25`, поэтому каталог всегда лежит внутри корня.
 
-У `cveta2 fetch` флаг `--images-dir` заменяет каталог на один запуск, а `--no-images` отключает скачивание. Если каталог не задан, `fetch` в терминале спрашивает путь и сохраняет его в `image_cache`; при `CVETA2_NO_INTERACTIVE=true` он завершается ошибкой. Настроить пути удобно командой [`cveta2 setup-cache`](commands/setup-cache.md). Ключи описаны в [Конфигурация](configuration.md).
+У `cveta2 fetch` флаг `--images-dir` заменяет каталог на один запуск, а `--no-images` отключает скачивание. Если каталог не задан, `fetch` в терминале спрашивает путь и сохраняет его в `image_cache`; при `CVETA2_NO_INTERACTIVE=true` он завершается ошибкой. Настроить пути удобно мастером [`cveta2 setup`](commands/setup.md#мастер-личной-настройки) или флагами `cveta2 setup --images-root PATH` и `cveta2 setup -p <проект> --images-dir PATH`. Ключи описаны в [Конфигурация](configuration.md).
 
 ### Как ключи S3 превращаются в локальные пути
 
@@ -178,7 +178,7 @@ s3://my-bucket/images/
 
 ## См. также
 
-- [cveta2 setup-cache](commands/setup-cache.md)
+- [cveta2 setup](commands/setup.md)
 - [Конфигурация](configuration.md)
 - [cveta2 fetch](commands/fetch.md)
 - [cveta2 s3-sync](commands/s3-sync.md)

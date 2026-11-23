@@ -99,7 +99,8 @@ def _sync_one(project_filter: str, sync_root: "str | None") -> list[str]:
                 f"Ошибка: для проекта {project_name!r} не настроен путь "
                 f"кэширования изображений.\n"
                 f"Добавьте image_cache.{project_name} или cache.images_root "
-                f"в конфигурацию (cveta2 setup-cache)."
+                f"в конфигурацию (cveta2 setup --images-root PATH или "
+                f"cveta2 setup -p <проект> --images-dir PATH)."
             )
         failure = _sync_project(client, project_id, project_name, cs_info, targets[project_name])
     return [failure] if failure else []
@@ -113,7 +114,7 @@ def _sync_all(sync_root: "str | None") -> list[str]:
             "Ошибка: нет проектов для синхронизации — не настроены ни "
             "image_cache, ни cache.projects.\n"
             "Добавьте секцию image_cache в конфигурацию или запустите: "
-            "cveta2 setup-cache"
+            "cveta2 setup --images-root PATH или cveta2 setup -p <проект> --images-dir PATH"
         )
 
     skipped: list[str] = []

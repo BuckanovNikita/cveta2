@@ -12,8 +12,7 @@
 
 Настройка:
 
-- [setup](commands/setup.md) — логин и пароль CVAT, подключение общей конфигурации ([global configuration](../GLOSSARY.md)).
-- [setup-cache](commands/setup-cache.md) — каталоги кэша изображений ([image cache](../GLOSSARY.md)) и кэша аннотаций ([annotation cache](../GLOSSARY.md)).
+- [setup](commands/setup.md) — логин и пароль CVAT, подключение общей конфигурации ([global configuration](../GLOSSARY.md)), кэш изображений и аннотаций ([image cache](../GLOSSARY.md), [annotation cache](../GLOSSARY.md)), настройки публикации.
 - [doctor](commands/doctor.md) — проверка конфигурации, ключей S3, подключения ClearML и прав на кэш.
 
 Выгрузка из CVAT:

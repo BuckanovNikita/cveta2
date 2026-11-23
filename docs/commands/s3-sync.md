@@ -93,11 +93,11 @@ S3 sync: 17 загружено, 8 из кэша, 0 ошибок (всего 25)
 
 **`Ошибка: нет проектов для синхронизации — не настроены ни image_cache, ни cache.projects.`**
 
-В личной конфигурации нет проектов с кэшем изображений. Запустите команду с `-p` или настройте кэш: [setup-cache](setup-cache.md).
+В личной конфигурации нет проектов с кэшем изображений. Запустите команду с `-p` или настройте кэш: [setup](setup.md#мастер-личной-настройки).
 
 **`Ошибка: для проекта 'Retail shelves' не настроен путь кэширования изображений.`**
 
-Добавьте `image_cache.<проект>` или `cache.images_root` в [конфигурацию](../configuration.md), например через [setup-cache](setup-cache.md).
+Добавьте `image_cache.<проект>` или `cache.images_root` в [конфигурацию](../configuration.md), например `cveta2 setup --images-root PATH` или `cveta2 setup -p <проект> --images-dir PATH` (см. [setup](setup.md)).
 
 **`Проект 'Retail shelves': cloud storage не найден — пропускаем.`**
 
@@ -143,6 +143,6 @@ print(stats.downloaded, stats.cached, stats.failed, stats.total)
 ## См. также
 
 - [fetch](fetch.md) — скачивает только изображения с аннотациями
-- [setup-cache](setup-cache.md) — настройка кэша изображений
+- [setup](setup.md) — настройка кэша изображений
 - [Кэш изображений и аннотаций](../images-and-cache.md)
 - [Конфигурация](../configuration.md)

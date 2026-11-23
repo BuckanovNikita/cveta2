@@ -15,7 +15,7 @@ cveta2 читает настройки из двух YAML-файлов и из �
 
 Порядок, первое найденное значение побеждает:
 
-1. Флаг `--config PATH` (есть у `setup`, `setup-cache` и команд `dataset`).
+1. Флаг `--config PATH` (есть у `setup` и команд `dataset`).
 2. Переменная окружения `CVETA2_CONFIG`.
 3. `~/.config/cveta2/config.yaml`.
 
@@ -141,7 +141,7 @@ upload:
 | `upload.image_quality` | целое 1–100 | `100` | Качество сжатия кадров, которое `upload` передаёт в CVAT. |
 | `overrides.projects.<ключ>.publication` | словарь | нет | Личные значения настроек публикации проекта. Только с `schema_version: 1`; см. [локальные переопределения](#локальные-переопределения). |
 
-Пути в разделах `cache` и `image_cache` пишите абсолютными: при чтении файла cveta2 не раскрывает `~`. `cveta2 setup-cache` сам записывает абсолютные пути.
+Пути в разделах `cache` и `image_cache` пишите абсолютными: при чтении файла cveta2 не раскрывает `~`. Мастер [`cveta2 setup`](commands/setup.md#мастер-личной-настройки) сам записывает абсолютные пути.
 
 Подробно о каталогах кэша — на странице [Изображения и кэши](images-and-cache.md).
 
@@ -376,7 +376,7 @@ CVAT API: попытка cveta2 1/5 не удалась; повтор через
 
 ## Запись в общий файл и блокировка
 
-Некоторые команды меняют общий файл: например, [`cveta2 ignore`](commands/ignore.md) меняет список игнорируемых задач, а [`cveta2 setup-cache`](commands/setup-cache.md) — `ignored_prefix` и `task_cache_s3`. Чтобы два человека не затёрли изменения друг друга:
+Некоторые команды меняют общий файл: например, [`cveta2 ignore`](commands/ignore.md) меняет список игнорируемых задач, а [`cveta2 setup --global`](commands/setup.md#мастер-общей-настройки---global) — настройки проектов: `ignored_prefix`, `task_cache_s3`, `publication` и другие. Чтобы два человека не затёрли изменения друг друга:
 
 1. cveta2 берёт блокировку на файл `.<имя файла>.lock` рядом с общим файлом. Если блокировку держит другой процесс, команда сразу завершается ошибкой `Cannot lock shared configuration <путь>; another writer may be active. Retry the change.` Блокировка снимается, когда процесс завершается.
 2. Записываются только поля, которые изменила эта команда. Изменения других проектов от другого человека сохраняются.
@@ -408,7 +408,6 @@ Legacy mixed configuration requires verification: cveta2 setup --migrate-config
 
 - [`cveta2 setup`](commands/setup.md)
 - [`cveta2 doctor`](commands/doctor.md)
-- [`cveta2 setup-cache`](commands/setup-cache.md)
 - [Изображения и кэши](images-and-cache.md)
 - [`cveta2 dataset`](commands/dataset.md)
 - [Python API](python-api.md)

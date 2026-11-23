@@ -45,6 +45,7 @@ from cveta2.domain.managed.models import (
     ProjectConfig,
     ProjectDefinition,
 )
+from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands import setup
 from cveta2.interfaces.commands.interactive import primitives, wizard
 from tests.helpers import parse_cli_args, write_config_yaml, write_split_config_yaml
@@ -1043,8 +1044,12 @@ def _run_wizard(monkeypatch: pytest.MonkeyPatch, cfg: Path, team: Path, organiza
     monkeypatch.setattr(wizard, "prompt_organization", lambda _existing: organization)
     monkeypatch.setattr(wizard, "prompt_username", lambda _default: "alice")
     monkeypatch.setattr(wizard, "prompt_password", lambda: "private")
-    monkeypatch.setattr(primitives, "path", lambda *_args, **_kwargs: team)
+    # Only the global-file prompt gets a path; the cache prompts that follow are skipped.
+    monkeypatch.setattr(
+        primitives, "path", lambda message, **_kwargs: team if message.startswith("Общий YAML") else None
+    )
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(setup, "load_projects_cache", lambda _path: [ProjectInfo(id=12, name="Main")])
     setup.run_setup(parse_cli_args("setup", "--config", str(cfg)))
 
 

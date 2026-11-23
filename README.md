@@ -27,8 +27,7 @@ ClearML SDK ставится вместе с пакетом, а его подк�
 
 ```bash
 cveta2 setup --global-config ~/team/project-config.yaml   # подключить общую конфигурацию команды
-cveta2 setup                                               # логин и пароль CVAT (в терминале)
-cveta2 setup-cache                                         # куда складывать изображения (в терминале)
+cveta2 setup                                               # логин, пароль CVAT и пути кэша (в терминале)
 cveta2 doctor                                              # проверить настройки
 cveta2 fetch -p "Retail shelves" -o output/                # выгрузить разметку в CSV, изображения — в кэш
 ```
@@ -41,8 +40,7 @@ cveta2 fetch -p "Retail shelves" -o output/                # выгрузить 
 
 | Команда | Что делает |
 | --- | --- |
-| [`setup`](docs/commands/setup.md) | Настроить подключение к CVAT |
-| [`setup-cache`](docs/commands/setup-cache.md) | Настроить каталоги кэша изображений |
+| [`setup`](docs/commands/setup.md) | Настроить подключение к CVAT, кэш и общую конфигурацию |
 | [`doctor`](docs/commands/doctor.md) | Проверить конфигурацию и кэш |
 | [`fetch`](docs/commands/fetch.md) | Выгрузить все аннотации проекта |
 | [`fetch-task`](docs/commands/fetch-task.md) | Выгрузить аннотации выбранных задач |

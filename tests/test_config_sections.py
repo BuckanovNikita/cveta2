@@ -595,7 +595,7 @@ def test_save_to_file_persists_every_optional_cvat_key(tmp_path: Path) -> None:
 def test_save_to_file_leaves_the_image_cache_section_alone(
     tmp_path: Path,
 ) -> None:
-    """``setup`` writes only ``cvat``; ``setup-cache`` owns ``image_cache``."""
+    """Saving the ``cvat`` section keeps ``image_cache``, which the cache questions of ``setup`` own."""
     cfg_path = write_config_yaml(
         tmp_path / "custom.yaml",
         cvat={"host": "http://localhost:8080"},

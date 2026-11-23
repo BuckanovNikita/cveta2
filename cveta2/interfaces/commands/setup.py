@@ -1,4 +1,4 @@
-"""Implementation of the ``cveta2 setup`` and ``cveta2 setup-cache`` commands."""
+"""Implementation of the ``cveta2 setup`` command: option flags, ``--list`` and the wizards."""
 
 import copy
 import json
@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from cveta2.composition.configuration import (
     PERSONAL_WORKSPACE_TITLE,
     CacheConfig,
-    CacheProjectSettings,
     CvatConfig,
     ImageCacheConfig,
     LocalOverrides,
@@ -290,17 +289,6 @@ def validate_setup_request(args: "argparse.Namespace", *, attached: bool) -> Non
         raise Cveta2Error(f"Файла общей конфигурации {selected} нет; создайте его: {_CREATION_FORM}")
 
 
-def configure_setup_cache(parser: "argparse.ArgumentParser") -> None:
-    """Declare the ``setup-cache`` command arguments."""
-    add_config_arg(parser)
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help=("Re-ask path for every project using cache_root/project_name as default (ignore existing paths)."),
-    )
-    add_list_arg(parser, "List current image cache paths and exit.")
-
-
 def _run_migration(config_path: Path, project_path: Path | None) -> None:
     """Review the exact migration proposal before activation."""
     require_interactive(wizard.SETUP_HINT)
@@ -379,7 +367,11 @@ def run_setup(args: "argparse.Namespace") -> None:
     if _given(args) or _unset(args):
         apply_setup_options(args, config_path, global_path)
     elif target is None and not attaching:
-        _run_wizard(config_path)
+        require_interactive(wizard.SETUP_HINT)
+        if args.global_scope:
+            _run_global_wizard(config_path, global_path, project=args.project)
+        else:
+            _run_personal_wizard(config_path, project=args.project, reset=args.reset)
 
 
 def _print_listing(config_path: Path, global_path: Path | None, project: str | None) -> None:
@@ -638,9 +630,150 @@ def _save_cvat(config_path: Path, updates: dict[str, object]) -> None:
     CvatConfig.model_validate(values).save_to_file(config_path)
 
 
-def _run_wizard(config_path: Path) -> None:
+def _run_personal_wizard(config_path: Path, *, project: str | None, reset: bool) -> None:
+    """Ask for CVAT credentials, offer a global file, then the image and annotation cache paths.
+
+    *project* (ID or name) limits the cache questions to that project;
+    *reset* re-derives every path from the cache root instead of keeping saved ones.
+    """
+    _ask_credentials(config_path)
+    projects = _ensure_projects_list(config_path)
+    if project is not None:
+        spec = project.strip()
+        projects = [info for info in projects if spec in (info.name, str(info.id))]
+        if not projects:
+            raise Cveta2Error(
+                f"Проекта {spec} нет в списке проектов CVAT; проверьте имя или ID проекта, "
+                f"либо удалите {get_projects_cache_path(config_path)}, чтобы загрузить список заново."
+            )
+    cache_root = wizard.prompt_cache_root()
+    if not projects:
+        logger.info("Нет доступных проектов; каталоги изображений по проектам не заданы.")
+    elif _setup_image_cache_dirs(projects, ImageCacheConfig.load(config_path), cache_root, config_path, reset=reset):
+        logger.info("Пути кэширования изображений обновлены.")
+    if _setup_cache_roots(cache_root, config_path):
+        logger.info("Настройки кэша обновлены.")
+    logger.info("Готово!")
+
+
+def _setup_cache_roots(cache_root: Path | None, config_path: Path) -> bool:
+    """Save ``cache.images_root`` (the cache root) and ``cache.tasks_root``; True when saved."""
+    cache_cfg = CacheConfig.load(config_path)
+    changed = False
+    if cache_root is not None and cache_cfg.images_root != cache_root:
+        cache_cfg.images_root = cache_root
+        changed = True
+    tasks_root = wizard.prompt_tasks_root(cache_cfg.tasks_root)
+    if tasks_root is not None and tasks_root != cache_cfg.tasks_root:
+        cache_cfg.tasks_root = tasks_root
+        changed = True
+    if changed:
+        cache_cfg.save(config_path)
+    return changed
+
+
+# Publication leaves the global wizard asks, with the flag that sets each one.
+_PUBLICATION_REQUIRED = {
+    "publication.clearml.project": "--clearml-project",
+    "publication.clearml.dataset": "--dataset-name",
+    "publication.api_url": "--api-url",
+}
+
+
+def _run_global_wizard(config_path: Path, global_path: Path | None, *, project: str | None) -> None:
+    """Ask each project's team settings and write the changed ones to the global file at once.
+
+    Defaults come from the global file as written, never from the effective
+    view, so local overrides neither leak into the team file nor block it.
+    Enter keeps a value; removing one is ``--unset``.
+    """
+    selected = project_config_path(config_path, global_path)
+    if selected is None or not selected.exists():
+        raise Cveta2Error(f"Общая конфигурация не выбрана; создайте её: {_CREATION_FORM}")
+    raw = load_global_config(config_path, global_path)
+    new_projects: dict[str, ProjectDefinition] = {}
+    if project is None:
+        keys = list(raw.projects)
+    elif (key := find_project_key(raw, project)) is not None:
+        keys = [key]
+    else:
+        project_id, name = resolve_new_project(config_path, project)
+        key = project_key_for(name, project_id)
+        logger.info(f"Новое описание проекта {key}: id={project_id}, name={name}")
+        new_projects[key] = ProjectDefinition(id=project_id, name=name)
+        keys = [key]
+    changes: dict[str, dict[str, object]] = {}
+    expected: dict[str, dict[str, object]] = {}
+    for key in keys:
+        definition = raw.projects.get(key) or new_projects[key]
+        stored = _team_values(definition)
+        answers = _ask_team_values(key, stored)
+        fields = {field: answer for field, answer in answers.items() if answer != _shown_default(field, stored[field])}
+        _check_complete_publication(key, definition, fields)
+        if fields:
+            changes[key] = fields
+            expected[key] = {field: stored[field] for field in fields}
+    if not changes and not new_projects:
+        logger.info("Общая конфигурация не изменена.")
+        return
+    written = write_shared_project_fields(
+        config_path, changes, expected=expected, new_projects=new_projects, global_path=global_path
+    )
+    names = [f"projects.{key}.{field}" for key, fields in changes.items() for field in fields]
+    names += [f"projects.{key}" for key in new_projects if key not in changes]
+    logger.info(f"Записано в общую конфигурацию {written}: {', '.join(names)}")
+
+
+def _team_values(definition: ProjectDefinition) -> dict[str, object]:
+    """Return the leaves the global wizard asks, as stored; ``None`` where absent."""
+    publication = definition.publication
+    return {
+        "ignored_prefix": definition.ignored_prefix,
+        "task_cache_s3": definition.task_cache_s3,
+        "publication.clearml.project": publication.clearml.project if publication else None,
+        "publication.clearml.dataset": publication.clearml.dataset if publication else None,
+        "publication.api_url": publication.api_url if publication else None,
+        "publication.empty_classes": list(publication.empty_classes) if publication else None,
+    }
+
+
+def _shown_default(field: str, stored: object) -> object:
+    """Return the default a prompt shows: the stored value, or no excluded classes."""
+    return [] if field == "publication.empty_classes" and stored is None else stored
+
+
+def _ask_team_values(key: str, stored: dict[str, object]) -> dict[str, object]:
+    """Ask the six team questions of one project, in order; each answer defaults to the stored value."""
+    return {
+        "ignored_prefix": wizard.prompt_ignored_prefix(key, cast("str | None", stored["ignored_prefix"])),
+        "task_cache_s3": wizard.prompt_task_cache_s3(key, cast("str | None", stored["task_cache_s3"])),
+        "publication.clearml.project": wizard.prompt_clearml_project(
+            key, cast("str | None", stored["publication.clearml.project"])
+        ),
+        "publication.clearml.dataset": wizard.prompt_dataset_name(
+            key, cast("str | None", stored["publication.clearml.dataset"])
+        ),
+        "publication.api_url": wizard.prompt_api_url(key, cast("str | None", stored["publication.api_url"])),
+        "publication.empty_classes": wizard.prompt_empty_classes(
+            key, cast("list[int]", _shown_default("publication.empty_classes", stored["publication.empty_classes"]))
+        ),
+    }
+
+
+def _check_complete_publication(key: str, definition: ProjectDefinition, fields: dict[str, object]) -> None:
+    """Refuse to start a ``publication`` block without its ClearML project, dataset name and API URL."""
+    if definition.publication is not None or not any(field.startswith("publication.") for field in fields):
+        return
+    missing = [flag for field, flag in _PUBLICATION_REQUIRED.items() if field not in fields]
+    if missing:
+        raise Cveta2Error(
+            f"Для проекта {key} укажите ClearML-проект, имя набора и адрес API классов вместе: "
+            f"не хватает {', '.join(missing)}"
+        )
+
+
+def _ask_credentials(config_path: Path) -> None:
     """Interactively ask for CVAT credentials and core settings."""
-    require_interactive(wizard.SETUP_HINT)
     shared = optional_project_config(config_path)
     if shared is not None:
         # Validate the effective configuration (e.g. conflicting environment
@@ -697,30 +830,6 @@ def _offer_shared_attachment(config_path: Path) -> None:
             activate_migration(proposal)
 
 
-def run_setup_cache(args: "argparse.Namespace") -> None:
-    """Interactively configure image cache directories for all known projects."""
-    config_path = config_path_from_args(args)
-    if args.list_only:
-        _list_cache_paths(config_path)
-        return
-
-    require_interactive(wizard.CACHE_HINT)
-
-    projects = _ensure_projects_list(config_path)
-    if not projects:
-        raise Cveta2Error("Нет доступных проектов.")
-
-    image_cache = ImageCacheConfig.load(config_path)
-    cache_root = wizard.prompt_cache_root()
-
-    if _setup_image_cache_dirs(projects, image_cache, cache_root, config_path, reset=args.reset):
-        logger.info("Пути кэширования изображений обновлены.")
-
-    if _setup_cache_settings(projects, cache_root, config_path):
-        logger.info("Настройки кэша обновлены.")
-    logger.info("Готово!")
-
-
 def _setup_image_cache_dirs(
     projects: "list[ProjectInfo]",
     image_cache: ImageCacheConfig,
@@ -745,68 +854,6 @@ def _setup_image_cache_dirs(
     if changed:
         image_cache.save(config_path)
     return changed
-
-
-def _setup_cache_settings(
-    projects: "list[ProjectInfo]",
-    cache_root: "Path | None",
-    config_path: "Path",
-) -> bool:
-    """Interactive ``cache`` section stage; returns True when saved."""
-    cache_cfg = CacheConfig.load(config_path)
-    changed = False
-
-    if cache_root is not None and cache_cfg.images_root != cache_root:
-        cache_cfg.images_root = cache_root
-        changed = True
-
-    tasks_root = wizard.prompt_tasks_root(cache_cfg.tasks_root)
-    if tasks_root is not None and tasks_root != cache_cfg.tasks_root:
-        cache_cfg.tasks_root = tasks_root
-        changed = True
-
-    if wizard.confirm_project_cache_settings():
-        for project in projects:
-            changed |= _prompt_project_cache_settings(cache_cfg, project.name)
-
-    if changed:
-        cache_cfg.save(config_path)
-    return changed
-
-
-def _prompt_project_cache_settings(cache_cfg: CacheConfig, name: str) -> bool:
-    """Prompt one project's ignored_prefix / task_cache_s3. True if changed."""
-    current = cache_cfg.projects.get(name) or CacheProjectSettings()
-    ignored = wizard.prompt_ignored_prefix(name, current.ignored_prefix)
-    task_cache_s3 = wizard.prompt_task_cache_s3(name, current.task_cache_s3)
-    if ignored == current.ignored_prefix and task_cache_s3 == current.task_cache_s3:
-        return False
-    cache_cfg.projects[name] = current.model_copy(update={"ignored_prefix": ignored, "task_cache_s3": task_cache_s3})
-    return True
-
-
-def _list_cache_paths(config_path: "Path") -> None:
-    """Print current image_cache paths and cache settings, then exit."""
-    image_cache = ImageCacheConfig.load(config_path)
-    cache_cfg = CacheConfig.load(config_path)
-    if not image_cache.projects and not cache_cfg.model_dump(exclude_defaults=True):
-        logger.info("Пути кэша не заданы.")
-        return
-    for name, path in sorted(image_cache.projects.items()):
-        logger.info(f"  {name}: {path}")
-    if cache_cfg.images_root is not None:
-        logger.info(f"  images_root: {cache_cfg.images_root}")
-    if cache_cfg.tasks_root is not None:
-        logger.info(f"  tasks_root: {cache_cfg.tasks_root}")
-    for name, settings in sorted(cache_cfg.projects.items()):
-        if settings.ignored_prefix:
-            logger.info(f"  {name}: ignored_prefix: {settings.ignored_prefix}")
-        if settings.task_cache_s3:
-            logger.info(f"  {name}: task_cache_s3: {settings.task_cache_s3}")
-        if settings.images_root is not None:
-            logger.info(f"  {name}: images_root: {settings.images_root}")
-        if settings.tasks_root is not None:
-            logger.info(f"  {name}: tasks_root: {settings.tasks_root}")
 
 
 def _apply_root_to_all_projects(
