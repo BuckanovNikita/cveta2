@@ -167,8 +167,10 @@ def test_list_with_global_config_attaches_nothing(tmp_path: Path, capsys: pytest
     other = team(tmp_path / "other.yaml")
     cfg = write(tmp_path / "config.yaml", {"cvat": {"username": "alice"}})
     before = cfg.read_bytes()
+    other_before = other.read_bytes()
     run_setup(parse_cli_args("setup", "--config", str(cfg), "--list", "--global-config", str(other)))
     assert cfg.read_bytes() == before
+    assert other.read_bytes() == other_before
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"Общая конфигурация: {other.resolve()}"
     assert "projects.bakery.sync_root = s3://my-bucket/bakery  (общая)" in out
@@ -216,3 +218,50 @@ def test_list_prefers_honoured_environment_values(tmp_path: Path, monkeypatch: p
     assert ListedValue("cvat.host", "https://cvat.example.com", "global") in listed
     # A value the reader ignores is not reported as coming from the environment.
     assert ListedValue("network.cvat_workers", "4", "default") in listed
+
+
+_URL_SECRET = "p4ss-DO-NOT-SHOW"
+
+
+@pytest.mark.parametrize("source", ["personal", "environment"])
+def test_list_hides_credentials_in_the_cvat_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], source: str
+) -> None:
+    url = f"https://u:{_URL_SECRET}@cvat.example.com"
+    cvat: dict[str, object] = {"username": "alice"}
+    if source == "personal":
+        cvat["host"] = url
+    else:
+        monkeypatch.setenv("CVAT_HOST", url)
+    cfg = write(tmp_path / "config.yaml", {"cvat": cvat})
+    listed = list_configuration(cfg)
+    assert ListedValue("cvat.host", "https://***@cvat.example.com", source) in listed  # type: ignore[arg-type]
+    run_setup(parse_cli_args("setup", "--config", str(cfg), "--list"))
+    out = capsys.readouterr().out
+    assert "cvat.host = https://***@cvat.example.com" in out
+    assert _URL_SECRET not in out
+    assert "u:" not in out
+
+
+def test_list_hides_credentials_in_global_and_override_urls(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    global_file = team(tmp_path / "team.yaml")
+    data = yaml.safe_load(global_file.read_text(encoding="utf-8"))
+    data["projects"]["bakery"]["sync_root"] = f"s3://key:{_URL_SECRET}@my-bucket/bakery"
+    write(global_file, data)
+    cfg = write(
+        tmp_path / "config.yaml",
+        {
+            "schema_version": 1,
+            "global_config": str(global_file),
+            "overrides": {
+                "projects": {
+                    "retail": {"publication": {"s3_roots": [f"s3://key:{_URL_SECRET}@my-bucket/a", "s3://b/c"]}}
+                }
+            },
+        },
+    )
+    listed = list_configuration(cfg)
+    assert ListedValue("projects.bakery.sync_root", "s3://***@my-bucket/bakery", "global") in listed
+    assert ListedValue("projects.retail.publication.s3_roots", "[s3://***@my-bucket/a, s3://b/c]", "override") in listed
+    run_setup(parse_cli_args("setup", "--config", str(cfg), "--list"))
+    assert _URL_SECRET not in capsys.readouterr().out

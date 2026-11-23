@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from cveta2.adapters.config.project import (
     find_project_key,
@@ -53,10 +54,23 @@ class ListedValue:
     applied: bool = True
 
 
+def _hide_userinfo(text: str) -> str:
+    """Replace the userinfo of a URL (any scheme) with ``***``; other text is returned as is."""
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return text
+    if "@" not in parts.netloc:
+        return text
+    host = parts.netloc.rpartition("@")[2]
+    return urlunsplit(parts._replace(netloc=f"{_HIDDEN}@{host}"))
+
+
 def _render(value: object) -> str:
+    """Render one value; credentials inside a URL are never shown, whichever file or variable holds them."""
     if isinstance(value, list):
-        return "[" + ", ".join(str(item) for item in cast("list[object]", value)) + "]"
-    return str(value)
+        return "[" + ", ".join(_hide_userinfo(str(item)) for item in cast("list[object]", value)) + "]"
+    return _hide_userinfo(str(value))
 
 
 def _dict(value: object) -> dict[str, object]:
