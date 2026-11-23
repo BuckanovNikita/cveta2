@@ -73,7 +73,8 @@ def _deep_merge(base: dict[str, object], override: dict[str, object]) -> dict[st
 
 def apply_local_overrides(config: ProjectConfig, overrides: LocalOverrides) -> ProjectConfig:
     """Return the effective configuration: *config* with the allowed overrides merged in."""
-    if not overrides.projects:
+    if not override_leaves(overrides):
+        # A block without leaves overrides nothing, so it is neither checked nor refused.
         return config
     if not config.local_overrides:
         raise LocalOverridesDisabledError(
@@ -94,7 +95,9 @@ def apply_local_overrides(config: ProjectConfig, overrides: LocalOverrides) -> P
         return ProjectConfig.model_validate(merged)
     except ValidationError as error:
         issues = error.errors()
-        fields = ", ".join(".".join(str(part) for part in issue["loc"]) for issue in issues)
-        raise ManagedError(
-            f"Локальные переопределения делают общую конфигурацию некорректной; поля: {fields}; {issues[0]['msg']}"
-        ) from error
+        prefix = "Локальные переопределения делают общую конфигурацию некорректной"
+        if not issues[0]["loc"]:
+            # A model-level rule, such as the destination-pair collision, names no field.
+            raise ManagedError(f"{prefix}: {issues[0]['msg']}") from error
+        fields = ", ".join(".".join(str(part) for part in issue["loc"]) for issue in issues if issue["loc"])
+        raise ManagedError(f"{prefix}; поля: {fields}; {issues[0]['msg']}") from error

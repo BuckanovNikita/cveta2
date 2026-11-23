@@ -164,6 +164,23 @@ def test_override_of_a_team_only_field_is_rejected_by_shape(tmp_path: Path, fiel
         validate_personal({**base, "overrides": {"cvat": {"host": "https://x.example"}}}, attached=True)
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"projects": {"retail": {}}},
+        {"projects": {"retail": {"publication": {}}}},
+        {"projects": {"retail": {"publication": {"clearml": {}}}}},
+        {"projects": {"nope": {"publication": {"clearml": {}}}}},
+    ],
+    ids=["project", "publication", "clearml", "unknown-project"],
+)
+def test_overrides_block_without_leaves_is_no_override(tmp_path: Path, overrides: dict[str, object]) -> None:
+    team = shared(tmp_path / "team.yaml", local_overrides=None)
+    cfg = personal(tmp_path / "config.yaml", team, overrides)
+
+    assert load_project_config(cfg) == load_global_config(cfg)
+
+
 def test_override_for_unknown_project_key_is_rejected(tmp_path: Path) -> None:
     overrides: dict[str, object] = {"projects": {"nope": {"publication": {"clearml": {"dataset": "x"}}}}}
     cfg = personal(tmp_path / "config.yaml", shared(tmp_path / "team.yaml"), overrides)
@@ -187,15 +204,17 @@ def test_override_that_collides_with_another_destination_is_rejected(tmp_path: P
     with pytest.raises(ManagedError) as caught:
         load_project_config(cfg)
 
-    assert "Локальные переопределения" in str(caught.value)
-    assert "Retail/Datasets/retail-shelves-alice" in str(caught.value)
+    message = str(caught.value)
+    assert "Локальные переопределения" in message
+    assert "Retail/Datasets/retail-shelves-alice" in message
+    assert "поля" not in message
 
 
 def test_override_that_leaves_publication_incomplete_is_rejected(tmp_path: Path) -> None:
     team = shared(tmp_path / "team.yaml", with_publication=False)
     cfg = personal(tmp_path / "config.yaml", team, _ALICE)
 
-    with pytest.raises(ManagedError, match=r"publication\.clearml\.project"):
+    with pytest.raises(ManagedError, match=r"некорректной; поля: .*projects\.retail\.publication\.clearml\.project"):
         load_project_config(cfg)
 
 
