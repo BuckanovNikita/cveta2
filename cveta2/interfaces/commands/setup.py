@@ -467,26 +467,36 @@ def _remove_dotted(mapping: dict[str, object], path: list[str]) -> None:
 def _check_remaining_override(
     raw_global: "ProjectConfig", overrides: LocalOverrides, key: str, fields: dict[str, object], spec: str
 ) -> None:
-    """Refuse a leaf removal that would leave this project's override block invalid.
+    """Refuse a leaf removal that would make the overrides that remain invalid.
 
-    Whether overrides are allowed at all is a separate question, so the
-    switch is treated as on here.
+    All remaining overrides are merged, since a removal can also collide with
+    another project's override. Whether overrides are allowed at all is a
+    separate question, so the switch is treated as on here. Overrides of
+    projects the global file no longer has are left out of both merges. When
+    the current overrides are already invalid the removal is never refused,
+    so the user can still repair them.
     """
-    current = overrides.projects.get(key)
-    if current is None or key not in raw_global.projects:
+    if key not in raw_global.projects or key not in overrides.projects:
         return
-    remaining = current.model_dump(exclude_none=True)
+    current = {
+        name: override.model_dump(exclude_none=True)
+        for name, override in overrides.projects.items()
+        if name in raw_global.projects
+    }
+    remaining = copy.deepcopy(current)
     for field in fields:
-        _remove_dotted(remaining, field.split("."))
+        _remove_dotted(remaining[key], field.split("."))
+    allowed = raw_global.model_copy(update={"local_overrides": True})
     try:
-        apply_local_overrides(
-            raw_global.model_copy(update={"local_overrides": True}),
-            LocalOverrides.model_validate({"projects": {key: remaining}}),
-        )
+        apply_local_overrides(allowed, LocalOverrides.model_validate({"projects": current}))
+    except ManagedError:
+        return
+    try:
+        apply_local_overrides(allowed, LocalOverrides.model_validate({"projects": remaining}))
     except ManagedError as error:
         raise Cveta2Error(
-            f"Без {', '.join(fields)} локальное переопределение проекта {key} станет некорректным: {error}. "
-            f"Удалите весь блок: cveta2 setup --project {spec} --unset publication"
+            f"Без {', '.join(fields)} локальные переопределения станут некорректными: {error}. "
+            f"Задайте другое значение или удалите весь блок: cveta2 setup --project {spec} --unset publication"
         ) from error
 
 

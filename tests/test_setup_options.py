@@ -498,6 +498,56 @@ def test_unset_of_one_leaf_that_leaves_an_incomplete_block_is_refused(tmp_path: 
     assert load_project_config(cfg).projects["retail"].publication is None
 
 
+def two_published_projects(tmp_path: Path, overrides: Mapping[str, object]) -> Path:
+    """Attach a global file with projects ``a`` and ``b`` published to ``R/a`` and ``R/b``."""
+    projects = {
+        name: {
+            "id": project_id,
+            "name": name,
+            "publication": {"clearml": {"project": "R", "dataset": name}, "api_url": _API},
+        }
+        for name, project_id in (("a", 1), ("b", 2))
+    }
+    global_file = write(
+        tmp_path / "team.yaml",
+        {"schema_version": 1, "local_overrides": True, "cvat": {"host": _HOST}, "projects": projects},
+    )
+    return write(
+        tmp_path / "config.yaml",
+        {"schema_version": 1, "global_config": str(global_file), "overrides": dict(overrides)},
+    )
+
+
+def _dataset_overrides(**datasets: str) -> dict[str, object]:
+    return {
+        "projects": {name: {"publication": {"clearml": {"dataset": dataset}}} for name, dataset in datasets.items()}
+    }
+
+
+def test_unset_that_collides_with_another_projects_override_is_refused(tmp_path: Path) -> None:
+    cfg = two_published_projects(tmp_path, _dataset_overrides(a="x", b="a"))
+    before = cfg.read_bytes()
+
+    with pytest.raises(Cveta2Error) as caught:
+        run(cfg, "-p", "a", "--unset", "dataset-name")
+
+    assert "R/a" in str(caught.value)
+    assert "--unset publication" in str(caught.value)
+    assert cfg.read_bytes() == before
+    assert load_project_config(cfg).projects["a"].publication is not None
+
+
+def test_unset_is_accepted_when_the_overrides_are_already_invalid(tmp_path: Path) -> None:
+    cfg = two_published_projects(tmp_path, _dataset_overrides(a="b"))
+    with pytest.raises(Cveta2Error, match="R/b"):
+        load_project_config(cfg)
+
+    run(cfg, "-p", "a", "--unset", "dataset-name")
+
+    assert "overrides" not in read_config(cfg)
+    assert load_project_config(cfg).projects["a"].publication is not None
+
+
 def test_fetch_settings_are_never_written_locally(tmp_path: Path) -> None:
     cfg, _ = attached(tmp_path, publication=_PUBLICATION)
     before = files(tmp_path)
