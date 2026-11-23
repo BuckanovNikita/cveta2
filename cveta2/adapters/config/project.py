@@ -1,6 +1,8 @@
 """Authoritative shared project configuration and reviewed legacy migration.
 
-Personal credentials and local paths are never merged into project policy. The
+Personal credentials and local paths are never merged into project policy; the
+only personal values layered over the shared file are local overrides of
+publication settings, and only when the shared file allows them. The
 migration journal records only paths and hashes; secret-bearing stages/backups
 are private files, and the shared target is always claimed exclusively.
 """
@@ -28,10 +30,13 @@ from cveta2.domain.managed.models import (
     ProjectConfig,
     ProjectDefinition,
 )
+from cveta2.domain.managed.overrides import LocalOverrides, apply_local_overrides
 
 _PERSONAL_KEYS = {
     "schema_version",
     "project_config",
+    "global_config",
+    "overrides",
     "cvat",
     "image_cache",
     "cache",
@@ -129,10 +134,28 @@ def _mixed_policy(raw: dict[str, object]) -> bool:
     )
 
 
+def read_local_overrides(raw: dict[str, object]) -> LocalOverrides:
+    """Parse the shape of the personal ``overrides`` section; whether it is allowed is decided later."""
+    if "overrides" not in raw:
+        return LocalOverrides()
+    try:
+        return LocalOverrides.model_validate(raw["overrides"])
+    except ValidationError as error:
+        fields = ", ".join(".".join(str(part) for part in issue["loc"]) for issue in error.errors())
+        raise ManagedError(f"Некорректный раздел overrides личной конфигурации; поля: {fields}") from error
+
+
 def validate_personal(raw: dict[str, object], *, attached: bool = False) -> None:
-    """Reject shared-owned fields instead of treating them as overrides."""
+    """Reject shared-owned fields; only the ``overrides`` section may layer over them."""
     if raw.get("schema_version") not in (None, 1):
         raise ManagedError("Unsupported personal configuration schema_version")
+    if "overrides" in raw:
+        if raw.get("schema_version") != 1:
+            raise ManagedError(
+                "Локальные переопределения требуют личного файла со schema_version: 1 "
+                "и подключённой общей конфигурацией"
+            )
+        read_local_overrides(raw)
     cvat = _dict(raw.get("cvat"))
     if raw.get("schema_version") == 1:
         if set(raw) - _PERSONAL_KEYS:
@@ -168,8 +191,8 @@ def project_config_path(personal_path: Path | None = None, project_path: Path | 
     return selected.expanduser().resolve() if selected is not None else None
 
 
-def load_project_config(personal_path: Path | None = None, project_path: Path | None = None) -> ProjectConfig:
-    """Load the one selected authoritative shared project definition."""
+def load_global_config(personal_path: Path | None = None, project_path: Path | None = None) -> ProjectConfig:
+    """Load the one selected shared file as written, without local overrides."""
     path = project_config_path(personal_path, project_path)
     if path is None:
         raise ManagedError(
@@ -182,15 +205,30 @@ def load_project_config(personal_path: Path | None = None, project_path: Path | 
         raise ManagedError(f"Invalid shared project configuration {path}; fields: {fields}") from error
 
 
-def optional_project_config(
-    personal_path: Path | None = None, project_path: Path | None = None
-) -> ProjectConfig | None:
-    """Return no definition only when no shared file was selected."""
+def optional_global_config(personal_path: Path | None = None, project_path: Path | None = None) -> ProjectConfig | None:
+    """Return the raw shared file, or nothing only when no shared file was selected."""
     return (
-        load_project_config(personal_path, project_path)
+        load_global_config(personal_path, project_path)
         if project_config_path(personal_path, project_path) is not None
         else None
     )
+
+
+def _personal_overrides(personal_path: Path | None) -> LocalOverrides:
+    return read_local_overrides(read_config(personal_config_path(personal_path), missing_ok=True))
+
+
+def load_project_config(personal_path: Path | None = None, project_path: Path | None = None) -> ProjectConfig:
+    """Load the effective configuration: the selected shared file plus allowed local overrides."""
+    return apply_local_overrides(load_global_config(personal_path, project_path), _personal_overrides(personal_path))
+
+
+def optional_project_config(
+    personal_path: Path | None = None, project_path: Path | None = None
+) -> ProjectConfig | None:
+    """Return the effective configuration, or nothing only when no shared file was selected."""
+    config = optional_global_config(personal_path, project_path)
+    return None if config is None else apply_local_overrides(config, _personal_overrides(personal_path))
 
 
 def _yaml_bytes(data: dict[str, object]) -> bytes:
@@ -455,7 +493,8 @@ def _write_shared_project_fields_locked(
 ) -> Path:
     """Read, merge and replace while cooperating policy writers are excluded."""
     original = _read_shared_bytes(path)
-    config = load_project_config(personal_path, path)
+    # The raw file is the baseline: a local override must never reach the team file.
+    config = load_global_config(personal_path, path)
     projects = dict(config.projects)
     aliases = shared_projects_by_name(config)
     for name, fields in changes.items():

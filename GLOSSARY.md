@@ -74,12 +74,17 @@ _Avoid_: diff base, checkpoint
 ### Configuration
 
 **Personal configuration**:
-The user's own YAML file (default `~/.config/cveta2/config.yaml`, or `CVETA2_CONFIG`) holding CVAT credentials, local cache paths, network and upload settings, and a reference to the shared configuration.
+The user's own YAML file (default `~/.config/cveta2/config.yaml`, or `CVETA2_CONFIG`) holding CVAT credentials, local cache paths, network and upload settings, a reference to the shared configuration and, when the team allows them, local overrides.
 _Russian_: личная конфигурация
 _Avoid_: user config, local config, settings file
 
+**Local override**:
+A per-project option in the personal configuration (`overrides.projects.<key>`) that replaces the global value for that user; allowed only when the global configuration sets `local_overrides: true`. Overridable: publication settings only.
+_Russian_: локальное переопределение
+_Avoid_: personal override, shadow setting
+
 **Shared configuration**:
-The single authoritative YAML file of a team's CVAT server, projects and managed datasets; it is never merged with personal configuration and holds no credentials or local paths.
+The single authoritative YAML file of a team's CVAT server, projects and managed datasets; it is never merged with personal configuration, apart from allowed local overrides, and holds no credentials or local paths.
 _Russian_: общая конфигурация
 _Avoid_: project config (in prose), team config, global config
 
