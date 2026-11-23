@@ -304,6 +304,7 @@ name = "cveta2"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
+    { name = "clearml", extra = ["s3"] },
     { name = "cvat-sdk" },
     { name = "loguru" },
     { name = "pandas" },
@@ -317,15 +318,9 @@ dependencies = [
     { name = "tqdm" },
 ]
 
-[package.optional-dependencies]
-clearml = [
-    { name = "clearml", extra = ["s3"] },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "boto3-stubs" },
-    { name = "clearml", extra = ["s3"] },
     { name = "deptry" },
     { name = "go-task-bin" },
     { name = "hypothesis" },
@@ -347,7 +342,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.42.49" },
-    { name = "clearml", extras = ["s3"], marker = "extra == 'clearml'", specifier = ">=2.1.12,<3" },
+    { name = "clearml", extras = ["s3"], specifier = ">=2.1.12,<3" },
     { name = "cvat-sdk", specifier = ">=2.82.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "pandas", specifier = ">=2.1.1" },
@@ -360,12 +355,10 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "tqdm", specifier = ">=4.66.0" },
 ]
-provides-extras = ["clearml"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "boto3-stubs", specifier = ">=1.42.49" },
-    { name = "clearml", extras = ["s3"], specifier = ">=2.1.12,<3" },
     { name = "deptry", specifier = ">=0.23" },
     { name = "go-task-bin", specifier = ">=3.54.0" },
     { name = "hypothesis", specifier = ">=6.130" },

@@ -210,7 +210,7 @@
 
 ## 4. Публикация в ClearML
 
-Для этого сценария нужен extra `clearml` (см. [README](../README.md)) и настроенный ClearML SDK. Есть два пути.
+Для этого сценария нужен настроенный ClearML SDK (см. [README](../README.md)). Есть два пути.
 
 | | Ручная подготовка ([bundle preparation](../GLOSSARY.md)) | Управляемый датасет ([managed dataset](../GLOSSARY.md)) |
 |---|---|---|

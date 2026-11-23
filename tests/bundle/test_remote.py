@@ -303,12 +303,6 @@ def test_s3_sdk_error_is_actionable(sdk: SimpleNamespace) -> None:
         S3Roots().check_root("s3://bucket/images")
 
 
-def test_missing_sdk_is_actionable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "clearml", None)
-    with pytest.raises(UploadError, match="clearml"):
-        ClearMLStore().names("project")
-
-
 def test_sdk_upload_none_success_requires_no_pending_files(sdk: SimpleNamespace, bundle: Path) -> None:
     # ClearML's normal successful upload returns None, despite its bool annotation.
     sdk.child.upload.return_value = None

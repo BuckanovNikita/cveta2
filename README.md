@@ -21,12 +21,7 @@ pip install git+ssh://git@<host>/<org>/cveta2@vX.Y.Z
 uv add git+ssh://git@<host>/<org>/cveta2@<хеш-коммита>
 ```
 
-Команды, которые работают с ClearML (`verify --bundle`, `upload-dataset`, `dataset`), требуют
-extra `clearml`:
-
-```bash
-uv add "cveta2[clearml] @ git+ssh://git@<host>/<org>/cveta2@vX.Y.Z"
-```
+ClearML SDK ставится вместе с пакетом; его подключение (`clearml.conf` или переменные `CLEARML_*`) настраивается отдельно.
 
 ## Быстрый старт
 

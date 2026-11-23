@@ -254,7 +254,6 @@ invalid_split строка 0: Expected train, val or test (an empty split is all
 
 ### Что нужно
 
-- Установленный пакет с дополнением `clearml`: `pip install "cveta2[clearml]"`. Без него команда завершается с ошибкой `Install cveta2[clearml] and configure the ClearML SDK before uploading`.
 - Настроенный ClearML SDK. cveta2 не передаёт ClearML свои настройки: SDK читает свою конфигурацию сам (например, переменные `CLEARML_API_HOST`, `CLEARML_FILES_HOST`, `CLEARML_API_ACCESS_KEY`, `CLEARML_API_SECRET_KEY`). Через ClearML SDK проверяется и доступ к корням S3. Пока в проекте ClearML нет ни одного датасета, SDK печатает предупреждение `No projects were found with name(s): ...`. Это не ошибка: проект появится при первой публикации.
 - Каталог полной выгрузки со всеми четырьмя файлами. В `dataset.csv` у каждой строки должен быть split `train`, `val` или `test`, а `image_path` — абсолютный локальный путь к изображению. `fetch` оставляет `split` пустым, поэтому заполните его сами. Формат файлов — на странице [Формат данных](../dataset-format.md#файлы-полной-выгрузки).
 - Адрес API классов — реестра классов ([class registry](../../GLOSSARY.md)).
