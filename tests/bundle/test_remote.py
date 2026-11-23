@@ -1,4 +1,4 @@
-"""Remote adapters tested without requiring the optional ClearML SDK."""
+"""Remote adapters tested against a fake of the lazily imported ClearML SDK."""
 
 import json
 import sys

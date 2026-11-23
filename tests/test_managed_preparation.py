@@ -11,7 +11,7 @@ from PIL import Image
 
 from cveta2.adapters.files.managed_preparation import LocalManagedPreparationFiles
 from cveta2.adapters.files.media import LocalMediaInspector
-from cveta2.application.use_cases.managed_preparation import prepare_managed
+from cveta2.application.use_cases.managed_preparation import prepare_managed, published_assignments
 from cveta2.domain.bundle.models import ApiClass, ClassInfo, DatasetMetadata, ImageRoots, UploadError
 from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.managed.evidence import labels_fingerprint
@@ -20,6 +20,7 @@ from cveta2.domain.managed.models import (
     CvatIdentity,
     DatasetDefinition,
     ManagedError,
+    ManagedMetadata,
     ManagedSnapshot,
     ProjectConfig,
     ProjectDefinition,
@@ -29,6 +30,7 @@ from cveta2.domain.managed.models import (
     definition_fingerprint,
     source_fingerprint,
 )
+from cveta2.domain.managed.policies import parent_splits
 from cveta2.domain.managed.preparation import PreparationSummary
 from cveta2.domain.models import LabelInfo
 
@@ -452,6 +454,50 @@ def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
     assert isinstance(blockers, list)
     assert "Every input row must have a valid train, val or test split assignment." in blockers
     assert not (summary.directory / "dataset.csv").exists()
+
+
+def test_split_mistakes_stay_out_of_cvat_feedback(tmp_path: Path) -> None:
+    """A wrong split is the CSV author's to fix; only annotation errors reach CVAT frames."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    snapshot = yaml.safe_load((source / "source-snapshot.yaml").read_text())
+    snapshot["assignments"] = {}
+    (source / "source-snapshot.yaml").write_text(yaml.safe_dump(snapshot))
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    rows["split"] = "holdout"
+    rows.loc[rows["image_name"].eq("0.png"), "bbox_x_br"] = "1"
+    rows.to_csv(transformed, index=False)
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert not summary.ready
+    findings = LocalManagedPreparationFiles().load_prepared(summary.directory).record.findings
+    assert [(finding.task_id, finding.frame_id) for finding in findings] == [(11, 0)]
+    assert findings[0].codes
+    assert not {"invalid_split", "split_conflict"} & set(findings[0].codes)
+    assert not any("train, val or test" in message for message in findings[0].messages)
+    assert summary.report["unmapped_errors"] == 0
+
+
+def test_published_assignments_reads_each_kind_of_parent(tmp_path: Path) -> None:
+    config, transformed, _source, metadata = _fixture(tmp_path)
+    files = LocalManagedPreparationFiles()
+    assert published_assignments(None, None, metadata, files) == ({}, None)
+    managed = metadata.model_copy(
+        update={
+            "managed": ManagedMetadata(
+                name="demo",
+                definition_hash="0" * 64,
+                definition=config.datasets["demo"],
+                cvat=config.cvat,
+                assignments={"digest": "test"},
+            )
+        }
+    )
+    assert published_assignments(managed, None, metadata, files) == ({"digest": "test"}, None)
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    legacy = parent_splits(rows, files.parent_image_hashes(rows, metadata))
+    assert legacy.assignments
+    assert published_assignments(metadata, rows, metadata, files) == (legacy.assignments, legacy)
+    with pytest.raises(ManagedError, match="Parent published rows are required to keep its splits"):
+        published_assignments(metadata, None, metadata, files)
 
 
 @pytest.mark.parametrize("edit", ["project-id", "ignored-id", "organization"])

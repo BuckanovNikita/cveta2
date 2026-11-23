@@ -765,6 +765,25 @@ def test_overlap_decision_added_after_a_failed_prepare_uses_the_same_fetch(workf
     assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
 
 
+@pytest.mark.parametrize("split", ["absent", "empty"])
+def test_missing_splits_make_preparation_not_ready_and_create_no_cvat_issues(
+    workflow: Workflow, tmp_path: Path, split: str
+) -> None:
+    fetched = tmp_path / "fetched"
+    api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
+    transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
+    transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    transformed = transformed.drop(columns="split") if split == "absent" else transformed.assign(split="")
+    output = tmp_path / "transformed.csv"
+    transformed.to_csv(output, index=False)
+    prepared = api.prepare_managed_dataset(
+        "combined", output, source=fetched, output_dir=tmp_path / "prepared", clean=True, **workflow.options
+    )
+    assert not prepared.ready
+    assert api.report_dataset_errors(prepared.directory, **workflow.options).created == 0
+    assert workflow.cvat.issues == {101: [], 102: []}
+
+
 def _ignore_bookkeeping(shared: dict[str, Any]) -> None:
     shared["projects"]["main"]["ignore"][0].update(name="renamed", description="edited", silent=True)
 
@@ -880,12 +899,18 @@ def test_parent_published_by_0_15_is_read_and_its_splits_propagate(workflow: Wor
     metadata = yaml.safe_load(metadata_path.read_text())
     metadata["managed"]["definition"]["splits"] = {"train": 0.6, "val": 0.2, "test": 0.2, "seed": 42}
     moved = next(iter(metadata["managed"]["assignments"]))
-    metadata["managed"]["assignments"][moved] = "test"
+    target = "val" if metadata["managed"]["assignments"][moved] == "test" else "test"
+    metadata["managed"]["assignments"][moved] = target
     metadata_path.write_text(yaml.safe_dump(metadata))
     child = _prepare(workflow, tmp_path / "child")
+    transformed = pd.read_csv(tmp_path / "child" / "transformed.csv", keep_default_na=False)
     rows = pd.read_csv(child / "dataset.csv", keep_default_na=False)
     hashes = rows["image_path"].map(lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest())
-    assert set(rows.loc[hashes.eq(moved), "split"]) == {"test"}
+    names = set(rows.loc[hashes.eq(moved), "image_name"])
+    assert names
+    # The child's CSV carried another split, so the published value is what propagated.
+    assert target not in set(transformed.loc[transformed["image_name"].isin(names), "split"])
+    assert set(rows.loc[hashes.eq(moved), "split"]) == {target}
 
 
 def test_destination_with_another_parent_needs_a_new_fetch(workflow: Workflow, tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""Optional ClearML dataset and S3 storage effects."""
+"""ClearML dataset and S3 storage effects; the SDK is imported lazily."""
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -23,7 +23,7 @@ _PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
 
 
 class _Dataset(Protocol):
-    """Typed subset of the opaque optional SDK dataset interface.
+    """Typed subset of the opaque, lazily imported SDK dataset interface.
 
     SDK keyword names must match the external call contract. Vulture cannot
     count keyword calls as variable references. Its documented F841 mapping

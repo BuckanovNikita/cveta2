@@ -36,7 +36,7 @@ def _frame() -> pd.DataFrame:
         ),
     ],
 )
-def test_split_rejects_ambiguous_or_missing_identity(
+def test_propagate_splits_rejects_duplicate_columns_and_invalid_published_splits(
     frame: pd.DataFrame, hashes: dict[str, str], published: dict[str, str]
 ) -> None:
     """No ambiguous identity or invalid published split is silently propagated."""
@@ -59,6 +59,12 @@ def test_propagate_splits_writes_published_split_and_counts_rows() -> None:
     assert result["split"].tolist() == ["train", "train", "test", ""]
     assert replaced == 3
     assert FRAME["split"].tolist() == ["val", "val", "", ""]  # input untouched
+
+
+def test_propagate_splits_leaves_a_row_without_a_hash_unchanged() -> None:
+    result, replaced = propagate_splits(FRAME, {"/i/b": "hb"}, {"ha": "train", "hb": "test"})
+    assert result["split"].tolist() == ["val", "val", "test", ""]
+    assert replaced == 1
 
 
 def test_propagate_splits_adds_an_empty_split_column() -> None:

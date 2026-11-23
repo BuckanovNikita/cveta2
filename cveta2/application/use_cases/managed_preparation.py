@@ -76,13 +76,17 @@ def _origin(row: dict[str, object], captured: CapturedManagedInput) -> tuple[str
     return origin if origin in captured.origins else None
 
 
+# A split mistake is the CSV author's to fix; it never becomes feedback on an annotator's frame.
+_SPLIT_CODES = frozenset({"invalid_split", "split_conflict"})
+
+
 def _feedback(
     frame: pd.DataFrame, validation: ValidationResult, captured: CapturedManagedInput
 ) -> tuple[list[FeedbackFinding], int]:
     """Group rejected-row reasons under only independently attested CVAT frames."""
     reasons: dict[int, list[tuple[str, str]]] = defaultdict(list)
     for issue in validation.issues:
-        if issue.severity == "error" and issue.row_position is not None:
+        if issue.severity == "error" and issue.row_position is not None and issue.code not in _SPLIT_CODES:
             reasons[issue.row_position].append((issue.code, issue.message))
     grouped: dict[tuple[str, int, int, int], set[tuple[str, str]]] = defaultdict(set)
     unmapped = 0
@@ -183,6 +187,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     files.check_roots(captured.frame, metadata)
     for root in metadata.images.s3_root:
         s3_roots.check_root(root)
+    # Only keeps the parent id in the message; published_assignments has the same guard without it.
     if parent_metadata is not None and parent_metadata.managed is None and parent_rows is None:
         raise ManagedError(f"Parent {parent_id} published rows are required to keep its splits")
     history: dict[str, str] = dict(snapshot.assignments)
