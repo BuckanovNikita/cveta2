@@ -57,6 +57,48 @@ class CvatIdentity(StrictModel):
         return value.rstrip("/")
 
 
+def _public_http_url(value: str) -> str:
+    """Do not permit credential-bearing endpoints in portable policy."""
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+        raise ValueError("Class API must be HTTP(S) without embedded credentials")
+    return value
+
+
+class ClearMLDestination(StrictModel):
+    """Exact project and dataset name; no recursive project matching."""
+
+    project: str = Field(min_length=1)
+    dataset: str = Field(min_length=1)
+    output_uri: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("output_uri")
+    @classmethod
+    def public_output_uri(cls, value: str | None) -> str | None:
+        """Accept any ClearML storage scheme, but keep credentials out of shared policy."""
+        if value is None:
+            return value
+        parts = urlsplit(value)
+        if not value or parts.username or parts.password:
+            raise ValueError("ClearML output URI must be nonempty and without embedded credentials")
+        return value
+
+
+class PublicationSettings(StrictModel):
+    """Where and how one project's bundles are published; `None` roots mean the derived default."""
+
+    clearml: ClearMLDestination
+    api_url: str
+    empty_classes: list[int] = Field(default_factory=list)
+    s3_roots: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("api_url")
+    @classmethod
+    def public_class_api(cls, value: str) -> str:
+        """Do not permit credential-bearing endpoints in portable policy."""
+        return _public_http_url(value)
+
+
 class ProjectDefinition(StrictModel):
     """Shared project identity and source interpretation, without local paths."""
 
@@ -66,6 +108,7 @@ class ProjectDefinition(StrictModel):
     ignored_prefix: str | None = None
     task_cache_s3: str | None = None
     ignore: list[dict[str, JsonValue]] = Field(default_factory=list)
+    publication: PublicationSettings | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("sync_root", "task_cache_s3")
     @classmethod
@@ -133,13 +176,6 @@ class SourceDefinition(StrictModel):
         return self
 
 
-class ClearMLDestination(StrictModel):
-    """Exact project and dataset name; no recursive project matching."""
-
-    project: str = Field(min_length=1)
-    dataset: str = Field(min_length=1)
-
-
 class OverlapDecision(StrictModel):
     """Choose one source or exclude content; bind to exact participating sources."""
 
@@ -161,10 +197,7 @@ class DatasetDefinition(StrictModel):
     @classmethod
     def public_class_api(cls, value: str) -> str:
         """Do not permit credential-bearing endpoints in portable policy."""
-        parts = urlsplit(value)
-        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
-            raise ValueError("Class API must be HTTP(S) without embedded credentials")
-        return value
+        return _public_http_url(value)
 
     @model_validator(mode="after")
     def unique_sources(self) -> Self:
@@ -180,6 +213,7 @@ class ProjectConfig(StrictModel):
     """Authoritative shared configuration, never merged with personal policy."""
 
     schema_version: Literal[1] = 1
+    local_overrides: bool = Field(default=False, exclude_if=lambda value: not value)
     cvat: CvatIdentity
     projects: dict[str, ProjectDefinition] = Field(default_factory=dict)
     datasets: dict[str, DatasetDefinition] = Field(default_factory=dict)
@@ -188,8 +222,16 @@ class ProjectConfig(StrictModel):
     def references(self) -> Self:
         """Reject unknown project references and duplicate destination pairs."""
         destinations = [(d.clearml.project, d.clearml.dataset) for d in self.datasets.values()]
-        if len(destinations) != len(set(destinations)):
-            raise ValueError("ClearML destination pairs must be unique")
+        destinations += [
+            (p.publication.clearml.project, p.publication.clearml.dataset)
+            for p in self.projects.values()
+            if p.publication is not None
+        ]
+        seen: set[tuple[str, str]] = set()
+        for pair in destinations:
+            if pair in seen:
+                raise ValueError(f"ClearML destination pairs must be unique: {pair[0]}/{pair[1]}")
+            seen.add(pair)
         ids = [p.id for p in self.projects.values()]
         if len(ids) != len(set(ids)):
             raise ValueError("CVAT project identities must be unique")

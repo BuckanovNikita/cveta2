@@ -11,9 +11,12 @@ from pydantic import ValidationError
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
+    ClearMLDestination,
+    DatasetDefinition,
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
+    PublicationSettings,
     SourceDefinition,
     SourceSnapshot,
     dataset_definition,
@@ -186,3 +189,127 @@ def test_source_reference_is_exclusive() -> None:
     """A source cannot imply two different acquisition paths."""
     with pytest.raises(ValidationError):
         SourceDefinition(name="main", type="cvat", project="p", uri="s3://bucket/a.csv")
+
+
+_PUBLICATION: dict[str, Any] = {
+    "clearml": {"project": "Retail/Datasets", "dataset": "retail-shelves", "output_uri": "s3://my-bucket/.clearml"},
+    "api_url": "https://classes.example.com/api",
+    "empty_classes": [12],
+    "s3_roots": ["s3://my-bucket/images"],
+}
+_RETAIL: dict[str, Any] = {
+    "id": 123,
+    "name": "Retail shelves",
+    "sync_root": "s3://my-bucket/images",
+    "publication": _PUBLICATION,
+}
+
+
+def _global(**extra: Any) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "cvat": {"host": "https://cvat.example", "organization": "my-team"},
+        "projects": {"retail": copy.deepcopy(_RETAIL)},
+        **extra,
+    }
+
+
+def test_publication_block_parses_the_design_example() -> None:
+    config = ProjectConfig.model_validate(_global(local_overrides=True))
+
+    publication = config.projects["retail"].publication
+    assert config.local_overrides is True
+    assert publication is not None
+    assert publication.clearml.output_uri == "s3://my-bucket/.clearml"
+    assert publication.empty_classes == [12]
+    assert publication.s3_roots == ["s3://my-bucket/images"]
+
+
+@pytest.mark.parametrize(
+    ("drop", "loc"),
+    [
+        (("clearml", "project"), ("projects", "retail", "publication", "clearml", "project")),
+        (("clearml", "dataset"), ("projects", "retail", "publication", "clearml", "dataset")),
+        (("api_url",), ("projects", "retail", "publication", "api_url")),
+    ],
+)
+def test_publication_requires_project_dataset_and_api_url(drop: tuple[str, ...], loc: tuple[str, ...]) -> None:
+    raw = _global()
+    node = raw["projects"]["retail"]["publication"]
+    for key in drop[:-1]:
+        node = node[key]
+    del node[drop[-1]]
+
+    with pytest.raises(ValidationError) as error:
+        ProjectConfig.model_validate(raw)
+
+    assert loc in [item["loc"] for item in error.value.errors()]
+
+
+def test_publication_api_url_rejects_credentials() -> None:
+    raw = _global()
+    raw["projects"]["retail"]["publication"]["api_url"] = "https://u:p@x/api"
+
+    with pytest.raises(ValidationError, match="without embedded credentials"):
+        ProjectConfig.model_validate(raw)
+
+
+@pytest.mark.parametrize("output_uri", ["s3://key:secret@bucket/x", ""])
+def test_output_uri_rejects_embedded_credentials_and_empty(output_uri: str) -> None:
+    with pytest.raises(ValidationError):
+        ClearMLDestination(project="p", dataset="d", output_uri=output_uri)
+
+
+def test_new_fields_are_not_serialized_at_default() -> None:
+    config = ProjectConfig.model_validate(
+        {"schema_version": 1, "cvat": {"host": "https://cvat.example"}, "projects": {"a": {"id": 1}}}
+    )
+    publication = PublicationSettings(
+        clearml=ClearMLDestination(project="p", dataset="d"), api_url="https://classes.example.com/api"
+    )
+
+    dumped = config.model_dump()
+    assert "local_overrides" not in dumped
+    assert "publication" not in dumped["projects"]["a"]
+    assert ClearMLDestination(project="p", dataset="d").model_dump(mode="json") == {"project": "p", "dataset": "d"}
+    assert "s3_roots" not in publication.model_dump()
+    assert "output_uri" not in publication.model_dump()["clearml"]
+
+
+def test_existing_definition_fingerprint_is_unchanged() -> None:
+    # Literal digest of _fingerprints()[1] computed on the branch head before Task 1 changed models.py.
+    assert _fingerprints()[1] == "0ae2d127ec5a4fad5f76e52ae031b7c83de2d81c30420d71bdb0f9b13689936e"
+
+
+_COLLISION = "ClearML destination pairs must be unique: Retail/Datasets/retail-shelves"
+
+
+def _shelves_dataset(clearml: dict[str, str]) -> dict[str, Any]:
+    return {
+        "sources": [{"name": "retail", "type": "cvat", "project": "retail"}],
+        "api_url": "https://classes.example.com/api",
+        "clearml": clearml,
+    }
+
+
+def test_destination_pairs_unique_across_projects_and_datasets() -> None:
+    raw = _global(datasets={"shelves": _shelves_dataset({"project": "Retail/Datasets", "dataset": "retail-shelves"})})
+    with pytest.raises(ValidationError, match=_COLLISION):
+        ProjectConfig.model_validate(raw)
+
+    raw = _global()
+    raw["projects"]["second"] = {"id": 124, "publication": copy.deepcopy(_PUBLICATION)}
+    with pytest.raises(ValidationError, match=_COLLISION):
+        ProjectConfig.model_validate(raw)
+
+
+def test_dataset_clearml_accepts_optional_output_uri() -> None:
+    raw = _global(
+        datasets={
+            "shelves": _shelves_dataset({"project": "Other", "dataset": "x", "output_uri": "gs://bucket/.clearml"})
+        }
+    )
+
+    config = ProjectConfig.model_validate(raw)
+
+    assert config.datasets["shelves"].clearml.output_uri == "gs://bucket/.clearml"

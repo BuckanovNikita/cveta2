@@ -84,9 +84,14 @@ _Russian_: общая конфигурация
 _Avoid_: project config (in prose), team config, global config
 
 **Project definition**:
-A CVAT project's entry in the shared configuration: its ID, name, sync root, ignored prefix, task-cache location and ignore list.
+A CVAT project's entry in the shared configuration: its ID, name, sync root, ignored prefix, task-cache location, ignore list and optional publication settings.
 _Russian_: описание проекта
 _Avoid_: project settings
+
+**Publication settings**:
+The optional `publication` block of a project definition: the ClearML destination (`clearml.project`, `clearml.dataset`, optional `clearml.output_uri`), the class API (`api_url`), excluded classes (`empty_classes`) and S3 image roots (`s3_roots`) used to publish that project's bundles.
+_Russian_: настройки публикации
+_Avoid_: release settings, ClearML config
 
 ### Images and caches
 
