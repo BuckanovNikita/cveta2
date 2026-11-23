@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from typing import Literal, Self, cast
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from pydantic import (
     BaseModel,
@@ -39,6 +39,14 @@ _URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 _HIDDEN_USERINFO = "***"
 
 
+def _url_parts(value: str) -> SplitResult | None:
+    """Split *value* as a URL, or return ``None`` when it cannot be parsed; the validators refuse it then."""
+    try:
+        return urlsplit(value)
+    except ValueError:
+        return None
+
+
 def has_url_userinfo(value: str) -> bool:
     """Say whether a URL-typed value may carry a login or password before its host.
 
@@ -65,11 +73,8 @@ def has_url_userinfo(value: str) -> bool:
     authority_end = min((i for i in map(rest.find, "/?#") if i >= 0), default=len(rest))
     if "@" in rest[:authority_end] or ":" in rest.rpartition("@")[0]:
         return True
-    try:
-        parts = urlsplit(value)
-        return bool(parts.username or parts.password)
-    except ValueError:
-        return True
+    parts = _url_parts(value)
+    return parts is None or bool(parts.username or parts.password)
 
 
 def hide_url_userinfo(value: str) -> str:
@@ -79,11 +84,7 @@ def hide_url_userinfo(value: str) -> str:
     that cannot be parsed and has no ``@`` is hidden whole.
     """
     if not has_url_userinfo(value):
-        try:
-            urlsplit(value)
-        except ValueError:
-            return _HIDDEN_USERINFO
-        return value
+        return value if _url_parts(value) is not None else _HIDDEN_USERINFO
     scheme = _URL_SCHEME.match(value)
     prefix = scheme.group() if scheme else ""
     return f"{prefix}{_HIDDEN_USERINFO}@{value.rpartition('@')[2]}"
@@ -105,20 +106,16 @@ class CvatIdentity(StrictModel):
     @classmethod
     def public_host(cls, value: str) -> str:
         """Keep credentials out of the shared server identity."""
-        if has_url_userinfo(value):
-            raise ValueError("CVAT host must be HTTP(S) without credentials")
-        parts = urlsplit(value)
-        if parts.scheme not in {"http", "https"} or not parts.hostname:
+        parts = _url_parts(value)
+        if parts is None or has_url_userinfo(value) or parts.scheme not in {"http", "https"} or not parts.hostname:
             raise ValueError("CVAT host must be HTTP(S) without credentials")
         return value.rstrip("/")
 
 
 def _public_http_url(value: str) -> str:
     """Do not permit credential-bearing endpoints in portable policy."""
-    if has_url_userinfo(value):
-        raise ValueError("Class API must be HTTP(S) without embedded credentials")
-    parts = urlsplit(value)
-    if parts.scheme not in {"http", "https"} or not parts.hostname:
+    parts = _url_parts(value)
+    if parts is None or has_url_userinfo(value) or parts.scheme not in {"http", "https"} or not parts.hostname:
         raise ValueError("Class API must be HTTP(S) without embedded credentials")
     return value
 
@@ -136,7 +133,7 @@ class ClearMLDestination(StrictModel):
         """Accept any ClearML storage scheme, but keep credentials out of shared policy."""
         if value is None:
             return value
-        if not value or has_url_userinfo(value):
+        if not value or _url_parts(value) is None or has_url_userinfo(value):
             raise ValueError("ClearML output URI must be nonempty and without embedded credentials")
         return value
 

@@ -339,6 +339,23 @@ def test_output_uri_rejects_every_userinfo_form(output_uri: str) -> None:
         ClearMLDestination(project="p", dataset="d", output_uri=output_uri)
 
 
+def test_output_uri_refuses_an_unparsable_uri() -> None:
+    with pytest.raises(ValidationError, match="without embedded credentials"):
+        ClearMLDestination(project="p", dataset="d", output_uri="s3://[bad")
+
+
+@pytest.mark.parametrize(("field", "message"), [("api_url", "without embedded credentials"), ("host", "CVAT host")])
+def test_http_urls_refuse_an_unparsable_url(field: str, message: str) -> None:
+    raw = _global()
+    if field == "host":
+        raw["cvat"]["host"] = "https://[bad"
+    else:
+        raw["projects"]["retail"]["publication"]["api_url"] = "https://[bad/api"
+
+    with pytest.raises(ValidationError, match=message):
+        ProjectConfig.model_validate(raw)
+
+
 def test_url_validators_accept_an_at_sign_in_the_path_or_query() -> None:
     raw = _global()
     raw["projects"]["retail"]["publication"]["api_url"] = "https://classes.example.com/api?owner=a@b"
