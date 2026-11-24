@@ -110,3 +110,15 @@ class ManagedPreparationFiles(Protocol):
     def stage_payload(self, directory: Path) -> AbstractContextManager[Path]:
         """Copy the three payload files into a private temporary directory."""
         ...
+
+    def read_metadata(self, path: Path) -> DatasetMetadata:
+        """Parse one ``dataset.yaml`` strictly; errors name fields, never their values."""
+        ...
+
+    def read_rows(self, path: Path) -> pd.DataFrame:
+        """Read one ``dataset.csv`` without lexical inference."""
+        ...
+
+    def write_bookkeeping(self, directory: Path, metadata: DatasetMetadata, tasks: TaskManifest) -> None:
+        """Replace only ``dataset.yaml`` and ``tasks.yaml`` of *directory*, each with one rename."""
+        ...

@@ -352,12 +352,13 @@ def report_dataset_errors(
 def publish_dataset(
     prepared: Path,
     *,
+    force_resplit: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> Publication:
-    """Publish reviewed stable payload only after prerequisite checks."""
+    """Publish the preparation's current files once they pass every check."""
     with _prepared_effects(prepared, config_path, project_config) as (config, services):
-        return publish_prepared(config, prepared, services=services)
+        return publish_prepared(config, prepared, services=services, force_resplit=force_resplit)
 
 
 @contextmanager

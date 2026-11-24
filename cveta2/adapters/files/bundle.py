@@ -134,11 +134,18 @@ def _tasks_yaml(tasks: TaskManifest) -> bytes:
     return yaml.safe_dump(tasks.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8")
 
 
+def _bookkeeping(metadata: DatasetMetadata, tasks: TaskManifest) -> dict[str, bytes]:
+    """Serialize ``dataset.yaml`` and ``tasks.yaml`` as every payload writes them."""
+    return {
+        "dataset.yaml": yaml.safe_dump(metadata.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8"),
+        "tasks.yaml": _tasks_yaml(tasks),
+    }
+
+
 def _payload(frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest) -> dict[str, bytes]:
     return {
         "dataset.csv": frame.to_csv(index=False, lineterminator="\n").encode("utf-8"),
-        "dataset.yaml": yaml.safe_dump(metadata.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8"),
-        "tasks.yaml": _tasks_yaml(tasks),
+        **_bookkeeping(metadata, tasks),
     }
 
 

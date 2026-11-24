@@ -59,7 +59,7 @@ class CvatFeedback(Protocol):
 
 
 class FeedbackLedger(Protocol):
-    """Keep delivery state outside the immutable preparation payload."""
+    """Keep delivery state outside the preparation payload, which the user may edit."""
 
     def get_receipt(self, marker: str) -> FeedbackReceipt | None:
         """Return a durable owned attempt, or None before its first write."""

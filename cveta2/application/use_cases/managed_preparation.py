@@ -4,6 +4,7 @@ import dataclasses
 import hashlib
 import json
 from collections import defaultdict
+from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
@@ -21,13 +22,16 @@ from cveta2.application.use_cases.dataset_bundle import split_pending
 from cveta2.domain.bundle.models import DatasetMetadata, TaskManifest
 from cveta2.domain.bundle.tasks import derive_tasks
 from cveta2.domain.bundle.validation import missing_active_classes, validate_bundle
-from cveta2.domain.managed.evidence import require_complete_evidence, source_differences
+from cveta2.domain.class_registry import registry_fingerprint
+from cveta2.domain.managed.evidence import labels_fingerprint, require_complete_evidence, source_differences
 from cveta2.domain.managed.models import (
+    DatasetDefinition,
     ManagedError,
     ManagedMetadata,
     ProjectConfig,
     dataset_definition,
     definition_fingerprint,
+    source_fingerprint,
 )
 from cveta2.domain.managed.policies import (
     SplitName,
@@ -142,6 +146,55 @@ def _tasks(clean: pd.DataFrame, captured: CapturedManagedInput) -> TaskManifest:
     return TaskManifest(included=sorted(included), obsolete=sorted(obsolete - included))
 
 
+def managed_bookkeeping(  # noqa: PLR0913, PLR0917 - every input of the derived records.
+    config: ProjectConfig,
+    name: str,
+    definition: DatasetDefinition,
+    rows: pd.DataFrame,
+    metadata: DatasetMetadata,
+    captured: CapturedManagedInput,
+    *,
+    assignments: Mapping[str, SplitName],
+    image_hashes: Mapping[str, str],
+    first: bool = False,
+) -> tuple[DatasetMetadata, TaskManifest]:
+    """Derive the ``managed`` block of ``dataset.yaml`` and all of ``tasks.yaml`` from *rows*.
+
+    The api_url, classes and image roots of *metadata* are kept as given; the
+    assignments, task lists, definition copy and hash fields are recomputed. A
+    *first* version records no parent.
+    """
+    snapshot = captured.snapshot
+    sources = [
+        source.model_copy(update={"labels_fingerprint": labels_fingerprint(source.labels)})
+        if source.type == "cvat" and source.labels is not None
+        else source
+        for source in snapshot.sources
+    ]
+    tasks = _tasks(rows, captured).model_copy(
+        update={
+            "managed": snapshot.model_copy(
+                update={
+                    "assignments": dict(assignments),
+                    "image_hashes": dict(image_hashes),
+                    "definition_hash": source_fingerprint(config, definition),
+                    "registry_hash": registry_fingerprint(snapshot.registry or []),
+                    "sources": sources,
+                    **({"parent_id": None} if first else {}),
+                }
+            )
+        }
+    )
+    managed = ManagedMetadata(
+        name=name,
+        definition_hash=definition_fingerprint(config, definition),
+        definition=definition,
+        cvat=config.cvat,
+        assignments=dict(assignments),
+    )
+    return metadata.model_copy(update={"managed": managed}), tasks
+
+
 def published_assignments(parent_metadata: DatasetMetadata | None) -> dict[str, SplitName]:
     """Return the published splits a managed parent records, by content identity.
 
@@ -195,7 +248,6 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     """
     check_parent(parent_id, parent_metadata, first=first)
     definition = dataset_definition(config, name)
-    definition_hash = definition_fingerprint(config, definition)
     captured = files.capture(transformed, source)
     snapshot = captured.snapshot
     require_complete_evidence(snapshot)
@@ -231,34 +283,24 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     validation = dataclasses.replace(validation, blockers=tuple(blockers))
     ready = not blockers
     findings, unmapped = _feedback(split_frame, validation.result, captured)
-    tasks = _tasks(validation.result.clean, captured)
+    clean_rows = validation.result.clean
     actual_hashes = {
         path: image_hashes.readable[path]
-        for path in set(validation.result.clean.get("image_path", []))
+        for path in set(clean_rows.get("image_path", []))
         if path in image_hashes.readable
     }
-    assignments = rebuild_assignments(validation.result.clean, image_hashes.readable, history)
-    prepared_snapshot = snapshot.model_copy(
-        update={
-            "assignments": assignments,
-            "image_hashes": actual_hashes,
-            # A first version has no parent in its published evidence either.
-            **({"parent_id": None} if first else {}),
-        }
+    prepared_metadata, tasks = managed_bookkeeping(
+        config,
+        name,
+        definition,
+        clean_rows,
+        metadata,
+        captured,
+        assignments=rebuild_assignments(clean_rows, image_hashes.readable, history),
+        image_hashes=actual_hashes,
+        first=first,
     )
-    prepared_metadata = metadata.model_copy(
-        update={
-            "managed": ManagedMetadata(
-                name=name,
-                definition_hash=definition_hash,
-                definition=definition,
-                cvat=config.cvat,
-                assignments=assignments,
-            )
-        }
-    )
-    tasks = tasks.model_copy(update={"managed": prepared_snapshot})
-    payload = files.payload_bytes(validation.result.clean, prepared_metadata, tasks) if ready else {}
+    payload = files.payload_bytes(clean_rows, prepared_metadata, tasks) if ready else {}
     record = ManagedRecord(
         name=name,
         parent_id=parent_id,

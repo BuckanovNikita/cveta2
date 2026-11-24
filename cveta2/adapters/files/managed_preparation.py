@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
-from cveta2.adapters.files.bundle import _error_details, _payload, _yaml
+from cveta2.adapters.files.bundle import _bookkeeping, _error_details, _payload, _yaml
 from cveta2.adapters.files.bundle_paths import LocalRoots
 from cveta2.adapters.files.verification import read_csv_bytes, report_dict
 from cveta2.application.ports.managed_preparation import (
@@ -29,6 +29,7 @@ from cveta2.domain.bundle.models import (
 )
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SourceSnapshot
 from cveta2.domain.managed.preparation import FeedbackFinding, ManagedRecord
+from cveta2.domain.verification.models import DatasetInputError
 
 _PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
 _TABLES = ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv")
@@ -214,7 +215,7 @@ class LocalManagedPreparationFiles:
 
     @contextmanager
     def stage_payload(self, directory: Path) -> Iterator[Path]:
-        """Copy the payload once, so an edit made during the upload cannot mix into it."""
+        """Copy the payload once, so the checks and the upload see the same bytes whatever is edited meanwhile."""
         try:
             payload = {name: _regular_bytes(directory / name) for name in _PAYLOAD}
         except OSError as error:
@@ -224,6 +225,38 @@ class LocalManagedPreparationFiles:
             for name, content in payload.items():
                 (staged / name).write_bytes(content)
             yield staged
+
+    def read_metadata(self, path: Path) -> DatasetMetadata:
+        """Parse one ``dataset.yaml`` strictly, like ``LocalBundleFiles.read_metadata``; errors name fields only."""
+        try:
+            return DatasetMetadata.model_validate(_yaml(_regular_bytes(path), path.name))
+        except (OSError, ValidationError) as error:
+            raise ManagedError(f"Invalid dataset metadata {path}: {_error_details(error)}") from error
+        except UploadError as error:
+            raise ManagedError(f"Invalid dataset metadata {path}: {error}") from error
+
+    def read_rows(self, path: Path) -> pd.DataFrame:
+        """Read one ``dataset.csv`` without lexical inference."""
+        try:
+            return read_csv_bytes(_regular_bytes(path), source=str(path))
+        except (OSError, DatasetInputError) as error:
+            raise ManagedError(f"Cannot read {path}: {error}") from error
+
+    def write_bookkeeping(self, directory: Path, metadata: DatasetMetadata, tasks: TaskManifest) -> None:
+        """Replace only ``dataset.yaml`` and ``tasks.yaml``, each with one rename, never writing through a symlink."""
+        for name, content in _bookkeeping(metadata, tasks).items():
+            path, temporary = directory / name, directory / f".{name}.tmp"
+            try:
+                temporary.unlink(missing_ok=True)
+                try:
+                    # Exclusive creation never follows a planted link.
+                    with temporary.open("xb") as stream:
+                        stream.write(content)
+                    temporary.replace(path)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            except OSError as error:
+                raise ManagedError(f"Cannot write {path}: {error}") from error
 
 
 def _capture(transformed: Path, source_path: Path) -> CapturedManagedInput:

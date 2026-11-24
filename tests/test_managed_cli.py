@@ -153,3 +153,18 @@ def test_dataset_commands_accept_global_config(operation: tuple[str, ...]) -> No
     args = parse_cli_args("dataset", *operation, "--global-config", "g.yaml")
 
     assert args.global_config == Path("g.yaml")
+
+
+@pytest.mark.parametrize(("flags", "force_resplit"), [((), False), (("--force-resplit",), True)])
+def test_publish_passes_force_resplit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...], *, force_resplit: bool
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def publish(*_args: object, **kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(dataset_id="version-1", version="1")
+
+    monkeypatch.setattr(managed_datasets, "publish_dataset", publish)
+    main(["dataset", "publish", str(tmp_path), *flags])
+    assert [call["force_resplit"] for call in calls] == [force_resplit]

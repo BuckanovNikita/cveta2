@@ -35,7 +35,9 @@ from cveta2.domain.bundle.models import (
     ImageRoots,
     Publication,
 )
+from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.errors import CvatApiError, Cveta2Error
+from cveta2.domain.managed.evidence import labels_fingerprint
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
 from cveta2.domain.models import LabelAttributeInfo, LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
@@ -1542,3 +1544,198 @@ def test_destination_with_another_parent_needs_a_new_fetch(workflow: Workflow, t
             **workflow.options,
         )
     assert workflow.clearml.publications == ["version-1"]
+
+
+_PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
+
+
+def test_publish_refuses_a_moved_published_image_and_force_resplit_accepts_it(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    _publish_then_prepare_child(workflow, tmp_path)
+    prepared = tmp_path / "child" / "prepared"
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    moved = rows["image_name"].eq("task101-0.png")
+    new_split = "test" if rows.loc[moved, "split"].iloc[0] != "test" else "val"
+    rows.loc[moved, "split"] = new_split
+    rows.to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(ManagedError, match=r"keep their split: task101-0\.png; .*--force-resplit"):
+        api.publish_dataset(prepared, **workflow.options)
+    published = api.publish_dataset(prepared, force_resplit=True, **workflow.options)
+    digest = hashlib.sha256((workflow.images / "task101-0.png").read_bytes()).hexdigest()
+    metadata = yaml.safe_load((workflow.clearml.root / published.dataset_id / "dataset.yaml").read_text())
+    assert metadata["managed"]["assignments"][digest] == new_split
+
+
+def test_publish_refuses_one_image_in_two_splits_even_with_force_resplit(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    first = rows.index[rows["image_name"].eq("task101-0.png")][0]
+    extra = rows.loc[[first]].assign(split="test" if rows.loc[first, "split"] != "test" else "val")
+    pd.concat([rows, extra]).to_csv(prepared / "dataset.csv", index=False)
+    for force in (False, True):
+        with pytest.raises(ManagedError, match=r"rows in several splits: task101-0\.png; one image may have one split"):
+            api.publish_dataset(prepared, force_resplit=force, **workflow.options)
+
+
+def test_publish_refuses_a_blank_split_cell(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    rows.loc[0, "split"] = ""
+    rows.to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(
+        ManagedError,
+        match=re.escape(f"not ready for publication: заполните split у 1 изображений в {prepared / 'dataset.csv'}"),
+    ):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_publish_refuses_a_split_without_images_in_pending_words(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    rows.assign(split="train").to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(ManagedError, match="not ready for publication: в val нет изображений"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_publish_refuses_an_active_class_without_bbox_until_marked_empty(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog")])
+    fetched, transformed = _fetch_and_transform(workflow, tmp_path)
+    rows = pd.read_csv(transformed, keep_default_na=False)
+    rows.loc[rows["image_name"].eq("external-0.png"), "instance_label"] = "dog"
+    rows.to_csv(transformed, index=False)
+    prepared = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "p", **workflow.options
+    ).directory
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    rows[rows["instance_label"].ne("dog")].to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(ManagedError, match="Active classes have no bbox: dog"):
+        api.publish_dataset(prepared, **workflow.options)
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["classes"]["dog"]["empty"] = True
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    published = api.publish_dataset(prepared, **workflow.options)
+    remote = yaml.safe_load((workflow.clearml.root / published.dataset_id / "dataset.yaml").read_text())
+    assert remote["classes"]["dog"]["empty"] is True
+
+
+def test_publish_rewrites_hand_edited_bookkeeping_and_keeps_rows_and_roots(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    csv_before = (prepared / "dataset.csv").read_bytes()
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["managed"]["assignments"] = {}
+    metadata["images"]["local_root"].append(str(tmp_path))
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    tasks = yaml.safe_load((prepared / "tasks.yaml").read_text())
+    tasks["included"] = []
+    (prepared / "tasks.yaml").write_text(yaml.safe_dump(tasks))
+    api.publish_dataset(prepared, **workflow.options)
+    assert (prepared / "dataset.csv").read_bytes() == csv_before
+    rewritten = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    assert len(rewritten["managed"]["assignments"]) == 30
+    assert str(tmp_path) in rewritten["images"]["local_root"]
+    assert yaml.safe_load((prepared / "tasks.yaml").read_text())["included"] == [101, 102]
+    for name in _PAYLOAD:
+        assert (workflow.clearml.root / "version-1" / name).read_bytes() == (prepared / name).read_bytes()
+
+
+def test_publish_keeps_assignments_of_removed_images(workflow: Workflow, tmp_path: Path) -> None:
+    api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    digest = hashlib.sha256((workflow.images / "external-0.png").read_bytes()).hexdigest()
+    second = tmp_path / "second"
+    fetched = second / "fetched"
+    api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
+    rows = _hand_splits(pd.read_csv(fetched / "dataset.csv", keep_default_na=False))
+    rows["image_path"] = rows["image_name"].map(lambda name: str(workflow.images / name))
+    rows[rows["image_name"].ne("external-0.png")].to_csv(second / "transformed.csv", index=False)
+    prepared = api.prepare_managed_dataset(
+        "combined", second / "transformed.csv", source=fetched, output_dir=second / "prepared", **workflow.options
+    ).directory
+    published = api.publish_dataset(prepared, **workflow.options)
+    remote = yaml.safe_load((workflow.clearml.root / published.dataset_id / "dataset.yaml").read_text())
+    assert digest in remote["managed"]["assignments"]
+
+
+def test_published_fingerprints_match_the_written_records(workflow: Workflow, tmp_path: Path) -> None:
+    published = api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    tasks = yaml.safe_load((workflow.clearml.root / published.dataset_id / "tasks.yaml").read_text())["managed"]
+    assert tasks["registry_hash"] == registry_fingerprint([ApiClass.model_validate(r) for r in tasks["registry"]])
+    for source in (s for s in tasks["sources"] if s["type"] == "cvat"):
+        labels = [LabelInfo.model_validate(label) for label in source["labels"]]
+        assert source["labels_fingerprint"] == labels_fingerprint(labels)
+
+
+def test_publish_passes_the_configured_output_uri(workflow: Workflow, tmp_path: Path) -> None:
+    _edit_shared(
+        workflow, lambda shared: shared["datasets"]["combined"]["clearml"].update(output_uri="s3://bucket/.clearml")
+    )
+    api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    assert workflow.clearml.published_calls == [(_PAYLOAD, "s3://bucket/.clearml")]
+
+
+def test_publish_records_a_split_filled_by_hand_after_prepare_for_the_next_version(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    fetched, output = _transform(workflow, tmp_path / "first")
+    transformed = pd.read_csv(output, keep_default_na=False)
+    pending = min(transformed["image_name"])
+    hand_split = transformed.loc[transformed["image_name"].eq(pending), "split"].iloc[0]
+    filled = "test" if hand_split != "test" else "val"
+    transformed.loc[transformed["image_name"].eq(pending), "split"] = ""
+    transformed.to_csv(output, index=False)
+    summary = api.prepare_managed_dataset(
+        "combined", output, source=fetched, output_dir=tmp_path / "first" / "prepared", **workflow.options
+    )
+    assert summary.ready
+    assert summary.report["pending"]
+    rows = pd.read_csv(summary.directory / "dataset.csv", keep_default_na=False)
+    rows.loc[rows["image_name"].eq(pending), "split"] = filled
+    rows.to_csv(summary.directory / "dataset.csv", index=False)
+    api.publish_dataset(summary.directory, **workflow.options)
+
+    child = _prepare(workflow, tmp_path / "child")
+
+    child_rows = pd.read_csv(child / "dataset.csv", keep_default_na=False)
+    assert set(child_rows.loc[child_rows["image_name"].eq(pending), "split"]) == {filled}
+
+
+def test_publish_uploads_the_files_it_validated(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edit made after the checks, while feedback is delivered, is not published."""
+    prepared = _prepare(workflow, tmp_path)
+    validated = (prepared / "dataset.csv").read_bytes()
+    latest = workflow.clearml.latest
+    calls: list[str] = []
+
+    def edit_after_checks(project: str, name: str) -> DatasetParent | None:
+        calls.append(name)
+        if len(calls) == 2:
+            # The second lookup is the post-feedback recheck: every content check has run.
+            rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+            rows.loc[0, "bbox_x_br"] = 1
+            rows.to_csv(prepared / "dataset.csv", index=False)
+        return latest(project, name)
+
+    monkeypatch.setattr(workflow.clearml, "latest", edit_after_checks)
+    published = api.publish_dataset(prepared, **workflow.options)
+    assert len(calls) == 2
+    assert (prepared / "dataset.csv").read_bytes() != validated
+    assert (workflow.clearml.root / published.dataset_id / "dataset.csv").read_bytes() == validated
+
+
+def test_prepared_metadata_with_credentials_is_refused_without_printing_them(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["api_url"] = "https://key:se/cret@classes.example/api"
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    with pytest.raises(ManagedError, match="api_url") as caught:
+        api.publish_dataset(prepared, **workflow.options)
+    assert "se/cret" not in str(caught.value)
+    assert workflow.clearml.publications == []

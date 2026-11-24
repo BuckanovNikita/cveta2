@@ -95,8 +95,14 @@ def report_dataset_errors(
 def publish_dataset(
     prepared: Path,
     *,
+    force_resplit: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> Publication:
-    """Recheck and publish accepted data after traceable feedback completes."""
-    return managed.publish_dataset(prepared, config_path=config_path, project_config=project_config)
+    """Check the preparation's current files, deliver feedback and publish them.
+
+    A published image keeps its split; *force_resplit* lets ``dataset.csv`` move it.
+    """
+    return managed.publish_dataset(
+        prepared, force_resplit=force_resplit, config_path=config_path, project_config=project_config
+    )

@@ -1,5 +1,6 @@
 """Check a managed preparation as it is now and deliver feedback before publication."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -19,14 +20,16 @@ from cveta2.application.ports.managed_preparation import (
 )
 from cveta2.application.ports.managed_sources import CvatSourceReader, S3CsvReader
 from cveta2.application.ports.verification import MediaInspector
+from cveta2.application.use_cases.dataset_bundle import split_pending
 from cveta2.application.use_cases.managed_feedback import (
     reconcile_pending,
     report_findings,
 )
+from cveta2.application.use_cases.managed_preparation import managed_bookkeeping, published_assignments
 from cveta2.domain.bundle.classes import registry_mismatches
-from cveta2.domain.bundle.models import DatasetMetadata, Publication
+from cveta2.domain.bundle.models import DatasetMetadata, DatasetParent, Publication
 from cveta2.domain.bundle.preparation import PAYLOAD_NAMES
-from cveta2.domain.bundle.validation import validate_bundle
+from cveta2.domain.bundle.validation import images_without_split, missing_active_classes, validate_bundle
 from cveta2.domain.managed.evidence import (
     SourceAssessment,
     assess_cvat_source,
@@ -43,8 +46,12 @@ from cveta2.domain.managed.models import (
     SourceSnapshot,
     dataset_definition,
 )
+from cveta2.domain.managed.policies import SplitName, rebuild_assignments, split_collisions, split_conflicts
 from cveta2.domain.managed.preparation import FeedbackOutcome
 from cveta2.domain.verification.models import ValidationOptions
+
+# How many image names one refusal lists before it only counts the rest.
+_LISTED = 20
 
 
 @dataclass(frozen=True)
@@ -151,13 +158,14 @@ def _check_prepared(
     config: ProjectConfig,
     loaded: LoadedManagedPreparation,
     services: ManagedPublicationServices,
-) -> SourceAssessment:
+) -> tuple[SourceAssessment, DatasetParent | None]:
     """Check the parent and the sources of ``source-snapshot.yaml``; warn about changed sources.
 
-    Returns the source assessment, whose stale tasks get no feedback; tasks whose
-    pending receipts could not be inspected, and tasks of sources that differ from
-    the current definition, count as stale too. The payload is not read, so a
-    blocked preparation can still report its findings.
+    Returns the source assessment, whose stale tasks get no feedback, and the
+    latest version, which is the recorded parent. Tasks whose pending receipts
+    could not be inspected, and tasks of sources that differ from the current
+    definition, count as stale too. The payload is not read, so a blocked
+    preparation can still report its findings.
     """
     record, snapshot = loaded.record, loaded.captured.snapshot
     require_complete_evidence(snapshot)
@@ -178,7 +186,7 @@ def _check_prepared(
     assessment = _assess_sources(config, services.ledger.effective_snapshot(snapshot), services)
     for line in (*differences.warnings, *assessment.warnings):
         logger.warning(f"{line}. Датасет собирается из выгруженных данных.")
-    return replace(assessment, stale_tasks=assessment.stale_tasks | differences.stale_tasks | unavailable)
+    return replace(assessment, stale_tasks=assessment.stale_tasks | differences.stale_tasks | unavailable), parent
 
 
 def _report(
@@ -198,19 +206,51 @@ def _report(
     return outcome
 
 
-def _check_current(frame: pd.DataFrame, metadata: DatasetMetadata, services: ManagedPublicationServices) -> None:
-    """Validate the current ``dataset.csv`` against its ``dataset.yaml``, local media and roots."""
+def _listed(names: Sequence[str]) -> str:
+    """Name at most ``_LISTED`` items, then count the rest."""
+    shown = ", ".join(names[:_LISTED])
+    return f"{shown} and {len(names) - _LISTED} more" if len(names) > _LISTED else shown
+
+
+def _not_ready(pending: Sequence[str]) -> ManagedError:
+    """Refuse with the ``pending`` lines ``dataset prepare`` reported for the same rows."""
+    return ManagedError(f"Prepared dataset.csv is not ready for publication: {'; '.join(pending)}")
+
+
+def _check_current(
+    frame: pd.DataFrame,
+    metadata: DatasetMetadata,
+    directory: Path,
+    hashes: Mapping[str, str],
+    services: ManagedPublicationServices,
+) -> None:
+    """Check the staged rows of the preparation in *directory* against their ``dataset.yaml``, media and roots.
+
+    In order: class registry, roots, one split per image content, filled splits,
+    validation, trainability and class coverage.
+    """
+    # Only class names and numbers bind the rows; other registry fields may change.
+    if names := registry_mismatches(metadata.classes, services.registry.fetch(metadata.api_url)):
+        raise ManagedError(f"Class names or numbers differ from the class registry: {', '.join(names)}; prepare again")
     services.files.check_roots(frame, metadata)
     for root in metadata.images.local_root:
         services.roots.check_local_root(root)
     for root in metadata.images.s3_root:
         services.s3_roots.check_root(root)
+    # Before validation, which would reject rows of one image name in two splits as ordinary row errors.
+    if collisions := split_collisions(frame, hashes):
+        raise ManagedError(
+            f"Image content has rows in several splits: {', '.join(collisions)}; one image may have one split"
+        )
+    if images_without_split(frame):
+        raise _not_ready(split_pending(frame, directory))
     inspection = services.media.inspect(
         frame,
         profile="clearml-yolo",
         options=ValidationOptions(check_images=True, emit_warnings=False),
     )
-    validation = validate_bundle(frame, metadata, inspection=inspection)
+    # Every split is filled, so this mode only leaves the trainability gaps to the pending lines below.
+    validation = validate_bundle(frame, metadata, inspection=inspection, allow_empty_split=True)
     result = validation.result
     if validation.blockers or not result.is_valid or result.requires_cleanup:
         rejected, cleanup, blockers = len(result.broken_row_positions), result.requires_cleanup, validation.blockers
@@ -218,41 +258,92 @@ def _check_current(frame: pd.DataFrame, metadata: DatasetMetadata, services: Man
             f"Prepared dataset.csv does not pass validation: {rejected} rejected rows, "
             f"repairs needed: {'yes' if cleanup else 'no'}, blockers: {'; '.join(blockers) or 'none'}"
         )
+    if pending := split_pending(result.clean, directory):
+        raise _not_ready(pending)
+    if names := missing_active_classes(frame, metadata):
+        raise ManagedError(
+            f"Active classes have no bbox: {', '.join(names)}; "
+            "mark them empty: true in dataset.yaml or add rows with them"
+        )
+
+
+def _published(
+    loaded: LoadedManagedPreparation, parent: DatasetParent | None, services: ManagedPublicationServices
+) -> dict[str, SplitName]:
+    """Return the splits the parent published; a first version reads no parent at all."""
+    # ``_check_prepared`` refused a parent without dataset.yaml unless the preparation is a first version.
+    if loaded.record.first or parent is None or parent.metadata_path is None:
+        return {}
+    return published_assignments(services.files.read_metadata(parent.metadata_path))
 
 
 def report_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> FeedbackOutcome:
     """Deliver the recorded frame findings; a blocked preparation reports too."""
     loaded = services.files.load_prepared(directory)
-    assessment = _check_prepared(config, loaded, services)
+    assessment, _parent = _check_prepared(config, loaded, services)
     return _report(loaded, assessment, services)
 
 
-def publish_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> Publication:
-    """Publish the current three payload files once they pass every check and feedback is delivered."""
+def publish_prepared(
+    config: ProjectConfig,
+    directory: Path,
+    *,
+    services: ManagedPublicationServices,
+    force_resplit: bool = False,
+) -> Publication:
+    """Publish the three payload files once they pass every check and feedback is delivered.
+
+    The files are copied before the checks, so exactly the checked rows are published. The
+    split assignments, task lists and the rest of the derived bookkeeping are rebuilt from those
+    rows and written back to *directory* too. A published image keeps its split unless
+    *force_resplit*.
+    """
     loaded = services.files.load_prepared(directory)
-    frame, metadata = loaded.frame, loaded.metadata
-    if frame is None or metadata is None:
+    if loaded.frame is None or loaded.metadata is None:
         raise ManagedError("Preparation was blocked and has no payload; see report.json and prepare again")
-    assessment = _check_prepared(config, loaded, services)
-    _check_current(frame, metadata, services)
-    # Only class names and numbers bind the prepared rows; other registry fields may change.
-    if names := registry_mismatches(metadata.classes, services.registry.fetch(metadata.api_url)):
-        raise ManagedError(f"Class names or numbers differ from the class registry: {', '.join(names)}; prepare again")
-    outcome = _report(loaded, assessment, services)
-    if outcome.failed:
-        raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")
-    # Recheck sources after feedback, acknowledging only proven issue-only writes.
-    # Its warnings were printed above; only a task completed meanwhile stops here.
-    _assess_sources(config, services.ledger.effective_snapshot(loaded.captured.snapshot), services)
-    definition = dataset_definition(config, loaded.record.name)
-    latest = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
-    if (latest.dataset_id if latest else None) != loaded.record.parent_id:
-        raise ManagedError("ClearML parent changed during feedback; prepare again")
+    assessment, parent = _check_prepared(config, loaded, services)
+    record = loaded.record
+    definition = dataset_definition(config, record.name)
     with services.files.stage_payload(loaded.directory) as staging:
+        frame = services.files.read_rows(staging / "dataset.csv")
+        metadata = services.files.read_metadata(staging / "dataset.yaml")
+        hashes = services.files.image_hashes(frame).readable
+        _check_current(frame, metadata, loaded.directory, hashes, services)
+        published = _published(loaded, parent, services)
+        if not force_resplit and (conflicts := split_conflicts(frame, hashes, published)):
+            raise ManagedError(
+                f"Images published in the parent must keep their split: {_listed(conflicts)}; "
+                "restore the split in dataset.csv or pass --force-resplit"
+            )
+        # Removed images keep their assignments; with force_resplit the rows' splits replace the published ones.
+        base = {} if record.first else {**loaded.captured.snapshot.assignments, **published}
+        metadata, tasks = managed_bookkeeping(
+            config,
+            record.name,
+            definition,
+            frame,
+            metadata,
+            loaded.captured,
+            assignments=rebuild_assignments(frame, hashes, base),
+            image_hashes=hashes,
+            first=record.first,
+        )
+        for target in (staging, loaded.directory):
+            services.files.write_bookkeeping(target, metadata, tasks)
+        outcome = _report(loaded, assessment, services)
+        if outcome.failed:
+            raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")
+        # Recheck sources after feedback, acknowledging only proven issue-only writes.
+        # Its warnings were printed above; only a task completed meanwhile stops here.
+        _assess_sources(config, services.ledger.effective_snapshot(loaded.captured.snapshot), services)
+        latest = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
+        if (latest.dataset_id if latest else None) != record.parent_id:
+            raise ManagedError("ClearML parent changed during feedback; prepare again")
         return services.remote.publish(
             definition.clearml.project,
             definition.clearml.dataset,
-            None if loaded.record.first else loaded.record.parent_id,
+            None if record.first else record.parent_id,
             staging,
             files=PAYLOAD_NAMES,
+            output_uri=definition.clearml.output_uri,
         )
