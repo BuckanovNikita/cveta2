@@ -196,11 +196,11 @@ def _warn_coverage(
     """
     try:
         metadata = DatasetMetadata(api_url=definition.api_url, classes=_classes(definition, records, previous))
+        excluded = excluded_class_rows(frame, metadata)
+        missing = list(missing_active_classes(frame, metadata))
     except Cveta2Error as error:
         logger.warning(f"Не удалось проверить классы: {error}")
         return None, None
-    excluded = excluded_class_rows(frame, metadata)
-    missing = list(missing_active_classes(frame, metadata))
     if excluded:
         logger.warning(f"Строк с исключёнными классами: {excluded}. dataset prepare отклонит их.")
     if missing:

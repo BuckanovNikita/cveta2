@@ -727,6 +727,18 @@ def test_fetch_computes_coverage_without_reading_a_non_managed_latest_version(
     assert not any("Не удалось проверить классы" in line for line in capture_logs)
 
 
+def test_fetch_warns_once_when_the_api_swaps_two_class_names(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog")])
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[8]))
+    api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "dog"), _api(8, "cat")])
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "again", **workflow.options)
+    assert (result["excluded_class_rows"], result["missing_classes"]) == (None, None)
+    assert sum("Не удалось проверить классы" in line for line in capture_logs) == 1
+
+
 def test_fetch_warns_once_when_the_managed_latest_version_conflicts_with_the_registry(
     workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
 ) -> None:
