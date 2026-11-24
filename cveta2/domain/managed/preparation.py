@@ -21,7 +21,13 @@ class FeedbackFinding(StrictModel):
 
 
 class ManagedRecord(StrictModel):
-    """Version-two local binding; delivery state lives outside immutable inputs."""
+    """Version-two local binding; delivery state lives outside immutable inputs.
+
+    ``parent_id`` and ``parent_version`` are the latest finalized version when the
+    sources were fetched. It is the parent that publication links, except for a
+    ``first`` version, which starts a lineage: publication links no parent, and the
+    recorded version only proves that nothing newer appeared since.
+    """
 
     format_version: Literal[2] = 2
     name: str
@@ -37,6 +43,7 @@ class ManagedRecord(StrictModel):
     findings: list[FeedbackFinding] = Field(default_factory=list)
     ready: bool
     clean: bool = False
+    first: bool = False
 
 
 class FeedbackOutcome(StrictModel):

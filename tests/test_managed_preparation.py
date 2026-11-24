@@ -30,7 +30,6 @@ from cveta2.domain.managed.models import (
     definition_fingerprint,
     source_fingerprint,
 )
-from cveta2.domain.managed.policies import parent_splits
 from cveta2.domain.managed.preparation import PreparationSummary
 from cveta2.domain.models import LabelInfo
 
@@ -476,10 +475,9 @@ def test_split_mistakes_stay_out_of_cvat_feedback(tmp_path: Path) -> None:
     assert summary.report["unmapped_errors"] == 0
 
 
-def test_published_assignments_reads_each_kind_of_parent(tmp_path: Path) -> None:
-    config, transformed, _source, metadata = _fixture(tmp_path)
-    files = LocalManagedPreparationFiles()
-    assert published_assignments(None, None, metadata, files) == ({}, None)
+def test_published_assignments_come_only_from_a_managed_parent(tmp_path: Path) -> None:
+    config, _transformed, _source, metadata = _fixture(tmp_path)
+    assert published_assignments(None) == {}
     managed = metadata.model_copy(
         update={
             "managed": ManagedMetadata(
@@ -491,13 +489,9 @@ def test_published_assignments_reads_each_kind_of_parent(tmp_path: Path) -> None
             )
         }
     )
-    assert published_assignments(managed, None, metadata, files) == ({"digest": "test"}, None)
-    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
-    legacy = parent_splits(rows, files.parent_image_hashes(rows, metadata))
-    assert legacy.assignments
-    assert published_assignments(metadata, rows, metadata, files) == (legacy.assignments, legacy)
-    with pytest.raises(ManagedError, match="Parent published rows are required to keep its splits"):
-        published_assignments(metadata, None, metadata, files)
+    assert published_assignments(managed) == {"digest": "test"}
+    with pytest.raises(ManagedError, match="Parent is not a managed dataset version"):
+        published_assignments(metadata)
 
 
 @pytest.mark.parametrize("edit", ["project-id", "ignored-id", "organization"])

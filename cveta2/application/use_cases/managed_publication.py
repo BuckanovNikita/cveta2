@@ -103,7 +103,7 @@ def _check_prepared(
         raise ManagedError("Latest ClearML parent changed; fetch and prepare again")
     if parent is not None and parent.version != record.parent_version:
         raise ManagedError("ClearML parent version changed; prepare again")
-    if parent is not None and parent.metadata_path is None:
+    if parent is not None and parent.metadata_path is None and not record.first:
         raise ManagedError(f"Parent {parent.dataset_id} lacks dataset.yaml; choose a new dataset name")
     records = services.registry.fetch(definition.api_url)
     if registry_fingerprint(records) != record.registry_hash:
@@ -179,6 +179,6 @@ def publish_prepared(config: ProjectConfig, directory: Path, *, services: Manage
         return services.remote.publish(
             definition.clearml.project,
             definition.clearml.dataset,
-            loaded.record.parent_id,
+            None if loaded.record.first else loaded.record.parent_id,
             staging,
         )

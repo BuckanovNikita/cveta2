@@ -6,7 +6,6 @@ import pytest
 from cveta2.domain.managed.models import ManagedError, OverlapDecision
 from cveta2.domain.managed.policies import (
     compare_frames,
-    parent_splits,
     propagate_splits,
     rebuild_assignments,
     resolve_overlaps,
@@ -193,18 +192,3 @@ def test_compare_normalizes_missing_cells_and_rejects_opaque_values() -> None:
     old = pd.DataFrame({"image_name": ["a.jpg"], "opaque": [object()]})
     with pytest.raises(ManagedError, match="Unsupported"):
         compare_frames(old, new)
-
-
-def test_parent_splits_carry_only_content_published_under_one_valid_split() -> None:
-    """Rows sharing content or an invalid split never decide an assignment."""
-    published = pd.DataFrame(
-        {
-            "image_path": ["/a.jpg", "/a.jpg", "/b.jpg", "/copy-of-b.jpg", "/c.jpg", "/d.jpg", "/gone.jpg"],
-            "split": ["val", "val", "train", "test", "train", "holdout", "train"],
-        }
-    )
-    hashes = {"/a.jpg": "A", "/b.jpg": "B", "/copy-of-b.jpg": "B", "/c.jpg": "C", "/d.jpg": "D"}
-    result = parent_splits(published, hashes)
-    assert result.assignments == {"A": "val", "C": "train"}
-    assert result.conflicts == 2
-    assert result.unresolved == 1

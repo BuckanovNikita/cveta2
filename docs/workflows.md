@@ -310,6 +310,8 @@
 
    Управляемая подготовка ([managed preparation](../GLOSSARY.md)) переносит опубликованный split на уже опубликованные изображения; split новых изображений заполняете вы в преобразованном CSV. В JSON смотрите `"ready"`: `true` и код `0` — можно публиковать; `false` и код `1` — причины в `"blockers"`. Подробнее — [prepare](commands/dataset.md#prepare).
 
+   Если в `clearml.dataset` ещё нет версий, это будет первая версия управляемой истории. Если там уже есть версии, опубликованные не через `dataset publish` (например, через `upload-dataset`), `prepare` остановится с `Parent <id> is not a managed dataset version; start a managed lineage with dataset prepare --first`. Тогда подготовьте первую управляемую версию с флагом `--first`: весь split возьмётся из вашего CSV, а `publish` создаст версию без родителя. Следующие подготовки делайте без флага.
+
 4. Отправьте замечания к кадрам в CVAT:
 
    ```bash

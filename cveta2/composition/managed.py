@@ -29,7 +29,7 @@ from cveta2.adapters.files.media import LocalMediaInspector
 from cveta2.adapters.files.verification import read_csv, read_csv_bytes
 from cveta2.adapters.s3.managed_sources import S3CsvSources
 from cveta2.application.client.assembly import task_to_records
-from cveta2.application.use_cases.managed_preparation import prepare_managed
+from cveta2.application.use_cases.managed_preparation import check_parent, prepare_managed
 from cveta2.application.use_cases.managed_publication import (
     ManagedPublicationServices,
     publish_prepared,
@@ -131,7 +131,7 @@ def show_dataset(name: str, *, config_path: Path | None = None, project_config: 
     """Show exact configured mapping and finalized parent."""
     _, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
-    parent, _ = _parent(definition)
+    parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
     return {
         "name": name,
         "definition": definition.model_dump(mode="json"),
@@ -202,27 +202,28 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     source: Path,
     output_dir: Path,
     clean: bool = False,
+    first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> PreparationSummary:
-    """Prepare transformed input using supplied policy and constructed effects."""
+    """Prepare transformed input using supplied policy and constructed effects.
+
+    With *first* the latest version is only checked to be non-managed; its classes,
+    splits and rows are not used.
+    """
     path, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
     parent, previous = _parent(definition)
-    parent_rows = None
-    if parent is not None and previous is not None and previous.managed is None:
-        parent_rows = read_csv_bytes(
-            ClearMLSources().read_files(parent.dataset_id, ("dataset.csv",))["dataset.csv"],
-            source=f"{parent.dataset_id}/dataset.csv",
-        )
+    # Refuse the wrong mode before reconciling classes against a parent that will not be used.
+    check_parent(parent.dataset_id if parent else None, previous, first=first)
     return prepare_managed(
         config,
         name,
         csv,
         source,
         output_dir,
-        _metadata(path, config, definition, records, previous, project_config),
+        _metadata(path, config, definition, records, None if first else previous, project_config),
         registry_hash=registry_fingerprint(records),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
@@ -230,8 +231,8 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
         parent_id=parent.dataset_id if parent else None,
         parent_version=parent.version if parent else None,
         parent_metadata=previous,
-        parent_rows=parent_rows,
         clean=clean,
+        first=first,
     )
 
 

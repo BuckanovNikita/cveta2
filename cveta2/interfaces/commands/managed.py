@@ -49,6 +49,11 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
                 action="store_true",
                 help="Принять исправления и удаление отклонённых строк.",
             )
+            command.add_argument(
+                "--first",
+                action="store_true",
+                help="Начать управляемую историю: последнюю версию без managed не использовать.",
+            )
         if operation == "diff":
             command.add_argument("old", help="Каталог/CSV или ID версии ClearML.")
             command.add_argument("new", help="Каталог/CSV или ID версии ClearML.")
@@ -85,6 +90,7 @@ def _dispatch(args: argparse.Namespace) -> None:
             source=args.source,
             output_dir=args.output_dir,
             clean=args.clean,
+            first=args.first,
             **options,
         )
         result = prepared.model_dump(mode="json")

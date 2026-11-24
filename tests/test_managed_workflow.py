@@ -192,6 +192,7 @@ class FakeClearML:
         self.root = root
         self.latest_id: str | None = None
         self.publications: list[str] = []
+        self.parents: list[str | None] = []
 
     def latest(self, project: str, name: str) -> DatasetParent | None:
         if self.latest_id is None or (project, name) != ("CV/combined", "annotations"):
@@ -208,7 +209,7 @@ class FakeClearML:
     def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
         assert project == "CV/combined"
         assert name == "annotations"
-        assert parent_id == self.latest_id
+        self.parents.append(parent_id)
         assert {path.name for path in directory.iterdir()} == {
             "dataset.csv",
             "dataset.yaml",
@@ -341,19 +342,24 @@ def _edit_shared(workflow: Workflow, edit: Callable[[dict[str, Any]], object]) -
     workflow.shared.write_text(yaml.safe_dump(shared))
 
 
-def _legacy_parent(workflow: Workflow, dataset: pd.DataFrame | None = None) -> Path:
-    """Install a standalone parent without managed extensions as the latest version."""
-    parent = workflow.clearml.root / "legacy"
+def _non_managed_latest(workflow: Workflow, *, metadata: bool = True) -> Path:
+    """Install a version without a ``managed`` block (made outside the managed workflow) as the latest one.
+
+    Its class differs from the registry's, so reading it for classes would fail the preparation.
+    """
+    parent = workflow.clearml.root / "external"
     parent.mkdir(parents=True)
-    metadata = DatasetMetadata(
-        api_url="https://classes.example/api",
-        classes={"cat": ClassInfo(prod_id=7)},
-        images=ImageRoots(local_root=[str(workflow.images)]),
+    if metadata:
+        plain = DatasetMetadata(
+            api_url="https://classes.example/api",
+            classes={"dog": ClassInfo(prod_id=8)},
+            images=ImageRoots(local_root=[str(workflow.images)]),
+        )
+        (parent / "dataset.yaml").write_text(yaml.safe_dump(plain.model_dump(mode="json")))
+    pd.DataFrame({"image_name": ["old.png"], "image_path": ["/old.png"], "split": ["val"]}).to_csv(
+        parent / "dataset.csv", index=False
     )
-    (parent / "dataset.yaml").write_text(yaml.safe_dump(metadata.model_dump(mode="json")))
-    published = pd.DataFrame(columns=["image_name", "image_path", "split"]) if dataset is None else dataset
-    published.to_csv(parent / "dataset.csv", index=False)
-    workflow.clearml.latest_id = "legacy"
+    workflow.clearml.latest_id = "external"
     return parent
 
 
@@ -364,13 +370,14 @@ def _hand_splits(frame: pd.DataFrame) -> pd.DataFrame:
     return frame.assign(split=frame["image_name"].map(chosen))
 
 
-def _prepare(
+def _transform(
     workflow: Workflow,
     tmp_path: Path,
     *,
     bad: bool = False,
     bad_frames: tuple[str, ...] = ("0",),
-) -> Path:
+) -> tuple[Path, Path]:
+    """Fetch, then write the transformed CSV a user would hand to prepare."""
     fetched = tmp_path / "fetched"
     result = api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
     assert result["rows"] == 30
@@ -383,6 +390,18 @@ def _prepare(
         ] = 1
     output = tmp_path / "transformed.csv"
     _hand_splits(transformed).to_csv(output, index=False)
+    return fetched, output
+
+
+def _prepare(
+    workflow: Workflow,
+    tmp_path: Path,
+    *,
+    bad: bool = False,
+    bad_frames: tuple[str, ...] = ("0",),
+    first: bool = False,
+) -> Path:
+    fetched, output = _transform(workflow, tmp_path, bad=bad, bad_frames=bad_frames)
     prepared = tmp_path / "prepared"
     summary = api.prepare_managed_dataset(
         "combined",
@@ -390,6 +409,7 @@ def _prepare(
         source=fetched,
         output_dir=prepared,
         clean=bad,
+        first=first,
         **workflow.options,
     )
     assert summary.ready, summary.report
@@ -422,9 +442,11 @@ def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workfl
     prepared = _prepare(workflow, tmp_path)
     assert workflow.clearml.publications == []
     assert LocalSourceFiles().read_snapshot(tmp_path / "fetched").parent_id is None
-    assert json.loads((prepared / "preparation.json").read_bytes())["parent_id"] is None
+    record = json.loads((prepared / "preparation.json").read_bytes())
+    assert (record["parent_id"], record["first"]) == (None, False)
     result = api.publish_dataset(prepared, **workflow.options)
     assert result.dataset_id == "version-1"
+    assert workflow.clearml.parents == [None]
     assert {path.name for path in (workflow.clearml.root / result.dataset_id).iterdir()} == {
         "dataset.csv",
         "dataset.yaml",
@@ -534,44 +556,89 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
     assert workflow.clearml.publications == []
 
 
-def test_csv_only_parent_cannot_become_a_ready_preparation(workflow: Workflow, tmp_path: Path) -> None:
-    parent = _legacy_parent(workflow)
-    (parent / "dataset.yaml").unlink()
-    with pytest.raises(ManagedError, match=r"dataset\.yaml"):
+@pytest.mark.parametrize("metadata", [True, False], ids=["plain-metadata", "no-metadata"])
+def test_latest_version_without_managed_metadata_is_refused_naming_first(
+    workflow: Workflow, tmp_path: Path, *, metadata: bool
+) -> None:
+    _non_managed_latest(workflow, metadata=metadata)
+    with pytest.raises(ManagedError, match=r"Parent external is not a managed dataset version; .*--first"):
         _prepare(workflow, tmp_path)
     assert not (tmp_path / "prepared").exists()
 
 
+def test_first_starts_a_lineage_over_a_non_managed_latest_version(workflow: Workflow, tmp_path: Path) -> None:
+    _non_managed_latest(workflow)
+    fetched, output = _transform(workflow, tmp_path)
+    prepared = tmp_path / "prepared"
+    main(
+        [
+            "dataset",
+            "prepare",
+            "combined",
+            str(output),
+            "--source",
+            str(fetched),
+            "--output-dir",
+            str(prepared),
+            "--first",
+            "--config",
+            str(workflow.personal),
+            "--project-config",
+            str(workflow.shared),
+        ]
+    )
+    record = json.loads((prepared / "preparation.json").read_bytes())
+    # The latest version seen by fetch stays bound for freshness; it is never linked as a parent.
+    assert (record["first"], record["parent_id"]) == (True, "external")
+
+    published = api.publish_dataset(prepared, **workflow.options)
+
+    assert workflow.clearml.parents == [None]
+    remote = workflow.clearml.root / published.dataset_id
+    tasks = yaml.safe_load((remote / "tasks.yaml").read_text())
+    assert tasks["managed"]["parent_id"] is None
+    assert set(yaml.safe_load((remote / "dataset.yaml").read_text())["classes"]) == {"cat"}
+    rows = pd.read_csv(remote / "dataset.csv", keep_default_na=False)
+    transformed = pd.read_csv(output, keep_default_na=False)
+    by_name = dict(zip(transformed["image_name"], transformed["split"], strict=True))
+    assert all(by_name[name] == split for name, split in zip(rows["image_name"], rows["split"], strict=True))
+    child = _prepare(workflow, tmp_path / "child")
+    assert json.loads((child / "preparation.json").read_bytes())["parent_id"] == published.dataset_id
+
+
+def test_first_is_refused_once_a_managed_lineage_exists(workflow: Workflow, tmp_path: Path) -> None:
+    api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    with pytest.raises(
+        ManagedError, match="Managed lineage already exists at parent version-1; prepare without --first"
+    ):
+        _prepare(workflow, tmp_path / "again", first=True)
+    assert not (tmp_path / "again" / "prepared").exists()
+
+
+def test_managed_version_published_after_a_first_preparation_blocks_it(workflow: Workflow, tmp_path: Path) -> None:
+    _non_managed_latest(workflow)
+    one = _prepare(workflow, tmp_path / "one", first=True)
+    two = _prepare(workflow, tmp_path / "two", first=True)
+    assert api.publish_dataset(one, **workflow.options).dataset_id == "version-1"
+    with pytest.raises(ManagedError, match="Latest ClearML parent changed; fetch and prepare again"):
+        api.publish_dataset(two, **workflow.options)
+    assert workflow.clearml.publications == ["version-1"]
+
+
+def test_show_reports_a_non_managed_latest_version_without_reading_it(workflow: Workflow) -> None:
+    parent = _non_managed_latest(workflow)
+    (parent / "dataset.yaml").write_text("not: [valid metadata")
+    shown = api.show_dataset("combined", **workflow.options)
+    assert (shown["parent_id"], shown["parent_version"]) == ("external", "0")
+
+
 def test_parent_that_lost_its_metadata_blocks_publication(workflow: Workflow, tmp_path: Path) -> None:
-    parent = _legacy_parent(workflow)
-    prepared = _prepare(workflow, tmp_path)
-    (parent / "dataset.yaml").unlink()
+    first = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    prepared = _prepare(workflow, tmp_path / "child")
+    (workflow.clearml.root / first.dataset_id / "dataset.yaml").unlink()
     with pytest.raises(ManagedError, match=r"dataset\.yaml"):
         api.publish_dataset(prepared, **workflow.options)
-    assert workflow.clearml.publications == []
-
-
-def test_legacy_parent_adoption_keeps_published_splits_of_unambiguous_images(
-    workflow: Workflow, tmp_path: Path
-) -> None:
-    paths = sorted(str(path) for path in workflow.images.iterdir())
-    hand = _hand_splits(pd.DataFrame({"image_name": [Path(path).name for path in paths], "image_path": paths}))
-    by_hand = dict(zip(hand["image_path"], hand["split"], strict=True))
-    # Published splits deliberately differ from the hand splits of the transformed CSV.
-    published = {path: {"train": "val", "val": "train", "test": "train"}[by_hand[path]] for path in paths}
-    ambiguous = paths[0]
-    rows = [{"image_name": Path(path).name, "image_path": path, "split": split} for path, split in published.items()]
-    rows.append({"image_name": Path(ambiguous).name, "image_path": ambiguous, "split": "test"})
-    _legacy_parent(workflow, pd.DataFrame(rows))
-    prepared = _prepare(workflow, tmp_path)
-    result = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
-    splits = result.groupby("image_path")["split"].agg(set).to_dict()
-    assert {path: splits[path] for path in paths if path != ambiguous} == {
-        path: {published[path]} for path in paths if path != ambiguous
-    }
-    assert splits[ambiguous] == {by_hand[ambiguous]}
-    report = json.loads((prepared / "report.json").read_text())
-    assert report["parent_split_conflicts"] == 1
+    assert workflow.clearml.publications == ["version-1"]
 
 
 def test_failed_feedback_is_delivered_after_a_sibling_issue_moved_the_task(workflow: Workflow, tmp_path: Path) -> None:
@@ -859,9 +926,8 @@ def _moved_server(shared: dict[str, Any], _parent: Path) -> None:
         (_other_definition_hash, []),
         (lambda shared, _parent: _ignore_task(shared), []),
         (_moved_server, [101, 102]),
-        (_unknown_identity, [101, 102]),
     ],
-    ids=["hash-mismatch", "ignored-id", "host", "unknown-identity"],
+    ids=["hash-mismatch", "ignored-id", "host"],
 )
 def test_published_server_identity_decides_whether_fetch_resets_every_source(
     workflow: Workflow, tmp_path: Path, edit: Callable[[dict[str, Any], Path], None], reads: list[int]
@@ -874,9 +940,24 @@ def test_published_server_identity_decides_whether_fetch_resets_every_source(
 
     assert sorted(workflow.cvat.annotation_reads) == reads
     assert api.publish_dataset(second, **workflow.options).dataset_id == "version-2"
+    assert workflow.clearml.parents == [None, "version-1"]
     workflow.cvat.annotation_reads.clear()
     api.fetch_dataset("combined", output_dir=tmp_path / "third", **workflow.options)
     assert workflow.cvat.annotation_reads == []
+
+
+def test_parent_without_managed_identity_resets_every_source_and_is_refused_by_prepare(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    """Without the parent's CVAT identity fetch trusts none of its tasks; prepare needs a managed parent."""
+    published = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    _edit_shared(workflow, lambda shared: _unknown_identity(shared, workflow.clearml.root / published.dataset_id))
+    workflow.cvat.annotation_reads.clear()
+
+    with pytest.raises(ManagedError, match="Parent version-1 is not a managed dataset version"):
+        _prepare(workflow, tmp_path / "second")
+
+    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
 
 
 def test_show_dataset_reports_the_definition_and_rejects_unknown_names(workflow: Workflow) -> None:

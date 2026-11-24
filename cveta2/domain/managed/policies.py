@@ -3,7 +3,6 @@
 import math
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from numbers import Integral, Real
@@ -137,38 +136,6 @@ def rebuild_assignments(
         if path is not None and (digest := image_hashes.get(path)) is not None:
             assignments[digest] = cast("SplitName", split)
     return dict(sorted(assignments.items()))
-
-
-@dataclass(frozen=True)
-class ParentSplits:
-    """Published splits of a parent without managed evidence, by content identity."""
-
-    assignments: dict[str, SplitName] = field(default_factory=dict)
-    conflicts: int = 0
-    unresolved: int = 0
-
-
-def parent_splits(frame: pd.DataFrame, image_hashes: Mapping[str, str]) -> ParentSplits:
-    """Carry a legacy parent's split only for content published under one split.
-
-    Identity is the SHA-256 of an image readable now. Paths without a hash are
-    unresolved; content published under several or invalid splits is a conflict.
-    """
-    _validate_frame(frame, ("image_path", "split"))
-    published: dict[str, set[object]] = defaultdict(set)
-    unresolved: set[object] = set()
-    for path, split in zip(frame["image_path"], frame["split"], strict=True):
-        key = _text(path)
-        digest = image_hashes.get(key) if key is not None else None
-        if _text(digest) is None:
-            unresolved.add(str(path))
-            continue
-        published[cast("str", digest)].add(split)
-    assignments: dict[str, SplitName] = {}
-    for digest, splits in sorted(published.items()):
-        if len(splits) == 1 and (split := next(iter(splits))) in {"train", "val", "test"}:
-            assignments[digest] = split
-    return ParentSplits(assignments, len(published) - len(assignments), len(unresolved))
 
 
 def resolve_overlaps(

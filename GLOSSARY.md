@@ -229,12 +229,17 @@ _Russian_: решение о пересечении
 _Avoid_: dedup rule, conflict resolution
 
 **Parent dataset**:
-The latest finalized ClearML version under the same project and dataset name, which a new preparation builds on and which must not change before publication.
+The latest finalized ClearML version under the same project and dataset name, which a new preparation builds on and which must not change before publication. For a managed dataset it must be a managed version, unless the preparation starts a managed lineage.
 _Russian_: родительский датасет
 _Avoid_: base dataset, previous version (in prose)
 
+**Managed lineage**:
+The chain of managed versions of one managed dataset, each published with the previous one as its parent. It starts in a ClearML dataset with no versions, or with `dataset prepare --first`, which publishes a first version with no parent over versions without managed metadata.
+_Russian_: управляемая история
+_Avoid_: adoption, migration
+
 **Publication**:
-The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset, after rechecking the preparation.
+The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset (the first version of a managed lineage has none), after rechecking the preparation.
 _Russian_: публикация
 _Avoid_: release, push, upload (reserved for CVAT task creation)
 
