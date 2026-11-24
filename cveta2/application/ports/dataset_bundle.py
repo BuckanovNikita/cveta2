@@ -8,6 +8,7 @@ from typing import Protocol
 import pandas as pd
 
 from cveta2.application.ports.verification import MediaInspector
+from cveta2.domain.bundle.draft import DatasetDraft
 from cveta2.domain.bundle.models import (
     ApiClass,
     DatasetMetadata,
@@ -88,7 +89,19 @@ class RootChecks(Protocol):
         ...
 
 
-class BundleFiles(Protocol):
+class DraftFiles(Protocol):
+    """Read and write the editable ``dataset.yaml`` draft of a fetch directory."""
+
+    def read_draft(self, directory: Path) -> DatasetDraft | None:
+        """Return the draft, or None when the directory has no ``dataset.yaml``."""
+        ...
+
+    def write_draft(self, directory: Path, draft: DatasetDraft) -> bool:
+        """Write the draft; return True when a different file was moved to ``dataset.yaml.bak``."""
+        ...
+
+
+class BundleFiles(DraftFiles, Protocol):
     """Capture and persist stable source/payload bytes behind a file boundary."""
 
     def read_source(self, directory: Path) -> SourceSnapshot:

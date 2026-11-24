@@ -93,6 +93,15 @@ class TaskManifest(BaseModel):
 
 
 @dataclass(frozen=True)
+class ClassMarkChange:
+    """One class whose exclusion mark differs from the previous classes."""
+
+    prod_id: int
+    name: str
+    empty: bool
+
+
+@dataclass(frozen=True)
 class ClassChange:
     """One added identity or canonical name transition."""
 

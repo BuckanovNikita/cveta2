@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
 from cveta2.adapters.files.verification import read_csv_bytes, report_dict
+from cveta2.domain.bundle.draft import DatasetDraft
 from cveta2.domain.bundle.models import (
     DatasetMetadata,
     FetchTables,
@@ -152,6 +153,41 @@ class LocalBundleFiles:
             return DatasetMetadata.model_validate(_yaml(path.read_bytes(), str(path)))
         except (OSError, ValidationError) as error:
             raise UploadError(f"Invalid dataset metadata {path}: {_error_details(error)}") from error
+
+    def read_draft(self, directory: Path) -> DatasetDraft | None:
+        """Read the strict draft; None when there is no ``dataset.yaml``."""
+        path = directory / "dataset.yaml"
+        if not path.exists() and not path.is_symlink():
+            return None
+        try:
+            content = _regular_bytes(path)
+        except OSError as error:
+            raise UploadError(f"Cannot read dataset draft {path}: {error}") from error
+        try:
+            return DatasetDraft.model_validate(_yaml(content, str(path)))
+        except ValidationError as error:
+            raise UploadError(f"Invalid dataset draft {path}: {_error_details(error)}") from error
+
+    def write_draft(self, directory: Path, draft: DatasetDraft) -> bool:
+        """Write the draft; a different existing file is first kept as ``dataset.yaml.bak``."""
+        path = directory / "dataset.yaml"
+        data = draft.model_dump(mode="json", exclude_none=True)
+        images = {key: value for key, value in data.get("images", {}).items() if value}
+        data.pop("images", None)
+        if images:
+            data["images"] = images
+        content = yaml.safe_dump(data, allow_unicode=True, sort_keys=False).encode("utf-8")
+        try:
+            backed_up = False
+            if path.exists() or path.is_symlink():
+                if path.read_bytes() == content:
+                    return False
+                path.replace(directory / "dataset.yaml.bak")
+                backed_up = True
+            path.write_bytes(content)
+        except OSError as error:
+            raise UploadError(f"Cannot write dataset draft {path}: {error}") from error
+        return backed_up
 
     def save_preparation(self, directory: Path, draft: BundleDraft) -> PreparedDataset:
         """Write reports and copied evidence without replacing any existing file."""

@@ -28,6 +28,7 @@ class PrepareOptions(BaseModel):
     project: str
     dataset_name: str | None = None
     api_url: str | None = None
+    output_uri: str | None = None
     local_roots: tuple[str, ...] = ()
     s3_roots: tuple[str, ...] = ()
     class_empty: dict[int, bool] = Field(default_factory=dict)
