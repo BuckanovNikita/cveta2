@@ -1,10 +1,13 @@
 """Resumable frame feedback with explicit failures and issue-only freshness."""
 
+from loguru import logger
+
 from cveta2.application.ports.managed_feedback import (
     CvatFeedback,
     FeedbackLedger,
     FeedbackReceipt,
     FeedbackTaskState,
+    FeedbackTaskUnavailable,
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.models import ManagedError
@@ -29,23 +32,42 @@ def _same_facts(before: FeedbackTaskState, after: FeedbackTaskState) -> bool:
     )
 
 
-def reconcile_pending(findings: list[FeedbackFinding], *, remote: CvatFeedback, ledger: FeedbackLedger) -> None:
+def reconcile_pending(
+    findings: list[FeedbackFinding], *, remote: CvatFeedback, ledger: FeedbackLedger
+) -> frozenset[tuple[str, int]]:
     """Acknowledge uncertain own writes by reads only, before freshness checks.
 
     A marker and unchanged annotation-relevant facts are both required. Mere
     existence of an older CVAT issue cannot excuse an unrelated task edit: when
     the annotations changed, the receipt stays pending, and the freshness check
     then reports the task as edited and its findings are skipped.
+
+    When a pending receipt's task is gone (deleted, moved or no longer
+    accessible), the receipt stays pending, one warning names the task, and the
+    task's ``(source_id, task_id)`` is returned so its findings are skipped.
+    Any other failure still raises: freshness cannot be judged then.
     """
+    unavailable: set[tuple[str, int]] = set()
     for finding in findings:
+        task = (finding.source_id, finding.task_id)
         receipt = ledger.get_receipt(finding.marker)
-        if receipt is None or receipt.delivered:
+        if receipt is None or receipt.delivered or task in unavailable:
             continue
         if not _receipt_matches(receipt, finding):
             raise ManagedError("Feedback marker belongs to different source evidence")
-        state = remote.inspect(finding)
-        if state.fingerprint == receipt.fingerprint and remote.issue_exists(finding):
+        try:
+            state = remote.inspect(finding)
+            delivered = state.fingerprint == receipt.fingerprint and remote.issue_exists(finding)
+        except FeedbackTaskUnavailable as error:
+            unavailable.add(task)
+            logger.warning(
+                f"{finding.source_id}: задача {finding.task_id} недоступна в CVAT ({error}); "
+                "незавершённая отправка замечания осталась незавершённой"
+            )
+            continue
+        if delivered:
             ledger.complete(finding, state)
+    return frozenset(unavailable)
 
 
 def _known_delivery(

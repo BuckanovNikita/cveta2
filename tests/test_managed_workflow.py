@@ -34,7 +34,7 @@ from cveta2.domain.bundle.models import (
     ImageRoots,
     Publication,
 )
-from cveta2.domain.errors import Cveta2Error
+from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
 from cveta2.domain.models import LabelAttributeInfo, LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
@@ -100,6 +100,8 @@ class FakeCvat:
         return self.labels[project_id]
 
     def get_task(self, task_id: int) -> TaskInfo:
+        if task_id not in self.tasks:
+            raise CvatApiError(f"Task {task_id} not found", status_code=404)
         return self.tasks[task_id]
 
     def get_task_jobs(self, task_id: int) -> list[RawJob]:
@@ -826,6 +828,25 @@ def test_unexplained_task_change_skips_a_pending_delivery(workflow: Workflow, tm
     assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
     assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
+
+
+def test_pending_receipt_of_a_deleted_task_does_not_stop_the_command(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.fail_issues = True
+    assert len(api.report_dataset_errors(prepared, **workflow.options).failed) == 1
+    del workflow.cvat.tasks[101]
+
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+
+    assert (outcome.created, outcome.skipped, outcome.failed) == (0, 1, [])
+    assert any(line.startswith("main: задача 101 недоступна в CVAT (") for line in capture_logs)
+    assert "main: задача 101 удалена. Датасет собирается из выгруженных данных." in capture_logs
+    (ledger,) = (workflow.personal.parent / "managed-feedback").iterdir()
+    receipts = json.loads(ledger.read_text())["receipts"]
+    assert [receipt["delivered"] for receipt in receipts.values()] == [False]
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
 def _fetch_and_transform(workflow: Workflow, tmp_path: Path) -> tuple[Path, Path]:

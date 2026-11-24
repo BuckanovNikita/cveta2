@@ -3,8 +3,15 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from cveta2.domain.managed.models import ManagedSnapshot
+from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
 from cveta2.domain.managed.preparation import FeedbackFinding
+
+
+class FeedbackTaskUnavailable(ManagedError):  # noqa: N818 - names the state, like MigrationRequired.
+    """The finding's task is gone from its source project: deleted, moved or no longer accessible.
+
+    Any other failure (CVAT unreachable, a server error) is not this error.
+    """
 
 
 @dataclass(frozen=True)
@@ -36,7 +43,10 @@ class CvatFeedback(Protocol):
     """Read source-frame ownership and write only a deduplicated review issue."""
 
     def inspect(self, finding: FeedbackFinding) -> FeedbackTaskState:
-        """Validate source ownership and fingerprint annotations/data/jobs/labels."""
+        """Validate source ownership and fingerprint annotations/data/jobs/labels.
+
+        Raises :class:`FeedbackTaskUnavailable` when the task is gone from its project.
+        """
         ...
 
     def issue_exists(self, finding: FeedbackFinding) -> bool:

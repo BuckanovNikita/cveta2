@@ -1,6 +1,6 @@
 """Recheck managed preparations and deliver feedback before exact publication."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from loguru import logger
@@ -112,7 +112,8 @@ def _check_prepared(
 ) -> SourceAssessment:
     """Check policy, parent, sources and clean publication media; warn about changed sources.
 
-    Returns the source assessment, whose stale tasks get no feedback.
+    Returns the source assessment, whose stale tasks get no feedback; tasks whose
+    pending receipts could not be inspected count as stale too.
     """
     record = loaded.record
     require_complete_evidence(record.snapshot)
@@ -134,12 +135,12 @@ def _check_prepared(
     records = services.registry.fetch(definition.api_url)
     if registry_fingerprint(records) != record.registry_hash:
         raise ManagedError("Class registry changed; fetch and prepare again")
-    reconcile_pending(record.findings, remote=services.feedback, ledger=services.ledger)
+    unavailable = reconcile_pending(record.findings, remote=services.feedback, ledger=services.ledger)
     assessment = _assess_sources(config, services.ledger.effective_snapshot(record.snapshot), services)
     for line in assessment.warnings:
         logger.warning(f"{line}. Датасет собирается из выгруженных данных.")
     _check_media(loaded, services)
-    return assessment
+    return replace(assessment, stale_tasks=assessment.stale_tasks | unavailable)
 
 
 def _report(
