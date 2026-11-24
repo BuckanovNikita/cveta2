@@ -566,8 +566,14 @@ def test_latest_version_without_managed_metadata_is_refused_naming_first(
     assert not (tmp_path / "prepared").exists()
 
 
-def test_first_starts_a_lineage_over_a_non_managed_latest_version(workflow: Workflow, tmp_path: Path) -> None:
-    _non_managed_latest(workflow)
+@pytest.mark.parametrize("latest", ["plain-metadata", "no-metadata", "empty"])
+def test_first_starts_a_lineage_over_a_non_managed_latest_version(
+    workflow: Workflow, tmp_path: Path, latest: str
+) -> None:
+    """Over a version without managed metadata, without any dataset.yaml, or in an empty dataset."""
+    if latest != "empty":
+        _non_managed_latest(workflow, metadata=latest == "plain-metadata")
+    seen = None if latest == "empty" else "external"
     fetched, output = _transform(workflow, tmp_path)
     prepared = tmp_path / "prepared"
     main(
@@ -589,7 +595,7 @@ def test_first_starts_a_lineage_over_a_non_managed_latest_version(workflow: Work
     )
     record = json.loads((prepared / "preparation.json").read_bytes())
     # The latest version seen by fetch stays bound for freshness; it is never linked as a parent.
-    assert (record["first"], record["parent_id"]) == (True, "external")
+    assert (record["first"], record["parent_id"]) == (True, seen)
 
     published = api.publish_dataset(prepared, **workflow.options)
 
