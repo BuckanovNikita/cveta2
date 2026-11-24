@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from cveta2.domain.bundle.models import ApiClass, ClassInfo, DatasetMetadata, ImageRoots
+from cveta2.domain.managed.models import ClearMLDestination
 
 
 @pytest.mark.parametrize("enabled", ["techClass", "isPeriodical", "isCritical"])
@@ -56,3 +57,30 @@ def test_metadata_preserves_unicode_and_rejects_secret_urls_and_unknown_fields()
         ClassInfo.model_validate({"prod_id": 93, "empty": "false"})
     with pytest.raises(ValidationError):
         ClassInfo.model_validate({"prod_id": 93, "empti": True})
+
+
+def test_metadata_clearml_block_round_trips_and_omits_absent_values() -> None:
+    metadata = DatasetMetadata(
+        clearml=ClearMLDestination(project="Retail/Datasets", dataset="retail-shelves"),
+        api_url="https://classes.example.com/api",
+        classes={},
+    )
+    dump = metadata.model_dump()
+    assert dump["clearml"] == {"project": "Retail/Datasets", "dataset": "retail-shelves"}
+    assert next(iter(dump)) == "clearml"
+    assert "clearml" not in DatasetMetadata(api_url="https://classes.example.com/api", classes={}).model_dump()
+    data = {
+        "clearml": {
+            "project": "Retail/Datasets",
+            "dataset": "retail-shelves",
+            "output_uri": "s3://my-bucket/.clearml",
+        },
+        "api_url": "https://classes.example.com/api",
+        "classes": {},
+        "images": {"local_root": [], "s3_root": []},
+    }
+    parsed = DatasetMetadata.model_validate(data)
+    assert parsed.clearml == ClearMLDestination(
+        project="Retail/Datasets", dataset="retail-shelves", output_uri="s3://my-bucket/.clearml"
+    )
+    assert parsed.model_dump() == data

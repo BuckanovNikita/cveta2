@@ -6,11 +6,11 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from cveta2.domain.class_registry import ApiClass as ApiClass  # noqa: PLC0414 - preserve the existing model import.
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.models import ManagedMetadata, ManagedSnapshot
+from cveta2.domain.managed.models import ClearMLDestination, ManagedMetadata, ManagedSnapshot
 from cveta2.domain.verification.models import ValidationResult
 
 
@@ -51,10 +51,17 @@ class DatasetMetadata(BaseModel):
     """Portable serialized bundle contract, without authentication secrets."""
 
     model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+    clearml: ClearMLDestination | None = Field(default=None, exclude_if=lambda value: value is None)
     api_url: str
     classes: dict[str, ClassInfo]
     images: ImageRoots = Field(default_factory=ImageRoots)
     managed: ManagedMetadata | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_serializer("clearml")
+    @staticmethod
+    def compact_clearml(value: ClearMLDestination | None) -> dict[str, str] | None:
+        """Write only the destination keys that are set: no ``output_uri: null``."""
+        return None if value is None else value.model_dump(exclude_none=True)
 
     @field_validator("api_url")
     @staticmethod
