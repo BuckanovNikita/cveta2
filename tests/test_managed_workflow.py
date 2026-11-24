@@ -566,13 +566,22 @@ def test_latest_version_without_managed_metadata_is_refused_naming_first(
     assert not (tmp_path / "prepared").exists()
 
 
-@pytest.mark.parametrize("latest", ["plain-metadata", "no-metadata", "empty"])
+def _invalidate_metadata(parent: Path) -> None:
+    """Leave a dataset.yaml that parses as YAML but not as dataset metadata (an unknown key)."""
+    metadata = yaml.safe_load((parent / "dataset.yaml").read_text())
+    metadata["unknown_key"] = 1
+    (parent / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+
+
+@pytest.mark.parametrize("latest", ["plain-metadata", "no-metadata", "invalid-metadata", "empty"])
 def test_first_starts_a_lineage_over_a_non_managed_latest_version(
-    workflow: Workflow, tmp_path: Path, latest: str
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str], latest: str
 ) -> None:
-    """Over a version without managed metadata, without any dataset.yaml, or in an empty dataset."""
+    """Over a version without managed metadata, without or with an unreadable dataset.yaml, or in an empty dataset."""
     if latest != "empty":
-        _non_managed_latest(workflow, metadata=latest == "plain-metadata")
+        parent = _non_managed_latest(workflow, metadata=latest != "no-metadata")
+        if latest == "invalid-metadata":
+            _invalidate_metadata(parent)
     seen = None if latest == "empty" else "external"
     fetched, output = _transform(workflow, tmp_path)
     prepared = tmp_path / "prepared"
@@ -596,6 +605,12 @@ def test_first_starts_a_lineage_over_a_non_managed_latest_version(
     record = json.loads((prepared / "preparation.json").read_bytes())
     # The latest version seen by fetch stays bound for freshness; it is never linked as a parent.
     assert (record["first"], record["parent_id"]) == (True, seen)
+    first_warnings = [message for message in capture_logs if "--first" in message]
+    if latest in {"no-metadata", "invalid-metadata"}:
+        assert len(first_warnings) == 1
+        assert "external" in first_warnings[0]
+    else:
+        assert first_warnings == []
 
     published = api.publish_dataset(prepared, **workflow.options)
 
@@ -610,6 +625,18 @@ def test_first_starts_a_lineage_over_a_non_managed_latest_version(
     assert all(by_name[name] == split for name, split in zip(rows["image_name"], rows["split"], strict=True))
     child = _prepare(workflow, tmp_path / "child")
     assert json.loads((child / "preparation.json").read_bytes())["parent_id"] == published.dataset_id
+
+
+def test_unreadable_latest_version_still_stops_prepare_without_first(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    """Fetch warns and fetches every source again; only --first may start over such a version."""
+    _invalidate_metadata(_non_managed_latest(workflow))
+    with pytest.raises(Cveta2Error, match=r"Invalid dataset metadata .*unknown_key"):
+        _prepare(workflow, tmp_path)
+    assert any("external" in message and "dataset.yaml" in message for message in capture_logs)
+    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
+    assert not (tmp_path / "prepared").exists()
 
 
 def test_first_is_refused_once_a_managed_lineage_exists(workflow: Workflow, tmp_path: Path) -> None:

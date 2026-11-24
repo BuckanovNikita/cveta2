@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from loguru import logger
 
 from cveta2.adapters.class_api.http import HttpClassApi
 from cveta2.adapters.clearml.bundle import ClearMLStore, S3Roots
@@ -45,6 +46,7 @@ from cveta2.domain.bundle.models import (
     DatasetParent,
     ImageRoots,
     Publication,
+    UploadError,
 )
 from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ProjectConfig, dataset_definition
@@ -60,9 +62,32 @@ def _selection(config_path: Path | None, project_config: Path | None) -> tuple[P
 def _parent(
     definition: DatasetDefinition,
 ) -> tuple[DatasetParent | None, DatasetMetadata | None]:
+    """Return the latest version and its metadata; an unreadable ``dataset.yaml`` raises."""
     parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
     metadata = LocalBundleFiles().read_metadata(parent.metadata_path) if parent and parent.metadata_path else None
     return parent, metadata
+
+
+def _first_parent(
+    definition: DatasetDefinition,
+) -> tuple[DatasetParent | None, DatasetMetadata | None]:
+    """Return the latest version for ``--first``, which only needs to know whether it is managed.
+
+    A missing, unreadable or invalid ``dataset.yaml`` makes the version count as not
+    managed, with one warning; only metadata that parses and carries ``managed`` is managed.
+    """
+    parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
+    if parent is None:
+        return None, None
+    if parent.metadata_path is None:
+        reason = "нет dataset.yaml"
+    else:
+        try:
+            return parent, LocalBundleFiles().read_metadata(parent.metadata_path)
+        except UploadError as error:
+            reason = f"dataset.yaml не читается: {error}"
+    logger.warning(f"dataset prepare --first: последняя версия {parent.dataset_id} считается неуправляемой ({reason})")
+    return parent, None
 
 
 def _metadata(  # noqa: PLR0913, PLR0917 - resolved policy and selected storage.
@@ -161,9 +186,20 @@ def fetch_dataset(
     path, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
-    parent, metadata = _parent(definition)
-    previous = ClearMLSources().read_snapshot(parent.dataset_id) if parent else None
-    previous_cvat = metadata.managed.cvat if metadata is not None and metadata.managed is not None else None
+    parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
+    previous = None
+    previous_cvat = None
+    if parent is not None:
+        try:
+            metadata = LocalBundleFiles().read_metadata(parent.metadata_path) if parent.metadata_path else None
+        except UploadError as error:
+            # Nothing of this version can be trusted for reuse; dataset prepare decides whether it may be used.
+            logger.warning(
+                f"dataset.yaml последней версии {parent.dataset_id} не читается, источники выгружаются заново: {error}"
+            )
+        else:
+            previous = ClearMLSources().read_snapshot(parent.dataset_id)
+            previous_cvat = metadata.managed.cvat if metadata is not None and metadata.managed is not None else None
     files = LocalSourceFiles()
     with _client(path, project_config) as client:
         snapshot, frame = fetch_sources(
@@ -214,7 +250,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     path, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
-    parent, previous = _parent(definition)
+    parent, previous = _first_parent(definition) if first else _parent(definition)
     # Refuse the wrong mode before reconciling classes against a parent that will not be used.
     check_parent(parent.dataset_id if parent else None, previous, first=first)
     return prepare_managed(
