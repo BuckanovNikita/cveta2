@@ -134,9 +134,12 @@ def _check_cvat_server(config: ProjectConfig, snapshot: ManagedSnapshot) -> None
     """Stop unless CVAT sources were fetched from the configured CVAT server and organization.
 
     Recorded task IDs belong to the fetched server: on another one freshness
-    cannot be judged and findings could reach the wrong tasks.
+    cannot be judged and findings could reach the wrong tasks. A dataset with no
+    CVAT source has no such IDs, so its recorded server is not compared.
     ``require_complete_evidence`` has already refused CVAT sources without a server.
     """
+    if not any(source.type == "cvat" for source in snapshot.sources):
+        return
     if snapshot.cvat is not None and snapshot.cvat != config.cvat:
         raise ManagedError(
             f"CVAT server differs from the one fetched: fetched {_server(snapshot.cvat)}, "

@@ -1164,32 +1164,58 @@ def test_server_wide_access_error_still_stops_the_command(
     assert workflow.clearml.publications == []
 
 
+def _prepare_s3_only(workflow: Workflow, tmp_path: Path) -> Path:
+    """Fetch and prepare a dataset whose only source is the S3 CSV: no CVAT task IDs."""
+    _edit_shared(
+        workflow,
+        lambda shared: shared["datasets"]["combined"].update(sources=[shared["datasets"]["combined"]["sources"][2]]),
+    )
+    fetched = tmp_path / "fetched"
+    assert api.fetch_dataset("combined", output_dir=fetched, **workflow.options)["rows"] == 6
+    transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
+    transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    _hand_splits(transformed).to_csv(tmp_path / "transformed.csv", index=False)
+    summary = api.prepare_managed_dataset(
+        "combined", tmp_path / "transformed.csv", source=fetched, output_dir=tmp_path / "prepared", **workflow.options
+    )
+    assert summary.ready, summary.report
+    return summary.directory
+
+
 @pytest.mark.parametrize(
-    ("cvat", "fetched", "configured"),
+    ("cvat", "s3_only", "message"),
     [
         (
             {"host": "https://cvat.moved.example"},
-            "https://cvat.example (organization none)",
-            "https://cvat.moved.example (organization none)",
+            False,
+            (
+                "CVAT server differs from the one fetched: fetched https://cvat.example (organization none), "
+                "configured https://cvat.moved.example (organization none); fetch the managed dataset again"
+            ),
         ),
         (
             {"host": "https://cvat.example", "organization": "team"},
-            "https://cvat.example (organization none)",
-            "https://cvat.example (organization team)",
+            False,
+            (
+                "CVAT server differs from the one fetched: fetched https://cvat.example (organization none), "
+                "configured https://cvat.example (organization team); fetch the managed dataset again"
+            ),
         ),
+        ({"host": "https://cvat.moved.example"}, True, None),
     ],
-    ids=["host", "organization"],
+    ids=["host", "organization", "s3-only"],
 )
 def test_another_cvat_server_after_fetch_stops_feedback_and_publication(
-    workflow: Workflow, tmp_path: Path, cvat: dict[str, str], fetched: str, configured: str
+    workflow: Workflow, tmp_path: Path, cvat: dict[str, str], *, s3_only: bool, message: str | None
 ) -> None:
-    prepared = _prepare(workflow, tmp_path, bad=True)
+    """Only recorded CVAT task IDs tie a preparation to a server; an S3-only dataset has none."""
+    prepared = _prepare_s3_only(workflow, tmp_path) if s3_only else _prepare(workflow, tmp_path, bad=True)
     _edit_shared(workflow, lambda shared: shared.update(cvat=cvat))
-    message = (
-        f"CVAT server differs from the one fetched: fetched {fetched}, configured {configured}; "
-        "fetch the managed dataset again"
-    )
 
+    if message is None:
+        assert api.report_dataset_errors(prepared, **workflow.options).failed == []
+        assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+        return
     with pytest.raises(ManagedError, match=re.escape(message)):
         api.report_dataset_errors(prepared, **workflow.options)
     with pytest.raises(ManagedError, match=re.escape(message)):
