@@ -39,7 +39,7 @@ from cveta2.domain.bundle.validation import (
     trainability_gaps,
     validate_bundle,
 )
-from cveta2.domain.managed.models import ClearMLDestination
+from cveta2.domain.managed.models import ClearMLDestination, hide_url_userinfo
 from cveta2.domain.models import Split
 from cveta2.domain.verification.models import ValidationOptions
 
@@ -51,6 +51,21 @@ _GAP_PENDING: dict[TrainabilityGap, str] = {
     "val_images": "в val нет изображений",
     "train_box": "в train нет ни одного bbox",
 }
+
+
+# Option fields whose refused value is shown, with URL credentials hidden; no other input is echoed.
+_URL_OPTIONS = frozenset({"output_uri", "api_url"})
+
+
+def _option_errors(error: ValidationError) -> str:
+    """Describe refused options without the credentials a refused URL may hold."""
+    details = []
+    for item in error.errors(include_url=False):
+        field = ".".join(str(part) for part in item["loc"])
+        value = item.get("input")
+        shown = f" ({hide_url_userinfo(value)})" if field in _URL_OPTIONS and isinstance(value, str) else ""
+        details.append(f"{field}: {item['msg']}{shown}")
+    return "; ".join(details)
 
 
 def _listing(items: Sequence[str]) -> str:
@@ -122,7 +137,8 @@ def _new_destination(options: PrepareOptions, draft: DatasetDraft | None) -> Cle
     try:
         return ClearMLDestination(project=project, dataset=dataset, output_uri=resolved.output_uri)
     except ValidationError as error:
-        raise UploadError(f"Invalid preparation options: {error}") from error
+        # ``from None``: the chained error's text would show the refused value with its credentials.
+        raise UploadError(f"Invalid preparation options: {_option_errors(error)}") from None
 
 
 def _published(parent: DatasetParent | None, services: BundleServices) -> dict[str, Split] | None:
@@ -142,7 +158,7 @@ def _api_url(value: str | None) -> str:
     try:
         DatasetMetadata(api_url=value, classes={})
     except ValidationError as error:
-        raise UploadError(f"Invalid preparation options or API metadata: {error}") from error
+        raise UploadError(f"Invalid preparation options or API metadata: {_option_errors(error)}") from None
     return value
 
 
@@ -210,7 +226,7 @@ def prepare_dataset(
     try:
         options = PrepareOptions.model_validate(options.model_dump())
     except ValidationError as error:
-        raise UploadError(f"Invalid preparation options: {error}") from error
+        raise UploadError(f"Invalid preparation options: {_option_errors(error)}") from None
     if directory is None:
         directory = services.files.default_directory(source)
     snapshot = services.files.read_source(source)

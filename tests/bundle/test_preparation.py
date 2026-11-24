@@ -4,6 +4,7 @@ import json
 import os
 import re
 import threading
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -150,6 +151,35 @@ def test_draft_values_are_used_without_flags(scenario: Scenario, tmp_path: Path)
     assert metadata["api_url"] == API_URL
     assert metadata["images"] == {"local_root": [str(images.resolve())], "s3_root": ["s3://bucket/images"]}
     assert _report(prepared)["destination"] == {"project": "Retail/Datasets", "dataset": "retail-shelves"}
+
+
+# A refused URL with credentials, its password, and how a refusal may show it.
+_SECRET_URLS = {
+    "output_uri": ("s3://key:se/cret@bucket/x", "se/cret", "s3://***@bucket/x"),
+    "api_url": ("https://key:hidden-pass@host/api", "hidden-pass", "https://***@host/api"),
+}
+
+
+@pytest.mark.parametrize("where", ["flag", "draft"])
+@pytest.mark.parametrize("key", ["output_uri", "api_url"])
+def test_refused_url_option_hides_its_credentials(scenario: Scenario, tmp_path: Path, where: str, key: str) -> None:
+    source, options, services, store, _classes = scenario
+    secret, password, hidden = _SECRET_URLS[key]
+    if where == "flag":
+        options = options.model_copy(update={key: secret})
+    else:
+        clearml: dict[str, str] = {"project": PROJECT, "dataset": DATASET}
+        draft: dict[str, object] = {"clearml": clearml, "api_url": API_URL}
+        (clearml if key == "output_uri" else draft)[key] = secret
+        write_draft(source, draft)
+    with pytest.raises(UploadError) as caught:
+        prepare_dataset(source, tmp_path / "prepared", options, services)
+    shown = "".join(traceback.format_exception(caught.value))
+    assert hidden in str(caught.value)
+    assert password not in shown
+    assert "key:" not in shown
+    assert store.calls == 0
+    assert not (tmp_path / "prepared").exists()
 
 
 def test_missing_destination_raises_project_and_dataset_decisions(scenario: Scenario, tmp_path: Path) -> None:
