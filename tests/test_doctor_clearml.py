@@ -141,7 +141,6 @@ def test_configured_from_config_file(
     _assert_no_secret("\n".join(capture_info_logs) + capsys.readouterr().out)
 
 
-@pytest.mark.usefixtures("no_clearml_configuration")
 @pytest.mark.parametrize(
     ("setting", "verify"),
     [(None, None), ("true", None), ("false", False), ("/etc/ssl/company-ca.pem", "/etc/ssl/company-ca.pem")],
@@ -172,6 +171,7 @@ def test_only_an_explicit_tls_setting_reaches_requests(
     assert (call["allow_redirects"], call["timeout"]) == (False, (10.0, 10.0))
 
 
+@pytest.mark.usefixtures("no_clearml_configuration")
 def test_environment_tls_and_method_settings_override_the_defaults(
     monkeypatch: pytest.MonkeyPatch, fake_login: _FakeLogin
 ) -> None:
@@ -184,6 +184,74 @@ def test_environment_tls_and_method_settings_override_the_defaults(
 
     [sent] = fake_login.calls
     assert (sent.method, sent.verify) == ("POST", False)
+
+
+@pytest.mark.parametrize(
+    ("variable", "value", "named"),
+    [
+        ("CLEARML_AUTH_TOKEN", "SECRETTOKEN\nPART2", "CLEARML_AUTH_TOKEN"),
+        ("CLEARML_AUTH_TOKEN", "SECRETTOKEN-ключ", "CLEARML_AUTH_TOKEN"),
+        ("CLEARML_API_SECRET_KEY", "SECRET KEY", "секретный ключ"),
+    ],
+    ids=["token-newline", "token-non-ascii", "secret-space"],
+)
+@pytest.mark.usefixtures("no_clearml_configuration")
+def test_malformed_credentials_are_reported_without_their_value(  # noqa: PLR0913 - fixtures plus one case.
+    monkeypatch: pytest.MonkeyPatch,
+    fake_login: _FakeLogin,
+    capture_logs: list[str],
+    capsys: pytest.CaptureFixture[str],
+    *,
+    variable: str,
+    value: str,
+    named: str,
+) -> None:
+    """A value requests would refuse as a header must not reach it: its error message quotes the header."""
+    monkeypatch.setenv("CLEARML_API_HOST", "https://api.clearml.example")
+    _set_keys(monkeypatch)
+    monkeypatch.setenv(variable, value)
+
+    assert check_clearml_configuration() is False
+
+    assert fake_login.calls == []
+    assert len(capture_logs) == 1
+    assert capture_logs[0].startswith("ClearML: ключи некорректны")
+    assert named in capture_logs[0]
+    output = "\n".join(capture_logs) + capsys.readouterr().out
+    for part in value.split():
+        assert part not in output
+    assert "SECRET" not in output
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("Invalid header value: 'Bearer SECRETTOKEN'"),
+        UnicodeEncodeError("latin-1", "SECRETTOKEN", 0, 1, "SECRETTOKEN"),
+        RuntimeError("SECRETTOKEN"),
+    ],
+    ids=["value-error", "unicode", "unexpected"],
+)
+@pytest.mark.usefixtures("no_clearml_configuration")
+def test_request_errors_are_reported_by_class_only(
+    monkeypatch: pytest.MonkeyPatch,
+    capture_logs: list[str],
+    capsys: pytest.CaptureFixture[str],
+    error: Exception,
+) -> None:
+    """An exception message may quote the request; only its class is printed, and nothing escapes."""
+    monkeypatch.setenv("CLEARML_API_HOST", "https://api.clearml.example")
+    _set_keys(monkeypatch)
+
+    def request(*_args: object, **_options: object) -> object:
+        raise error
+
+    monkeypatch.setattr(requests, "request", request)
+
+    assert check_clearml_configuration() is False
+
+    assert capture_logs == [f"ClearML: сервер недоступен — https://api.clearml.example: {type(error).__name__}."]
+    assert "SECRET" not in capsys.readouterr().out
 
 
 @pytest.mark.usefixtures("no_clearml_configuration")

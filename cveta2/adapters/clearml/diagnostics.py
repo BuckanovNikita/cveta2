@@ -96,17 +96,9 @@ def _resolve() -> _Settings | None:
         if not secret_key:
             missing.append("секретный ключ (CLEARML_API_SECRET_KEY или api.credentials.secret_key)")
         fixes.append(_FIX)
-    missing_credentials = len(missing)
-    try:
-        Session.get_app_server_host(config=config)  # type: ignore[arg-type]
-    except ValueError:
-        missing.append("адрес веб-приложения (CLEARML_WEB_HOST или api.web_server)")
-    files_host = None
-    try:
-        files_host = Session.get_files_server_host(config=config)  # type: ignore[arg-type]
-    except ValueError:
-        missing.append("адрес сервера файлов (CLEARML_FILES_HOST или api.files_server)")
-    if len(missing) > missing_credentials:
+    files_host, missing_hosts = _derived_hosts(config)
+    missing.extend(missing_hosts)
+    if missing_hosts:
         fixes.append(
             f"ClearML SDK выводит эти адреса только из адреса сервера API вида api.<домен> или с портом 8008, "
             f"а адрес {host} не такой: задайте их явно."
@@ -119,6 +111,12 @@ def _resolve() -> _Settings | None:
     environment = (ENV_HOST, ENV_WEB_HOST, ENV_FILES_HOST, ENV_ACCESS_KEY, ENV_SECRET_KEY, ENV_AUTH_TOKEN)
     if any(entry.get() for entry in environment):
         sources.append("переменные окружения")
+    if malformed := _malformed_credentials(token, access_key, secret_key):
+        logger.warning(
+            f"ClearML: ключи некорректны — {malformed}: есть пробелы, переводы строк или символы не из ASCII. "
+            f"Задайте значение заново (источник: {', '.join(sources)})."
+        )
+        return None
     configured_host = ENV_HOST.get() or config.get("api.api_server", None) or config.get("api.host", None)
     # Session._send_request uses Request.def_method; Session._update_default_api_method lets the file override it.
     method = ENV_API_DEFAULT_REQ_METHOD.get(default=None) or config.get("api.http.default_method", None) or "get"
@@ -136,6 +134,42 @@ def _resolve() -> _Settings | None:
         verify=_verify_argument(ENV_HOST_VERIFY_CERT.get(default=config.get("api.verify_certificate", True))),
         authorization=authorization,
     )
+
+
+def _derived_hosts(config: object) -> tuple[str | None, list[str]]:
+    """Return the files host and the hosts the SDK cannot derive from *config*.
+
+    The SDK derives the web and files hosts from an ``api.*`` or ``:8008`` API host only.
+    """
+    from clearml.backend_api import Session  # noqa: PLC0415 - the SDK stays lazy
+
+    missing: list[str] = []
+    try:
+        # The SDK's own session passes its Config to these helpers although they are annotated ConfigTree.
+        Session.get_app_server_host(config=config)  # type: ignore[arg-type]
+    except ValueError:
+        missing.append("адрес веб-приложения (CLEARML_WEB_HOST или api.web_server)")
+    files_host = None
+    try:
+        files_host = Session.get_files_server_host(config=config)  # type: ignore[arg-type]
+    except ValueError:
+        missing.append("адрес сервера файлов (CLEARML_FILES_HOST или api.files_server)")
+    return files_host, missing
+
+
+def _malformed_credentials(token: str | None, access_key: str | None, secret_key: str | None) -> str:
+    """Name the credentials that cannot travel in an HTTP header, without their values.
+
+    requests refuses such a header with an error that quotes it, so they are caught here.
+    """
+
+    def malformed(value: str | None) -> bool:
+        return value is not None and not all("!" <= character <= "~" for character in value)
+
+    if token:
+        return "CLEARML_AUTH_TOKEN" if malformed(token) else ""
+    names = [name for name, value in (("ключ доступа", access_key), ("секретный ключ", secret_key)) if malformed(value)]
+    return ", ".join(names)
 
 
 def _verify_argument(setting: object) -> bool | str | None:
@@ -224,13 +258,16 @@ def _root_cause(error: BaseException) -> BaseException:
 
 
 def _network_reason(error: Exception) -> str:
-    """Describe a failed request without the request itself, which carries the credentials."""
+    """Name a failed request by the class of its root error only.
+
+    Exception messages are never printed: requests quotes the request in some of them,
+    for example the Authorization header in ``InvalidHeader``.
+    """
     import requests  # noqa: PLC0415 - imported lazily, like the SDK
 
     if isinstance(error, requests.Timeout | TimeoutError):
         return f"нет ответа за {_TIMEOUT_SECONDS:g} с"
-    root = _root_cause(error)
-    return f"{type(root).__name__}: {root}"
+    return type(_root_cause(error)).__name__
 
 
 def _status_problem(settings: _Settings, status: int, body: bytes) -> str | None:
@@ -260,7 +297,7 @@ def _login_problem(settings: _Settings) -> str | None:
         )
     try:
         status, body = _request_login(settings)
-    except (OSError, ValueError) as error:  # requests' errors are OSError; TimeoutError is the deadline.
+    except Exception as error:  # noqa: BLE001 - every failure to get an answer is a warning, by class only.
         return f"ClearML: сервер недоступен — {settings.host}: {_network_reason(error)}."
     return _status_problem(settings, status, body)
 
