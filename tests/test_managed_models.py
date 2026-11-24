@@ -12,7 +12,6 @@ from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
     ClearMLDestination,
-    DatasetDefinition,
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
