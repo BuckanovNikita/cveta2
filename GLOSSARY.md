@@ -205,7 +205,7 @@ _Avoid_: prepared set, release candidate, package
 
 **Bundle preparation**:
 Preparation of a prepared bundle from a full fetch directory with `verify <directory>`, taking the destination, class API, excluded classes and image roots from flags, the dataset draft and the parent dataset, with cleanup accepted by default; published with `upload-dataset`.
-_Russian_: ручная подготовка
+_Russian_: подготовка каталога
 _Avoid_: standalone preparation, ad hoc preparation
 
 **Managed dataset**:

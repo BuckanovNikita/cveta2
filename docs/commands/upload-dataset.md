@@ -168,7 +168,7 @@ if prepared.ready and not prepared.pending:
 
 ## См. также
 
-- [`cveta2 verify`](verify.md) — проверка CSV и ручная подготовка.
+- [`cveta2 verify`](verify.md) — проверка CSV и подготовка каталога.
 - [`cveta2 dataset`](dataset.md) — управляемые датасеты и `dataset publish`.
 - [Формат данных: подготовленный датасет](../dataset-format.md#подготовленный-датасет).
 - [Сценарии](../workflows.md).

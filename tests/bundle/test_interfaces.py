@@ -259,6 +259,18 @@ def test_verify_file_rejects_preparation_flags(
     assert "Ошибка проверки: Настройки подготовки относятся к каталогу полной выгрузки." in capture_info_logs
 
 
+@pytest.mark.parametrize("flags", [[], ["--clearml-project", "P"]], ids=["no-flag", "preparation-flag"])
+def test_verify_names_a_missing_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capture_info_logs: list[str], flags: list[str]
+) -> None:
+    missing = tmp_path / "run2" / "nope"
+    csv_check = Mock(side_effect=AssertionError("The CSV check was reached"))
+    monkeypatch.setattr(verification, "verify", csv_check)
+    assert _run_verify([str(missing), *flags]) == 2
+    csv_check.assert_not_called()
+    assert capture_info_logs == [f"Ошибка проверки: Нет такого файла или каталога: {missing}"]
+
+
 def test_verify_prints_prepared_path_pending_and_next_command(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capture_info_logs: list[str]
 ) -> None:

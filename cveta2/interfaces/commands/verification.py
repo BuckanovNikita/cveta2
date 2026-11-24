@@ -214,6 +214,9 @@ def _prepare(args: argparse.Namespace) -> None:
 
 
 def _validate_csv_arguments(args: argparse.Namespace) -> None:
+    # A mistyped directory is not a directory either: name the missing path before judging the flags.
+    if not Path(args.input).exists():
+        raise Cveta2Error(f"Нет такого файла или каталога: {args.input}")
     if any(getattr(args, name) for name in _PREPARATION_FLAGS):
         raise Cveta2Error("Настройки подготовки относятся к каталогу полной выгрузки.")
     if args.clean and args.output_dir is None:

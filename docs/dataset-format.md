@@ -183,7 +183,7 @@ output/
 
 ## Подготовленный датасет
 
-Подготовленный датасет ([prepared bundle](../GLOSSARY.md)) — каталог, который пишут `verify <каталог>` (ручная подготовка, [bundle preparation](../GLOSSARY.md)) и `dataset prepare` (управляемая подготовка, [managed preparation](../GLOSSARY.md)). Каталог пишется один раз:
+Подготовленный датасет ([prepared bundle](../GLOSSARY.md)) — каталог, который пишут `verify <каталог>` (подготовка каталога, [bundle preparation](../GLOSSARY.md)) и `dataset prepare` (управляемая подготовка, [managed preparation](../GLOSSARY.md)). Каталог пишется один раз:
 
 - каталог не должен существовать заранее;
 - каталог не должен лежать внутри исходного каталога выгрузки;
