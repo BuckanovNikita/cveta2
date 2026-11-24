@@ -21,6 +21,7 @@ from cveta2.domain.managed.evidence import (
 )
 from cveta2.domain.managed.models import (
     ClearMLDestination,
+    CvatIdentity,
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
@@ -154,6 +155,7 @@ def test_s3_source_does_not_skip_validation_of_later_cvat_evidence(*, missing_la
         definition_hash="recorded-definition",
         registry=[],
         registry_hash="4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        cvat=CvatIdentity(host="https://cvat.example"),
         sources=[
             SourceSnapshot(name="imported", type="s3-csv", uri="s3://bucket/source.csv"),
             SourceSnapshot(
@@ -172,6 +174,22 @@ def test_s3_source_does_not_skip_validation_of_later_cvat_evidence(*, missing_la
     else:
         require_complete_evidence(snapshot)
     assert consistent_evidence(snapshot) is False
+
+
+@pytest.mark.parametrize(("source_type", "refused"), [("cvat", True), ("s3-csv", False)])
+def test_only_cvat_sources_need_the_cvat_server_in_the_snapshot(source_type: str, *, refused: bool) -> None:
+    source = (
+        SourceSnapshot(name="live", type="cvat", project_id=12, labels=[])
+        if source_type == "cvat"
+        else SourceSnapshot(name="imported", type="s3-csv", uri="s3://bucket/source.csv")
+    )
+    snapshot = ManagedSnapshot(definition_hash="d", registry_hash="r", registry=[], sources=[source])
+
+    if refused:
+        with pytest.raises(ManagedError, match="lacks the CVAT server identity; fetch and prepare again"):
+            require_complete_evidence(snapshot)
+    else:
+        require_complete_evidence(snapshot)
 
 
 def test_saved_unicode_full_records_keep_their_persisted_fingerprints() -> None:

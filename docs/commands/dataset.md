@@ -337,7 +337,7 @@ output/fetch/
 
 У строк из CVAT столбец `image_path` пустой: путь к локальному файлу заполняете вы при преобразовании.
 
-`source-snapshot.yaml` хранит реестр классов, метки CVAT, по каждой задаче её время изменения, признак завершённости и исходные таблицы, а для `s3-csv` — адрес, SHA-256, ETag и версию объекта. Этот снимок потом попадает в опубликованный `tasks.yaml`.
+`source-snapshot.yaml` хранит реестр классов, адрес и организацию CVAT, метки CVAT, по каждой задаче её время изменения, признак завершённости и исходные таблицы, а для `s3-csv` — адрес, SHA-256, ETag и версию объекта. Этот снимок потом попадает в опубликованный `tasks.yaml`.
 
 Вывод:
 
@@ -496,11 +496,12 @@ Split — ваш: cveta2 никогда не назначает его сам. �
 
 ### Что останавливает команды и что только предупреждает
 
-`prepare`, `report-errors` и `publish` работают с текущими файлами и текущей конфигурацией. Команду останавливают только три случая:
+`prepare`, `report-errors` и `publish` работают с текущими файлами и текущей конфигурацией. Команду останавливают только эти случаи:
 
 | Что случилось | Какие команды | Сообщение | Что делать |
 |---|---|---|---|
 | В ClearML появилась новая версия датасета: после `fetch` (для `prepare`) или после `prepare` (для `report-errors` и `publish`) | все три | `Source parent changed; fetch the managed dataset again`, `Latest ClearML parent changed; fetch and prepare again`, `ClearML parent version changed; prepare again` | новый `fetch`, затем `prepare` |
+| Адрес или организация CVAT в общей конфигурации не те, с которых `fetch` выгрузил задачи | `report-errors`, `publish` | `CVAT server differs from the one fetched: fetched <адрес> (organization <организация>), configured <адрес> (organization <организация>); fetch the managed dataset again` | новый `fetch`, затем `prepare` |
 | Задача CVAT завершена сейчас, а `fetch` не записал её завершённой | `report-errors`, `publish` | `CVAT tasks completed after fetch: <источник>/<задача>, …; fetch the managed dataset again` | новый `fetch`, затем `prepare` |
 | Имена или номера классов в `dataset.yaml` подготовки расходятся с реестром классов, или строки не проходят другое правило содержимого | `publish` (реестр классов), все три (правила содержимого) | `Class names or numbers differ from the class registry: <имена>; prepare again`; блокирующие проблемы в `report.json`; `Prepared payload no longer passes training validation` | исправьте данные или подготовьте заново |
 
@@ -512,7 +513,7 @@ Split — ваш: cveta2 никогда не назначает его сам. �
 | `Источник отличается от выгруженного: <источник>: только в снимке` или `только в описании` | все три | Источник убрали из записи датасета или добавили в неё после `fetch`. |
 | Изменения задач и меток проектов CVAT, объектов S3 | `report-errors`, `publish` | Задачу изменили, переоткрыли, удалили или добавили в список игнорируемых после `fetch`; появилась незавершённая задача; изменились метки проекта; в S3 лежит другой объект. Полный список — в [Изменения источников после fetch](#изменения-источников-после-fetch). |
 
-Остальные ключи записи датасета (`clearml`, `api_url`, `s3_roots`, `empty_classes`, `overlaps`) и поля реестра классов, кроме имени и номера (порог, флаги), с подготовкой не сравниваются: `report-errors` и `publish` берут их из файлов подготовки, а новые значения применит следующий `prepare`. Если изменить `clearml`, команды ищут родительский датасет уже в новом месте и останавливаются с `Latest ClearML parent changed; fetch and prepare again`. Адрес и организация CVAT тоже не сравниваются: команды обращаются к CVAT из текущей конфигурации и сверяют задачи с тем, что там есть.
+Остальные ключи записи датасета (`clearml`, `api_url`, `s3_roots`, `empty_classes`, `overlaps`) и поля реестра классов, кроме имени и номера (порог, флаги), с подготовкой не сравниваются: `report-errors` и `publish` берут их из файлов подготовки, а новые значения применит следующий `prepare`. Если изменить `clearml`, команды ищут родительский датасет уже в новом месте и останавливаются с `Latest ClearML parent changed; fetch and prepare again`. Адрес и организацию CVAT `prepare` не проверяет, а `report-errors` и `publish` сравнивают с теми, что записал `fetch`, и при отличии останавливаются: ID задач из снимка относятся к другому серверу, поэтому проверить их свежесть нельзя, а замечания могли бы попасть в чужие задачи. Адрес сравнивается без завершающего `/`, пустая организация равна её отсутствию.
 
 Кроме того, `report-errors` и `publish` проверяют сам каталог подготовки, изображения и корни изображений (см. их «Частые ошибки»).
 
@@ -533,6 +534,7 @@ Split — ваш: cveta2 никогда не назначает его сам. �
 | `Managed lineage already exists at parent <id>; prepare without --first` | Последняя версия уже управляемая, а передан `--first`. Уберите флаг: подготовка продолжит историю от этой версии. |
 | `Invalid dataset metadata <путь>/dataset.yaml: <поле>: ...` | `dataset.yaml` последней версии в ClearML не читается как метаданные датасета. Без `--first` подготовка останавливается. Если это версия, сделанная не через `dataset publish`, начните управляемую историю с `--first`. |
 | `Source parent changed; fetch the managed dataset again` | После `fetch` в ClearML появилась новая версия датасета. Сделайте новый `fetch` и `prepare`. |
+| `Source snapshot lacks the CVAT server identity; fetch and prepare again` | В `source-snapshot.yaml` с источниками CVAT нет адреса CVAT: выгрузка сделана старой версией cveta2. Сделайте новый `fetch` и `prepare`. |
 
 ### Из Python
 
@@ -692,6 +694,7 @@ cveta2 dataset verification: <коды ошибок через запятую>
 | `Feedback frame has no unique annotation job` (в `failed`) | Кадр не входит ровно в один job типа annotation. |
 | `CVAT tasks completed after fetch: <источник>/<задача>, …; fetch the managed dataset again` | После `fetch` задачи завершили: их принятой разметки нет в выгрузке. Сделайте новый `fetch` и `prepare`. |
 | `Cannot read required S3 CSV source: s3://...` | Метаданные объекта S3 CSV-источника не читаются: объект удалён или нет доступа. |
+| `CVAT server differs from the one fetched: fetched …, configured …; fetch the managed dataset again` | В общей конфигурации другой адрес или организация CVAT, чем при `fetch`. Верните прежние или сделайте новый `fetch` и `prepare`. |
 
 ### Из Python
 
@@ -744,8 +747,9 @@ cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 
 `report-errors` и `publish` сравнивают источники с тем, что записал `fetch` в снимок источников. Читаются только списки задач, метки проектов и метаданные объектов S3; аннотации и содержимое CSV не скачиваются. Задачи из текущего списка игнорируемых не проверяются; если задачу из снимка добавили в этот список после `fetch`, команда предупреждает об этом. Кроме того, описание источников в общей конфигурации сравнивается со снимком: тип, ID проекта CVAT и `uri` каждого источника.
 
-Данные и источники останавливают команду в трёх случаях:
+Данные и источники останавливают команду в четырёх случаях:
 
+- адрес или организация CVAT в общей конфигурации не те, что записал `fetch`: `CVAT server differs from the one fetched: …; fetch the managed dataset again`. Сделайте новый `fetch` и `prepare`;
 - строки подготовки больше не проходят проверку `clearml-yolo` или, для `publish`, имена и номера классов расходятся с реестром классов (правила содержимого);
 - в ClearML появилась новая версия датасета;
 - задача CVAT завершена сейчас (все job на stage `acceptance` в state `completed`), а `fetch` не записал её завершённой: она новая или её доделали после `fetch`. Её принятой разметки нет в выгрузке, поэтому команда завершается с `CVAT tasks completed after fetch: <источник>/<задача>, …; fetch the managed dataset again`. Сделайте новый `fetch` и `prepare`.
@@ -792,6 +796,7 @@ cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 | `Parent <id> lacks dataset.yaml and is no longer a managed dataset version; fetch and prepare again, with dataset prepare --first to start a managed lineage` | У родительской версии пропал `dataset.yaml`, и она больше не управляемая. Сделайте новый `fetch` и `prepare` с `--first`. |
 | `Class names or numbers differ from the class registry: <имена>; prepare again` | Имена или номера классов в `dataset.yaml` подготовки расходятся с реестром классов: класс переименовали, перенумеровали, добавили или убрали. Подготовьте заново. |
 | `Cannot read required S3 CSV source: s3://...` | Метаданные объекта S3 CSV-источника не читаются: объект удалён или нет доступа. |
+| `CVAT server differs from the one fetched: fetched …, configured …; fetch the managed dataset again` | В общей конфигурации другой адрес или организация CVAT, чем при `fetch`. Верните прежние или сделайте новый `fetch` и `prepare`. |
 | `CVAT tasks completed after fetch: <источник>/<задача>, …; fetch the managed dataset again` | После `fetch` задачи завершили: их принятой разметки нет в выгрузке. Сделайте новый `fetch` и `prepare`. |
 | `Personal image roots changed; prepare again` | Изменились локальные корни изображений в личной конфигурации. |
 | `Prepared images changed; prepare again` | Изменился файл изображения. |

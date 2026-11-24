@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -1161,6 +1162,63 @@ def test_server_wide_access_error_still_stops_the_command(
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.cvat.issues[101] == []
     assert workflow.clearml.publications == []
+
+
+@pytest.mark.parametrize(
+    ("cvat", "fetched", "configured"),
+    [
+        (
+            {"host": "https://cvat.moved.example"},
+            "https://cvat.example (organization none)",
+            "https://cvat.moved.example (organization none)",
+        ),
+        (
+            {"host": "https://cvat.example", "organization": "team"},
+            "https://cvat.example (organization none)",
+            "https://cvat.example (organization team)",
+        ),
+    ],
+    ids=["host", "organization"],
+)
+def test_another_cvat_server_after_fetch_stops_feedback_and_publication(
+    workflow: Workflow, tmp_path: Path, cvat: dict[str, str], fetched: str, configured: str
+) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, lambda shared: shared.update(cvat=cvat))
+    message = (
+        f"CVAT server differs from the one fetched: fetched {fetched}, configured {configured}; "
+        "fetch the managed dataset again"
+    )
+
+    with pytest.raises(ManagedError, match=re.escape(message)):
+        api.report_dataset_errors(prepared, **workflow.options)
+    with pytest.raises(ManagedError, match=re.escape(message)):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.cvat.issues == {101: [], 102: []}
+    assert workflow.clearml.publications == []
+
+
+def test_same_cvat_server_written_differently_still_publishes(workflow: Workflow, tmp_path: Path) -> None:
+    """The comparison uses the normalised identity: a trailing slash and an empty organization change nothing."""
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, lambda shared: shared.update(cvat={"host": "https://cvat.example/", "organization": ""}))
+
+    assert api.report_dataset_errors(prepared, **workflow.options).created == 1
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+
+def test_snapshot_without_a_cvat_server_cannot_be_prepared(workflow: Workflow, tmp_path: Path) -> None:
+    fetched, transformed = _transform(workflow, tmp_path)
+    snapshot_path = fetched / "source-snapshot.yaml"
+    snapshot = yaml.safe_load(snapshot_path.read_text())
+    assert snapshot.pop("cvat") == {"host": "https://cvat.example", "organization": None}
+    snapshot_path.write_text(yaml.safe_dump(snapshot, allow_unicode=True))
+
+    with pytest.raises(ManagedError, match="Source snapshot lacks the CVAT server identity; fetch and prepare again"):
+        api.prepare_managed_dataset(
+            "combined", transformed, source=fetched, output_dir=tmp_path / "prepared", **workflow.options
+        )
+    assert not (tmp_path / "prepared").exists()
 
 
 def _change_registry(monkeypatch: pytest.MonkeyPatch, *, name: str = "cat", threshold: float = 0.5) -> None:

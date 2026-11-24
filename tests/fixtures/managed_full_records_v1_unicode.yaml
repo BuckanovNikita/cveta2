@@ -1,5 +1,6 @@
 # Fixed full-record format_version=1 evidence from d8659e0 (2026-11-17).
 # Keep these persisted fingerprints fixed when changing serializer code.
+# The cvat key was added when snapshots began recording the CVAT server (SIP-291).
 format_version: 1
 definition_hash: recorded-definition
 registry_hash: a1ec76fb4e9d72397f0b711e57f0df70023f5ae0d46644be37809396ebd95234
@@ -11,6 +12,8 @@ registry:
     isPeriodical: true
     isCritical: false
     threshold: 0.5
+cvat:
+  host: https://cvat.example
 parent_id: null
 sources:
   - name: live

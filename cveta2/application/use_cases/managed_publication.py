@@ -34,6 +34,7 @@ from cveta2.domain.managed.evidence import (
     source_differences,
 )
 from cveta2.domain.managed.models import (
+    CvatIdentity,
     DatasetDefinition,
     ManagedError,
     ManagedSnapshot,
@@ -124,6 +125,25 @@ def _definition_differences(
     )
 
 
+def _server(identity: CvatIdentity) -> str:
+    """Name a CVAT server and organization for a message."""
+    return f"{identity.host} (organization {identity.organization or 'none'})"
+
+
+def _check_cvat_server(config: ProjectConfig, snapshot: ManagedSnapshot) -> None:
+    """Stop unless CVAT sources were fetched from the configured CVAT server and organization.
+
+    Recorded task IDs belong to the fetched server: on another one freshness
+    cannot be judged and findings could reach the wrong tasks.
+    ``require_complete_evidence`` has already refused CVAT sources without a server.
+    """
+    if snapshot.cvat is not None and snapshot.cvat != config.cvat:
+        raise ManagedError(
+            f"CVAT server differs from the one fetched: fetched {_server(snapshot.cvat)}, "
+            f"configured {_server(config.cvat)}; fetch the managed dataset again"
+        )
+
+
 def _check_prepared(
     config: ProjectConfig,
     loaded: LoadedManagedPreparation,
@@ -137,6 +157,7 @@ def _check_prepared(
     """
     record = loaded.record
     require_complete_evidence(record.snapshot)
+    _check_cvat_server(config, record.snapshot)
     definition = dataset_definition(config, record.name)
     parent = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (parent.dataset_id if parent else None) != record.parent_id:

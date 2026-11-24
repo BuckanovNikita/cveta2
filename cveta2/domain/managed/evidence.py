@@ -50,6 +50,8 @@ def require_complete_evidence(snapshot: ManagedSnapshot) -> None:
     """Keep old snapshots readable, but require the full records before preparation or publication."""
     if snapshot.registry is None:
         raise ManagedError("Source snapshot lacks class-registry records; fetch and prepare again")
+    if snapshot.cvat is None and any(source.type == "cvat" for source in snapshot.sources):
+        raise ManagedError("Source snapshot lacks the CVAT server identity; fetch and prepare again")
     for source in snapshot.sources:
         if source.type == "cvat" and source.labels is None:
             raise ManagedError(f"Source snapshot lacks CVAT label definitions: {source.name}; fetch and prepare again")

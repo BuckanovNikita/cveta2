@@ -155,6 +155,7 @@ def fetch_sources(  # noqa: PLR0913
         definition_hash=definition_hash,
         registry_hash=registry_hash,
         registry=sorted(registry, key=lambda record: record.number),
+        cvat=config.cvat,
         parent_id=parent_id,
         sources=sources,
         assignments=previous.assignments if previous else {},

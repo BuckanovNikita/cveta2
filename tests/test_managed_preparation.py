@@ -103,6 +103,7 @@ def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata
         definition_hash=source_fingerprint(config, config.datasets["demo"]),
         registry_hash=registry_fingerprint(_registry()),
         registry=_registry(),
+        cvat=config.cvat,
         sources=[
             SourceSnapshot(
                 name="main",

@@ -224,7 +224,7 @@ _Russian_: источник
 _Avoid_: input, origin, feed
 
 **Source snapshot**:
-The source evidence captured by a managed fetch (`source-snapshot.yaml`): per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched or reused. It is stored inside the published `tasks.yaml`.
+The source evidence captured by a managed fetch (`source-snapshot.yaml`): the CVAT server and organization it was fetched from; per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched or reused. It is stored inside the published `tasks.yaml`.
 _Russian_: снимок источников
 _Avoid_: source evidence (in prose), snapshot alone, state dump
 
