@@ -680,6 +680,63 @@ def test_findings_of_an_edited_task_are_skipped(workflow: Workflow, tmp_path: Pa
     assert any("Замечаний не отправлено: 1" in line for line in capture_logs)
 
 
+def _api(number: int, name: str) -> ApiClass:
+    return ApiClass(
+        id=number + 80,
+        number=number,
+        name=name,
+        techClass=False,
+        isPeriodical=False,
+        isCritical=False,
+        threshold=0.5,
+    )
+
+
+def test_fetch_warns_about_missing_classes(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog"), _api(9, "cow")])
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[9]))
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)
+    assert (result["excluded_class_rows"], result["missing_classes"]) == (0, ["dog"])
+    assert any("dog" in line for line in capture_logs)
+
+
+def test_fetch_counts_rows_of_excluded_classes(workflow: Workflow, tmp_path: Path, capture_logs: list[str]) -> None:
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[7]))
+    assert api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)["excluded_class_rows"] == 30
+    assert "Строк с исключёнными классами: 30. dataset prepare отклонит их." in capture_logs
+
+
+def test_fetch_with_an_unknown_excluded_class_warns_once_and_succeeds(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[99]))
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)
+    assert (result["missing_classes"], result["excluded_class_rows"]) == (None, None)
+    assert sum("Не удалось проверить классы" in line for line in capture_logs) == 1
+
+
+def test_fetch_computes_coverage_without_reading_a_non_managed_latest_version(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    # The non-managed version has class "dog" (8), which the API lacks: reconciling against it would fail.
+    _non_managed_latest(workflow)
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)
+    assert (result["excluded_class_rows"], result["missing_classes"]) == (0, [])
+    assert not any("Не удалось проверить классы" in line for line in capture_logs)
+
+
+def test_fetch_warns_once_when_the_managed_latest_version_conflicts_with_the_registry(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(8, "dog")])
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "again", **workflow.options)
+    assert result["missing_classes"] is None
+    assert sum("Не удалось проверить классы" in line for line in capture_logs) == 1
+
+
 @pytest.mark.parametrize("metadata", [True, False], ids=["plain-metadata", "no-metadata"])
 def test_latest_version_without_managed_metadata_is_refused_naming_first(
     workflow: Workflow, tmp_path: Path, *, metadata: bool
