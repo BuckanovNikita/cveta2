@@ -639,6 +639,55 @@ def test_unreadable_latest_version_still_stops_prepare_without_first(
     assert not (tmp_path / "prepared").exists()
 
 
+def test_first_takes_no_split_from_a_latest_version_that_lost_its_managed_metadata(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    """Its tasks.yaml still carries a managed snapshot with assignments; none of them may come back."""
+    published = api.publish_dataset(_prepare(workflow, tmp_path / "one"), **workflow.options)
+    remote = workflow.clearml.root / published.dataset_id
+    old = pd.read_csv(remote / "dataset.csv", keep_default_na=False)
+    old_split = dict(zip(old["image_name"], old["split"], strict=False))
+    metadata = yaml.safe_load((remote / "dataset.yaml").read_text())
+    metadata.pop("managed")
+    (remote / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    assert yaml.safe_load((remote / "tasks.yaml").read_text())["managed"]["assignments"]
+    workflow.cvat.annotation_reads.clear()
+
+    fetched = tmp_path / "two" / "fetched"
+    api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
+    assert LocalSourceFiles().read_snapshot(fetched).assignments == {}
+    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
+    frame = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
+    frame["image_path"] = frame["image_name"].map(lambda name: str(workflow.images / name))
+    rotate = {"train": "val", "val": "test", "test": "train"}
+    frame = frame.assign(split=frame["image_name"].map(lambda name: rotate[old_split[name]]))
+    output = tmp_path / "two" / "transformed.csv"
+    frame.to_csv(output, index=False)
+
+    summary = api.prepare_managed_dataset(
+        "combined", output, source=fetched, output_dir=tmp_path / "two" / "prepared", first=True, **workflow.options
+    )
+
+    assert summary.ready, summary.report
+    assert summary.report["split_replacements"] == 0
+    result = pd.read_csv(summary.directory / "dataset.csv", keep_default_na=False)
+    assert all(
+        split == rotate[old_split[name]] for name, split in zip(result["image_name"], result["split"], strict=True)
+    )
+
+
+def test_first_reads_no_tasks_yaml_from_a_non_managed_latest_version(workflow: Workflow, tmp_path: Path) -> None:
+    """Fetch must not parse anything of a version it may not reuse, so a broken tasks.yaml cannot block --first."""
+    parent = _non_managed_latest(workflow)
+    (parent / "tasks.yaml").write_text("managed: {format_version: 1, unexpected: [}\n")
+
+    prepared = _prepare(workflow, tmp_path, first=True)
+
+    record = json.loads((prepared / "preparation.json").read_bytes())
+    assert (record["first"], record["parent_id"]) == (True, "external")
+    assert sorted(workflow.cvat.annotation_reads) == [101, 102]
+
+
 def test_first_is_refused_once_a_managed_lineage_exists(workflow: Workflow, tmp_path: Path) -> None:
     api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
     with pytest.raises(

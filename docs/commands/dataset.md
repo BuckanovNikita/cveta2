@@ -280,7 +280,7 @@ cveta2 dataset fetch [--config CONFIG] [--project-config PROJECT_CONFIG] [--json
 ### Как это работает
 
 1. Читает запись датасета и загружает реестр классов с `api_url`.
-2. Ищет родительский датасет в ClearML. Если он есть, читает из его `tasks.yaml` снимок источников ([source snapshot](../../GLOSSARY.md)) прошлой публикации. Если `dataset.yaml` этой версии не читается, команда пишет предупреждение `dataset.yaml последней версии <id> не читается, источники выгружаются заново: ...` и читает все задачи заново.
+2. Ищет последнюю версию в ClearML. Если она управляемая (её `dataset.yaml` читается и содержит блок `managed`), это родительский датасет: из его `tasks.yaml` берётся снимок источников ([source snapshot](../../GLOSSARY.md)) прошлой публикации. Из неуправляемой версии не читается ничего, даже `tasks.yaml`, и все задачи читаются заново. Если `dataset.yaml` не читается, команда ещё пишет предупреждение `dataset.yaml последней версии <id> не читается, источники выгружаются заново: ...`.
 3. Для каждого источника `cvat`:
    1. Читает метки (label) проекта и список его задач. Задача считается завершённой ([completed task](../../GLOSSARY.md)), если её статус `completed`, у неё есть job и каждый job в stage `acceptance` и state `completed`.
    2. Пропускает задачи из списка игнорируемых задач проекта.
@@ -749,6 +749,7 @@ cveta2 dataset publish [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 |---|---|
 | `Preparation is not ready; review diagnostics and accept cleanup` | Подготовка не готова. Посмотрите `report.json` и подготовьте заново, при необходимости с `--clean`. |
 | `Latest ClearML parent changed; fetch and prepare again` | После подготовки в ClearML опубликована другая версия; для подготовки с `--first` — тоже любая новая версия, управляемая или нет. Сделайте новый `fetch` и `prepare`. |
+| `Parent <id> lacks dataset.yaml and is no longer a managed dataset version; fetch and prepare again, with dataset prepare --first to start a managed lineage` | У родительской версии пропал `dataset.yaml`, и она больше не управляемая. Сделайте новый `fetch` и `prepare` с `--first`. |
 | `Shared dataset policy changed; prepare again` | Изменились `clearml`, `api_url`, `s3_roots`, `empty_classes` или `overlaps`. |
 | `Source definition changed; fetch the managed dataset again` | Изменилось описание источников или адрес CVAT. |
 | `Class registry changed; fetch and prepare again` | Изменился ответ API классов. |

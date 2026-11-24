@@ -194,7 +194,8 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     files.check_roots(captured.frame, metadata)
     for root in metadata.images.s3_root:
         s3_roots.check_root(root)
-    history: dict[str, str] = dict(snapshot.assignments)
+    # A first version takes every split from the CSV, whatever the fetch snapshot carries.
+    history: dict[str, str] = {} if first else dict(snapshot.assignments)
     history.update(published_assignments(None if first else parent_metadata))
     image_hashes = files.image_hashes(captured.frame)
     frame = resolve_overlaps(captured.frame, image_hashes.identities, definition.overlaps)

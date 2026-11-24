@@ -189,17 +189,18 @@ def fetch_dataset(
     parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
     previous = None
     previous_cvat = None
-    if parent is not None:
+    metadata = None
+    if parent is not None and parent.metadata_path is not None:
         try:
-            metadata = LocalBundleFiles().read_metadata(parent.metadata_path) if parent.metadata_path else None
+            metadata = LocalBundleFiles().read_metadata(parent.metadata_path)
         except UploadError as error:
-            # Nothing of this version can be trusted for reuse; dataset prepare decides whether it may be used.
             logger.warning(
                 f"dataset.yaml последней версии {parent.dataset_id} не читается, источники выгружаются заново: {error}"
             )
-        else:
-            previous = ClearMLSources().read_snapshot(parent.dataset_id)
-            previous_cvat = metadata.managed.cvat if metadata is not None and metadata.managed is not None else None
+    # Only a managed version is a lineage to continue: nothing else of it, tasks.yaml included, is read or reused.
+    if parent is not None and metadata is not None and metadata.managed is not None:
+        previous = ClearMLSources().read_snapshot(parent.dataset_id)
+        previous_cvat = metadata.managed.cvat
     files = LocalSourceFiles()
     with _client(path, project_config) as client:
         snapshot, frame = fetch_sources(

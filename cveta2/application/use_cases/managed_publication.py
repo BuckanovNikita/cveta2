@@ -104,7 +104,10 @@ def _check_prepared(
     if parent is not None and parent.version != record.parent_version:
         raise ManagedError("ClearML parent version changed; prepare again")
     if parent is not None and parent.metadata_path is None and not record.first:
-        raise ManagedError(f"Parent {parent.dataset_id} lacks dataset.yaml; choose a new dataset name")
+        raise ManagedError(
+            f"Parent {parent.dataset_id} lacks dataset.yaml and is no longer a managed dataset version; "
+            "fetch and prepare again, with dataset prepare --first to start a managed lineage"
+        )
     records = services.registry.fetch(definition.api_url)
     if registry_fingerprint(records) != record.registry_hash:
         raise ManagedError("Class registry changed; fetch and prepare again")
