@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 import questionary
+from pydantic import ValidationError
 
 import cveta2
 from cveta2.domain.bundle.models import Publication
@@ -114,3 +115,9 @@ def test_collect_decisions_asks_project_by_text(monkeypatch: pytest.MonkeyPatch)
     options = collect_decisions(PrepareOptions(), (Decision("project", "Укажите проект ClearML."),))
     assert options.project == "Retail/Datasets"
     prompt.assert_called_once_with("Укажите проект ClearML.")
+
+
+@pytest.mark.parametrize("field", ["accept_default_classes", "accept_class_changes"])
+def test_prepare_options_reject_the_removed_class_answers(field: str) -> None:
+    with pytest.raises(ValidationError, match=field):
+        PrepareOptions.model_validate({field: True})

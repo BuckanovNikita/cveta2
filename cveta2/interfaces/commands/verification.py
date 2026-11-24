@@ -129,8 +129,6 @@ def _prepare(args: argparse.Namespace) -> None:
         local_roots=tuple(args.local_root),
         s3_roots=tuple(args.s3_root),
         class_empty=dict.fromkeys(args.empty_class, True),
-        accept_default_classes=args.accept_default_classes,
-        accept_class_changes=args.accept_class_changes,
         clean=args.clean,
     )
     while True:

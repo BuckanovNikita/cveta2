@@ -29,9 +29,8 @@ class PrepareOptions(BaseModel):
     """Flag values of a preparation; each one left out comes from the draft, then the parent.
 
     ``class_empty`` maps a class number to its exclusion mark: ``True`` excludes
-    the class, ``False`` brings back a class the parent excluded. The two
-    ``accept_*`` fields are accepted and ignored: class changes are reported,
-    never asked about.
+    the class, ``False`` brings back a class the parent excluded. Class changes
+    are reported, never asked about.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -42,8 +41,6 @@ class PrepareOptions(BaseModel):
     local_roots: tuple[str, ...] = ()
     s3_roots: tuple[str, ...] = ()
     class_empty: dict[int, bool] = Field(default_factory=dict)
-    accept_default_classes: bool = False
-    accept_class_changes: bool = False
     clean: bool = True
 
 
