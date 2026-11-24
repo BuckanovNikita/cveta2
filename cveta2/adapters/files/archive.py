@@ -7,13 +7,11 @@ import zlib
 from collections.abc import Mapping
 
 from cveta2.domain.bundle.models import UploadError
-from cveta2.domain.bundle.preparation import SOURCE_NAMES
-
-ARCHIVE_NAME = "sources.tar.gz"
+from cveta2.domain.bundle.preparation import SOURCE_NAMES, SOURCES_ARCHIVE
 
 
 def _broken(reason: str) -> UploadError:
-    return UploadError(f"Архив {ARCHIVE_NAME} повреждён или неполон: {reason}; запустите cveta2 verify заново.")
+    return UploadError(f"Архив {SOURCES_ARCHIVE} повреждён или неполон: {reason}; запустите cveta2 verify заново.")
 
 
 def pack_sources(content: Mapping[str, bytes]) -> bytes:

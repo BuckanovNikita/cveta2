@@ -3,14 +3,18 @@
 import json
 import re
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pandas as pd
 import pytest
 import yaml
 
+from cveta2.adapters.clearml.bundle import S3Roots
+from cveta2.application.ports.dataset_bundle import BundleServices
 from cveta2.application.use_cases.dataset_bundle import prepare_dataset, upload_dataset
 from cveta2.domain.bundle.models import ClassInfo, DatasetMetadata, DatasetParent, UploadError
 from cveta2.domain.bundle.preparation import PUBLISHED_NAMES, PrepareOptions
@@ -387,3 +391,50 @@ def test_unlisted_s3_root_or_output_bucket_is_refused(scenario: Scenario, tmp_pa
     with pytest.raises(UploadError, match="unavailable root"):
         upload_dataset(prepared, services)
     assert store.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("listing", "refusal"),
+    [
+        ([], None),
+        (None, "S3 listing unavailable for s3://output"),
+        (PermissionError("NoSuchBucket"), "Cannot access S3 root s3://output"),
+    ],
+    ids=["empty-bucket", "no-listing", "missing-bucket"],
+)
+def test_output_bucket_must_exist_but_may_be_empty(
+    scenario: Scenario,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    listing: list[str] | Exception | None,
+    refusal: str | None,
+) -> None:
+    _source, _options, services, store, _classes = scenario
+    prepared = _prepare(scenario, tmp_path)
+    _edit_metadata(prepared, lambda data: _clearml(data).update(output_uri="s3://output/.clearml"))
+
+    def list_objects(*, remote_url: str, return_full_path: bool) -> list[str] | None:
+        assert return_full_path
+        if remote_url == "s3://bucket/images/":
+            return ["s3://bucket/images/train.png"]
+        assert remote_url == "s3://output/"
+        if isinstance(listing, Exception):
+            raise listing
+        return listing
+
+    monkeypatch.setitem(sys.modules, "clearml", SimpleNamespace(StorageManager=SimpleNamespace(list=list_objects)))
+    real_storage = BundleServices(
+        api=services.api,
+        datasets=services.datasets,
+        s3=S3Roots(),
+        roots=services.roots,
+        files=services.files,
+        media=services.media,
+    )
+    if refusal is None:
+        assert upload_dataset(prepared, real_storage).dataset_id == "child"
+        assert store.output_uri == "s3://output/.clearml"
+    else:
+        with pytest.raises(UploadError, match=re.escape(refusal)):
+            upload_dataset(prepared, real_storage)
+        assert store.calls == 0
