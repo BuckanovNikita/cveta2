@@ -613,6 +613,18 @@ def test_s3_adapter_identity_failure_names_the_source() -> None:
         S3CsvSources(client).object_identity("s3://bucket/data.csv")
 
 
+@pytest.mark.parametrize("operation", ["read_object", "object_identity"])
+def test_s3_adapter_never_echoes_an_invalid_source_uri(operation: str) -> None:
+    client = Mock()
+    with pytest.raises(ManagedError, match=r"^Invalid S3 CSV source uri: expected s3://bucket/key\.csv$") as caught:
+        getattr(S3CsvSources(client), operation)("s3://AKIAKEY:TOPSECRET@bucket/key.csv")
+    assert "TOPSECRET" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__
+    client.get_object.assert_not_called()
+    client.head_object.assert_not_called()
+
+
 def test_cvat_adapter_metadata_inspection_does_not_download_annotations() -> None:
     api = Mock()
     api.get_project_tasks.return_value = [

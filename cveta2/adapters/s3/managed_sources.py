@@ -5,6 +5,8 @@ from collections.abc import Callable
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
+
 from cveta2.adapters.s3.errors import S3_FAILURES
 from cveta2.adapters.s3.types import S3Client
 from cveta2.adapters.s3.utils import S3_TRANSFER_ERRORS, make_s3_client, s3_retry
@@ -72,10 +74,16 @@ class S3CsvSources:
 
 
 def _on_object[T](uri: str, operation: Callable[[str, str], T]) -> T:
-    """Run *operation* on the bucket and key of an S3 CSV source, naming the source on failure."""
-    SourceDefinition(name="object", type="s3-csv", uri=uri)
-    parts = urlsplit(uri)
+    """Run *operation* on the bucket and key of an S3 CSV source, naming the source on failure.
+
+    An invalid URI is refused without its value: one read from a hand-edited
+    ``source-snapshot.yaml`` may carry credentials.
+    """
     try:
+        SourceDefinition(name="object", type="s3-csv", uri=uri)
+        parts = urlsplit(uri)
         return operation(parts.netloc, parts.path.removeprefix("/"))
+    except ValidationError:
+        raise ManagedError("Invalid S3 CSV source uri: expected s3://bucket/key.csv") from None
     except (*S3_TRANSFER_ERRORS, *S3_FAILURES, AttributeError, TypeError) as error:
         raise ManagedError(f"Cannot read required S3 CSV source: {uri}") from error

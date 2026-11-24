@@ -720,6 +720,7 @@ cveta2 dataset verification: <коды ошибок через запятую>
 | `Feedback frame has no unique annotation job` (в `failed`) | Кадр не входит ровно в один job типа annotation. |
 | `CVAT tasks completed after fetch: <источник>/<задача>, …; fetch the managed dataset again` | После `fetch` задачи завершили: их принятой разметки нет в выгрузке. Сделайте новый `fetch` и `prepare`. |
 | `Cannot read required S3 CSV source: s3://...` | Метаданные объекта S3 CSV-источника не читаются: объект удалён или нет доступа. |
+| `Invalid S3 CSV source uri: expected s3://bucket/key.csv` | `uri` S3 CSV-источника в `source-snapshot.yaml` подготовки — не адрес вида `s3://bucket/key.csv` (файл правили вручную). Значение не печатается: в нём могут быть учётные данные. Сделайте `fetch` и `prepare` заново. |
 | `CVAT server differs from the one fetched: fetched …, configured …; fetch the managed dataset again` | В общей конфигурации другой адрес или организация CVAT, чем при `fetch`. Верните прежние или сделайте новый `fetch` и `prepare`. |
 
 ### Из Python
@@ -865,6 +866,7 @@ cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 | `Parent <id> lacks dataset.yaml and is no longer a managed dataset version; fetch and prepare again, with dataset prepare --first to start a managed lineage` | У родительской версии пропал `dataset.yaml`, и она больше не управляемая. Сделайте новый `fetch` и `prepare` с `--first`. |
 | `Class names or numbers differ from the class registry: <имена>; prepare again` | Имена или номера классов в `dataset.yaml` подготовки расходятся с реестром классов: класс переименовали, перенумеровали, добавили или убрали. Подготовьте заново. |
 | `Cannot read required S3 CSV source: s3://...` | Метаданные объекта S3 CSV-источника не читаются: объект удалён или нет доступа. |
+| `Invalid S3 CSV source uri: expected s3://bucket/key.csv` | `uri` S3 CSV-источника в `source-snapshot.yaml` подготовки — не адрес вида `s3://bucket/key.csv` (файл правили вручную). Значение не печатается: в нём могут быть учётные данные. Сделайте `fetch` и `prepare` заново. |
 | `CVAT server differs from the one fetched: fetched …, configured …; fetch the managed dataset again` | В общей конфигурации другой адрес или организация CVAT, чем при `fetch`. Верните прежние или сделайте новый `fetch` и `prepare`. |
 | `CVAT tasks completed after fetch: <источник>/<задача>, …; fetch the managed dataset again` | После `fetch` задачи завершили: их принятой разметки нет в выгрузке. Сделайте новый `fetch` и `prepare`. |
 | `CVAT feedback delivery failed; retry report-errors before publication` | Замечание не доставлено. Запустите `report-errors`, посмотрите `failed`. |
