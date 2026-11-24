@@ -8,7 +8,7 @@ from cveta2.application.ports.managed_sources import (
     SourceFiles,
 )
 from cveta2.domain.class_registry import ApiClass, registry_fingerprint
-from cveta2.domain.managed.evidence import require_complete_evidence
+from cveta2.domain.managed.evidence import consistent_evidence, require_complete_evidence
 from cveta2.domain.managed.models import (
     CvatIdentity,
     DatasetDefinition,
@@ -104,7 +104,8 @@ def fetch_sources(  # noqa: PLR0913
     Reuse is decided per source: a source keeps its previous tasks while its
     name, type, CVAT project and labels match, and ignored tasks are skipped
     per task, so editing one source refetches at most that source. Every source
-    is reset only by ``refresh``, legacy evidence, a class registry change or a
+    is reset only by ``refresh``, legacy or inconsistent evidence (records
+    missing or not matching their fingerprints), a class registry change or a
     change of the CVAT host or organization. ``previous_cvat`` is the identity
     the previous snapshot was captured under and must come from the same
     publication as ``previous``; when it is unknown, any source definition hash
@@ -112,11 +113,7 @@ def fetch_sources(  # noqa: PLR0913
     """
     registry_hash = registry_fingerprint(registry)
     definition_hash = source_fingerprint(config, definition)
-    legacy = previous is not None and (
-        previous.registry is None or any(source.type == "cvat" and source.labels is None for source in previous.sources)
-    )
-    if previous is not None and not legacy:
-        require_complete_evidence(previous)
+    legacy = previous is not None and not consistent_evidence(previous)
     invalidated = (
         refresh
         or previous is None

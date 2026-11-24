@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from loguru import logger
+
 from cveta2.application.ports.dataset_bundle import (
     ClassApi,
     DatasetStore,
@@ -26,11 +28,17 @@ from cveta2.domain.bundle.validation import validate_bundle
 from cveta2.domain.class_registry import (
     registry_fingerprint as registry_fingerprint,  # noqa: PLC0414 - existing import.
 )
-from cveta2.domain.managed.evidence import require_complete_evidence
+from cveta2.domain.managed.evidence import (
+    SourceAssessment,
+    assess_cvat_source,
+    assess_s3_source,
+    require_complete_evidence,
+)
 from cveta2.domain.managed.models import (
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
+    SourceSnapshot,
     dataset_definition,
     definition_fingerprint,
     source_fingerprint,
@@ -56,42 +64,56 @@ class ManagedPublicationServices:
     local_roots: list[str]
 
 
-def _check_sources(
+def _assess_source(
+    config: ProjectConfig,
+    source: SourceSnapshot,
+    services: ManagedPublicationServices,
+) -> SourceAssessment:
+    """Compare one recorded source with its live state; metadata only, no annotations or CSV bodies."""
+    if source.type == "s3-csv":
+        return assess_s3_source(source, services.s3.object_identity(source.uri) if source.uri is not None else None)
+    if source.project_id is None:
+        raise ManagedError("Managed CVAT source lacks project identity")
+    project = next((project for project in config.projects.values() if project.id == source.project_id), None)
+    if project is None:
+        return SourceAssessment(
+            warnings=(
+                f"{source.name}: проект {source.project_id} больше не описан в конфигурации, задачи не проверены",
+            ),
+            stale_tasks=frozenset((source.name, task.id) for task in source.tasks.values()),
+        )
+    state = services.cvat.inspect_project(source.project_id)
+    return assess_cvat_source(source, state.tasks, state.labels_fingerprint, project.ignored_task_ids)
+
+
+def _assess_sources(
     config: ProjectConfig,
     snapshot: ManagedSnapshot,
     services: ManagedPublicationServices,
-) -> None:
-    """Metadata checks never download unchanged CVAT task annotations."""
-    for source in snapshot.sources:
-        if source.type == "s3-csv":
-            if source.uri is None or services.s3.read_object(source.uri).content_hash != source.content_hash:
-                raise ManagedError(f"S3 source changed; fetch again: {source.name}")
-            continue
-        if source.project_id is None:
-            raise ManagedError("Managed CVAT source lacks project identity")
-        project = next(
-            (project for project in config.projects.values() if project.id == source.project_id),
-            None,
+) -> SourceAssessment:
+    """Merge the per-source assessments; a CVAT task completed after fetch stops the command."""
+    parts = [_assess_source(config, source, services) for source in snapshot.sources]
+    merged = SourceAssessment(
+        newly_completed=tuple(task for part in parts for task in part.newly_completed),
+        warnings=tuple(line for part in parts for line in part.warnings),
+        stale_tasks=frozenset().union(*(part.stale_tasks for part in parts)),
+    )
+    if merged.newly_completed:
+        raise ManagedError(
+            f"CVAT tasks completed after fetch: {', '.join(merged.newly_completed)}; fetch the managed dataset again"
         )
-        if project is None:
-            raise ManagedError("Managed CVAT project no longer configured")
-        ignored = project.ignored_task_ids
-        state = services.cvat.inspect_project(source.project_id)
-        live = {str(task.id): task for task in state.tasks if task.id not in ignored}
-        if state.labels_fingerprint != source.labels_fingerprint or set(live) != set(source.tasks):
-            raise ManagedError(f"CVAT source changed; fetch again: {source.name}")
-        for key, old in source.tasks.items():
-            current = live[key]
-            if current.updated_date != old.updated_date or current.completed != old.completed:
-                raise ManagedError(f"CVAT task changed; fetch again: {source.name}/{old.id}")
+    return merged
 
 
 def _check_prepared(
     config: ProjectConfig,
     loaded: LoadedManagedPreparation,
     services: ManagedPublicationServices,
-) -> None:
-    """Check policy, parent, original source facts and clean publication media."""
+) -> SourceAssessment:
+    """Check policy, parent, sources and clean publication media; warn about changed sources.
+
+    Returns the source assessment, whose stale tasks get no feedback.
+    """
     record = loaded.record
     require_complete_evidence(record.snapshot)
     definition = dataset_definition(config, record.name)
@@ -113,8 +135,28 @@ def _check_prepared(
     if registry_fingerprint(records) != record.registry_hash:
         raise ManagedError("Class registry changed; fetch and prepare again")
     reconcile_pending(record.findings, remote=services.feedback, ledger=services.ledger)
-    _check_sources(config, services.ledger.effective_snapshot(record.snapshot), services)
+    assessment = _assess_sources(config, services.ledger.effective_snapshot(record.snapshot), services)
+    for line in assessment.warnings:
+        logger.warning(f"{line}. Датасет собирается из выгруженных данных.")
     _check_media(loaded, services)
+    return assessment
+
+
+def _report(
+    loaded: LoadedManagedPreparation, assessment: SourceAssessment, services: ManagedPublicationServices
+) -> FeedbackOutcome:
+    """Deliver the recorded findings, except those of tasks that changed after fetch."""
+    unmapped = loaded.report.get("unmapped_errors", 0)
+    outcome = report_findings(
+        loaded.record.findings,
+        remote=services.feedback,
+        ledger=services.ledger,
+        unmapped=unmapped if isinstance(unmapped, int) else 0,
+        skip=assessment.stale_tasks,
+    )
+    if outcome.skipped:
+        logger.warning(f"Замечаний не отправлено: {outcome.skipped}: их задачи изменились после fetch")
+    return outcome
 
 
 def _check_media(loaded: LoadedManagedPreparation, services: ManagedPublicationServices) -> None:
@@ -144,14 +186,8 @@ def _check_media(loaded: LoadedManagedPreparation, services: ManagedPublicationS
 def report_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> FeedbackOutcome:
     """Resume traceable frame feedback without changing immutable payload bytes."""
     loaded = services.files.load_prepared(directory)
-    _check_prepared(config, loaded, services)
-    unmapped = loaded.report.get("unmapped_errors", 0)
-    return report_findings(
-        loaded.record.findings,
-        remote=services.feedback,
-        ledger=services.ledger,
-        unmapped=unmapped if isinstance(unmapped, int) else 0,
-    )
+    assessment = _check_prepared(config, loaded, services)
+    return _report(loaded, assessment, services)
 
 
 def publish_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> Publication:
@@ -163,18 +199,13 @@ def publish_prepared(config: ProjectConfig, directory: Path, *, services: Manage
         "tasks.yaml",
     }:
         raise ManagedError("Preparation is not ready; review diagnostics and accept cleanup")
-    _check_prepared(config, loaded, services)
-    unmapped = loaded.report.get("unmapped_errors", 0)
-    outcome = report_findings(
-        loaded.record.findings,
-        remote=services.feedback,
-        ledger=services.ledger,
-        unmapped=unmapped if isinstance(unmapped, int) else 0,
-    )
+    assessment = _check_prepared(config, loaded, services)
+    outcome = _report(loaded, assessment, services)
     if outcome.failed:
         raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")
     # Recheck sources after feedback, acknowledging only proven issue-only writes.
-    _check_sources(config, services.ledger.effective_snapshot(loaded.record.snapshot), services)
+    # Its warnings were printed above; only a task completed meanwhile stops here.
+    _assess_sources(config, services.ledger.effective_snapshot(loaded.record.snapshot), services)
     definition = dataset_definition(config, loaded.record.name)
     latest = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (latest.dataset_id if latest else None) != loaded.record.parent_id:

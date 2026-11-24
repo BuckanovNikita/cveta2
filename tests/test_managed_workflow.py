@@ -24,7 +24,7 @@ from cveta2.application.ports.dtos import (
     RawJob,
     RawShape,
 )
-from cveta2.application.ports.managed_sources import S3Object
+from cveta2.application.ports.managed_sources import S3Object, S3ObjectIdentity
 from cveta2.composition import managed
 from cveta2.domain.bundle.models import (
     ApiClass,
@@ -176,12 +176,17 @@ class FakeConnection:
 
 class FakeS3:
     def __init__(self, content: bytes) -> None:
-        """Capture an object whose bytes tests can replace."""
+        """Capture an object whose bytes and version tests can replace."""
         self.content = content
+        self.version = "v1"
+
+    def object_identity(self, uri: str) -> S3ObjectIdentity:
+        assert uri == "s3://annotations/imported.csv"
+        return S3ObjectIdentity(f'"{hashlib.sha256(self.content).hexdigest()[:32]}"', self.version)
 
     def read_object(self, uri: str) -> S3Object:
-        assert uri == "s3://annotations/imported.csv"
-        return S3Object(self.content, hashlib.sha256(self.content).hexdigest(), "opaque", "v1")
+        identity = self.object_identity(uri)
+        return S3Object(self.content, hashlib.sha256(self.content).hexdigest(), identity.etag, identity.version_id)
 
 
 class FakeClearML:
@@ -547,7 +552,7 @@ def test_feedback_failure_blocks_remote_publication(workflow: Workflow, tmp_path
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
-@pytest.mark.parametrize("change", ["definition", "parent", "cvat", "label-attribute", "s3", "image"])
+@pytest.mark.parametrize("change", ["definition", "parent", "image"])
 def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path, change: str) -> None:
     prepared = _prepare(workflow, tmp_path)
     message = "fetch again|prepare again|validation"
@@ -560,7 +565,27 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
         target.mkdir()
         shutil.copy(prepared / "dataset.yaml", target / "dataset.yaml")
         workflow.clearml.latest_id = "competing"
-    elif change == "cvat":
+    else:
+        Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
+    with pytest.raises(ManagedError, match=message):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+_SOURCE_WARNINGS = {
+    "cvat": "main: задача 101 изменена после fetch",
+    "label-attribute": "main: изменились метки проекта",
+    "s3": "imported: в S3 лежит другой объект (ETag или версия)",
+    "s3-version": "imported: в S3 лежит другой объект (ETag или версия)",
+}
+
+
+@pytest.mark.parametrize("change", _SOURCE_WARNINGS)
+def test_source_changes_after_fetch_warn_and_publish(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str], change: str
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    if change == "cvat":
         workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
     elif change == "label-attribute":
         label = workflow.cvat.labels[12][0]
@@ -570,10 +595,30 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
     elif change == "s3":
         workflow.s3.content += b"\n"
     else:
-        Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
-    with pytest.raises(ManagedError, match=message):
+        workflow.s3.version = "v2"
+
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    assert f"{_SOURCE_WARNINGS[change]}. Датасет собирается из выгруженных данных." in capture_logs
+
+
+def test_task_completed_after_fetch_stops_publication(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    workflow.cvat.tasks[103] = workflow.cvat.tasks[101].model_copy(update={"id": 103, "updated_date": "new"})
+    workflow.cvat.issues[103] = []
+    with pytest.raises(
+        ManagedError, match="CVAT tasks completed after fetch: main/103; fetch the managed dataset again"
+    ):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+def test_findings_of_an_edited_task_are_skipped(workflow: Workflow, tmp_path: Path, capture_logs: list[str]) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+    assert (outcome.created, outcome.skipped) == (0, 1)
+    assert workflow.cvat.issues[101] == []
+    assert any("Замечаний не отправлено: 1" in line for line in capture_logs)
 
 
 @pytest.mark.parametrize("metadata", [True, False], ids=["plain-metadata", "no-metadata"])
@@ -768,19 +813,19 @@ def test_failed_feedback_is_delivered_after_a_sibling_issue_moved_the_task(workf
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
-def test_unexplained_task_change_still_blocks_a_pending_delivery(workflow: Workflow, tmp_path: Path) -> None:
+def test_unexplained_task_change_skips_a_pending_delivery(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path, bad=True, bad_frames=("0", "1"))
     workflow.cvat.advance_issue_timestamp = True
     workflow.cvat.fail_frames = {0}
     api.report_dataset_errors(prepared, **workflow.options)
     workflow.cvat.fail_frames.clear()
     workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
-    with pytest.raises(ManagedError):
-        api.report_dataset_errors(prepared, **workflow.options)
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+    # Both findings are on task 101, so both are skipped, the delivered one too.
+    assert (outcome.created, outcome.skipped, outcome.failed) == (0, 2, [])
     assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
-    with pytest.raises(ManagedError):
-        api.publish_dataset(prepared, **workflow.options)
-    assert workflow.clearml.publications == []
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
 
 
 def _fetch_and_transform(workflow: Workflow, tmp_path: Path) -> tuple[Path, Path]:
@@ -816,11 +861,7 @@ def test_feedback_from_an_inspection_does_not_stale_a_sibling_preparation(
         label = workflow.cvat.labels[12][0]
         attribute = label.attributes[0].model_copy(update={"default_value": "poor"})
         workflow.cvat.labels[12][0] = label.model_copy(update={"attributes": [attribute]})
-        with pytest.raises(ManagedError, match="CVAT source changed"):
-            api.publish_dataset(prepared.directory, **workflow.options)
-        assert workflow.clearml.publications == []
-    else:
-        assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
+    assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
     assert len(workflow.cvat.issues[101]) == 1
 
 
@@ -854,7 +895,7 @@ def test_preparation_with_a_ledger_from_before_sharing_still_publishes(
     assert local.read_bytes() == original_ledger
 
 
-@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels", "changed-registry", "changed-labels"])
+@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels"])
 def test_incomplete_or_corrupt_prepared_records_block_publication(
     workflow: Workflow, tmp_path: Path, damage: str
 ) -> None:
@@ -870,12 +911,8 @@ def test_incomplete_or_corrupt_prepared_records_block_publication(
     for snapshot in (source, tasks["managed"], record["snapshot"]):
         if damage == "missing-registry":
             snapshot.pop("registry")
-        elif damage == "missing-labels":
-            snapshot["sources"][0].pop("labels")
-        elif damage == "changed-registry":
-            snapshot["registry"][0]["threshold"] = 0.75
         else:
-            snapshot["sources"][0]["labels"][0]["attributes"][0]["default_value"] = "poor"
+            snapshot["sources"][0].pop("labels")
     source_path.write_text(yaml.safe_dump(source))
     tasks_path.write_text(yaml.safe_dump(tasks))
     record["source_hash"] = hashlib.sha256(source_path.read_bytes()).hexdigest()

@@ -33,7 +33,9 @@ def reconcile_pending(findings: list[FeedbackFinding], *, remote: CvatFeedback, 
     """Acknowledge uncertain own writes by reads only, before freshness checks.
 
     A marker and unchanged annotation-relevant facts are both required. Mere
-    existence of an older CVAT issue cannot excuse an unrelated task edit.
+    existence of an older CVAT issue cannot excuse an unrelated task edit: when
+    the annotations changed, the receipt stays pending, and the freshness check
+    then reports the task as edited and its findings are skipped.
     """
     for finding in findings:
         receipt = ledger.get_receipt(finding.marker)
@@ -42,9 +44,7 @@ def reconcile_pending(findings: list[FeedbackFinding], *, remote: CvatFeedback, 
         if not _receipt_matches(receipt, finding):
             raise ManagedError("Feedback marker belongs to different source evidence")
         state = remote.inspect(finding)
-        if state.fingerprint != receipt.fingerprint:
-            raise ManagedError(f"Source annotations changed during feedback: {finding.task_id}")
-        if remote.issue_exists(finding):
+        if state.fingerprint == receipt.fingerprint and remote.issue_exists(finding):
             ledger.complete(finding, state)
 
 
@@ -108,12 +108,21 @@ def report_findings(
     remote: CvatFeedback,
     ledger: FeedbackLedger,
     unmapped: int = 0,
+    skip: frozenset[tuple[str, int]] = frozenset(),
 ) -> FeedbackOutcome:
-    """Deliver every mapped finding, preserving pending checkpoints on failure."""
+    """Deliver every mapped finding, preserving pending checkpoints on failure.
+
+    A finding whose ``(source_id, task_id)`` is in *skip* is not delivered, makes
+    no CVAT call and is counted in ``skipped``.
+    """
     created = 0
     existing = 0
+    skipped = 0
     failed = []
     for finding in findings:
+        if (finding.source_id, finding.task_id) in skip:
+            skipped += 1
+            continue
         try:
             was_created = _deliver(finding, remote=remote, ledger=ledger)
         except Cveta2Error as error:
@@ -121,4 +130,4 @@ def report_findings(
             continue
         created += int(was_created)
         existing += int(not was_created)
-    return FeedbackOutcome(created=created, existing=existing, unmapped=unmapped, failed=failed)
+    return FeedbackOutcome(created=created, existing=existing, unmapped=unmapped, failed=failed, skipped=skipped)

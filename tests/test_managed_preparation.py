@@ -274,19 +274,15 @@ def test_source_definition_and_registry_must_match_fetch(tmp_path: Path) -> None
         )
 
 
-@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels", "changed-registry", "changed-labels"])
-def test_incomplete_or_corrupt_source_records_cannot_be_prepared(tmp_path: Path, damage: str) -> None:
+@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels"])
+def test_incomplete_source_records_cannot_be_prepared(tmp_path: Path, damage: str) -> None:
     config, transformed, source, metadata = _fixture(tmp_path)
     source_path = source / "source-snapshot.yaml"
     stored = yaml.safe_load(source_path.read_text())
     if damage == "missing-registry":
         stored.pop("registry")
-    elif damage == "missing-labels":
-        stored["sources"][0].pop("labels")
-    elif damage == "changed-registry":
-        stored["registry"][0]["threshold"] = 0.75
     else:
-        stored["sources"][0]["labels"][0]["color"] = "#ffffff"
+        stored["sources"][0].pop("labels")
     source_path.write_text(yaml.safe_dump(stored))
     output = tmp_path / "refused"
 

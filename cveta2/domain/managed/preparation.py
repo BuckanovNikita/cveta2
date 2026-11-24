@@ -47,12 +47,16 @@ class ManagedRecord(StrictModel):
 
 
 class FeedbackOutcome(StrictModel):
-    """Honest delivery accounting including local/unmapped diagnostics."""
+    """Honest delivery accounting including local/unmapped diagnostics.
+
+    ``skipped`` counts findings not delivered because their task changed after fetch.
+    """
 
     created: int = 0
     existing: int = 0
     unmapped: int = 0
     failed: list[str] = Field(default_factory=list)
+    skipped: int = 0
 
 
 class PreparationSummary(StrictModel):

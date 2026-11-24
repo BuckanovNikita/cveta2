@@ -144,7 +144,7 @@ def test_uncertain_create_recovers_by_reads_before_freshness_validation(
     assert report_findings([finding], remote=remote, ledger=ledger).existing == 1
 
 
-def test_real_annotation_change_is_never_acknowledged(tmp_path: Path) -> None:
+def test_reconcile_pending_keeps_a_receipt_whose_annotations_changed(tmp_path: Path) -> None:
     ledger = LocalFeedbackLedger(tmp_path)
     remote = _Remote(ledger)
     remote.edit_during.add(1)
@@ -152,8 +152,26 @@ def test_real_annotation_change_is_never_acknowledged(tmp_path: Path) -> None:
     outcome = report_findings([finding], remote=remote, ledger=ledger)
     assert len(outcome.failed) == 1
     assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
-    with pytest.raises(ManagedError, match="annotations changed"):
-        reconcile_pending([finding], remote=remote, ledger=ledger)
+
+    reconcile_pending([finding], remote=remote, ledger=ledger)
+
+    receipt = ledger.get_receipt(finding.marker)
+    assert receipt is not None
+    assert not receipt.delivered
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
+
+
+def test_report_findings_skips_stale_tasks(tmp_path: Path) -> None:
+    ledger = LocalFeedbackLedger(tmp_path)
+    remote = _Remote(ledger)
+    stale = _finding(task=101)
+
+    outcome = report_findings([stale, _finding(task=2)], remote=remote, ledger=ledger, skip=frozenset({("main", 101)}))
+
+    assert (outcome.created, outcome.existing, outcome.skipped, outcome.failed) == (1, 0, 1, [])
+    assert remote.creates == 1
+    assert stale.marker not in remote.issues
+    assert ledger.get_receipt(stale.marker) is None
 
 
 def test_partial_failure_is_explicit_and_other_findings_complete(
