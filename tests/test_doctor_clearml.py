@@ -396,6 +396,33 @@ def test_server_answering_without_a_login_is_unreachable(  # noqa: PLR0913 - fix
 
 
 @pytest.mark.usefixtures("no_clearml_configuration")
+def test_non_http_answer_is_unreachable(monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]) -> None:
+    """A server that speaks another protocol (here an SSH banner) is reported, not raised."""
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+
+        def answer() -> None:
+            connection, _address = listener.accept()
+            with connection:
+                connection.recv(65536)
+                connection.sendall(b"SSH-2.0-test\r\n")
+
+        thread = threading.Thread(target=answer, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{listener.getsockname()[1]}"
+        _point_at(monkeypatch, url)
+        _set_keys(monkeypatch)
+
+        assert check_clearml_configuration() is False
+        thread.join(5)
+
+    assert len(capture_logs) == 1
+    assert capture_logs[0].startswith(f"ClearML: сервер недоступен — {url}: ")
+    _assert_no_secret(capture_logs[0])
+
+
+@pytest.mark.usefixtures("no_clearml_configuration")
 def test_refused_connection_is_unreachable(monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]) -> None:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))

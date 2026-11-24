@@ -6,6 +6,7 @@ its login retries 240 times with backoff and can wait forever on server maintena
 """
 
 import base64
+import http.client
 import json
 import ssl
 import threading
@@ -206,7 +207,7 @@ def _has_token(body: bytes) -> bool:
     return isinstance(data, dict) and isinstance(data.get("token"), str)
 
 
-def _network_reason(error: OSError | ValueError) -> str:
+def _network_reason(error: OSError | ValueError | http.client.HTTPException) -> str:
     """Describe a failed request without the request itself, which carries the credentials."""
     reason: object = error.reason if isinstance(error, urllib.error.URLError) else error
     if isinstance(reason, TimeoutError):
@@ -246,7 +247,7 @@ def _login_problem(settings: _Settings) -> str | None:
     )
     try:
         status, body = _request_login(request, _ssl_context(settings.verify))
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, http.client.HTTPException) as error:  # HTTPException: a non-HTTP answer.
         return f"ClearML: сервер недоступен — {settings.host}: {_network_reason(error)}."
     return _status_problem(settings, status, body)
 
