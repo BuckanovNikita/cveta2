@@ -5,10 +5,12 @@ tests talk to a local HTTP server on 127.0.0.1 or to a port that refuses or neve
 """
 
 import base64
+import importlib
 import json
 import os
 import socket
 import ssl
+import sys
 import threading
 import urllib.request
 from collections.abc import Iterator
@@ -147,6 +149,50 @@ def test_configured_from_config_file(
 
 
 @pytest.mark.usefixtures("no_clearml_configuration")
+def _record_ca_files(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
+    """Record the CA file each TLS context of the check is built from."""
+    ca_files: list[str | None] = []
+    create = ssl.create_default_context
+
+    def recording(*, cafile: str | None = None) -> ssl.SSLContext:
+        ca_files.append(cafile)
+        return create(cafile=cafile)
+
+    monkeypatch.setattr(ssl, "create_default_context", recording)
+    return ca_files
+
+
+def test_tls_trusts_the_certifi_bundle_like_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The SDK verifies through requests, whose only default CA bundle is certifi's."""
+    certifi = importlib.import_module("certifi")
+    ca_files = _record_ca_files(monkeypatch)
+
+    context = diagnostics._ssl_context(verify=True)
+
+    assert ca_files == [certifi.where()]
+    assert context.verify_mode == ssl.CERT_REQUIRED
+
+
+def test_tls_falls_back_to_the_system_store_without_certifi(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(sys.modules, "certifi", None)
+    ca_files = _record_ca_files(monkeypatch)
+
+    diagnostics._ssl_context(verify=True)
+
+    assert ca_files == [None]
+
+
+def test_tls_uses_a_ca_file_named_by_the_sdk_setting(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    certifi = importlib.import_module("certifi")
+    bundle = tmp_path / "company-ca.pem"
+    bundle.write_bytes(Path(certifi.where()).read_bytes())
+    ca_files = _record_ca_files(monkeypatch)
+
+    diagnostics._ssl_context(str(bundle))
+
+    assert ca_files == [str(bundle)]
+
+
 def test_environment_tls_and_method_settings_override_the_defaults(
     monkeypatch: pytest.MonkeyPatch, fake_login: _FakeLogin
 ) -> None:

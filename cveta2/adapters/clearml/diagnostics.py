@@ -13,6 +13,7 @@ import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
 from typing import override
 
@@ -139,22 +140,37 @@ def _resolve() -> _Settings | None:
     )
 
 
+def _default_ca_file() -> str | None:
+    """Return certifi's CA bundle, the only default of the SDK's ``requests``; ``None`` without certifi.
+
+    certifi is a transitive dependency (through the SDK's ``requests``), so it is imported
+    by name: deptry treats a static import of an undeclared transitive package as an error.
+    """
+    try:
+        certifi = import_module("certifi")
+    except ImportError:
+        return None
+    return str(certifi.where())
+
+
 def _ssl_context(verify: object) -> ssl.SSLContext:
     """Build the TLS context the SDK's HTTP session would use for *verify*.
 
     Like ``get_http_session_with_retry``, a boolean-like string switches verification on
-    or off, and any other string is handed on as a CA bundle path.
+    or off, and any other string is handed on as a CA bundle path. Without a CA file the
+    certificates are checked against certifi's bundle, as ``requests`` does, or against
+    the system store when certifi is missing.
     """
-    from clearml.backend_config.converters import strtobool  # noqa: PLC0415 - the SDK stays lazy
-
     if isinstance(verify, str):
+        from clearml.backend_config.converters import strtobool  # noqa: PLC0415 - the SDK stays lazy
+
         try:
             enabled = bool(strtobool(verify))
         except ValueError:
             return ssl.create_default_context(cafile=verify)
     else:
         enabled = bool(verify)
-    context = ssl.create_default_context()
+    context = ssl.create_default_context(cafile=_default_ca_file() if enabled else None)
     if not enabled:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
