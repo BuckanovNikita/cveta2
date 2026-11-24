@@ -5,14 +5,10 @@ tests talk to a local HTTP server on 127.0.0.1 or to a port that refuses or neve
 """
 
 import base64
-import importlib
 import json
 import os
 import socket
-import ssl
-import sys
 import threading
-import urllib.request
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +16,7 @@ from pathlib import Path
 from typing import override
 
 import pytest
+import requests
 
 from cveta2.adapters.clearml import diagnostics
 from cveta2.adapters.clearml.diagnostics import check_clearml_configuration
@@ -76,10 +73,10 @@ class _FakeLogin:
 
     status: int = 200
     body: bytes = field(default_factory=_token_body)
-    calls: list[tuple[urllib.request.Request, ssl.SSLContext]] = field(default_factory=list)
+    calls: list[diagnostics._Settings] = field(default_factory=list)
 
-    def __call__(self, request: urllib.request.Request, context: ssl.SSLContext) -> tuple[int, bytes]:
-        self.calls.append((request, context))
+    def __call__(self, settings: diagnostics._Settings) -> tuple[int, bytes]:
+        self.calls.append(settings)
         return self.status, self.body
 
 
@@ -107,11 +104,9 @@ def test_configured_from_environment_logs_in_with_basic_auth(
 
     assert check_clearml_configuration() is True
 
-    [(request, context)] = fake_login.calls
-    assert request.full_url == "https://api.clearml.example/auth.login"
-    assert request.get_method() == "GET"
-    assert request.get_header("Authorization") == _BASIC
-    assert context.verify_mode == ssl.CERT_REQUIRED
+    [sent] = fake_login.calls
+    assert (sent.host, sent.method, sent.authorization) == ("https://api.clearml.example", "GET", _BASIC)
+    assert sent.verify is None
     report = _report(capture_info_logs)
     assert report.startswith("ClearML: проверено")
     assert "https://api.clearml.example" in report
@@ -137,10 +132,8 @@ def test_configured_from_config_file(
 
     assert check_clearml_configuration() is True
 
-    [(request, context)] = fake_login.calls
-    assert request.full_url == "https://api.from-file.example/auth.login"
-    assert request.get_method() == "PUT"
-    assert context.verify_mode == ssl.CERT_NONE
+    [sent] = fake_login.calls
+    assert (sent.host, sent.method, sent.verify) == ("https://api.from-file.example", "PUT", False)
     report = _report(capture_info_logs)
     assert "https://api.from-file.example" in report
     assert str(no_clearml_configuration) in report
@@ -149,48 +142,34 @@ def test_configured_from_config_file(
 
 
 @pytest.mark.usefixtures("no_clearml_configuration")
-def _record_ca_files(monkeypatch: pytest.MonkeyPatch) -> list[str | None]:
-    """Record the CA file each TLS context of the check is built from."""
-    ca_files: list[str | None] = []
-    create = ssl.create_default_context
+@pytest.mark.parametrize(
+    ("setting", "verify"),
+    [(None, None), ("true", None), ("false", False), ("/etc/ssl/company-ca.pem", "/etc/ssl/company-ca.pem")],
+    ids=["default", "explicit-on", "off", "ca-file"],
+)
+@pytest.mark.usefixtures("no_clearml_configuration")
+def test_only_an_explicit_tls_setting_reaches_requests(
+    monkeypatch: pytest.MonkeyPatch, *, setting: str | None, verify: bool | str | None
+) -> None:
+    """``verify=None`` is requests' own default: certifi, or REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE."""
+    monkeypatch.setenv("CLEARML_API_HOST", "https://api.clearml.example")
+    if setting is not None:
+        monkeypatch.setenv("CLEARML_API_HOST_VERIFY_CERT", setting)
+    _set_keys(monkeypatch)
+    calls: list[dict[str, object]] = []
 
-    def recording(*, cafile: str | None = None) -> ssl.SSLContext:
-        ca_files.append(cafile)
-        return create(cafile=cafile)
+    def request(method: str, url: str, **options: object) -> object:
+        calls.append({"method": method, "url": url, **options})
+        raise requests.ConnectionError("recorded")
 
-    monkeypatch.setattr(ssl, "create_default_context", recording)
-    return ca_files
+    monkeypatch.setattr(requests, "request", request)
 
+    assert check_clearml_configuration() is False
 
-def test_tls_trusts_the_certifi_bundle_like_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The SDK verifies through requests, whose only default CA bundle is certifi's."""
-    certifi = importlib.import_module("certifi")
-    ca_files = _record_ca_files(monkeypatch)
-
-    context = diagnostics._ssl_context(verify=True)
-
-    assert ca_files == [certifi.where()]
-    assert context.verify_mode == ssl.CERT_REQUIRED
-
-
-def test_tls_falls_back_to_the_system_store_without_certifi(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "certifi", None)
-    ca_files = _record_ca_files(monkeypatch)
-
-    diagnostics._ssl_context(verify=True)
-
-    assert ca_files == [None]
-
-
-def test_tls_uses_a_ca_file_named_by_the_sdk_setting(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    certifi = importlib.import_module("certifi")
-    bundle = tmp_path / "company-ca.pem"
-    bundle.write_bytes(Path(certifi.where()).read_bytes())
-    ca_files = _record_ca_files(monkeypatch)
-
-    diagnostics._ssl_context(str(bundle))
-
-    assert ca_files == [str(bundle)]
+    [call] = calls
+    assert call["url"] == "https://api.clearml.example/auth.login"
+    assert call["verify"] == verify
+    assert (call["allow_redirects"], call["timeout"]) == (False, (10.0, 10.0))
 
 
 def test_environment_tls_and_method_settings_override_the_defaults(
@@ -203,10 +182,8 @@ def test_environment_tls_and_method_settings_override_the_defaults(
 
     assert check_clearml_configuration() is True
 
-    [(request, context)] = fake_login.calls
-    assert request.get_method() == "POST"
-    assert context.verify_mode == ssl.CERT_NONE
-    assert context.check_hostname is False
+    [sent] = fake_login.calls
+    assert (sent.method, sent.verify) == ("POST", False)
 
 
 @pytest.mark.usefixtures("no_clearml_configuration")

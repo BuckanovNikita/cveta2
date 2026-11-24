@@ -314,6 +314,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "questionary" },
     { name = "reflink-copy" },
+    { name = "requests" },
     { name = "tenacity" },
     { name = "tqdm" },
 ]
@@ -352,6 +353,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "questionary", specifier = ">=2.0.0" },
     { name = "reflink-copy", specifier = ">=0.1.0" },
+    { name = "requests", specifier = ">=2.32.5,<3" },
     { name = "tenacity", specifier = ">=9.1.4" },
     { name = "tqdm", specifier = ">=4.66.0" },
 ]

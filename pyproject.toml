@@ -34,6 +34,7 @@ dependencies = [
     "Pillow>=11.3",
     "reflink-copy>=0.1.0",
     "clearml[s3]>=2.1.12,<3",
+    "requests>=2.32.5,<3",
 ]
 
 [project.urls]

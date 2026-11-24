@@ -1,28 +1,25 @@
 """ClearML configuration inspection for ``cveta2 doctor``; the SDK is imported lazily.
 
 The settings are resolved offline the way the SDK resolves them. The credentials are
-then verified with one bounded login request. The SDK session is not used for that:
-its login retries 240 times with backoff and can wait forever on server maintenance.
+then verified with one bounded login request sent through ``requests``, the HTTP stack
+of the SDK, so certificates, ``REQUESTS_CA_BUNDLE`` and proxies behave as in the SDK.
+The SDK session itself is not used: its login retries 240 times with backoff and can
+wait forever on server maintenance.
 """
 
 import base64
-import http.client
 import json
-import ssl
 import threading
-import urllib.error
-import urllib.request
+import warnings
 from dataclasses import dataclass, field
-from importlib import import_module
 from pathlib import Path
-from typing import override
 
 from loguru import logger
 
 from cveta2.domain.errors import Cveta2Error
 
 _TIMEOUT_SECONDS = 10.0
-"""Total time limit of the login request, name resolution included."""
+"""Time limit of the login request: requests' connect and read timeouts, and the whole exchange."""
 
 _MAX_RESPONSE_BYTES = 1 << 20
 
@@ -42,7 +39,8 @@ class _Settings:
     sources: str
     method: str
     uses_token: bool
-    verify: object
+    verify: bool | str | None
+    """requests' ``verify`` when the SDK setting is explicit; ``None`` keeps requests' default."""
     authorization: str = field(repr=False)
 
 
@@ -135,78 +133,67 @@ def _resolve() -> _Settings | None:
         sources=", ".join(sources),
         method=str(method).strip().upper(),
         uses_token=bool(token),
-        verify=ENV_HOST_VERIFY_CERT.get(default=config.get("api.verify_certificate", True)),
+        verify=_verify_argument(ENV_HOST_VERIFY_CERT.get(default=config.get("api.verify_certificate", True))),
         authorization=authorization,
     )
 
 
-def _default_ca_file() -> str | None:
-    """Return certifi's CA bundle, the only default of the SDK's ``requests``; ``None`` without certifi.
+def _verify_argument(setting: object) -> bool | str | None:
+    """Translate the SDK's TLS setting into requests' ``verify``.
 
-    certifi is a transitive dependency (through the SDK's ``requests``), so it is imported
-    by name: deptry treats a static import of an undeclared transitive package as an error.
+    As in ``get_http_session_with_retry`` (``clearml/backend_api/utils.py``), a boolean-like
+    string switches verification on or off and any other string is a CA bundle path. Only
+    an explicit choice is passed on: verification on returns ``None``, which leaves requests
+    its default (certifi, or ``REQUESTS_CA_BUNDLE`` / ``CURL_CA_BUNDLE``).
     """
-    try:
-        certifi = import_module("certifi")
-    except ImportError:
-        return None
-    return str(certifi.where())
-
-
-def _ssl_context(verify: object) -> ssl.SSLContext:
-    """Build the TLS context the SDK's HTTP session would use for *verify*.
-
-    Like ``get_http_session_with_retry``, a boolean-like string switches verification on
-    or off, and any other string is handed on as a CA bundle path. Without a CA file the
-    certificates are checked against certifi's bundle, as ``requests`` does, or against
-    the system store when certifi is missing.
-    """
-    if isinstance(verify, str):
+    if isinstance(setting, str):
         from clearml.backend_config.converters import strtobool  # noqa: PLC0415 - the SDK stays lazy
 
         try:
-            enabled = bool(strtobool(verify))
+            setting = bool(strtobool(setting))
         except ValueError:
-            return ssl.create_default_context(cafile=verify)
-    else:
-        enabled = bool(verify)
-    context = ssl.create_default_context(cafile=_default_ca_file() if enabled else None)
-    if not enabled:
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-    return context
+            return setting
+    return None if setting else False
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Keep the authorization header on the configured host: a redirect is reported, not followed."""
+def _request_login(settings: _Settings) -> tuple[int, bytes]:
+    """Send one login request and return the HTTP status and at most ``_MAX_RESPONSE_BYTES`` of body.
 
-    @override
-    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
-        return None
-
-
-def _request_login(request: urllib.request.Request, context: ssl.SSLContext) -> tuple[int, bytes]:
-    """Send *request* once and return the HTTP status and body.
-
-    The socket timeout bounds each blocking step; the worker thread bounds the whole
-    request, name resolution included, to ``_TIMEOUT_SECONDS``.
+    A plain ``requests.request`` has no retrying adapter and follows no redirect, so the
+    authorization header never leaves the configured host. requests' timeout bounds the
+    connection and each read separately, not name resolution or the whole answer; the
+    worker thread bounds those to ``_TIMEOUT_SECONDS`` as well.
     """
-    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context), _NoRedirect)
+    import requests  # noqa: PLC0415 - imported lazily, like the SDK
+
     outcome: list[tuple[int, bytes] | BaseException] = []
 
     def send() -> None:
         try:
-            with opener.open(request, timeout=_TIMEOUT_SECONDS) as response:
-                outcome.append((response.status, response.read(_MAX_RESPONSE_BYTES)))
-        except urllib.error.HTTPError as error:
-            with error:
-                outcome.append((error.code, error.read(_MAX_RESPONSE_BYTES)))
+            with requests.request(
+                settings.method,
+                f"{settings.host}/auth.login",
+                headers={"Authorization": settings.authorization},
+                timeout=(_TIMEOUT_SECONDS, _TIMEOUT_SECONDS),
+                allow_redirects=False,
+                stream=True,
+                verify=settings.verify,
+            ) as response:
+                body = b""
+                for chunk in response.iter_content(64 * 1024):
+                    body += chunk
+                    if len(body) >= _MAX_RESPONSE_BYTES:
+                        break
+                outcome.append((response.status_code, body))
         except Exception as error:  # noqa: BLE001 - the caller classifies every failure.
             outcome.append(error)
 
     worker = threading.Thread(target=send, name="clearml-login-check", daemon=True)
-    worker.start()
-    worker.join(_TIMEOUT_SECONDS)
+    with warnings.catch_warnings():
+        # Verification off is the user's explicit SDK setting; the SDK silences this warning too.
+        warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+        worker.start()
+        worker.join(_TIMEOUT_SECONDS)
     if not outcome:
         raise TimeoutError
     result = outcome[0]
@@ -223,12 +210,27 @@ def _has_token(body: bytes) -> bool:
     return isinstance(data, dict) and isinstance(data.get("token"), str)
 
 
-def _network_reason(error: OSError | ValueError | http.client.HTTPException) -> str:
+def _root_cause(error: BaseException) -> BaseException:
+    """Follow requests' and urllib3's wrapping down to the error that started the failure."""
+    seen: set[int] = set()
+    while id(error) not in seen:
+        seen.add(id(error))
+        reason = getattr(error, "reason", None)
+        following = reason if isinstance(reason, BaseException) else error.__cause__ or error.__context__
+        if following is None:
+            break
+        error = following
+    return error
+
+
+def _network_reason(error: Exception) -> str:
     """Describe a failed request without the request itself, which carries the credentials."""
-    reason: object = error.reason if isinstance(error, urllib.error.URLError) else error
-    if isinstance(reason, TimeoutError):
+    import requests  # noqa: PLC0415 - imported lazily, like the SDK
+
+    if isinstance(error, requests.Timeout | TimeoutError):
         return f"нет ответа за {_TIMEOUT_SECONDS:g} с"
-    return f"{type(reason).__name__}: {reason}"
+    root = _root_cause(error)
+    return f"{type(root).__name__}: {root}"
 
 
 def _status_problem(settings: _Settings, status: int, body: bytes) -> str | None:
@@ -256,14 +258,9 @@ def _login_problem(settings: _Settings) -> str | None:
         return (
             f"ClearML: сервер недоступен — {settings.host}: адрес сервера API должен начинаться с http:// или https://."
         )
-    request = urllib.request.Request(  # noqa: S310 - the scheme is checked above.
-        f"{settings.host}/auth.login",
-        method=settings.method,
-        headers={"Authorization": settings.authorization},
-    )
     try:
-        status, body = _request_login(request, _ssl_context(settings.verify))
-    except (OSError, ValueError, http.client.HTTPException) as error:  # HTTPException: a non-HTTP answer.
+        status, body = _request_login(settings)
+    except (OSError, ValueError) as error:  # requests' errors are OSError; TimeoutError is the deadline.
         return f"ClearML: сервер недоступен — {settings.host}: {_network_reason(error)}."
     return _status_problem(settings, status, body)
 
