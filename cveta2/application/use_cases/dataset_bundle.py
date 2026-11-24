@@ -1,6 +1,6 @@
 """Prepare a bundle from fetch output, then publish whatever the bundle's current files make valid."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -40,6 +40,7 @@ from cveta2.domain.bundle.validation import (
     validate_bundle,
 )
 from cveta2.domain.managed.models import ClearMLDestination
+from cveta2.domain.models import Split
 from cveta2.domain.verification.models import ValidationOptions
 
 # How many paths, rows or images one refusal lists before it only counts the rest.
@@ -124,12 +125,15 @@ def _new_destination(options: PrepareOptions, draft: DatasetDraft | None) -> Cle
         raise UploadError(f"Invalid preparation options: {error}") from error
 
 
-def _prefill(frame: pd.DataFrame, parent: DatasetParent | None, services: BundleServices) -> tuple[pd.DataFrame, int]:
-    """Fill empty ``split`` cells from the parent's published ``dataset.csv``; count the filled images."""
+def _published(parent: DatasetParent | None, services: BundleServices) -> dict[str, Split] | None:
+    """Return the split of each image in the parent's published ``dataset.csv``; ``None`` without that file."""
     path = services.datasets.parent_file(parent, "dataset.csv") if parent is not None else None
-    if path is None:
-        return frame, 0
-    return prefill_splits(frame, published_splits(services.files.read_rows(path)))
+    return None if path is None else published_splits(services.files.read_rows(path))
+
+
+def _prefill(frame: pd.DataFrame, published: Mapping[str, Split] | None) -> tuple[pd.DataFrame, int]:
+    """Fill empty ``split`` cells from the parent's published splits; count the filled images."""
+    return (frame, 0) if published is None else prefill_splits(frame, published)
 
 
 def _api_url(value: str | None) -> str:
@@ -161,11 +165,21 @@ def _split_missing(count: int, directory: Path) -> str:
     return f"заполните split у {count} изображений в {directory / 'dataset.csv'}"
 
 
-def _pending(clean: pd.DataFrame, directory: Path) -> tuple[str, ...]:
+def _pending(
+    clean: pd.DataFrame, directory: Path, parent: DatasetParent | None, published: Mapping[str, Split] | None
+) -> tuple[str, ...]:
     """Split conditions ``upload-dataset`` enforces that the clean rows do not meet yet."""
     if count := images_without_split(clean):
-        return (_split_missing(count, directory),)
-    return tuple(_GAP_PENDING[gap] for gap in trainability_gaps(clean))
+        pending = [_split_missing(count, directory)]
+    else:
+        pending = [_GAP_PENDING[gap] for gap in trainability_gaps(clean)]
+    if parent is not None and published and (changes := changed_splits(clean, published)):
+        images = len({name for name, _old, _new in changes})
+        pending.append(
+            f"у {images} изображений split отличается от опубликованного в родителе {parent.dataset_id}: "
+            "upload-dataset откажет без --force-resplit"
+        )
+    return tuple(pending)
 
 
 def _blockers(
@@ -211,7 +225,8 @@ def prepare_dataset(
             "выберите другое имя или используйте cveta2 dataset."
         )
     # From here on ``frame`` is what is validated and written; ``snapshot`` keeps the fetched bytes.
-    frame, split_prefilled = _prefill(snapshot.tables.dataset, parent, services)
+    published = _published(parent, services)
+    frame, split_prefilled = _prefill(snapshot.tables.dataset, published)
     resolved = resolve_preparation(options, draft, previous)
     api_url = _api_url(resolved.api_url)
     old_classes = previous.classes if previous else {}
@@ -239,7 +254,7 @@ def prepare_dataset(
             parent=parent,
             changes=update.changes,
             blockers=_blockers(validation, metadata, options, task_error),
-            pending=_pending(validation.result.clean, directory),
+            pending=_pending(validation.result.clean, directory, parent, published),
             mark_changes=class_mark_changes(old_classes, classes),
             dropped_local_roots=dropped,
             split_prefilled=split_prefilled,
@@ -386,10 +401,7 @@ def _check_rows(
         )
     if force_resplit or parent is None:
         return
-    path = services.datasets.parent_file(parent, "dataset.csv")
-    if path is None:
-        return
-    if changes := changed_splits(bundle.dataset, published_splits(services.files.read_rows(path))):
+    if changes := changed_splits(bundle.dataset, _published(parent, services) or {}):
         lines = [f"{name}: {published} → {current}" for name, published, current in changes]
         raise UploadError(
             f"Изображения опубликованы в родителе {parent.dataset_id} с другим split ({len(changes)}):\n"

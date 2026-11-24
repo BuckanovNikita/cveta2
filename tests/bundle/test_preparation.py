@@ -300,7 +300,12 @@ def test_image_with_one_valid_and_one_empty_split_row_is_pending(
     result = prepare_dataset(source, prepared, options, services)
     assert result.ready
     assert result.blockers == ()
-    assert result.pending == ("заполните split у 1 изображений в " + str(prepared / "dataset.csv"),)
+    missing = "заполните split у 1 изображений в " + str(prepared / "dataset.csv")
+    changed = (
+        "у 1 изображений split отличается от опубликованного в родителе parent-id: "
+        "upload-dataset откажет без --force-resplit"
+    )
+    assert result.pending == ((missing,) if parent is None else (missing, changed))
     assert result.split_prefilled == 0
     assert _read_rows(prepared / "broken-images.csv").empty
     assert list(_read_rows(prepared / "dataset.csv")["split"]) == ["train", "val", "val", ""]
@@ -336,6 +341,27 @@ def test_nothing_is_prefilled_without_a_published_dataset_csv(scenario: Scenario
     assert result.split_prefilled == 0
     assert _report(prepared)["split_prefilled"] == 0
     assert _splits(prepared / "dataset.csv")["train.png"] == ""
+
+
+def test_changed_split_of_a_published_image_is_pending(scenario: Scenario, tmp_path: Path) -> None:
+    source, options, services, store, _classes = scenario
+
+    def add_second_box(frame: pd.DataFrame) -> pd.DataFrame:
+        # Each image is counted once, however many of its rows changed.
+        extra = frame[frame["image_name"] == "val2.png"].assign(bbox_x_tl="21", bbox_x_br="30")
+        return pd.concat([frame, extra], ignore_index=True)
+
+    _edit_source(source, add_second_box)
+    _set_parent(store, tmp_path, published_rows="image_name,split\ntrain.png,train\nval.png,test\nval2.png,train\n")
+    prepared = tmp_path / "prepared"
+    result = prepare_dataset(source, prepared, options, services)
+    assert result.ready
+    pending = (
+        "у 2 изображений split отличается от опубликованного в родителе parent-id: "
+        "upload-dataset откажет без --force-resplit"
+    )
+    assert result.pending == (pending,)
+    assert _report(prepared)["pending"] == [pending]
 
 
 def test_trainability_gaps_are_pending(scenario: Scenario, tmp_path: Path) -> None:
