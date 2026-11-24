@@ -316,7 +316,7 @@ except cveta2.CvatApiError as error:
 | `UploadResult` | `upload` | `task_id`, `task_name`, `url`, `images`, `deleted`, `annotations`, `issues`. См. [upload](commands/upload.md#из-python). |
 | `WhatsNewResult` | `whats_new` | `tasks` (список `TaskInfo`), `cutoff` (наибольший ID завершённой задачи в `dataset.csv`; если завершённых нет, наибольший ID вообще). См. [whats-new](commands/whats-new.md#из-python). |
 | `ValidationResult` | `verify`, `verify_dataframe` | См. [ниже](#validationresult). |
-| `PreparedDataset` | `prepare_dataset` | `directory`, `ready`, `validation`, `metadata`, `tasks`, `blockers`, `pending`, `changes`, `mark_changes`, `dropped_local_roots`, `split_prefilled`. См. [verify](commands/verify.md#из-python). |
+| `PreparedDataset` | `prepare_dataset` | `directory`, `ready`, `validation`, `metadata`, `tasks`, `blockers`, `pending`, `changes`, `mark_changes`, `dropped_local_roots`, `split_prefilled`, `parent`. См. [verify](commands/verify.md#из-python). |
 | `Publication` | `upload_dataset`, `publish_dataset` | `dataset_id`, `version`. См. [upload-dataset](commands/upload-dataset.md#из-python). |
 
 ### Параметры проверки

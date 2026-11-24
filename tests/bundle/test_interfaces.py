@@ -15,8 +15,10 @@ import cveta2
 from cveta2.domain.bundle.models import (
     BundleValidation,
     ClassChange,
+    ClassInfo,
     ClassMarkChange,
     DatasetMetadata,
+    DatasetParent,
     Publication,
     TaskManifest,
     UploadError,
@@ -122,6 +124,9 @@ def test_collect_decisions_asks_project_by_text(monkeypatch: pytest.MonkeyPatch)
     prompt.assert_called_once_with("Укажите проект ClearML.")
 
 
+_PARENT = DatasetParent("parent-id", "Retail/Datasets", "retail-shelves", "1.0.0", None)
+
+
 def _prepared(directory: Path, *, broken_rows: int = 0, **fields: Any) -> PreparedDataset:
     """Return a ready preparation result whose validation dropped ``broken_rows`` rows of one image."""
     broken = pd.DataFrame({"image_name": ["bad.jpg"] * broken_rows})
@@ -143,6 +148,7 @@ def _prepared(directory: Path, *, broken_rows: int = 0, **fields: Any) -> Prepar
         validation=validation,
         metadata=DatasetMetadata(api_url="https://classes.example/api", classes={}),
         tasks=TaskManifest(included=[], obsolete=[]),
+        parent=_PARENT,
     )
     return replace(base, **fields)
 
@@ -351,3 +357,29 @@ def test_verify_counts_broken_rows_without_image_names(
     _fake_prepare(monkeypatch, replace(prepared, validation=replace(prepared.validation, broken_images=rows)))
     assert _run_verify([str(source)]) == 1
     assert f"В broken-images.csv записано 2 строк: {directory / 'broken-images.csv'}" in capture_info_logs
+
+
+def test_verify_summarises_the_classes_of_a_first_preparation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capture_info_logs: list[str]
+) -> None:
+    source = _source(tmp_path)
+    directory = tmp_path / "fetch-prepared"
+    classes = {
+        "bowl": ClassInfo(prod_id=1),
+        "cup": ClassInfo(prod_id=2),
+        "umbrella": ClassInfo(prod_id=10, empty=True),
+    }
+    prepared = _prepared(
+        directory,
+        parent=None,
+        metadata=DatasetMetadata(api_url="https://classes.example/api", classes=classes),
+        changes=tuple(ClassChange("added", info.prod_id, name) for name, info in classes.items()),
+        mark_changes=(ClassMarkChange(10, "umbrella", empty=True),),
+    )
+    _fake_prepare(monkeypatch, prepared)
+    CliApp().run(["verify", str(source)])
+    assert capture_info_logs[1:-2] == [
+        "Родительской версии нет: 3 классов из API, исключено 1",
+        "Класс 10 umbrella исключён",
+    ]
+    assert not any(message.startswith("Класс добавлен") for message in capture_info_logs)

@@ -175,8 +175,14 @@ def _report_preparation(result: PreparedDataset) -> None:
     _summary(result.validation.result)
     if result.split_prefilled:
         logger.info(f"split заполнен из родителя у {result.split_prefilled} изображений")
-    for change in result.changes:
-        logger.info(_class_change(change))
+    if result.parent is None:
+        # Without a parent every registry class counts as added: one line instead of one per class.
+        classes = result.metadata.classes.values()
+        excluded = sum(info.empty for info in classes)
+        logger.info(f"Родительской версии нет: {len(classes)} классов из API, исключено {excluded}")
+    else:
+        for change in result.changes:
+            logger.info(_class_change(change))
     for mark in result.mark_changes:
         logger.info(f"Класс {mark.prod_id} {mark.name} {'исключён' if mark.empty else 'возвращён'}")
     for root in result.dropped_local_roots:

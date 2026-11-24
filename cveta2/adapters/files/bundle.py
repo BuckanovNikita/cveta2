@@ -282,6 +282,7 @@ class LocalBundleFiles:
             mark_changes=proposal.mark_changes,
             dropped_local_roots=proposal.dropped_local_roots,
             split_prefilled=proposal.split_prefilled,
+            parent=proposal.parent,
         )
 
     @staticmethod

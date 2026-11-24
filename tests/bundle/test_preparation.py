@@ -114,6 +114,7 @@ def test_bundle_layout_has_archive_and_no_preparation_record(scenario: Scenario,
     assert metadata_text.startswith("clearml:")
     draft = yaml.safe_load(original["dataset.yaml"])
     assert yaml.safe_load(metadata_text)["clearml"] == draft["clearml"] == {"project": PROJECT, "dataset": DATASET}
+    assert result.parent is None
     report = json.loads((prepared / "report.json").read_bytes())
     assert report["parent"] is None
     assert report["destination"] == {"project": PROJECT, "dataset": DATASET}
@@ -318,6 +319,7 @@ def test_split_prefilled_from_parent_only_in_empty_cells(scenario: Scenario, tmp
     assert result.ready
     assert _splits(prepared / "dataset.csv") == {"train.png": "train", "val.png": "test", "val2.png": ""}
     assert result.split_prefilled == 1
+    assert result.parent == store.parent
     assert _report(prepared)["split_prefilled"] == 1
     assert unpack_sources((prepared / "sources.tar.gz").read_bytes())["dataset.csv"] == fetched
     assert (source / "dataset.csv").read_bytes() == fetched

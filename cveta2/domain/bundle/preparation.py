@@ -109,6 +109,7 @@ class PreparedDataset:
     mark_changes: tuple[ClassMarkChange, ...] = ()
     dropped_local_roots: tuple[str, ...] = ()
     split_prefilled: int = 0
+    parent: DatasetParent | None = None
 
 
 @dataclass(frozen=True)
