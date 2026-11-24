@@ -9,10 +9,8 @@ import pytest
 from pydantic import ValidationError
 
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
-from cveta2.domain.bundle.models import DatasetMetadata
 from cveta2.domain.managed.evidence import require_complete_evidence
 from cveta2.domain.managed.models import (
-    DatasetDefinition,
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
@@ -167,32 +165,6 @@ def test_saved_unicode_full_records_keep_their_persisted_fingerprints() -> None:
     assert snapshot.registry[0].name == "Кошка"
     assert snapshot.sources[0].labels is not None
     assert snapshot.sources[0].labels[0].attributes[0].values == ["", "видно"]
-
-
-def test_published_0_15_definition_with_splits_is_read() -> None:
-    raw = {
-        "api_url": "https://classes.example/api",
-        "classes": {"cat": {"prod_id": 7}},
-        "managed": {
-            "name": "combined",
-            "definition_hash": "0" * 64,
-            "cvat": {"host": "https://cvat.example"},
-            "assignments": {"h": "test"},
-            "definition": {
-                **copy.deepcopy(_SHARED["datasets"]["combined"]),
-                "splits": {"train": 0.6, "val": 0.2, "test": 0.2, "seed": 42},
-            },
-        },
-    }
-    metadata = DatasetMetadata.model_validate(raw)
-    assert metadata.managed is not None
-    assert metadata.managed.assignments == {"h": "test"}
-    assert "splits" not in metadata.managed.definition.model_dump()
-
-
-def test_dataset_definition_still_rejects_a_splits_key() -> None:
-    with pytest.raises(ValidationError):
-        DatasetDefinition.model_validate({**copy.deepcopy(_SHARED["datasets"]["combined"]), "splits": {}})
 
 
 @pytest.mark.parametrize(

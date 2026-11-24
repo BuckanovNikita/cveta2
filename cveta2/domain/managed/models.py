@@ -184,19 +184,6 @@ class ProjectConfig(StrictModel):
     projects: dict[str, ProjectDefinition] = Field(default_factory=dict)
     datasets: dict[str, DatasetDefinition] = Field(default_factory=dict)
 
-    @model_validator(mode="before")
-    @classmethod
-    def reject_split_policy(cls, data: object) -> object:
-        """Name a split policy left from cveta2 0.15 so the user deletes it."""
-        if isinstance(data, dict) and isinstance(datasets := data.get("datasets"), dict):
-            for name, dataset in datasets.items():
-                if isinstance(dataset, dict) and "splits" in dataset:
-                    raise ManagedError(
-                        f"datasets.{name}.splits is no longer supported; delete the key from the shared "
-                        "configuration: splits are not assigned automatically any more"
-                    )
-        return data
-
     @model_validator(mode="after")
     def references(self) -> Self:
         """Reject unknown project references and duplicate destination pairs."""
@@ -265,14 +252,6 @@ class ManagedMetadata(StrictModel):
     definition: DatasetDefinition
     cvat: CvatIdentity
     assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)
-
-    @field_validator("definition", mode="before")
-    @classmethod
-    def drop_legacy_splits(cls, value: object) -> object:
-        """Read a definition published by cveta2 0.15, whose split policy no longer applies."""
-        if isinstance(value, dict):
-            return {key: item for key, item in value.items() if key != "splits"}
-        return value
 
 
 def dataset_definition(config: ProjectConfig, name: str) -> DatasetDefinition:

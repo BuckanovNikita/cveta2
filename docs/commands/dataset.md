@@ -87,8 +87,6 @@ datasets:
 
 Для источника `cvat` также действует список игнорируемых задач ([ignore list](../../GLOSSARY.md)) проекта (`projects.<ключ>.ignore`): эти задачи выгрузка пропускает.
 
-Ключ `splits` удалён: split больше не назначается автоматически. Файл, в котором он остался, не читается; удалите ключ.
-
 ### Вся цепочка
 
 ```text
@@ -136,7 +134,6 @@ dataset publish        -> новая версия в ClearML
 | Сообщение | Причина и решение |
 |---|---|
 | `Ошибка операции с набором данных: Unknown managed dataset: <имя>` | В разделе `datasets` нет такого ключа. Проверьте имя через `cveta2 dataset list`. |
-| `Ошибка операции с набором данных: datasets.<имя>.splits is no longer supported; delete the key from the shared configuration: splits are not assigned automatically any more` | В записи датасета остался ключ `splits` от прежней версии cveta2. Удалите ключ `splits` из общей конфигурации. |
 | `Ошибка операции с набором данных: Invalid shared project configuration <путь>; fields: datasets.<имя>.sources.<номер>` | У источника `cvat` нет `project` или задан `uri`; у `s3-csv` адрес не вида `s3://bucket/key.csv`. |
 
 ## list
@@ -435,6 +432,8 @@ cveta2 dataset prepare [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 10. Пишет каталог подготовки. Сначала всё пишется во временный каталог рядом, затем переносится.
 
 #### Откуда берётся split
+
+Split — ваш: cveta2 никогда не назначает его сам. Он только сохраняет опубликованный split изображения, которое уже опубликовано в родительской версии.
 
 Изображение, опубликованное в родительской версии, получает опубликованный split ([stable split](../../GLOSSARY.md)). Изображение узнаётся по SHA-256 содержимого, поэтому порядок строк и имена файлов не влияют. Значение из вашего CSV заменяется; число заменённых строк — `split_replacements` в `report.json`.
 

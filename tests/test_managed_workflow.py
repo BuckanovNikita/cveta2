@@ -893,11 +893,13 @@ def _publish_then_prepare_child(workflow: Workflow, tmp_path: Path) -> Path:
     return _prepare(workflow, tmp_path / "child")
 
 
-def test_parent_published_by_0_15_is_read_and_its_splits_propagate(workflow: Workflow, tmp_path: Path) -> None:
+def test_child_takes_the_published_split_of_an_image_its_managed_parent_published(
+    workflow: Workflow, tmp_path: Path
+) -> None:
     first = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
     metadata_path = workflow.clearml.root / first.dataset_id / "dataset.yaml"
     metadata = yaml.safe_load(metadata_path.read_text())
-    metadata["managed"]["definition"]["splits"] = {"train": 0.6, "val": 0.2, "test": 0.2, "seed": 42}
+    # Move one published image to another split, so it differs from the child's hand split.
     moved = next(iter(metadata["managed"]["assignments"]))
     target = "val" if metadata["managed"]["assignments"][moved] == "test" else "test"
     metadata["managed"]["assignments"][moved] = target
