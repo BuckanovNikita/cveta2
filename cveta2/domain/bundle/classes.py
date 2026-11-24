@@ -1,6 +1,6 @@
 """Pure API class identity and historical name reconciliation."""
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from cveta2.domain.bundle.models import (
     ApiClass,
@@ -92,3 +92,10 @@ def class_mark_changes(previous: dict[str, ClassInfo], classes: dict[str, ClassI
         for name, info in classes.items()
         if before.get(info.prod_id, False) != info.empty
     )
+
+
+def registry_mismatches(classes: Mapping[str, ClassInfo], records: Sequence[ApiClass]) -> tuple[str, ...]:
+    """Name the classes that are not in both the registry and the API with the same number."""
+    registered = {name: info.prod_id for name, info in classes.items()}
+    served = {record.name: record.number for record in records}
+    return tuple(sorted(name for name in registered.keys() | served.keys() if registered.get(name) != served.get(name)))

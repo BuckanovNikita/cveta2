@@ -9,6 +9,8 @@ from cveta2.domain.managed.policies import (
     propagate_splits,
     rebuild_assignments,
     resolve_overlaps,
+    split_collisions,
+    split_conflicts,
 )
 
 
@@ -192,3 +194,23 @@ def test_compare_normalizes_missing_cells_and_rejects_opaque_values() -> None:
     old = pd.DataFrame({"image_name": ["a.jpg"], "opaque": [object()]})
     with pytest.raises(ManagedError, match="Unsupported"):
         compare_frames(old, new)
+
+
+def test_split_collisions_go_by_content() -> None:
+    frame = pd.DataFrame(
+        {
+            "image_name": ["a.png", "copy.png", "b.png", "b.png"],
+            "image_path": ["/i/a", "/i/copy", "/i/b", "/i/b"],
+            "split": ["train", "val", "train", ""],
+        }
+    )
+    assert split_collisions(frame, {"/i/a": "h", "/i/copy": "h", "/i/b": "hb"}) == ("a.png", "copy.png")
+
+
+def test_split_collisions_fall_back_to_the_path_and_skip_unhashed_rows() -> None:
+    frame = pd.DataFrame({"image_path": ["/i/a", "/i/c", "/i/x"], "split": ["train", "val", "val"]})
+    assert split_collisions(frame, {"/i/a": "h", "/i/c": "h"}) == ("/i/a", "/i/c")
+
+
+def test_split_conflicts_name_images_whose_published_split_moved() -> None:
+    assert split_conflicts(FRAME, HASHES, {"ha": "train", "hb": "test"}) == ("a.png",)

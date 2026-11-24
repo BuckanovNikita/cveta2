@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
-from cveta2.domain.managed.evidence import require_complete_evidence
+from cveta2.domain.managed.evidence import require_complete_evidence, source_differences
 from cveta2.domain.managed.models import (
     ClearMLDestination,
     ManagedError,
@@ -418,3 +418,40 @@ def test_dataset_clearml_accepts_optional_output_uri() -> None:
     config = ProjectConfig.model_validate(raw)
 
     assert config.datasets["shelves"].clearml.output_uri == "gs://bucket/.clearml"
+
+
+def test_source_differences_report_changed_uri_and_dropped_source() -> None:
+    config = ProjectConfig.model_validate(
+        {
+            "cvat": {"host": "https://cvat.example", "organization": "team"},
+            "projects": {"main": {"id": 12}},
+            "datasets": {
+                "combined": {
+                    "sources": [
+                        {"name": "main", "type": "cvat", "project": "main"},
+                        {"name": "imported", "type": "s3-csv", "uri": "s3://b/new.csv"},
+                    ],
+                    "clearml": {"project": "CV/combined", "dataset": "annotations"},
+                    "api_url": "https://classes.example/api",
+                }
+            },
+        }
+    )
+    snapshot = ManagedSnapshot(
+        definition_hash="d",
+        registry_hash="r",
+        sources=[
+            SourceSnapshot(name="main", type="cvat", project_id=12),
+            SourceSnapshot(name="imported", type="s3-csv", uri="s3://b/old.csv"),
+            SourceSnapshot(name="legacy", type="cvat", project_id=30),
+        ],
+    )
+
+    assert source_differences(config, dataset_definition(config, "combined"), snapshot) == (
+        "imported: uri s3://b/old.csv → s3://b/new.csv",
+        "legacy: только в снимке",
+    )
+    snapshot = snapshot.model_copy(update={"sources": snapshot.sources[:1]})
+    assert source_differences(config, dataset_definition(config, "combined"), snapshot) == (
+        "imported: только в описании",
+    )

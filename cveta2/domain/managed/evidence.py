@@ -4,7 +4,7 @@ import hashlib
 import json
 
 from cveta2.domain.class_registry import registry_fingerprint
-from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
+from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ManagedSnapshot, ProjectConfig
 from cveta2.domain.models import LabelInfo
 
 
@@ -29,3 +29,36 @@ def require_complete_evidence(snapshot: ManagedSnapshot) -> None:
             raise ManagedError(
                 f"CVAT label definitions do not match their fingerprint: {source.name}; fetch and prepare again"
             )
+
+
+def source_differences(
+    config: ProjectConfig,
+    definition: DatasetDefinition,
+    snapshot: ManagedSnapshot,
+) -> tuple[str, ...]:
+    """Describe, in Russian, how the snapshot's sources differ from the current definition.
+
+    Sources are matched by name and compared on type, resolved CVAT project id
+    and URI; the snapshot value is the old one, the definition value the new one.
+    """
+    current: dict[str, dict[str, object]] = {}
+    for source in definition.sources:
+        project = config.projects.get(source.project) if source.project is not None else None
+        current[source.name] = {
+            "type": source.type,
+            "project_id": project.id if project is not None else None,
+            "uri": source.uri,
+        }
+    recorded = {
+        source.name: {"type": source.type, "project_id": source.project_id, "uri": source.uri}
+        for source in snapshot.sources
+    }
+    lines = [f"{name}: только в снимке" for name in recorded.keys() - current.keys()]
+    lines += [f"{name}: только в описании" for name in current.keys() - recorded.keys()]
+    for name in current.keys() & recorded.keys():
+        lines += [
+            f"{name}: {field} {recorded[name][field]} → {current[name][field]}"
+            for field in ("type", "project_id", "uri")
+            if recorded[name][field] != current[name][field]
+        ]
+    return tuple(sorted(lines))
