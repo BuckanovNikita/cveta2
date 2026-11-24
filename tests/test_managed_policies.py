@@ -214,3 +214,14 @@ def test_split_collisions_fall_back_to_the_path_and_skip_unhashed_rows() -> None
 
 def test_split_conflicts_name_images_whose_published_split_moved() -> None:
     assert split_conflicts(FRAME, HASHES, {"ha": "train", "hb": "test"}) == ("a.png",)
+
+
+def test_split_collisions_do_not_name_pending_copies() -> None:
+    frame = pd.DataFrame(
+        {
+            "image_name": ["a.png", "b.png", "pending.png"],
+            "image_path": ["/i/a", "/i/b", "/i/p"],
+            "split": ["train", "val", ""],
+        }
+    )
+    assert split_collisions(frame, {"/i/a": "h", "/i/b": "h", "/i/p": "h"}) == ("a.png", "b.png")

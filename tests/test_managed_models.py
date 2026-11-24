@@ -455,3 +455,53 @@ def test_source_differences_report_changed_uri_and_dropped_source() -> None:
     assert source_differences(config, dataset_definition(config, "combined"), snapshot) == (
         "imported: только в описании",
     )
+
+
+def _one_source_config(source: dict[str, Any], projects: dict[str, Any]) -> ProjectConfig:
+    return ProjectConfig.model_validate(
+        {
+            "cvat": {"host": "https://cvat.example", "organization": "team"},
+            "projects": projects,
+            "datasets": {
+                "combined": {
+                    "sources": [source],
+                    "clearml": {"project": "CV/combined", "dataset": "annotations"},
+                    "api_url": "https://classes.example/api",
+                }
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expected"),
+    [
+        (
+            SourceSnapshot(name="main", type="cvat", project_id=13),
+            ("main: project_id 13 → 12",),
+        ),
+        (
+            SourceSnapshot(name="main", type="s3-csv", project_id=12, uri="s3://b/x.csv"),
+            ("main: type s3-csv → cvat", "main: uri s3://b/x.csv → None"),
+        ),
+    ],
+)
+def test_source_differences_report_changed_type_and_project_id(
+    recorded: SourceSnapshot, expected: tuple[str, ...]
+) -> None:
+    config = _one_source_config({"name": "main", "type": "cvat", "project": "main"}, {"main": {"id": 12}})
+    snapshot = ManagedSnapshot(definition_hash="d", registry_hash="r", sources=[recorded])
+
+    assert source_differences(config, dataset_definition(config, "combined"), snapshot) == expected
+
+
+def test_source_differences_treat_a_project_missing_from_the_config_as_no_project_id() -> None:
+    owner = _one_source_config({"name": "main", "type": "cvat", "project": "main"}, {"main": {"id": 12}})
+    other = _one_source_config({"name": "x", "type": "s3-csv", "uri": "s3://b/x.csv"}, {})
+    snapshot = ManagedSnapshot(
+        definition_hash="d",
+        registry_hash="r",
+        sources=[SourceSnapshot(name="main", type="cvat", project_id=12)],
+    )
+
+    assert source_differences(other, dataset_definition(owner, "combined"), snapshot) == ("main: project_id 12 → None",)

@@ -143,7 +143,7 @@ def split_collisions(frame: pd.DataFrame, image_hashes: Mapping[str, str]) -> tu
     for digest, _, split in rows:
         if split:
             splits[digest].add(split)
-    return tuple(sorted({name for digest, name, _ in rows if len(splits[digest]) > 1}))
+    return tuple(sorted({name for digest, name, split in rows if split and len(splits[digest]) > 1}))
 
 
 def split_conflicts(
