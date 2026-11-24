@@ -3,7 +3,7 @@
 import hashlib
 import json
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -117,7 +117,7 @@ class LocalManagedPreparationFiles:
         """Use the same deterministic three-file serialization as legacy bundles."""
         return _payload(frame, metadata, tasks)
 
-    def validation_report(
+    def validation_report(  # noqa: PLR0913 - report boundary.
         self,
         validation: BundleValidation,
         *,
@@ -125,6 +125,9 @@ class LocalManagedPreparationFiles:
         findings: list[FeedbackFinding],
         unmapped: int,
         split_replacements: int,
+        pending: Sequence[str] = (),
+        missing_classes: Sequence[str] = (),
+        collisions: Sequence[str] = (),
     ) -> dict[str, JsonValue]:
         """Serialize report tuples as JSON arrays and retain original diagnostics."""
         report = report_dict(validation.result)
@@ -136,6 +139,9 @@ class LocalManagedPreparationFiles:
             mapped_findings=len(findings),
             unmapped_errors=unmapped,
             split_replacements=split_replacements,
+            pending=list(pending),
+            missing_classes=list(missing_classes),
+            split_collisions=list(collisions),
         )
         return _REPORT.validate_json(json.dumps(report))
 

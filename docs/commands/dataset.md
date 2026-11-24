@@ -17,7 +17,7 @@ cveta2 dataset list
 ```bash
 cveta2 dataset fetch shelves-det --output-dir output/fetch
 # ... ваше преобразование: output/fetch/dataset.csv -> output/transformed.csv
-cveta2 dataset prepare shelves-det output/transformed.csv --source output/fetch --output-dir output/prepared --clean
+cveta2 dataset prepare shelves-det output/transformed.csv --source output/fetch --output-dir output/prepared
 cveta2 dataset report-errors output/prepared
 cveta2 dataset publish output/prepared
 ```
@@ -122,7 +122,7 @@ dataset publish        -> новая версия в ClearML
 | Код | Когда |
 |---|---|
 | `0` | Операция выполнена. Для `prepare` — подготовка готова к публикации. |
-| `1` | Только `prepare`: каталог записан, но подготовка не готова (`"ready": false`). |
+| `1` | Только `prepare`: каталог записан, но есть блокирующие условия (`"ready": false`). |
 | `2` | Ошибка операции: конфигурация, сеть, CVAT, S3, ClearML, изменившиеся источники и т. п. Для `report-errors` — также если хотя бы одно замечание не доставлено. Также неверные аргументы командной строки. |
 
 ### Интерактивный и неинтерактивный режим
@@ -396,7 +396,7 @@ print(result["rows"], [s["reused"] for s in result["sources"]])
 
 ```text
 cveta2 dataset prepare [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json]
-                       --output-dir OUTPUT_DIR --source SOURCE [--clean] [--first]
+                       --output-dir OUTPUT_DIR --source SOURCE [--no-clean] [--first]
                        name csv
 ```
 
@@ -406,7 +406,8 @@ cveta2 dataset prepare [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 | `csv` | обязателен | Ваш преобразованный CSV. |
 | `--source` | обязателен | Каталог выгрузки от `dataset fetch` (или путь к его `source-snapshot.yaml`). |
 | `--output-dir` | обязателен | Новый каталог подготовки. Не должен существовать и не должен лежать внутри каталога `--source`. |
-| `--clean` | выключен | Подтверждение очистки ([cleanup acceptance](../../GLOSSARY.md)): отклонённые строки удаляются, исправления применяются, и подготовка может стать готовой. |
+| `--no-clean` | выключен | Не принимать очистку ([cleanup acceptance](../../GLOSSARY.md)). По умолчанию отклонённые строки удаляются, а исправления применяются; с `--no-clean` подготовка блокируется, если очистка нужна. |
+| `--clean` | — | Оставлен для совместимости: очистка и так включена по умолчанию. |
 | `--first` | выключен | Начать управляемую историю датасета: подготовить первую управляемую версию, хотя в ClearML уже есть версии без управляемых метаданных. Последняя версия не используется: ни её классы, ни split, ни строки. `publish` создаст версию без родителя. Если последняя версия уже управляемая, флаг отклоняется. Версия без `dataset.yaml` или с `dataset.yaml`, который не читается, считается неуправляемой; команда пишет предупреждение `dataset prepare --first: последняя версия <id> считается неуправляемой (<причина>)`. |
 
 ### Что должен содержать преобразованный CSV
@@ -429,8 +430,19 @@ cveta2 dataset prepare [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 4. Проверяет, что изображения лежат в разрешённых локальных корнях и корнях `s3_roots`, и что каждый корень `s3_roots` доступен.
 5. Считает SHA-256 каждого изображения и применяет решения о пересечении.
 6. Переносит опубликованный split (см. ниже) в столбец `split`.
-7. Проверяет строки и изображения по профилю `clearml-yolo`.
-8. Подготовка готова, если нет блокирующих проблем, нет структурных ошибок и либо очистка не нужна, либо передан `--clean`.
+7. Проверяет строки и изображения по профилю `clearml-yolo`. Пустой `split` при этом разрешён: такие изображения попадают в `pending`.
+8. Проверяет блокирующие условия ([blocker](../../GLOSSARY.md)). Подготовка готова, если их нет:
+
+   | Условие | Строка в `blockers` |
+   |---|---|
+   | Структурные ошибки CSV или не осталось ни одного годного изображения | `Input CSV has structural validation errors.`, `No valid images remain for upload.` |
+   | Нужна очистка, а передан `--no-clean` | `Cleanup is needed and --no-clean was given.` |
+   | У класса, который не исключён, нет ни одного bbox ни в одном split | `Active classes have no bbox: <классы>` |
+   | Одно и то же изображение (по SHA-256 содержимого, под одним или разными именами) стоит в нескольких split | `Image content has rows in several splits: <имена>` |
+
+   Строки, которые убирает очистка, сами по себе подготовку не блокируют. Класс без bbox исключите (`empty_classes` в записи датасета) или добавьте его разметку.
+
+   Условия split, которые потребует `publish`, но которые пока не выполнены, попадают в `pending`. Если у каких-то изображений пустой `split`, там одна строка `заполните split у <N> изображений в <каталог>/dataset.csv`. Если split заполнен у всех строк, там пустые `train` или `val` и отсутствие bbox в `train`: `в train нет изображений`, `в val нет изображений`, `в train нет ни одного bbox`. Условия `pending` подготовку не блокируют.
 9. Собирает замечания к кадрам: ошибки в строках, которые указывают на кадр задачи из снимка источников.
 10. Пишет каталог подготовки. Сначала всё пишется во временный каталог рядом, затем переносится.
 
@@ -442,7 +454,9 @@ Split — ваш: cveta2 никогда не назначает его сам. �
 
 Изображение, удалённое из датасета, сохраняет запись о своём split: если оно вернётся, оно попадёт в тот же split.
 
-Новое изображение сохраняет split из вашего CSV. Если split пустой или не равен `train`, `val` или `test`, строки этого изображения отклоняются, и подготовка не становится готовой: в `blockers` появляется `Every input row must have a valid train, val or test split assignment.` Заполните `split` у новых изображений в преобразованном CSV и запустите `prepare` снова.
+Новое изображение сохраняет split из вашего CSV. Пустой split не блокирует подготовку: изображение попадает в `pending` (`заполните split у <N> изображений в <каталог>/dataset.csv`), а `dataset.csv` записывается с пустым split. Заполните его в `<каталог>/dataset.csv` подготовки или в преобразованном CSV перед новым `prepare`. Split, не равный `train`, `val` или `test`, — ошибка строки: очистка удаляет строки этого изображения.
+
+Одно изображение (по SHA-256 содержимого) может стоять только в одном split. Если его строки — под одним именем или под разными — стоят в разных split, подготовка блокируется: `Image content has rows in several splits: <имена>`. Очистка такие строки не удаляет молча: исправьте split в CSV.
 
 Ошибки split не отправляются в CVAT как замечания: их исправляет автор преобразованного CSV, а не разметчик.
 
@@ -460,7 +474,7 @@ Split — ваш: cveta2 никогда не назначает его сам. �
 | `source-snapshot.yaml` | всегда | Копия снимка источников из `--source`. |
 | `report.json` | всегда | Отчёт проверки ([verification report](../../GLOSSARY.md)). |
 | `broken-images.csv` | всегда | Отклонённые строки. |
-| `dataset.csv`, `dataset.yaml`, `tasks.yaml` | только если готово | Данные для публикации. |
+| `dataset.csv`, `dataset.yaml`, `tasks.yaml` | только если нет блокирующих условий | Данные для публикации. |
 | `preparation.json` | всегда | Запись подготовки: имя датасета, родительский датасет, замечания к кадрам, `ready`, `clean`. Контрольных сумм нет. |
 
 Содержимое файлов описано в [dataset-format.md](../dataset-format.md#dataset-prepare). Файлы можно править после подготовки: `report-errors` и `publish` читают их такими, какие они сейчас.
@@ -485,14 +499,17 @@ Split — ваш: cveta2 никогда не назначает его сам. �
     "broken_image_rows": 1,
     "mapped_findings": 1,
     "unmapped_errors": 0,
-    "split_replacements": 12
+    "split_replacements": 12,
+    "pending": ["заполните split у 3 изображений в output/prepared/dataset.csv"],
+    "missing_classes": [],
+    "split_collisions": []
   }
 }
 ```
 
-`mapped_findings` — сколько замечаний к кадрам будет отправлено в CVAT, `unmapped_errors` — сколько строк с ошибками не удалось связать с кадром, `split_replacements` — у скольких строк cveta2 изменил значение `split`.
+`mapped_findings` — сколько замечаний к кадрам будет отправлено в CVAT, `unmapped_errors` — сколько строк с ошибками не удалось связать с кадром, `split_replacements` — у скольких строк cveta2 изменил значение `split`, `pending` — условия split, которые потребует `publish`, но которые пока не выполнены, `missing_classes` — классы без bbox, `split_collisions` — имена изображений, у содержимого которых строки в нескольких split.
 
-Код завершения `0` — готово, `1` — каталог записан, но не готов (например, нужна очистка, а `--clean` не передан), `2` — ошибка, каталог не создан.
+Код завершения `0` — готово (условия `pending` могут оставаться), `1` — каталог записан, но есть блокирующие условия (например, нужна очистка, а передан `--no-clean`), `2` — ошибка, каталог не создан.
 
 ### Что останавливает команды и что только предупреждает
 
@@ -545,14 +562,14 @@ cveta2.prepare_managed_dataset(
     *,
     source: Path,
     output_dir: Path,
-    clean: bool = False,
+    clean: bool = True,
     first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> PreparationSummary
 ```
 
-`first=True` — то же, что флаг `--first`.
+`clean=False` — то же, что флаг `--no-clean`. `first=True` — то же, что флаг `--first`.
 
 Возвращает объект с полями `directory`, `ready` и `report` (словарь из `report.json`). Неготовая подготовка — это не исключение: проверяйте `ready`. Ошибки — исключения `cveta2.Cveta2Error`.
 
@@ -565,9 +582,8 @@ summary = cveta2.prepare_managed_dataset(
     Path("output/transformed.csv"),
     source=Path("output/fetch"),
     output_dir=Path("output/prepared"),
-    clean=True,
 )
-print(summary.ready, summary.report["counts"])
+print(summary.ready, summary.report["counts"], summary.report["pending"])
 ```
 
 ## diff
@@ -790,7 +806,7 @@ cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 
 | Сообщение | Причина и решение |
 |---|---|
-| `Preparation was blocked and has no payload; see report.json and prepare again` | `prepare` был заблокирован и не записал `dataset.csv`, `dataset.yaml` и `tasks.yaml`. Посмотрите `report.json` и подготовьте заново, при необходимости с `--clean`. |
+| `Preparation was blocked and has no payload; see report.json and prepare again` | `prepare` был заблокирован и не записал `dataset.csv`, `dataset.yaml` и `tasks.yaml`. Посмотрите `blockers` в `report.json`, исправьте данные и подготовьте заново (без `--no-clean`, если блокирует очистка). |
 | `Prepared dataset.csv does not pass validation: <n> rejected rows, repairs needed: <yes/no>, blockers: <проблемы или none>` | Текущие строки `dataset.csv` с текущими изображениями не проходят проверку `clearml-yolo`: строки отклонены, нужны исправления (например, обрезка рамок) или есть блокирующие проблемы. Исправьте `dataset.csv` или изображения либо подготовьте заново. |
 | `Cannot load managed preparation: <каталог>: <поле>: <ошибка>` | Файл каталога подготовки не разбирается, или в `preparation.json` другой `format_version`. Сообщение называет поле, но не его значение. Исправьте файл или подготовьте заново. |
 | `Latest ClearML parent changed; fetch and prepare again` | После подготовки в ClearML опубликована другая версия; для подготовки с `--first` — тоже любая новая версия, управляемая или нет. Сделайте новый `fetch` и `prepare`. |

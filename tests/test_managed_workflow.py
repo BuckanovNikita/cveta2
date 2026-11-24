@@ -431,7 +431,6 @@ def _prepare(
         output,
         source=fetched,
         output_dir=prepared,
-        clean=bad,
         first=first,
         **workflow.options,
     )
@@ -927,7 +926,7 @@ def test_feedback_from_an_inspection_does_not_stale_a_sibling_preparation(
 ) -> None:
     fetched, transformed = _fetch_and_transform(workflow, tmp_path)
     inspection = api.prepare_managed_dataset(
-        "combined", transformed, source=fetched, output_dir=tmp_path / "inspection", **workflow.options
+        "combined", transformed, source=fetched, output_dir=tmp_path / "inspection", clean=False, **workflow.options
     )
     assert not inspection.ready
     workflow.cvat.advance_issue_timestamp = True
@@ -1056,22 +1055,50 @@ def test_overlap_decision_added_after_a_failed_prepare_uses_the_same_fetch(workf
 
 
 @pytest.mark.parametrize("split", ["absent", "empty"])
-def test_missing_splits_make_preparation_not_ready_and_create_no_cvat_issues(
-    workflow: Workflow, tmp_path: Path, split: str
-) -> None:
+def test_missing_splits_are_pending_and_create_no_cvat_issues(workflow: Workflow, tmp_path: Path, split: str) -> None:
     fetched = tmp_path / "fetched"
     api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
     transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
     transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    images = transformed["image_name"].nunique()
     transformed = transformed.drop(columns="split") if split == "absent" else transformed.assign(split="")
     output = tmp_path / "transformed.csv"
     transformed.to_csv(output, index=False)
-    prepared = api.prepare_managed_dataset(
-        "combined", output, source=fetched, output_dir=tmp_path / "prepared", clean=True, **workflow.options
-    )
-    assert not prepared.ready
+    directory = tmp_path / "prepared"
+    prepared = api.prepare_managed_dataset("combined", output, source=fetched, output_dir=directory, **workflow.options)
+    assert prepared.ready
+    assert prepared.report["pending"] == [f"заполните split у {images} изображений в {directory / 'dataset.csv'}"]
     assert api.report_dataset_errors(prepared.directory, **workflow.options).created == 0
     assert workflow.cvat.issues == {101: [], 102: []}
+
+
+def test_prepare_exits_zero_with_pending_split_from_the_cli(
+    workflow: Workflow, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fetched, output = _transform(workflow, tmp_path)
+    transformed = pd.read_csv(output, keep_default_na=False)
+    blank = min(transformed["image_name"])
+    transformed.loc[transformed["image_name"].eq(blank), "split"] = ""
+    transformed.to_csv(output, index=False)
+    main(
+        [
+            "dataset",
+            "prepare",
+            "combined",
+            str(output),
+            "--source",
+            str(fetched),
+            "--output-dir",
+            str(tmp_path / "prepared"),
+            "--config",
+            str(workflow.personal),
+            "--global-config",
+            str(workflow.shared),
+        ]
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["ready"]
+    assert result["report"]["pending"] == [f"заполните split у 1 изображений в {tmp_path / 'prepared' / 'dataset.csv'}"]
 
 
 def _ignore_bookkeeping(shared: dict[str, Any]) -> None:

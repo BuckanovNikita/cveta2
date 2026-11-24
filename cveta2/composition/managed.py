@@ -237,7 +237,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     *,
     source: Path,
     output_dir: Path,
-    clean: bool = False,
+    clean: bool = True,
     first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,

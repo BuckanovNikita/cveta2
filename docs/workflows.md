@@ -320,10 +320,10 @@
 
    ```bash
    cveta2 dataset prepare shelves-det output/transformed.csv --source output/fetch \
-     --output-dir output/prepared --clean
+     --output-dir output/prepared
    ```
 
-   Управляемая подготовка ([managed preparation](../GLOSSARY.md)) переносит опубликованный split на уже опубликованные изображения; split новых изображений заполняете вы в преобразованном CSV. В JSON смотрите `"ready"`: `true` и код `0` — можно публиковать; `false` и код `1` — причины в `"blockers"`. Подробнее — [prepare](commands/dataset.md#prepare).
+   Управляемая подготовка ([managed preparation](../GLOSSARY.md)) переносит опубликованный split на уже опубликованные изображения; split новых изображений заполняете вы в преобразованном CSV. Отклонённые строки очистка удаляет по умолчанию. В JSON смотрите `"ready"`: `true` и код `0` — каталог записан; `false` и код `1` — причины в `"blockers"` (например, класс без bbox или одно изображение в нескольких split). В `"pending"` — условия split, которые потребует `publish`: заполните split новых изображений в `output/prepared/dataset.csv`, если он пуст. Подробнее — [prepare](commands/dataset.md#prepare).
 
    После `prepare` можно поправить `output/prepared/dataset.csv` и `dataset.yaml`, например убрать строки изображения. Контрольных сумм нет: `report-errors` и `publish` проверяют файлы такими, какие они сейчас, и `publish` опубликует правку, если она проходит проверки.
 

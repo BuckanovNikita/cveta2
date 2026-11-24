@@ -466,14 +466,87 @@ def test_published_image_gets_its_published_split_and_a_new_image_keeps_its_own(
     assert summary.report["split_replacements"] == 1
 
 
-def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
-    config, transformed, source, metadata = _fixture(tmp_path)
+def _forget_assignments(source: Path) -> None:
+    """Make both fixture images new: the fetch snapshot records no published split."""
     snapshot = yaml.safe_load((source / "source-snapshot.yaml").read_text())
     snapshot["assignments"] = {}
     (source / "source-snapshot.yaml").write_text(yaml.safe_dump(snapshot))
+
+
+def test_empty_split_of_a_new_image_is_pending(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
     rows = pd.read_csv(transformed, keep_default_na=False)
     rows.loc[rows["image_name"].eq("1.png"), "split"] = ""
     rows.to_csv(transformed, index=False)
+    directory = tmp_path / "prepared"
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert summary.ready
+    assert (directory / "dataset.csv").exists()
+    assert summary.report["pending"] == [f"заполните split у 1 изображений в {directory / 'dataset.csv'}"]
+
+
+def test_trainability_gaps_are_pending_when_every_split_is_set(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    rows = pd.read_csv(transformed, keep_default_na=False)
+    rows["split"] = "train"
+    rows.to_csv(transformed, index=False)
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert summary.ready
+    assert summary.report["pending"] == ["в val нет изображений"]
+
+
+def test_active_class_without_bbox_blocks(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    classes = {**metadata.classes, "dog": ClassInfo(prod_id=8)}
+    blocked = _prepare_with(config, tmp_path, transformed, source, metadata.model_copy(update={"classes": classes}))
+    assert not blocked.ready
+    blockers = blocked.report["blockers"]
+    assert isinstance(blockers, list)
+    assert "Active classes have no bbox: dog" in blockers
+    assert blocked.report["missing_classes"] == ["dog"]
+    assert not (blocked.directory / "dataset.csv").exists()
+    classes["dog"] = ClassInfo(prod_id=8, empty=True)
+    summary = prepare_managed(
+        config,
+        "demo",
+        transformed,
+        source,
+        tmp_path / "again",
+        metadata.model_copy(update={"classes": classes}),
+        files=LocalManagedPreparationFiles(),
+        media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
+    )
+    assert summary.ready
+
+
+def test_same_content_in_two_splits_blocks(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    images = tmp_path / "images"
+    copy = images / "copy.png"
+    copy.write_bytes((images / "0.png").read_bytes())
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    extra = rows[rows["image_name"].eq("0.png")].assign(image_name=copy.name, image_path=str(copy), split="val")
+    pd.concat([rows, extra], ignore_index=True).to_csv(transformed, index=False)
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert not summary.ready
+    blockers = summary.report["blockers"]
+    assert isinstance(blockers, list)
+    assert "Image content has rows in several splits: 0.png, copy.png" in blockers
+    assert summary.report["split_collisions"] == ["0.png", "copy.png"]
+    assert not (summary.directory / "dataset.csv").exists()
+
+
+def test_one_image_name_in_two_splits_blocks_even_with_cleanup(tmp_path: Path) -> None:
+    """Cleanup would drop the conflicting rows; the collision is named instead."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    extra = rows[rows["image_name"].eq("0.png")].assign(split="val", bbox_x_tl="2")
+    pd.concat([rows, extra], ignore_index=True).to_csv(transformed, index=False)
     summary = prepare_managed(
         config,
         "demo",
@@ -489,8 +562,40 @@ def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
     assert not summary.ready
     blockers = summary.report["blockers"]
     assert isinstance(blockers, list)
-    assert "Every input row must have a valid train, val or test split assignment." in blockers
+    assert "Image content has rows in several splits: 0.png" in blockers
     assert not (summary.directory / "dataset.csv").exists()
+
+
+def test_cleanup_is_accepted_by_default_and_no_clean_blocks(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    frame = pd.read_csv(transformed, keep_default_na=False)
+    bad = frame.iloc[[0]].copy()
+    bad["bbox_x_br"] = "1"
+    extra = Path(str(bad["image_path"].iloc[0])).parent / "bad.png"
+    Image.new("RGB", (32, 32), "green").save(extra)
+    bad["image_name"] = extra.name
+    bad["image_path"] = str(extra)
+    pd.concat([frame, bad], ignore_index=True).to_csv(transformed, index=False)
+    summaries = {
+        clean: prepare_managed(
+            config,
+            "demo",
+            transformed,
+            source,
+            tmp_path / f"prepared-{clean}",
+            metadata,
+            files=LocalManagedPreparationFiles(),
+            media=LocalMediaInspector(),
+            s3_roots=FakeS3Roots(),
+            clean=clean,
+        )
+        for clean in (True, False)
+    }
+    assert summaries[True].ready
+    assert not summaries[False].ready
+    blockers = summaries[False].report["blockers"]
+    assert isinstance(blockers, list)
+    assert "Cleanup is needed and --no-clean was given." in blockers
 
 
 def test_split_mistakes_stay_out_of_cvat_feedback(tmp_path: Path) -> None:

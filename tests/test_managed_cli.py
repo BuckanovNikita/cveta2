@@ -64,6 +64,33 @@ def test_unready_preparation_still_exits_one(tmp_path: Path, monkeypatch: pytest
     assert exited.value.code == 1
 
 
+@pytest.mark.parametrize(("flags", "clean"), [((), True), (("--no-clean",), False), (("--clean",), True)])
+def test_prepare_cleans_by_default_and_no_clean_opts_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...], *, clean: bool
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def prepare(*_args: object, **kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return SimpleNamespace(ready=True, model_dump=lambda **_kwargs: {"ready": True})
+
+    monkeypatch.setattr(managed_datasets, "prepare_managed_dataset", prepare)
+    main(
+        [
+            "dataset",
+            "prepare",
+            "combined",
+            str(tmp_path / "in.csv"),
+            "--source",
+            str(tmp_path),
+            "--output-dir",
+            str(tmp_path / "prepared"),
+            *flags,
+        ]
+    )
+    assert [call["clean"] for call in calls] == [clean]
+
+
 def test_failed_feedback_report_still_exits_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     report = SimpleNamespace(model_dump=lambda **_kwargs: {"failed": 1})
     monkeypatch.setattr(managed_datasets, "report_dataset_errors", lambda *_args, **_kwargs: report)

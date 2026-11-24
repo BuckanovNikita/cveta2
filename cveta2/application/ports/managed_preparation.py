@@ -1,6 +1,6 @@
 """Typed capture, serialization and media effects for managed preparation."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,7 +76,7 @@ class ManagedPreparationFiles(Protocol):
         """Serialize the exact three-file publication payload."""
         ...
 
-    def validation_report(
+    def validation_report(  # noqa: PLR0913 - report boundary.
         self,
         validation: BundleValidation,
         *,
@@ -84,6 +84,9 @@ class ManagedPreparationFiles(Protocol):
         findings: list[FeedbackFinding],
         unmapped: int,
         split_replacements: int,
+        pending: Sequence[str] = (),
+        missing_classes: Sequence[str] = (),
+        collisions: Sequence[str] = (),
     ) -> dict[str, JsonValue]:
         """Return JSON-safe diagnostics without inventing successful checks."""
         ...

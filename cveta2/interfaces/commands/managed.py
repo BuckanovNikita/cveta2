@@ -49,7 +49,15 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
             command.add_argument(
                 "--clean",
                 action="store_true",
-                help="Принять исправления и удаление отклонённых строк.",
+                dest="clean",
+                default=True,
+                help="Оставлено для совместимости: очистка включена по умолчанию.",
+            )
+            command.add_argument(
+                "--no-clean",
+                action="store_false",
+                dest="clean",
+                help="Не удалять отклонённые строки: подготовка остановится, если очистка нужна.",
             )
             command.add_argument(
                 "--first",

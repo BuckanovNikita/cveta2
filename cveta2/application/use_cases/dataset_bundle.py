@@ -181,14 +181,21 @@ def _split_missing(count: int, directory: Path) -> str:
     return f"заполните split у {count} изображений в {directory / 'dataset.csv'}"
 
 
+def split_pending(clean: pd.DataFrame, directory: Path) -> list[str]:
+    """Return the empty-split line, or else the unmet training requirements, of rows written to *directory*.
+
+    The gaps are not listed while some split is still empty.
+    """
+    if count := images_without_split(clean):
+        return [_split_missing(count, directory)]
+    return [_GAP_PENDING[gap] for gap in trainability_gaps(clean)]
+
+
 def _pending(
     clean: pd.DataFrame, directory: Path, parent: DatasetParent | None, published: Mapping[str, Split] | None
 ) -> tuple[str, ...]:
     """Split conditions ``upload-dataset`` enforces that the clean rows do not meet yet."""
-    if count := images_without_split(clean):
-        pending = [_split_missing(count, directory)]
-    else:
-        pending = [_GAP_PENDING[gap] for gap in trainability_gaps(clean)]
+    pending = split_pending(clean, directory)
     if parent is not None and published and (changes := changed_splits(clean, published)):
         images = len({name for name, _old, _new in changes})
         pending.append(

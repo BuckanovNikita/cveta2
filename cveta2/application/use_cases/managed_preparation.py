@@ -1,5 +1,6 @@
 """Prepare opaque transformed records while retaining original managed evidence."""
 
+import dataclasses
 import hashlib
 import json
 from collections import defaultdict
@@ -16,9 +17,10 @@ from cveta2.application.ports.managed_preparation import (
     ManagedPreparationFiles,
 )
 from cveta2.application.ports.verification import MediaInspector
+from cveta2.application.use_cases.dataset_bundle import split_pending
 from cveta2.domain.bundle.models import DatasetMetadata, TaskManifest
 from cveta2.domain.bundle.tasks import derive_tasks
-from cveta2.domain.bundle.validation import validate_bundle
+from cveta2.domain.bundle.validation import missing_active_classes, validate_bundle
 from cveta2.domain.managed.evidence import require_complete_evidence, source_differences
 from cveta2.domain.managed.models import (
     ManagedError,
@@ -32,6 +34,7 @@ from cveta2.domain.managed.policies import (
     propagate_splits,
     rebuild_assignments,
     resolve_overlaps,
+    split_collisions,
 )
 from cveta2.domain.managed.preparation import (
     FeedbackFinding,
@@ -176,7 +179,8 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     """Propagate published splits, validate and persist a fresh preparation without remote mutation.
 
     *parent_id* is the latest finalized version. With *first* it must not be managed and
-    nothing is read from it: every split comes from the transformed CSV.
+    nothing is read from it: every split comes from the transformed CSV. An empty split is
+    pending, not a blocker; the payload is written only when nothing blocks it.
     """
     check_parent(parent_id, parent_metadata, first=first)
     definition = dataset_definition(config, name)
@@ -197,17 +201,24 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     image_hashes = files.image_hashes(captured.frame)
     frame = resolve_overlaps(captured.frame, image_hashes.identities, definition.overlaps)
     split_frame, replacements = propagate_splits(frame, image_hashes.identities, history)
+    # Before validation: cleanup would silently drop rows of one image name in two splits.
+    collisions = split_collisions(split_frame, image_hashes.readable)
     inspection = media.inspect(
         split_frame,
         profile="clearml-yolo",
         options=ValidationOptions(check_images=True, emit_warnings=False),
     )
-    validation = validate_bundle(split_frame, metadata, inspection=inspection)
-    ready = (
-        not validation.blockers
-        and not validation.result.structural_errors
-        and (clean or not validation.result.requires_cleanup)
-    )
+    validation = validate_bundle(split_frame, metadata, inspection=inspection, allow_empty_split=True)
+    missing_classes = missing_active_classes(validation.result.clean, metadata)
+    blockers = list(validation.blockers)
+    if validation.result.requires_cleanup and not clean:
+        blockers.append("Cleanup is needed and --no-clean was given.")
+    if missing_classes:
+        blockers.append(f"Active classes have no bbox: {', '.join(missing_classes)}")
+    if collisions:
+        blockers.append(f"Image content has rows in several splits: {', '.join(collisions)}")
+    validation = dataclasses.replace(validation, blockers=tuple(blockers))
+    ready = not blockers
     findings, unmapped = _feedback(split_frame, validation.result, captured)
     tasks = _tasks(validation.result.clean, captured)
     actual_hashes = {
@@ -252,6 +263,9 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         findings=findings,
         unmapped=unmapped,
         split_replacements=replacements,
+        pending=split_pending(validation.result.clean, directory),
+        missing_classes=missing_classes,
+        collisions=collisions,
     )
     files.persist(directory, captured, record, payload, report, validation.broken_images)
     return PreparationSummary(directory=directory, ready=ready, report=report)

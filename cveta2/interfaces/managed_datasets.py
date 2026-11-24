@@ -49,14 +49,15 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     *,
     source: Path,
     output_dir: Path,
-    clean: bool = False,
+    clean: bool = True,
     first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> PreparationSummary:
     """Propagate published splits and verify arbitrary externally transformed rows.
 
-    *first* starts a managed lineage: the latest version must not be managed and is not used.
+    Cleanup is accepted by default; with ``clean=False`` the preparation is blocked when it is
+    needed. *first* starts a managed lineage: the latest version must not be managed and is not used.
     """
     return managed.prepare_managed_dataset(
         name,
