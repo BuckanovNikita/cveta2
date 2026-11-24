@@ -78,6 +78,6 @@ def prepare_dataset(source: str | Path, *, output_dir: str | Path, options: Prep
     return prepare_bundle(Path(source), Path(output_dir), options)
 
 
-def upload_dataset(prepared_dir: str | Path) -> Publication:
-    """Revalidate a reviewed bundle and finalize exactly its three payload files."""
-    return publish_bundle(Path(prepared_dir))
+def upload_dataset(prepared_dir: str | Path, *, force_resplit: bool = False) -> Publication:
+    """Validate a prepared bundle's current files and finalize its four published files."""
+    return publish_bundle(Path(prepared_dir), force_resplit=force_resplit)

@@ -35,6 +35,6 @@ def prepare_dataset(source: Path, directory: Path, options: PrepareOptions) -> P
     return prepare(source, directory, options, bundle_services())
 
 
-def upload_dataset(directory: Path) -> Publication:
-    """Revalidate reviewed evidence and finalize an explicit ClearML child."""
-    return publish(directory, bundle_services())
+def upload_dataset(directory: Path, *, force_resplit: bool = False) -> Publication:
+    """Validate the bundle's current files and finalize them as a ClearML child."""
+    return publish(directory, bundle_services(), force_resplit=force_resplit)

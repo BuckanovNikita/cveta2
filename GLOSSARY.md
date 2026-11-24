@@ -199,7 +199,7 @@ _Avoid_: empty label, negative class, background
 ### Preparation and publication
 
 **Prepared bundle**:
-A directory that preparation writes once: a copy of its source files, `broken-images.csv` and `report.json`, and, when the preparation is ready, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml` with `preparation.json` and `preparation.sha256`, which publication uploads to ClearML.
+A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation keeps its own state files (see Managed preparation).
 _Russian_: подготовленный датасет
 _Avoid_: prepared set, release candidate, package
 
@@ -234,7 +234,7 @@ _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
 **Stable split**:
-An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
+An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
 _Russian_: стабильный split
 _Avoid_: random split, rebalancing, split policy
 
@@ -254,7 +254,7 @@ _Russian_: управляемая история
 _Avoid_: adoption, migration
 
 **Publication**:
-The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset (the first version of a managed lineage has none), after rechecking the preparation.
+The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset (the first version of a managed lineage has none), after validating the directory's current files; `upload-dataset` publishes four files, `dataset publish` three.
 _Russian_: публикация
 _Avoid_: release, push, upload (reserved for CVAT task creation)
 

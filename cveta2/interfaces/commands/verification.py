@@ -92,11 +92,16 @@ def configure_verify(parser: argparse.ArgumentParser) -> None:
 
 
 def configure_upload_dataset(parser: argparse.ArgumentParser) -> None:
-    """Accept only a prepared local directory, never mutable source options."""
+    """Accept a prepared directory and the one override of the split rule."""
     parser.add_argument(
         "prepared_dir",
         type=Path,
-        help="Каталог с preparation.json, созданный verify --bundle.",
+        help="Каталог, подготовленный cveta2 verify.",
+    )
+    parser.add_argument(
+        "--force-resplit",
+        action="store_true",
+        help="Разрешить другой split у изображений, уже опубликованных в родителе.",
     )
 
 
@@ -137,7 +142,7 @@ def _prepare(args: argparse.Namespace) -> None:
                 raise
             options = collect_decisions(options, error.decisions)
     _summary(result.validation.result)
-    for blocker in result.validation.blockers:
+    for blocker in result.blockers:
         logger.info(blocker)
     logger.info(f"Отчёт: {result.directory}")
     if not result.ready:
@@ -195,7 +200,7 @@ def run_verify(args: argparse.Namespace) -> None:
 def run_upload_dataset(args: argparse.Namespace) -> None:
     """Report success only after the adapter proves remote finalization."""
     try:
-        result = upload_dataset(args.prepared_dir)
+        result = upload_dataset(args.prepared_dir, force_resplit=args.force_resplit)
         logger.info(f"Опубликован датасет {result.dataset_id}, версия {result.version or 'назначена сервером'}.")
     except (KeyboardInterrupt, UploadCancelled) as error:
         logger.info(f"Публикация отменена: {error}")

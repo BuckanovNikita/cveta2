@@ -1,11 +1,13 @@
 """Stable byte snapshots, strict YAML and local prepared-bundle persistence."""
 
-import hashlib
 import json
 import os
+import shutil
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -14,23 +16,30 @@ import yaml
 from pydantic import ValidationError
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
+from cveta2.adapters.files.archive import pack_sources, unpack_sources
 from cveta2.adapters.files.verification import read_csv_bytes, report_dict
 from cveta2.domain.bundle.draft import DatasetDraft
 from cveta2.domain.bundle.models import (
     DatasetMetadata,
     FetchTables,
+    Publication,
     TaskManifest,
     UploadError,
 )
 from cveta2.domain.bundle.preparation import (
-    PAYLOAD_NAMES,
     SOURCE_NAMES,
-    BundleDraft,
+    SOURCES_ARCHIVE,
+    BundleProposal,
+    CurrentBundle,
     PreparedDataset,
-    PreparedRecord,
     SourceSnapshot,
-    StoredBundle,
+    VerifyRecord,
 )
+from cveta2.domain.managed.models import ClearMLDestination
+from cveta2.domain.verification.models import DatasetInputError
+
+# The bundle files ``read_bundle`` captures and ``stage_publication`` publishes as read.
+_CAPTURED_NAMES = ("dataset.csv", "dataset.yaml", SOURCES_ARCHIVE)
 
 
 def _yaml_children(node: Node) -> list[Node]:
@@ -109,16 +118,16 @@ def _tables(content: dict[str, bytes]) -> FetchTables:
     return FetchTables(*tables)
 
 
+def _tasks_yaml(tasks: TaskManifest) -> bytes:
+    return yaml.safe_dump(tasks.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8")
+
+
 def _payload(frame: pd.DataFrame, metadata: DatasetMetadata, tasks: TaskManifest) -> dict[str, bytes]:
     return {
         "dataset.csv": frame.to_csv(index=False, lineterminator="\n").encode("utf-8"),
         "dataset.yaml": yaml.safe_dump(metadata.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8"),
-        "tasks.yaml": yaml.safe_dump(tasks.model_dump(), allow_unicode=True, sort_keys=False).encode("utf-8"),
+        "tasks.yaml": _tasks_yaml(tasks),
     }
-
-
-def _hashes(content: dict[str, bytes]) -> dict[str, str]:
-    return {name: hashlib.sha256(value).hexdigest() for name, value in content.items()}
 
 
 def _regular_bytes(path: Path) -> bytes:
@@ -127,13 +136,70 @@ def _regular_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
-def _read_bound(directory: Path, names: tuple[str, ...], expected: dict[str, str]) -> dict[str, bytes]:
-    if set(expected) != set(names):
-        raise UploadError("Invalid prepared file inventory; prepare again.")
-    content = {name: _regular_bytes(directory / name) for name in names}
-    if _hashes(content) != expected:
-        raise UploadError("Prepared files changed (hash mismatch); prepare again.")
-    return content
+def _json(path: Path) -> object:
+    """Parse one regular JSON file; raises UploadError, OSError or ValueError."""
+    result: object = json.loads(_regular_bytes(path))
+    return result
+
+
+def _recorded_parent(report: dict[str, object]) -> tuple[str | None, str | None] | None:
+    """``(id, version)`` of the recorded parent, ``(None, None)`` for ``null``, None when absent or malformed."""
+    if "parent" not in report:
+        return None
+    parent = report["parent"]
+    if parent is None:
+        return None, None
+    if isinstance(parent, dict):
+        parent_id, version = parent.get("id"), parent.get("version")
+        if isinstance(parent_id, str) and (version is None or isinstance(version, str)):
+            return parent_id, version
+    return None
+
+
+def _recorded(directory: Path) -> VerifyRecord | None:
+    """Return the destination and parent ``verify`` wrote in ``report.json``, or None when unusable."""
+    try:
+        report = _json(directory / "report.json")
+    except (UploadError, OSError, ValueError):
+        return None
+    if not isinstance(report, dict) or not isinstance(destination := report.get("destination"), dict):
+        return None
+    project, dataset = destination.get("project"), destination.get("dataset")
+    parent = _recorded_parent(report)
+    if not isinstance(project, str) or not isinstance(dataset, str) or parent is None:
+        return None
+    return VerifyRecord(project, dataset, *parent)
+
+
+def _previous_publication(directory: Path) -> dict[str, object] | None:
+    """Return ``publication.json``: None when absent, ``{}`` when it is not a readable JSON object."""
+    path = directory / "publication.json"
+    if not path.exists() and not path.is_symlink():
+        return None
+    try:
+        record = _json(path)
+    except (UploadError, OSError, ValueError):
+        return {}
+    return record if isinstance(record, dict) else {}
+
+
+def _report(proposal: BundleProposal) -> bytes:
+    report = report_dict(proposal.validation.result)
+    report.pop("metadata_columns", None)
+    parent = proposal.parent
+    report.update(
+        blockers=list(proposal.blockers),
+        ready=proposal.ready,
+        pending=list(proposal.pending),
+        destination={"project": proposal.destination.project, "dataset": proposal.destination.dataset},
+        parent=None if parent is None else {"id": parent.dataset_id, "version": parent.version},
+        class_changes=[asdict(change) for change in proposal.changes],
+        class_marks=[asdict(mark) for mark in proposal.mark_changes],
+        dropped_local_roots=list(proposal.dropped_local_roots),
+        broken_image_rows=len(proposal.validation.broken_images),
+        split_prefilled=proposal.split_prefilled,
+    )
+    return (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
 class LocalBundleFiles:
@@ -189,99 +255,126 @@ class LocalBundleFiles:
             raise UploadError(f"Cannot write dataset draft {path}: {error}") from error
         return backed_up
 
-    def save_preparation(self, directory: Path, draft: BundleDraft) -> PreparedDataset:
-        """Write reports and copied evidence without replacing any existing file."""
+    def save_preparation(self, directory: Path, proposal: BundleProposal) -> PreparedDataset:
+        """Write a new bundle with one rename, never replacing an existing file."""
         try:
-            self._save(directory, draft)
+            self._save(directory, proposal)
         except OSError as error:
             raise UploadError(f"Cannot create preparation {directory}: {error}") from error
-        return PreparedDataset(directory, draft.ready, draft.validation, draft.metadata, draft.tasks)
+        return PreparedDataset(
+            directory=directory,
+            ready=proposal.ready,
+            validation=proposal.validation,
+            metadata=proposal.metadata,
+            tasks=proposal.tasks,
+            blockers=proposal.blockers,
+            pending=proposal.pending,
+            changes=proposal.changes,
+            mark_changes=proposal.mark_changes,
+            dropped_local_roots=proposal.dropped_local_roots,
+            split_prefilled=proposal.split_prefilled,
+        )
 
     @staticmethod
-    def _save(directory: Path, draft: BundleDraft) -> None:
+    def _save(directory: Path, proposal: BundleProposal) -> None:
         if directory.exists() or directory.is_symlink():
             raise UploadError(f"Preparation directory already exists: {directory}")
-        if directory.resolve().is_relative_to(draft.source.base_dir):
+        if directory.resolve().is_relative_to(proposal.source.base_dir):
             raise UploadError("Preparation must be outside the source directory.")
         directory.parent.mkdir(parents=True, exist_ok=True)
-        payload = _payload(draft.validation.result.clean, draft.metadata, draft.tasks)
-        report = report_dict(draft.validation.result)
-        report.pop("metadata_columns", None)
-        report.update(
-            blockers=list(draft.validation.blockers),
-            ready=draft.ready,
-            class_changes=[asdict(change) for change in draft.changes],
-            broken_image_rows=len(draft.validation.broken_images),
+        files = {SOURCES_ARCHIVE: pack_sources(proposal.source.content), "report.json": _report(proposal)}
+        if proposal.ready:
+            files.update(_payload(proposal.validation.result.clean, proposal.metadata, proposal.tasks))
+        holder = Path(tempfile.mkdtemp(prefix=".cveta2-prepare-", dir=directory.parent))
+        try:
+            # mkdtemp's directory is private (0700); the bundle inside it comes from
+            # a plain mkdir, so it gets the permissions any new directory would.
+            staged = holder / directory.name
+            staged.mkdir()
+            for name, content in files.items():
+                (staged / name).write_bytes(content)
+            proposal.validation.broken_images.to_csv(staged / "broken-images.csv", index=False)
+            if directory.exists() or directory.is_symlink():
+                raise UploadError(f"Preparation directory already exists: {directory}")
+            # One rename makes the whole bundle appear: an interrupted write leaves nothing.
+            os.rename(staged, directory)  # noqa: PTH104 - the single atomic step the interruption test patches.
+        finally:
+            shutil.rmtree(holder, ignore_errors=True)
+
+    def read_bundle(self, directory: Path) -> CurrentBundle:
+        """Read ``dataset.csv``, ``dataset.yaml`` and ``sources.tar.gz`` once and parse the captured bytes."""
+        try:
+            content = {name: _regular_bytes(directory / name) for name in _CAPTURED_NAMES}
+        except OSError as error:
+            raise UploadError(f"Cannot read prepared bundle {directory}: {error}") from error
+        metadata_path = directory / "dataset.yaml"
+        try:
+            metadata = DatasetMetadata.model_validate(_yaml(content["dataset.yaml"], str(metadata_path)))
+        except ValidationError as error:
+            raise UploadError(f"Invalid dataset metadata {metadata_path}: {_error_details(error)}") from error
+        try:
+            dataset = read_csv_bytes(content["dataset.csv"], source=str(directory / "dataset.csv"))
+        except DatasetInputError as error:
+            raise UploadError(str(error)) from error
+        sources = unpack_sources(content[SOURCES_ARCHIVE])
+        try:
+            tables = _tables(sources)
+        except DatasetInputError as error:
+            raise UploadError(f"{SOURCES_ARCHIVE}: {error}") from error
+        return CurrentBundle(
+            directory=directory,
+            source=SourceSnapshot(directory.resolve(), sources, tables),
+            metadata=metadata,
+            dataset=dataset,
+            content=content,
+            recorded=_recorded(directory),
+            previous_publication=_previous_publication(directory),
         )
-        with TemporaryDirectory(prefix=".cveta2-prepare-", dir=directory.parent) as temporary:
-            staged = Path(temporary)
-            (staged / "sources").mkdir()
-            for name, content in draft.source.content.items():
-                (staged / "sources" / name).write_bytes(content)
-            draft.validation.broken_images.to_csv(staged / "broken-images.csv", index=False)
-            (staged / "report.json").write_text(
-                json.dumps(report, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            if draft.ready:
-                for name, content in payload.items():
-                    (staged / name).write_bytes(content)
-                record = PreparedRecord(
-                    options=draft.options,
-                    parent_id=draft.parent.dataset_id if draft.parent else None,
-                    parent_version=draft.parent.version if draft.parent else None,
-                    source_hashes=_hashes(draft.source.content),
-                    payload_hashes=_hashes(payload),
-                )
-                record_bytes = (record.model_dump_json(indent=2) + "\n").encode("utf-8")
-                (staged / "preparation.json").write_bytes(record_bytes)
-                (staged / "preparation.sha256").write_text(
-                    hashlib.sha256(record_bytes).hexdigest() + "\n", encoding="ascii"
-                )
-            # Claim the destination exclusively; the marker is linked last so a
-            # partially failed write can never appear uploadable.
-            directory.mkdir(exist_ok=False)
-            (directory / "sources").mkdir()
-            for name in SOURCE_NAMES:
-                os.link(staged / "sources" / name, directory / "sources" / name)
-            for name in (
-                "broken-images.csv",
-                "report.json",
-                *PAYLOAD_NAMES,
-                "preparation.json",
-                "preparation.sha256",
-            ):
-                if (staged / name).is_file():
-                    os.link(staged / name, directory / name)
+
+    def read_rows(self, path: Path) -> pd.DataFrame:
+        """Read a downloaded parent ``dataset.csv`` without lexical inference."""
+        try:
+            return read_csv_bytes(path.read_bytes(), source=str(path))
+        except (OSError, DatasetInputError) as error:
+            raise UploadError(f"Не удалось прочитать dataset.csv родителя {path}: {error}") from error
+
+    def write_tasks(self, directory: Path, tasks: TaskManifest) -> None:
+        """Replace ``tasks.yaml`` with one rename, never writing through a symlink."""
+        path, temporary = directory / "tasks.yaml", directory / ".tasks.yaml.tmp"
+        try:
+            temporary.unlink(missing_ok=True)
+            try:
+                # Exclusive creation never follows a planted link and keeps the usual file mode.
+                with temporary.open("xb") as stream:
+                    stream.write(_tasks_yaml(tasks))
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
+        except OSError as error:
+            raise UploadError(f"Не удалось записать {path}: {error}") from error
 
     @contextmanager
-    def stage_prepared(self, directory: Path) -> Iterator[StoredBundle]:
-        """Read/hash once, then hold a stable local payload until publication ends."""
-        try:
-            record_bytes = _regular_bytes(directory / "preparation.json")
-            expected_record_hash = _regular_bytes(directory / "preparation.sha256").strip()
-            actual_record_hash = hashlib.sha256(record_bytes).hexdigest().encode("ascii")
-            if actual_record_hash != expected_record_hash:
-                raise UploadError("Preparation record changed (hash mismatch); prepare again.")
-            record = PreparedRecord.model_validate_json(record_bytes)
-            if not record.options.project.strip() or not record.options.dataset_name:
-                raise UploadError("Prepared destination is incomplete; prepare again.")
-            if (directory / "sources").is_symlink():
-                raise UploadError("Prepared source directory must not be a symlink.")
-            source = _read_bound(directory / "sources", SOURCE_NAMES, record.source_hashes)
-            payload = _read_bound(directory, PAYLOAD_NAMES, record.payload_hashes)
-            metadata = DatasetMetadata.model_validate(_yaml(payload["dataset.yaml"], "dataset.yaml"))
-            tasks = TaskManifest.model_validate(_yaml(payload["tasks.yaml"], "tasks.yaml"))
-            dataset = read_csv_bytes(payload["dataset.csv"], source="dataset.csv")
-            captured = SourceSnapshot(directory.resolve(), source, _tables(source))
-            with TemporaryDirectory(prefix="cveta2-publish-") as temporary:
-                staging = Path(temporary)
-                for name, content in payload.items():
+    def stage_publication(self, bundle: CurrentBundle, tasks: TaskManifest) -> Iterator[Path]:
+        """Hold the bytes ``read_bundle`` captured and ``tasks.yaml`` in a private directory."""
+        with TemporaryDirectory(prefix="cveta2-publish-") as temporary:
+            staging = Path(temporary)
+            try:
+                for name, content in bundle.content.items():
                     (staging / name).write_bytes(content)
-                yield StoredBundle(staging, captured, record, metadata, tasks, dataset, payload)
-        except (OSError, ValidationError) as error:
-            raise UploadError(f"Cannot read prepared bundle {directory}: {_error_details(error)}") from error
+                (staging / "tasks.yaml").write_bytes(_tasks_yaml(tasks))
+            except OSError as error:
+                raise UploadError(f"Cannot stage publication files: {error}") from error
+            yield staging
 
-    def payload_matches(self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest) -> bool:
-        """Require deterministic derivation to equal the bytes actually reviewed."""
-        return _payload(frame, bundle.metadata, tasks) == bundle.payload
+    def write_publication(self, directory: Path, publication: Publication, destination: ClearMLDestination) -> None:
+        """Write ``publication.json``: the published version, its destination and time, no hashes."""
+        record = {
+            "dataset_id": publication.dataset_id,
+            "version": publication.version,
+            "project": destination.project,
+            "dataset": destination.dataset,
+            "published_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        (directory / "publication.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )

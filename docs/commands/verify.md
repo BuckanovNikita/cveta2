@@ -299,7 +299,7 @@ invalid_split строка 0: Expected train, val or test (an empty split is all
 
 ### Результат
 
-Всегда пишутся `sources/` (копия четырёх файлов), `broken-images.csv` (исходные строки всех изображений, в которых отклонена хотя бы одна строка) и `report.json` (отчёт проверки плюс поля `blockers`, `ready`, `class_changes`, `broken_image_rows`). Только при готовности добавляются `dataset.csv`, `dataset.yaml`, `tasks.yaml`, `preparation.json` и `preparation.sha256`.
+Всегда пишутся `sources.tar.gz` (архив четырёх файлов), `broken-images.csv` (исходные строки всех изображений, в которых отклонена хотя бы одна строка) и `report.json` (отчёт проверки плюс итог подготовки, см. [report.json](../dataset-format.md#reportjson)). Только при готовности добавляются `dataset.csv`, `dataset.yaml` и `tasks.yaml`.
 
 Вывод готовой подготовки:
 
@@ -317,7 +317,7 @@ image_quarantined строка 14: Another rejected record quarantined this imag
 Набор не готов к публикации; исправьте исходные данные или явно разрешите очистку.
 ```
 
-Перед публикацией просмотрите `report.json`, `broken-images.csv` и `dataset.yaml`. Не меняйте файлы каталога: `upload-dataset` сверяет их хеши.
+Перед публикацией просмотрите `report.json`, `broken-images.csv` и `dataset.yaml`. Файлы каталога можно править: `upload-dataset` проверяет их такими, какие они есть (см. [upload-dataset](upload-dataset.md#что-можно-править)).
 
 ### Коды завершения
 

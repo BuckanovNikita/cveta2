@@ -8,6 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 import cveta2
+from cveta2.domain.bundle.models import Publication
 from cveta2.domain.bundle.preparation import Decision, MissingDecisions
 from cveta2.interfaces.cli import CliApp
 from cveta2.interfaces.commands import verification
@@ -84,3 +85,13 @@ def test_environment_disables_bundle_prompts_on_a_terminal(monkeypatch: pytest.M
         )
     assert caught.value.code == 2
     prompt.assert_not_called()
+
+
+@pytest.mark.parametrize(("flags", "expected"), [([], False), (["--force-resplit"], True)])
+def test_upload_dataset_force_resplit_reaches_the_api(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, flags: list[str], *, expected: bool
+) -> None:
+    upload = Mock(return_value=Publication("child", "1.0.0"))
+    monkeypatch.setattr(verification, "upload_dataset", upload)
+    CliApp().run(["upload-dataset", str(tmp_path), *flags])
+    upload.assert_called_once_with(tmp_path, force_resplit=expected)

@@ -18,11 +18,12 @@ from cveta2.domain.bundle.models import (
     TaskManifest,
 )
 from cveta2.domain.bundle.preparation import (
-    BundleDraft,
+    BundleProposal,
+    CurrentBundle,
     PreparedDataset,
     SourceSnapshot,
-    StoredBundle,
 )
+from cveta2.domain.managed.models import ClearMLDestination
 
 
 class ClassApi(Protocol):
@@ -88,6 +89,10 @@ class RootChecks(Protocol):
         """Reject uncovered or ambiguous remote paths."""
         ...
 
+    def missing_files(self, frame: pd.DataFrame) -> list[str]:
+        """Return each distinct absolute ``image_path`` that is not a regular file, in row order."""
+        ...
+
 
 class DraftFiles(Protocol):
     """Read and write the editable ``dataset.yaml`` draft of a fetch directory."""
@@ -102,7 +107,7 @@ class DraftFiles(Protocol):
 
 
 class BundleFiles(DraftFiles, Protocol):
-    """Capture and persist stable source/payload bytes behind a file boundary."""
+    """Read fetch sources, write prepared bundles and read their current files."""
 
     def read_source(self, directory: Path) -> SourceSnapshot:
         """Read all four source files exactly once and parse the captured bytes."""
@@ -112,16 +117,28 @@ class BundleFiles(DraftFiles, Protocol):
         """Read strict parent metadata."""
         ...
 
-    def save_preparation(self, directory: Path, draft: BundleDraft) -> PreparedDataset:
-        """Write a new local report and, when ready, immutable upload evidence."""
+    def save_preparation(self, directory: Path, proposal: BundleProposal) -> PreparedDataset:
+        """Write a new bundle in one step: the archive and report, and the payload when ready."""
         ...
 
-    def stage_prepared(self, directory: Path) -> AbstractContextManager[StoredBundle]:
-        """Verify hashes and stage stable bytes; clean temporary files on exit."""
+    def read_bundle(self, directory: Path) -> CurrentBundle:
+        """Read the bundle's current files once; a missing or malformed one raises UploadError."""
         ...
 
-    def payload_matches(self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest) -> bool:
-        """Compare rederived publication bytes with the reviewed snapshot."""
+    def read_rows(self, path: Path) -> pd.DataFrame:
+        """Read a downloaded parent ``dataset.csv`` strictly; errors raise UploadError naming the file."""
+        ...
+
+    def write_tasks(self, directory: Path, tasks: TaskManifest) -> None:
+        """Rewrite the bundle's ``tasks.yaml``."""
+        ...
+
+    def stage_publication(self, bundle: CurrentBundle, tasks: TaskManifest) -> AbstractContextManager[Path]:
+        """Hold the captured bytes and ``tasks.yaml`` in a private directory until publication ends."""
+        ...
+
+    def write_publication(self, directory: Path, publication: Publication, destination: ClearMLDestination) -> None:
+        """Record the published version in the bundle's ``publication.json``; may raise OSError."""
         ...
 
 

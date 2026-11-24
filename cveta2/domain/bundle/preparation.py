@@ -1,4 +1,4 @@
-"""Local review decisions and immutable dataset preparation contracts."""
+"""Preparation decisions, the prepared-bundle layout and the bundle as ``upload-dataset`` reads it."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,15 +10,19 @@ from pydantic import BaseModel, ConfigDict, Field
 from cveta2.domain.bundle.models import (
     BundleValidation,
     ClassChange,
+    ClassMarkChange,
     DatasetMetadata,
     DatasetParent,
     FetchTables,
     TaskManifest,
     UploadError,
 )
+from cveta2.domain.managed.models import ClearMLDestination
 
 SOURCE_NAMES = ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv")
 PAYLOAD_NAMES = ("dataset.csv", "dataset.yaml", "tasks.yaml")
+SOURCES_ARCHIVE = "sources.tar.gz"
+PUBLISHED_NAMES = (*PAYLOAD_NAMES, SOURCES_ARCHIVE)
 
 
 class PrepareOptions(BaseModel):
@@ -56,18 +60,6 @@ class MissingDecisions(UploadError):  # noqa: N818 - structured public decision 
         super().__init__("\n".join(decision.message for decision in decisions))
 
 
-class PreparedRecord(BaseModel):
-    """Versioned local binding of reviewed payload, evidence and destination."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    format_version: Literal[1] = 1
-    options: PrepareOptions
-    parent_id: str | None
-    parent_version: str | None
-    source_hashes: dict[str, str]
-    payload_hashes: dict[str, str]
-
-
 @dataclass(frozen=True)
 class SourceSnapshot:
     """Exact captured source bytes and the tables parsed from those bytes."""
@@ -78,38 +70,63 @@ class SourceSnapshot:
 
 
 @dataclass(frozen=True)
-class BundleDraft:
-    """Fully evaluated proposal handed to the persistence adapter once."""
+class BundleProposal:
+    """Fully evaluated preparation handed to the persistence adapter once."""
 
     source: SourceSnapshot
     metadata: DatasetMetadata
     tasks: TaskManifest
     validation: BundleValidation
-    options: PrepareOptions
+    destination: ClearMLDestination
     parent: DatasetParent | None
     changes: tuple[ClassChange, ...]
-    ready: bool
+    blockers: tuple[str, ...]
+    pending: tuple[str, ...] = ()
+    mark_changes: tuple[ClassMarkChange, ...] = ()
+    dropped_local_roots: tuple[str, ...] = ()
+    split_prefilled: int = 0
+
+    @property
+    def ready(self) -> bool:
+        """Whether the payload is written: nothing blocks it."""
+        return not self.blockers
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PreparedDataset:
-    """A local report and, only when ready, an uploadable reviewed bundle."""
+    """A local report and, only when ready, the editable payload of the bundle."""
 
     directory: Path
     ready: bool
     validation: BundleValidation
     metadata: DatasetMetadata
     tasks: TaskManifest
+    blockers: tuple[str, ...] = ()
+    pending: tuple[str, ...] = ()
+    changes: tuple[ClassChange, ...] = ()
+    mark_changes: tuple[ClassMarkChange, ...] = ()
+    dropped_local_roots: tuple[str, ...] = ()
+    split_prefilled: int = 0
 
 
 @dataclass(frozen=True)
-class StoredBundle:
-    """Stable checked publication bytes staged for one upload attempt."""
+class VerifyRecord:
+    """The destination and parent that ``verify`` recorded in ``report.json``."""
+
+    project: str
+    dataset: str
+    parent_id: str | None
+    parent_version: str | None
+
+
+@dataclass(frozen=True)
+class CurrentBundle:
+    """A prepared bundle's files as read now; every one of them may have been edited."""
 
     directory: Path
     source: SourceSnapshot
-    record: PreparedRecord
     metadata: DatasetMetadata
-    tasks: TaskManifest
     dataset: pd.DataFrame
-    payload: dict[str, bytes]
+    content: dict[str, bytes]
+    recorded: VerifyRecord | None
+    previous_publication: dict[str, object] | None

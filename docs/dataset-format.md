@@ -186,7 +186,8 @@ output/
 
 - каталог не должен существовать заранее;
 - каталог не должен лежать внутри исходного каталога выгрузки;
-- `preparation.json` и `preparation.sha256` появляются последними, поэтому прерванная запись не оставляет каталог, готовый к публикации.
+- `verify --bundle` собирает каталог во временном каталоге рядом и переносит его на место одним переименованием, поэтому прерванная запись не оставляет ничего;
+- у `dataset prepare` `preparation.json` и `preparation.sha256` появляются последними, поэтому прерванная запись не оставляет каталог, готовый к публикации.
 
 Готовность (`ready`) означает: нет блокирующих проблем, нет структурных ошибок, и либо очистка не нужна, либо вы дали подтверждение очистки ([cleanup acceptance](../GLOSSARY.md)) флагом `--clean`. `verify --bundle` также требует хотя бы одно изображение `train` и одно `val` и хотя бы один bbox в `train`.
 
@@ -196,19 +197,16 @@ output/
 
 ```text
 prepared/
-├── sources/
-│   ├── dataset.csv
-│   ├── obsolete.csv
-│   ├── in_progress.csv
-│   └── deleted.csv
+├── sources.tar.gz
 ├── broken-images.csv
 ├── report.json
 ├── dataset.csv           только если ready
 ├── dataset.yaml          только если ready
 ├── tasks.yaml            только если ready
-├── preparation.json      только если ready
-└── preparation.sha256    только если ready
+└── publication.json      после upload-dataset
 ```
+
+`sources.tar.gz` — архив четырёх файлов выгрузки (`dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv`). Архив детерминированный: из одинаковых файлов всегда получаются одинаковые байты (фиксированные порядок, время и владелец). `preparation.json` и `preparation.sha256` этот вид подготовки не пишет: ничего не привязывает каталог к хешам, и файлы `dataset.csv`, `dataset.yaml` и `tasks.yaml` можно править до публикации.
 
 ### dataset prepare
 
@@ -231,32 +229,38 @@ prepared/
 
 | Файл | Назначение | Публикуется в ClearML |
 |---|---|---|
-| `sources/*.csv` | Точная копия четырёх файлов выгрузки (только `verify --bundle`). | нет |
+| `sources.tar.gz` | Архив четырёх файлов выгрузки (только `verify --bundle`). | да |
 | `transformed.csv` | Точная копия вашего CSV (только `dataset prepare`). | нет |
 | `source-snapshot.yaml` | Точная копия снимка источников ([source snapshot](../GLOSSARY.md)) (только `dataset prepare`). | нет |
 | `broken-images.csv` | Исходные строки всех изображений, у которых хотя бы одна строка отклонена. Если у изображения отклонён один bbox, отклоняется всё изображение. | нет |
 | `report.json` | отчёт проверки ([verification report](../GLOSSARY.md)) с итогом подготовки. | нет |
 | `dataset.csv` | Очищенные строки датасета. | да |
-| `dataset.yaml` | Классы, API классов и разрешённые корни изображений. | да |
+| `dataset.yaml` | Назначение в ClearML, классы, API классов и разрешённые корни изображений. | да |
 | `tasks.yaml` | список задач датасета ([task manifest](../GLOSSARY.md)). | да |
-| `preparation.json` | Запись о подготовке: параметры и хеши SHA-256 файлов. | нет |
-| `preparation.sha256` | Хеш SHA-256 файла `preparation.json`. | нет |
+| `preparation.json` | Запись о подготовке: параметры и хеши SHA-256 файлов (только `dataset prepare`). | нет |
+| `preparation.sha256` | Хеш SHA-256 файла `preparation.json` (только `dataset prepare`). | нет |
+| `publication.json` | Запись об успешной публикации (только `upload-dataset`). | нет |
 
-При публикации ([publication](../GLOSSARY.md)) в новую версию ClearML загружаются ровно три файла: `dataset.csv`, `dataset.yaml`, `tasks.yaml`. Перед публикацией cveta2 сверяет хеши из `preparation.json` с файлами. Если вы изменили любой из них, публикация останавливается, и нужно подготовить датасет заново.
+При публикации ([publication](../GLOSSARY.md)) `upload-dataset` загружает в новую версию ClearML ровно четыре файла: `dataset.csv`, `dataset.yaml`, `tasks.yaml`, `sources.tar.gz`. Он проверяет файлы каталога такими, какие они сейчас: правки разрешены, если результат проходит проверки (см. [upload-dataset](commands/upload-dataset.md#как-это-работает)). `dataset publish` загружает три файла: `dataset.csv`, `dataset.yaml`, `tasks.yaml`, и сверяет их хеши из `preparation.json`: если вы изменили любой из них, публикация останавливается, и нужно подготовить датасет заново.
 
 Отличия двух видов подготовки:
 
 | | `verify --bundle` | `dataset prepare` |
 |---|---|---|
-| Копия входа | `sources/` с четырьмя файлами | `transformed.csv` и `source-snapshot.yaml` |
-| `preparation.json` | только если ready, `format_version: 1` | всегда, `format_version: 2`, с полем `ready` |
+| Копия входа | `sources.tar.gz` с четырьмя файлами | `transformed.csv` и `source-snapshot.yaml` |
+| `preparation.json` | нет | всегда, `format_version: 2`, с полем `ready` |
+| Правки перед публикацией | любые, если результат проходит проверки | нельзя: хеши сверяются |
 | split | ваш, из CSV | ваш, из CSV; у опубликованных изображений — опубликованный ([stable split](../GLOSSARY.md)) |
 | Ключ `managed` в `dataset.yaml` и `tasks.yaml` | нет | есть |
-| Публикация | `upload-dataset` | `dataset publish` |
+| Публикация | `upload-dataset`, четыре файла | `dataset publish`, три файла |
 
 ### dataset.yaml
 
 ```yaml
+clearml:
+  project: Retail/Datasets
+  dataset: retail-shelves
+  output_uri: s3://my-bucket/.clearml
 api_url: https://classes.example.com/classes
 classes:
   bowl:
@@ -272,6 +276,8 @@ images:
 
 | Ключ | Значение |
 |---|---|
+| `clearml.project`, `clearml.dataset` | Проект и имя датасета ClearML, куда `upload-dataset` публикует версию. Без них `upload-dataset` отказывается публиковать. |
+| `clearml.output_uri` | Необязательно. Хранилище файлов версии, например `s3://my-bucket/.clearml`; без ключа ClearML берёт хранилище по умолчанию. |
 | `api_url` | Адрес API реестра классов ([class registry](../GLOSSARY.md)). Только HTTP(S), без логина и пароля. |
 | `classes` | Словарь: каноническое имя класса ([canonical class name](../GLOSSARY.md)) → описание. |
 | `classes.<имя>.prod_id` | номер класса ([class identity](../GLOSSARY.md)). |
@@ -280,6 +286,8 @@ images:
 | `images.local_root` | Разрешённые локальные каталоги изображений. |
 | `images.s3_root` | Разрешённые префиксы S3 вида `s3://bucket/prefix`. |
 | `managed` | Только у управляемого датасета ([managed dataset](../GLOSSARY.md)): имя, хеш и копия описания датасета из общей конфигурации, адрес CVAT с организацией и назначенные split (`assignments`: хеш содержимого изображения → `train`/`val`/`test`). |
+
+Блок `clearml` пишет `verify --bundle`. cveta2 0.15 не знает этого ключа и не может прочитать такой `dataset.yaml` как родителя: после публикации этой версией обновите cveta2 у всех, кто готовит датасеты с тем же именем.
 
 ### tasks.yaml
 
@@ -295,21 +303,42 @@ obsolete:
 
 | Ключ | Значение |
 |---|---|
-| `included` | ID задач, чьи строки остались в очищенном `dataset.csv`. |
+| `included` | ID задач, чьи строки остались в очищенном `dataset.csv`. У `verify --bundle` — только задачи, с которыми строки связаны в `sources.tar.gz` (пара `task_id` и `image_name` есть в его `dataset.csv`); `upload-dataset` строит `tasks.yaml` заново из текущего `dataset.csv` и перезаписывает его в каталоге. |
 | `obsolete` | ID завершённых задач, которые полностью перекрыты: для каждого их изображения есть более новая завершённая задача или удаление. |
 | `managed` | Только у управляемого датасета: снимок источников, с задачами, их временем изменения и признаком завершённости. `managed.parent_id` — родительский датасет; у первой версии (`--first`) — `null`. |
 
-### preparation.json
+### report.json
 
-Запись `verify --bundle`:
+`report.json` подготовки `verify --bundle` — отчёт проверки и итог подготовки:
 
 | Ключ | Значение |
 |---|---|
-| `format_version` | `1`. |
-| `options` | Выбранные параметры: проект и имя датасета ClearML, `api_url`, корни изображений, решения по классам, `clean`. |
-| `parent_id`, `parent_version` | родительский датасет ([parent dataset](../GLOSSARY.md)) в ClearML или `null`, если родителя нет. |
-| `source_hashes` | SHA-256 четырёх файлов в `sources/`. |
-| `payload_hashes` | SHA-256 трёх публикуемых файлов. |
+| `blockers` | Блокирующие условия ([blocker](../GLOSSARY.md)). Пока список не пуст, `dataset.csv`, `dataset.yaml` и `tasks.yaml` не пишутся. |
+| `ready` | `true`, если блокирующих условий нет. |
+| `pending` | Условия split, которые нужно выполнить до публикации; правьте `split` в `dataset.csv`. |
+| `destination` | `{"project": …, "dataset": …}`: куда собирались публиковать при подготовке. |
+| `parent` | `{"id": …, "version": …}` родительского датасета ([parent dataset](../GLOSSARY.md)), который видел `verify`, или `null`, если его не было. `upload-dataset` сравнивает с ним последнюю версию. |
+| `class_changes` | Добавленные и переименованные классы относительно родителя; без родителя все классы — добавленные. |
+| `class_marks` | Классы, у которых отметка `empty` отличается от родителя: `[{"prod_id", "name", "empty"}]`. |
+| `dropped_local_roots` | Локальные корни родителя, которых нет на этой машине: в новый `dataset.yaml` они не попали. |
+| `broken_image_rows` | Число строк в `broken-images.csv`. |
+| `split_prefilled` | Сколько изображений получили split родителя в пустые ячейки `split`. |
+
+Остальные ключи — те же, что у отчёта проверки CSV ([verify](commands/verify.md)).
+
+### publication.json
+
+`upload-dataset` пишет его в каталог после успешной публикации. Хешей в нём нет.
+
+| Ключ | Значение |
+|---|---|
+| `dataset_id`, `version` | ID и версия опубликованного датасета в ClearML. |
+| `project`, `dataset` | Куда опубликовано. |
+| `published_at` | Время публикации, UTC, ISO 8601. |
+
+Если в каталоге уже есть `publication.json`, повторный `upload-dataset` печатает предупреждение с ID прежней публикации и продолжает. Обычно его раньше останавливает проверка родителя: прежняя публикация стала последней версией.
+
+### preparation.json
 
 Запись `dataset prepare`:
 
