@@ -84,11 +84,22 @@ _SPLIT_CODES = frozenset({"invalid_split", "split_conflict"})
 def _feedback(
     frame: pd.DataFrame, validation: ValidationResult, captured: CapturedManagedInput
 ) -> tuple[list[FeedbackFinding], int]:
-    """Group rejected-row reasons under only independently attested CVAT frames."""
+    """Group rejected-row reasons under only independently attested CVAT frames.
+
+    A quarantine counts only when some row that triggered it has a reason other than a split mistake.
+    """
+    errors = [issue for issue in validation.issues if issue.severity == "error" and issue.row_position is not None]
+    direct: dict[int, set[str]] = defaultdict(set)
+    for issue in errors:
+        if issue.code != "image_quarantined":
+            direct[cast("int", issue.row_position)].add(issue.code)
     reasons: dict[int, list[tuple[str, str]]] = defaultdict(list)
-    for issue in validation.issues:
-        if issue.severity == "error" and issue.row_position is not None and issue.code not in _SPLIT_CODES:
-            reasons[issue.row_position].append((issue.code, issue.message))
+    for issue in errors:
+        if issue.code in _SPLIT_CODES or (
+            issue.code == "image_quarantined" and all(direct[row] <= _SPLIT_CODES for row in issue.related_rows)
+        ):
+            continue
+        reasons[cast("int", issue.row_position)].append((issue.code, issue.message))
     grouped: dict[tuple[str, int, int, int], set[tuple[str, str]]] = defaultdict(set)
     unmapped = 0
     for position, findings in sorted(reasons.items()):

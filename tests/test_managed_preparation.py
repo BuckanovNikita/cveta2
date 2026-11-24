@@ -30,7 +30,7 @@ from cveta2.domain.managed.models import (
     definition_fingerprint,
     source_fingerprint,
 )
-from cveta2.domain.managed.preparation import PreparationSummary
+from cveta2.domain.managed.preparation import FeedbackFinding, PreparationSummary
 from cveta2.domain.models import LabelInfo
 
 
@@ -616,6 +616,49 @@ def test_split_mistakes_stay_out_of_cvat_feedback(tmp_path: Path) -> None:
     assert not {"invalid_split", "split_conflict"} & set(findings[0].codes)
     assert not any("train, val or test" in message for message in findings[0].messages)
     assert summary.report["unmapped_errors"] == 0
+
+
+def _three_rows_of_one_image(
+    tmp_path: Path, splits: tuple[str, str, str], *, bad_box: int | None = None
+) -> list[FeedbackFinding]:
+    """Prepare with three rows of ``0.png`` (distinct boxes) and return the recorded findings."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    image = rows[rows["image_name"].eq("0.png")]
+    extra = [image.assign(split=split, bbox_x_tl=str(1 + index)) for index, split in enumerate(splits)]
+    if bad_box is not None:
+        extra[bad_box] = extra[bad_box].assign(bbox_x_br="1")
+    pd.concat([rows[rows["image_name"].ne("0.png")], *extra], ignore_index=True).to_csv(transformed, index=False)
+    summary = prepare_managed(
+        config,
+        "demo",
+        transformed,
+        source,
+        tmp_path / "prepared",
+        metadata,
+        files=LocalManagedPreparationFiles(),
+        media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
+        clean=True,
+    )
+    assert not summary.ready
+    return LocalManagedPreparationFiles().load_prepared(summary.directory).record.findings
+
+
+@pytest.mark.parametrize("splits", [("train", "train", "val"), ("train", "train", "holdout")])
+def test_rows_quarantined_by_a_split_mistake_stay_out_of_cvat_feedback(
+    tmp_path: Path, splits: tuple[str, str, str]
+) -> None:
+    """The other rows of an image that only a split mistake rejects are not an annotator's error."""
+    assert _three_rows_of_one_image(tmp_path, splits) == []
+
+
+def test_rows_quarantined_by_an_annotation_error_still_reach_cvat_feedback(tmp_path: Path) -> None:
+    findings = _three_rows_of_one_image(tmp_path, ("train", "val", "val"), bad_box=1)
+    assert [(finding.task_id, finding.frame_id) for finding in findings] == [(11, 0)]
+    assert "invalid_box_area" in findings[0].codes
+    assert not {"invalid_split", "split_conflict"} & set(findings[0].codes)
 
 
 def test_published_assignments_come_only_from_a_managed_parent(tmp_path: Path) -> None:
