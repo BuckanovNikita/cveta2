@@ -154,19 +154,9 @@ def upload_dataset(prepared_dir: str | Path, *, force_resplit: bool = False) -> 
 ```python
 import cveta2
 
-prepared = cveta2.prepare_dataset(
-    "output/fetch",
-    output_dir="output/prepared-1",
-    options=cveta2.PrepareOptions(
-        project="Retail/Datasets",
-        dataset_name="retail-shelves",
-        api_url="https://classes.example.com/api",
-        local_roots=("/home/user/data/images",),
-        accept_default_classes=True,
-        clean=True,
-    ),
-)
-if prepared.ready:
+# Назначение, API классов и корни берутся из черновика output/fetch/dataset.yaml.
+prepared = cveta2.prepare_dataset("output/fetch", output_dir="output/prepared-1")
+if prepared.ready and not prepared.pending:
     publication = cveta2.upload_dataset(prepared.directory)
     print(publication.dataset_id, publication.version)
 ```

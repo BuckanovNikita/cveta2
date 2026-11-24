@@ -220,6 +220,15 @@ class LocalBundleFiles:
         except (OSError, ValidationError) as error:
             raise UploadError(f"Invalid dataset metadata {path}: {_error_details(error)}") from error
 
+    def default_directory(self, source: Path) -> Path:
+        """Return the first sibling of the resolved source, ``-prepared`` then ``-prepared-2``…, not yet taken."""
+        base = source.resolve()
+        candidate, number = base.parent / f"{base.name}-prepared", 1
+        while candidate.exists() or candidate.is_symlink():
+            number += 1
+            candidate = base.parent / f"{base.name}-prepared-{number}"
+        return candidate
+
     def read_draft(self, directory: Path) -> DatasetDraft | None:
         """Read the strict draft; None when there is no ``dataset.yaml``."""
         path = directory / "dataset.yaml"

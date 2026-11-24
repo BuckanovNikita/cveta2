@@ -89,7 +89,7 @@ def resolved(**fields: object) -> ResolvedPreparation:
 ALL_FLAGS = PrepareOptions(
     project="F-project", dataset_name="F-dataset", output_uri="s3://f/x", api_url="https://flag/api"
 )
-NO_FLAGS = PrepareOptions(project="")
+NO_FLAGS = PrepareOptions()
 
 
 @pytest.mark.parametrize(
@@ -113,25 +113,25 @@ NO_FLAGS = PrepareOptions(project="")
         (NO_FLAGS, None, None, resolved()),
         (NO_FLAGS, DatasetDraft(empty_classes=[3]), None, resolved(class_marks={3: True})),
         (
-            PrepareOptions(project="", class_empty={3: False}),
+            PrepareOptions(class_empty={3: False}),
             DatasetDraft(empty_classes=[3]),
             None,
             resolved(class_marks={3: False}),
         ),
         (
-            PrepareOptions(project="", class_empty={4: True}),
+            PrepareOptions(class_empty={4: True}),
             DatasetDraft(empty_classes=[3]),
             None,
             resolved(class_marks={3: True, 4: True}),
         ),
         (
-            PrepareOptions(project="", class_empty={5: False}),
+            PrepareOptions(class_empty={5: False}),
             None,
             parent_metadata(),
             resolved(api_url="https://parent/api", class_marks={5: False}),
         ),
         (
-            PrepareOptions(project="", local_roots=("/f",), s3_roots=("s3://b/p",)),
+            PrepareOptions(local_roots=("/f",), s3_roots=("s3://b/p",)),
             DatasetDraft(images=ImageRoots(local_root=["/d", "/f"], s3_root=["s3://b/d"])),
             parent_metadata(ImageRoots(local_root=["/p"], s3_root=["s3://b/p"])),
             resolved(
@@ -151,7 +151,7 @@ def test_resolve_preparation_precedence(
 
 def test_parent_marks_stay_on_the_parent() -> None:
     parent = parent_metadata()
-    resolve_preparation(PrepareOptions(project="", class_empty={5: False}), None, parent)
+    resolve_preparation(PrepareOptions(class_empty={5: False}), None, parent)
     assert parent.classes["a"].empty is True
 
 

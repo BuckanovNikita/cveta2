@@ -8,11 +8,11 @@ from loguru import logger
 from pydantic import ValidationError
 
 from cveta2.application.ports.dataset_bundle import BundleServices
-from cveta2.domain.bundle.classes import reconcile_classes
+from cveta2.domain.bundle.classes import apply_class_marks, class_mark_changes, reconcile_classes
+from cveta2.domain.bundle.draft import DatasetDraft, resolve_preparation
 from cveta2.domain.bundle.models import (
     BundleValidation,
     ClassInfo,
-    ClassUpdate,
     DatasetMetadata,
     DatasetParent,
     ImageRoots,
@@ -30,52 +30,34 @@ from cveta2.domain.bundle.preparation import (
     PreparedDataset,
     PrepareOptions,
 )
-from cveta2.domain.bundle.splits import changed_splits, published_splits
+from cveta2.domain.bundle.splits import changed_splits, prefill_splits, published_splits
 from cveta2.domain.bundle.tasks import derive_tasks, trace_tasks
-from cveta2.domain.bundle.validation import missing_active_classes, validate_bundle
+from cveta2.domain.bundle.validation import (
+    TrainabilityGap,
+    images_without_split,
+    missing_active_classes,
+    trainability_gaps,
+    validate_bundle,
+)
 from cveta2.domain.managed.models import ClearMLDestination
 from cveta2.domain.verification.models import ValidationOptions
 
 # How many paths, rows or images one refusal lists before it only counts the rest.
 _LISTED = 20
+# The ``pending`` line of each training requirement that the rows with a split do not meet yet.
+_GAP_PENDING: dict[TrainabilityGap, str] = {
+    "train_images": "в train нет изображений",
+    "val_images": "в val нет изображений",
+    "train_box": "в train нет ни одного bbox",
+}
 
 
-def _classes(
-    previous: DatasetMetadata | None,
-    api_url: str,
-    options: PrepareOptions,
-    services: BundleServices,
-) -> ClassUpdate:
-    update = reconcile_classes(previous.classes if previous else {}, services.api.fetch(api_url))
-    decisions = []
-    if previous and update.changes and not options.accept_class_changes:
-        decisions.append(
-            Decision(
-                "class_changes",
-                "Подтвердите изменения классов: "
-                + ", ".join(f"{c.kind}: {c.name} ({c.prod_id})" for c in update.changes),
-            )
-        )
-    classes = dict(update.classes)
-    added = {change.prod_id for change in update.changes if change.kind == "added"}
-    identities = {info.prod_id for info in classes.values()}
-    if unknown := options.class_empty.keys() - identities:
-        raise UploadError(f"Неизвестные номера классов в настройках: {sorted(unknown)}")
-    for name, info in classes.items():
-        if info.prod_id in options.class_empty:
-            classes[name] = info.model_copy(update={"empty": options.class_empty[info.prod_id]})
-        elif info.prod_id in added and not options.accept_default_classes:
-            decisions.append(
-                Decision(
-                    "class_empty",
-                    f"Исключать класс {name!r} ({info.prod_id})?",
-                    ("false", "true"),
-                    info.prod_id,
-                )
-            )
-    if decisions:
-        raise MissingDecisions(tuple(decisions))
-    return ClassUpdate(classes, update.changes)
+def _listing(items: Sequence[str]) -> str:
+    """One item per line, at most ``_LISTED`` of them, then the count of the rest."""
+    lines = [f"  {item}" for item in items[:_LISTED]]
+    if len(items) > _LISTED:
+        lines.append(f"  … и ещё {len(items) - _LISTED}")
+    return "\n".join(lines)
 
 
 def _roots(frame: pd.DataFrame, roots: ImageRoots, services: BundleServices) -> ImageRoots:
@@ -99,13 +81,15 @@ def _roots(frame: pd.DataFrame, roots: ImageRoots, services: BundleServices) -> 
     return canonical
 
 
-def _validate(frame: pd.DataFrame, metadata: DatasetMetadata, services: BundleServices) -> BundleValidation:
+def _validate(
+    frame: pd.DataFrame, metadata: DatasetMetadata, services: BundleServices, *, allow_empty_split: bool = False
+) -> BundleValidation:
     inspection = services.media.inspect(
         frame,
         profile="clearml-yolo",
         options=ValidationOptions(check_images=True, emit_warnings=False),
     )
-    return validate_bundle(frame, metadata, inspection=inspection)
+    return validate_bundle(frame, metadata, inspection=inspection, allow_empty_split=allow_empty_split)
 
 
 def _parent_metadata(parent: DatasetParent | None, services: BundleServices) -> DatasetMetadata | None:
@@ -116,57 +100,129 @@ def _parent_metadata(parent: DatasetParent | None, services: BundleServices) -> 
     return services.files.read_metadata(parent.metadata_path)
 
 
+def _refuse_missing_files(frame: pd.DataFrame, services: BundleServices) -> None:
+    if missing := services.roots.missing_files(frame):
+        raise UploadError(
+            f"Нет файлов изображений из image_path ({len(missing)}):\n{_listing(missing)}\n"
+            "Скачайте изображения (cveta2 s3-sync) или выполните cveta2 fetch заново."
+        )
+
+
+def _new_destination(options: PrepareOptions, draft: DatasetDraft | None) -> ClearMLDestination:
+    """Return the ClearML destination from the flags, else the draft; a missing project or name is a decision."""
+    resolved = resolve_preparation(options, draft, None)
+    project = resolved.project if resolved.project and resolved.project.strip() else None
+    dataset = resolved.dataset_name if resolved.dataset_name and resolved.dataset_name.strip() else None
+    if project is None or dataset is None:
+        decisions = [Decision("project", "Укажите проект ClearML.")] if project is None else []
+        if dataset is None:
+            decisions.append(Decision("dataset_name", "Укажите имя датасета ClearML."))
+        raise MissingDecisions(tuple(decisions))
+    try:
+        return ClearMLDestination(project=project, dataset=dataset, output_uri=resolved.output_uri)
+    except ValidationError as error:
+        raise UploadError(f"Invalid preparation options: {error}") from error
+
+
+def _prefill(frame: pd.DataFrame, parent: DatasetParent | None, services: BundleServices) -> tuple[pd.DataFrame, int]:
+    """Fill empty ``split`` cells from the parent's published ``dataset.csv``; count the filled images."""
+    path = services.datasets.parent_file(parent, "dataset.csv") if parent is not None else None
+    if path is None:
+        return frame, 0
+    return prefill_splits(frame, published_splits(services.files.read_rows(path)))
+
+
+def _api_url(value: str | None) -> str:
+    if not value:
+        raise MissingDecisions((Decision("api_url", "Укажите URL API классов."),))
+    try:
+        DatasetMetadata(api_url=value, classes={})
+    except ValidationError as error:
+        raise UploadError(f"Invalid preparation options or API metadata: {error}") from error
+    return value
+
+
+def _parent_local_roots(roots: Sequence[str], services: BundleServices) -> tuple[list[str], tuple[str, ...]]:
+    """Split the parent's local roots into those usable here and those missing on this machine."""
+    kept: list[str] = []
+    dropped: list[str] = []
+    for root in roots:
+        try:
+            services.roots.check_local_root(root)
+        except UploadError:
+            dropped.append(root)
+        else:
+            kept.append(root)
+    return kept, tuple(dropped)
+
+
+def _pending(clean: pd.DataFrame, directory: Path) -> tuple[str, ...]:
+    """Split conditions ``upload-dataset`` enforces that the clean rows do not meet yet."""
+    if count := images_without_split(clean):
+        return (f"заполните split у {count} изображений в {directory / 'dataset.csv'}",)
+    return tuple(_GAP_PENDING[gap] for gap in trainability_gaps(clean))
+
+
+def _blockers(
+    validation: BundleValidation, metadata: DatasetMetadata, options: PrepareOptions, task_error: str | None
+) -> tuple[str, ...]:
+    """List what keeps the payload from being written; rows that cleanup drops never block on their own."""
+    blockers = list(validation.blockers)
+    if task_error is not None:
+        blockers.append(task_error)
+    result = validation.result
+    if result.requires_cleanup and not options.clean:
+        blockers.append(
+            f"Нужна очистка: отклонено {len(result.broken)} строк; "
+            "запустите verify без --no-clean или исправьте исходные данные."
+        )
+    if names := missing_active_classes(result.clean, metadata):
+        blockers.append(
+            f"Нет ни одного bbox классов {', '.join(names)}: исключите их (--empty-class N или empty_classes в "
+            "dataset.yaml выгрузки) или выгрузите данные с ними."
+        )
+    return tuple(blockers)
+
+
 def prepare_dataset(
-    source: Path, directory: Path, options: PrepareOptions, services: BundleServices
+    source: Path, directory: Path | None, options: PrepareOptions, services: BundleServices
 ) -> PreparedDataset:
-    """Write reviewable local evidence without creating a remote dataset."""
+    """Write the bundle from the flags, the source's draft and the parent without creating a remote dataset."""
     try:
         options = PrepareOptions.model_validate(options.model_dump())
     except ValidationError as error:
         raise UploadError(f"Invalid preparation options: {error}") from error
-    if not options.project.strip():
-        raise UploadError("Укажите непустой проект ClearML.")
-    if not options.dataset_name or not options.dataset_name.strip():
-        raise MissingDecisions((Decision("dataset_name", "Укажите имя датасета ClearML."),))
-    try:
-        destination = ClearMLDestination(
-            project=options.project, dataset=options.dataset_name, output_uri=options.output_uri
-        )
-    except ValidationError as error:
-        raise UploadError(f"Invalid preparation options: {error}") from error
+    if directory is None:
+        directory = services.files.default_directory(source)
     snapshot = services.files.read_source(source)
-    parent = services.datasets.latest(options.project, options.dataset_name)
+    draft = services.files.read_draft(source)
+    _refuse_missing_files(snapshot.tables.dataset, services)
+    destination = _new_destination(options, draft)
+    parent = services.datasets.latest(destination.project, destination.dataset)
     previous = _parent_metadata(parent, services)
-    api_url = options.api_url or (previous.api_url if previous else None)
-    if not api_url:
-        raise MissingDecisions((Decision("api_url", "Укажите URL API классов."),))
-    try:
-        DatasetMetadata(api_url=api_url, classes={})
-    except ValidationError as error:
-        raise UploadError(f"Invalid preparation options or API metadata: {error}") from error
-    update = _classes(previous, api_url, options, services)
-    old_roots = previous.images if previous else ImageRoots()
+    if parent is not None and previous is not None and previous.managed is not None:
+        raise UploadError(
+            f"Родитель {parent.dataset_id} принадлежит управляемому датасету; "
+            "выберите другое имя или используйте cveta2 dataset."
+        )
+    # From here on ``frame`` is what is validated and written; ``snapshot`` keeps the fetched bytes.
+    frame, split_prefilled = _prefill(snapshot.tables.dataset, parent, services)
+    resolved = resolve_preparation(options, draft, previous)
+    api_url = _api_url(resolved.api_url)
+    old_classes = previous.classes if previous else {}
+    update = reconcile_classes(old_classes, services.api.fetch(api_url))
+    classes = apply_class_marks(update.classes, resolved.class_marks)
+    kept, dropped = _parent_local_roots(resolved.parent_local_roots, services)
     roots = _roots(
-        snapshot.tables.dataset,
-        ImageRoots(
-            local_root=[*old_roots.local_root, *options.local_roots],
-            s3_root=[*old_roots.s3_root, *options.s3_roots],
-        ),
-        services,
+        frame, ImageRoots(local_root=[*kept, *resolved.local_roots], s3_root=list(resolved.s3_roots)), services
     )
-    metadata = DatasetMetadata(clearml=destination, api_url=api_url, classes=update.classes, images=roots)
-    validation = _validate(snapshot.tables.dataset, metadata, services)
-    blockers = list(validation.blockers)
+    metadata = DatasetMetadata(clearml=destination, api_url=api_url, classes=classes, images=roots)
+    validation = _validate(frame, metadata, services, allow_empty_split=True)
+    task_error = None
     try:
         tasks = derive_tasks(snapshot.tables, validation.result.clean)
     except UploadError as error:
-        tasks = TaskManifest(included=[], obsolete=[])
-        blockers.append(str(error))
-    if validation.result.requires_cleanup and not options.clean:
-        blockers.append(
-            f"Нужна очистка: отклонено {len(validation.result.broken)} строк; "
-            "запустите verify без --no-clean или исправьте исходные данные."
-        )
+        tasks, task_error = TaskManifest(included=[], obsolete=[]), str(error)
     return services.files.save_preparation(
         directory,
         BundleProposal(
@@ -177,17 +233,13 @@ def prepare_dataset(
             destination=destination,
             parent=parent,
             changes=update.changes,
-            blockers=tuple(blockers),
+            blockers=_blockers(validation, metadata, options, task_error),
+            pending=_pending(validation.result.clean, directory),
+            mark_changes=class_mark_changes(old_classes, classes),
+            dropped_local_roots=dropped,
+            split_prefilled=split_prefilled,
         ),
     )
-
-
-def _listing(items: Sequence[str]) -> str:
-    """One item per line, at most ``_LISTED`` of them, then the count of the rest."""
-    lines = [f"  {item}" for item in items[:_LISTED]]
-    if len(items) > _LISTED:
-        lines.append(f"  … и ещё {len(items) - _LISTED}")
-    return "\n".join(lines)
 
 
 def _identity(parent: DatasetParent | None) -> tuple[str | None, str | None]:

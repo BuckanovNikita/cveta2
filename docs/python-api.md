@@ -103,7 +103,7 @@ with cveta2.CvatClient(cfg) as client:
 | Логин и пароль | `MissingCredentialsError`. |
 | Каталог для изображений | Аргумент `images_dir=` или `download_images=False`. Если ни того, ни другого нет и [кэш изображений](../GLOSSARY.md) (image cache) не настроен, `Cveta2Error`. |
 | Проект или задачи из списка | Аргументы `project` и `tasks`. Не найден проект: `ProjectNotFoundError`. Не найдена задача: `TaskNotFoundError`. |
-| Решения при подготовке датасета (имя, классы, корни изображений) | Поля `PrepareOptions`. Если решения не хватает, `MissingDecisions` со списком недостающих решений. См. [verify](commands/verify.md#из-python). |
+| Решения при подготовке датасета (проект ClearML, имя датасета, API классов, корни изображений) | Поля `PrepareOptions` или черновик `dataset.yaml` из `fetch`. Если решения не хватает, `MissingDecisions` со списком недостающих решений. О классах ничего не спрашивается. См. [verify](commands/verify.md#из-python). |
 | Подтверждение удаления (меток, задачи) | Подтверждения нет: `update_labels(delete=...)`, `task_delete` и методы `CvatClient` сразу выполняют действие. |
 
 `InteractiveModeRequiredError` вызывает только CLI. Это происходит, когда команде нужен ответ пользователя, а интерактивный режим выключен (`CVETA2_NO_INTERACTIVE=true`). Функции Python его не вызывают.
@@ -227,7 +227,7 @@ list_projects() requires a context manager. Use: with CvatClient(cfg) as client:
 | `InteractiveModeRequiredError` | `Cveta2Error` | Только в CLI: нужен ответ пользователя, а интерактивный режим выключен. | Текст с подсказкой, какой флаг или переменную использовать. |
 | `LabelsMismatchError` | `Cveta2Error` | Метки из CSV не найдены в проекте. | `unknown_labels`, `available_labels`. |
 | `DatasetInputError` | `Cveta2Error`, `ValueError` | CSV нельзя прочитать как таблицу, или каталог отчёта нельзя создать. | Текст сообщения. |
-| `MissingDecisions` | `Cveta2Error` (через внутренний класс `UploadError`) | Подготовке датасета не хватает решений. | `decisions`: кортеж с полями `kind`, `message`, `choices`, `class_id`. |
+| `MissingDecisions` | `Cveta2Error` (через внутренний класс `UploadError`) | Подготовке датасета не хватает решений. | `decisions`: кортеж с полями `kind` (`project`, `dataset_name`, `api_url`, `local_roots`), `message`, `choices`. |
 | `DatasetWarning` | `UserWarning` | Не исключение, а предупреждение модуля `warnings`: проверка датасета нашла проблему, которую можно исправить. Выдаётся при `ValidationOptions(emit_warnings=True)`. | Текст предупреждения. |
 
 ### Подробности CvatApiError
@@ -316,7 +316,7 @@ except cveta2.CvatApiError as error:
 | `UploadResult` | `upload` | `task_id`, `task_name`, `url`, `images`, `deleted`, `annotations`, `issues`. См. [upload](commands/upload.md#из-python). |
 | `WhatsNewResult` | `whats_new` | `tasks` (список `TaskInfo`), `cutoff` (наибольший ID завершённой задачи в `dataset.csv`; если завершённых нет, наибольший ID вообще). См. [whats-new](commands/whats-new.md#из-python). |
 | `ValidationResult` | `verify`, `verify_dataframe` | См. [ниже](#validationresult). |
-| `PreparedDataset` | `prepare_dataset`, `prepare_managed_dataset` | `directory`, `ready`, `validation`, `metadata`, `tasks`. См. [verify](commands/verify.md#из-python). |
+| `PreparedDataset` | `prepare_dataset` | `directory`, `ready`, `validation`, `metadata`, `tasks`, `blockers`, `pending`, `changes`, `mark_changes`, `dropped_local_roots`, `split_prefilled`. См. [verify](commands/verify.md#из-python). |
 | `Publication` | `upload_dataset`, `publish_dataset` | `dataset_id`, `version`. См. [upload-dataset](commands/upload-dataset.md#из-python). |
 
 ### Параметры проверки

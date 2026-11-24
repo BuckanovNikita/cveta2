@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+import yaml
 from PIL import Image
 
 from cveta2.adapters.files.bundle import LocalBundleFiles
@@ -98,13 +99,26 @@ class Storage:
 
 type Scenario = tuple[Path, PrepareOptions, BundleServices, Store, Classes]
 
+# The destination and class API of the scenario's draft ``dataset.yaml``.
+PROJECT = "inspection"
+DATASET = "training"
+API_URL = "https://example.org/classes"
+
 # Image, its split and the task that annotated it; every image has one cat box.
 SCENARIO_IMAGES = (("train.png", "train", 1), ("val.png", "val", 2), ("val2.png", "val", 3))
 
 
+def write_draft(source: Path, draft: dict[str, object]) -> None:
+    """Write ``draft`` as the fetch directory's ``dataset.yaml``."""
+    (source / "dataset.yaml").write_text(yaml.safe_dump(draft, sort_keys=False), encoding="utf-8")
+
+
 @pytest.fixture
 def scenario(tmp_path: Path) -> Scenario:
-    """Build a completed fetch of three images in three tasks with literal CSV evidence."""
+    """Build a completed fetch of three images in three tasks, with literal CSV evidence and a draft.
+
+    The draft names the destination and the class API; the options add only the image roots.
+    """
     source = tmp_path / "source"
     source.mkdir()
     images = tmp_path / "images"
@@ -131,14 +145,8 @@ def scenario(tmp_path: Path) -> Scenario:
     frame.to_csv(source / "dataset.csv", index=False)
     for name in ("obsolete", "in_progress", "deleted"):
         frame.iloc[:0].to_csv(source / f"{name}.csv", index=False)
-    options = PrepareOptions(
-        project="inspection",
-        dataset_name="training",
-        api_url="https://example.org/classes",
-        local_roots=(str(images),),
-        s3_roots=("s3://bucket/images",),
-        accept_default_classes=True,
-    )
+    write_draft(source, {"clearml": {"project": PROJECT, "dataset": DATASET}, "api_url": API_URL})
+    options = PrepareOptions(local_roots=(str(images),), s3_roots=("s3://bucket/images",))
     store, classes = Store(), Classes()
     services = BundleServices(
         api=classes,

@@ -26,29 +26,34 @@ PUBLISHED_NAMES = (*PAYLOAD_NAMES, SOURCES_ARCHIVE)
 
 
 class PrepareOptions(BaseModel):
-    """Explicit destination and review policy; omitted decisions never prompt."""
+    """Flag values of a preparation; each one left out comes from the draft, then the parent.
+
+    ``class_empty`` maps a class number to its exclusion mark: ``True`` excludes
+    the class, ``False`` brings back a class the parent excluded. The two
+    ``accept_*`` fields are accepted and ignored: class changes are reported,
+    never asked about.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    project: str
+    project: str | None = None
     dataset_name: str | None = None
-    api_url: str | None = None
     output_uri: str | None = None
+    api_url: str | None = None
     local_roots: tuple[str, ...] = ()
     s3_roots: tuple[str, ...] = ()
     class_empty: dict[int, bool] = Field(default_factory=dict)
     accept_default_classes: bool = False
     accept_class_changes: bool = False
-    clean: bool = False
+    clean: bool = True
 
 
 @dataclass(frozen=True)
 class Decision:
     """A missing user choice that an incoming interface may collect."""
 
-    kind: Literal["dataset_name", "api_url", "class_empty", "class_changes", "local_roots"]
+    kind: Literal["project", "dataset_name", "api_url", "local_roots"]
     message: str
     choices: tuple[str, ...] = ()
-    class_id: int | None = None
 
 
 class MissingDecisions(UploadError):  # noqa: N818 - structured public decision contract.

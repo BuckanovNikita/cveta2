@@ -117,6 +117,10 @@ class BundleFiles(DraftFiles, Protocol):
         """Read strict parent metadata."""
         ...
 
+    def default_directory(self, source: Path) -> Path:
+        """Return the first free sibling ``<source>-prepared``, ``<source>-prepared-2``, … of the resolved source."""
+        ...
+
     def save_preparation(self, directory: Path, proposal: BundleProposal) -> PreparedDataset:
         """Write a new bundle in one step: the archive and report, and the payload when ready."""
         ...

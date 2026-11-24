@@ -6,12 +6,14 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import questionary
 
 import cveta2
 from cveta2.domain.bundle.models import Publication
-from cveta2.domain.bundle.preparation import Decision, MissingDecisions
+from cveta2.domain.bundle.preparation import Decision, MissingDecisions, PrepareOptions
 from cveta2.interfaces.cli import CliApp
 from cveta2.interfaces.commands import verification
+from cveta2.interfaces.commands.interactive.bundle import collect_decisions
 
 
 def test_public_dataset_functions_and_typed_options_are_exported() -> None:
@@ -95,3 +97,20 @@ def test_upload_dataset_force_resplit_reaches_the_api(
     monkeypatch.setattr(verification, "upload_dataset", upload)
     CliApp().run(["upload-dataset", str(tmp_path), *flags])
     upload.assert_called_once_with(tmp_path, force_resplit=expected)
+
+
+def test_public_prepare_dataset_defaults() -> None:
+    parameters = inspect.signature(cveta2.prepare_dataset).parameters
+    assert parameters["output_dir"].default is None
+    assert parameters["options"].default is None
+    assert PrepareOptions().clean is True
+    assert PrepareOptions().project is None
+    assert "class_id" not in Decision.__dataclass_fields__
+
+
+def test_collect_decisions_asks_project_by_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompt = Mock(return_value=Mock(ask=Mock(return_value="Retail/Datasets")))
+    monkeypatch.setattr(questionary, "text", prompt)
+    options = collect_decisions(PrepareOptions(), (Decision("project", "Укажите проект ClearML."),))
+    assert options.project == "Retail/Datasets"
+    prompt.assert_called_once_with("Укажите проект ClearML.")

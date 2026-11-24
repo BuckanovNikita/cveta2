@@ -25,9 +25,7 @@ from cveta2.domain.managed.models import (
     ManagedMetadata,
     SourceDefinition,
 )
-from tests.bundle.conftest import Scenario, Storage, api_class
-
-API_URL = "https://example.org/classes"
+from tests.bundle.conftest import API_URL, DATASET, PROJECT, Scenario, Storage, api_class
 
 
 def _prepare(scenario: Scenario, tmp_path: Path, options: PrepareOptions | None = None) -> Path:
@@ -78,7 +76,7 @@ def _parent_metadata(path: Path, *, managed: ManagedMetadata | None = None) -> P
 def test_upload_publishes_four_files_with_output_uri_and_writes_publication_json(
     scenario: Scenario, tmp_path: Path
 ) -> None:
-    _source, options, services, store, _classes = scenario
+    _source, _options, services, store, _classes = scenario
     prepared = _prepare(scenario, tmp_path)
     _edit_metadata(prepared, lambda data: _clearml(data).update(output_uri="s3://bucket/.clearml"))
     expected = {name: (prepared / name).read_bytes() for name in ("dataset.csv", "dataset.yaml", "sources.tar.gz")}
@@ -94,7 +92,7 @@ def test_upload_publishes_four_files_with_output_uri_and_writes_publication_json
     record = json.loads((prepared / "publication.json").read_bytes())
     assert record["dataset_id"] == "child"
     assert record["version"] == "1.0.0"
-    assert (record["project"], record["dataset"]) == (options.project, options.dataset_name)
+    assert (record["project"], record["dataset"]) == (PROJECT, DATASET)
     assert record["published_at"]
 
 
@@ -241,13 +239,13 @@ def test_upload_refuses_class_identity_mismatch(scenario: Scenario, tmp_path: Pa
 
 @pytest.mark.parametrize("metadata", ["copy", "absent"])
 def test_newer_parent_after_verify_refuses(scenario: Scenario, tmp_path: Path, metadata: str) -> None:
-    _source, options, services, store, _classes = scenario
+    _source, _options, services, store, _classes = scenario
     prepared = _prepare(scenario, tmp_path)
     metadata_path = None
     if metadata == "copy":
         metadata_path = tmp_path / "parent.yaml"
         shutil.copyfile(prepared / "dataset.yaml", metadata_path)
-    store.parent = DatasetParent("new", options.project, options.dataset_name or "", "2", metadata_path)
+    store.parent = DatasetParent("new", PROJECT, DATASET, "2", metadata_path)
     with pytest.raises(UploadError, match="verify"):
         upload_dataset(prepared, services)
     assert store.calls == 0
@@ -300,9 +298,9 @@ def test_parent_change_during_checks_refuses(
 
 
 def test_managed_parent_is_refused(scenario: Scenario, tmp_path: Path) -> None:
-    _source, options, services, store, _classes = scenario
+    _source, _options, services, store, _classes = scenario
     prepared = _prepare(scenario, tmp_path)
-    destination = ClearMLDestination(project=options.project, dataset=options.dataset_name or "")
+    destination = ClearMLDestination(project=PROJECT, dataset=DATASET)
     managed = ManagedMetadata(
         name="demo",
         definition_hash="0" * 64,
@@ -314,7 +312,7 @@ def test_managed_parent_is_refused(scenario: Scenario, tmp_path: Path) -> None:
         cvat=CvatIdentity(host="https://cvat.example.org"),
     )
     path = _parent_metadata(tmp_path / "parent.yaml", managed=managed)
-    store.parent = DatasetParent("managed-id", options.project, options.dataset_name or "", "3", path)
+    store.parent = DatasetParent("managed-id", PROJECT, DATASET, "3", path)
     _edit_report(prepared, lambda data: data.update(parent={"id": "managed-id", "version": "3"}))
     with pytest.raises(UploadError, match="managed"):
         upload_dataset(prepared, services)

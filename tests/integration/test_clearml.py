@@ -158,7 +158,6 @@ def scenario(
         api_url=class_api,
         local_roots=(str(images),),
         s3_roots=(f"s3://{bucket}",),
-        accept_default_classes=True,
     )
     return Scenario(source, options, bundle_services())
 
@@ -178,7 +177,7 @@ def test_publish_finalized_exact_payload_and_preserve_parent(
     original = _source_bytes(source)
     prepared = tmp_path / "prepared-first"
     assert prepare_dataset(source, prepared, options, services).ready
-    assert services.datasets.latest(options.project, options.dataset_name or "") is None
+    assert services.datasets.latest(options.project or "", options.dataset_name or "") is None
     first = upload_dataset(prepared, services)
     parent = Dataset.get(dataset_id=first.dataset_id)
     assert parent.is_final()

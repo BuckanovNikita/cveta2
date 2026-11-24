@@ -433,15 +433,32 @@ def verify_dataframe(
 ) -> ValidationResult
 
 def prepare_dataset(
-    source: str | Path, *, output_dir: str | Path, options: PrepareOptions
+    source: str | Path,
+    *,
+    output_dir: str | Path | None = None,
+    options: PrepareOptions | None = None,
 ) -> PreparedDataset
 ```
 
 - `ValidationOptions(iou_threshold=0.99, check_images=False, image_root=None, base_dir=None, emit_warnings=True)`. `base_dir` — каталог для относительных путей (по умолчанию каталог CSV). С `emit_warnings=True` предупреждения выдаются через модуль `warnings` (класс `cveta2.DatasetWarning`).
 - `ValidationResult` содержит `clean` и `broken` (DataFrame), `issues` (список `Issue` с полями `code`, `message`, `severity`, `row_position`, `columns`, `related_rows`, `iou`), свойства `is_valid` и `requires_cleanup`, метод `reasons_for(row_position)`. `verify_dataframe` ничего не пишет на диск.
 - `verify` бросает `cveta2.DatasetInputError`, если CSV не читается или каталог отчёта нельзя создать.
-- `PrepareOptions(project, dataset_name=None, api_url=None, local_roots=(), s3_roots=(), class_empty={}, accept_default_classes=False, accept_class_changes=False, clean=False)`. `class_empty` — словарь «номер класса → исключать ли».
-- `prepare_dataset` возвращает `PreparedDataset` с полями `directory`, `ready`, `validation`, `metadata`, `tasks`. Если не хватает решения, бросает `cveta2.MissingDecisions` с кортежем `decisions` (у каждого `kind`, `message`, `choices`, `class_id`). Прочие ошибки — подклассы `cveta2.Cveta2Error`.
+- `prepare_dataset(source)` готовит набор из каталога `fetch`, как `cveta2 verify <каталог>`. Без `output_dir` набор пишется рядом с `source`: в `<source>-prepared`, а если он занят — в `<source>-prepared-2`, `-3` и так далее. Указанный `output_dir` не должен существовать. `options=None` означает `PrepareOptions()`.
+- `PrepareOptions(project=None, dataset_name=None, output_uri=None, api_url=None, local_roots=(), s3_roots=(), class_empty={}, accept_default_classes=False, accept_class_changes=False, clean=True)`. Незаданное значение берётся из черновика `dataset.yaml` в `source`, а `api_url` — затем из родительского датасета. Корни изображений (`local_roots`, `s3_roots`) складываются с корнями черновика и родителя.
+  - `project` и `dataset_name` — проект и имя датасета ClearML. Оба необязательны, если они есть в черновике (`clearml.project`, `clearml.dataset`).
+  - `output_uri` — куда ClearML загружает файлы датасета; без него — из черновика (`clearml.output_uri`), иначе хранилище ClearML по умолчанию.
+  - `class_empty` — словарь «номер класса → исключён ли». `{N: True}` исключает класс. `{N: False}` возвращает класс, исключённый в родительском датасете: без этого его отметка сохраняется. Номер, которого нет в реестре классов, — ошибка.
+  - `clean=True` (по умолчанию): строки, которые отклонила проверка, не попадают в набор и не мешают ему. С `clean=False` такие строки блокируют набор.
+  - `accept_default_classes` и `accept_class_changes` принимаются и ничего не делают: о классах больше ничего не спрашивается, изменения классов попадают в `changes` и `report.json`.
+- Если не хватает решения, `prepare_dataset` бросает `cveta2.MissingDecisions` с кортежем `decisions`; у каждого решения есть `kind`, `message` и `choices`. Значения `kind`: `project`, `dataset_name`, `api_url` (URL API классов), `local_roots` (в `choices` — пути изображений вне разрешённых каталогов). Прочие ошибки — подклассы `cveta2.Cveta2Error`. Пустой или относительный `image_path` и отсутствующий файл изображения — тоже ошибка: тогда ничего не пишется.
+- `PreparedDataset` содержит поля:
+  - `directory`, `ready`, `validation`, `metadata`, `tasks`;
+  - `blockers` — что не даёт записать `dataset.csv`, `dataset.yaml` и `tasks.yaml` (тогда `ready` ложно). Например, класс без единого bbox, который не исключён;
+  - `pending` — что `upload-dataset` потребует, но пока не выполнено: пустой `split`, нет изображений в `train` или `val`, нет ни одного bbox в `train`. Если `ready`, набор при этом записан;
+  - `changes` — добавленные и переименованные классы реестра;
+  - `mark_changes` — классы, у которых отметка «исключён» отличается от родительской;
+  - `dropped_local_roots` — локальные корни родителя, которых нет на этом компьютере;
+  - `split_prefilled` — сколько изображений получили `split` из `dataset.csv` родителя. Заполняются только пустые ячейки.
 
 ```python
 import cveta2
@@ -456,21 +473,14 @@ for issue in result.issues:
     print(issue.code, issue.row_position, issue.message)
 
 try:
+    # Назначение, API классов и корни берутся из черновика output/fetch/dataset.yaml.
     prepared = cveta2.prepare_dataset(
         "output/fetch",  # ~ в пути не раскрывается
-        output_dir="output/prepared-1",
-        options=cveta2.PrepareOptions(
-            project="Retail/Datasets",
-            dataset_name="retail-shelves",
-            api_url="https://classes.example.com/api",
-            local_roots=("/home/user/data/images",),
-            s3_roots=("s3://my-bucket/images",),
-            class_empty={10: True},
-            accept_default_classes=True,
-            clean=True,
-        ),
+        options=cveta2.PrepareOptions(class_empty={10: True, 12: False}),
     )
-    print(prepared.ready, prepared.directory)
+    print(prepared.ready, prepared.directory)  # абсолютный путь к output/fetch-prepared
+    for item in prepared.pending:
+        print("перед публикацией:", item)
 except cveta2.MissingDecisions as error:
     for decision in error.decisions:
         print(decision.kind, decision.message)

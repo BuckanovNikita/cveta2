@@ -73,9 +73,11 @@ def verify_dataframe(
     return verify_frame(frame, profile=profile, options=options)
 
 
-def prepare_dataset(source: str | Path, *, output_dir: str | Path, options: PrepareOptions) -> PreparedDataset:
-    """Prepare local evidence; missing choices raise structured MissingDecisions."""
-    return prepare_bundle(Path(source), Path(output_dir), options)
+def prepare_dataset(
+    source: str | Path, *, output_dir: str | Path | None = None, options: PrepareOptions | None = None
+) -> PreparedDataset:
+    """Prepare a bundle as ``verify <directory>`` does; missing choices raise structured MissingDecisions."""
+    return prepare_bundle(Path(source), None if output_dir is None else Path(output_dir), options or PrepareOptions())
 
 
 def upload_dataset(prepared_dir: str | Path, *, force_resplit: bool = False) -> Publication:
