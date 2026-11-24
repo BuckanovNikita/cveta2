@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from cveta2.domain.class_registry import ApiClass as ApiClass  # noqa: PLC0414 - preserve the existing model import.
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.models import ClearMLDestination, ManagedMetadata, ManagedSnapshot
+from cveta2.domain.managed.models import ClearMLDestination, ManagedMetadata, ManagedSnapshot, has_url_userinfo
 from cveta2.domain.verification.models import ValidationResult
 
 
@@ -70,7 +70,8 @@ class DatasetMetadata(BaseModel):
         parsed = urlsplit(value)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("api_url must be an HTTP(S) URL")
-        if parsed.username is not None or parsed.password is not None:
+        # urlsplit misses a password that holds ``/``, ``?`` or ``#``; the shared rule does not.
+        if has_url_userinfo(value):
             raise ValueError("api_url must not contain credentials")
         return value
 

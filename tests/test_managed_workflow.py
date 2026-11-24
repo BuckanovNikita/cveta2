@@ -743,6 +743,18 @@ def test_parent_that_lost_its_metadata_blocks_publication(workflow: Workflow, tm
     assert workflow.clearml.publications == ["version-1"]
 
 
+def test_parent_api_url_with_a_slash_in_its_password_stops_prepare(workflow: Workflow, tmp_path: Path) -> None:
+    first = api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    metadata_path = workflow.clearml.root / first.dataset_id / "dataset.yaml"
+    metadata = yaml.safe_load(metadata_path.read_text())
+    metadata["api_url"] = "https://key:se/cret@classes.example/api"
+    metadata_path.write_text(yaml.safe_dump(metadata))
+    with pytest.raises(Cveta2Error, match=r"Invalid dataset metadata .*api_url must not contain credentials") as caught:
+        _prepare(workflow, tmp_path / "child")
+    assert "se/cret" not in str(caught.value)
+    assert workflow.clearml.publications == ["version-1"]
+
+
 def test_failed_feedback_is_delivered_after_a_sibling_issue_moved_the_task(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path, bad=True, bad_frames=("0", "1"))
     workflow.cvat.advance_issue_timestamp = True

@@ -156,7 +156,7 @@ def test_draft_values_are_used_without_flags(scenario: Scenario, tmp_path: Path)
 # A refused URL with credentials, its password, and how a refusal may show it.
 _SECRET_URLS = {
     "output_uri": ("s3://key:se/cret@bucket/x", "se/cret", "s3://***@bucket/x"),
-    "api_url": ("https://key:hidden-pass@host/api", "hidden-pass", "https://***@host/api"),
+    "api_url": ("https://key:se/cret@host/api", "se/cret", "https://***@host/api"),
 }
 
 

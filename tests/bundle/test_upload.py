@@ -270,6 +270,16 @@ def test_upload_refuses_rejected_or_repaired_rows(scenario: Scenario, tmp_path: 
     assert store.calls == 0
 
 
+def test_upload_refuses_an_api_url_with_a_slash_in_its_password(scenario: Scenario, tmp_path: Path) -> None:
+    _source, _options, services, store, _classes = scenario
+    prepared = _prepare(scenario, tmp_path)
+    _edit_metadata(prepared, lambda data: data.update(api_url="https://key:se/cret@host/api"))
+    with pytest.raises(UploadError, match=r"Invalid dataset metadata .*api_url must not contain credentials") as caught:
+        upload_dataset(prepared, services)
+    assert "se/cret" not in str(caught.value)
+    assert store.calls == 0
+
+
 @pytest.mark.parametrize("where", ["dataset.yaml", "registry"])
 def test_upload_refuses_class_identity_mismatch(scenario: Scenario, tmp_path: Path, where: str) -> None:
     _source, _options, services, store, classes = scenario
