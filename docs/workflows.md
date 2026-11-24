@@ -214,50 +214,65 @@
 
 | | Ручная подготовка ([bundle preparation](../GLOSSARY.md)) | Управляемый датасет ([managed dataset](../GLOSSARY.md)) |
 |---|---|---|
-| Команды | `verify --bundle`, `upload-dataset` | `dataset fetch`, `prepare`, `report-errors`, `publish` |
-| Что нужно в общей конфигурации | ничего | запись в разделе `datasets` |
+| Команды | `verify <каталог>`, `upload-dataset` | `dataset fetch`, `prepare`, `report-errors`, `publish` |
+| Что нужно в общей конфигурации | ничего; настройки публикации проекта (`publication`) избавляют от флагов | запись в разделе `datasets` |
 | Вход | каталог полной выгрузки одного проекта | источники ([source](../GLOSSARY.md)) датасета: проекты CVAT и CSV в S3 |
-| Классы, корни изображений | флаги `verify` или вопросы в терминале | из общей конфигурации |
-| split | назначаете вы | назначаете вы; у опубликованных изображений cveta2 переносит опубликованный split ([stable split](../GLOSSARY.md)) |
+| Классы, корни изображений | из настроек публикации проекта (черновик `dataset.yaml`) или флагов `verify` | из общей конфигурации |
+| split | назначаете вы; опубликованное изображение сохраняет свой split ([stable split](../GLOSSARY.md)): `verify` заполняет его из родителя, `upload-dataset` не даёт изменить без `--force-resplit` | назначаете вы; у опубликованных изображений cveta2 переносит опубликованный split ([stable split](../GLOSSARY.md)) |
 | Замечания в CVAT | нет | замечания к кадрам ([feedback finding](../GLOSSARY.md)) как issue |
 
 Выбирайте управляемый датасет, если команда описала его в разделе `datasets` общей конфигурации: все, кто его публикует, работают с одними и теми же источниками, классами и split. Ручная подготовка подходит, когда записи нет, а вам нужно опубликовать одну выгрузку проекта.
 
 ### Ручная подготовка
 
-1. Сделайте полную выгрузку и назначьте split прямо в её `dataset.csv` (подготовке нужны все четыре файла в одном каталоге):
+1. Один раз опишите настройки публикации проекта в общей конфигурации. Это делает тот, кто ведёт общий файл:
 
    ```bash
-   cveta2 fetch -p "Retail shelves" -o ~/data/fetch/
-   python assign_split.py ~/data/fetch/dataset.csv ~/data/fetch/dataset.csv
+   cveta2 setup --global --project "Retail shelves" --clearml-project Retail/Datasets \
+     --dataset-name retail-shelves --api-url https://classes.example.com/api
    ```
 
-2. Проверьте CSV по профилю проверки ([verification profile](../GLOSSARY.md)) `clearml-yolo` и откройте каждое изображение:
+   Подробнее — [setup](commands/setup.md). Без этих настроек всё работает так же, но значения придётся передавать флагами `verify` или вписывать в черновик.
+
+2. Сделайте полную выгрузку:
 
    ```bash
-   cveta2 verify ~/data/fetch/dataset.csv --profile clearml-yolo --check-images
+   cveta2 fetch -p "Retail shelves" -o out/fetch
    ```
 
-   Итог выглядит так: `Проверка: 34 строк; допустимых 34, отклонённых 0.` Каждая отклонённая строка печатается с кодом и причиной. Без `--output-dir` команда ничего не пишет. Правила — [verify](commands/verify.md#проверка-csv).
+   Рядом с четырьмя CSV появится черновик `dataset.yaml`: назначение в ClearML, API классов, исключённые классы и корни изображений из настроек публикации проекта. Если чего-то не хватает, `fetch` печатает предупреждение и подсказку, но не завершается с ошибкой. Черновик можно поправить. Подробнее — [Черновик dataset.yaml](commands/fetch.md#черновик-datasetyaml).
 
 3. Подготовьте датасет:
 
    ```bash
-   cveta2 verify ~/data/fetch --bundle --project "Retail/Datasets" --dataset-name retail-shelves \
-     --api-url https://classes.example.com/api --local-root ~/data/images \
-     --s3-root s3://my-bucket/images --accept-default-classes \
-     --clean --output-dir output/prepared-1 --non-interactive
+   cveta2 verify out/fetch
    ```
 
-   При успехе команда печатает `Набор подготовлен. После проверки: cveta2 upload-dataset output/prepared-1` и завершается с кодом `0`. Если подготовка не готова, она печатает причины, `Набор не готов к публикации; ...` и код `1`; например, при пустом split — `Every input row must have a valid train, val or test split assignment.`, а если ни одно изображение не попало в val — `Required val split has no valid images.` (скрипт из сценария 1 на нескольких изображениях может оставить val пустым: проверьте его вывод). Каталог `--output-dir` не должен существовать: для новой попытки укажите новый. Состав каталога — [Подготовленный датасет](dataset-format.md#подготовленный-датасет), флаги — [verify](commands/verify.md#ручная-подготовка---bundle).
+   Команда читает черновик, ищет родительский датасет в ClearML, сверяет классы с API, проверяет каждое изображение и пишет подготовленный датасет в `out/fetch-prepared` (если он занят — в `out/fetch-prepared-2` и так далее). Отклонённые строки не попадают в набор: команда печатает их число, а строки изображений с отклонёнными строками пишет в `broken-images.csv`. Последние строки вывода:
 
-4. Просмотрите `output/prepared-1/report.json` и опубликуйте:
+   ```text
+   Набор подготовлен: /home/user/out/fetch-prepared
+   Перед публикацией: заполните split у 120 изображений в /home/user/out/fetch-prepared/dataset.csv
+   Затем: cveta2 upload-dataset /home/user/out/fetch-prepared
+   ```
+
+   Код завершения `0`. Если набор не подготовлен (например, у неисключённого класса нет ни одного bbox), команда печатает причины, `Набор не подготовлен; отчёт: …/report.json` и завершается с кодом `1`. Состав каталога — [Подготовленный датасет](dataset-format.md#подготовленный-датасет), флаги и правила — [verify](commands/verify.md#подготовка-каталога).
+
+4. Заполните оставшиеся пустые `split` в `out/fetch-prepared/dataset.csv`. Изображения, уже опубликованные в родителе, получили свой split от `verify`; скрипт из сценария 1 заполняет только пустые ячейки:
 
    ```bash
-   cveta2 upload-dataset output/prepared-1
+   python assign_split.py out/fetch-prepared/dataset.csv out/fetch-prepared/dataset.csv
    ```
 
-   Команда заново проверяет подготовку, загружает новую версию и печатает `Опубликован датасет <id>, версия 1.0.0.` Публикацию ([publication](../GLOSSARY.md)) нельзя отменить. Подробнее — [upload-dataset](commands/upload-dataset.md).
+   Просмотрите `report.json`, `broken-images.csv` и `dataset.yaml`. Файлы каталога можно править: `upload-dataset` проверяет их такими, какие они есть.
+
+5. Опубликуйте:
+
+   ```bash
+   cveta2 upload-dataset out/fetch-prepared
+   ```
+
+   Команда заново проверяет файлы каталога, загружает новую версию и печатает `Опубликован датасет <id>, версия 1.0.0.` Если вы изменили split изображения, уже опубликованного в родителе, публикация останавливается; `--force-resplit` разрешает это явно. Публикацию ([publication](../GLOSSARY.md)) нельзя отменить. Подробнее — [upload-dataset](commands/upload-dataset.md).
 
 ### Управляемый датасет
 

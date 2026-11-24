@@ -256,6 +256,10 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
         {"global_scope": True, "project": "retail", "empty_classes": [1, 2]},
     ),
     (["setup", "--unset", "sync-root", "s3-root"], {"unset": ["sync-root", "s3-root"]}),
+    (
+        ["verify", "in", "--clearml-project", "P"],
+        {"input": "in", "clearml_project": "P", "clean": False, "no_clean": False},
+    ),
 ]
 
 
@@ -279,6 +283,7 @@ _PARSE_ERROR_CASES: list[list[str]] = [
     ["task", "drop-label", "-p", "proj", "-t", "1"],
     ["task", "status", "-p", "proj", "-t", "7", "--state", "done"],
     ["setup", "--password", "x"],
+    ["verify", "in", "--clean", "--no-clean"],
 ]
 
 

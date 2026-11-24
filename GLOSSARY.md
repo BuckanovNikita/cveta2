@@ -165,12 +165,12 @@ _Russian_: очищенный CSV (`clean.csv`)
 _Avoid_: fixed CSV, valid CSV
 
 **Cleanup acceptance**:
-The explicit consent (`--clean`) to drop broken rows and apply repairs; without it a result that needs cleanup is not ready.
+The consent to drop broken rows and apply repairs: `--clean` for the CSV check and `dataset prepare`, the default in bundle preparation unless `--no-clean`; without it a result that needs cleanup is not ready.
 _Russian_: подтверждение очистки
 _Avoid_: auto-fix
 
 **Blocker**:
-A condition found while preparing a bundle that makes the preparation not ready (`ready: false`); it is listed under `blockers` in `report.json` and stops publication.
+A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`.
 _Russian_: блокирующее условие
 _Avoid_: blocking error, fatal issue
 
@@ -204,7 +204,7 @@ _Russian_: подготовленный датасет
 _Avoid_: prepared set, release candidate, package
 
 **Bundle preparation**:
-Preparation of a prepared bundle from a full fetch directory with `verify --bundle`, with classes and image roots chosen by flags or prompts; published with `upload-dataset`.
+Preparation of a prepared bundle from a full fetch directory with `verify <directory>`, taking the destination, class API, excluded classes and image roots from flags, the dataset draft and the parent dataset, with cleanup accepted by default; published with `upload-dataset`.
 _Russian_: ручная подготовка
 _Avoid_: standalone preparation, ad hoc preparation
 

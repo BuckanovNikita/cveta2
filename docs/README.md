@@ -36,8 +36,8 @@
 
 Проверка и публикация в ClearML:
 
-- [verify](commands/verify.md) — проверка CSV и сборка подготовленного датасета ([prepared bundle](../GLOSSARY.md)) через `--bundle`.
-- [upload-dataset](commands/upload-dataset.md) — публикация датасета после `verify --bundle`.
+- [verify](commands/verify.md) — проверка CSV и подготовка каталога выгрузки: подготовленный датасет ([prepared bundle](../GLOSSARY.md)).
+- [upload-dataset](commands/upload-dataset.md) — публикация датасета, подготовленного `verify <каталог>`.
 - [dataset](commands/dataset.md) — управляемые датасеты: выгрузка, подготовка, замечания, публикация, сравнение версий.
 
 ## Справочник

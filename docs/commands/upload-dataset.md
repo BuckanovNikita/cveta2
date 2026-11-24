@@ -1,6 +1,6 @@
 # cveta2 upload-dataset
 
-Публикует подготовленный датасет ([prepared bundle](../../GLOSSARY.md)), созданный командой [`verify --bundle`](verify.md#ручная-подготовка---bundle), как новую завершённую версию датасета в ClearML. Команда проверяет файлы каталога такими, какие они сейчас: после `verify` их можно править, и публикуется то, что проходит проверки ([publication](../../GLOSSARY.md)).
+Публикует подготовленный датасет ([prepared bundle](../../GLOSSARY.md)), созданный подготовкой каталога [`verify <каталог>`](verify.md#подготовка-каталога), как новую завершённую версию датасета в ClearML. Команда проверяет файлы каталога такими, какие они сейчас: после `verify` их можно править, и публикуется то, что проходит проверки ([publication](../../GLOSSARY.md)).
 
 > **Внимание.** Опубликованную версию команда не удаляет и не заменяет. Новая публикация с тем же именем создаёт следующую версию, а не исправляет прежнюю.
 
@@ -15,12 +15,13 @@ cveta2 upload-dataset output/prepared-1
 Полный цикл: подготовить, просмотреть и поправить файлы, опубликовать:
 
 ```bash
-cveta2 verify ~/data/fetch --bundle --project "Retail/Datasets" --dataset-name retail-shelves \
-  --api-url https://classes.example.com/api --local-root ~/data/images \
-  --accept-default-classes --clean --output-dir output/prepared-1 --non-interactive
-less output/prepared-1/report.json
-cveta2 upload-dataset output/prepared-1
+cveta2 verify out/fetch
+less out/fetch-prepared/report.json
+python assign_split.py out/fetch-prepared/dataset.csv out/fetch-prepared/dataset.csv
+cveta2 upload-dataset out/fetch-prepared
 ```
+
+`assign_split.py` — скрипт из [сценария 1](../workflows.md#1-первая-выгрузка-и-данные-для-обучения): он заполняет только пустые `split`.
 
 Опубликовать, хотя изображения, уже опубликованные в родителе, теперь в другом split:
 
@@ -28,7 +29,7 @@ cveta2 upload-dataset output/prepared-1
 cveta2 upload-dataset output/prepared-1 --force-resplit
 ```
 
-Если в `dataset.csv` заполнен `s3_image_path`, добавьте к `verify` флаг `--s3-root s3://my-bucket/images`, иначе подготовка остановится с ошибкой `S3 image path is outside approved S3 roots`.
+Если в `dataset.csv` заполнен `s3_image_path`, добавьте к `verify` флаг `--s3-root s3://my-bucket/images` (или впишите корень в `images.s3_root` черновика), иначе подготовка остановится с ошибкой `S3 image path is outside approved S3 roots`.
 
 ## Синтаксис и аргументы
 
