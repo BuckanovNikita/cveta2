@@ -7,6 +7,19 @@ from cveta2.composition import managed
 from cveta2.domain.bundle.models import Publication
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
 
+__all__ = [
+    "FeedbackOutcome",
+    "PreparationSummary",
+    "compare_datasets",
+    "dataset_versions",
+    "fetch_dataset",
+    "list_datasets",
+    "prepare_managed_dataset",
+    "publish_dataset",
+    "report_dataset_errors",
+    "show_dataset",
+]
+
 
 def list_datasets(*, config_path: Path | None = None, project_config: Path | None = None) -> list[dict[str, Any]]:
     """List locally configured dataset mappings without network access."""
