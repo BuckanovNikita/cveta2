@@ -311,8 +311,9 @@ def publish_prepared(
         _check_current(frame, metadata, loaded.directory, hashes, services)
         published = _published(loaded, parent, services)
         if not force_resplit and (conflicts := split_conflicts(frame, hashes, published)):
+            moved = [f"{name} ({was} → {now})" for name, was, now in conflicts]
             raise ManagedError(
-                f"Images published in the parent must keep their split: {_listed(conflicts)}; "
+                f"Images published in the parent must keep their split: {_listed(moved)}; "
                 "restore the split in dataset.csv or pass --force-resplit"
             )
         # Removed images keep their assignments; with force_resplit the rows' splits replace the published ones.

@@ -1557,9 +1557,17 @@ def test_publish_refuses_a_moved_published_image_and_force_resplit_accepts_it(
     rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
     moved = rows["image_name"].eq("task101-0.png")
     new_split = "test" if rows.loc[moved, "split"].iloc[0] != "test" else "val"
+    published_split = rows.loc[moved, "split"].iloc[0]
     rows.loc[moved, "split"] = new_split
     rows.to_csv(prepared / "dataset.csv", index=False)
-    with pytest.raises(ManagedError, match=r"keep their split: task101-0\.png; .*--force-resplit"):
+    with pytest.raises(
+        ManagedError,
+        match=(
+            rf"^Images published in the parent must keep their split: "
+            rf"task101-0\.png \({published_split} → {new_split}\); "
+            r"restore the split in dataset\.csv or pass --force-resplit$"
+        ),
+    ):
         api.publish_dataset(prepared, **workflow.options)
     published = api.publish_dataset(prepared, force_resplit=True, **workflow.options)
     digest = hashlib.sha256((workflow.images / "task101-0.png").read_bytes()).hexdigest()

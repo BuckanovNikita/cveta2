@@ -150,12 +150,12 @@ def split_conflicts(
     frame: pd.DataFrame,
     image_hashes: Mapping[str, str],
     published: Mapping[str, str],
-) -> tuple[str, ...]:
-    """Name the images whose non-empty split differs from the one published for their content."""
+) -> tuple[tuple[str, str, str], ...]:
+    """Sorted ``(image_name, published, current)`` for images whose non-empty split differs from the published one."""
     return tuple(
         sorted(
             {
-                name
+                (name, published[digest], split)
                 for digest, name, split in _hashed_rows(frame, image_hashes)
                 if split and digest in published and split != published[digest]
             }

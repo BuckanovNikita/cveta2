@@ -212,8 +212,8 @@ def test_split_collisions_fall_back_to_the_path_and_skip_unhashed_rows() -> None
     assert split_collisions(frame, {"/i/a": "h", "/i/c": "h"}) == ("/i/a", "/i/c")
 
 
-def test_split_conflicts_name_images_whose_published_split_moved() -> None:
-    assert split_conflicts(FRAME, HASHES, {"ha": "train", "hb": "test"}) == ("a.png",)
+def test_split_conflicts_name_each_moved_image_with_its_published_and_current_split() -> None:
+    assert split_conflicts(FRAME, HASHES, {"ha": "train", "hb": "test"}) == (("a.png", "train", "val"),)
 
 
 def test_split_collisions_do_not_name_pending_copies() -> None:
