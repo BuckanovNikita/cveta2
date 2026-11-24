@@ -21,7 +21,7 @@ pip install git+ssh://git@<host>/<org>/cveta2@vX.Y.Z
 uv add git+ssh://git@<host>/<org>/cveta2@<хеш-коммита>
 ```
 
-ClearML SDK ставится вместе с пакетом; его подключение (`clearml.conf` или переменные `CLEARML_*`) настраивается отдельно.
+ClearML SDK ставится вместе с пакетом, а его подключение к серверу ClearML настраивается отдельно. Оно нужно для `verify --bundle`, `upload-dataset` и команд `cveta2 dataset`, которые читают или публикуют версии в ClearML. Настройте его файлом `~/clearml.conf` (или файлом из `CLEARML_CONFIG_FILE`) либо переменными `CLEARML_API_HOST`, `CLEARML_API_ACCESS_KEY` и `CLEARML_API_SECRET_KEY`. Проверить настройку можно командой [`cveta2 doctor`](docs/commands/doctor.md).
 
 ## Быстрый старт
 
