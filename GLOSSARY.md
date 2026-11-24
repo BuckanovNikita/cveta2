@@ -234,7 +234,7 @@ _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
 **Stable split**:
-An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
+An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and only when the image's other cells agree with the published split; `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
 _Russian_: стабильный split
 _Avoid_: random split, rebalancing, split policy
 

@@ -281,8 +281,14 @@ def test_empty_split_prepares_payload_with_pending(scenario: Scenario, tmp_path:
     assert _report(prepared)["pending"] == [pending]
 
 
-def test_image_with_one_valid_and_one_empty_split_row_is_pending(scenario: Scenario, tmp_path: Path) -> None:
-    source, options, services, _store, _classes = scenario
+@pytest.mark.parametrize("parent", [None, "val"], ids=["no-parent", "parent-publishes-val"])
+def test_image_with_one_valid_and_one_empty_split_row_is_pending(
+    scenario: Scenario, tmp_path: Path, parent: str | None
+) -> None:
+    source, options, services, store, _classes = scenario
+    if parent is not None:
+        # The parent disagrees with the user's ``train``: the image is left as written, never half-filled.
+        _set_parent(store, tmp_path, published_rows=f"image_name,split\ntrain.png,{parent}\n")
 
     def add_second_box(frame: pd.DataFrame) -> pd.DataFrame:
         extra = frame[frame["image_name"] == "train.png"].assign(split="", bbox_x_tl="21", bbox_x_br="30")
@@ -292,7 +298,14 @@ def test_image_with_one_valid_and_one_empty_split_row_is_pending(scenario: Scena
     prepared = tmp_path / "prepared"
     result = prepare_dataset(source, prepared, options, services)
     assert result.ready
+    assert result.blockers == ()
     assert result.pending == ("заполните split у 1 изображений в " + str(prepared / "dataset.csv"),)
+    assert result.split_prefilled == 0
+    assert _read_rows(prepared / "broken-images.csv").empty
+    assert list(_read_rows(prepared / "dataset.csv")["split"]) == ["train", "val", "val", ""]
+    with pytest.raises(UploadError, match="split"):
+        upload_dataset(prepared, services)
+    assert store.calls == 0
 
 
 def test_split_prefilled_from_parent_only_in_empty_cells(scenario: Scenario, tmp_path: Path) -> None:

@@ -31,8 +31,12 @@ def published_splits(frame: pd.DataFrame) -> dict[str, Split]:
 def prefill_splits(frame: pd.DataFrame, published: Mapping[str, Split]) -> tuple[pd.DataFrame, int]:
     """Fill empty ``split`` cells of published images; count the images that got a value.
 
-    Non-empty cells, including invalid ones, are kept. A frame without a
-    ``split`` column gets one with empty cells first.
+    An image is filled only when every non-empty cell it has already equals
+    the published split (or it has none). An image with any other value,
+    including an invalid one, is left exactly as written: its empty cells
+    stay empty, so it stays pending, and ``upload-dataset`` judges the
+    user's value against the parent. A frame without a ``split`` column
+    gets one with empty cells first.
     """
     working = frame.copy(deep=True)
     if "split" not in working:
@@ -40,10 +44,16 @@ def prefill_splits(frame: pd.DataFrame, published: Mapping[str, Split]) -> tuple
         working["split"] = [""] * len(working)
     if "image_name" not in working:
         return working, 0
+    pairs = _pairs(working)
+    disagreeing = {
+        name
+        for name, split in pairs
+        if isinstance(name, str) and name in published and not is_missing(split) and split != published[name]
+    }
     values: list[object] = []
     filled: set[str] = set()
-    for name, split in _pairs(working):
-        if isinstance(name, str) and name in published and is_missing(split):
+    for name, split in pairs:
+        if isinstance(name, str) and name in published and name not in disagreeing and is_missing(split):
             values.append(published[name])
             filled.add(name)
         else:

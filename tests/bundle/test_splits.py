@@ -41,9 +41,24 @@ def test_prefill_keeps_invalid_values_and_duplicate_indices() -> None:
         dtype=object,
     )
     filled, count = prefill_splits(current, {"a.jpg": "val", "b.jpg": "train"})
-    assert filled["split"].tolist() == ["holdout", "val", "train"]
+    # ``holdout`` disagrees with the published ``val``, so ``a.jpg`` stays as the user wrote it.
+    assert filled["split"].tolist() == ["holdout", "", "train"]
     assert filled.index.tolist() == [7, 7, 7]
+    assert count == 1
+
+
+def test_prefill_fills_an_image_whose_other_cells_agree_with_the_parent() -> None:
+    current = frame(("a.jpg", "val"), ("a.jpg", ""), ("b.jpg", ""), ("b.jpg", float("nan")))
+    filled, count = prefill_splits(current, {"a.jpg": "val", "b.jpg": "train"})
+    assert filled["split"].tolist() == ["val", "val", "train", "train"]
     assert count == 2
+
+
+def test_prefill_leaves_an_image_whose_other_cells_disagree_with_the_parent() -> None:
+    current = frame(("a.jpg", "train"), ("a.jpg", ""), ("a.jpg", "val"), ("b.jpg", ""))
+    filled, count = prefill_splits(current, {"a.jpg": "val", "b.jpg": "test"})
+    assert filled["split"].tolist() == ["train", "", "val", "test"]
+    assert count == 1
 
 
 def test_prefill_fills_a_float_split_column() -> None:
