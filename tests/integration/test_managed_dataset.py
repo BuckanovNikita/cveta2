@@ -205,6 +205,9 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
         bad_task = int(transformed.loc[bad_position, "source_task_id"])
         bad_frame = int(transformed.loc[bad_position, "source_frame_id"])
         transformed.loc[bad_position, "bbox_x_br"] = 1
+        # Splits are set by hand; the val image is not the broken one cleanup drops.
+        transformed["split"] = "train"
+        transformed.loc[transformed.index.drop(bad_position)[0], "split"] = "val"
         transformed_path = tmp_path / "transformed.csv"
         transformed.to_csv(transformed_path, index=False)
         prepared = tmp_path / "prepared"

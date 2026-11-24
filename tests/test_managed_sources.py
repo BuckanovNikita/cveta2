@@ -212,7 +212,6 @@ _EDITS: dict[str, Callable[[dict[str, Any]], object]] = {
     "overlap-decision": lambda raw: raw["datasets"]["combined"].update(
         overlaps={"digest": {"source": "main", "members": ["main", "extra"]}}
     ),
-    "splits": lambda raw: raw["datasets"]["combined"].update(splits={"train": 0.8, "val": 0.1, "test": 0.1, "seed": 7}),
     "source-uri": lambda raw: raw["datasets"]["combined"]["sources"][2].update(uri="s3://bucket/moved.csv"),
     "ignored-id": lambda raw: raw["projects"]["p"]["ignore"].append({"id": 3}),
     "added-source": _add_source,
@@ -243,7 +242,7 @@ def _supplemental_with_ignored_task() -> tuple[ProjectConfig, DatasetDefinition]
     return edited, edited.datasets["combined"]
 
 
-@pytest.mark.parametrize("edit", ["ignored-description", "source-order", "overlap-decision", "splits"])
+@pytest.mark.parametrize("edit", ["ignored-description", "source-order", "overlap-decision"])
 def test_edits_fetch_does_not_read_keep_task_reuse(edit: str) -> None:
     config, definition = _supplemental_with_ignored_task()
     reader = _Cvat({12: [_task(1)], 27: [_task(2)]})

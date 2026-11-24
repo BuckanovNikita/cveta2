@@ -1,10 +1,10 @@
-"""Optional ClearML dataset and S3 storage effects."""
+"""ClearML dataset and S3 storage effects; the SDK is imported lazily."""
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from urllib.parse import urlsplit
 
 from cveta2.domain.bundle.models import (
@@ -14,11 +14,16 @@ from cveta2.domain.bundle.models import (
     UploadError,
 )
 
+if TYPE_CHECKING:
+    # The SDK is imported lazily at run time through import_module; this static import keeps it
+    # visible to the import-linter contract that confines it to this adapter.
+    import clearml  # noqa: F401 - graph visibility for import-linter only
+
 _PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
 
 
 class _Dataset(Protocol):
-    """Typed subset of the opaque optional SDK dataset interface.
+    """Typed subset of the opaque, lazily imported SDK dataset interface.
 
     SDK keyword names must match the external call contract. Vulture cannot
     count keyword calls as variable references. Its documented F841 mapping
@@ -86,12 +91,9 @@ class _Sdk(Protocol):
 
 
 def _sdk() -> _Sdk:
-    try:
-        # The optional third-party SDK is opaque here; typed protocols keep its
-        # implementation types and lazy import out of the application contracts.
-        return cast("_Sdk", import_module("clearml"))
-    except ImportError as exc:
-        raise UploadError("Install cveta2[clearml] and configure the ClearML SDK before uploading") from exc
+    # The SDK is required. It is imported lazily so that inner imports stay offline,
+    # and typed protocols keep its implementation types out of the application contracts.
+    return cast("_Sdk", import_module("clearml"))
 
 
 @contextmanager

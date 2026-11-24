@@ -185,6 +185,7 @@ def test_doctor_required_failure_exits(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(doctor, "check_config", lambda: False)
     monkeypatch.setattr(doctor, "check_aws_credentials", lambda: True)
+    monkeypatch.setattr(doctor, "check_clearml_configuration", lambda: True)
     monkeypatch.setattr(doctor, "check_cache_permissions", lambda **_kwargs: True)
     with pytest.raises(SystemExit) as e:
         doctor.run_doctor()
@@ -196,6 +197,7 @@ def test_doctor_optional_failure_succeeds(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(doctor, "check_config", lambda: True)
     monkeypatch.setattr(doctor, "check_aws_credentials", lambda: False)
+    monkeypatch.setattr(doctor, "check_clearml_configuration", lambda: False)
     monkeypatch.setattr(doctor, "check_cache_permissions", lambda **_kwargs: False)
     doctor.run_doctor()
 
@@ -218,6 +220,8 @@ def test_doctor_subprocess_exit_contract(tmp_path: Path, code: int, *, credentia
     }
     environment.pop("AWS_ACCESS_KEY_ID", None)
     environment.pop("AWS_SECRET_ACCESS_KEY", None)
+    environment = {name: value for name, value in environment.items() if not name.startswith(("CLEARML_", "TRAINS_"))}
+    environment["CLEARML_CONFIG_FILE"] = str(tmp_path / "absent-clearml.conf")
     result = subprocess.run(
         [sys.executable, "-m", "cveta2.cli", "doctor"],
         env=environment,
@@ -229,6 +233,7 @@ def test_doctor_subprocess_exit_contract(tmp_path: Path, code: int, *, credentia
     assert result.returncode == code
     assert "Traceback" not in result.stderr
     assert "необязательная" in result.stderr
+    assert "doctor: необязательная проверка ClearML не пройдена" in result.stderr
     assert "отключена" in result.stderr
 
 
@@ -244,6 +249,7 @@ def test_doctor_required_unavailable_and_optional_unavailable(
         "check_aws_credentials",
         Mock(side_effect=Cveta2Error("Unable to locate credentials")),
     )
+    monkeypatch.setattr(doctor, "check_clearml_configuration", Mock(return_value=True))
     monkeypatch.setattr(doctor, "check_cache_permissions", Mock(return_value=True))
     with pytest.raises(SystemExit) as error:
         doctor.run_doctor()

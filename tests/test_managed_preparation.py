@@ -11,7 +11,7 @@ from PIL import Image
 
 from cveta2.adapters.files.managed_preparation import LocalManagedPreparationFiles
 from cveta2.adapters.files.media import LocalMediaInspector
-from cveta2.application.use_cases.managed_preparation import prepare_managed
+from cveta2.application.use_cases.managed_preparation import prepare_managed, published_assignments
 from cveta2.domain.bundle.models import ApiClass, ClassInfo, DatasetMetadata, ImageRoots, UploadError
 from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.managed.evidence import labels_fingerprint
@@ -20,6 +20,7 @@ from cveta2.domain.managed.models import (
     CvatIdentity,
     DatasetDefinition,
     ManagedError,
+    ManagedMetadata,
     ManagedSnapshot,
     ProjectConfig,
     ProjectDefinition,
@@ -78,6 +79,7 @@ def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata
                 "source_project_id": "7",
                 "source_task_id": "11",
                 "source_frame_id": str(index),
+                "split": ("train", "val")[index],
             }
         )
     frame = pd.DataFrame(rows)
@@ -392,8 +394,6 @@ def _edit(config: ProjectConfig, edit: str) -> ProjectConfig:
     dataset = raw["datasets"]["demo"]
     if edit == "overlap-decision":
         dataset["overlaps"] = {"digest": {"source": "main", "members": ["main", "other"]}}
-    elif edit == "splits":
-        dataset["splits"] = {"train": 0.5, "val": 0.5, "test": 0.0, "seed": 1}
     elif edit == "project-bookkeeping":
         raw["projects"]["p"].update(name="Renamed", sync_root="s3://images/p")
     elif edit == "project-id":
@@ -405,11 +405,93 @@ def _edit(config: ProjectConfig, edit: str) -> ProjectConfig:
     return ProjectConfig.model_validate(raw)
 
 
-@pytest.mark.parametrize("edit", ["overlap-decision", "splits", "project-bookkeeping"])
+@pytest.mark.parametrize("edit", ["overlap-decision", "project-bookkeeping"])
 def test_policy_and_bookkeeping_edits_prepare_on_the_same_fetch(tmp_path: Path, edit: str) -> None:
     config, transformed, source, metadata = _fixture(tmp_path)
     summary = _prepare_with(_edit(config, edit), tmp_path, transformed, source, metadata)
     assert summary.ready
+
+
+def test_published_image_gets_its_published_split_and_a_new_image_keeps_its_own(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    digest = hashlib.sha256((tmp_path / "images" / "1.png").read_bytes()).hexdigest()
+    snapshot = yaml.safe_load((source / "source-snapshot.yaml").read_text())
+    snapshot["assignments"] = {digest: "train"}
+    (source / "source-snapshot.yaml").write_text(yaml.safe_dump(snapshot))
+    frame = pd.read_csv(transformed, keep_default_na=False)
+    frame.loc[frame["image_name"].eq("0.png"), "split"] = "val"
+    frame.to_csv(transformed, index=False)
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    rows = pd.read_csv(summary.directory / "dataset.csv", keep_default_na=False)
+    assert dict(zip(rows["image_name"], rows["split"], strict=True)) == {"0.png": "val", "1.png": "train"}
+    assert summary.report["split_replacements"] == 1
+
+
+def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    snapshot = yaml.safe_load((source / "source-snapshot.yaml").read_text())
+    snapshot["assignments"] = {}
+    (source / "source-snapshot.yaml").write_text(yaml.safe_dump(snapshot))
+    rows = pd.read_csv(transformed, keep_default_na=False)
+    rows.loc[rows["image_name"].eq("1.png"), "split"] = ""
+    rows.to_csv(transformed, index=False)
+    summary = prepare_managed(
+        config,
+        "demo",
+        transformed,
+        source,
+        tmp_path / "prepared",
+        metadata,
+        registry_hash=registry_fingerprint(_registry()),
+        files=LocalManagedPreparationFiles(),
+        media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
+        clean=True,
+    )
+    assert not summary.ready
+    blockers = summary.report["blockers"]
+    assert isinstance(blockers, list)
+    assert "Every input row must have a valid train, val or test split assignment." in blockers
+    assert not (summary.directory / "dataset.csv").exists()
+
+
+def test_split_mistakes_stay_out_of_cvat_feedback(tmp_path: Path) -> None:
+    """A wrong split is the CSV author's to fix; only annotation errors reach CVAT frames."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    snapshot = yaml.safe_load((source / "source-snapshot.yaml").read_text())
+    snapshot["assignments"] = {}
+    (source / "source-snapshot.yaml").write_text(yaml.safe_dump(snapshot))
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    rows["split"] = "holdout"
+    rows.loc[rows["image_name"].eq("0.png"), "bbox_x_br"] = "1"
+    rows.to_csv(transformed, index=False)
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert not summary.ready
+    findings = LocalManagedPreparationFiles().load_prepared(summary.directory).record.findings
+    assert [(finding.task_id, finding.frame_id) for finding in findings] == [(11, 0)]
+    assert findings[0].codes
+    assert not {"invalid_split", "split_conflict"} & set(findings[0].codes)
+    assert not any("train, val or test" in message for message in findings[0].messages)
+    assert summary.report["unmapped_errors"] == 0
+
+
+def test_published_assignments_come_only_from_a_managed_parent(tmp_path: Path) -> None:
+    config, _transformed, _source, metadata = _fixture(tmp_path)
+    assert published_assignments(None) == {}
+    managed = metadata.model_copy(
+        update={
+            "managed": ManagedMetadata(
+                name="demo",
+                definition_hash="0" * 64,
+                definition=config.datasets["demo"],
+                cvat=config.cvat,
+                assignments={"digest": "test"},
+            )
+        }
+    )
+    assert published_assignments(managed) == {"digest": "test"}
+    with pytest.raises(ManagedError, match="Parent is not a managed dataset version"):
+        published_assignments(metadata)
 
 
 @pytest.mark.parametrize("edit", ["project-id", "ignored-id", "organization"])

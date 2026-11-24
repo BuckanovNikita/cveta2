@@ -194,7 +194,7 @@ _Russian_: ручная подготовка
 _Avoid_: standalone preparation, ad hoc preparation
 
 **Managed dataset**:
-A dataset whose sources, ClearML destination, class API, S3 roots, empty classes, split policy and overlap decisions are defined by name in the shared configuration and handled by the `dataset` commands.
+A dataset whose sources, ClearML destination, class API, S3 roots, empty classes and overlap decisions are defined by name in the shared configuration and handled by the `dataset` commands.
 _Russian_: управляемый датасет
 _Avoid_: configured dataset, named dataset
 
@@ -219,9 +219,9 @@ _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
 **Stable split**:
-A train/val/test assignment computed by hashing image content with the split policy's seed; once published, an image's assignment is never rebalanced.
+An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
 _Russian_: стабильный split
-_Avoid_: random split, rebalancing
+_Avoid_: random split, rebalancing, split policy
 
 **Overlap decision**:
 A reviewed choice, for content found in several sources, of which source owns it or that it is excluded.
@@ -229,12 +229,17 @@ _Russian_: решение о пересечении
 _Avoid_: dedup rule, conflict resolution
 
 **Parent dataset**:
-The latest finalized ClearML version under the same project and dataset name, which a new preparation builds on and which must not change before publication.
+The latest finalized ClearML version under the same project and dataset name, which a new preparation builds on and which must not change before publication. For a managed dataset it must be a managed version, unless the preparation starts a managed lineage.
 _Russian_: родительский датасет
 _Avoid_: base dataset, previous version (in prose)
 
+**Managed lineage**:
+The chain of managed versions of one managed dataset, each published with the previous one as its parent. It starts in a ClearML dataset with no versions, or with `dataset prepare --first`, which publishes a first version with no parent over versions without managed metadata.
+_Russian_: управляемая история
+_Avoid_: adoption, migration
+
 **Publication**:
-The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset, after rechecking the preparation.
+The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset (the first version of a managed lineage has none), after rechecking the preparation.
 _Russian_: публикация
 _Avoid_: release, push, upload (reserved for CVAT task creation)
 

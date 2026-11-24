@@ -16,7 +16,6 @@ from cveta2.domain.managed.models import (
     ProjectConfig,
     SourceDefinition,
     SourceSnapshot,
-    SplitPolicy,
     dataset_definition,
     definition_fingerprint,
     source_fingerprint,
@@ -92,7 +91,6 @@ _NEUTRAL: dict[str, Edit] = {
     "overlap-order": lambda raw: _dataset(raw).update(overlaps=dict(reversed(_dataset(raw)["overlaps"].items()))),
 }
 _POLICY: dict[str, Edit] = {
-    "splits": lambda raw: _dataset(raw).update(splits={"train": 0.8, "val": 0.1, "test": 0.1}),
     "overlap-added": lambda raw: _dataset(raw)["overlaps"].update(third={"source": None, "members": ["main", "other"]}),
     "overlap-choice": lambda raw: _dataset(raw)["overlaps"]["digest"].update(source="imported"),
     "empty-classes": lambda raw: _dataset(raw)["empty_classes"].append(7),
@@ -167,18 +165,6 @@ def test_saved_unicode_full_records_keep_their_persisted_fingerprints() -> None:
     assert snapshot.registry[0].name == "Кошка"
     assert snapshot.sources[0].labels is not None
     assert snapshot.sources[0].labels[0].attributes[0].values == ["", "видно"]
-
-
-def test_default_splits_and_invalid_distribution() -> None:
-    """The approved split defaults and complete distribution are contractual."""
-    assert SplitPolicy().model_dump() == {
-        "train": 0.6,
-        "val": 0.2,
-        "test": 0.2,
-        "seed": 42,
-    }
-    with pytest.raises(ValidationError):
-        SplitPolicy(train=0.8)
 
 
 @pytest.mark.parametrize(

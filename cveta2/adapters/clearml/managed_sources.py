@@ -37,11 +37,8 @@ class _Factory(Protocol):
 
 
 def _factory() -> _Factory:
-    try:
-        # Keep the optional SDK lazy and opaque at its outgoing boundary.
-        return cast("_Factory", import_module("clearml").Dataset)
-    except ImportError as error:
-        raise ManagedError("Install cveta2[clearml] to read published dataset evidence") from error
+    # The SDK is required. It is imported lazily so that inner imports stay offline.
+    return cast("_Factory", import_module("clearml").Dataset)
 
 
 def _check_yaml(node: Node, active: set[int]) -> None:

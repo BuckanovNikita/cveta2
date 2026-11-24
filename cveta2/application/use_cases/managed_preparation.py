@@ -28,9 +28,9 @@ from cveta2.domain.managed.models import (
     source_fingerprint,
 )
 from cveta2.domain.managed.policies import (
-    ParentSplits,
-    assign_splits,
-    parent_splits,
+    SplitName,
+    propagate_splits,
+    rebuild_assignments,
     resolve_overlaps,
 )
 from cveta2.domain.managed.preparation import (
@@ -74,13 +74,17 @@ def _origin(row: dict[str, object], captured: CapturedManagedInput) -> tuple[str
     return origin if origin in captured.origins else None
 
 
+# A split mistake is the CSV author's to fix; it never becomes feedback on an annotator's frame.
+_SPLIT_CODES = frozenset({"invalid_split", "split_conflict"})
+
+
 def _feedback(
     frame: pd.DataFrame, validation: ValidationResult, captured: CapturedManagedInput
 ) -> tuple[list[FeedbackFinding], int]:
     """Group rejected-row reasons under only independently attested CVAT frames."""
     reasons: dict[int, list[tuple[str, str]]] = defaultdict(list)
     for issue in validation.issues:
-        if issue.severity == "error" and issue.row_position is not None:
+        if issue.severity == "error" and issue.row_position is not None and issue.code not in _SPLIT_CODES:
             reasons[issue.row_position].append((issue.code, issue.message))
     grouped: dict[tuple[str, int, int, int], set[tuple[str, str]]] = defaultdict(set)
     unmapped = 0
@@ -124,6 +128,34 @@ def _tasks(clean: pd.DataFrame, captured: CapturedManagedInput) -> TaskManifest:
     return TaskManifest(included=sorted(included), obsolete=sorted(obsolete - included))
 
 
+def published_assignments(parent_metadata: DatasetMetadata | None) -> dict[str, SplitName]:
+    """Return the published splits a managed parent records, by content identity.
+
+    No parent means none; a parent without a ``managed`` block is refused.
+    """
+    if parent_metadata is None:
+        return {}
+    if parent_metadata.managed is None:
+        raise ManagedError("Parent is not a managed dataset version")
+    return dict(parent_metadata.managed.assignments)
+
+
+def check_parent(parent_id: str | None, parent_metadata: DatasetMetadata | None, *, first: bool) -> None:
+    """Require a managed parent, or no managed version when a lineage is started with ``first``.
+
+    *parent_metadata* is the latest version's ``dataset.yaml`` (``None`` when it has none).
+    """
+    if parent_id is None:
+        return
+    managed = parent_metadata is not None and parent_metadata.managed is not None
+    if first and managed:
+        raise ManagedError(f"Managed lineage already exists at parent {parent_id}; prepare without --first")
+    if not first and not managed:
+        raise ManagedError(
+            f"Parent {parent_id} is not a managed dataset version; start a managed lineage with dataset prepare --first"
+        )
+
+
 def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     config: ProjectConfig,
     name: str,
@@ -139,10 +171,15 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     parent_id: str | None = None,
     parent_version: str | None = None,
     parent_metadata: DatasetMetadata | None = None,
-    parent_rows: pd.DataFrame | None = None,
     clean: bool = False,
+    first: bool = False,
 ) -> PreparationSummary:
-    """Split, validate and persist a fresh preparation without remote mutation."""
+    """Propagate published splits, validate and persist a fresh preparation without remote mutation.
+
+    *parent_id* is the latest finalized version. With *first* it must not be managed and
+    nothing is read from it: every split comes from the transformed CSV.
+    """
+    check_parent(parent_id, parent_metadata, first=first)
     definition = dataset_definition(config, name)
     definition_hash = definition_fingerprint(config, definition)
     captured = files.capture(transformed, source)
@@ -154,27 +191,15 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         raise ManagedError("Class registry changed; fetch the managed dataset again")
     if snapshot.parent_id != parent_id:
         raise ManagedError("Source parent changed; fetch the managed dataset again")
-    if parent_id is not None and parent_metadata is None:
-        raise ManagedError(f"Parent {parent_id} lacks dataset.yaml; choose a new dataset name")
-    previous = dict(snapshot.assignments)
-    if parent_metadata is not None and parent_metadata.managed is not None:
-        if parent_metadata.managed.definition.splits != definition.splits:
-            raise ManagedError("Split policy changed; choose a new dataset lineage")
-        previous.update(parent_metadata.managed.assignments)
     files.check_roots(captured.frame, metadata)
     for root in metadata.images.s3_root:
         s3_roots.check_root(root)
-    legacy: ParentSplits | None = None
-    if parent_metadata is not None and parent_metadata.managed is None:
-        if parent_rows is None:
-            raise ManagedError(f"Parent {parent_id} published rows are required to keep its splits")
-        # Adoption without managed evidence: carry only unambiguous content identity.
-        legacy = parent_splits(parent_rows, files.parent_image_hashes(parent_rows, metadata))
-        previous.update(legacy.assignments)
+    # A first version takes every split from the CSV, whatever the fetch snapshot carries.
+    history: dict[str, str] = {} if first else dict(snapshot.assignments)
+    history.update(published_assignments(None if first else parent_metadata))
     image_hashes = files.image_hashes(captured.frame)
     frame = resolve_overlaps(captured.frame, image_hashes.identities, definition.overlaps)
-    split_frame, assignments = assign_splits(frame, definition.splits, image_hashes.identities, previous)
-    replacements = int((frame["split"] != split_frame["split"]).sum()) if "split" in frame else 0
+    split_frame, replacements = propagate_splits(frame, image_hashes.identities, history)
     inspection = media.inspect(
         split_frame,
         profile="clearml-yolo",
@@ -193,10 +218,15 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         for path in set(validation.result.clean.get("image_path", []))
         if path in image_hashes.readable
     }
-    accepted_assignments = {
-        digest: value for digest, value in assignments.items() if not digest.startswith("unreadable:")
-    }
-    prepared_snapshot = snapshot.model_copy(update={"assignments": accepted_assignments, "image_hashes": actual_hashes})
+    assignments = rebuild_assignments(validation.result.clean, image_hashes.readable, history)
+    prepared_snapshot = snapshot.model_copy(
+        update={
+            "assignments": assignments,
+            "image_hashes": actual_hashes,
+            # A first version has no parent in its published evidence either.
+            **({"parent_id": None} if first else {}),
+        }
+    )
     prepared_metadata = metadata.model_copy(
         update={
             "managed": ManagedMetadata(
@@ -204,7 +234,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
                 definition_hash=definition_hash,
                 definition=definition,
                 cvat=config.cvat,
-                assignments=accepted_assignments,
+                assignments=assignments,
             )
         }
     )
@@ -224,6 +254,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         findings=findings,
         ready=ready,
         clean=clean,
+        first=first,
     )
     report = files.validation_report(
         validation,
@@ -231,7 +262,6 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         findings=findings,
         unmapped=unmapped,
         split_replacements=replacements,
-        parent_splits=legacy,
     )
     files.persist(directory, captured, record, payload, report, validation.broken_images)
     return PreparationSummary(directory=directory, ready=ready, report=report)

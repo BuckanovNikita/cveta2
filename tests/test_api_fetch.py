@@ -130,13 +130,7 @@ class TestFetchApi:
         original = config.read_bytes()
         _api, connection = _scoped(fake, config_path=config)
         monkeypatch.setenv("CVETA2_CLEARML", legacy_switch)
-        with (
-            patch(
-                "cveta2.adapters.clearml.availability.is_clearml_available",
-                side_effect=AssertionError("fetch must not inspect ClearML"),
-            ),
-            pytest.raises(MigrationRequired, match="migrate-config"),
-        ):
+        with pytest.raises(MigrationRequired, match="migrate-config"):
             cveta2.fetch(
                 fake.project.id,
                 tmp_path / "out",

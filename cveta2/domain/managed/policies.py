@@ -1,10 +1,8 @@
-"""Pure stable splitting, reviewed source overlap and dataset comparison."""
+"""Pure published-split propagation, reviewed source overlap and dataset comparison."""
 
-import hashlib
 import math
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from numbers import Integral, Real
@@ -12,7 +10,7 @@ from typing import Literal, TypedDict, cast
 
 import pandas as pd
 
-from cveta2.domain.managed.models import ManagedError, OverlapDecision, SplitPolicy
+from cveta2.domain.managed.models import ManagedError, OverlapDecision
 
 type SplitName = Literal["train", "val", "test"]
 type RowKey = tuple[tuple[str, str], ...]
@@ -86,69 +84,58 @@ def _content_hashes(frame: pd.DataFrame, image_hashes: Mapping[str, str]) -> lis
     return digests
 
 
-def _new_split(digest: str, policy: SplitPolicy) -> SplitName:
-    """Assign a content identity independently of input row order."""
-    value = int.from_bytes(hashlib.sha256(f"{policy.seed}\x00{digest}".encode()).digest()) / (1 << 256)
-    if value < policy.train:
-        return "train"
-    return "val" if value < policy.train + policy.val else "test"
+def _published_split(digest: str, split: str) -> SplitName:
+    """Accept only a published train, val or test assignment of a content identity."""
+    if _text(digest) is None or split not in {"train", "val", "test"}:
+        raise ManagedError(f"Invalid published image split assignment: {digest!r}")
+    return cast("SplitName", split)
 
 
-def assign_splits(
+def propagate_splits(
     frame: pd.DataFrame,
-    policy: SplitPolicy,
     image_hashes: Mapping[str, str],
-    previous: Mapping[str, str] | None = None,
-) -> tuple[pd.DataFrame, dict[str, SplitName]]:
-    """Replace input splits while retaining every published content assignment.
+    published: Mapping[str, str],
+) -> tuple[pd.DataFrame, int]:
+    """Write each published split over the rows of the same image content.
 
-    Removed content keeps its assignment so reintroduction cannot leak it into a
-    different split. This policy targets proportions and never silently moves
-    existing images to satisfy minimum training/validation requirements.
+    Rows of unpublished content keep their own split, even an empty one, and
+    rows without a content hash are left unchanged. Returns the copy and the
+    number of rows whose split changed.
     """
-    assignments: dict[str, SplitName] = {}
-    for digest, split in (previous or {}).items():
-        if _text(digest) is None or split not in {"train", "val", "test"}:
-            raise ManagedError(f"Invalid published image split assignment: {digest!r}")
-        assignments[digest] = cast("SplitName", split)
-    digests = _content_hashes(frame, image_hashes)
-    for digest in sorted(set(digests)):
-        assignments.setdefault(digest, _new_split(digest, policy))
+    _validate_frame(frame, ("image_path",))
+    splits = {digest: _published_split(digest, split) for digest, split in published.items()}
     result = frame.copy(deep=True)
-    result["split"] = [assignments[digest] for digest in digests]
-    return result, dict(sorted(assignments.items()))
+    if "split" not in result:
+        result["split"] = ""
+    values = result["split"].tolist()
+    replaced = 0
+    for position, path in enumerate(result["image_path"]):
+        digest = image_hashes.get(key) if (key := _text(path)) is not None else None
+        if digest is not None and (split := splits.get(digest)) is not None and values[position] != split:
+            values[position] = split
+            replaced += 1
+    result["split"] = values
+    return result, replaced
 
 
-@dataclass(frozen=True)
-class ParentSplits:
-    """Published splits of a parent without managed evidence, by content identity."""
-
-    assignments: dict[str, SplitName] = field(default_factory=dict)
-    conflicts: int = 0
-    unresolved: int = 0
-
-
-def parent_splits(frame: pd.DataFrame, image_hashes: Mapping[str, str]) -> ParentSplits:
-    """Carry a legacy parent's split only for content published under one split.
-
-    Identity is the SHA-256 of an image readable now. Paths without a hash are
-    unresolved; content published under several or invalid splits is a conflict.
-    """
-    _validate_frame(frame, ("image_path", "split"))
-    published: dict[str, set[object]] = defaultdict(set)
-    unresolved: set[object] = set()
-    for path, split in zip(frame["image_path"], frame["split"], strict=True):
-        key = _text(path)
-        digest = image_hashes.get(key) if key is not None else None
-        if _text(digest) is None:
-            unresolved.add(str(path))
+def rebuild_assignments(
+    frame: pd.DataFrame,
+    image_hashes: Mapping[str, str],
+    base: Mapping[str, str],
+) -> dict[str, SplitName]:
+    """Overlay the splits of hashed rows on earlier assignments, keeping removed images."""
+    assignments = cast("dict[str, SplitName]", dict(base))
+    for row in frame.to_dict(orient="records"):
+        split = row.get("split")
+        if not isinstance(split, str) or not split:
             continue
-        published[cast("str", digest)].add(split)
-    assignments: dict[str, SplitName] = {}
-    for digest, splits in sorted(published.items()):
-        if len(splits) == 1 and (split := next(iter(splits))) in {"train", "val", "test"}:
-            assignments[digest] = split
-    return ParentSplits(assignments, len(published) - len(assignments), len(unresolved))
+        if split not in {"train", "val", "test"}:
+            name = _text(row.get("image_name")) or row.get("image_path")
+            raise ManagedError(f"Invalid split for image: {name}")
+        path = _text(row.get("image_path"))
+        if path is not None and (digest := image_hashes.get(path)) is not None:
+            assignments[digest] = cast("SplitName", split)
+    return dict(sorted(assignments.items()))
 
 
 def resolve_overlaps(

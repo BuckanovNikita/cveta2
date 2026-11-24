@@ -20,8 +20,6 @@ from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import LabelInfo
 from cveta2.domain.paths import parse_sync_root
 
-_SPLIT_TOLERANCE = 1e-9
-
 
 class ManagedError(Cveta2Error):
     """A managed definition, source, preparation or feedback cannot proceed."""
@@ -142,22 +140,6 @@ class ClearMLDestination(StrictModel):
     dataset: str = Field(min_length=1)
 
 
-class SplitPolicy(StrictModel):
-    """Stable hash targets; published assignments are never rebalanced."""
-
-    train: float = Field(default=0.6, ge=0, le=1)
-    val: float = Field(default=0.2, ge=0, le=1)
-    test: float = Field(default=0.2, ge=0, le=1)
-    seed: int = 42
-
-    @model_validator(mode="after")
-    def total(self) -> Self:
-        """Require a complete probability distribution and usable train/val."""
-        if abs(self.train + self.val + self.test - 1) > _SPLIT_TOLERANCE or not self.train or not self.val:
-            raise ValueError("Splits must sum to one with positive train and val")
-        return self
-
-
 class OverlapDecision(StrictModel):
     """Choose one source or exclude content; bind to exact participating sources."""
 
@@ -173,7 +155,6 @@ class DatasetDefinition(StrictModel):
     api_url: str = Field(min_length=1)
     s3_roots: list[str] = Field(default_factory=list)
     empty_classes: list[int] = Field(default_factory=list)
-    splits: SplitPolicy = Field(default_factory=SplitPolicy)
     overlaps: dict[str, OverlapDecision] = Field(default_factory=dict)
 
     @field_validator("api_url")
@@ -323,7 +304,6 @@ def definition_fingerprint(config: ProjectConfig, definition: DatasetDefinition)
         "api_url": definition.api_url,
         "s3_roots": sorted(set(definition.s3_roots)),
         "empty_classes": sorted(set(definition.empty_classes)),
-        "splits": definition.splits.model_dump(mode="json"),
         "overlaps": {
             digest: {"source": decision.source, "members": sorted(decision.members)}
             for digest, decision in definition.overlaps.items()

@@ -61,11 +61,6 @@ datasets:
     s3_roots:
       - s3://my-bucket/images
     empty_classes: [12]
-    splits:
-      train: 0.7
-      val: 0.2
-      test: 0.1
-      seed: 42
     overlaps:
       <SHA-256 содержимого изображения>:
         source: cvat
@@ -86,10 +81,6 @@ datasets:
 | `api_url` | да | — | Адрес API реестра классов ([class registry](../../GLOSSARY.md)), `http://` или `https://` без логина и пароля в адресе. |
 | `s3_roots` | нет | `[]` | Корни S3, в которых должны лежать изображения из столбца `s3_image_path`. При подготовке и публикации cveta2 проверяет, что каждый корень доступен для чтения списка объектов. |
 | `empty_classes` | нет | `[]` | Номера классов (`prod_id`, [class identity](../../GLOSSARY.md)), исключённых из обучения ([empty class](../../GLOSSARY.md)). Строка с таким классом отклоняется с кодом `empty_class`. Номер, которого нет в реестре классов, — ошибка. |
-| `splits.train` | нет | `0.6` | Целевая доля train. Должна быть больше нуля. |
-| `splits.val` | нет | `0.2` | Целевая доля val. Должна быть больше нуля. |
-| `splits.test` | нет | `0.2` | Целевая доля test. Может быть нулём. Сумма трёх долей должна быть равна 1. |
-| `splits.seed` | нет | `42` | Seed для хеша, по которому изображению назначается split. |
 | `overlaps` | нет | `{}` | Решения о пересечении ([overlap decision](../../GLOSSARY.md)). Ключ — SHA-256 содержимого изображения, которое пришло из нескольких источников. |
 | `overlaps.<sha256>.members` | да | — | Точный список источников, в которых найдено это изображение. |
 | `overlaps.<sha256>.source` | нет | `null` | Источник, строки которого остаются. `null` исключает изображение из датасета целиком. |
@@ -108,9 +99,11 @@ dataset publish        -> новая версия в ClearML
 
 1. `fetch` читает все источники и пишет каталог выгрузки управляемого датасета.
 2. Вы преобразуете `dataset.csv` из этого каталога любым своим кодом и сохраняете результат в отдельный файл.
-3. `prepare` назначает split, проверяет строки и изображения и пишет новый каталог подготовленного датасета ([prepared bundle](../../GLOSSARY.md)).
+3. `prepare` переносит опубликованный split, проверяет строки и изображения и пишет новый каталог подготовленного датасета ([prepared bundle](../../GLOSSARY.md)).
 4. `report-errors` отправляет замечания к кадрам ([feedback finding](../../GLOSSARY.md)) в CVAT. Этот шаг можно пропустить: `publish` всё равно доставит замечания перед загрузкой.
 5. `publish` перепроверяет подготовку и загружает три файла новой версией в ClearML.
+
+Управляемая история датасета начинается с первой версии. Если в `clearml.dataset` ещё нет версий, первая подготовка и публикация делаются как обычно. Если там уже есть версии, сделанные не через `dataset publish` (например, через `upload-dataset`), первую управляемую версию подготовьте с флагом `--first`: см. [prepare](#prepare).
 
 ## Общие аргументы
 
@@ -143,8 +136,7 @@ dataset publish        -> новая версия в ClearML
 | Сообщение | Причина и решение |
 |---|---|
 | `Ошибка операции с набором данных: Unknown managed dataset: <имя>` | В разделе `datasets` нет такого ключа. Проверьте имя через `cveta2 dataset list`. |
-| `Ошибка операции с набором данных: Invalid shared project configuration <путь>; fields: datasets.<имя>.splits` | Запись датасета не прошла проверку; в конце перечислены поля с ошибкой. Для `splits`: доли не дают в сумме 1 или `train`/`val` равны нулю. |
-| `... fields: datasets.<имя>.sources.<номер>` | У источника `cvat` нет `project` или задан `uri`; у `s3-csv` адрес не вида `s3://bucket/key.csv`. |
+| `Ошибка операции с набором данных: Invalid shared project configuration <путь>; fields: datasets.<имя>.sources.<номер>` | У источника `cvat` нет `project` или задан `uri`; у `s3-csv` адрес не вида `s3://bucket/key.csv`. |
 
 ## list
 
@@ -177,7 +169,6 @@ cveta2 dataset list [--config CONFIG] [--project-config PROJECT_CONFIG] [--json]
     "api_url": "https://classes.example.com/api/classes",
     "s3_roots": ["s3://my-bucket/images"],
     "empty_classes": [],
-    "splits": {"train": 0.6, "val": 0.2, "test": 0.2, "seed": 42},
     "overlaps": {}
   }
 ]
@@ -210,7 +201,7 @@ cveta2 dataset show [--config CONFIG] [--project-config PROJECT_CONFIG] [--json]
 ### Как это работает
 
 1. Читает запись датасета из общей конфигурации.
-2. Ищет в ClearML последнюю финализированную версию с точно таким `clearml.project` и `clearml.dataset` — родительский датасет ([parent dataset](../../GLOSSARY.md)).
+2. Ищет в ClearML последнюю финализированную версию с точно таким `clearml.project` и `clearml.dataset` — родительский датасет ([parent dataset](../../GLOSSARY.md)). Её `dataset.yaml` не читается, поэтому версия без управляемых метаданных тоже показывается.
 
 ### Результат
 
@@ -289,7 +280,7 @@ cveta2 dataset fetch [--config CONFIG] [--project-config PROJECT_CONFIG] [--json
 ### Как это работает
 
 1. Читает запись датасета и загружает реестр классов с `api_url`.
-2. Ищет родительский датасет в ClearML. Если он есть, читает из его `tasks.yaml` снимок источников ([source snapshot](../../GLOSSARY.md)) прошлой публикации.
+2. Ищет последнюю версию в ClearML. Если она управляемая (её `dataset.yaml` читается и содержит блок `managed`), это родительский датасет: из его `tasks.yaml` берётся снимок источников ([source snapshot](../../GLOSSARY.md)) прошлой публикации. Из неуправляемой версии не читается ничего, даже `tasks.yaml`, и все задачи читаются заново. Если `dataset.yaml` не читается, команда ещё пишет предупреждение `dataset.yaml последней версии <id> не читается, источники выгружаются заново: ...`.
 3. Для каждого источника `cvat`:
    1. Читает метки (label) проекта и список его задач. Задача считается завершённой ([completed task](../../GLOSSARY.md)), если её статус `completed`, у неё есть job и каждый job в stage `acceptance` и state `completed`.
    2. Пропускает задачи из списка игнорируемых задач проекта.
@@ -399,13 +390,13 @@ print(result["rows"], [s["reused"] for s in result["sources"]])
 
 ## prepare
 
-Управляемая подготовка ([managed preparation](../../GLOSSARY.md)): назначает split, проверяет ваш преобразованный CSV и изображения и пишет новый каталог подготовленного датасета. Ничего не меняет в CVAT, S3 и ClearML.
+Управляемая подготовка ([managed preparation](../../GLOSSARY.md)): переносит опубликованный split, проверяет ваш преобразованный CSV и изображения и пишет новый каталог подготовленного датасета. Ничего не меняет в CVAT, S3 и ClearML.
 
 ### Синтаксис и аргументы
 
 ```text
 cveta2 dataset prepare [--config CONFIG] [--project-config PROJECT_CONFIG] [--json]
-                       --output-dir OUTPUT_DIR --source SOURCE [--clean]
+                       --output-dir OUTPUT_DIR --source SOURCE [--clean] [--first]
                        name csv
 ```
 
@@ -416,13 +407,14 @@ cveta2 dataset prepare [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 | `--source` | обязателен | Каталог выгрузки от `dataset fetch` (или путь к его `source-snapshot.yaml`). |
 | `--output-dir` | обязателен | Новый каталог подготовки. Не должен существовать и не должен лежать внутри каталога `--source`. |
 | `--clean` | выключен | Подтверждение очистки ([cleanup acceptance](../../GLOSSARY.md)): отклонённые строки удаляются, исправления применяются, и подготовка может стать готовой. |
+| `--first` | выключен | Начать управляемую историю датасета: подготовить первую управляемую версию, хотя в ClearML уже есть версии без управляемых метаданных. Последняя версия не используется: ни её классы, ни split, ни строки. `publish` создаст версию без родителя. Если последняя версия уже управляемая, флаг отклоняется. Версия без `dataset.yaml` или с `dataset.yaml`, который не читается, считается неуправляемой; команда пишет предупреждение `dataset prepare --first: последняя версия <id> считается неуправляемой (<причина>)`. |
 
 ### Что должен содержать преобразованный CSV
 
 Преобразование — ваш код: вы можете убрать строки, оставить одну аннотацию на изображение, переименовать классы, поправить координаты. cveta2 не проверяет, как CSV получен, но требует:
 
 - уникальные непустые имена столбцов;
-- столбцы профиля проверки ([verification profile](../../GLOSSARY.md)) `clearml-yolo`: `image_name`, `image_path`, `instance_label`, `bbox_x_tl`, `bbox_y_tl`, `bbox_x_br`, `bbox_y_br`. Столбец `split` можно не заполнять: cveta2 перезаписывает его;
+- столбцы профиля проверки ([verification profile](../../GLOSSARY.md)) `clearml-yolo`: `image_name`, `image_path`, `instance_label`, `bbox_x_tl`, `bbox_y_tl`, `bbox_x_br`, `bbox_y_br`. Столбец `split` заполняете вы для новых изображений; у изображений, уже опубликованных в родительской версии, cveta2 запишет опубликованный split;
 - в `image_path` у каждой строки путь к локальному файлу изображения. Файл должен лежать внутри разрешённых локальных корней: `cache.images_root` личной конфигурации и каталогов кэша изображений проектов-источников (см. [images-and-cache.md](../images-and-cache.md)). Изображение должно читаться: cveta2 считает SHA-256 его содержимого;
 - если есть столбец `s3_image_path`, каждый непустой путь должен лежать ровно в одном из корней `s3_roots`;
 - одно и то же `image_name` не может указывать на изображения с разным содержимым;
@@ -431,24 +423,28 @@ cveta2 dataset prepare [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 
 ### Как это работает
 
-1. Читает запись датасета, загружает реестр классов с `api_url` и ищет родительский датасет в ClearML.
+1. Читает запись датасета, загружает реестр классов с `api_url` и ищет последнюю версию в ClearML. Без `--first` она должна быть управляемой (с блоком `managed` в `dataset.yaml`) и становится родительским датасетом. С `--first` она не должна быть управляемой, и из неё ничего не берётся. Если версий нет, подготовка делает первую версию с флагом и без него.
 2. Сверяет снимок источников из `--source` с текущим состоянием (см. «Какие изменения требуют нового fetch или prepare»).
 3. Строит список классов: номера и имена из реестра, отметки исключённых классов из `empty_classes`.
 4. Проверяет, что изображения лежат в разрешённых локальных корнях и корнях `s3_roots`, и что каждый корень `s3_roots` доступен.
 5. Считает SHA-256 каждого изображения и применяет решения о пересечении.
-6. Назначает split (см. ниже) и перезаписывает столбец `split`.
+6. Переносит опубликованный split (см. ниже) в столбец `split`.
 7. Проверяет строки и изображения по профилю `clearml-yolo`.
 8. Подготовка готова, если нет блокирующих проблем, нет структурных ошибок и либо очистка не нужна, либо передан `--clean`.
 9. Собирает замечания к кадрам: ошибки в строках, которые указывают на кадр задачи из снимка источников.
 10. Пишет каталог подготовки. Сначала всё пишется во временный каталог рядом, затем переносится.
 
-#### Как назначается split
+#### Откуда берётся split
 
-Стабильный split ([stable split](../../GLOSSARY.md)) зависит только от содержимого изображения и `splits.seed`: cveta2 хеширует `seed` вместе с SHA-256 изображения и по значению хеша выбирает train, val или test по долям `splits`. Порядок строк и имена файлов не влияют.
+Split — ваш: cveta2 никогда не назначает его сам. Он только сохраняет опубликованный split изображения, которое уже опубликовано в родительской версии. В первой версии (новый датасет или `--first`) родителя нет, поэтому все изображения новые и весь split берётся из вашего CSV.
 
-Изображение, которое уже было в опубликованной версии, сохраняет свой split. Изображение, удалённое из датасета, тоже сохраняет запись о своём split: если оно вернётся, оно попадёт в тот же split. Доли не перебалансируются; они — цель для новых изображений, а не гарантия.
+Изображение, опубликованное в родительской версии, получает опубликованный split ([stable split](../../GLOSSARY.md)). Изображение узнаётся по SHA-256 содержимого, поэтому порядок строк и имена файлов не влияют. Значение из вашего CSV заменяется; число заменённых строк — `split_replacements` в `report.json`.
 
-Если родительский датасет опубликован без управляемой подготовки, cveta2 переносит его split только для изображений, которые сейчас читаются и были опубликованы ровно в одном split. Счётчики попадают в `report.json`: `parent_splits_carried`, `parent_split_conflicts`, `parent_split_unresolved`.
+Изображение, удалённое из датасета, сохраняет запись о своём split: если оно вернётся, оно попадёт в тот же split.
+
+Новое изображение сохраняет split из вашего CSV. Если split пустой или не равен `train`, `val` или `test`, строки этого изображения отклоняются, и подготовка не становится готовой: в `blockers` появляется `Every input row must have a valid train, val or test split assignment.` Заполните `split` у новых изображений в преобразованном CSV и запустите `prepare` снова.
+
+Ошибки split не отправляются в CVAT как замечания: их исправляет автор преобразованного CSV, а не разметчик.
 
 #### Решения о пересечении
 
@@ -505,12 +501,10 @@ cveta2 dataset prepare [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 | `cvat.host` или `cvat.organization`; у источника имя, тип, проект (его ID) или `uri`; список игнорируемых задач проекта-источника | новый `fetch`, затем `prepare` | `Source definition changed; fetch the managed dataset again` |
 | Ответ API классов (реестр классов) | новый `fetch`, затем `prepare` | `Class registry changed; fetch the managed dataset again` |
 | В ClearML появилась новая версия после `fetch` | новый `fetch`, затем `prepare` | `Source parent changed; fetch the managed dataset again` |
-| `clearml`, `api_url`, `s3_roots`, `empty_classes`, `splits`, `overlaps` | новый `prepare` (на старой подготовке `publish` остановится) | `Shared dataset policy changed; prepare again` |
+| `clearml`, `api_url`, `s3_roots`, `empty_classes`, `overlaps` | новый `prepare` (на старой подготовке `publish` остановится) | `Shared dataset policy changed; prepare again` |
 | Локальные корни изображений в личной конфигурации | новый `prepare` | `Personal image roots changed; prepare again` |
 
 Порядок элементов в `s3_roots`, `empty_classes` и `members` не важен. Имя ключа проекта, его `name`, а также `name`, `description` и `silent` в списке игнорируемых задач не требуют нового `fetch`.
-
-Изменить `splits` у датасета, уже опубликованного управляемой подготовкой, нельзя: `prepare` останавливается с `Split policy changed; select a new dataset lineage` (в зависимости от места проверки текст может оканчиваться на `choose a new dataset lineage`). Для новых долей задайте новое имя `clearml.dataset`. Новое имя меняет родительский датасет, поэтому после этого нужен и новый `fetch`.
 
 ### Частые ошибки
 
@@ -525,7 +519,9 @@ cveta2 dataset prepare [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 | `Image overlap membership changed; review decision: <sha256>` | Список `members` не совпадает с фактическими источниками. |
 | `Conflicting image filename for different content: <имя>` | Одно `image_name` у разных изображений. Переименуйте одно из них. |
 | `Shared exclusion policy contains unknown class identities` | В `empty_classes` номер, которого нет в реестре классов. |
-| `Parent <id> lacks dataset.yaml; choose a new dataset name` | Последняя версия в ClearML без `dataset.yaml`. Задайте другое `clearml.dataset`. |
+| `Parent <id> is not a managed dataset version; start a managed lineage with dataset prepare --first` | Последняя версия в ClearML сделана не через `dataset publish`: в её `dataset.yaml` нет блока `managed` или самого `dataset.yaml` нет. Подготовьте первую управляемую версию с `--first`. |
+| `Managed lineage already exists at parent <id>; prepare without --first` | Последняя версия уже управляемая, а передан `--first`. Уберите флаг: подготовка продолжит историю от этой версии. |
+| `Invalid dataset metadata <путь>/dataset.yaml: <поле>: ...` | `dataset.yaml` последней версии в ClearML не читается как метаданные датасета. Без `--first` подготовка останавливается. Если это версия, сделанная не через `dataset publish`, начните управляемую историю с `--first`. |
 | Сообщения из таблицы выше | Конфигурация или источники изменились после `fetch`. |
 
 ### Из Python
@@ -538,10 +534,13 @@ cveta2.prepare_managed_dataset(
     source: Path,
     output_dir: Path,
     clean: bool = False,
+    first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> PreparationSummary
 ```
+
+`first=True` — то же, что флаг `--first`.
 
 Возвращает объект с полями `directory`, `ready` и `report` (словарь из `report.json`). Неготовая подготовка — это не исключение: проверяйте `ready`. Ошибки — исключения `cveta2.Cveta2Error`.
 
@@ -721,7 +720,7 @@ cveta2 dataset publish [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 3. Перепроверяет:
    - описание источников в общей конфигурации не изменилось (иначе нужен `fetch`);
    - остальные ключи записи датасета не изменились (иначе нужен `prepare`);
-   - последняя версия в ClearML — та же, что при подготовке, с той же версией, и у неё есть `dataset.yaml`;
+   - последняя версия в ClearML — та же, что при подготовке, с той же версией, и у неё есть `dataset.yaml` (для подготовки с `--first` `dataset.yaml` не нужен);
    - реестр классов с `api_url` не изменился;
    - в проектах CVAT тот же набор задач (кроме игнорируемых), те же метки, у каждой задачи то же время изменения и та же завершённость;
    - содержимое CSV-объектов `s3-csv` не изменилось (по SHA-256);
@@ -729,7 +728,7 @@ cveta2 dataset publish [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
    - изображения не изменились (по SHA-256) и строки снова проходят проверку `clearml-yolo` без очистки.
 4. Доставляет замечания к кадрам так же, как `report-errors`. Если хотя бы одно не доставлено, публикация останавливается.
 5. Ещё раз проверяет задачи CVAT и родительский датасет. Изменения задач, вызванные только своими issue из записей о доставке, не считаются изменением.
-6. Создаёт в ClearML новый датасет в `clearml.project` с именем `clearml.dataset`, дочерний к родительскому, загружает в него `dataset.csv`, `dataset.yaml`, `tasks.yaml` и финализирует. Номер версии назначает ClearML.
+6. Создаёт в ClearML новый датасет в `clearml.project` с именем `clearml.dataset`, дочерний к родительскому, загружает в него `dataset.csv`, `dataset.yaml`, `tasks.yaml` и финализирует. Номер версии назначает ClearML. Подготовка с `--first` публикуется без родителя, даже если в ClearML есть более ранние версии без управляемых метаданных.
 
 ### Результат
 
@@ -749,8 +748,9 @@ cveta2 dataset publish [--config CONFIG] [--project-config PROJECT_CONFIG] [--js
 | Сообщение | Причина и решение |
 |---|---|
 | `Preparation is not ready; review diagnostics and accept cleanup` | Подготовка не готова. Посмотрите `report.json` и подготовьте заново, при необходимости с `--clean`. |
-| `Latest ClearML parent changed; fetch and prepare again` | После подготовки в ClearML опубликована другая версия. Сделайте новый `fetch` и `prepare`. |
-| `Shared dataset policy changed; prepare again` | Изменились `clearml`, `api_url`, `s3_roots`, `empty_classes`, `splits` или `overlaps`. |
+| `Latest ClearML parent changed; fetch and prepare again` | После подготовки в ClearML опубликована другая версия; для подготовки с `--first` — тоже любая новая версия, управляемая или нет. Сделайте новый `fetch` и `prepare`. |
+| `Parent <id> lacks dataset.yaml and is no longer a managed dataset version; fetch and prepare again, with dataset prepare --first to start a managed lineage` | У родительской версии пропал `dataset.yaml`, и она больше не управляемая. Сделайте новый `fetch` и `prepare` с `--first`. |
+| `Shared dataset policy changed; prepare again` | Изменились `clearml`, `api_url`, `s3_roots`, `empty_classes` или `overlaps`. |
 | `Source definition changed; fetch the managed dataset again` | Изменилось описание источников или адрес CVAT. |
 | `Class registry changed; fetch and prepare again` | Изменился ответ API классов. |
 | `CVAT source changed; fetch again: <источник>` / `CVAT task changed; fetch again: <источник>/<задача>` | Задачи CVAT изменились после `fetch`. |
