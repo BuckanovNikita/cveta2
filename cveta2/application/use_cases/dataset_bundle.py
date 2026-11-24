@@ -310,7 +310,7 @@ def _warn_previous_publication(bundle: CurrentBundle) -> None:
         logger.warning(
             f"Каталог уже опубликован (publication.json): датасет {dataset_id}"
             + (f", версия {version}" if isinstance(version, str) else "")
-            + ". Публикуется ещё одна версия."
+            + ". Новая публикация создаст ещё одну версию."
         )
     else:
         logger.warning("В каталоге есть publication.json, но его нельзя прочитать: каталог мог быть уже опубликован.")
@@ -424,10 +424,11 @@ def upload_dataset(directory: Path, services: BundleServices, *, force_resplit: 
     bundle = services.files.read_bundle(directory)
     destination = _destination(bundle)
     parent = services.datasets.latest(destination.project, destination.dataset)
+    # Before check 2: a repeated upload makes the earlier publication the latest version, and check 2 refuses it.
+    _warn_previous_publication(bundle)
     _check_recorded_parent(bundle, destination, parent)
     previous = _parent_metadata(parent, services)
     _refuse_managed(parent, previous)
-    _warn_previous_publication(bundle)
     _check_classes(bundle.metadata, previous, services)
     _check_roots(bundle, destination, services)
     _check_rows(bundle, parent, services, force_resplit=force_resplit)

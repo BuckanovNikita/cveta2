@@ -399,6 +399,25 @@ def test_second_upload_warns_about_earlier_publication(
     assert json.loads((prepared / "publication.json").read_bytes())["dataset_id"] == "child"
 
 
+def test_repeated_upload_warns_about_the_publication_before_the_parent_refusal(
+    scenario: Scenario, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    _source, _options, services, store, _classes = scenario
+    prepared = _prepare(scenario, tmp_path)
+    upload_dataset(prepared, services)
+    # The first publication is now the latest version, which verify did not see.
+    store.parent = DatasetParent("child", PROJECT, DATASET, "1.0.0", _parent_metadata(tmp_path / "parent.yaml"))
+    capture_logs.clear()
+    with pytest.raises(UploadError, match="После verify появилась новая версия"):
+        upload_dataset(prepared, services)
+    assert store.calls == 1
+    warning = (
+        "Каталог уже опубликован (publication.json): датасет child, версия 1.0.0. "
+        "Новая публикация создаст ещё одну версию."
+    )
+    assert [message for message in capture_logs if "Каталог уже опубликован" in message] == [warning]
+
+
 @pytest.mark.parametrize("refused", ["roots", "output-bucket"])
 def test_unlisted_s3_root_or_output_bucket_is_refused(scenario: Scenario, tmp_path: Path, refused: str) -> None:
     source, options, services, store, _classes = scenario
