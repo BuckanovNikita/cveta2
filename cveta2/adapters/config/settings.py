@@ -11,6 +11,7 @@ from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from cveta2.adapters.config.project import (
+    optional_global_config,
     optional_project_config,
     shared_projects_by_name,
     write_personal_file,
@@ -267,7 +268,7 @@ def _snapshot_values(changes: dict[str, dict[str, object]], snapshot: ProjectCon
 class _SharedBaseline(NamedTuple):
     """What a section saw when it last loaded or saved shared policy."""
 
-    snapshot: ProjectConfig  # the shared file
+    snapshot: ProjectConfig  # the raw global file: never carries a local override
     section: object  # the section's own serialized form
 
 
@@ -355,17 +356,19 @@ class SectionConfig(BaseModel):
         """Load this section from the config YAML (defaults when absent)."""
         path = get_config_path(config_path)
         personal = _load_raw_yaml(path)
-        shared = optional_project_config(path, project_path)
+        effective = optional_project_config(path, project_path)
+        raw_global = optional_global_config(path, project_path)
         raw = personal.get(cls.section_key)
-        if shared is not None:
-            raw = _shared_section(cls.section_key, raw, shared)
+        if effective is not None:
+            raw = _shared_section(cls.section_key, raw, effective)
         section = cls.model_validate(cls._wrap_raw(raw)) if isinstance(raw, dict) else cls()
-        if shared is not None:
-            section._remember_shared(shared)  # noqa: SLF001 - this factory owns the snapshot
+        if raw_global is not None:
+            section._remember_shared(raw_global)  # noqa: SLF001 - this factory owns the snapshot
         return section
 
-    def _remember_shared(self, shared: ProjectConfig) -> None:
-        self._shared_baseline = _SharedBaseline(shared, self._to_raw())
+    def _remember_shared(self, raw: ProjectConfig) -> None:
+        """Keep the raw global file as the baseline of later team writes."""
+        self._shared_baseline = _SharedBaseline(raw, self._to_raw())
 
     def save(self, config_path: Path | None = None) -> Path:
         """Update only this section of the config YAML, keeping the rest."""
@@ -375,14 +378,14 @@ class SectionConfig(BaseModel):
         shared = optional_project_config(path)
         if shared is not None:
             serialized = _save_shared_section(path, self.section_key, serialized, shared, self._shared_baseline)
-            refreshed = optional_project_config(path)
+            refreshed = optional_global_config(path)
             if refreshed is not None:
                 self._remember_shared(refreshed)
             if self.section_key in {"sync_roots", "ignore"}:
                 return path
         elif self.section_key in {"sync_roots", "ignore"} and serialized:
             raise MigrationRequired(
-                "Project policy requires shared configuration; attach it with setup --project-config"
+                "Project policy requires shared configuration; attach it with setup --global-config"
             )
         elif self.section_key == "cache" and isinstance(serialized, dict):
             projects = serialized.get("projects", {})
@@ -525,7 +528,8 @@ class CvatConfig(BaseModel):
         shared = optional_project_config(path)
         if shared is not None and (self.host != shared.cvat.host or self.organization != shared.cvat.organization):
             raise ManagedError("CVAT identity must be changed in shared project configuration")
-        cvat_data: dict[str, str | float] = {} if shared is not None else {"host": self.host}
+        # An empty host is never written: the key alone would mark the file as legacy-attached.
+        cvat_data: dict[str, str | float] = {"host": self.host} if shared is None and self.host else {}
         if self.organization and shared is None:
             cvat_data["organization"] = self.organization
         if self.username:

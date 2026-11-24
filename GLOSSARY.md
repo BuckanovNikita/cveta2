@@ -74,19 +74,29 @@ _Avoid_: diff base, checkpoint
 ### Configuration
 
 **Personal configuration**:
-The user's own YAML file (default `~/.config/cveta2/config.yaml`, or `CVETA2_CONFIG`) holding CVAT credentials, local cache paths, network and upload settings, and a reference to the shared configuration.
+The user's own YAML file (default `~/.config/cveta2/config.yaml`, or `CVETA2_CONFIG`) holding CVAT credentials, local cache paths, network and upload settings, a reference to the global configuration and, when the team allows them, local overrides.
 _Russian_: личная конфигурация
 _Avoid_: user config, local config, settings file
 
-**Shared configuration**:
-The single authoritative YAML file of a team's CVAT server, projects and managed datasets; it is never merged with personal configuration and holds no credentials or local paths.
+**Local override**:
+A per-project option in the personal configuration (`overrides.projects.<key>`) that replaces the global value for that user; allowed only when the global configuration sets `local_overrides: true`. Overridable: publication settings only.
+_Russian_: локальное переопределение
+_Avoid_: personal override, shadow setting
+
+**Global configuration**:
+The single authoritative YAML file of a team's CVAT server, projects, publication settings and managed datasets, selected by `--global-config`, `CVETA2_GLOBAL_CONFIG` or `global_config`; it holds no credentials or local paths.
 _Russian_: общая конфигурация
-_Avoid_: project config (in prose), team config, global config
+_Avoid_: shared configuration (former name), project config (in prose), team config
 
 **Project definition**:
-A CVAT project's entry in the shared configuration: its ID, name, sync root, ignored prefix, task-cache location and ignore list.
+A CVAT project's entry in the global configuration: its ID, name, sync root, ignored prefix, task-cache location, ignore list and optional publication settings.
 _Russian_: описание проекта
 _Avoid_: project settings
+
+**Publication settings**:
+The optional `publication` block of a project definition: the ClearML destination (`clearml.project`, `clearml.dataset`, optional `clearml.output_uri`), the class API (`api_url`), excluded classes (`empty_classes`) and S3 image roots (`s3_roots`) used to publish that project's bundles.
+_Russian_: настройки публикации
+_Avoid_: release settings, ClearML config
 
 ### Images and caches
 
@@ -194,7 +204,7 @@ _Russian_: ручная подготовка
 _Avoid_: standalone preparation, ad hoc preparation
 
 **Managed dataset**:
-A dataset whose sources, ClearML destination, class API, S3 roots, empty classes and overlap decisions are defined by name in the shared configuration and handled by the `dataset` commands.
+A dataset whose sources, ClearML destination, class API, S3 roots, empty classes and overlap decisions are defined by name in the global configuration and handled by the `dataset` commands.
 _Russian_: управляемый датасет
 _Avoid_: configured dataset, named dataset
 

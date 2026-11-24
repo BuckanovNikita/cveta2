@@ -22,12 +22,7 @@ from cveta2.interfaces.commands.labels import configure_labels, run_labels
 from cveta2.interfaces.commands.managed import configure_managed, run_managed
 from cveta2.interfaces.commands.merge import configure_merge, run_merge
 from cveta2.interfaces.commands.s3_sync import configure_s3_sync, run_s3_sync
-from cveta2.interfaces.commands.setup import (
-    configure_setup,
-    configure_setup_cache,
-    run_setup,
-    run_setup_cache,
-)
+from cveta2.interfaces.commands.setup import configure_setup, run_setup
 from cveta2.interfaces.commands.task_ops import (
     configure_task_delete,
     configure_task_drop_label,
@@ -101,15 +96,9 @@ def _command_specs() -> "tuple[CommandSpec, ...]":
         ),
         CommandSpec(
             "setup",
-            "Interactively configure CVAT connection settings.",
+            "Настроить личную и общую конфигурацию.",
             run_setup,
             configure_setup,
-        ),
-        CommandSpec(
-            "setup-cache",
-            "Interactively configure image cache directories for all projects.",
-            run_setup_cache,
-            configure_setup_cache,
         ),
         CommandSpec(
             "s3-sync",

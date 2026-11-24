@@ -158,7 +158,7 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             yaml.safe_dump(
                 {
                     "schema_version": 1,
-                    "project_config": str(shared),
+                    "global_config": str(shared),
                     "cvat": {"username": cfg.username, "password": cfg.password},
                     "cache": {"images_root": str(images)},
                 }

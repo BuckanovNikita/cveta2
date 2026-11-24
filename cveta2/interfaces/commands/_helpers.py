@@ -86,6 +86,12 @@ def config_path_from_args(args: "argparse.Namespace") -> Path:
     return Path(config_arg) if config_arg else get_config_path()
 
 
+def global_config_from_args(args: "argparse.Namespace") -> Path | None:
+    """Return the global file chosen by ``--global-config``."""
+    selected: Path | None = getattr(args, "global_config", None)
+    return selected
+
+
 def resolve_project_from_args(
     client: "CvatClient",
     project_arg: str | None,

@@ -231,7 +231,7 @@ def write_split_config_yaml(
         projects=projects,
         datasets={},
     )
-    personal.update(schema_version=1, project_config=str(shared_path), cvat=cvat)
+    personal.update(schema_version=1, global_config=str(shared_path), cvat=cvat)
     return write_config_yaml(path, **personal)
 
 

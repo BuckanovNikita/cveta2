@@ -99,12 +99,11 @@ def test_run_doctor_binary_clearml_configuration_only_warns(
 
 def test_run_setup_requires_interactive(tmp_path: Path) -> None:
     """run_setup raises when interactive mode is disabled."""
-    import argparse
-
     from cveta2.domain.errors import InteractiveModeRequiredError
     from cveta2.interfaces.commands.setup import run_setup
+    from tests.helpers import parse_cli_args
 
-    args = argparse.Namespace(config=str(tmp_path / "fake-config.yaml"))
+    args = parse_cli_args("setup", "--config", str(tmp_path / "fake-config.yaml"))
     with (
         patch(
             "cveta2.interfaces.commands.setup.require_interactive",

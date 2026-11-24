@@ -2,7 +2,7 @@
 
 Every data command (fetch, upload, convert, merge, labels, task ops,
 whats-new, ignore, s3-sync) has a counterpart here; the interactive-only
-commands (``setup``, ``setup-cache``, ``doctor``) do not.
+commands (``setup``, ``doctor``) do not.
 
 Every remote function accepts an optional ``connection=`` argument (a
 :class:`Connection`); when omitted or partially filled, configuration is

@@ -338,7 +338,7 @@ def test_unreadable_personal_config_is_a_typed_cli_error(
     monkeypatch.setenv("CVETA2_CONFIG", str(config))
     try:
         with pytest.raises(SystemExit) as exit_info:
-            CliApp().run(["setup-cache", "--list"])
+            CliApp().run(["setup", "--list"])
     finally:
         target.chmod(0o700)
     assert str(config) in str(exit_info.value.code)
@@ -374,7 +374,7 @@ def test_shared_yaml_diagnostics_name_the_file_and_location(
     shared = tmp_path / "shared.yaml"
     shared.write_text(document, encoding="utf-8")
     personal = tmp_path / "personal.yaml"
-    personal.write_text(f"schema_version: 1\nproject_config: {shared}\n", encoding="utf-8")
+    personal.write_text(f"schema_version: 1\nglobal_config: {shared}\n", encoding="utf-8")
 
     with pytest.raises(Cveta2Error) as caught:
         CvatConfig.load(personal)

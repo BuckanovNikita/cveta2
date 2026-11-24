@@ -16,12 +16,13 @@ from cveta2.adapters.s3.managed_sources import S3CsvSources
 from cveta2.domain.managed.models import ManagedError
 from cveta2.interfaces import managed_datasets
 from cveta2.interfaces.cli import main
+from tests.helpers import parse_cli_args
 
 
 def test_missing_shared_config_exits_two_with_path(tmp_path: Path, capture_logs: list[str]) -> None:
     missing = tmp_path / "absent.yaml"
     with pytest.raises(SystemExit) as exited:
-        main(["dataset", "show", "combined", "--project-config", str(missing)])
+        main(["dataset", "show", "combined", "--global-config", str(missing)])
     assert exited.value.code == 2
     assert any(str(missing) in line for line in capture_logs)
 
@@ -105,3 +106,23 @@ def test_s3_credential_failures_exit_two_naming_the_source(
     assert exited.value.__cause__ is not None
     assert exited.value.__cause__.__cause__ is error
     assert not any("Traceback" in line for line in capture_logs)
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        ("list",),
+        ("show", "combined"),
+        ("versions", "combined"),
+        ("fetch", "combined", "--output-dir", "out"),
+        ("prepare", "combined", "in.csv", "--source", "src", "--output-dir", "out"),
+        ("diff", "old", "new"),
+        ("report-errors", "prepared"),
+        ("publish", "prepared"),
+    ],
+    ids=lambda operation: operation[0],
+)
+def test_dataset_commands_accept_global_config(operation: tuple[str, ...]) -> None:
+    args = parse_cli_args("dataset", *operation, "--global-config", "g.yaml")
+
+    assert args.global_config == Path("g.yaml")

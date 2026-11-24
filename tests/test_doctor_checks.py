@@ -66,7 +66,7 @@ def test_check_config_without_personal_file_uses_shared_identity(
     shared = write_config_yaml(tmp_path / "projects.yaml", schema_version=1, cvat={"host": "https://shared.example"})
     personal = tmp_path / "missing-personal.yaml"
     monkeypatch.setenv("CVETA2_CONFIG", str(personal))
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(shared))
+    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(shared))
     monkeypatch.delenv("CVAT_HOST", raising=False)
     monkeypatch.delenv("CVAT_ORGANIZATION", raising=False)
     monkeypatch.setenv("CVAT_USERNAME", "user")

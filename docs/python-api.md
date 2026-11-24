@@ -40,7 +40,7 @@ import cveta2
 
 Переменные окружения и ключи конфигурации описаны на странице [Конфигурация](configuration.md).
 
-Если подключена [общая конфигурация](../GLOSSARY.md) (shared configuration), адрес CVAT и организация берутся только из неё:
+Если подключена [общая конфигурация](../GLOSSARY.md) (global configuration), адрес CVAT и организация берутся только из неё:
 
 - `host` или `organization` в `Connection`, которые с ней не совпадают, вызывают `Cveta2Error` («Explicit host cannot override shared CVAT identity»).
 - Клиент в `Connection.client` с другим адресом или организацией вызывает `Cveta2Error`.

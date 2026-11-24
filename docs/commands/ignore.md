@@ -44,7 +44,7 @@ cveta2 ignore [-h] [--project PROJECT] [--add TASK [TASK ...] | --remove TASK [T
 
 ### Где хранится список
 
-Список хранится в общей конфигурации ([shared configuration](../../GLOSSARY.md)), в описании проекта ([project definition](../../GLOSSARY.md)), в поле `ignore`. Поэтому одно изменение видят все, у кого подключён тот же общий файл. Каждая запись содержит ID задачи, имя задачи на момент добавления, причину и признак `silent`:
+Список хранится в общей конфигурации ([global configuration](../../GLOSSARY.md)), в описании проекта ([project definition](../../GLOSSARY.md)), в поле `ignore`. Поэтому одно изменение видят все, у кого подключён тот же общий файл. Каждая запись содержит ID задачи, имя задачи на момент добавления, причину и признак `silent`:
 
 ```yaml
 projects:
@@ -160,10 +160,10 @@ Unknown shared projects: ['Retail shelves']
 Проекта нет в разделе `projects` общей конфигурации. Список не сохранён. Перед этой ошибкой команда всё равно печатает `... добавлена в ignore-список ...` — не верьте этой строке. Попросите того, кто ведёт общую конфигурацию, добавить описание проекта.
 
 ```text
-Versioned personal configuration requires a shared project_config reference
+В личном файле schema_version: 1, но общая конфигурация не выбрана (ключ global_config); подключите её: cveta2 setup --global-config PATH или задайте CVETA2_GLOBAL_CONFIG
 ```
 
-В личной конфигурации не подключён общий файл. Подключите его через [`cveta2 setup --project-config`](setup.md).
+В личной конфигурации не подключён общий файл. Подключите его через [`cveta2 setup --global-config`](setup.md).
 
 ```text
 Interactive prompt required but CVETA2_NO_INTERACTIVE=true. Pass --project / -p to specify the project name.

@@ -134,7 +134,7 @@ Deleted CSV saved to output/deleted.csv (0 images, 0 rows)
 
 **`Ошибка: путь кэширования изображений для проекта 'Retail shelves' не настроен.`**
 
-Добавьте `--images-dir` или `--no-images`, или настройте кэш: [setup-cache](setup-cache.md).
+Добавьте `--images-dir` или `--no-images`, или настройте кэш: [setup](setup.md#мастер-личной-настройки).
 
 ## Из Python
 

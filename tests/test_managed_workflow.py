@@ -310,7 +310,7 @@ def workflow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workflow:
         yaml.safe_dump(
             {
                 "schema_version": 1,
-                "project_config": str(shared),
+                "global_config": str(shared),
                 "cvat": {"username": "user", "password": "secret"},
                 "cache": {"images_root": str(images)},
             }
@@ -425,7 +425,7 @@ def test_setup_attach_and_cli_list_never_modify_shared_config(
             "setup",
             "--config",
             str(workflow.personal),
-            "--project-config",
+            "--global-config",
             str(workflow.shared),
         ]
     )
@@ -598,7 +598,7 @@ def test_first_starts_a_lineage_over_a_non_managed_latest_version(
             "--first",
             "--config",
             str(workflow.personal),
-            "--project-config",
+            "--global-config",
             str(workflow.shared),
         ]
     )

@@ -251,6 +251,11 @@ _PARSE_CASES: list[tuple[list[str], dict[str, object]]] = [
     ),
     (["doctor"], {"command": "doctor", "cache": False}),
     (["doctor", "--cache"], {"command": "doctor", "cache": True}),
+    (
+        ["setup", "--global", "-p", "retail", "--empty-class", "1", "--empty-class", "2"],
+        {"global_scope": True, "project": "retail", "empty_classes": [1, 2]},
+    ),
+    (["setup", "--unset", "sync-root", "s3-root"], {"unset": ["sync-root", "s3-root"]}),
 ]
 
 
@@ -273,6 +278,7 @@ _PARSE_ERROR_CASES: list[list[str]] = [
     ["task", "mark-deleted", "-p", "proj", "--frame", "1"],
     ["task", "drop-label", "-p", "proj", "-t", "1"],
     ["task", "status", "-p", "proj", "-t", "7", "--state", "done"],
+    ["setup", "--password", "x"],
 ]
 
 

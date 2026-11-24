@@ -153,7 +153,7 @@ Deleted CSV saved to output/deleted.csv (0 images, 0 rows)
 
 **`Ошибка: путь кэширования изображений для проекта 'Retail shelves' не настроен.`**
 
-Каталог изображений не задан. Добавьте `--images-dir` или `--no-images`, или настройте кэш: [setup-cache](setup-cache.md).
+Каталог изображений не задан. Добавьте `--images-dir` или `--no-images`, или настройте кэш: [setup](setup.md#мастер-личной-настройки).
 
 **`Interactive prompt required but CVETA2_NO_INTERACTIVE=true. Pass --project / -p to specify the project ID or name.`**
 
