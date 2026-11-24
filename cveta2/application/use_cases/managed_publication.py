@@ -22,26 +22,24 @@ from cveta2.application.use_cases.managed_feedback import (
     reconcile_pending,
     report_findings,
 )
+from cveta2.domain.bundle.classes import registry_mismatches
 from cveta2.domain.bundle.models import Publication
 from cveta2.domain.bundle.preparation import PAYLOAD_NAMES
 from cveta2.domain.bundle.validation import validate_bundle
-from cveta2.domain.class_registry import (
-    registry_fingerprint as registry_fingerprint,  # noqa: PLC0414 - existing import.
-)
 from cveta2.domain.managed.evidence import (
     SourceAssessment,
     assess_cvat_source,
     assess_s3_source,
     require_complete_evidence,
+    source_differences,
 )
 from cveta2.domain.managed.models import (
+    DatasetDefinition,
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
     SourceSnapshot,
     dataset_definition,
-    definition_fingerprint,
-    source_fingerprint,
 )
 from cveta2.domain.managed.preparation import FeedbackOutcome
 from cveta2.domain.verification.models import ValidationOptions
@@ -105,23 +103,41 @@ def _assess_sources(
     return merged
 
 
+def _definition_differences(
+    config: ProjectConfig, definition: DatasetDefinition, snapshot: ManagedSnapshot
+) -> SourceAssessment:
+    """Warn about each way the sources of the definition differ from the fetched ones.
+
+    Every recorded task of a source named in a difference is stale.
+    """
+    lines = source_differences(config, definition, snapshot)
+    # Source names cannot contain ":" or spaces, so the prefix names exactly one source.
+    changed = {source.name for source in snapshot.sources if any(line.startswith(f"{source.name}: ") for line in lines)}
+    return SourceAssessment(
+        warnings=tuple(f"Источник отличается от выгруженного: {line}" for line in lines),
+        stale_tasks=frozenset(
+            (source.name, task.id)
+            for source in snapshot.sources
+            if source.name in changed
+            for task in source.tasks.values()
+        ),
+    )
+
+
 def _check_prepared(
     config: ProjectConfig,
     loaded: LoadedManagedPreparation,
     services: ManagedPublicationServices,
 ) -> SourceAssessment:
-    """Check policy, parent, sources and clean publication media; warn about changed sources.
+    """Check parent, sources and clean publication media; warn about changed sources.
 
     Returns the source assessment, whose stale tasks get no feedback; tasks whose
-    pending receipts could not be inspected count as stale too.
+    pending receipts could not be inspected, and tasks of sources that differ from
+    the current definition, count as stale too.
     """
     record = loaded.record
     require_complete_evidence(record.snapshot)
     definition = dataset_definition(config, record.name)
-    if record.snapshot.definition_hash != source_fingerprint(config, definition):
-        raise ManagedError("Source definition changed; fetch the managed dataset again")
-    if record.definition_hash != definition_fingerprint(config, definition):
-        raise ManagedError("Shared dataset policy changed; prepare again")
     parent = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (parent.dataset_id if parent else None) != record.parent_id:
         raise ManagedError("Latest ClearML parent changed; fetch and prepare again")
@@ -132,15 +148,13 @@ def _check_prepared(
             f"Parent {parent.dataset_id} lacks dataset.yaml and is no longer a managed dataset version; "
             "fetch and prepare again, with dataset prepare --first to start a managed lineage"
         )
-    records = services.registry.fetch(definition.api_url)
-    if registry_fingerprint(records) != record.registry_hash:
-        raise ManagedError("Class registry changed; fetch and prepare again")
+    differences = _definition_differences(config, definition, record.snapshot)
     unavailable = reconcile_pending(record.findings, remote=services.feedback, ledger=services.ledger)
     assessment = _assess_sources(config, services.ledger.effective_snapshot(record.snapshot), services)
-    for line in assessment.warnings:
+    for line in (*differences.warnings, *assessment.warnings):
         logger.warning(f"{line}. Датасет собирается из выгруженных данных.")
     _check_media(loaded, services)
-    return replace(assessment, stale_tasks=assessment.stale_tasks | unavailable)
+    return replace(assessment, stale_tasks=assessment.stale_tasks | differences.stale_tasks | unavailable)
 
 
 def _report(
@@ -194,13 +208,13 @@ def report_prepared(config: ProjectConfig, directory: Path, *, services: Managed
 def publish_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> Publication:
     """Publish only a ready, fresh, feedback-complete stable three-file snapshot."""
     loaded = services.files.load_prepared(directory)
-    if not loaded.record.ready or set(loaded.payload) != {
-        "dataset.csv",
-        "dataset.yaml",
-        "tasks.yaml",
-    }:
+    metadata = loaded.metadata
+    if not loaded.record.ready or metadata is None or set(loaded.payload) != set(PAYLOAD_NAMES):
         raise ManagedError("Preparation is not ready; review diagnostics and accept cleanup")
     assessment = _check_prepared(config, loaded, services)
+    # Only class names and numbers bind the prepared rows; other registry fields may change.
+    if names := registry_mismatches(metadata.classes, services.registry.fetch(metadata.api_url)):
+        raise ManagedError(f"Class names or numbers differ from the class registry: {', '.join(names)}; prepare again")
     outcome = _report(loaded, assessment, services)
     if outcome.failed:
         raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")

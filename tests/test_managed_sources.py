@@ -23,12 +23,12 @@ from cveta2.application.ports.managed_sources import ProjectState, S3Object, S3O
 from cveta2.application.use_cases.managed_publication import (
     ManagedPublicationServices,
     _assess_sources,
-    registry_fingerprint,
 )
 from cveta2.application.use_cases.managed_sources import (
     fetch_sources,
 )
 from cveta2.domain.bundle.models import ApiClass
+from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.evidence import SourceAssessment, labels_fingerprint
 from cveta2.domain.managed.models import (

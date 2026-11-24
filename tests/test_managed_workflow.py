@@ -554,14 +554,11 @@ def test_feedback_failure_blocks_remote_publication(workflow: Workflow, tmp_path
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
-@pytest.mark.parametrize("change", ["definition", "parent", "image"])
+@pytest.mark.parametrize("change", ["parent", "image"])
 def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path, change: str) -> None:
     prepared = _prepare(workflow, tmp_path)
     message = "fetch again|prepare again|validation"
-    if change == "definition":
-        _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[7]))
-        message = "Shared dataset policy changed; prepare again"
-    elif change == "parent":
+    if change == "parent":
         workflow.clearml.root.mkdir()
         target = workflow.clearml.root / "competing"
         target.mkdir()
@@ -1065,14 +1062,140 @@ def _ignore_task(shared: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize("edit", [_move_source, _ignore_task], ids=["source-uri", "ignored-id"])
-def test_source_edits_after_preparation_require_fetching_again(
-    workflow: Workflow, tmp_path: Path, edit: Callable[[dict[str, Any]], None]
+def test_source_edits_after_preparation_warn_and_publish(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str], edit: Callable[[dict[str, Any]], None]
 ) -> None:
     prepared = _prepare(workflow, tmp_path)
     _edit_shared(workflow, edit)
-    with pytest.raises(ManagedError, match="Source definition changed; fetch the managed dataset again"):
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    if edit is _move_source:
+        assert (
+            "Источник отличается от выгруженного: imported: uri s3://annotations/imported.csv → "
+            "s3://annotations/moved.csv. Датасет собирается из выгруженных данных."
+        ) in capture_logs
+
+
+def _repoint_main(shared: dict[str, Any]) -> None:
+    shared["projects"]["third"] = {"id": 40}
+    shared["datasets"]["combined"]["sources"][0]["project"] = "third"
+
+
+def _drop_main(shared: dict[str, Any]) -> None:
+    shared["datasets"]["combined"]["sources"].pop(0)
+
+
+def _renumber_main(shared: dict[str, Any]) -> None:
+    shared["projects"]["main"]["id"] = 13
+
+
+@pytest.mark.parametrize(
+    ("edit", "warnings"),
+    [
+        (_repoint_main, ["Источник отличается от выгруженного: main: project_id 12 → 40"]),
+        (_drop_main, ["Источник отличается от выгруженного: main: только в снимке"]),
+        (
+            _renumber_main,
+            [
+                "Источник отличается от выгруженного: main: project_id 12 → 13",
+                "main: проект 12 больше не описан в конфигурации, задачи не проверены",
+            ],
+        ),
+    ],
+    ids=["another-project", "dropped-source", "unconfigured-project"],
+)
+def test_findings_of_a_source_that_differs_from_the_definition_are_skipped(
+    workflow: Workflow,
+    tmp_path: Path,
+    capture_logs: list[str],
+    edit: Callable[[dict[str, Any]], None],
+    warnings: list[str],
+) -> None:
+    """The command goes on from the fetched sources and sends no finding of the changed source."""
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, edit)
+
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+
+    assert (outcome.created, outcome.skipped, outcome.failed) == (0, 1, [])
+    assert workflow.cvat.issues[101] == []
+    for line in warnings:
+        assert f"{line}. Датасет собирается из выгруженных данных." in capture_logs
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    assert workflow.cvat.issues[101] == []
+
+
+def test_task_ignored_after_fetch_is_reported_as_ignored_and_its_findings_skipped(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, lambda shared: shared["projects"]["main"].update(ignore=[{"id": 101}]))
+
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+
+    assert (outcome.created, outcome.skipped) == (0, 1)
+    assert "main: задача 101 теперь игнорируется. Датасет собирается из выгруженных данных." in capture_logs
+    assert not any("удалена" in line for line in capture_logs)
+    assert workflow.cvat.issues[101] == []
+
+
+def test_server_wide_access_error_still_stops_the_command(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending receipt's task is unavailable, but so is the whole project: freshness cannot be judged."""
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.fail_issues = True
+    assert len(api.report_dataset_errors(prepared, **workflow.options).failed) == 1
+    workflow.cvat.fail_issues = False
+
+    def forbidden(*_args: object) -> None:
+        raise CvatApiError("Forbidden", status_code=403)
+
+    for method in ("get_task", "get_project_tasks", "get_project_labels"):
+        monkeypatch.setattr(workflow.cvat, method, forbidden)
+
+    with pytest.raises(CvatApiError, match="Forbidden"):
+        api.report_dataset_errors(prepared, **workflow.options)
+    # The pending receipt's task was judged unavailable first; the project listing then stopped the command.
+    assert any(line.startswith("main: задача 101 недоступна в CVAT (") for line in capture_logs)
+    with pytest.raises(CvatApiError, match="Forbidden"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.cvat.issues[101] == []
+    assert workflow.clearml.publications == []
+
+
+def _change_registry(monkeypatch: pytest.MonkeyPatch, *, name: str = "cat", threshold: float = 0.5) -> None:
+    """Serve the fixture's single class (number 7) with another name or threshold."""
+    changed = [
+        ApiClass(
+            id=90,
+            number=7,
+            name=name,
+            techClass=False,
+            isPeriodical=False,
+            isCritical=False,
+            threshold=threshold,
+        )
+    ]
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: changed)
+
+
+def test_registry_rename_after_preparation_stops_publication(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    _change_registry(monkeypatch, name="kitty")
+    assert api.report_dataset_errors(prepared, **workflow.options).failed == []
+    with pytest.raises(ManagedError, match="differ from the class registry: cat, kitty; prepare again"):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+def test_registry_threshold_change_after_preparation_publishes(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    _change_registry(monkeypatch, threshold=0.9)
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
 def _other_definition_hash(_shared: dict[str, Any], parent: Path) -> None:
@@ -1175,7 +1298,7 @@ def test_destination_with_another_parent_needs_a_new_fetch(workflow: Workflow, t
         lambda shared: shared["datasets"]["combined"].update(clearml={"project": "CV/moved", "dataset": "annotations"}),
     )
 
-    with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
+    with pytest.raises(ManagedError, match="Latest ClearML parent changed"):
         api.publish_dataset(prepared, **workflow.options)
     with pytest.raises(ManagedError, match="Source parent changed; fetch the managed dataset again"):
         api.prepare_managed_dataset(

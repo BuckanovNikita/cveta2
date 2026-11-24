@@ -144,7 +144,6 @@ def _prepare(
         source,
         directory,
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -191,7 +190,6 @@ def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
         source,
         tmp_path / "prepared",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -229,7 +227,6 @@ def test_bad_box_produces_attested_feedback_and_requires_cleanup(
         source,
         tmp_path / "diagnostics",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -256,24 +253,6 @@ def test_load_rejects_modified_bound_bytes(tmp_path: Path, name: str) -> None:
         LocalManagedPreparationFiles().load_prepared(summary.directory)
 
 
-def test_source_definition_and_registry_must_match_fetch(tmp_path: Path) -> None:
-    """A transformed output cannot be prepared against a different source policy."""
-    config, transformed, source, metadata = _fixture(tmp_path)
-    with pytest.raises(ManagedError, match="registry"):
-        prepare_managed(
-            config,
-            "demo",
-            transformed,
-            source,
-            tmp_path / "prepared",
-            metadata,
-            registry_hash="changed",
-            files=LocalManagedPreparationFiles(),
-            media=LocalMediaInspector(),
-            s3_roots=FakeS3Roots(),
-        )
-
-
 @pytest.mark.parametrize("damage", ["missing-registry", "missing-labels"])
 def test_incomplete_source_records_cannot_be_prepared(tmp_path: Path, damage: str) -> None:
     config, transformed, source, metadata = _fixture(tmp_path)
@@ -294,7 +273,6 @@ def test_incomplete_source_records_cannot_be_prepared(tmp_path: Path, damage: st
             source,
             output,
             metadata,
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=FakeS3Roots(),
@@ -313,7 +291,6 @@ def test_symlink_and_existing_destination_are_rejected(tmp_path: Path) -> None:
             source,
             summary.directory,
             metadata,
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=FakeS3Roots(),
@@ -338,7 +315,6 @@ def test_preparation_inside_the_fetch_source_is_refused(tmp_path: Path) -> None:
             source / "source-snapshot.yaml",
             source / "prepared",
             metadata,
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=FakeS3Roots(),
@@ -359,7 +335,6 @@ def test_inaccessible_s3_root_blocks_preparation(tmp_path: Path) -> None:
             source,
             tmp_path / "prepared",
             metadata.model_copy(update={"images": roots}),
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=s3_roots,
@@ -378,7 +353,6 @@ def _prepare_with(
         source,
         tmp_path / "prepared",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -438,7 +412,6 @@ def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
         source,
         tmp_path / "prepared",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -491,11 +464,17 @@ def test_published_assignments_come_only_from_a_managed_parent(tmp_path: Path) -
 
 
 @pytest.mark.parametrize("edit", ["project-id", "ignored-id", "organization"])
-def test_source_edits_require_fetching_again(tmp_path: Path, edit: str) -> None:
+def test_source_edits_warn_and_prepare_from_the_fetched_sources(
+    tmp_path: Path, capture_logs: list[str], edit: str
+) -> None:
     config, transformed, source, metadata = _fixture(tmp_path)
-    with pytest.raises(ManagedError, match="Source definition changed; fetch the managed dataset again"):
-        _prepare_with(_edit(config, edit), tmp_path, transformed, source, metadata)
-    assert not (tmp_path / "prepared").exists()
+    summary = _prepare_with(_edit(config, edit), tmp_path, transformed, source, metadata)
+    assert summary.ready
+    if edit == "project-id":
+        assert (
+            "Источник отличается от выгруженного: main: project_id 7 → 8. Датасет собирается из выгруженных данных."
+            in capture_logs
+        )
 
 
 def test_preparation_records_policy_and_source_fingerprints(tmp_path: Path) -> None:

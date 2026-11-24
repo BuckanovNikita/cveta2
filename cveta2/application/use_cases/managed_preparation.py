@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import pandas as pd
+from loguru import logger
 
 from cveta2.application.ports.dataset_bundle import S3Storage
 from cveta2.application.ports.managed_preparation import (
@@ -18,14 +19,13 @@ from cveta2.application.ports.verification import MediaInspector
 from cveta2.domain.bundle.models import DatasetMetadata, TaskManifest
 from cveta2.domain.bundle.tasks import derive_tasks
 from cveta2.domain.bundle.validation import validate_bundle
-from cveta2.domain.managed.evidence import require_complete_evidence
+from cveta2.domain.managed.evidence import require_complete_evidence, source_differences
 from cveta2.domain.managed.models import (
     ManagedError,
     ManagedMetadata,
     ProjectConfig,
     dataset_definition,
     definition_fingerprint,
-    source_fingerprint,
 )
 from cveta2.domain.managed.policies import (
     SplitName,
@@ -164,7 +164,6 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     directory: Path,
     metadata: DatasetMetadata,
     *,
-    registry_hash: str,
     files: ManagedPreparationFiles,
     media: MediaInspector,
     s3_roots: S3Storage,
@@ -185,10 +184,8 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     captured = files.capture(transformed, source)
     snapshot = captured.snapshot
     require_complete_evidence(snapshot)
-    if snapshot.definition_hash != source_fingerprint(config, definition):
-        raise ManagedError("Source definition changed; fetch the managed dataset again")
-    if snapshot.registry_hash != registry_hash:
-        raise ManagedError("Class registry changed; fetch the managed dataset again")
+    for line in source_differences(config, definition, snapshot):
+        logger.warning(f"Источник отличается от выгруженного: {line}. Датасет собирается из выгруженных данных.")
     if snapshot.parent_id != parent_id:
         raise ManagedError("Source parent changed; fetch the managed dataset again")
     files.check_roots(captured.frame, metadata)
@@ -245,7 +242,7 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
         definition_hash=definition_hash,
         parent_id=parent_id,
         parent_version=parent_version,
-        registry_hash=registry_hash,
+        registry_hash=snapshot.registry_hash,
         source_hash=hashlib.sha256(captured.source_content).hexdigest(),
         input_hash=hashlib.sha256(captured.input_content).hexdigest(),
         payload_hashes={key: hashlib.sha256(value).hexdigest() for key, value in payload.items()},

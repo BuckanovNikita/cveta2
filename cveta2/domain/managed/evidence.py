@@ -75,8 +75,9 @@ def assess_cvat_source(
     """Compare a CVAT source recorded at fetch with its live tasks and labels.
 
     Only a task completed now that fetch did not record as completed stops a
-    command. A task that was deleted, reopened or edited since fetch, and every
-    task of a source whose labels changed, is stale: its findings are skipped.
+    command. A task that was deleted, ignored, reopened or edited since fetch,
+    and every task of a source whose labels changed, is stale: its findings are
+    skipped.
     """
     live = {task.id: task for task in live_tasks if task.id not in ignored}
     recorded = {task.id: task for task in source.tasks.values()}
@@ -86,7 +87,8 @@ def assess_cvat_source(
     for task_id in sorted(live.keys() | recorded.keys()):
         now, then = live.get(task_id), recorded.get(task_id)
         if now is None:
-            warnings.append(f"{source.name}: задача {task_id} удалена")
+            gone = "теперь игнорируется" if task_id in ignored else "удалена"
+            warnings.append(f"{source.name}: задача {task_id} {gone}")
             stale.add((source.name, task_id))
         elif now.completed and (then is None or not then.completed):
             newly_completed.append(f"{source.name}/{task_id}")

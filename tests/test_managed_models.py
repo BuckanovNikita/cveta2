@@ -586,6 +586,12 @@ def _open(task_id: int, date: str = "d1") -> TaskSnapshot:
             ),
         ),
         ([_done(1)], [_done(1), _done(5)], _LABELS, SourceAssessment()),
+        (
+            [_done(1), _done(5)],
+            [_done(1), _done(5)],
+            _LABELS,
+            SourceAssessment(warnings=("main: задача 5 теперь игнорируется",), stale_tasks=frozenset({("main", 5)})),
+        ),
     ],
     ids=[
         "unchanged",
@@ -598,6 +604,7 @@ def _open(task_id: int, date: str = "d1") -> TaskSnapshot:
         "edited-incomplete",
         "labels",
         "ignored-completed",
+        "ignored-after-fetch",
     ],
 )
 def test_assess_cvat_source_stops_only_on_newly_completed_tasks(

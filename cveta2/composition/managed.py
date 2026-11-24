@@ -48,7 +48,6 @@ from cveta2.domain.bundle.models import (
     Publication,
     UploadError,
 )
-from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ProjectConfig, dataset_definition
 from cveta2.domain.managed.policies import compare_frames
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
@@ -261,7 +260,6 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
         source,
         output_dir,
         _metadata(path, config, definition, records, None if first else previous, project_config),
-        registry_hash=registry_fingerprint(records),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=S3Roots(),
