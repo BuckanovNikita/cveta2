@@ -63,6 +63,8 @@ result = cveta2.fetch("Retail shelves", "output/fetch", download_images=False, c
 print(len(result.dataset), len(result.obsolete), len(result.in_progress))
 ```
 
+Как и команда `cveta2 fetch`, `cveta2.fetch` пишет рядом с CSV черновик `dataset.yaml` и печатает предупреждения о его пробелах и о покрытии классов; исключений они не вызывают (см. [Черновик dataset.yaml](commands/fetch.md#черновик-datasetyaml)).
+
 ### Пример: один клиент на несколько вызовов
 
 Без `client` каждая функция открывает своё соединение с CVAT и закрывает его в конце. Чтобы не входить в CVAT заново на каждый вызов, откройте `CvatClient` сами и передайте его через `Connection(client=...)`:

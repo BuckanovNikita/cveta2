@@ -31,6 +31,11 @@ The four CSV files a full fetch writes: `dataset.csv`, `obsolete.csv`, `in_progr
 _Russian_: файлы полной выгрузки
 _Avoid_: splits (that word is reserved for train/val/test)
 
+**Dataset draft**:
+The `dataset.yaml` a full fetch writes next to the partition outputs: the ClearML destination, output URI, class API, excluded class numbers and image roots known from the global configuration, each key optional; `verify` reads it instead of the configuration.
+_Russian_: черновик `dataset.yaml`
+_Avoid_: template, stub config
+
 **Dataset (partition)**:
 The rows of the latest completed task of each image that is neither deleted nor reopened; the file `dataset.csv`.
 _Russian_: датасет (`dataset.csv`)

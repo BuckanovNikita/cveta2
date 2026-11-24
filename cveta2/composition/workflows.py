@@ -9,6 +9,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from cveta2.adapters.class_api.http import HttpClassApi
 from cveta2.adapters.config.settings import (
     CacheConfig,
     IgnoreConfig,
@@ -17,6 +18,7 @@ from cveta2.adapters.config.settings import (
     resolve_images_cache_dir,
 )
 from cveta2.adapters.execution.concurrency import Workers, run_concurrent
+from cveta2.adapters.files.bundle import LocalBundleFiles
 from cveta2.adapters.files.manifests import LocalManifestStore
 from cveta2.adapters.files.task_output import LocalWorkflowFiles
 from cveta2.adapters.s3.task_cache import AnnotationCacheFactory
@@ -24,6 +26,8 @@ from cveta2.adapters.s3.upload import S3UploadStorage
 from cveta2.application.client import ApplicationClient
 from cveta2.application.ports.cache import CacheInvalidator
 from cveta2.application.use_cases import fetch, resolve, task_ops, upload
+from cveta2.application.use_cases.fetch_draft import DraftServices, write_fetch_draft
+from cveta2.composition.configuration import project_publication
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import ProjectAnnotations, TaskInfo
 from cveta2.domain.partition import PartitionResult
@@ -45,8 +49,23 @@ def fetch_dependencies(target: fetch.FetchTarget, options: fetch.FetchOptions) -
 
 
 def fetch_project(client: ApplicationClient, target: fetch.FetchTarget, options: fetch.FetchOptions) -> PartitionResult:
-    """Run a project fetch using configured production adapters."""
-    return fetch.fetch_project(client, target, options, deps=fetch_dependencies(target, options))
+    """Run a project fetch using configured production adapters, then write its draft ``dataset.yaml``.
+
+    The publication settings are read before the fetch, so a broken
+    configuration stops it before any CVAT work. The draft step only warns.
+    """
+    publication = project_publication(target.project_id, config_path=options.config_path)
+    partition = fetch.fetch_project(client, target, options, deps=fetch_dependencies(target, options))
+    write_fetch_draft(
+        target.output_dir,
+        partition.dataset,
+        project_name=target.project_name,
+        publication=publication,
+        storage=target.cs_info,
+        images_dir=options.images_dir,
+        services=DraftServices(LocalBundleFiles(), HttpClassApi()),
+    )
+    return partition
 
 
 def fetch_selected_tasks(
