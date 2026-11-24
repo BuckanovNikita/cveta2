@@ -105,7 +105,12 @@ def test_configured_from_environment_logs_in_with_basic_auth(
     assert check_clearml_configuration() is True
 
     [sent] = fake_login.calls
-    assert (sent.host, sent.method, sent.authorization) == ("https://api.clearml.example", "GET", _BASIC)
+    assert (sent.host, sent.method, sent.keys, sent.token) == (
+        "https://api.clearml.example",
+        "GET",
+        (_ACCESS_KEY, _SECRET_KEY),
+        None,
+    )
     assert sent.verify is None
     report = _report(capture_info_logs)
     assert report.startswith("ClearML: проверено")
@@ -412,6 +417,33 @@ def test_server_accepting_the_keys_is_verified(
     report = _report(capture_info_logs)
     assert report.startswith(f"ClearML: проверено — вход на сервер API {login_server.url} выполнен")
     _assert_no_secret("\n".join(capture_info_logs) + capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("credentials", ["keys", "token"])
+@pytest.mark.usefixtures("no_clearml_configuration")
+def test_netrc_cannot_replace_the_clearml_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    login_server: _LoginServer,
+    capture_info_logs: list[str],
+    credentials: str,
+) -> None:
+    """Without explicit auth requests would send netrc credentials; the SDK passes auth explicitly too."""
+    netrc = tmp_path / "netrc"
+    netrc.write_text("machine 127.0.0.1 login NETRCUSER password NETRCPASS\n")
+    netrc.chmod(0o600)
+    monkeypatch.setenv("NETRC", str(netrc))
+    _point_at(monkeypatch, login_server.url)
+    if credentials == "keys":
+        _set_keys(monkeypatch)
+    else:
+        monkeypatch.setenv("CLEARML_AUTH_TOKEN", _AUTH_TOKEN)
+
+    assert check_clearml_configuration() is True
+
+    expected = _BASIC if credentials == "keys" else f"Bearer {_AUTH_TOKEN}"
+    assert login_server.requests == [("GET", "/auth.login", expected)]
+    assert _report(capture_info_logs).startswith("ClearML: проверено")
 
 
 @pytest.mark.usefixtures("no_clearml_configuration")

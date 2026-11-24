@@ -7,7 +7,6 @@ The SDK session itself is not used: its login retries 240 times with backoff and
 wait forever on server maintenance.
 """
 
-import base64
 import json
 import threading
 import warnings
@@ -31,7 +30,7 @@ _FIX = (
 
 @dataclass(frozen=True)
 class _Settings:
-    """Resolved ClearML settings; the authorization header never reaches a log line."""
+    """Resolved ClearML settings; the credentials never reach a log line."""
 
     host: str
     host_note: str
@@ -41,7 +40,10 @@ class _Settings:
     uses_token: bool
     verify: bool | str | None
     """requests' ``verify`` when the SDK setting is explicit; ``None`` keeps requests' default."""
-    authorization: str = field(repr=False)
+    keys: tuple[str, str] | None = field(repr=False)
+    """Access and secret key, sent as HTTP Basic auth like ``Session._do_refresh_token``."""
+    token: str | None = field(repr=False)
+    """``CLEARML_AUTH_TOKEN``, sent as a Bearer token instead of the keys."""
 
 
 def _config_files() -> list[str]:
@@ -120,10 +122,6 @@ def _resolve() -> _Settings | None:
     configured_host = ENV_HOST.get() or config.get("api.api_server", None) or config.get("api.host", None)
     # Session._send_request uses Request.def_method; Session._update_default_api_method lets the file override it.
     method = ENV_API_DEFAULT_REQ_METHOD.get(default=None) or config.get("api.http.default_method", None) or "get"
-    if token:
-        authorization = f"Bearer {token}"
-    else:
-        authorization = "Basic " + base64.b64encode(f"{access_key}:{secret_key}".encode()).decode("ascii")
     return _Settings(
         host=host,
         host_note="" if configured_host else " (адрес SDK по умолчанию)",
@@ -132,7 +130,8 @@ def _resolve() -> _Settings | None:
         method=str(method).strip().upper(),
         uses_token=bool(token),
         verify=_verify_argument(ENV_HOST_VERIFY_CERT.get(default=config.get("api.verify_certificate", True))),
-        authorization=authorization,
+        keys=None if token else (str(access_key), str(secret_key)),
+        token=token or None,
     )
 
 
@@ -194,11 +193,18 @@ def _request_login(settings: _Settings) -> tuple[int, bytes]:
     """Send one login request and return the HTTP status and at most ``_MAX_RESPONSE_BYTES`` of body.
 
     A plain ``requests.request`` has no retrying adapter and follows no redirect, so the
-    authorization header never leaves the configured host. requests' timeout bounds the
-    connection and each read separately, not name resolution or the whole answer; the
-    worker thread bounds those to ``_TIMEOUT_SECONDS`` as well.
+    credentials never leave the configured host. They always go through ``auth=``: without
+    it requests would take ``~/.netrc`` credentials for the host and replace the header.
+    requests' timeout bounds the connection and each read separately, not name resolution
+    or the whole answer; the worker thread bounds those to ``_TIMEOUT_SECONDS`` as well.
     """
     import requests  # noqa: PLC0415 - imported lazily, like the SDK
+
+    token = settings.token
+
+    def bearer(request: requests.PreparedRequest) -> requests.PreparedRequest:
+        request.headers["Authorization"] = f"Bearer {token}"
+        return request
 
     outcome: list[tuple[int, bytes] | BaseException] = []
 
@@ -207,7 +213,7 @@ def _request_login(settings: _Settings) -> tuple[int, bytes]:
             with requests.request(
                 settings.method,
                 f"{settings.host}/auth.login",
-                headers={"Authorization": settings.authorization},
+                auth=settings.keys if settings.keys is not None else bearer,
                 timeout=(_TIMEOUT_SECONDS, _TIMEOUT_SECONDS),
                 allow_redirects=False,
                 stream=True,
