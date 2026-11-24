@@ -86,7 +86,7 @@ def personal(path: Path, reference: Path) -> Path:
         path,
         {
             "schema_version": 1,
-            "project_config": str(reference),
+            "global_config": str(reference),
             "cvat": {"username": "alice", "password": "private"},
             "cache": {"images_root": "/local/images"},
         },
@@ -131,12 +131,12 @@ def test_selection_precedence_and_relative_saved_path(tmp_path: Path, monkeypatc
     env = shared(tmp_path / "env.yaml", "https://env.example")
     explicit = shared(tmp_path / "explicit.yaml", "https://explicit.example")
     cfg = personal(tmp_path / "personal.yaml", Path("saved.yaml"))
-    monkeypatch.delenv("CVETA2_PROJECT_CONFIG", raising=False)
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
     assert project_config_path(cfg) == saved
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(env))
+    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(env))
     assert load_project_config(cfg).cvat.host == "https://env.example"
     assert load_project_config(cfg, explicit).cvat.host == "https://explicit.example"
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(tmp_path / "missing.yaml"))
+    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(tmp_path / "missing.yaml"))
     with pytest.raises(ManagedError, match="Cannot read"):
         load_project_config(cfg)
 
@@ -147,7 +147,7 @@ def test_attach_is_noninteractive_and_does_not_modify_shared(tmp_path: Path, mon
     cfg = write(tmp_path / "personal.yaml", {"network": {"s3_workers": 2}})
     before = target.read_bytes()
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-    setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--project-config", str(target)))
+    setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--global-config", str(target)))
     assert target.read_bytes() == before
     assert read_config(cfg)["global_config"] == str(target)
     assert read_config(cfg)["network"] == {"s3_workers": 2}
@@ -166,7 +166,7 @@ def test_personal_cannot_override_shared(tmp_path: Path, fields: dict[str, objec
     target = shared(tmp_path / "shared.yaml")
     cfg = write(
         tmp_path / "personal.yaml",
-        {"schema_version": 1, "project_config": str(target), **fields},
+        {"schema_version": 1, "global_config": str(target), **fields},
     )
     with pytest.raises(ManagedError, match=r"Shared|shared"):
         CvatConfig.load(cfg)
@@ -492,14 +492,14 @@ def test_explicit_shared_path_without_saved_reference(tmp_path: Path, monkeypatc
             "network": {"cvat_workers": 2},
         },
     )
-    monkeypatch.delenv("CVETA2_PROJECT_CONFIG", raising=False)
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
     before = cfg.read_bytes()
     assert CvatConfig.load(cfg, project_path=target).host == "https://cvat.example"
     assert ImageCacheConfig.load(cfg, project_path=target).get_cache_dir("Main project") == Path("/local/images")
     assert CacheConfig.load(cfg, project_path=target).for_project("Main project").task_cache_s3 == "s3://bucket/cache"
     assert NetworkConfig.resolve(cfg, project_path=target).cvat_workers == 2
     assert cfg.read_bytes() == before
-    assert "CVETA2_PROJECT_CONFIG" not in os.environ
+    assert "CVETA2_GLOBAL_CONFIG" not in os.environ
 
 
 def test_concurrent_journal_is_not_overwritten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -748,7 +748,7 @@ def test_global_cache_save_still_rejects_ambiguous_shared_project_names(
         },
         datasets={},
     )
-    personal = write_config_yaml(tmp_path / "personal.yaml", schema_version=1, project_config=str(shared))
+    personal = write_config_yaml(tmp_path / "personal.yaml", schema_version=1, global_config=str(shared))
     personal_before, shared_before = personal.read_bytes(), shared.read_bytes()
     with pytest.raises(ManagedError, match="Collision"):
         CacheConfig(images_root=tmp_path / "local-images").save(personal)
@@ -1084,7 +1084,6 @@ def test_wizard_refuses_an_existing_shared_file_with_another_identity(
     assert str(team.resolve()) in str(caught.value)
     assert "other-team" not in str(caught.value)
     assert team.read_bytes() == before
-    assert "project_config" not in read_config(cfg)
     assert "global_config" not in read_config(cfg)
 
 
@@ -1121,7 +1120,7 @@ def _two_writers(tmp_path: Path) -> tuple[Path, Path]:
     )
     bob = write(
         tmp_path / "bob.yaml",
-        {"schema_version": 1, "project_config": str(alice.with_name("alice-projects.yaml"))},
+        {"schema_version": 1, "global_config": str(alice.with_name("alice-projects.yaml"))},
     )
     return alice, bob
 
@@ -1198,7 +1197,7 @@ def test_overlapping_policy_saves_refuse_contention_then_preserve_both_edits(
     if aliased:
         alias = tmp_path / "team-alias.yaml"
         alias.symlink_to(alice.with_name("alice-projects.yaml"))
-        write(bob, {"schema_version": 1, "project_config": str(alias)})
+        write(bob, {"schema_version": 1, "global_config": str(alias)})
     alice_config = _SECTIONS[kind].load(alice)
     bob_config = _SECTIONS[kind].load(bob)
     _edit(kind, alice_config, "A", 100)
@@ -1402,7 +1401,7 @@ def _overridden(tmp_path: Path) -> tuple[Path, Path]:
         tmp_path / "config.yaml",
         {
             "schema_version": 1,
-            "project_config": str(team),
+            "global_config": str(team),
             "cvat": {"username": "alice", "password": "private"},
             "overrides": {"projects": {"retail": {"publication": {"clearml": {"dataset": "retail-shelves-alice"}}}}},
         },

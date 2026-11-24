@@ -22,7 +22,7 @@ _DESTINATION = {"project": "Retail/Datasets", "dataset": "retail-shelves"}
 @pytest.fixture(autouse=True)
 def _no_global_file_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Let the personal file alone select the global file in these tests."""
-    monkeypatch.delenv("CVETA2_PROJECT_CONFIG", raising=False)
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
 
 
 def write(path: Path, data: dict[str, object]) -> Path:
@@ -70,7 +70,7 @@ def personal(path: Path, reference: Path, overrides: dict[str, object] | None = 
     """Write a versioned personal file that selects *reference* and may carry overrides."""
     data: dict[str, object] = {
         "schema_version": 1,
-        "project_config": str(reference),
+        "global_config": str(reference),
         "cvat": {"username": "alice", "password": "private"},
     }
     if overrides is not None:
@@ -156,7 +156,7 @@ def test_overrides_rejected_when_global_file_does_not_allow_them(
     ids=lambda fields: next(iter(fields)),
 )
 def test_override_of_a_team_only_field_is_rejected_by_shape(tmp_path: Path, fields: dict[str, object]) -> None:
-    base: dict[str, object] = {"schema_version": 1, "project_config": str(tmp_path / "team.yaml")}
+    base: dict[str, object] = {"schema_version": 1, "global_config": str(tmp_path / "team.yaml")}
 
     with pytest.raises(ManagedError, match="overrides"):
         validate_personal({**base, "overrides": {"projects": {"retail": fields}}}, attached=True)
@@ -233,7 +233,7 @@ def test_team_write_keeps_overrides_out_of_the_global_file(tmp_path: Path) -> No
 
 def test_overrides_need_a_versioned_personal_file(tmp_path: Path) -> None:
     team = shared(tmp_path / "team.yaml")
-    cfg = write(tmp_path / "config.yaml", {"project_config": str(team), "overrides": _ALICE})
+    cfg = write(tmp_path / "config.yaml", {"global_config": str(team), "overrides": _ALICE})
 
     with pytest.raises(ManagedError, match="schema_version: 1"):
         load_project_config(cfg)

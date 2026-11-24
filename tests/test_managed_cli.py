@@ -22,7 +22,7 @@ from tests.helpers import parse_cli_args
 def test_missing_shared_config_exits_two_with_path(tmp_path: Path, capture_logs: list[str]) -> None:
     missing = tmp_path / "absent.yaml"
     with pytest.raises(SystemExit) as exited:
-        main(["dataset", "show", "combined", "--project-config", str(missing)])
+        main(["dataset", "show", "combined", "--global-config", str(missing)])
     assert exited.value.code == 2
     assert any(str(missing) in line for line in capture_logs)
 

@@ -112,7 +112,7 @@ dataset publish        -> новая версия в ClearML
 | Аргумент | По умолчанию | Описание |
 |---|---|---|
 | `--config` | `CVETA2_CONFIG` или `~/.config/cveta2/config.yaml` | Путь к личной конфигурации ([personal configuration](../../GLOSSARY.md)). |
-| `--global-config` | `CVETA2_GLOBAL_CONFIG`, иначе `global_config` из личной конфигурации | Путь к общей конфигурации. Старое написание `--project-config` тоже работает; если заданы оба флага с разными путями, команда завершается с кодом `2`. Подробно о выборе файла — в [configuration.md](../configuration.md). |
+| `--global-config` | `CVETA2_GLOBAL_CONFIG`, иначе `global_config` из личной конфигурации | Путь к общей конфигурации. Подробно о выборе файла — в [configuration.md](../configuration.md). |
 | `--json` | выключен | Принимается, но ничего не меняет: результат всегда печатается в JSON. |
 
 Результат каждой операции печатается в стандартный вывод в JSON. Сообщения об ошибках идут в журнал (stderr). ClearML SDK может печатать свои строки (предупреждения, ход загрузки) в стандартный вывод перед JSON. Например, пока в проекте ClearML нет ни одного датасета, он печатает `No projects were found with name(s): ...`; это не ошибка. Если вы разбираете вывод в скрипте, удобнее вызывать функции из Python (см. разделы «Из Python»).
@@ -143,7 +143,7 @@ dataset publish        -> новая версия в ClearML
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset list [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json]
+cveta2 dataset list [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json]
 ```
 
 Только общие аргументы.
@@ -191,7 +191,7 @@ print([d["name"] for d in cveta2.list_datasets()])
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset show [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json] name
+cveta2 dataset show [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json] name
 ```
 
 | Аргумент | По умолчанию | Описание |
@@ -227,7 +227,7 @@ cveta2.show_dataset(name: str, *, config_path: Path | None = None, project_confi
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset versions [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json] name
+cveta2 dataset versions [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json] name
 ```
 
 | Аргумент | По умолчанию | Описание |
@@ -267,7 +267,7 @@ cveta2.dataset_versions(name: str, *, config_path: Path | None = None, project_c
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset fetch [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json]
+cveta2 dataset fetch [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json]
                      --output-dir OUTPUT_DIR [--refresh] name
 ```
 
@@ -395,7 +395,7 @@ print(result["rows"], [s["reused"] for s in result["sources"]])
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset prepare [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json]
+cveta2 dataset prepare [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json]
                        --output-dir OUTPUT_DIR --source SOURCE [--clean] [--first]
                        name csv
 ```
@@ -565,7 +565,7 @@ print(summary.ready, summary.report["counts"])
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset diff [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json] old new
+cveta2 dataset diff [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json] old new
 ```
 
 | Аргумент | По умолчанию | Описание |
@@ -622,7 +622,7 @@ print(result["rows"], result["classes"])
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset report-errors [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json] prepared
+cveta2 dataset report-errors [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json] prepared
 ```
 
 | Аргумент | По умолчанию | Описание |
@@ -706,7 +706,7 @@ print(outcome.created, outcome.existing, outcome.failed)
 ### Синтаксис и аргументы
 
 ```text
-cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--project-config PROJECT_CONFIG] [--json] prepared
+cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json] prepared
 ```
 
 | Аргумент | По умолчанию | Описание |

@@ -5,7 +5,6 @@ from pathlib import Path
 from cveta2.adapters.config.listing import ListedValue, ValueOrigin, list_configuration
 from cveta2.adapters.config.project import (
     GLOBAL_CONFIG_ENV,
-    LEGACY_GLOBAL_CONFIG_ENV,
     MigrationProposal,
     SharedIdentityMismatchError,
     activate_migration,
@@ -24,7 +23,6 @@ from cveta2.adapters.config.project import (
     read_config,
     read_local_overrides,
     recover_migration,
-    select_spelling,
     write_local_overrides,
     write_shared_project_fields,
 )
@@ -78,7 +76,6 @@ __all__ = [
     "CONFIG_DIR",
     "CONFIG_PATH",
     "GLOBAL_CONFIG_ENV",
-    "LEGACY_GLOBAL_CONFIG_ENV",
     "OVERRIDABLE_PROJECT_FIELDS",
     "PERSONAL_WORKSPACE_SLUG",
     "PERSONAL_WORKSPACE_TITLE",
@@ -134,7 +131,6 @@ __all__ = [
     "require_interactive",
     "resolve_images_cache_dir",
     "save_orgs_cache",
-    "select_spelling",
     "should_raise_on_fetch_failure",
     "update_org_projects",
     "write_local_overrides",

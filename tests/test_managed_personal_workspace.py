@@ -26,7 +26,7 @@ def test_blank_shared_organization_allows_credential_save(tmp_path: Path) -> Non
         yaml.safe_dump(
             {
                 "schema_version": 1,
-                "project_config": str(shared),
+                "global_config": str(shared),
                 "cvat": {"username": "alice", "password": "old"},
             }
         )
@@ -61,7 +61,7 @@ def test_empty_environment_organization_does_not_override_shared_policy(
         )
     )
     personal = tmp_path / "personal.yaml"
-    personal.write_text(yaml.safe_dump({"schema_version": 1, "project_config": str(shared)}))
+    personal.write_text(yaml.safe_dump({"schema_version": 1, "global_config": str(shared)}))
     monkeypatch.setenv("CVAT_ORGANIZATION", "")
     assert CvatConfig.load(personal).organization == "team"
     monkeypatch.setenv("CVAT_ORGANIZATION", "other")

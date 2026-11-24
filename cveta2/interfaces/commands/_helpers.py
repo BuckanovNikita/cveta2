@@ -16,7 +16,6 @@ from cveta2.composition.configuration import (
     CvatConfig,
     get_config_path,
     load_projects_cache,
-    select_spelling,
 )
 from cveta2.composition.workflows import project_cloud_storage
 from cveta2.domain.errors import MissingHostError
@@ -88,13 +87,9 @@ def config_path_from_args(args: "argparse.Namespace") -> Path:
 
 
 def global_config_from_args(args: "argparse.Namespace") -> Path | None:
-    """Return the global file chosen by ``--global-config`` or its old spelling ``--project-config``."""
-    return select_spelling(
-        getattr(args, "global_config", None),
-        getattr(args, "project_config", None),
-        new_name="--global-config",
-        old_name="--project-config",
-    )
+    """Return the global file chosen by ``--global-config``."""
+    selected: Path | None = getattr(args, "global_config", None)
+    return selected
 
 
 def resolve_project_from_args(

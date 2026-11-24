@@ -374,7 +374,7 @@ def test_shared_yaml_diagnostics_name_the_file_and_location(
     shared = tmp_path / "shared.yaml"
     shared.write_text(document, encoding="utf-8")
     personal = tmp_path / "personal.yaml"
-    personal.write_text(f"schema_version: 1\nproject_config: {shared}\n", encoding="utf-8")
+    personal.write_text(f"schema_version: 1\nglobal_config: {shared}\n", encoding="utf-8")
 
     with pytest.raises(Cveta2Error) as caught:
         CvatConfig.load(personal)

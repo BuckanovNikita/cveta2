@@ -35,7 +35,6 @@ def _isolated_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Select files only through the test's own arguments, and fail on any prompt."""
     for name in (
         "CVETA2_GLOBAL_CONFIG",
-        "CVETA2_PROJECT_CONFIG",
         "CVETA2_CONFIG",
         "CVAT_HOST",
         "CVAT_ORGANIZATION",

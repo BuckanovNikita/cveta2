@@ -35,7 +35,6 @@ _PUBLICATION: dict[str, object] = {
 def _no_global_file_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Let the personal file alone select the global file in these tests."""
     monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
-    monkeypatch.delenv("CVETA2_PROJECT_CONFIG", raising=False)
 
 
 def write(path: Path, data: dict[str, object]) -> Path:

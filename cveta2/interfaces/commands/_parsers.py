@@ -36,16 +36,10 @@ def add_list_arg(parser: "argparse.ArgumentParser", help_text: str) -> None:
 
 
 def add_global_config_arg(parser: "argparse.ArgumentParser") -> None:
-    """Add ``--global-config`` and its old spelling ``--project-config``."""
+    """Add ``--global-config``."""
     parser.add_argument(
         "--global-config",
         dest="global_config",
         type=Path,
         help="Общая конфигурация (global configuration): файл проектов и наборов данных команды.",
-    )
-    parser.add_argument(
-        "--project-config",
-        dest="project_config",
-        type=Path,
-        help="Старое написание --global-config.",
     )

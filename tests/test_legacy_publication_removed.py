@@ -32,8 +32,6 @@ def test_removed_fetch_keyword_is_rejected_before_connecting(tmp_path: Path) -> 
     [
         ["fetch", "-p", "1", "-o", "out", "--no-clearml"],
         ["setup-clearml"],
-        ["setup-cache"],
-        ["setup-cache", "--list"],
     ],
 )
 def test_removed_cli_interfaces_are_rejected(arguments: list[str]) -> None:

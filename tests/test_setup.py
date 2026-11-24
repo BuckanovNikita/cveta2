@@ -535,7 +535,7 @@ def test_attached_setup_does_not_persist_one_run_environment_overrides(
     config_path = write_config_yaml(
         tmp_path / "config.yaml",
         schema_version=1,
-        project_config=str(shared),
+        global_config=str(shared),
         cvat={"username": "alice", "password": "file-password"},
     )
     monkeypatch.setenv("CVAT_PASSWORD", "one-run-token")

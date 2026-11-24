@@ -1,4 +1,4 @@
-"""Selecting the global configuration by its new and old spellings."""
+"""Selecting the global configuration with --global-config, CVETA2_GLOBAL_CONFIG and global_config."""
 
 from pathlib import Path
 
@@ -6,9 +6,7 @@ import pytest
 import yaml
 
 from cveta2.adapters.config.project import migration_proposal, project_config_path, read_config
-from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.models import ManagedError
-from cveta2.interfaces.cli import main
 from cveta2.interfaces.commands.setup import run_setup
 from tests.helpers import parse_cli_args
 
@@ -51,106 +49,54 @@ def test_new_spellings_select_the_global_file(tmp_path: Path, monkeypatch: pytes
     assert project_config_path(cfg) == key.resolve()
 
 
-@pytest.mark.parametrize(
-    ("env_name", "key_name"),
-    [
-        ("CVETA2_GLOBAL_CONFIG", "global_config"),
-        ("CVETA2_PROJECT_CONFIG", "project_config"),
-        ("CVETA2_GLOBAL_CONFIG", "project_config"),
-        ("CVETA2_PROJECT_CONFIG", "global_config"),
-    ],
-)
-def test_precedence_flag_then_env_then_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, env_name: str, key_name: str
-) -> None:
+def test_precedence_flag_then_env_then_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     flag = _global(tmp_path / "flag.yaml")
     env = _global(tmp_path / "env.yaml")
     key = _global(tmp_path / "key.yaml")
-    cfg = _personal(tmp_path / "personal.yaml", **{key_name: str(key)})
-    monkeypatch.setenv(env_name, str(env))
+    cfg = _personal(tmp_path / "personal.yaml", global_config=str(key))
+    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(env))
 
     assert project_config_path(cfg, flag) == flag.resolve()
     assert project_config_path(cfg) == env.resolve()
-    monkeypatch.delenv(env_name)
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG")
     assert project_config_path(cfg) == key.resolve()
 
 
-@pytest.mark.parametrize("level", ["env", "key"])
-def test_old_and_new_spelling_that_differ_stop_the_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, level: str
-) -> None:
-    first = _global(tmp_path / "first.yaml")
-    second = _global(tmp_path / "second.yaml")
-    if level == "env":
-        cfg = _write(tmp_path / "personal.yaml", {"cvat": {"username": "alice"}})
-        monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(first))
-        monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(second))
-        names = ("CVETA2_GLOBAL_CONFIG", "CVETA2_PROJECT_CONFIG")
-    else:
-        cfg = _personal(tmp_path / "personal.yaml", global_config=str(first), project_config=str(second))
-        names = ("global_config", "project_config")
-
-    with pytest.raises(ManagedError) as caught:
-        project_config_path(cfg)
-
-    assert all(name in str(caught.value) for name in names)
-
-
-def test_a_higher_level_wins_over_a_conflicting_lower_level(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """First match wins: a conflict below the selecting level is not consulted."""
-    flag = _global(tmp_path / "flag.yaml")
-    cfg = _personal(
-        tmp_path / "personal.yaml",
-        global_config=str(_global(tmp_path / "a.yaml")),
-        project_config=str(_global(tmp_path / "b.yaml")),
-    )
-    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(tmp_path / "c.yaml"))
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(tmp_path / "d.yaml"))
-
-    assert project_config_path(cfg, flag) == flag.resolve()
-
-
-def test_old_and_new_flags_that_differ_stop_dataset_commands(tmp_path: Path, capture_logs: list[str]) -> None:
+@pytest.mark.parametrize("command", [["dataset", "list"], ["setup"]])
+def test_the_old_project_config_flag_is_an_unknown_argument(tmp_path: Path, command: list[str]) -> None:
     with pytest.raises(SystemExit) as exited:
-        main(["dataset", "list", "--global-config", str(tmp_path / "a"), "--project-config", str(tmp_path / "b")])
+        parse_cli_args(*command, "--project-config", str(_global(tmp_path / "g.yaml")))
 
     assert exited.value.code == 2
-    assert any("--global-config" in line and "--project-config" in line for line in capture_logs)
 
 
-def test_old_and_new_flags_that_differ_stop_setup(tmp_path: Path) -> None:
-    args = parse_cli_args("setup", "--global-config", str(tmp_path / "a"), "--project-config", str(tmp_path / "b"))
-
-    with pytest.raises(Cveta2Error) as caught:
-        run_setup(args)
-
-    assert "--global-config" in str(caught.value)
-    assert "--project-config" in str(caught.value)
-
-
-def test_old_and_new_spelling_with_the_same_path_are_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    target = _global(tmp_path / "g.yaml")
+def test_the_old_environment_variable_selects_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = _write(tmp_path / "personal.yaml", {"cvat": {"username": "alice"}})
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", "./g.yaml")
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(target.resolve()))
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
+    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(_global(tmp_path / "g.yaml")))
 
-    assert project_config_path(cfg) == target.resolve()
+    assert project_config_path(cfg) is None
 
 
-def test_attachment_writes_global_config_and_drops_project_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _global(tmp_path / "old.yaml")
+def test_a_versioned_personal_file_with_the_old_key_is_rejected(tmp_path: Path) -> None:
+    cfg = _personal(tmp_path / "personal.yaml", project_config=str(_global(tmp_path / "g.yaml")))
+
+    with pytest.raises(ManagedError, match="project_config"):
+        project_config_path(cfg, tmp_path / "g.yaml")
+
+
+def test_attachment_writes_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     new = _global(tmp_path / "new.yaml")
-    cfg = _write(tmp_path / "personal.yaml", {"project_config": "old.yaml", "cvat": {"username": "alice"}})
+    cfg = _write(tmp_path / "personal.yaml", {"cvat": {"username": "alice"}})
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
 
     run_setup(parse_cli_args("setup", "--config", str(cfg), "--global-config", str(new)))
 
-    saved = read_config(cfg)
-    assert saved["global_config"] == str(new.resolve())
-    assert "project_config" not in saved
+    assert read_config(cfg) == {
+        "cvat": {"username": "alice"},
+        "schema_version": 1,
+        "global_config": str(new.resolve()),
+    }
 
 
 def _legacy(path: Path, **extra: str) -> Path:
@@ -167,6 +113,12 @@ def test_migration_writes_global_config(tmp_path: Path) -> None:
     assert "project_config" not in proposal.personal
 
 
+def test_migration_reports_the_old_key_of_a_legacy_file_as_unclassified(tmp_path: Path) -> None:
+    proposal = migration_proposal(_legacy(tmp_path / "personal.yaml", project_config="team.yaml"))
+
+    assert any("project_config" in item for item in proposal.unresolved)
+
+
 def test_migration_accepts_a_legacy_file_that_selects_with_global_config(tmp_path: Path) -> None:
     proposal = migration_proposal(_legacy(tmp_path / "personal.yaml", global_config="team.yaml"))
 
@@ -176,8 +128,7 @@ def test_migration_accepts_a_legacy_file_that_selects_with_global_config(tmp_pat
 def test_a_versioned_personal_file_without_a_reference_names_the_key_and_the_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    for name in ("CVETA2_GLOBAL_CONFIG", "CVETA2_PROJECT_CONFIG"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
     cfg = _personal(tmp_path / "personal.yaml")
 
     with pytest.raises(ManagedError) as caught:

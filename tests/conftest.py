@@ -39,7 +39,6 @@ _CVAT_ENV_VARS = (
     "CVETA2_CVAT_WORKERS",
     "CVETA2_RETRY_ATTEMPTS",
     "CVETA2_GLOBAL_CONFIG",
-    "CVETA2_PROJECT_CONFIG",
 )
 
 # Property tests stay deterministic and deadline-free by default: commits run

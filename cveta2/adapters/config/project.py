@@ -36,7 +36,6 @@ from cveta2.domain.managed.overrides import OVERRIDABLE_PROJECT_FIELDS, LocalOve
 
 _PERSONAL_KEYS = {
     "schema_version",
-    "project_config",
     "global_config",
     "overrides",
     "cvat",
@@ -160,8 +159,10 @@ def validate_personal(raw: dict[str, object], *, attached: bool = False) -> None
         read_local_overrides(raw)
     cvat = _dict(raw.get("cvat"))
     if raw.get("schema_version") == 1:
-        if set(raw) - _PERSONAL_KEYS:
-            raise ManagedError("Personal configuration contains unsupported/shared sections")
+        if unknown := set(raw) - _PERSONAL_KEYS:
+            raise ManagedError(
+                "Personal configuration contains unsupported/shared sections: " + ", ".join(sorted(unknown))
+            )
         cache_projects = _dict(_dict(raw.get("cache")).get("projects"))
         misplaced_cache = any(set(_dict(value)) & _POLICY_KEYS for value in cache_projects.values())
         if _mixed_policy(raw) or misplaced_cache or "host" in cvat or "organization" in cvat:
@@ -173,36 +174,16 @@ def validate_personal(raw: dict[str, object], *, attached: bool = False) -> None
 
 
 GLOBAL_CONFIG_ENV = "CVETA2_GLOBAL_CONFIG"
-LEGACY_GLOBAL_CONFIG_ENV = "CVETA2_PROJECT_CONFIG"
-
-
-def select_spelling(new: Path | None, old: Path | None, *, new_name: str, old_name: str) -> Path | None:
-    """Return whichever spelling of one selection level is set; both must agree."""
-    if new is not None and old is not None and new.expanduser().resolve() != old.expanduser().resolve():
-        raise ManagedError(
-            f"Заданы оба варианта: {new_name}={new} и {old_name}={old}, и они различаются. "
-            f"Оставьте один (старое написание {old_name} поддерживается для совместимости)."
-        )
-    return new if new is not None else old
-
-
-def _env_path(name: str) -> Path | None:
-    value = os.environ.get(name)
-    return Path(value) if value else None
 
 
 def global_config_from_env() -> Path | None:
-    """Select the global file from the environment, by its new or old variable."""
-    return select_spelling(
-        _env_path(GLOBAL_CONFIG_ENV),
-        _env_path(LEGACY_GLOBAL_CONFIG_ENV),
-        new_name=GLOBAL_CONFIG_ENV,
-        old_name=LEGACY_GLOBAL_CONFIG_ENV,
-    )
+    """Select the global file from ``CVETA2_GLOBAL_CONFIG``."""
+    value = os.environ.get(GLOBAL_CONFIG_ENV)
+    return Path(value) if value else None
 
 
-def _saved_reference(raw: dict[str, object], key: str, personal: Path) -> Path | None:
-    saved = raw.get(key)
+def _saved_reference(raw: dict[str, object], personal: Path) -> Path | None:
+    saved = raw.get("global_config")
     if saved is None:
         return None
     if not isinstance(saved, str) or not saved.strip():
@@ -215,16 +196,13 @@ def project_config_path(personal_path: Path | None = None, project_path: Path | 
     """Select one global file; never overlay definitions from multiple files.
 
     Levels are checked in order and the first one that is set wins: the
-    explicit path, then the environment, then the personal key. Each level
-    accepts its new or old spelling.
+    explicit path, then ``CVETA2_GLOBAL_CONFIG``, then the personal key
+    ``global_config``.
     """
     personal = personal_config_path(personal_path)
     raw = read_config(personal, missing_ok=True)
-    saved_new = _saved_reference(raw, "global_config", personal)
-    saved_old = _saved_reference(raw, "project_config", personal)
-    selected = project_path or global_config_from_env()
-    if selected is None:
-        selected = select_spelling(saved_new, saved_old, new_name="global_config", old_name="project_config")
+    saved = _saved_reference(raw, personal)
+    selected = project_path or global_config_from_env() or saved
     validate_personal(raw, attached=selected is not None)
     if raw.get("schema_version") == 1 and selected is None:
         raise ManagedError(
@@ -398,7 +376,6 @@ def _validated_shared_file(selected: Path) -> ProjectConfig:
 
 def _save_attachment(personal_path: Path, raw: dict[str, object], selected: Path) -> Path:
     """Write the versioned personal file that references *selected*."""
-    raw = {key: value for key, value in raw.items() if key != "project_config"}
     raw = {**raw, "schema_version": 1, "global_config": str(selected)}
     try:
         validate_personal(raw, attached=True)
@@ -919,7 +896,6 @@ def migration_proposal(personal_path: Path, project_path: Path | None = None) ->
         "ignore",
         "network",
         "upload",
-        "project_config",
         "global_config",
     }
     unknown = set(raw) - known
