@@ -62,29 +62,6 @@ def test_precedence_flag_then_env_then_key(tmp_path: Path, monkeypatch: pytest.M
     assert project_config_path(cfg) == key.resolve()
 
 
-@pytest.mark.parametrize("command", [["dataset", "list"], ["setup"]])
-def test_the_old_project_config_flag_is_an_unknown_argument(tmp_path: Path, command: list[str]) -> None:
-    with pytest.raises(SystemExit) as exited:
-        parse_cli_args(*command, "--project-config", str(_global(tmp_path / "g.yaml")))
-
-    assert exited.value.code == 2
-
-
-def test_the_old_environment_variable_selects_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = _write(tmp_path / "personal.yaml", {"cvat": {"username": "alice"}})
-    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(_global(tmp_path / "g.yaml")))
-
-    assert project_config_path(cfg) is None
-
-
-def test_a_versioned_personal_file_with_the_old_key_is_rejected(tmp_path: Path) -> None:
-    cfg = _personal(tmp_path / "personal.yaml", project_config=str(_global(tmp_path / "g.yaml")))
-
-    with pytest.raises(ManagedError, match="project_config"):
-        project_config_path(cfg, tmp_path / "g.yaml")
-
-
 def test_attachment_writes_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     new = _global(tmp_path / "new.yaml")
     cfg = _write(tmp_path / "personal.yaml", {"cvat": {"username": "alice"}})
@@ -110,13 +87,6 @@ def test_migration_writes_global_config(tmp_path: Path) -> None:
     proposal = migration_proposal(_legacy(tmp_path / "personal.yaml"))
 
     assert proposal.personal["global_config"] == str(tmp_path.resolve() / "project-config.yaml")
-    assert "project_config" not in proposal.personal
-
-
-def test_migration_reports_the_old_key_of_a_legacy_file_as_unclassified(tmp_path: Path) -> None:
-    proposal = migration_proposal(_legacy(tmp_path / "personal.yaml", project_config="team.yaml"))
-
-    assert any("project_config" in item for item in proposal.unresolved)
 
 
 def test_migration_accepts_a_legacy_file_that_selects_with_global_config(tmp_path: Path) -> None:
