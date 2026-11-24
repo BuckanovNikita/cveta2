@@ -136,6 +136,30 @@ def test_upload_refuses_rows_without_split_in_the_words_of_pending(
     assert store.calls == 0
 
 
+def _nameless_row_without_split(frame: pd.DataFrame) -> pd.DataFrame:
+    row = frame.iloc[[0]].assign(image_name="", split="")
+    return pd.concat([frame, row], ignore_index=True)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        *(_set_split("val2.png", value) for value in (" ", "nan", "None", "<NA>", "TRAIN")),
+        _nameless_row_without_split,
+    ],
+    ids=["blank", "nan", "None", "NA", "uppercase", "nameless-row"],
+)
+def test_upload_never_publishes_a_row_without_a_valid_split(
+    scenario: Scenario, tmp_path: Path, edit: Callable[[pd.DataFrame], pd.DataFrame]
+) -> None:
+    _source, _options, services, store, _classes = scenario
+    prepared = _prepare(scenario, tmp_path)
+    _edit_rows(prepared, edit)
+    with pytest.raises(UploadError):
+        upload_dataset(prepared, services)
+    assert store.calls == 0
+
+
 def test_upload_refuses_an_untrainable_split_in_the_words_of_pending(scenario: Scenario, tmp_path: Path) -> None:
     _source, _options, services, store, _classes = scenario
     prepared = _prepare(scenario, tmp_path)
