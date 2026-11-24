@@ -15,6 +15,7 @@ import yaml
 from PIL import Image
 
 from cveta2.adapters.class_api.http import HttpClassApi
+from cveta2.adapters.files.managed_preparation import LocalManagedPreparationFiles
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.application.ports.dtos import (
     NewIssue,
@@ -25,6 +26,7 @@ from cveta2.application.ports.dtos import (
     RawJob,
     RawShape,
 )
+from cveta2.application.ports.managed_preparation import ImageHashes
 from cveta2.application.ports.managed_sources import S3Object, S3ObjectIdentity
 from cveta2.composition import managed
 from cveta2.domain.bundle.models import (
@@ -596,9 +598,35 @@ def test_hand_edited_rows_that_fail_validation_stop_publish(workflow: Workflow, 
 
     with pytest.raises(
         ManagedError,
-        match=r"^Prepared dataset\.csv does not pass validation: 1 rejected rows, repairs needed: yes, blockers: none$",
+        match=(
+            r"^Prepared dataset\.csv does not pass validation: 1 rejected rows, repairs needed: yes\n"
+            r"  row 0: Box width and height must each exceed 2 px[^\n]*$"
+        ),
     ):
         api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_publish_names_the_rows_of_a_class_marked_empty_while_its_rows_remain(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog")])
+    fetched, transformed = _fetch_and_transform(workflow, tmp_path)
+    rows = pd.read_csv(transformed, keep_default_na=False)
+    rows.loc[rows["image_name"].eq("external-0.png"), "instance_label"] = "dog"
+    rows.to_csv(transformed, index=False)
+    prepared = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "p", **workflow.options
+    ).directory
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["classes"]["dog"]["empty"] = True
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    dog = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)["instance_label"].eq("dog")
+    position = int(dog.to_numpy().nonzero()[0][0])
+
+    with pytest.raises(ManagedError, match=r"^Prepared dataset\.csv does not pass validation: ") as caught:
+        api.publish_dataset(prepared, **workflow.options)
+    assert f"row {position}: Class is marked empty: 'dog'" in str(caught.value)
     assert workflow.clearml.publications == []
 
 
@@ -1422,6 +1450,36 @@ def test_registry_rename_after_preparation_stops_publication(
     assert api.report_dataset_errors(prepared, **workflow.options).failed == []
     with pytest.raises(ManagedError, match="differ from the class registry: cat, kitty; prepare again"):
         api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+@pytest.mark.parametrize("refusal", ["registry", "roots"])
+def test_publish_refuses_registry_and_roots_before_hashing_any_image(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: str
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    if refusal == "registry":
+        _change_registry(monkeypatch, name="kitty")
+        expected = "differ from the class registry"
+    else:
+        outside = tmp_path / "outside" / "task101-0.png"
+        outside.parent.mkdir()
+        shutil.copyfile(workflow.images / "task101-0.png", outside)
+        rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+        rows.loc[rows["image_name"].eq("task101-0.png"), "image_path"] = str(outside)
+        rows.to_csv(prepared / "dataset.csv", index=False)
+        expected = "outside approved roots"
+    hashed: list[int] = []
+    original = LocalManagedPreparationFiles.image_hashes
+
+    def spy(self: LocalManagedPreparationFiles, frame: pd.DataFrame) -> ImageHashes:
+        hashed.append(len(frame))
+        return original(self, frame)
+
+    monkeypatch.setattr(LocalManagedPreparationFiles, "image_hashes", spy)
+    with pytest.raises(ManagedError, match=expected):
+        api.publish_dataset(prepared, **workflow.options)
+    assert hashed == []
     assert workflow.clearml.publications == []
 
 

@@ -50,7 +50,7 @@ from cveta2.domain.managed.policies import SplitName, rebuild_assignments, split
 from cveta2.domain.managed.preparation import FeedbackOutcome
 from cveta2.domain.verification.models import ValidationOptions
 
-# How many image names one refusal lists before it only counts the rest.
+# How many images or rows one refusal lists before it only counts the rest.
 _LISTED = 20
 
 
@@ -212,22 +212,23 @@ def _listed(names: Sequence[str]) -> str:
     return f"{shown} and {len(names) - _LISTED} more" if len(names) > _LISTED else shown
 
 
+def _listing(items: Sequence[str]) -> str:
+    """One indented item per line, at most ``_LISTED`` of them, then the count of the rest."""
+    lines = [f"  {item}" for item in items[:_LISTED]]
+    if len(items) > _LISTED:
+        lines.append(f"  and {len(items) - _LISTED} more")
+    return "\n".join(lines)
+
+
 def _not_ready(pending: Sequence[str]) -> ManagedError:
     """Refuse with the ``pending`` lines ``dataset prepare`` reported for the same rows."""
     return ManagedError(f"Prepared dataset.csv is not ready for publication: {'; '.join(pending)}")
 
 
-def _check_current(
-    frame: pd.DataFrame,
-    metadata: DatasetMetadata,
-    directory: Path,
-    hashes: Mapping[str, str],
-    services: ManagedPublicationServices,
-) -> None:
-    """Check the staged rows of the preparation in *directory* against their ``dataset.yaml``, media and roots.
+def _check_bindings(frame: pd.DataFrame, metadata: DatasetMetadata, services: ManagedPublicationServices) -> None:
+    """Check the staged ``dataset.yaml`` against the class registry, and the rows against its roots.
 
-    In order: class registry, roots, one split per image content, filled splits,
-    validation, trainability and class coverage.
+    Runs before any image is read, so a path outside the roots is never opened.
     """
     # Only class names and numbers bind the rows; other registry fields may change.
     if names := registry_mismatches(metadata.classes, services.registry.fetch(metadata.api_url)):
@@ -237,6 +238,20 @@ def _check_current(
         services.roots.check_local_root(root)
     for root in metadata.images.s3_root:
         services.s3_roots.check_root(root)
+
+
+def _check_current(
+    frame: pd.DataFrame,
+    metadata: DatasetMetadata,
+    directory: Path,
+    hashes: Mapping[str, str],
+    services: ManagedPublicationServices,
+) -> None:
+    """Check the staged rows of the preparation in *directory* against their ``dataset.yaml`` and media.
+
+    In order: one split per image content, filled splits, validation,
+    trainability and class coverage.
+    """
     # Before validation, which would reject rows of one image name in two splits as ordinary row errors.
     if collisions := split_collisions(frame, hashes):
         raise ManagedError(
@@ -253,10 +268,17 @@ def _check_current(
     validation = validate_bundle(frame, metadata, inspection=inspection, allow_empty_split=True)
     result = validation.result
     if validation.blockers or not result.is_valid or result.requires_cleanup:
-        rejected, cleanup, blockers = len(result.broken_row_positions), result.requires_cleanup, validation.blockers
+        rejected, cleanup = len(result.broken_row_positions), result.requires_cleanup
+        problems = [
+            *validation.blockers,
+            *(
+                f"row {issue.row_position}: {issue.message}" if issue.row_position is not None else issue.message
+                for issue in result.issues
+            ),
+        ]
         raise ManagedError(
             f"Prepared dataset.csv does not pass validation: {rejected} rejected rows, "
-            f"repairs needed: {'yes' if cleanup else 'no'}, blockers: {'; '.join(blockers) or 'none'}"
+            f"repairs needed: {'yes' if cleanup else 'no'}\n{_listing(problems)}"
         )
     if pending := split_pending(result.clean, directory):
         raise _not_ready(pending)
@@ -307,6 +329,7 @@ def publish_prepared(
     with services.files.stage_payload(loaded.directory) as staging:
         frame = services.files.read_rows(staging / "dataset.csv")
         metadata = services.files.read_metadata(staging / "dataset.yaml")
+        _check_bindings(frame, metadata, services)
         hashes = services.files.image_hashes(frame).readable
         _check_current(frame, metadata, loaded.directory, hashes, services)
         published = _published(loaded, parent, services)

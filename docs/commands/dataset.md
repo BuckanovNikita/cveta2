@@ -766,7 +766,7 @@ cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 3. Копирует `dataset.csv`, `dataset.yaml` и `tasks.yaml` во временный каталог. Все следующие проверки идут по этой копии, и публикуется она же: правка файлов подготовки, сделанная во время публикации, в версию не попадёт.
 4. Проверяет текущие строки и `dataset.yaml`, по порядку:
    1. имена и номера классов совпадают с реестром классов с `api_url` из `dataset.yaml`; остальные поля реестра (порог, флаги) не сравниваются;
-   2. корни изображений из `dataset.yaml` покрывают пути изображений, локальные корни существуют, корни `s3_roots` доступны;
+   2. корни изображений из `dataset.yaml` покрывают пути изображений, локальные корни существуют, корни `s3_roots` доступны; изображения читаются только после этой проверки;
    3. ни одно изображение (по SHA-256 содержимого) не стоит в нескольких split;
    4. у каждой строки заполнен split;
    5. строки с текущими изображениями проходят проверку `clearml-yolo` без очистки;
@@ -853,7 +853,7 @@ cveta2 dataset publish [--config CONFIG] [--global-config GLOBAL_CONFIG] [--json
 | Сообщение | Причина и решение |
 |---|---|
 | `Preparation was blocked and has no payload; see report.json and prepare again` | `prepare` был заблокирован и не записал `dataset.csv`, `dataset.yaml` и `tasks.yaml`. Посмотрите `blockers` в `report.json`, исправьте данные и подготовьте заново (без `--no-clean`, если блокирует очистка). |
-| `Prepared dataset.csv does not pass validation: <n> rejected rows, repairs needed: <yes/no>, blockers: <проблемы или none>` | Текущие строки `dataset.csv` с текущими изображениями не проходят проверку `clearml-yolo`: строки отклонены, нужны исправления (например, обрезка рамок) или есть блокирующие проблемы. Split, не равный `train`, `val` или `test`, — тоже отклонённая строка. Исправьте `dataset.csv` или изображения либо подготовьте заново. |
+| `Prepared dataset.csv does not pass validation: <n> rejected rows, repairs needed: <yes/no>`, ниже по строке на проблему: блокирующие проблемы, затем `row <номер>: <ошибка>` | Текущие строки `dataset.csv` с текущими изображениями не проходят проверку `clearml-yolo`: строки отклонены, нужны исправления (например, обрезка рамок) или есть блокирующие проблемы. Называются первые 20 проблем, затем `and <N> more`; номер строки считается от 0, без строки заголовка, как в `verify`. Строка класса, отмеченного `empty: true`, — тоже отклонённая строка. Split, не равный `train`, `val` или `test`, — тоже отклонённая строка. Исправьте `dataset.csv` или изображения либо подготовьте заново. |
 | `Prepared dataset.csv is not ready for publication: заполните split у <N> изображений в <каталог>/dataset.csv` | У строк этих изображений пустой split — те же слова, что в `pending` после `prepare`. Заполните split в `dataset.csv` подготовки. |
 | `Prepared dataset.csv is not ready for publication: в train нет изображений`, `в val нет изображений`, `в train нет ни одного bbox` | Split заполнен у всех строк, но для обучения не хватает `train`, `val` или bbox в `train`. Перенесите изображения или добавьте строки. |
 | `Image content has rows in several splits: <имена>; one image may have one split` | Строки одного изображения (по SHA-256 содержимого, под одним именем или под разными) стоят в разных split. `--force-resplit` этого не разрешает: оставьте изображению один split. |
