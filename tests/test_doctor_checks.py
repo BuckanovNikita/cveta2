@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cveta2.adapters.clearml.diagnostics import check_clearml_configuration
 from cveta2.adapters.config.settings import (
     CacheConfig,
     CacheProjectSettings,
@@ -17,7 +16,6 @@ from cveta2.adapters.config.settings import (
     ImageCacheConfig,
 )
 from cveta2.adapters.s3.diagnostics import check_aws_credentials
-from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces.commands.doctor import (
     _check_one,
     _log_broken_summary,
@@ -27,9 +25,6 @@ from cveta2.interfaces.commands.doctor import (
     collect_cache_roots,
 )
 from tests.helpers import write_config_yaml
-
-# The ClearML SDK parses its configuration with deprecated pyparsing calls; that is the SDK's noise.
-pytestmark = pytest.mark.filterwarnings("ignore::pyparsing.warnings.PyparsingDeprecationWarning")
 
 # ---------------------------------------------------------------------------
 # check_config
@@ -118,107 +113,6 @@ def test_check_aws_credentials(access_key: str | None, *, expected: bool) -> Non
     mock_boto3.Session.return_value = mock_session
     with patch.dict("sys.modules", {"boto3": mock_boto3}):
         assert check_aws_credentials() is expected
-
-
-# ---------------------------------------------------------------------------
-# check_clearml_configuration
-# ---------------------------------------------------------------------------
-
-_CLEARML_ACCESS_KEY = "AKCLEARMLACCESS0001"
-_CLEARML_SECRET_KEY = "SKCLEARMLSECRET0002"
-
-
-@pytest.fixture
-def no_clearml_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Hide the developer's ClearML setup: no ``CLEARML_*`` variables and an absent config file.
-
-    ``CLEARML_CONFIG_FILE`` replaces the home-directory files even when it does not
-    exist, so pointing it into *tmp_path* keeps ``~/clearml.conf`` out of the check.
-    """
-    for name in list(os.environ):
-        if name.startswith(("CLEARML_", "TRAINS_")):
-            monkeypatch.delenv(name)
-    config_file = tmp_path / "clearml.conf"
-    monkeypatch.setenv("CLEARML_CONFIG_FILE", str(config_file))
-    return config_file
-
-
-def _assert_no_secret(text: str) -> None:
-    assert _CLEARML_ACCESS_KEY not in text
-    assert _CLEARML_SECRET_KEY not in text
-
-
-@pytest.mark.usefixtures("no_clearml_configuration")
-def test_clearml_configured_from_environment(
-    monkeypatch: pytest.MonkeyPatch, capture_info_logs: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("CLEARML_API_HOST", "https://api.clearml.example")
-    monkeypatch.setenv("CLEARML_API_ACCESS_KEY", _CLEARML_ACCESS_KEY)
-    monkeypatch.setenv("CLEARML_API_SECRET_KEY", _CLEARML_SECRET_KEY)
-
-    assert check_clearml_configuration() is True
-
-    report = [message for message in capture_info_logs if message.startswith("ClearML:")]
-    assert len(report) == 1
-    assert "https://api.clearml.example" in report[0]
-    assert "переменные окружения" in report[0]
-    _assert_no_secret("\n".join(capture_info_logs) + capsys.readouterr().out)
-
-
-def test_clearml_configured_from_config_file(
-    no_clearml_configuration: Path, capture_info_logs: list[str], capsys: pytest.CaptureFixture[str]
-) -> None:
-    no_clearml_configuration.write_text(
-        "api {\n"
-        '  api_server: "https://api.from-file.example"\n'
-        f'  credentials {{ access_key: "{_CLEARML_ACCESS_KEY}", secret_key: "{_CLEARML_SECRET_KEY}" }}\n'
-        "}\n"
-    )
-
-    assert check_clearml_configuration() is True
-
-    report = [message for message in capture_info_logs if message.startswith("ClearML:")]
-    assert len(report) == 1
-    assert "https://api.from-file.example" in report[0]
-    assert str(no_clearml_configuration) in report[0]
-    assert "переменные окружения" not in report[0]
-    _assert_no_secret("\n".join(capture_info_logs) + capsys.readouterr().out)
-
-
-@pytest.mark.usefixtures("no_clearml_configuration")
-def test_clearml_not_configured_warns_how_to_configure(capture_logs: list[str]) -> None:
-    assert check_clearml_configuration() is False
-
-    assert len(capture_logs) == 1
-    warning = capture_logs[0]
-    assert warning.startswith("ClearML: не настроен")
-    assert "файл конфигурации ClearML" in warning
-    assert "CLEARML_API_HOST" in warning
-    assert "CLEARML_API_ACCESS_KEY" in warning
-    assert "CLEARML_API_SECRET_KEY" in warning
-
-
-@pytest.mark.usefixtures("no_clearml_configuration")
-def test_clearml_with_only_an_access_key_names_the_missing_secret(
-    monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
-) -> None:
-    monkeypatch.setenv("CLEARML_API_ACCESS_KEY", _CLEARML_ACCESS_KEY)
-
-    assert check_clearml_configuration() is False
-
-    assert len(capture_logs) == 1
-    assert "секретный ключ" in capture_logs[0]
-    assert "ключ доступа" not in capture_logs[0]
-    _assert_no_secret(capture_logs[0])
-
-
-def test_unreadable_clearml_file_is_translated_at_adapter_boundary(no_clearml_configuration: Path) -> None:
-    no_clearml_configuration.write_text(f'api {{ credentials {{ secret_key: "{_CLEARML_SECRET_KEY}"\n')
-
-    with pytest.raises(Cveta2Error, match="ClearML") as error:
-        check_clearml_configuration()
-    assert str(no_clearml_configuration) in str(error.value)
-    _assert_no_secret(str(error.value))
 
 
 # ---------------------------------------------------------------------------

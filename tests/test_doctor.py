@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +10,14 @@ import pytest
 
 from cveta2.adapters.config.settings import CvatConfig, ImageCacheConfig
 from cveta2.interfaces.commands.doctor import run_doctor
+
+
+def _use_clearml_file(monkeypatch: pytest.MonkeyPatch, config_file: Path) -> None:
+    """Hide the developer's ClearML setup and point the SDK at *config_file*."""
+    for name in list(os.environ):
+        if name.startswith(("CLEARML_", "TRAINS_")):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("CLEARML_CONFIG_FILE", str(config_file))
 
 
 def test_run_doctor_no_crash() -> None:
@@ -53,12 +62,7 @@ def test_run_doctor_missing_clearml_configuration_only_warns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_info_logs: list[str]
 ) -> None:
     """Without a ClearML setup doctor warns and keeps the exit code of the required check."""
-    import os
-
-    for name in list(os.environ):
-        if name.startswith(("CLEARML_", "TRAINS_")):
-            monkeypatch.delenv(name)
-    monkeypatch.setenv("CLEARML_CONFIG_FILE", str(tmp_path / "absent.conf"))
+    _use_clearml_file(monkeypatch, tmp_path / "absent.conf")
 
     with (
         patch("cveta2.interfaces.commands.doctor.check_config", return_value=True),
@@ -73,24 +77,24 @@ def test_run_doctor_missing_clearml_configuration_only_warns(
     assert capture_info_logs[-1] == "doctor: обязательные проверки пройдены"
 
 
-def test_run_doctor_unreadable_clearml_configuration_only_warns(capture_logs: list[str]) -> None:
-    """A ClearML check that cannot run is reported and does not fail doctor."""
-    from cveta2.domain.errors import Cveta2Error
+@pytest.mark.filterwarnings("ignore::pyparsing.warnings.PyparsingDeprecationWarning")  # the SDK's own parser
+def test_run_doctor_binary_clearml_configuration_only_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    """A ClearML file the SDK cannot even decode is a warning, not a traceback or a failed doctor."""
+    config_file = tmp_path / "clearml.conf"
+    config_file.write_bytes(b"\xff\xfe\x00\x81SKCLEARMLSECRET0002")
+    _use_clearml_file(monkeypatch, config_file)
 
     with (
         patch("cveta2.interfaces.commands.doctor.check_config", return_value=True),
         patch("cveta2.interfaces.commands.doctor.check_aws_credentials", return_value=True),
-        patch(
-            "cveta2.interfaces.commands.doctor.check_clearml_configuration",
-            side_effect=Cveta2Error("ClearML: файл конфигурации не читается"),
-        ),
         patch("cveta2.interfaces.commands.doctor.check_cache_permissions", return_value=True),
     ):
         run_doctor()
 
-    assert capture_logs == [
-        "doctor: необязательная проверка ClearML недоступна: ClearML: файл конфигурации не читается"
-    ]
+    unreadable = f"ClearML: файл конфигурации не читается ({config_file}): UnicodeDecodeError"
+    assert capture_logs == [f"doctor: необязательная проверка ClearML недоступна: {unreadable}"]
 
 
 def test_run_setup_requires_interactive(tmp_path: Path) -> None:
