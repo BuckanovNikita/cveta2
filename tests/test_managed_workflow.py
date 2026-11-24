@@ -555,21 +555,81 @@ def test_feedback_failure_blocks_remote_publication(workflow: Workflow, tmp_path
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
-@pytest.mark.parametrize("change", ["parent", "image"])
-def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path, change: str) -> None:
+def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path)
-    message = "fetch again|prepare again|validation"
-    if change == "parent":
-        workflow.clearml.root.mkdir()
-        target = workflow.clearml.root / "competing"
-        target.mkdir()
-        shutil.copy(prepared / "dataset.yaml", target / "dataset.yaml")
-        workflow.clearml.latest_id = "competing"
-    else:
-        Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
-    with pytest.raises(ManagedError, match=message):
+    workflow.clearml.root.mkdir()
+    target = workflow.clearml.root / "competing"
+    target.mkdir()
+    shutil.copy(prepared / "dataset.yaml", target / "dataset.yaml")
+    workflow.clearml.latest_id = "competing"
+    with pytest.raises(ManagedError, match=r"fetch again|prepare again"):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+def test_replaced_valid_image_publishes(workflow: Workflow, tmp_path: Path) -> None:
+    """Publication validates the image files as they are now; no recorded image hash binds them."""
+    prepared = _prepare(workflow, tmp_path)
+    Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+
+def test_hand_edited_rows_that_pass_publish(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False, dtype=str)
+    removed = min(rows["image_name"])
+    rows[rows["image_name"].ne(removed)].to_csv(prepared / "dataset.csv", index=False)
+
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+    published = pd.read_csv(workflow.clearml.root / "version-1" / "dataset.csv", keep_default_na=False)
+    assert removed not in set(published["image_name"])
+    assert len(published) == len(rows) - int(rows["image_name"].eq(removed).sum())
+
+
+def test_hand_edited_rows_that_fail_validation_stop_publish(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False, dtype=str)
+    rows.loc[0, "bbox_x_br"] = "1"
+    rows.to_csv(prepared / "dataset.csv", index=False)
+
+    with pytest.raises(
+        ManagedError,
+        match=r"^Prepared dataset\.csv does not pass validation: 1 rejected rows, repairs needed: yes, blockers: none$",
+    ):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_blocked_preparation_reports_its_findings_but_does_not_publish(workflow: Workflow, tmp_path: Path) -> None:
+    fetched, output = _transform(workflow, tmp_path, bad=True)
+    summary = api.prepare_managed_dataset(
+        "combined", output, source=fetched, output_dir=tmp_path / "prepared", clean=False, **workflow.options
+    )
+    assert not summary.ready
+    assert not (summary.directory / "dataset.csv").exists()
+
+    assert api.report_dataset_errors(summary.directory, **workflow.options).created == 1
+    assert len(workflow.cvat.issues[101]) == 1
+    with pytest.raises(
+        ManagedError, match=r"^Preparation was blocked and has no payload; see report\.json and prepare again$"
+    ):
+        api.publish_dataset(summary.directory, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+@pytest.mark.parametrize("command", ["publish", "report-errors"])
+def test_another_format_version_is_refused(workflow: Workflow, tmp_path: Path, command: str) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    record_path = prepared / "preparation.json"
+    record = json.loads(record_path.read_bytes())
+    record["format_version"] = 2
+    record_path.write_text(json.dumps(record))
+    run = api.publish_dataset if command == "publish" else api.report_dataset_errors
+    with pytest.raises(ManagedError, match="Cannot load managed preparation"):
+        run(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+    assert all(not issues for issues in workflow.cvat.issues.values())
 
 
 _SOURCE_WARNINGS = {
@@ -921,23 +981,16 @@ def test_incomplete_or_corrupt_prepared_records_block_publication(
     prepared = _prepare(workflow, tmp_path)
     source_path = prepared / "source-snapshot.yaml"
     tasks_path = prepared / "tasks.yaml"
-    record_path = prepared / "preparation.json"
     source = yaml.safe_load(source_path.read_text())
     tasks = yaml.safe_load(tasks_path.read_text())
-    record = json.loads(record_path.read_text())
-    # Keep byte bindings consistent, as in an old or corrupted exporter, so the
-    # publication check must inspect the records themselves rather than checksums.
-    for snapshot in (source, tasks["managed"], record["snapshot"]):
+    # The publication check inspects the records themselves.
+    for snapshot in (source, tasks["managed"]):
         if damage == "missing-registry":
             snapshot.pop("registry")
         else:
             snapshot["sources"][0].pop("labels")
     source_path.write_text(yaml.safe_dump(source))
     tasks_path.write_text(yaml.safe_dump(tasks))
-    record["source_hash"] = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    record["payload_hashes"]["tasks.yaml"] = hashlib.sha256(tasks_path.read_bytes()).hexdigest()
-    record_path.write_text(json.dumps(record))
-    (prepared / "preparation.sha256").write_text(hashlib.sha256(record_path.read_bytes()).hexdigest())
 
     with pytest.raises(ManagedError, match=r"fetch|fingerprint|records|definitions"):
         api.publish_dataset(prepared, **workflow.options)

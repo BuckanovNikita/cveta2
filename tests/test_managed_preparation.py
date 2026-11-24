@@ -1,4 +1,4 @@
-"""Managed preparation binds opaque transformations and original source evidence."""
+"""Managed preparation keeps the transformed CSV, original source evidence and plain state."""
 
 import hashlib
 import json
@@ -153,24 +153,36 @@ def _prepare(
     return result, config, transformed, source, metadata
 
 
-def test_prepare_binds_inputs_and_exact_three_file_payload(tmp_path: Path) -> None:
-    """Publication gets full source evidence and clean training rows, no ZIP."""
-    summary, _config, transformed, source, _metadata = _prepare(tmp_path)
+def test_prepare_writes_format_three_record(tmp_path: Path) -> None:
+    """The record is plain state; the payload and inputs are read as they are now."""
+    summary, _config, _transformed, source, _metadata = _prepare(tmp_path)
     assert summary.ready
+    record = json.loads((summary.directory / "preparation.json").read_bytes())
+    assert record["format_version"] == 3
+    assert set(record) == {
+        "format_version",
+        "name",
+        "parent_id",
+        "parent_version",
+        "findings",
+        "ready",
+        "clean",
+        "first",
+    }
+    assert not (summary.directory / "preparation.sha256").exists()
     files = LocalManagedPreparationFiles()
     loaded = files.load_prepared(summary.directory)
-    assert set(loaded.payload) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
-    assert loaded.record.input_hash == hashlib.sha256(transformed.read_bytes()).hexdigest()
-    assert loaded.record.source_hash == hashlib.sha256((source / "source-snapshot.yaml").read_bytes()).hexdigest()
-    assert loaded.tasks is not None
-    assert loaded.tasks.included == [11]
-    assert loaded.tasks.managed is not None
-    assert loaded.tasks.managed.sources[0].tasks["11"].tables
+    assert loaded.ledger_key == hashlib.sha256((source / "source-snapshot.yaml").read_bytes()).hexdigest()
+    assert loaded.captured.snapshot.sources[0].tasks["11"].tables
     assert loaded.metadata is not None
     assert loaded.metadata.managed is not None
+    assert loaded.frame is not None
     assert loaded.frame["split"].tolist() == ["train", "val"]
-    with files.stage_payload(loaded.payload) as staged:
-        assert (staged / "dataset.csv").read_bytes() == loaded.payload["dataset.csv"]
+    tasks = yaml.safe_load((summary.directory / "tasks.yaml").read_text())
+    assert tasks["included"] == [11]
+    with files.stage_payload(summary.directory) as staged:
+        assert sorted(path.name for path in staged.iterdir()) == ["dataset.csv", "dataset.yaml", "tasks.yaml"]
+        assert (staged / "dataset.csv").read_bytes() == (summary.directory / "dataset.csv").read_bytes()
 
 
 def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
@@ -201,9 +213,9 @@ def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
     issues = result.report["issues"]
     assert isinstance(issues, list)
     assert any(isinstance(issue, dict) and issue.get("code") == "media_missing" for issue in issues)
-    loaded = LocalManagedPreparationFiles().load_prepared(result.directory)
-    assert len(loaded.record.image_hashes) == 2
-    assert str(tmp_path / "images" / "missing.png") not in loaded.record.image_hashes
+    image_hashes = yaml.safe_load((result.directory / "tasks.yaml").read_text())["managed"]["image_hashes"]
+    assert len(image_hashes) == 2
+    assert str(tmp_path / "images" / "missing.png") not in image_hashes
 
 
 def test_bad_box_produces_attested_feedback_and_requires_cleanup(
@@ -238,19 +250,66 @@ def test_bad_box_produces_attested_feedback_and_requires_cleanup(
     assert loaded.record.findings[0].task_id == 11
     assert loaded.record.findings[0].frame_id == 0
     assert loaded.record.findings[0].marker.startswith("cveta2:")
-    assert loaded.record.payload_hashes == {}
+    assert loaded.frame is None
+
+
+def _edit_bytes(path: Path) -> None:
+    """Change a file's bytes but not its content: CSV lines end in CRLF, YAML gains a blank line."""
+    content = path.read_bytes()
+    path.write_bytes(content.replace(b"\n", b"\r\n") if path.suffix == ".csv" else content + b"\n")
 
 
 @pytest.mark.parametrize(
     "name",
-    ["transformed.csv", "source-snapshot.yaml", "dataset.csv", "preparation.json"],
+    ["transformed.csv", "source-snapshot.yaml", "dataset.csv", "dataset.yaml", "tasks.yaml"],
 )
-def test_load_rejects_modified_bound_bytes(tmp_path: Path, name: str) -> None:
-    """No changed reviewed bytes can enter publication unnoticed."""
+def test_load_accepts_edited_files(tmp_path: Path, name: str) -> None:
+    """No checksum binds the files: each command reads them as they are now."""
     summary, *_ = _prepare(tmp_path)
     path = summary.directory / name
-    path.write_bytes(path.read_bytes() + b"\n")
-    with pytest.raises(ManagedError):
+    before = path.read_bytes()
+    _edit_bytes(path)
+    assert path.read_bytes() != before
+    loaded = LocalManagedPreparationFiles().load_prepared(summary.directory)
+    assert loaded.frame is not None
+    assert loaded.record.ready
+
+
+@pytest.mark.parametrize("version", [2, 4])
+def test_load_refuses_another_format_version(tmp_path: Path, version: int) -> None:
+    summary, *_ = _prepare(tmp_path)
+    record_path = summary.directory / "preparation.json"
+    record = json.loads(record_path.read_bytes())
+    record["format_version"] = version
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(ManagedError, match=r"Cannot load managed preparation: .*format_version"):
+        LocalManagedPreparationFiles().load_prepared(summary.directory)
+
+
+@pytest.mark.parametrize("content", [b"{not json", b"\xff\xfe"], ids=["json", "utf-8"])
+def test_load_refuses_an_unreadable_record(tmp_path: Path, content: bytes) -> None:
+    summary, *_ = _prepare(tmp_path)
+    (summary.directory / "preparation.json").write_bytes(content)
+    with pytest.raises(ManagedError, match="Cannot load managed preparation"):
+        LocalManagedPreparationFiles().load_prepared(summary.directory)
+
+
+def test_load_names_invalid_fields_without_printing_their_values(tmp_path: Path) -> None:
+    """Hand edits are allowed, so a refusal must not echo what was typed, credentials included."""
+    summary, *_ = _prepare(tmp_path)
+    metadata_path = summary.directory / "dataset.yaml"
+    metadata = yaml.safe_load(metadata_path.read_text())
+    metadata["api_url"] = "https://user:s3cr3t-token@classes.example/api"
+    metadata_path.write_text(yaml.safe_dump(metadata))
+    with pytest.raises(ManagedError, match="api_url") as raised:
+        LocalManagedPreparationFiles().load_prepared(summary.directory)
+    assert "s3cr3t-token" not in str(raised.value)
+
+
+def test_load_refuses_a_partial_payload(tmp_path: Path) -> None:
+    summary, *_ = _prepare(tmp_path)
+    (summary.directory / "tasks.yaml").unlink()
+    with pytest.raises(ManagedError, match=r"tasks\.yaml"):
         LocalManagedPreparationFiles().load_prepared(summary.directory)
 
 
@@ -478,32 +537,10 @@ def test_source_edits_warn_and_prepare_from_the_fetched_sources(
         )
 
 
-def test_preparation_records_policy_and_source_fingerprints(tmp_path: Path) -> None:
+def test_payload_carries_recomputed_informational_hashes(tmp_path: Path) -> None:
     summary, config, *_ = _prepare(tmp_path)
     loaded = LocalManagedPreparationFiles().load_prepared(summary.directory)
     definition = config.datasets["demo"]
-    assert loaded.record.snapshot.definition_hash == source_fingerprint(config, definition)
-    assert loaded.record.definition_hash == definition_fingerprint(config, definition)
     assert loaded.metadata is not None
     assert loaded.metadata.managed is not None
-    assert loaded.metadata.managed.definition_hash == loaded.record.definition_hash
-    assert loaded.tasks is not None
-    assert loaded.tasks.managed is not None
-    assert loaded.tasks.managed.definition_hash == loaded.record.snapshot.definition_hash
-
-
-def test_load_rejects_published_metadata_bound_to_another_definition(tmp_path: Path) -> None:
-    """dataset.yaml carries the definition fingerprint the record was prepared with."""
-    summary, *_ = _prepare(tmp_path)
-    metadata_path = summary.directory / "dataset.yaml"
-    record_path = summary.directory / "preparation.json"
-    metadata = yaml.safe_load(metadata_path.read_text())
-    metadata["managed"]["definition_hash"] = "0" * 64
-    metadata_path.write_text(yaml.safe_dump(metadata))
-    record = json.loads(record_path.read_text())
-    record["payload_hashes"]["dataset.yaml"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
-    record_path.write_text(json.dumps(record))
-    (summary.directory / "preparation.sha256").write_text(hashlib.sha256(record_path.read_bytes()).hexdigest())
-
-    with pytest.raises(ManagedError, match="metadata binding changed"):
-        LocalManagedPreparationFiles().load_prepared(summary.directory)
+    assert loaded.metadata.managed.definition_hash == definition_fingerprint(config, definition)

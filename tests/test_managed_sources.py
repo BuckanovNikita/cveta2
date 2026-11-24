@@ -573,7 +573,6 @@ def _assess(config: ProjectConfig, snapshot: ManagedSnapshot, reader: _Cvat, s3:
         s3_roots=Mock(),
         feedback=Mock(),
         ledger=Mock(),
-        local_roots=[],
     )
     return _assess_sources(config, snapshot, services)
 

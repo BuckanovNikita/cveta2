@@ -327,8 +327,6 @@ def _prepared_effects(
     path, config = _selection(config_path, project_config)
     files = LocalManagedPreparationFiles()
     loaded = files.load_prepared(prepared)
-    definition = dataset_definition(config, loaded.record.name)
-    local_roots = _image_roots(path, config, definition, project_config).local_root
     with _client(path, project_config) as client:
         yield (
             config,
@@ -344,8 +342,7 @@ def _prepared_effects(
                 feedback=CvatFeedback(client.api),
                 ledger=LocalFeedbackLedger(
                     prepared,
-                    shared_ledger_path(path.parent / "managed-feedback", loaded.record.source_hash),
+                    shared_ledger_path(path.parent / "managed-feedback", loaded.ledger_key),
                 ),
-                local_roots=local_roots,
             ),
         )

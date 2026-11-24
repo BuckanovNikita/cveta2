@@ -1,8 +1,9 @@
-"""Recheck managed preparations and deliver feedback before exact publication."""
+"""Check a managed preparation as it is now and deliver feedback before publication."""
 
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import pandas as pd
 from loguru import logger
 
 from cveta2.application.ports.dataset_bundle import (
@@ -23,7 +24,7 @@ from cveta2.application.use_cases.managed_feedback import (
     report_findings,
 )
 from cveta2.domain.bundle.classes import registry_mismatches
-from cveta2.domain.bundle.models import Publication
+from cveta2.domain.bundle.models import DatasetMetadata, Publication
 from cveta2.domain.bundle.preparation import PAYLOAD_NAMES
 from cveta2.domain.bundle.validation import validate_bundle
 from cveta2.domain.managed.evidence import (
@@ -60,7 +61,6 @@ class ManagedPublicationServices:
     s3_roots: S3Storage
     feedback: CvatFeedback
     ledger: FeedbackLedger
-    local_roots: list[str]
 
 
 def _assess_source(
@@ -152,15 +152,16 @@ def _check_prepared(
     loaded: LoadedManagedPreparation,
     services: ManagedPublicationServices,
 ) -> SourceAssessment:
-    """Check parent, sources and clean publication media; warn about changed sources.
+    """Check the parent and the sources of ``source-snapshot.yaml``; warn about changed sources.
 
     Returns the source assessment, whose stale tasks get no feedback; tasks whose
     pending receipts could not be inspected, and tasks of sources that differ from
-    the current definition, count as stale too.
+    the current definition, count as stale too. The payload is not read, so a
+    blocked preparation can still report its findings.
     """
-    record = loaded.record
-    require_complete_evidence(record.snapshot)
-    _check_cvat_server(config, record.snapshot)
+    record, snapshot = loaded.record, loaded.captured.snapshot
+    require_complete_evidence(snapshot)
+    _check_cvat_server(config, snapshot)
     definition = dataset_definition(config, record.name)
     parent = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (parent.dataset_id if parent else None) != record.parent_id:
@@ -172,12 +173,11 @@ def _check_prepared(
             f"Parent {parent.dataset_id} lacks dataset.yaml and is no longer a managed dataset version; "
             "fetch and prepare again, with dataset prepare --first to start a managed lineage"
         )
-    differences = _definition_differences(config, definition, record.snapshot)
+    differences = _definition_differences(config, definition, snapshot)
     unavailable = reconcile_pending(record.findings, remote=services.feedback, ledger=services.ledger)
-    assessment = _assess_sources(config, services.ledger.effective_snapshot(record.snapshot), services)
+    assessment = _assess_sources(config, services.ledger.effective_snapshot(snapshot), services)
     for line in (*differences.warnings, *assessment.warnings):
         logger.warning(f"{line}. Датасет собирается из выгруженных данных.")
-    _check_media(loaded, services)
     return replace(assessment, stale_tasks=assessment.stale_tasks | differences.stale_tasks | unavailable)
 
 
@@ -198,44 +198,43 @@ def _report(
     return outcome
 
 
-def _check_media(loaded: LoadedManagedPreparation, services: ManagedPublicationServices) -> None:
-    """Revalidate immutable clean bytes against current local media and roots."""
-    record = loaded.record
-    if loaded.metadata is None:
-        return
-    if set(services.local_roots) != set(loaded.metadata.images.local_root):
-        raise ManagedError("Personal image roots changed; prepare again")
-    services.files.check_roots(loaded.frame, loaded.metadata)
-    for root in loaded.metadata.images.local_root:
+def _check_current(frame: pd.DataFrame, metadata: DatasetMetadata, services: ManagedPublicationServices) -> None:
+    """Validate the current ``dataset.csv`` against its ``dataset.yaml``, local media and roots."""
+    services.files.check_roots(frame, metadata)
+    for root in metadata.images.local_root:
         services.roots.check_local_root(root)
-    for root in loaded.metadata.images.s3_root:
+    for root in metadata.images.s3_root:
         services.s3_roots.check_root(root)
-    if services.files.image_hashes(loaded.frame).readable != record.image_hashes:
-        raise ManagedError("Prepared images changed; prepare again")
     inspection = services.media.inspect(
-        loaded.frame,
+        frame,
         profile="clearml-yolo",
         options=ValidationOptions(check_images=True, emit_warnings=False),
     )
-    result = validate_bundle(loaded.frame, loaded.metadata, inspection=inspection)
-    if result.blockers or not result.result.is_valid or result.result.requires_cleanup:
-        raise ManagedError("Prepared payload no longer passes training validation")
+    validation = validate_bundle(frame, metadata, inspection=inspection)
+    result = validation.result
+    if validation.blockers or not result.is_valid or result.requires_cleanup:
+        rejected, cleanup, blockers = len(result.broken_row_positions), result.requires_cleanup, validation.blockers
+        raise ManagedError(
+            f"Prepared dataset.csv does not pass validation: {rejected} rejected rows, "
+            f"repairs needed: {'yes' if cleanup else 'no'}, blockers: {'; '.join(blockers) or 'none'}"
+        )
 
 
 def report_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> FeedbackOutcome:
-    """Resume traceable frame feedback without changing immutable payload bytes."""
+    """Deliver the recorded frame findings; a blocked preparation reports too."""
     loaded = services.files.load_prepared(directory)
     assessment = _check_prepared(config, loaded, services)
     return _report(loaded, assessment, services)
 
 
 def publish_prepared(config: ProjectConfig, directory: Path, *, services: ManagedPublicationServices) -> Publication:
-    """Publish only a ready, fresh, feedback-complete stable three-file snapshot."""
+    """Publish the current three payload files once they pass every check and feedback is delivered."""
     loaded = services.files.load_prepared(directory)
-    metadata = loaded.metadata
-    if not loaded.record.ready or metadata is None or set(loaded.payload) != set(PAYLOAD_NAMES):
-        raise ManagedError("Preparation is not ready; review diagnostics and accept cleanup")
+    frame, metadata = loaded.frame, loaded.metadata
+    if frame is None or metadata is None:
+        raise ManagedError("Preparation was blocked and has no payload; see report.json and prepare again")
     assessment = _check_prepared(config, loaded, services)
+    _check_current(frame, metadata, services)
     # Only class names and numbers bind the prepared rows; other registry fields may change.
     if names := registry_mismatches(metadata.classes, services.registry.fetch(metadata.api_url)):
         raise ManagedError(f"Class names or numbers differ from the class registry: {', '.join(names)}; prepare again")
@@ -244,12 +243,12 @@ def publish_prepared(config: ProjectConfig, directory: Path, *, services: Manage
         raise ManagedError("CVAT feedback delivery failed; retry report-errors before publication")
     # Recheck sources after feedback, acknowledging only proven issue-only writes.
     # Its warnings were printed above; only a task completed meanwhile stops here.
-    _assess_sources(config, services.ledger.effective_snapshot(loaded.record.snapshot), services)
+    _assess_sources(config, services.ledger.effective_snapshot(loaded.captured.snapshot), services)
     definition = dataset_definition(config, loaded.record.name)
     latest = services.remote.latest(definition.clearml.project, definition.clearml.dataset)
     if (latest.dataset_id if latest else None) != loaded.record.parent_id:
         raise ManagedError("ClearML parent changed during feedback; prepare again")
-    with services.files.stage_payload(loaded.payload) as staging:
+    with services.files.stage_payload(loaded.directory) as staging:
         return services.remote.publish(
             definition.clearml.project,
             definition.clearml.dataset,

@@ -1,4 +1,4 @@
-"""Capture and checksum reviewed managed inputs without publishing mutable files."""
+"""Capture managed inputs and read preparation directories as they are now."""
 
 import hashlib
 import json
@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 import pandas as pd
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
-from cveta2.adapters.files.bundle import _payload, _yaml
+from cveta2.adapters.files.bundle import _error_details, _payload, _yaml
 from cveta2.adapters.files.bundle_paths import LocalRoots
 from cveta2.adapters.files.verification import read_csv_bytes, report_dict
 from cveta2.application.ports.managed_preparation import (
@@ -83,28 +83,12 @@ class LocalManagedPreparationFiles:
     def capture(self, transformed: Path, source: Path) -> CapturedManagedInput:
         """Read exact bytes once and independently attest original task frames."""
         source_path = source / "source-snapshot.yaml" if source.is_dir() else source
+        if source.is_symlink():
+            raise ManagedError(f"Source directory must not be a symlink: {source}")
         try:
-            if source.is_symlink():
-                raise ManagedError(f"Source directory must not be a symlink: {source}")
-            input_content, source_content = (
-                _regular_bytes(transformed),
-                _regular_bytes(source_path),
-            )
-            snapshot = _parse_snapshot(source_content)
-            tables = {item.name: _tables(item) for item in snapshot.sources}
-            if len(tables) != len(snapshot.sources):
-                raise ManagedError("Source snapshot names must be unique")
-            return CapturedManagedInput(
-                frame=read_csv_bytes(input_content, source=str(transformed)),
-                input_content=input_content,
-                source_content=source_content,
-                snapshot=snapshot,
-                source_tables=tables,
-                origins=_origins(snapshot),
-                source_directory=source_path.parent.resolve(),
-            )
+            return _capture(transformed, source_path)
         except (OSError, ValidationError) as error:
-            raise ManagedError(f"Cannot capture managed preparation inputs: {error}") from error
+            raise ManagedError(f"Cannot capture managed preparation inputs: {_error_details(error)}") from error
 
     def image_hashes(self, frame: pd.DataFrame) -> ImageHashes:
         """Hash each readable path once while letting media validation report errors."""
@@ -154,7 +138,7 @@ class LocalManagedPreparationFiles:
         )
         return _REPORT.validate_json(json.dumps(report))
 
-    def persist(  # noqa: PLR0913, PLR0917 - immutable persistence boundary.
+    def persist(  # noqa: PLR0913, PLR0917 - persistence boundary.
         self,
         directory: Path,
         captured: CapturedManagedInput,
@@ -163,7 +147,7 @@ class LocalManagedPreparationFiles:
         report: dict[str, JsonValue],
         broken_images: pd.DataFrame,
     ) -> None:
-        """Create a new preparation with the record completion marker written last."""
+        """Create a new preparation with ``preparation.json`` written last."""
         if directory.exists() or directory.is_symlink():
             raise ManagedError(f"Preparation directory already exists: {directory}")
         if directory.resolve().is_relative_to(captured.source_directory):
@@ -183,11 +167,7 @@ class LocalManagedPreparationFiles:
                     if name not in _PAYLOAD:
                         raise ManagedError(f"Unexpected managed payload file: {name}")
                     (staged / name).write_bytes(content)
-                record_bytes = (record.model_dump_json(indent=2) + "\n").encode("utf-8")
-                (staged / "preparation.json").write_bytes(record_bytes)
-                (staged / "preparation.sha256").write_text(
-                    hashlib.sha256(record_bytes).hexdigest() + "\n", encoding="ascii"
-                )
+                (staged / "preparation.json").write_text(record.model_dump_json(indent=2) + "\n", encoding="utf-8")
                 directory.mkdir(exist_ok=False)
                 for name in (
                     "transformed.csv",
@@ -196,7 +176,6 @@ class LocalManagedPreparationFiles:
                     "broken-images.csv",
                     *_PAYLOAD,
                     "preparation.json",
-                    "preparation.sha256",
                 ):
                     if (staged / name).is_file():
                         os.link(staged / name, directory / name)
@@ -204,90 +183,74 @@ class LocalManagedPreparationFiles:
             raise ManagedError(f"Cannot persist managed preparation: {directory}") from error
 
     def load_prepared(self, directory: Path) -> LoadedManagedPreparation:
-        """Reject edited records, inputs or payload and hold stable captured bytes."""
+        """Read every file as it is now; parse strictly and name invalid fields, never their values."""
+        if directory.is_symlink() or not directory.is_dir():
+            raise ManagedError(f"Expected a nonsymlink preparation directory: {directory}")
         try:
-            if directory.is_symlink() or not directory.is_dir():
-                raise ManagedError(f"Expected a nonsymlink preparation directory: {directory}")
-            record_bytes = _regular_bytes(directory / "preparation.json")
-            if (
-                hashlib.sha256(record_bytes).hexdigest().encode("ascii")
-                != _regular_bytes(directory / "preparation.sha256").strip()
-            ):
-                raise ManagedError("Managed preparation record checksum mismatch; prepare again")
-            record = ManagedRecord.model_validate_json(record_bytes)
-            input_content = _regular_bytes(directory / "transformed.csv")
-            source_content = _regular_bytes(directory / "source-snapshot.yaml")
-            if (
-                hashlib.sha256(input_content).hexdigest() != record.input_hash
-                or hashlib.sha256(source_content).hexdigest() != record.source_hash
-            ):
-                raise ManagedError("Managed input or source snapshot changed; prepare again")
-            source_snapshot = _parse_snapshot(source_content)
-            # A first version publishes no parent; the version fetch saw stays bound in the record.
-            expected_snapshot = source_snapshot.model_copy(
-                update={
-                    "assignments": record.snapshot.assignments,
-                    "image_hashes": record.snapshot.image_hashes,
-                    **({"parent_id": None} if record.first else {}),
-                }
-            )
-            if (
-                expected_snapshot != record.snapshot
-                or record.registry_hash != source_snapshot.registry_hash
-                or record.parent_id != source_snapshot.parent_id
-            ):
-                raise ManagedError("Managed source binding is inconsistent; prepare again")
-            payload = _read_payload(directory, record)
-            metadata, tasks, frame = _parse_payload(payload)
-            if tasks is not None and tasks.managed != record.snapshot:
-                raise ManagedError("Managed task snapshot changed; prepare again")
-            if metadata is not None and (
-                metadata.managed is None or metadata.managed.definition_hash != record.definition_hash
-            ):
-                raise ManagedError("Managed metadata binding changed; prepare again")
+            record = _record(_regular_bytes(directory / "preparation.json"), directory)
+            captured = _capture(directory / "transformed.csv", directory / "source-snapshot.yaml")
+            frame, metadata = _current_payload(directory)
             report = _REPORT.validate_json(_regular_bytes(directory / "report.json"))
-            return LoadedManagedPreparation(
-                directory=directory,
-                record=record,
-                frame=frame,
-                metadata=metadata,
-                tasks=tasks,
-                payload=payload,
-                input_content=input_content,
-                source_content=source_content,
-                report=report,
-            )
         except (OSError, ValidationError) as error:
-            raise ManagedError(f"Cannot load managed preparation: {directory}: {error}") from error
+            raise ManagedError(f"Cannot load managed preparation: {directory}: {_error_details(error)}") from error
+        return LoadedManagedPreparation(
+            directory=directory,
+            record=record,
+            captured=captured,
+            frame=frame,
+            metadata=metadata,
+            report=report,
+            ledger_key=hashlib.sha256(captured.source_content).hexdigest(),
+        )
 
     @contextmanager
-    def stage_payload(self, payload: Mapping[str, bytes]) -> Iterator[Path]:
-        """Publish private captured bytes rather than rereading mutable local files."""
-        if set(payload) != set(_PAYLOAD):
-            raise ManagedError("Managed publication requires exactly three payload files")
+    def stage_payload(self, directory: Path) -> Iterator[Path]:
+        """Copy the payload once, so an edit made during the upload cannot mix into it."""
+        try:
+            payload = {name: _regular_bytes(directory / name) for name in _PAYLOAD}
+        except OSError as error:
+            raise ManagedError(f"Cannot load managed preparation: {directory}: {error}") from error
         with TemporaryDirectory(prefix="cveta2-managed-publish-") as temporary:
-            directory = Path(temporary)
+            staged = Path(temporary)
             for name, content in payload.items():
-                (directory / name).write_bytes(content)
-            yield directory
+                (staged / name).write_bytes(content)
+            yield staged
 
 
-def _read_payload(directory: Path, record: ManagedRecord) -> dict[str, bytes]:
-    expected = set(_PAYLOAD) if record.ready else set()
-    if set(record.payload_hashes) != expected:
-        raise ManagedError("Invalid managed payload inventory; prepare again")
-    payload = {name: _regular_bytes(directory / name) for name in record.payload_hashes}
-    if {name: hashlib.sha256(content).hexdigest() for name, content in payload.items()} != record.payload_hashes:
-        raise ManagedError("Managed payload checksum mismatch; prepare again")
-    return payload
+def _capture(transformed: Path, source_path: Path) -> CapturedManagedInput:
+    """Read the transformed CSV and the source snapshot; raises OSError or ValidationError."""
+    input_content, source_content = _regular_bytes(transformed), _regular_bytes(source_path)
+    snapshot = _parse_snapshot(source_content)
+    tables = {item.name: _tables(item) for item in snapshot.sources}
+    if len(tables) != len(snapshot.sources):
+        raise ManagedError("Source snapshot names must be unique")
+    return CapturedManagedInput(
+        frame=read_csv_bytes(input_content, source=str(transformed)),
+        input_content=input_content,
+        source_content=source_content,
+        snapshot=snapshot,
+        source_tables=tables,
+        origins=_origins(snapshot),
+        source_directory=source_path.parent.resolve(),
+    )
 
 
-def _parse_payload(
-    payload: Mapping[str, bytes],
-) -> tuple[DatasetMetadata | None, TaskManifest | None, pd.DataFrame]:
-    if not payload:
-        return None, None, pd.DataFrame()
-    metadata = DatasetMetadata.model_validate(_yaml(payload["dataset.yaml"], "dataset.yaml"))
-    tasks = TaskManifest.model_validate(_yaml(payload["tasks.yaml"], "tasks.yaml"))
-    frame = read_csv_bytes(payload["dataset.csv"], source="dataset.csv")
-    return metadata, tasks, frame
+def _record(content: bytes, directory: Path) -> ManagedRecord:
+    """Parse ``preparation.json``; any ``format_version`` other than 3 fails validation."""
+    try:
+        raw = json.loads(content.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ManagedError(f"Cannot load managed preparation: {directory}: {error}") from error
+    return ManagedRecord.model_validate(raw)
+
+
+def _current_payload(directory: Path) -> tuple[pd.DataFrame | None, DatasetMetadata | None]:
+    """Parse the three payload files, or return ``None`` for both when prepare was blocked and wrote none."""
+    paths = [directory / name for name in _PAYLOAD]
+    if not any(path.exists() or path.is_symlink() for path in paths):
+        return None, None
+    content = {path.name: _regular_bytes(path) for path in paths}
+    metadata = DatasetMetadata.model_validate(_yaml(content["dataset.yaml"], "dataset.yaml"))
+    # tasks.yaml is published as it is, so it must parse too.
+    TaskManifest.model_validate(_yaml(content["tasks.yaml"], "tasks.yaml"))
+    return read_csv_bytes(content["dataset.csv"], source="dataset.csv"), metadata

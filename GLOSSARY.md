@@ -199,7 +199,7 @@ _Avoid_: empty label, negative class, background
 ### Preparation and publication
 
 **Prepared bundle**:
-A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation keeps its own state files (see Managed preparation).
+A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation also keeps `transformed.csv`, `source-snapshot.yaml` and `preparation.json`. `preparation.json` is plain state; no file carries a checksum; each command validates the current files.
 _Russian_: подготовленный датасет
 _Avoid_: prepared set, release candidate, package
 
@@ -214,7 +214,7 @@ _Russian_: управляемый датасет
 _Avoid_: configured dataset, named dataset
 
 **Managed preparation**:
-Preparation of a prepared bundle with `dataset prepare` from a user-transformed CSV and a managed fetch, bound to the managed definition and source snapshot.
+Preparation of a prepared bundle with `dataset prepare` from a user-transformed CSV and a managed fetch, using the managed definition and the source snapshot as they are when each command runs.
 _Russian_: управляемая подготовка
 _Avoid_: managed build
 

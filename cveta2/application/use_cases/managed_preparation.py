@@ -239,15 +239,8 @@ def prepare_managed(  # noqa: PLR0913, PLR0917 - explicit workflow boundary.
     payload = files.payload_bytes(validation.result.clean, prepared_metadata, tasks) if ready else {}
     record = ManagedRecord(
         name=name,
-        definition_hash=definition_hash,
         parent_id=parent_id,
         parent_version=parent_version,
-        registry_hash=snapshot.registry_hash,
-        source_hash=hashlib.sha256(captured.source_content).hexdigest(),
-        input_hash=hashlib.sha256(captured.input_content).hexdigest(),
-        payload_hashes={key: hashlib.sha256(value).hexdigest() for key, value in payload.items()},
-        image_hashes=actual_hashes,
-        snapshot=prepared_snapshot,
         findings=findings,
         ready=ready,
         clean=clean,

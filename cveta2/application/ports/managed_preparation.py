@@ -42,21 +42,23 @@ class ImageHashes:
 
 @dataclass(frozen=True)
 class LoadedManagedPreparation:
-    """Checked immutable publication bytes and their local review binding."""
+    """A preparation directory as it is now: no checksum binds its files.
+
+    ``frame`` and ``metadata`` are ``None`` when prepare was blocked and wrote no payload.
+    ``ledger_key`` is the SHA-256 of ``source-snapshot.yaml``; it names the shared feedback ledger.
+    """
 
     directory: Path
     record: ManagedRecord
-    frame: pd.DataFrame
+    captured: CapturedManagedInput
+    frame: pd.DataFrame | None
     metadata: DatasetMetadata | None
-    tasks: TaskManifest | None
-    payload: dict[str, bytes]
-    input_content: bytes
-    source_content: bytes
     report: dict[str, JsonValue]
+    ledger_key: str
 
 
 class ManagedPreparationFiles(Protocol):
-    """Own local capture, source attestation, hashes and immutable persistence."""
+    """Own local capture, source attestation, image hashes and persistence."""
 
     def capture(self, transformed: Path, source: Path) -> CapturedManagedInput:
         """Capture transformed input and source snapshot, verifying source tables."""
@@ -86,7 +88,7 @@ class ManagedPreparationFiles(Protocol):
         """Return JSON-safe diagnostics without inventing successful checks."""
         ...
 
-    def persist(  # noqa: PLR0913, PLR0917 - immutable persistence boundary.
+    def persist(  # noqa: PLR0913, PLR0917 - persistence boundary.
         self,
         directory: Path,
         captured: CapturedManagedInput,
@@ -95,13 +97,13 @@ class ManagedPreparationFiles(Protocol):
         report: dict[str, JsonValue],
         broken_images: pd.DataFrame,
     ) -> None:
-        """Write a fresh local directory with completion marker last."""
+        """Write a fresh local directory with ``preparation.json`` last."""
         ...
 
     def load_prepared(self, directory: Path) -> LoadedManagedPreparation:
-        """Verify record/input/source/payload hashes and reject symlink inputs."""
+        """Read and strictly parse the current files; reject symlinks and an unsupported record."""
         ...
 
-    def stage_payload(self, payload: Mapping[str, bytes]) -> AbstractContextManager[Path]:
-        """Hold a stable private copy until the publication attempt completes."""
+    def stage_payload(self, directory: Path) -> AbstractContextManager[Path]:
+        """Copy the three payload files into a private temporary directory."""
         ...
