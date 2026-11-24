@@ -92,6 +92,15 @@ def _error_details(error: OSError | ValidationError) -> str:
     )
 
 
+def _yaml_error(error: yaml.YAMLError) -> str:
+    """Describe a YAML error by its problem and place, never by the source line, which may hold credentials."""
+    mark = getattr(error, "problem_mark", None)
+    problem = getattr(error, "problem", None)
+    if isinstance(error, yaml.MarkedYAMLError) and problem and mark is not None:
+        return f"{problem} (line {mark.line + 1}, column {mark.column + 1})"
+    return type(error).__name__
+
+
 def _yaml(content: bytes, name: str) -> object:
     try:
         text = content.decode("utf-8")
@@ -99,7 +108,10 @@ def _yaml(content: bytes, name: str) -> object:
         if node is not None:
             _check_yaml_nodes(node)
         result: object = yaml.safe_load(text)
-    except (yaml.YAMLError, UnicodeError) as error:
+    except yaml.YAMLError as error:
+        # The original error text holds the source line: keep it out of the traceback too.
+        raise UploadError(f"Cannot parse {name}: {_yaml_error(error)}") from None
+    except UnicodeError as error:
         raise UploadError(f"Cannot parse {name}: {error}") from error
     except RecursionError as error:
         raise UploadError(f"Cannot parse {name}: YAML nesting is too deep") from error

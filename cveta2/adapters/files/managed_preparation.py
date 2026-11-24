@@ -25,6 +25,7 @@ from cveta2.domain.bundle.models import (
     DatasetMetadata,
     FetchTables,
     TaskManifest,
+    UploadError,
 )
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SourceSnapshot
 from cveta2.domain.managed.preparation import FeedbackFinding, ManagedRecord
@@ -193,6 +194,8 @@ class LocalManagedPreparationFiles:
             report = _REPORT.validate_json(_regular_bytes(directory / "report.json"))
         except (OSError, ValidationError) as error:
             raise ManagedError(f"Cannot load managed preparation: {directory}: {_error_details(error)}") from error
+        except UploadError as error:
+            raise ManagedError(f"Cannot load managed preparation: {directory}: {error}") from error
         return LoadedManagedPreparation(
             directory=directory,
             record=record,

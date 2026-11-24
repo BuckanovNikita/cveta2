@@ -294,14 +294,23 @@ def test_load_refuses_an_unreadable_record(tmp_path: Path, content: bytes) -> No
         LocalManagedPreparationFiles().load_prepared(summary.directory)
 
 
-def test_load_names_invalid_fields_without_printing_their_values(tmp_path: Path) -> None:
+@pytest.mark.parametrize("damage", ["invalid-value", "syntax-error"])
+def test_load_names_invalid_fields_without_printing_their_values(tmp_path: Path, damage: str) -> None:
     """Hand edits are allowed, so a refusal must not echo what was typed, credentials included."""
     summary, *_ = _prepare(tmp_path)
     metadata_path = summary.directory / "dataset.yaml"
-    metadata = yaml.safe_load(metadata_path.read_text())
-    metadata["api_url"] = "https://user:s3cr3t-token@classes.example/api"
-    metadata_path.write_text(yaml.safe_dump(metadata))
-    with pytest.raises(ManagedError, match="api_url") as raised:
+    secret = "https://user:s3cr3t-token@classes.example/api"
+    if damage == "invalid-value":
+        metadata = yaml.safe_load(metadata_path.read_text())
+        metadata["api_url"] = secret
+        metadata_path.write_text(yaml.safe_dump(metadata))
+        expected = r"Cannot load managed preparation: .*api_url"
+    else:
+        lines = metadata_path.read_text().splitlines()
+        lines = [f"api_url: {secret}: y" if line.startswith("api_url:") else line for line in lines]
+        metadata_path.write_text("\n".join(lines) + "\n")
+        expected = r"Cannot load managed preparation: .*dataset\.yaml: .*\(line \d+, column \d+\)$"
+    with pytest.raises(ManagedError, match=expected) as raised:
         LocalManagedPreparationFiles().load_prepared(summary.directory)
     assert "s3cr3t-token" not in str(raised.value)
 
