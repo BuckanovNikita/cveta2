@@ -2,8 +2,14 @@
 
 import pytest
 
-from cveta2.domain.bundle.classes import class_lookup, reconcile_classes
-from cveta2.domain.bundle.models import ApiClass, ClassInfo, UploadError
+from cveta2.domain.bundle.classes import (
+    apply_class_marks,
+    class_lookup,
+    class_mark_changes,
+    reconcile_classes,
+    registry_classes,
+)
+from cveta2.domain.bundle.models import ApiClass, ClassInfo, ClassMarkChange, UploadError
 
 
 def api(number: int, name: str, *, internal_id: int = 100) -> ApiClass:
@@ -66,3 +72,32 @@ def test_api_rename_cannot_steal_another_identity_alias() -> None:
     previous = {"a": ClassInfo(prod_id=1), "b": ClassInfo(prod_id=2, alt_names=["old"])}
     with pytest.raises(UploadError):
         reconcile_classes(previous, [api(1, "old"), api(2, "b")])
+
+
+def test_apply_class_marks_keeps_parent_marks_and_clears_on_include() -> None:
+    classes = {"a": ClassInfo(prod_id=5, empty=True), "b": ClassInfo(prod_id=6)}
+    assert apply_class_marks(classes, {})["a"].empty is True
+    assert apply_class_marks(classes, {5: False})["a"].empty is False
+    assert apply_class_marks(classes, {6: True})["b"].empty is True
+    assert classes["a"].empty is True
+    with pytest.raises(UploadError, match="9"):
+        apply_class_marks(classes, {9: True})
+
+
+def test_registry_classes_marks_listed_numbers() -> None:
+    classes = registry_classes([api(1, "a"), api(2, "b")], [2])
+    assert classes == {"a": ClassInfo(prod_id=1), "b": ClassInfo(prod_id=2, empty=True)}
+
+
+def test_class_mark_changes_lists_only_differences() -> None:
+    previous = {"a": ClassInfo(prod_id=5, empty=True), "b": ClassInfo(prod_id=6)}
+    classes = {
+        "a": ClassInfo(prod_id=5),
+        "b": ClassInfo(prod_id=6),
+        "c": ClassInfo(prod_id=7, empty=True),
+        "d": ClassInfo(prod_id=8),
+    }
+    assert class_mark_changes(previous, classes) == (
+        ClassMarkChange(5, "a", empty=False),
+        ClassMarkChange(7, "c", empty=True),
+    )

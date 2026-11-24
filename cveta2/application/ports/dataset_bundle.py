@@ -8,6 +8,7 @@ from typing import Protocol
 import pandas as pd
 
 from cveta2.application.ports.verification import MediaInspector
+from cveta2.domain.bundle.draft import DatasetDraft
 from cveta2.domain.bundle.models import (
     ApiClass,
     DatasetMetadata,
@@ -17,11 +18,12 @@ from cveta2.domain.bundle.models import (
     TaskManifest,
 )
 from cveta2.domain.bundle.preparation import (
-    BundleDraft,
+    BundleProposal,
+    CurrentBundle,
     PreparedDataset,
     SourceSnapshot,
-    StoredBundle,
 )
+from cveta2.domain.managed.models import ClearMLDestination
 
 
 class ClassApi(Protocol):
@@ -43,8 +45,24 @@ class DatasetStore(Protocol):
         """Return latest finalized nonarchived exact parent; errors are not absence."""
         ...
 
-    def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
-        """Publish only payload files, reporting known child IDs on failure."""
+    def publish(  # noqa: PLR0913
+        self,
+        project: str,
+        name: str,
+        parent_id: str | None,
+        directory: Path,
+        *,
+        files: tuple[str, ...],
+        output_uri: str | None = None,
+    ) -> Publication:
+        """Publish only the listed files, reporting known child IDs on failure."""
+        ...
+
+    def parent_file(self, parent: DatasetParent, filename: str) -> Path | None:
+        """Return a local copy of one file of that exact version, or None when it is not listed.
+
+        SDK and download errors raise UploadError; they never mean "absent".
+        """
         ...
 
 
@@ -71,9 +89,25 @@ class RootChecks(Protocol):
         """Reject uncovered or ambiguous remote paths."""
         ...
 
+    def missing_files(self, frame: pd.DataFrame) -> list[str]:
+        """Return each distinct absolute ``image_path`` that is not a regular file, in row order."""
+        ...
 
-class BundleFiles(Protocol):
-    """Capture and persist stable source/payload bytes behind a file boundary."""
+
+class DraftFiles(Protocol):
+    """Read and write the editable ``dataset.yaml`` draft of a fetch directory."""
+
+    def read_draft(self, directory: Path) -> DatasetDraft | None:
+        """Return the draft, or None when the directory has no ``dataset.yaml``."""
+        ...
+
+    def write_draft(self, directory: Path, draft: DatasetDraft) -> bool:
+        """Write the draft; return True when a different file was moved to ``dataset.yaml.bak``."""
+        ...
+
+
+class BundleFiles(DraftFiles, Protocol):
+    """Read fetch sources, write prepared bundles and read their current files."""
 
     def read_source(self, directory: Path) -> SourceSnapshot:
         """Read all four source files exactly once and parse the captured bytes."""
@@ -83,16 +117,32 @@ class BundleFiles(Protocol):
         """Read strict parent metadata."""
         ...
 
-    def save_preparation(self, directory: Path, draft: BundleDraft) -> PreparedDataset:
-        """Write a new local report and, when ready, immutable upload evidence."""
+    def default_directory(self, source: Path) -> Path:
+        """Return the first free sibling ``<source>-prepared``, ``<source>-prepared-2``, … of the resolved source."""
         ...
 
-    def stage_prepared(self, directory: Path) -> AbstractContextManager[StoredBundle]:
-        """Verify hashes and stage stable bytes; clean temporary files on exit."""
+    def save_preparation(self, directory: Path, proposal: BundleProposal) -> PreparedDataset:
+        """Write a new bundle in one step: the archive and report, and the payload when ready."""
         ...
 
-    def payload_matches(self, bundle: StoredBundle, frame: pd.DataFrame, tasks: TaskManifest) -> bool:
-        """Compare rederived publication bytes with the reviewed snapshot."""
+    def read_bundle(self, directory: Path) -> CurrentBundle:
+        """Read the bundle's current files once; a missing or malformed one raises UploadError."""
+        ...
+
+    def read_rows(self, path: Path) -> pd.DataFrame:
+        """Read a downloaded parent ``dataset.csv`` strictly; errors raise UploadError naming the file."""
+        ...
+
+    def write_tasks(self, directory: Path, tasks: TaskManifest) -> None:
+        """Rewrite the bundle's ``tasks.yaml``."""
+        ...
+
+    def stage_publication(self, bundle: CurrentBundle, tasks: TaskManifest) -> AbstractContextManager[Path]:
+        """Hold the captured bytes and ``tasks.yaml`` in a private directory until publication ends."""
+        ...
+
+    def write_publication(self, directory: Path, publication: Publication, destination: ClearMLDestination) -> None:
+        """Record the published version in the bundle's ``publication.json``; may raise OSError."""
         ...
 
 

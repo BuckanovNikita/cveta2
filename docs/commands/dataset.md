@@ -784,6 +784,6 @@ print(publication.dataset_id, publication.version)
 - [configuration.md](../configuration.md) — личная и общая конфигурация, разделы `projects` и `datasets`.
 - [dataset-format.md](../dataset-format.md) — столбцы CSV и файлы подготовленного датасета.
 - [images-and-cache.md](../images-and-cache.md) — кэш изображений и его каталоги.
-- [verify](verify.md) и [upload-dataset](upload-dataset.md) — ручная подготовка и публикация без управляемого датасета.
+- [verify](verify.md) и [upload-dataset](upload-dataset.md) — подготовка каталога и публикация без управляемого датасета.
 - [ignore](ignore.md) — список игнорируемых задач.
 - [workflows.md](../workflows.md) — сценарии целиком.

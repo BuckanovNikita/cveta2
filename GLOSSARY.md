@@ -31,6 +31,11 @@ The four CSV files a full fetch writes: `dataset.csv`, `obsolete.csv`, `in_progr
 _Russian_: файлы полной выгрузки
 _Avoid_: splits (that word is reserved for train/val/test)
 
+**Dataset draft**:
+The `dataset.yaml` a full fetch writes next to the partition outputs: the ClearML destination, output URI, class API, excluded class numbers and image roots known from the global configuration, each key optional; `verify` reads it instead of the configuration.
+_Russian_: черновик `dataset.yaml`
+_Avoid_: template, stub config
+
 **Dataset (partition)**:
 The rows of the latest completed task of each image that is neither deleted nor reopened; the file `dataset.csv`.
 _Russian_: датасет (`dataset.csv`)
@@ -160,12 +165,12 @@ _Russian_: очищенный CSV (`clean.csv`)
 _Avoid_: fixed CSV, valid CSV
 
 **Cleanup acceptance**:
-The explicit consent (`--clean`) to drop broken rows and apply repairs; without it a result that needs cleanup is not ready.
+The consent to drop broken rows and apply repairs: `--clean` for the CSV check and `dataset prepare`, the default in bundle preparation unless `--no-clean`; without it a result that needs cleanup is not ready.
 _Russian_: подтверждение очистки
 _Avoid_: auto-fix
 
 **Blocker**:
-A condition found while preparing a bundle that makes the preparation not ready (`ready: false`); it is listed under `blockers` in `report.json` and stops publication.
+A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`.
 _Russian_: блокирующее условие
 _Avoid_: blocking error, fatal issue
 
@@ -194,13 +199,13 @@ _Avoid_: empty label, negative class, background
 ### Preparation and publication
 
 **Prepared bundle**:
-A directory that preparation writes once: a copy of its source files, `broken-images.csv` and `report.json`, and, when the preparation is ready, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml` with `preparation.json` and `preparation.sha256`, which publication uploads to ClearML.
+A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation keeps its own state files (see Managed preparation).
 _Russian_: подготовленный датасет
 _Avoid_: prepared set, release candidate, package
 
 **Bundle preparation**:
-Preparation of a prepared bundle from a full fetch directory with `verify --bundle`, with classes and image roots chosen by flags or prompts; published with `upload-dataset`.
-_Russian_: ручная подготовка
+Preparation of a prepared bundle from a full fetch directory with `verify <directory>`, taking the destination, class API, excluded classes and image roots from flags, the dataset draft and the parent dataset, with cleanup accepted by default; published with `upload-dataset`.
+_Russian_: подготовка каталога
 _Avoid_: standalone preparation, ad hoc preparation
 
 **Managed dataset**:
@@ -229,7 +234,7 @@ _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
 **Stable split**:
-An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
+An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and only when the image's other cells agree with the published split; `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
 _Russian_: стабильный split
 _Avoid_: random split, rebalancing, split policy
 
@@ -249,7 +254,7 @@ _Russian_: управляемая история
 _Avoid_: adoption, migration
 
 **Publication**:
-The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset (the first version of a managed lineage has none), after rechecking the preparation.
+The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset (the first version of a managed lineage has none), after validating the directory's current files; `upload-dataset` publishes four files, `dataset publish` three.
 _Russian_: публикация
 _Avoid_: release, push, upload (reserved for CVAT task creation)
 

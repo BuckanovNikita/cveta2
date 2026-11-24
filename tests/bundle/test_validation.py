@@ -14,11 +14,18 @@ from cveta2.domain.bundle.models import (
     DatasetMetadata,
     UploadError,
 )
+from cveta2.domain.bundle.validation import (
+    excluded_class_rows,
+    images_without_split,
+    missing_active_classes,
+    trainability_gaps,
+)
 from cveta2.domain.bundle.validation import validate_bundle as _validate_bundle
 from cveta2.domain.verification.models import ValidationOptions
+from cveta2.domain.verification.validation import validate_dataframe
 
 
-def validate_bundle(frame: Any, metadata: Any, base_dir: Any) -> BundleValidation:
+def validate_bundle(frame: Any, metadata: Any, base_dir: Any, *, allow_empty_split: bool = False) -> BundleValidation:
     return _validate_bundle(
         frame,
         metadata,
@@ -27,6 +34,7 @@ def validate_bundle(frame: Any, metadata: Any, base_dir: Any) -> BundleValidatio
             profile="clearml-yolo",
             options=ValidationOptions(check_images=True, emit_warnings=False, base_dir=base_dir),
         ),
+        allow_empty_split=allow_empty_split,
     )
 
 
@@ -225,3 +233,140 @@ def test_explicit_negative_does_not_require_an_empty_class(tmp_path: Path) -> No
     bundle = validate_bundle(pd.DataFrame([row(tmp_path, "train.png"), background]), metadata(), tmp_path)
     assert not bundle.blockers
     assert bundle.result.broken.empty
+
+
+SPLIT_BLOCKER = "Every input row must have a valid train, val or test split assignment."
+
+
+def coverage_metadata() -> DatasetMetadata:
+    return DatasetMetadata(
+        api_url="https://example.com/classes",
+        classes={
+            "bowl": ClassInfo(prod_id=1),
+            "cup": ClassInfo(prod_id=2, alt_names=["mug"]),
+            "plate": ClassInfo(prod_id=3, empty=True),
+        },
+    )
+
+
+def labelled(*rows: tuple[object, object]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=["instance_label", "instance_shape"], dtype=object)
+
+
+def test_missing_active_classes_lists_sorted_unexcluded_classes_without_bbox() -> None:
+    assert missing_active_classes(labelled(("bowl", "box"), ("", "none")), coverage_metadata()) == ("cup",)
+    assert missing_active_classes(labelled(), coverage_metadata()) == ("bowl", "cup")
+    assert missing_active_classes(pd.DataFrame(), coverage_metadata()) == ("bowl", "cup")
+
+
+def test_missing_active_classes_counts_aliases() -> None:
+    assert "cup" not in missing_active_classes(labelled(("mug", "box")), coverage_metadata())
+
+
+def test_missing_active_classes_counts_rows_without_a_shape_as_boxes() -> None:
+    frame = labelled(("bowl", ""), ("cup", "none"), ("cup", "deleted"))
+    assert missing_active_classes(frame, coverage_metadata()) == ("cup",)
+    without_column = pd.DataFrame({"instance_label": ["bowl", "mug", float("nan")]}, dtype=object)
+    assert missing_active_classes(without_column, coverage_metadata()) == ()
+
+
+def test_excluded_class_rows_counts_rows_of_excluded_classes() -> None:
+    frame = labelled(("plate", "box"), ("plate", "box"), ("bowl", "box"))
+    assert excluded_class_rows(frame, coverage_metadata()) == 2
+    assert excluded_class_rows(pd.DataFrame(), coverage_metadata()) == 0
+
+
+def coverage_row(tmp_path: Path, name: str, split: str = "train", label: str = "bowl") -> dict[str, object]:
+    return {key: value for key, value in row(tmp_path, name, split, label).items() if key != "extra"}
+
+
+@pytest.mark.parametrize("empty", ["", float("nan")])
+def test_preparation_mode_accepts_empty_split(tmp_path: Path, empty: object) -> None:
+    frame = pd.DataFrame([coverage_row(tmp_path, "a.png"), coverage_row(tmp_path, "b.png", label="cup")])
+    frame["split"] = pd.Series([empty, empty], dtype=object)
+    bundle = validate_bundle(frame, coverage_metadata(), tmp_path, allow_empty_split=True)
+    assert bundle.result.broken_row_positions == ()
+    assert bundle.blockers == ()
+    assert images_without_split(bundle.result.clean) == 2
+    strict = validate_bundle(frame, coverage_metadata(), tmp_path)
+    assert strict.result.broken_row_positions == (0, 1)
+    assert {issue.row_position for issue in strict.result.issues if issue.code == "invalid_split"} == {0, 1}
+    assert SPLIT_BLOCKER in strict.blockers
+
+
+@pytest.mark.parametrize("allow_empty_split", [False, True])
+def test_preparation_mode_still_rejects_invalid_split_value(tmp_path: Path, *, allow_empty_split: bool) -> None:
+    frame = pd.DataFrame(
+        [
+            coverage_row(tmp_path, "a.png", "holdout"),
+            coverage_row(tmp_path, "b.png"),
+            coverage_row(tmp_path, "c.png", "val"),
+        ]
+    )
+    bundle = validate_bundle(frame, coverage_metadata(), tmp_path, allow_empty_split=allow_empty_split)
+    assert bundle.result.broken_row_positions == (0,)
+    assert "invalid_split" in {issue.code for issue in bundle.result.issues if issue.row_position == 0}
+
+
+def test_preparation_mode_keeps_structural_and_empty_blockers(tmp_path: Path) -> None:
+    frame = pd.DataFrame([coverage_row(tmp_path, "a.png")]).drop(columns=["split"])
+    blockers = validate_bundle(frame, coverage_metadata(), tmp_path, allow_empty_split=True).blockers
+    assert "Input CSV has structural validation errors." in blockers
+    assert "No valid images remain for upload." in blockers
+    assert SPLIT_BLOCKER not in blockers
+
+
+def test_preparation_mode_leaves_trainability_to_the_caller(tmp_path: Path) -> None:
+    frame = pd.DataFrame([coverage_row(tmp_path, "a.png"), coverage_row(tmp_path, "b.png", label="cup")])
+    prepared = validate_bundle(frame, coverage_metadata(), tmp_path, allow_empty_split=True)
+    assert "Required val split has no valid images." not in prepared.blockers
+    assert prepared.blockers == ()
+    assert trainability_gaps(prepared.result.clean) == ("val_images",)
+    assert validate_bundle(frame, coverage_metadata(), tmp_path).blockers == (
+        "Required val split has no valid images.",
+    )
+
+
+def test_trainability_gaps_ignore_rows_without_a_split() -> None:
+    clean = pd.DataFrame(
+        {"split": ["", "val", "train"], "instance_label": ["bowl", "bowl", ""]},
+        dtype=object,
+    )
+    assert trainability_gaps(clean) == ("train_box",)
+    assert trainability_gaps(clean.iloc[[0]]) == ("train_images", "val_images", "train_box")
+    assert trainability_gaps(pd.DataFrame()) == ("train_images", "val_images", "train_box")
+
+
+def test_default_mode_lists_every_trainability_blocker_in_order(tmp_path: Path) -> None:
+    background = coverage_row(tmp_path, "a.png", "test", "")
+    for column in ("bbox_x_tl", "bbox_y_tl", "bbox_x_br", "bbox_y_br"):
+        background[column] = ""
+    assert validate_bundle(pd.DataFrame([background]), coverage_metadata(), tmp_path).blockers == (
+        "Required train split has no valid images.",
+        "Required val split has no valid images.",
+        "At least one valid training box is required.",
+    )
+
+
+def test_images_without_split_counts_distinct_names() -> None:
+    frame = pd.DataFrame(
+        {"image_name": ["a.png", "a.png", "b.png", "c.png"], "split": ["", float("nan"), "train", ""]},
+        dtype=object,
+    )
+    assert images_without_split(frame) == 2
+    assert images_without_split(frame.drop(columns=["split"])) == 3
+    assert images_without_split(pd.DataFrame()) == 0
+
+
+def test_clearml_yolo_profile_still_requires_split(tmp_path: Path) -> None:
+    frame = pd.DataFrame([coverage_row(tmp_path, "a.png", "")])
+    result = validate_dataframe(frame, profile="clearml-yolo")
+    assert "invalid_split" in {issue.code for issue in result.issues}
+
+
+@pytest.mark.parametrize("allow_empty_split", [False, True])
+def test_validate_bundle_does_not_check_class_coverage(tmp_path: Path, *, allow_empty_split: bool) -> None:
+    frame = pd.DataFrame([coverage_row(tmp_path, "a.png"), coverage_row(tmp_path, "b.png", "val")])
+    assert missing_active_classes(frame, coverage_metadata()) == ("cup",)
+    bundle = validate_bundle(frame, coverage_metadata(), tmp_path, allow_empty_split=allow_empty_split)
+    assert bundle.blockers == ()

@@ -471,11 +471,13 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
     profile: Profile = "cveta2",
     options: ValidationOptions | None = None,
     inspection: MediaInspection | None = None,
+    allow_empty_split: bool = False,
 ) -> ValidationResult:
     """Validate rows and propose repairs while preserving original broken records.
 
     Ordinary data errors never raise. Invalid configuration and missing optional
     dependencies remain explicit caller errors. Indices may be duplicated.
+    ``allow_empty_split`` accepts empty ``split`` cells (bundle preparation only).
     """
     if profile not in ("cveta2", "clearml-yolo"):
         raise DatasetInputError(f"Unknown validation profile: {profile!r}")
@@ -501,7 +503,7 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
         )
     if profile == "clearml-yolo":
         working = working.loc[:, [column for column in CLEARML_COLUMNS if column in working]]
-    field_issues = schema_issues(working, profile)
+    field_issues = schema_issues(working, profile, allow_empty_split=allow_empty_split)
     issues = field_issues.copy()
     extras = sorted(set(frame.columns) - set(KNOWN_COLUMNS))
     if extras and profile == "cveta2":
@@ -574,7 +576,7 @@ def validate_dataframe(  # noqa: C901, PLR0912, PLR0915
         if repairs:
             # Revalidate the final coordinates, replacing deferred negative-
             # coordinate failures.
-            issues = schema_issues(working, profile) + [
+            issues = schema_issues(working, profile, allow_empty_split=allow_empty_split) + [
                 issue
                 for issue in issues[len(field_issues) :]
                 if not (issue.code == "out_of_bounds" and issue.row_position in repairs)

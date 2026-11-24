@@ -114,6 +114,11 @@ def fetch(  # noqa: PLR0913
     :data:`cveta2.CSV_COLUMNS`; rows are flattened
     :data:`cveta2.AnnotationRecord` variants.
 
+    Like the CLI, it also writes the draft ``dataset.yaml`` next to the
+    CSVs (ClearML destination, class API, excluded classes and image
+    roots known from the global configuration) and logs a warning for
+    each gap and class coverage finding; none of them raises.
+
     *cache* controls the task-annotation cache: ``"use"`` reads and
     updates it, ``"refresh"`` re-downloads every task and updates it,
     ``"off"`` disables it entirely.

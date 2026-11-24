@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from cveta2.domain.bundle.models import FetchTables, TaskManifest, UploadError
-from cveta2.domain.bundle.tasks import derive_tasks
+from cveta2.domain.bundle.tasks import derive_tasks, trace_tasks
 
 
 def frame(*rows: tuple[object, str, object]) -> pd.DataFrame:
@@ -191,3 +191,20 @@ def test_only_an_explicitly_true_deleted_row_is_a_reopen_marker(flag: object, *,
     source = tables(frame((6, "z", True)), obsolete=frame((5, "z", True)), in_progress=deleted_row)
 
     assert derive_tasks(source, source.dataset).obsolete == ([5] if is_marker else [])
+
+
+def test_trace_tasks_counts_untraceable_rows() -> None:
+    source = tables(frame((3, "a", True)), obsolete=frame((1, "a", True)))
+    traced = trace_tasks(source, frame((3, "a", True), (99, "a", True), ("", "a", True)))
+    assert traced.untraced_rows == 2
+    assert traced.manifest == TaskManifest(included=[3], obsolete=[1])
+
+
+@pytest.mark.parametrize(
+    "clean",
+    [pd.DataFrame(), frame(), pd.DataFrame({"image_name": ["a"]}), frame((3, "", True), (3.5, "a", True))],
+)
+def test_trace_tasks_never_raises_on_the_clean_frame(clean: pd.DataFrame) -> None:
+    traced = trace_tasks(tables(frame((3, "a", True))), clean)
+    assert traced.untraced_rows == len(clean)
+    assert traced.manifest.included == []

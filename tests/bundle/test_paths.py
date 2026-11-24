@@ -130,3 +130,11 @@ def test_unreadable_unused_root_is_rejected(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr(os, "scandir", inaccessible)
     with pytest.raises(UploadError, match=r"cannot|Cannot|access"):
         LocalRoots().check_local_root(str(root))
+
+
+def test_missing_files_lists_absent_image_paths(tmp_path: Path) -> None:
+    present = tmp_path / "present.png"
+    present.write_bytes(b"image")
+    deleted = tmp_path / "deleted.png"
+    frame = pd.DataFrame({"image_path": [str(present), str(deleted), str(deleted), ""]})
+    assert LocalRoots().missing_files(frame) == [str(deleted)]

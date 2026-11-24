@@ -253,6 +253,17 @@ def _row_masks(frame: pd.DataFrame, profile: Profile, code: str) -> "pd.Series[b
 
 def schema_for(profile: Profile) -> pa.DataFrameSchema:
     """Return a non-coercing profile schema preserving values and extras."""
+    return _schema(profile, allow_empty_split=False)
+
+
+def _schema(profile: Profile, *, allow_empty_split: bool) -> pa.DataFrameSchema:
+    """Build the profile schema; ``allow_empty_split`` relaxes only empty ``split`` cells.
+
+    Bundle preparation reports a split still empty after the parent prefill as
+    pending, so it accepts an empty cell; a present non-empty value must still
+    be train, val or test, and the ``split`` column stays required for
+    ``clearml-yolo``.
+    """
     required = required_columns(profile)
     columns = {
         name: pa.Column(required=name in required, nullable=True, coerce=False)
@@ -305,7 +316,7 @@ def schema_for(profile: Profile) -> pa.DataFrameSchema:
             _check(
                 partial(_enum, allowed),
                 f"invalid_{name}",
-                optional=name != "split" or profile == "cveta2",
+                optional=name != "split" or profile == "cveta2" or allow_empty_split,
             )
         )
     checks = [
@@ -316,10 +327,10 @@ def schema_for(profile: Profile) -> pa.DataFrameSchema:
     return pa.DataFrameSchema(columns, checks=checks, strict=False, coerce=False, unique_column_names=True)
 
 
-def schema_issues(frame: pd.DataFrame, profile: Profile) -> list[Issue]:
+def schema_issues(frame: pd.DataFrame, profile: Profile, *, allow_empty_split: bool = False) -> list[Issue]:
     """Collect lazy failures with original positional lineage."""
     try:
-        schema_for(profile).validate(frame, lazy=True)
+        _schema(profile, allow_empty_split=allow_empty_split).validate(frame, lazy=True)
     except pa.errors.SchemaErrors as error:
         issues: list[Issue] = []
         seen: set[tuple[str, int | None, tuple[str, ...]]] = set()

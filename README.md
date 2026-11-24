@@ -21,7 +21,7 @@ pip install git+ssh://git@<host>/<org>/cveta2@vX.Y.Z
 uv add git+ssh://git@<host>/<org>/cveta2@<хеш-коммита>
 ```
 
-ClearML SDK ставится вместе с пакетом, а его подключение к серверу ClearML настраивается отдельно. Оно нужно для `verify --bundle`, `upload-dataset` и команд `cveta2 dataset`, которые читают или публикуют версии в ClearML. Настройте его файлом `~/clearml.conf` (или файлом из `CLEARML_CONFIG_FILE`) либо переменными `CLEARML_API_HOST`, `CLEARML_API_ACCESS_KEY` и `CLEARML_API_SECRET_KEY`; если адрес сервера API не вида `api.<домен>` и без порта 8008, задайте ещё `CLEARML_WEB_HOST` и `CLEARML_FILES_HOST`. Проверить настройку можно командой [`cveta2 doctor`](docs/commands/doctor.md).
+ClearML SDK ставится вместе с пакетом, а его подключение к серверу ClearML настраивается отдельно. Оно нужно для `verify <каталог>`, `upload-dataset` и команд `cveta2 dataset`, которые читают или публикуют версии в ClearML. Настройте его файлом `~/clearml.conf` (или файлом из `CLEARML_CONFIG_FILE`) либо переменными `CLEARML_API_HOST`, `CLEARML_API_ACCESS_KEY` и `CLEARML_API_SECRET_KEY`; если адрес сервера API не вида `api.<домен>` и без порта 8008, задайте ещё `CLEARML_WEB_HOST` и `CLEARML_FILES_HOST`. Проверить настройку можно командой [`cveta2 doctor`](docs/commands/doctor.md).
 
 ## Быстрый старт
 
@@ -52,7 +52,7 @@ cveta2 fetch -p "Retail shelves" -o output/                # выгрузить 
 | [`labels`](docs/commands/labels.md) | Посмотреть и изменить метки (labels) проекта |
 | [`ignore`](docs/commands/ignore.md) | Вести список задач, которые `fetch` пропускает |
 | [`task`](docs/commands/task.md) | Изменить задачу: пометить кадры удалёнными, удалить аннотации метки или задачу, сменить stage и state |
-| [`verify`](docs/commands/verify.md) | Проверить CSV или подготовить датасет к публикации |
+| [`verify`](docs/commands/verify.md) | Проверить CSV или подготовить каталог выгрузки к публикации |
 | [`upload-dataset`](docs/commands/upload-dataset.md) | Опубликовать подготовленный датасет в ClearML |
 | [`dataset`](docs/commands/dataset.md) | Управлять именованными датасетами: выгрузка, подготовка, публикация |
 

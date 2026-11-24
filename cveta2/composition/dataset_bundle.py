@@ -30,11 +30,11 @@ def bundle_services() -> BundleServices:
     )
 
 
-def prepare_dataset(source: Path, directory: Path, options: PrepareOptions) -> PreparedDataset:
-    """Prepare local review evidence using runtime configuration."""
+def prepare_dataset(source: Path, directory: Path | None, options: PrepareOptions) -> PreparedDataset:
+    """Prepare a bundle; ``None`` writes it to the first free ``<source>-prepared`` sibling."""
     return prepare(source, directory, options, bundle_services())
 
 
-def upload_dataset(directory: Path) -> Publication:
-    """Revalidate reviewed evidence and finalize an explicit ClearML child."""
-    return publish(directory, bundle_services())
+def upload_dataset(directory: Path, *, force_resplit: bool = False) -> Publication:
+    """Validate the bundle's current files and finalize them as a ClearML child."""
+    return publish(directory, bundle_services(), force_resplit=force_resplit)

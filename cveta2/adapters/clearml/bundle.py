@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     # visible to the import-linter contract that confines it to this adapter.
     import clearml  # noqa: F401 - graph visibility for import-linter only
 
-_PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
-
 
 class _Dataset(Protocol):
     """Typed subset of the opaque, lazily imported SDK dataset interface.
@@ -63,14 +61,15 @@ class _DatasetFactory(Protocol):
         recursive_project_search: bool,  # noqa: F841, RUF100
         include_archived: bool,  # noqa: F841, RUF100
     ) -> list[Mapping[str, object]]: ...
-    def get(
+    def get(  # noqa: PLR0913
         self,
         *,
-        dataset_project: str,  # noqa: F841, RUF100
-        dataset_name: str,
-        only_completed: bool,  # noqa: F841, RUF100
-        auto_create: bool,  # noqa: F841, RUF100
-        include_archived: bool,  # noqa: F841, RUF100
+        dataset_id: str | None = None,  # noqa: F841, RUF100
+        dataset_project: str | None = None,  # noqa: F841, RUF100
+        dataset_name: str | None = None,
+        only_completed: bool = False,  # noqa: F841, RUF100
+        auto_create: bool = False,  # noqa: F841, RUF100
+        include_archived: bool = False,  # noqa: F841, RUF100
     ) -> _Dataset: ...
     def create(
         self,
@@ -78,6 +77,7 @@ class _DatasetFactory(Protocol):
         dataset_project: str,  # noqa: F841, RUF100
         dataset_name: str,
         parent_datasets: list[str],  # noqa: F841, RUF100
+        output_uri: str | None = None,  # noqa: F841, RUF100
     ) -> _Dataset: ...
 
 
@@ -184,30 +184,53 @@ class ClearMLStore:
                     raise UploadError("ClearML parent advertised dataset.yaml but its download is missing")
             return DatasetParent(dataset.id, project, name, dataset.version, metadata_path)
 
+    def parent_file(self, parent: DatasetParent, filename: str) -> Path | None:
+        """Download one file of the exact parent version; None when the version does not list it."""
+        with _sdk_errors(f"Cannot download {filename} of ClearML dataset {parent.dataset_id}"):
+            dataset = _sdk().Dataset.get(dataset_id=parent.dataset_id)
+            if filename not in dataset.list_files():
+                return None
+            directory = dataset.get_local_copy(files=[filename], use_soft_links=False, raise_on_error=True)
+            path = Path(directory) / filename
+            if not path.is_file():
+                raise UploadError(f"ClearML parent advertised {filename} but its download is missing")
+            return path
+
     @staticmethod
-    def _upload_child(child: _Dataset) -> None:
+    def _upload_child(child: _Dataset, files: tuple[str, ...]) -> None:
         # upload is synchronous in ClearML. Disable SDK retries and finalize's
         # implicit upload to avoid replaying mutation after uncertain failures.
         if child.upload(retries=0) is False or child.is_dirty():
             raise UploadError(f"Upload did not complete for created ClearML dataset {child.id}")
-        if set(child.list_files()) != set(_PAYLOAD):
+        if set(child.list_files()) != set(files):
             raise UploadError(f"Upload lost bundle files for created ClearML dataset {child.id}")
         if child.finalize(raise_on_error=True, auto_upload=False) is not True or not child.is_final():
             raise UploadError(f"Finalization did not complete for created ClearML dataset {child.id}")
-        if set(child.list_files()) != set(_PAYLOAD):
+        if set(child.list_files()) != set(files):
             raise UploadError(f"Finalized ClearML dataset {child.id} has an unexpected file manifest")
 
-    def publish(self, project: str, name: str, parent_id: str | None, directory: Path) -> Publication:
-        """Publish exactly three files in a new finalized child."""
-        for filename in _PAYLOAD:
+    def publish(  # noqa: PLR0913
+        self,
+        project: str,
+        name: str,
+        parent_id: str | None,
+        directory: Path,
+        *,
+        files: tuple[str, ...],
+        output_uri: str | None = None,
+    ) -> Publication:
+        """Publish exactly the listed files in a new finalized child."""
+        for filename in files:
             if not (directory / filename).is_file():
                 raise UploadError(f"Required upload file is missing: {filename}")
         child: _Dataset | None = None
         with _sdk_errors("Cannot create ClearML child dataset"):
+            extra = {} if output_uri is None else {"output_uri": output_uri}
             child = _sdk().Dataset.create(
                 dataset_project=project,
                 dataset_name=name,
                 parent_datasets=[parent_id] if parent_id is not None else [],
+                **extra,
             )
         with _sdk_errors(
             f"Publication failed for created ClearML dataset {child.id}; inspect it before retrying",
@@ -221,11 +244,13 @@ class ClearMLStore:
                 child.remove_files(dataset_path="*", recursive=True)
             if child.list_files():
                 raise UploadError(f"Created ClearML dataset {child.id} retained inherited entries")
-            for filename in _PAYLOAD:
+            for filename in files:
                 child.add_files(path=str(directory / filename), local_base_folder=str(directory))
-            if set(child.list_files()) != set(_PAYLOAD):
-                raise UploadError(f"Created ClearML dataset {child.id} does not contain exactly the three bundle files")
-            self._upload_child(child)
+            if set(child.list_files()) != set(files):
+                raise UploadError(
+                    f"Created ClearML dataset {child.id} does not contain exactly the {len(files)} bundle files"
+                )
+            self._upload_child(child, files)
             return Publication(child.id, child.version)
 
 

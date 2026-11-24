@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+import yaml
 
 import cveta2
 from cveta2.adapters.config.settings import CvatConfig
@@ -38,7 +39,7 @@ from cveta2.application.use_cases.fetch import (
     _retrieve_task,
 )
 from cveta2.composition.client import CvatClient
-from cveta2.composition.workflows import fetch_dependencies, fetch_project
+from cveta2.composition.workflows import fetch_dependencies, fetch_project, fetch_selected_tasks
 from cveta2.domain.errors import CvatApiError
 from cveta2.domain.models import (
     CSV_COLUMNS,
@@ -986,3 +987,58 @@ def test_a_failing_task_still_aborts_the_whole_fetch(coco8_fixtures: LoadedFixtu
 
     with pytest.raises(CvatApiError):
         _fetch_project(api, fake, tmp_path / "out", FetchOptions())
+
+
+# ---------------------------------------------------------------------------
+# the draft dataset.yaml of a full fetch
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_project_writes_draft_next_to_partition_csvs(
+    normal_fake: LoadedFixtures, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    """The draft lands beside the four CSVs; publication is looked up by CVAT project ID."""
+    lookups: list[tuple[int, Path | None]] = []
+
+    def no_publication(project_id: int, *, config_path: Path | None = None) -> None:
+        lookups.append((project_id, config_path))
+
+    monkeypatch.setattr("cveta2.composition.workflows.project_publication", no_publication)
+    fake = normal_fake
+    out = tmp_path / "out"
+    config = tmp_path / "personal.yaml"
+
+    fetch_project(
+        CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
+        FetchTarget(fake.project.id, fake.project.name, out, make_cs_info(bucket="bkt", prefix="data")),
+        FetchOptions(config_path=config),
+    )
+
+    assert lookups == [(fake.project.id, config)]
+    assert {path.name for path in out.iterdir() if path.is_file()} == {
+        "dataset.csv",
+        "obsolete.csv",
+        "in_progress.csv",
+        "deleted.csv",
+        "dataset.yaml",
+    }
+    assert yaml.safe_load((out / "dataset.yaml").read_text()) == {
+        "clearml": {"output_uri": "s3://bkt/.clearml"},
+        "images": {"s3_root": ["s3://bkt/data"]},
+    }
+    assert any("cveta2 setup --global --project" in message for message in capture_logs)
+
+
+def test_fetch_selected_tasks_writes_no_draft(normal_fake: LoadedFixtures, tmp_path: Path) -> None:
+    """A task fetch cannot be prepared, so it gets no draft."""
+    fake = normal_fake
+    out = tmp_path / "out"
+
+    fetch_selected_tasks(
+        CvatClient(CvatConfig(), api=FakeCvatApi(fake)),
+        FetchTarget(fake.project.id, fake.project.name, out, None),
+        FetchOptions(task_selector=[fake.tasks[0].name]),
+    )
+
+    assert (out / "dataset.csv").is_file()
+    assert not (out / "dataset.yaml").exists()
