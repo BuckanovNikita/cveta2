@@ -156,10 +156,15 @@ def _parent_local_roots(roots: Sequence[str], services: BundleServices) -> tuple
     return kept, tuple(dropped)
 
 
+def _split_missing(count: int, directory: Path) -> str:
+    """Return the empty-split line that ``verify`` lists under ``pending`` and ``upload-dataset`` refuses with."""
+    return f"заполните split у {count} изображений в {directory / 'dataset.csv'}"
+
+
 def _pending(clean: pd.DataFrame, directory: Path) -> tuple[str, ...]:
     """Split conditions ``upload-dataset`` enforces that the clean rows do not meet yet."""
     if count := images_without_split(clean):
-        return (f"заполните split у {count} изображений в {directory / 'dataset.csv'}",)
+        return (_split_missing(count, directory),)
     return tuple(_GAP_PENDING[gap] for gap in trainability_gaps(clean))
 
 
@@ -353,9 +358,12 @@ def _check_roots(bundle: CurrentBundle, destination: ClearMLDestination, service
 def _check_rows(
     bundle: CurrentBundle, parent: DatasetParent | None, services: BundleServices, *, force_resplit: bool
 ) -> None:
-    """Check 5: the rows pass validation untouched, cover every active class and keep published splits."""
+    """Check 5: splits filled, rows untouched and trainable, active classes covered, published splits kept."""
     metadata = bundle.metadata
-    validation = _validate(bundle.dataset, metadata, services)
+    if count := images_without_split(bundle.dataset):
+        raise UploadError(f"dataset.csv не готов к публикации:\n  {_split_missing(count, bundle.directory)}")
+    # Every split is filled, so the empty-split mode differs only in leaving trainability to the lines below.
+    validation = _validate(bundle.dataset, metadata, services, allow_empty_split=True)
     result = validation.result
     if validation.blockers or result.structural_errors or result.requires_cleanup:
         problems = [
@@ -369,6 +377,8 @@ def _check_rows(
             f"dataset.csv не проходит проверку:\n{_listing(problems)}\n"
             "Исправьте или удалите эти строки; публикуются только строки без отклонений и исправлений."
         )
+    if gaps := trainability_gaps(result.clean):
+        raise UploadError("dataset.csv не готов к публикации:\n" + _listing([_GAP_PENDING[gap] for gap in gaps]))
     if missing := missing_active_classes(bundle.dataset, metadata):
         raise UploadError(
             f"Нет ни одного bbox классов {', '.join(missing)}. Отметьте их empty: true в dataset.yaml "

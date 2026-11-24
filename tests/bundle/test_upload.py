@@ -114,12 +114,35 @@ def test_upload_accepts_edits_and_rederives_tasks(scenario: Scenario, tmp_path: 
     assert store.published["tasks.yaml"] == (prepared / "tasks.yaml").read_bytes()
 
 
-def test_upload_refuses_rows_without_split(scenario: Scenario, tmp_path: Path) -> None:
+def _clear_splits(frame: pd.DataFrame) -> pd.DataFrame:
+    frame["split"] = ""
+    return frame
+
+
+@pytest.mark.parametrize(
+    ("edit", "count"), [(_set_split("val2.png", ""), 1), (_clear_splits, 3)], ids=["one-image", "every-image"]
+)
+def test_upload_refuses_rows_without_split_in_the_words_of_pending(
+    scenario: Scenario, tmp_path: Path, edit: Callable[[pd.DataFrame], pd.DataFrame], count: int
+) -> None:
     _source, _options, services, store, _classes = scenario
     prepared = _prepare(scenario, tmp_path)
-    _edit_rows(prepared, _set_split("val2.png", ""))
-    with pytest.raises(UploadError, match="split"):
+    _edit_rows(prepared, edit)
+    with pytest.raises(UploadError) as caught:
         upload_dataset(prepared, services)
+    assert str(caught.value) == (
+        f"dataset.csv не готов к публикации:\n  заполните split у {count} изображений в {prepared / 'dataset.csv'}"
+    )
+    assert store.calls == 0
+
+
+def test_upload_refuses_an_untrainable_split_in_the_words_of_pending(scenario: Scenario, tmp_path: Path) -> None:
+    _source, _options, services, store, _classes = scenario
+    prepared = _prepare(scenario, tmp_path)
+    _edit_rows(prepared, lambda frame: frame.assign(split="train"))
+    with pytest.raises(UploadError) as caught:
+        upload_dataset(prepared, services)
+    assert str(caught.value) == "dataset.csv не готов к публикации:\n  в val нет изображений"
     assert store.calls == 0
 
 
@@ -216,8 +239,10 @@ def test_upload_refuses_rejected_or_repaired_rows(scenario: Scenario, tmp_path: 
     _source, _options, services, store, _classes = scenario
     prepared = _prepare(scenario, tmp_path)
     _edit_rows(prepared, lambda frame: pd.concat([frame, frame.iloc[[0]]], ignore_index=True))
-    with pytest.raises(UploadError, match="не проходит проверку"):
+    with pytest.raises(UploadError, match="не проходит проверку") as caught:
         upload_dataset(prepared, services)
+    assert "строка " in str(caught.value)
+    assert "Исправьте или удалите эти строки" in str(caught.value)
     assert store.calls == 0
 
 
