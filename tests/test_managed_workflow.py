@@ -15,6 +15,7 @@ import yaml
 from PIL import Image
 
 from cveta2.adapters.class_api.http import HttpClassApi
+from cveta2.adapters.config.project import load_project_config
 from cveta2.adapters.files.managed_preparation import LocalManagedPreparationFiles
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.application.ports.dtos import (
@@ -40,7 +41,7 @@ from cveta2.domain.bundle.models import (
 from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.managed.evidence import labels_fingerprint
-from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
+from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, dataset_definition, source_fingerprint
 from cveta2.domain.models import LabelAttributeInfo, LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
 from cveta2.interfaces.cli import main
@@ -1072,8 +1073,14 @@ def test_preparation_with_a_ledger_from_before_sharing_still_publishes(
     assert local.read_bytes() == original_ledger
 
 
-@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels"])
-def test_incomplete_or_corrupt_prepared_records_block_publication(
+_MISSING_RECORDS = {
+    "missing-registry": r"^Source snapshot lacks class-registry records; fetch and prepare again$",
+    "missing-labels": r"^Source snapshot lacks CVAT label definitions: main; fetch and prepare again$",
+}
+
+
+@pytest.mark.parametrize("damage", sorted(_MISSING_RECORDS))
+def test_prepared_records_without_registry_or_labels_block_publication(
     workflow: Workflow, tmp_path: Path, damage: str
 ) -> None:
     prepared = _prepare(workflow, tmp_path)
@@ -1090,7 +1097,7 @@ def test_incomplete_or_corrupt_prepared_records_block_publication(
     source_path.write_text(yaml.safe_dump(source))
     tasks_path.write_text(yaml.safe_dump(tasks))
 
-    with pytest.raises(ManagedError, match=r"fetch|fingerprint|records|definitions"):
+    with pytest.raises(ManagedError, match=_MISSING_RECORDS[damage]):
         api.publish_dataset(prepared, **workflow.options)
 
     assert workflow.clearml.publications == []
@@ -1727,8 +1734,17 @@ def test_publish_keeps_assignments_of_removed_images(workflow: Workflow, tmp_pat
 
 
 def test_published_fingerprints_match_the_written_records(workflow: Workflow, tmp_path: Path) -> None:
-    published = api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    prepared = _prepare(workflow, tmp_path)
+    edited = yaml.safe_load((prepared / "tasks.yaml").read_text())
+    edited["managed"]["definition_hash"] = edited["managed"]["registry_hash"] = "0" * 64
+    for source in edited["managed"]["sources"]:
+        if source["type"] == "cvat":
+            source["labels_fingerprint"] = "0" * 64
+    (prepared / "tasks.yaml").write_text(yaml.safe_dump(edited))
+    published = api.publish_dataset(prepared, **workflow.options)
     tasks = yaml.safe_load((workflow.clearml.root / published.dataset_id / "tasks.yaml").read_text())["managed"]
+    config = load_project_config(workflow.personal, workflow.shared)
+    assert tasks["definition_hash"] == source_fingerprint(config, dataset_definition(config, "combined"))
     assert tasks["registry_hash"] == registry_fingerprint([ApiClass.model_validate(r) for r in tasks["registry"]])
     for source in (s for s in tasks["sources"] if s["type"] == "cvat"):
         labels = [LabelInfo.model_validate(label) for label in source["labels"]]
@@ -1792,6 +1808,20 @@ def test_publish_uploads_the_files_it_validated(
     assert len(calls) == 2
     assert (prepared / "dataset.csv").read_bytes() != validated
     assert (workflow.clearml.root / published.dataset_id / "dataset.csv").read_bytes() == validated
+
+
+def test_parent_metadata_with_credentials_is_refused_at_publish_without_printing_them(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    prepared = _publish_then_prepare_child(workflow, tmp_path)
+    parent = workflow.clearml.root / "version-1" / "dataset.yaml"
+    metadata = yaml.safe_load(parent.read_text())
+    metadata["api_url"] = "https://key:se/cret@classes.example/api"
+    parent.write_text(yaml.safe_dump(metadata))
+    with pytest.raises(ManagedError, match=r"^Invalid dataset metadata .*dataset\.yaml: api_url") as caught:
+        api.publish_dataset(prepared, **workflow.options)
+    assert "se/cret" not in str(caught.value)
+    assert workflow.clearml.publications == ["version-1"]
 
 
 def test_prepared_metadata_with_credentials_is_refused_without_printing_them(

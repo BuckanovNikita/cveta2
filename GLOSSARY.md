@@ -170,7 +170,7 @@ _Russian_: подтверждение очистки
 _Avoid_: auto-fix
 
 **Blocker**:
-A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`. In managed preparation, also: a class that is not excluded has no bbox, one image content in two splits, and cleanup needed with `--no-clean`.
+A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`. In managed preparation, also: one image content in two splits.
 _Russian_: блокирующее условие
 _Avoid_: blocking error, fatal issue
 

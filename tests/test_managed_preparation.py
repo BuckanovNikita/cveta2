@@ -334,7 +334,14 @@ def test_incomplete_source_records_cannot_be_prepared(tmp_path: Path, damage: st
     source_path.write_text(yaml.safe_dump(stored))
     output = tmp_path / "refused"
 
-    with pytest.raises(ManagedError, match=r"fetch|fingerprint|records|definitions"):
+    with pytest.raises(
+        ManagedError,
+        match=(
+            r"^Source snapshot lacks class-registry records; fetch and prepare again$"
+            if damage == "missing-registry"
+            else r"^Source snapshot lacks CVAT label definitions: main; fetch and prepare again$"
+        ),
+    ):
         prepare_managed(
             config,
             "demo",
@@ -657,7 +664,7 @@ def test_rows_quarantined_by_a_split_mistake_stay_out_of_cvat_feedback(
 def test_rows_quarantined_by_an_annotation_error_still_reach_cvat_feedback(tmp_path: Path) -> None:
     findings = _three_rows_of_one_image(tmp_path, ("train", "val", "val"), bad_box=1)
     assert [(finding.task_id, finding.frame_id) for finding in findings] == [(11, 0)]
-    assert "invalid_box_area" in findings[0].codes
+    assert {"invalid_box_area", "image_quarantined"} <= set(findings[0].codes)
     assert not {"invalid_split", "split_conflict"} & set(findings[0].codes)
 
 

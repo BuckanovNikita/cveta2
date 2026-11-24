@@ -91,6 +91,28 @@ def test_prepare_cleans_by_default_and_no_clean_opts_out(
     assert [call["clean"] for call in calls] == [clean]
 
 
+def test_prepare_refuses_clean_together_with_no_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(managed_datasets, "prepare_managed_dataset", lambda *args, **_kwargs: calls.append(args))
+    with pytest.raises(SystemExit) as exited:
+        main(
+            [
+                "dataset",
+                "prepare",
+                "combined",
+                str(tmp_path / "in.csv"),
+                "--source",
+                str(tmp_path),
+                "--output-dir",
+                str(tmp_path / "prepared"),
+                "--no-clean",
+                "--clean",
+            ]
+        )
+    assert exited.value.code == 2
+    assert calls == []
+
+
 def test_failed_feedback_report_still_exits_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     report = SimpleNamespace(model_dump=lambda **_kwargs: {"failed": 1})
     monkeypatch.setattr(managed_datasets, "report_dataset_errors", lambda *_args, **_kwargs: report)

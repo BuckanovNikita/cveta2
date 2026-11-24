@@ -46,14 +46,15 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
                 required=True,
                 help="Каталог полного managed fetch.",
             )
-            command.add_argument(
+            cleanup = command.add_mutually_exclusive_group()
+            cleanup.add_argument(
                 "--clean",
                 action="store_true",
                 dest="clean",
                 default=True,
                 help="Оставлено для совместимости: очистка включена по умолчанию.",
             )
-            command.add_argument(
+            cleanup.add_argument(
                 "--no-clean",
                 action="store_false",
                 dest="clean",
