@@ -312,9 +312,52 @@
 
 ### Breaking Changes
 
+- The clearml extra is removed; ClearML is always installed. Install lines that still name
+  cveta2[clearml] get an unknown-extra warning.
+
+- datasets.<name>.splits is removed; dataset prepare no longer assigns splits to new images, it only
+  carries published splits by image content.
+
 - A shared configuration that still has datasets.<name>.splits is rejected as an unknown key, and a
   parent published by cveta2 0.15 with managed.definition.splits is no longer read as a managed
   parent.
+
+- dataset prepare and dataset publish refuse a parent version without managed metadata instead of
+  adopting it; start a managed lineage over such versions with dataset prepare --first
+  (prepare_managed_dataset(first=True)), which publishes a first version with no parent.
+
+- `cveta2 setup-cache` is removed; `cveta2 setup` asks its questions, `cveta2 setup --list` replaces
+  `setup-cache --list`, and per-project ignored prefix and annotation cache in S3 move to
+  `cveta2 setup --global`.
+
+- The --project-config flag, the CVETA2_PROJECT_CONFIG environment variable and the personal key
+  project_config are removed; use --global-config, CVETA2_GLOBAL_CONFIG and global_config.
+
+- Prepared bundles hold sources.tar.gz and no preparation.json; upload-dataset publishes four files
+  and refuses a changed split of a published image unless --force-resplit.
+
+- PrepareOptions.clean defaults to True and project is optional; MissingDecisions no longer has
+  class kinds; an empty split no longer blocks preparation, a class without a bbox does, and a
+  missing image file stops it.
+
+- PrepareOptions no longer accepts accept_default_classes or accept_class_changes.
+
+- verify <directory> prepares a bundle without --bundle and accepts cleanup unless --no-clean.
+
+- Edited, reopened or removed tasks, label changes and replaced S3 CSV objects now warn instead of
+  refusing; their findings are not delivered.
+
+- A changed source definition only warns; the class registry is compared by class names and
+  numbers.
+
+- preparation.json is format_version 3 without hashes and preparation.sha256 is gone; a preparation
+  of another format must be prepared again.
+
+- dataset prepare accepts cleanup by default (--no-clean opts out); a class without a bbox or one
+  image in two splits blocks the preparation.
+
+- dataset publish rewrites the derived assignments, task lists and definition copy in dataset.yaml
+  and tasks.yaml, and refuses a published image whose split changed unless --force-resplit is given.
 
 
 ## v0.15.1 (2026-11-21)
