@@ -8,8 +8,20 @@ from typing import Protocol
 import pandas as pd
 
 from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawIssue, RawJob
+from cveta2.domain.managed.evidence import S3ObjectIdentity
 from cveta2.domain.managed.models import ManagedSnapshot, SourceSnapshot, TaskSnapshot
 from cveta2.domain.models import AnnotationRecord, DeletedImage, LabelInfo, TaskInfo
+
+__all__ = [
+    "CvatSourceReader",
+    "ProjectState",
+    "PublishedSources",
+    "S3CsvReader",
+    "S3Object",
+    "S3ObjectIdentity",
+    "SourceFiles",
+    "TaskAssembler",
+]
 
 type TaskAssembler = Callable[
     [
@@ -61,6 +73,10 @@ class S3CsvReader(Protocol):
 
     def read_object(self, uri: str) -> S3Object:
         """Return bytes and object identity, or fail the whole source."""
+        ...
+
+    def object_identity(self, uri: str) -> S3ObjectIdentity:
+        """Return the object's ETag and version ID without reading its body, or fail the whole source."""
         ...
 
 

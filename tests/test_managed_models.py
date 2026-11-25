@@ -9,21 +9,33 @@ import pytest
 from pydantic import ValidationError
 
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
-from cveta2.domain.managed.evidence import require_complete_evidence
+from cveta2.domain.managed.evidence import (
+    S3ObjectIdentity,
+    SourceAssessment,
+    assess_cvat_source,
+    assess_s3_source,
+    consistent_evidence,
+    labels_fingerprint,
+    require_complete_evidence,
+    source_differences,
+)
 from cveta2.domain.managed.models import (
     ClearMLDestination,
+    CvatIdentity,
     ManagedError,
     ManagedSnapshot,
     ProjectConfig,
     PublicationSettings,
     SourceDefinition,
     SourceSnapshot,
+    TaskSnapshot,
     dataset_definition,
     definition_fingerprint,
     has_url_userinfo,
     hide_url_userinfo,
     source_fingerprint,
 )
+from cveta2.domain.models import LabelInfo
 
 _SHARED: dict[str, Any] = {
     "cvat": {"host": "https://cvat.example", "organization": "team"},
@@ -143,6 +155,7 @@ def test_s3_source_does_not_skip_validation_of_later_cvat_evidence(*, missing_la
         definition_hash="recorded-definition",
         registry=[],
         registry_hash="4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        cvat=CvatIdentity(host="https://cvat.example"),
         sources=[
             SourceSnapshot(name="imported", type="s3-csv", uri="s3://bucket/source.csv"),
             SourceSnapshot(
@@ -155,7 +168,27 @@ def test_s3_source_does_not_skip_validation_of_later_cvat_evidence(*, missing_la
         ],
     )
 
-    with pytest.raises(ManagedError, match="live"):
+    if missing_labels:
+        with pytest.raises(ManagedError, match="live"):
+            require_complete_evidence(snapshot)
+    else:
+        require_complete_evidence(snapshot)
+    assert consistent_evidence(snapshot) is False
+
+
+@pytest.mark.parametrize(("source_type", "refused"), [("cvat", True), ("s3-csv", False)])
+def test_only_cvat_sources_need_the_cvat_server_in_the_snapshot(source_type: str, *, refused: bool) -> None:
+    source = (
+        SourceSnapshot(name="live", type="cvat", project_id=12, labels=[])
+        if source_type == "cvat"
+        else SourceSnapshot(name="imported", type="s3-csv", uri="s3://bucket/source.csv")
+    )
+    snapshot = ManagedSnapshot(definition_hash="d", registry_hash="r", registry=[], sources=[source])
+
+    if refused:
+        with pytest.raises(ManagedError, match="lacks the CVAT server identity; fetch and prepare again"):
+            require_complete_evidence(snapshot)
+    else:
         require_complete_evidence(snapshot)
 
 
@@ -164,6 +197,7 @@ def test_saved_unicode_full_records_keep_their_persisted_fingerprints() -> None:
 
     snapshot = LocalSourceFiles().read_snapshot(path)
     require_complete_evidence(snapshot)
+    assert consistent_evidence(snapshot) is True
 
     assert snapshot.registry is not None
     assert snapshot.registry[0].name == "Кошка"
@@ -418,3 +452,216 @@ def test_dataset_clearml_accepts_optional_output_uri() -> None:
     config = ProjectConfig.model_validate(raw)
 
     assert config.datasets["shelves"].clearml.output_uri == "gs://bucket/.clearml"
+
+
+def test_source_differences_report_changed_uri_and_dropped_source() -> None:
+    config = ProjectConfig.model_validate(
+        {
+            "cvat": {"host": "https://cvat.example", "organization": "team"},
+            "projects": {"main": {"id": 12}},
+            "datasets": {
+                "combined": {
+                    "sources": [
+                        {"name": "main", "type": "cvat", "project": "main"},
+                        {"name": "imported", "type": "s3-csv", "uri": "s3://b/new.csv"},
+                    ],
+                    "clearml": {"project": "CV/combined", "dataset": "annotations"},
+                    "api_url": "https://classes.example/api",
+                }
+            },
+        }
+    )
+    snapshot = ManagedSnapshot(
+        definition_hash="d",
+        registry_hash="r",
+        sources=[
+            SourceSnapshot(name="main", type="cvat", project_id=12),
+            SourceSnapshot(name="imported", type="s3-csv", uri="s3://b/old.csv"),
+            SourceSnapshot(name="legacy", type="cvat", project_id=30),
+        ],
+    )
+
+    assert source_differences(config, dataset_definition(config, "combined"), snapshot) == (
+        "imported: uri s3://b/old.csv → s3://b/new.csv",
+        "legacy: только в снимке",
+    )
+    snapshot = snapshot.model_copy(update={"sources": snapshot.sources[:1]})
+    assert source_differences(config, dataset_definition(config, "combined"), snapshot) == (
+        "imported: только в описании",
+    )
+
+
+def _one_source_config(source: dict[str, Any], projects: dict[str, Any]) -> ProjectConfig:
+    return ProjectConfig.model_validate(
+        {
+            "cvat": {"host": "https://cvat.example", "organization": "team"},
+            "projects": projects,
+            "datasets": {
+                "combined": {
+                    "sources": [source],
+                    "clearml": {"project": "CV/combined", "dataset": "annotations"},
+                    "api_url": "https://classes.example/api",
+                }
+            },
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expected"),
+    [
+        (
+            SourceSnapshot(name="main", type="cvat", project_id=13),
+            ("main: project_id 13 → 12",),
+        ),
+        (
+            SourceSnapshot(name="main", type="s3-csv", project_id=12, uri="s3://b/x.csv"),
+            ("main: type s3-csv → cvat", "main: uri s3://b/x.csv → None"),
+        ),
+    ],
+)
+def test_source_differences_report_changed_type_and_project_id(
+    recorded: SourceSnapshot, expected: tuple[str, ...]
+) -> None:
+    config = _one_source_config({"name": "main", "type": "cvat", "project": "main"}, {"main": {"id": 12}})
+    snapshot = ManagedSnapshot(definition_hash="d", registry_hash="r", sources=[recorded])
+
+    assert source_differences(config, dataset_definition(config, "combined"), snapshot) == expected
+
+
+def test_source_differences_treat_a_project_missing_from_the_config_as_no_project_id() -> None:
+    owner = _one_source_config({"name": "main", "type": "cvat", "project": "main"}, {"main": {"id": 12}})
+    other = _one_source_config({"name": "x", "type": "s3-csv", "uri": "s3://b/x.csv"}, {})
+    snapshot = ManagedSnapshot(
+        definition_hash="d",
+        registry_hash="r",
+        sources=[SourceSnapshot(name="main", type="cvat", project_id=12)],
+    )
+
+    assert source_differences(other, dataset_definition(owner, "combined"), snapshot) == ("main: project_id 12 → None",)
+
+
+_LABELS = [LabelInfo(id=1, name="cat")]
+
+
+def _cvat_snapshot(*tasks: TaskSnapshot) -> SourceSnapshot:
+    return SourceSnapshot(
+        name="main",
+        type="cvat",
+        project_id=12,
+        tasks={str(task.id): task for task in tasks},
+        labels=_LABELS,
+        labels_fingerprint=labels_fingerprint(_LABELS),
+    )
+
+
+def _done(task_id: int, date: str = "d1") -> TaskSnapshot:
+    return TaskSnapshot(id=task_id, updated_date=date, completed=True)
+
+
+def _open(task_id: int, date: str = "d1") -> TaskSnapshot:
+    return TaskSnapshot(id=task_id, updated_date=date, completed=False)
+
+
+@pytest.mark.parametrize(
+    ("recorded", "live", "labels", "expected"),
+    [
+        ([_done(1)], [_done(1)], _LABELS, SourceAssessment()),
+        ([_done(1)], [_done(1), _done(2)], _LABELS, SourceAssessment(newly_completed=("main/2",))),
+        ([_open(1)], [_done(1, "d2")], _LABELS, SourceAssessment(newly_completed=("main/1",))),
+        ([], [_open(3)], _LABELS, SourceAssessment(warnings=("main: новая незавершённая задача 3",))),
+        (
+            [_done(1), _done(2)],
+            [_done(1)],
+            _LABELS,
+            SourceAssessment(warnings=("main: задача 2 удалена",), stale_tasks=frozenset({("main", 2)})),
+        ),
+        (
+            [_done(1)],
+            [_open(1, "d2")],
+            _LABELS,
+            SourceAssessment(warnings=("main: задача 1 переоткрыта",), stale_tasks=frozenset({("main", 1)})),
+        ),
+        (
+            [_done(1)],
+            [_done(1, "d2")],
+            _LABELS,
+            SourceAssessment(warnings=("main: задача 1 изменена после fetch",), stale_tasks=frozenset({("main", 1)})),
+        ),
+        (
+            [_open(1)],
+            [_open(1, "d2")],
+            _LABELS,
+            SourceAssessment(warnings=("main: задача 1 изменена после fetch",), stale_tasks=frozenset({("main", 1)})),
+        ),
+        (
+            [_done(1), _open(2)],
+            [_done(1), _open(2)],
+            [LabelInfo(id=1, name="cat", color="#ffffff")],
+            SourceAssessment(
+                warnings=("main: изменились метки проекта",),
+                stale_tasks=frozenset({("main", 1), ("main", 2)}),
+            ),
+        ),
+        ([_done(1)], [_done(1), _done(5)], _LABELS, SourceAssessment()),
+        (
+            [_done(1), _done(5)],
+            [_done(1), _done(5)],
+            _LABELS,
+            SourceAssessment(warnings=("main: задача 5 теперь игнорируется",), stale_tasks=frozenset({("main", 5)})),
+        ),
+    ],
+    ids=[
+        "unchanged",
+        "new-completed",
+        "finished-since",
+        "new-incomplete",
+        "deleted",
+        "reopened",
+        "edited",
+        "edited-incomplete",
+        "labels",
+        "ignored-completed",
+        "ignored-after-fetch",
+    ],
+)
+def test_assess_cvat_source_stops_only_on_newly_completed_tasks(
+    recorded: list[TaskSnapshot], live: list[TaskSnapshot], labels: list[LabelInfo], expected: SourceAssessment
+) -> None:
+    assessment = assess_cvat_source(_cvat_snapshot(*recorded), live, labels_fingerprint(labels), frozenset({5}))
+
+    assert assessment == expected
+
+
+def test_assess_cvat_source_compares_the_recorded_labels_not_their_stored_fingerprint() -> None:
+    source = _cvat_snapshot(_done(1)).model_copy(update={"labels_fingerprint": "0" * 64})
+
+    assert assess_cvat_source(source, [_done(1)], labels_fingerprint(_LABELS), frozenset()) == SourceAssessment()
+
+
+def _s3_snapshot(etag: str | None, version_id: str | None) -> SourceSnapshot:
+    return SourceSnapshot(name="imported", type="s3-csv", uri="s3://b/x.csv", etag=etag, version_id=version_id)
+
+
+@pytest.mark.parametrize(
+    ("recorded", "live", "warnings"),
+    [
+        (('"e1"', "v1"), S3ObjectIdentity('"e1"', "v1"), ()),
+        (('"e1"', None), S3ObjectIdentity('"e1"', None), ()),
+        (('"e1"', "v1"), S3ObjectIdentity('"e2"', "v1"), ("imported: в S3 лежит другой объект (ETag или версия)",)),
+        (('"e1"', "v1"), S3ObjectIdentity('"e1"', "v2"), ("imported: в S3 лежит другой объект (ETag или версия)",)),
+        (('"e1"', "v1"), None, ("imported: в S3 лежит другой объект (ETag или версия)",)),
+        (
+            (None, None),
+            S3ObjectIdentity('"e1"', "v1"),
+            ("imported: в снимке нет ETag и версии, проверить объект нельзя",),
+        ),
+    ],
+    ids=["same", "same-unversioned", "etag", "version", "unreadable", "unrecorded"],
+)
+def test_assess_s3_source_warns_on_another_object(
+    recorded: tuple[str | None, str | None], live: S3ObjectIdentity | None, warnings: tuple[str, ...]
+) -> None:
+    assessment = assess_s3_source(_s3_snapshot(*recorded), live)
+
+    assert assessment == SourceAssessment(warnings=warnings)

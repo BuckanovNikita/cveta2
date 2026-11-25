@@ -8,6 +8,7 @@ from cveta2.domain.bundle.classes import (
     class_mark_changes,
     reconcile_classes,
     registry_classes,
+    registry_mismatches,
 )
 from cveta2.domain.bundle.models import ApiClass, ClassInfo, ClassMarkChange, UploadError
 
@@ -101,3 +102,10 @@ def test_class_mark_changes_lists_only_differences() -> None:
         ClassMarkChange(5, "a", empty=False),
         ClassMarkChange(7, "c", empty=True),
     )
+
+
+def test_registry_mismatches_names_renamed_added_and_renumbered_classes() -> None:
+    classes = {"cat": ClassInfo(prod_id=7), "cow": ClassInfo(prod_id=9)}
+    assert registry_mismatches(classes, [api(7, "kitty"), api(9, "cow"), api(8, "dog")]) == ("cat", "dog", "kitty")
+    assert registry_mismatches({"cat": ClassInfo(prod_id=7)}, [api(7, "cat")]) == ()
+    assert registry_mismatches({"cat": ClassInfo(prod_id=7)}, [api(8, "cat")]) == ("cat",)

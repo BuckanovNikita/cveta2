@@ -317,6 +317,8 @@ except cveta2.CvatApiError as error:
 | `WhatsNewResult` | `whats_new` | `tasks` (список `TaskInfo`), `cutoff` (наибольший ID завершённой задачи в `dataset.csv`; если завершённых нет, наибольший ID вообще). См. [whats-new](commands/whats-new.md#из-python). |
 | `ValidationResult` | `verify`, `verify_dataframe` | См. [ниже](#validationresult). |
 | `PreparedDataset` | `prepare_dataset` | `directory`, `ready`, `validation`, `metadata`, `tasks`, `blockers`, `pending`, `changes`, `mark_changes`, `dropped_local_roots`, `split_prefilled`, `parent`. См. [verify](commands/verify.md#из-python). |
+| `PreparationSummary` | `prepare_managed_dataset` | `directory`, `ready`, `report`. См. [dataset prepare](commands/dataset.md#prepare). |
+| `FeedbackOutcome` | `report_dataset_errors` | `created`, `existing`, `unmapped`, `failed`, `skipped`. См. [dataset report-errors](commands/dataset.md#report-errors). |
 | `Publication` | `upload_dataset`, `publish_dataset` | `dataset_id`, `version`. См. [upload-dataset](commands/upload-dataset.md#из-python). |
 
 ### Параметры проверки
@@ -432,6 +434,7 @@ print(len(parts.dataset), len(parts.obsolete), len(parts.in_progress))
 | `DatasetInputError` | [Исключения и предупреждения](#исключения-и-предупреждения) |
 | `DatasetWarning` | [Исключения и предупреждения](#исключения-и-предупреждения) |
 | `DeletedImage` | [Записи аннотаций](#записи-аннотаций) |
+| `FeedbackOutcome` | [Результаты функций](#результаты-функций), [dataset report-errors](commands/dataset.md#report-errors) |
 | `FetchContext` | [Выгрузка через клиент](#выгрузка-через-клиент) |
 | `IgnoredTask` | [Проекты, задачи, метки](#проекты-задачи-метки) |
 | `ImageWithoutAnnotations` | [Записи аннотаций](#записи-аннотаций) |
@@ -446,6 +449,7 @@ print(len(parts.dataset), len(parts.obsolete), len(parts.in_progress))
 | `MissingDecisions` | [Исключения и предупреждения](#исключения-и-предупреждения), [verify](commands/verify.md#из-python) |
 | `MissingHostError` | [Исключения и предупреждения](#исключения-и-предупреждения) |
 | `PartitionResult` | [partition_annotations_df](#partition_annotations_df) |
+| `PreparationSummary` | [Результаты функций](#результаты-функций), [dataset prepare](commands/dataset.md#prepare) |
 | `PrepareOptions` | [verify](commands/verify.md#из-python) |
 | `PreparedDataset` | [verify](commands/verify.md#из-python) |
 | `Profile` | [Параметры проверки](#параметры-проверки) |

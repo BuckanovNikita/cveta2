@@ -46,10 +46,19 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
                 required=True,
                 help="Каталог полного managed fetch.",
             )
-            command.add_argument(
+            cleanup = command.add_mutually_exclusive_group()
+            cleanup.add_argument(
                 "--clean",
                 action="store_true",
-                help="Принять исправления и удаление отклонённых строк.",
+                dest="clean",
+                default=True,
+                help="Оставлено для совместимости: очистка включена по умолчанию.",
+            )
+            cleanup.add_argument(
+                "--no-clean",
+                action="store_false",
+                dest="clean",
+                help="Не удалять отклонённые строки: подготовка остановится, если очистка нужна.",
             )
             command.add_argument(
                 "--first",
@@ -61,6 +70,15 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
             command.add_argument("new", help="Каталог/CSV или ID версии ClearML.")
         if operation in {"report-errors", "publish"}:
             command.add_argument("prepared", type=Path, help="Каталог проверенной подготовки.")
+        if operation == "publish":
+            command.add_argument(
+                "--force-resplit",
+                action="store_true",
+                help=(
+                    "Разрешить split, отличный от опубликованного в родительской версии; "
+                    "опубликованные назначения заменятся значениями из dataset.csv."
+                ),
+            )
 
 
 def run_managed(args: argparse.Namespace) -> None:
@@ -109,6 +127,6 @@ def _dispatch(args: argparse.Namespace) -> None:
             raise SystemExit(2)
         return
     else:
-        result = managed_datasets.publish_dataset(args.prepared, **options)
+        result = managed_datasets.publish_dataset(args.prepared, force_resplit=args.force_resplit, **options)
         result = {"dataset_id": result.dataset_id, "version": result.version}
     sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")

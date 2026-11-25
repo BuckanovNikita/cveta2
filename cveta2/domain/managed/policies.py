@@ -118,6 +118,51 @@ def propagate_splits(
     return result, replaced
 
 
+def _hashed_rows(frame: pd.DataFrame, image_hashes: Mapping[str, str]) -> list[tuple[str, str, str]]:
+    """List (content hash, image name, split) of rows whose path has a hash.
+
+    The name falls back to the path when the frame has no ``image_name`` column.
+    """
+    _validate_frame(frame, ("image_path",))
+    names = frame["image_name"] if "image_name" in frame else frame["image_path"]
+    splits = frame["split"] if "split" in frame else [""] * len(frame)
+    rows = []
+    for path, name, split in zip(frame["image_path"], names, splits, strict=True):
+        key = _text(path)
+        digest = image_hashes.get(key) if key is not None else None
+        label = _text(name)
+        if digest is not None and label is not None:
+            rows.append((digest, label, split if isinstance(split, str) else ""))
+    return rows
+
+
+def split_collisions(frame: pd.DataFrame, image_hashes: Mapping[str, str]) -> tuple[str, ...]:
+    """Name the images of every content that has rows in more than one non-empty split."""
+    rows = _hashed_rows(frame, image_hashes)
+    splits: dict[str, set[str]] = defaultdict(set)
+    for digest, _, split in rows:
+        if split:
+            splits[digest].add(split)
+    return tuple(sorted({name for digest, name, split in rows if split and len(splits[digest]) > 1}))
+
+
+def split_conflicts(
+    frame: pd.DataFrame,
+    image_hashes: Mapping[str, str],
+    published: Mapping[str, str],
+) -> tuple[tuple[str, str, str], ...]:
+    """Sorted ``(image_name, published, current)`` for images whose non-empty split differs from the published one."""
+    return tuple(
+        sorted(
+            {
+                (name, published[digest], split)
+                for digest, name, split in _hashed_rows(frame, image_hashes)
+                if split and digest in published and split != published[digest]
+            }
+        )
+    )
+
+
 def rebuild_assignments(
     frame: pd.DataFrame,
     image_hashes: Mapping[str, str],

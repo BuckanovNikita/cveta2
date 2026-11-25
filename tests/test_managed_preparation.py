@@ -1,4 +1,4 @@
-"""Managed preparation binds opaque transformations and original source evidence."""
+"""Managed preparation keeps the transformed CSV, original source evidence and plain state."""
 
 import hashlib
 import json
@@ -30,7 +30,7 @@ from cveta2.domain.managed.models import (
     definition_fingerprint,
     source_fingerprint,
 )
-from cveta2.domain.managed.preparation import PreparationSummary
+from cveta2.domain.managed.preparation import FeedbackFinding, PreparationSummary
 from cveta2.domain.models import LabelInfo
 
 
@@ -103,6 +103,7 @@ def _fixture(tmp_path: Path) -> tuple[ProjectConfig, Path, Path, DatasetMetadata
         definition_hash=source_fingerprint(config, config.datasets["demo"]),
         registry_hash=registry_fingerprint(_registry()),
         registry=_registry(),
+        cvat=config.cvat,
         sources=[
             SourceSnapshot(
                 name="main",
@@ -144,7 +145,6 @@ def _prepare(
         source,
         directory,
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -153,24 +153,36 @@ def _prepare(
     return result, config, transformed, source, metadata
 
 
-def test_prepare_binds_inputs_and_exact_three_file_payload(tmp_path: Path) -> None:
-    """Publication gets full source evidence and clean training rows, no ZIP."""
-    summary, _config, transformed, source, _metadata = _prepare(tmp_path)
+def test_prepare_writes_format_three_record(tmp_path: Path) -> None:
+    """The record is plain state; the payload and inputs are read as they are now."""
+    summary, _config, _transformed, source, _metadata = _prepare(tmp_path)
     assert summary.ready
+    record = json.loads((summary.directory / "preparation.json").read_bytes())
+    assert record["format_version"] == 3
+    assert set(record) == {
+        "format_version",
+        "name",
+        "parent_id",
+        "parent_version",
+        "findings",
+        "ready",
+        "clean",
+        "first",
+    }
+    assert not (summary.directory / "preparation.sha256").exists()
     files = LocalManagedPreparationFiles()
     loaded = files.load_prepared(summary.directory)
-    assert set(loaded.payload) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
-    assert loaded.record.input_hash == hashlib.sha256(transformed.read_bytes()).hexdigest()
-    assert loaded.record.source_hash == hashlib.sha256((source / "source-snapshot.yaml").read_bytes()).hexdigest()
-    assert loaded.tasks is not None
-    assert loaded.tasks.included == [11]
-    assert loaded.tasks.managed is not None
-    assert loaded.tasks.managed.sources[0].tasks["11"].tables
+    assert loaded.ledger_key == hashlib.sha256((source / "source-snapshot.yaml").read_bytes()).hexdigest()
+    assert loaded.captured.snapshot.sources[0].tasks["11"].tables
     assert loaded.metadata is not None
     assert loaded.metadata.managed is not None
+    assert loaded.frame is not None
     assert loaded.frame["split"].tolist() == ["train", "val"]
-    with files.stage_payload(loaded.payload) as staged:
-        assert (staged / "dataset.csv").read_bytes() == loaded.payload["dataset.csv"]
+    tasks = yaml.safe_load((summary.directory / "tasks.yaml").read_text())
+    assert tasks["included"] == [11]
+    with files.stage_payload(summary.directory) as staged:
+        assert sorted(path.name for path in staged.iterdir()) == ["dataset.csv", "dataset.yaml", "tasks.yaml"]
+        assert (staged / "dataset.csv").read_bytes() == (summary.directory / "dataset.csv").read_bytes()
 
 
 def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
@@ -191,7 +203,6 @@ def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
         source,
         tmp_path / "prepared",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -202,9 +213,9 @@ def test_missing_media_is_reported_and_can_be_removed_with_explicit_cleanup(
     issues = result.report["issues"]
     assert isinstance(issues, list)
     assert any(isinstance(issue, dict) and issue.get("code") == "media_missing" for issue in issues)
-    loaded = LocalManagedPreparationFiles().load_prepared(result.directory)
-    assert len(loaded.record.image_hashes) == 2
-    assert str(tmp_path / "images" / "missing.png") not in loaded.record.image_hashes
+    image_hashes = yaml.safe_load((result.directory / "tasks.yaml").read_text())["managed"]["image_hashes"]
+    assert len(image_hashes) == 2
+    assert str(tmp_path / "images" / "missing.png") not in image_hashes
 
 
 def test_bad_box_produces_attested_feedback_and_requires_cleanup(
@@ -229,7 +240,6 @@ def test_bad_box_produces_attested_feedback_and_requires_cleanup(
         source,
         tmp_path / "diagnostics",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -240,57 +250,98 @@ def test_bad_box_produces_attested_feedback_and_requires_cleanup(
     assert loaded.record.findings[0].task_id == 11
     assert loaded.record.findings[0].frame_id == 0
     assert loaded.record.findings[0].marker.startswith("cveta2:")
-    assert loaded.record.payload_hashes == {}
+    assert loaded.frame is None
+
+
+def _edit_bytes(path: Path) -> None:
+    """Change a file's bytes but not its content: CSV lines end in CRLF, YAML gains a blank line."""
+    content = path.read_bytes()
+    path.write_bytes(content.replace(b"\n", b"\r\n") if path.suffix == ".csv" else content + b"\n")
 
 
 @pytest.mark.parametrize(
     "name",
-    ["transformed.csv", "source-snapshot.yaml", "dataset.csv", "preparation.json"],
+    ["transformed.csv", "source-snapshot.yaml", "dataset.csv", "dataset.yaml", "tasks.yaml"],
 )
-def test_load_rejects_modified_bound_bytes(tmp_path: Path, name: str) -> None:
-    """No changed reviewed bytes can enter publication unnoticed."""
+def test_load_accepts_edited_files(tmp_path: Path, name: str) -> None:
+    """No checksum binds the files: each command reads them as they are now."""
     summary, *_ = _prepare(tmp_path)
     path = summary.directory / name
-    path.write_bytes(path.read_bytes() + b"\n")
-    with pytest.raises(ManagedError):
+    before = path.read_bytes()
+    _edit_bytes(path)
+    assert path.read_bytes() != before
+    loaded = LocalManagedPreparationFiles().load_prepared(summary.directory)
+    assert loaded.frame is not None
+    assert loaded.record.ready
+
+
+@pytest.mark.parametrize("version", [2, 4])
+def test_load_refuses_another_format_version(tmp_path: Path, version: int) -> None:
+    summary, *_ = _prepare(tmp_path)
+    record_path = summary.directory / "preparation.json"
+    record = json.loads(record_path.read_bytes())
+    record["format_version"] = version
+    record_path.write_text(json.dumps(record))
+    with pytest.raises(ManagedError, match=r"Cannot load managed preparation: .*format_version"):
         LocalManagedPreparationFiles().load_prepared(summary.directory)
 
 
-def test_source_definition_and_registry_must_match_fetch(tmp_path: Path) -> None:
-    """A transformed output cannot be prepared against a different source policy."""
-    config, transformed, source, metadata = _fixture(tmp_path)
-    with pytest.raises(ManagedError, match="registry"):
-        prepare_managed(
-            config,
-            "demo",
-            transformed,
-            source,
-            tmp_path / "prepared",
-            metadata,
-            registry_hash="changed",
-            files=LocalManagedPreparationFiles(),
-            media=LocalMediaInspector(),
-            s3_roots=FakeS3Roots(),
-        )
+@pytest.mark.parametrize("content", [b"{not json", b"\xff\xfe"], ids=["json", "utf-8"])
+def test_load_refuses_an_unreadable_record(tmp_path: Path, content: bytes) -> None:
+    summary, *_ = _prepare(tmp_path)
+    (summary.directory / "preparation.json").write_bytes(content)
+    with pytest.raises(ManagedError, match="Cannot load managed preparation"):
+        LocalManagedPreparationFiles().load_prepared(summary.directory)
 
 
-@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels", "changed-registry", "changed-labels"])
-def test_incomplete_or_corrupt_source_records_cannot_be_prepared(tmp_path: Path, damage: str) -> None:
+@pytest.mark.parametrize("damage", ["invalid-value", "syntax-error"])
+def test_load_names_invalid_fields_without_printing_their_values(tmp_path: Path, damage: str) -> None:
+    """Hand edits are allowed, so a refusal must not echo what was typed, credentials included."""
+    summary, *_ = _prepare(tmp_path)
+    metadata_path = summary.directory / "dataset.yaml"
+    secret = "https://user:s3cr3t-token@classes.example/api"
+    if damage == "invalid-value":
+        metadata = yaml.safe_load(metadata_path.read_text())
+        metadata["api_url"] = secret
+        metadata_path.write_text(yaml.safe_dump(metadata))
+        expected = r"Cannot load managed preparation: .*api_url"
+    else:
+        lines = metadata_path.read_text().splitlines()
+        lines = [f"api_url: {secret}: y" if line.startswith("api_url:") else line for line in lines]
+        metadata_path.write_text("\n".join(lines) + "\n")
+        expected = r"Cannot load managed preparation: .*dataset\.yaml: .*\(line \d+, column \d+\)$"
+    with pytest.raises(ManagedError, match=expected) as raised:
+        LocalManagedPreparationFiles().load_prepared(summary.directory)
+    assert "s3cr3t-token" not in str(raised.value)
+
+
+def test_load_refuses_a_partial_payload(tmp_path: Path) -> None:
+    summary, *_ = _prepare(tmp_path)
+    (summary.directory / "tasks.yaml").unlink()
+    with pytest.raises(ManagedError, match=r"tasks\.yaml"):
+        LocalManagedPreparationFiles().load_prepared(summary.directory)
+
+
+@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels"])
+def test_incomplete_source_records_cannot_be_prepared(tmp_path: Path, damage: str) -> None:
     config, transformed, source, metadata = _fixture(tmp_path)
     source_path = source / "source-snapshot.yaml"
     stored = yaml.safe_load(source_path.read_text())
     if damage == "missing-registry":
         stored.pop("registry")
-    elif damage == "missing-labels":
-        stored["sources"][0].pop("labels")
-    elif damage == "changed-registry":
-        stored["registry"][0]["threshold"] = 0.75
     else:
-        stored["sources"][0]["labels"][0]["color"] = "#ffffff"
+        stored["sources"][0].pop("labels")
     source_path.write_text(yaml.safe_dump(stored))
     output = tmp_path / "refused"
 
-    with pytest.raises(ManagedError, match=r"fetch|fingerprint|records|definitions"):
+    with pytest.raises(
+        ManagedError,
+        match=(
+            r"^Source snapshot lacks class-registry records; fetch and prepare again$"
+            if damage == "missing-registry"
+            else r"^Source snapshot lacks CVAT label definitions: main; fetch and prepare again$"
+        ),
+    ):
         prepare_managed(
             config,
             "demo",
@@ -298,7 +349,6 @@ def test_incomplete_or_corrupt_source_records_cannot_be_prepared(tmp_path: Path,
             source,
             output,
             metadata,
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=FakeS3Roots(),
@@ -317,7 +367,6 @@ def test_symlink_and_existing_destination_are_rejected(tmp_path: Path) -> None:
             source,
             summary.directory,
             metadata,
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=FakeS3Roots(),
@@ -342,7 +391,6 @@ def test_preparation_inside_the_fetch_source_is_refused(tmp_path: Path) -> None:
             source / "source-snapshot.yaml",
             source / "prepared",
             metadata,
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=FakeS3Roots(),
@@ -363,7 +411,6 @@ def test_inaccessible_s3_root_blocks_preparation(tmp_path: Path) -> None:
             source,
             tmp_path / "prepared",
             metadata.model_copy(update={"images": roots}),
-            registry_hash=registry_fingerprint(_registry()),
             files=LocalManagedPreparationFiles(),
             media=LocalMediaInspector(),
             s3_roots=s3_roots,
@@ -382,7 +429,6 @@ def _prepare_with(
         source,
         tmp_path / "prepared",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -427,14 +473,87 @@ def test_published_image_gets_its_published_split_and_a_new_image_keeps_its_own(
     assert summary.report["split_replacements"] == 1
 
 
-def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
-    config, transformed, source, metadata = _fixture(tmp_path)
+def _forget_assignments(source: Path) -> None:
+    """Make both fixture images new: the fetch snapshot records no published split."""
     snapshot = yaml.safe_load((source / "source-snapshot.yaml").read_text())
     snapshot["assignments"] = {}
     (source / "source-snapshot.yaml").write_text(yaml.safe_dump(snapshot))
+
+
+def test_empty_split_of_a_new_image_is_pending(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
     rows = pd.read_csv(transformed, keep_default_na=False)
     rows.loc[rows["image_name"].eq("1.png"), "split"] = ""
     rows.to_csv(transformed, index=False)
+    directory = tmp_path / "prepared"
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert summary.ready
+    assert (directory / "dataset.csv").exists()
+    assert summary.report["pending"] == [f"заполните split у 1 изображений в {directory / 'dataset.csv'}"]
+
+
+def test_trainability_gaps_are_pending_when_every_split_is_set(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    rows = pd.read_csv(transformed, keep_default_na=False)
+    rows["split"] = "train"
+    rows.to_csv(transformed, index=False)
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert summary.ready
+    assert summary.report["pending"] == ["в val нет изображений"]
+
+
+def test_active_class_without_bbox_blocks(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    classes = {**metadata.classes, "dog": ClassInfo(prod_id=8)}
+    blocked = _prepare_with(config, tmp_path, transformed, source, metadata.model_copy(update={"classes": classes}))
+    assert not blocked.ready
+    blockers = blocked.report["blockers"]
+    assert isinstance(blockers, list)
+    assert "Active classes have no bbox: dog" in blockers
+    assert blocked.report["missing_classes"] == ["dog"]
+    assert not (blocked.directory / "dataset.csv").exists()
+    classes["dog"] = ClassInfo(prod_id=8, empty=True)
+    summary = prepare_managed(
+        config,
+        "demo",
+        transformed,
+        source,
+        tmp_path / "again",
+        metadata.model_copy(update={"classes": classes}),
+        files=LocalManagedPreparationFiles(),
+        media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
+    )
+    assert summary.ready
+
+
+def test_same_content_in_two_splits_blocks(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    images = tmp_path / "images"
+    copy = images / "copy.png"
+    copy.write_bytes((images / "0.png").read_bytes())
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    extra = rows[rows["image_name"].eq("0.png")].assign(image_name=copy.name, image_path=str(copy), split="val")
+    pd.concat([rows, extra], ignore_index=True).to_csv(transformed, index=False)
+    summary = _prepare_with(config, tmp_path, transformed, source, metadata)
+    assert not summary.ready
+    blockers = summary.report["blockers"]
+    assert isinstance(blockers, list)
+    assert "Image content has rows in several splits: 0.png, copy.png" in blockers
+    assert summary.report["split_collisions"] == ["0.png", "copy.png"]
+    assert not (summary.directory / "dataset.csv").exists()
+
+
+def test_one_image_name_in_two_splits_blocks_even_with_cleanup(tmp_path: Path) -> None:
+    """Cleanup would drop the conflicting rows; the collision is named instead."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    extra = rows[rows["image_name"].eq("0.png")].assign(split="val", bbox_x_tl="2")
+    pd.concat([rows, extra], ignore_index=True).to_csv(transformed, index=False)
     summary = prepare_managed(
         config,
         "demo",
@@ -442,7 +561,6 @@ def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
         source,
         tmp_path / "prepared",
         metadata,
-        registry_hash=registry_fingerprint(_registry()),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=FakeS3Roots(),
@@ -451,8 +569,40 @@ def test_new_image_with_an_empty_split_is_not_ready(tmp_path: Path) -> None:
     assert not summary.ready
     blockers = summary.report["blockers"]
     assert isinstance(blockers, list)
-    assert "Every input row must have a valid train, val or test split assignment." in blockers
+    assert "Image content has rows in several splits: 0.png" in blockers
     assert not (summary.directory / "dataset.csv").exists()
+
+
+def test_cleanup_is_accepted_by_default_and_no_clean_blocks(tmp_path: Path) -> None:
+    config, transformed, source, metadata = _fixture(tmp_path)
+    frame = pd.read_csv(transformed, keep_default_na=False)
+    bad = frame.iloc[[0]].copy()
+    bad["bbox_x_br"] = "1"
+    extra = Path(str(bad["image_path"].iloc[0])).parent / "bad.png"
+    Image.new("RGB", (32, 32), "green").save(extra)
+    bad["image_name"] = extra.name
+    bad["image_path"] = str(extra)
+    pd.concat([frame, bad], ignore_index=True).to_csv(transformed, index=False)
+    summaries = {
+        clean: prepare_managed(
+            config,
+            "demo",
+            transformed,
+            source,
+            tmp_path / f"prepared-{clean}",
+            metadata,
+            files=LocalManagedPreparationFiles(),
+            media=LocalMediaInspector(),
+            s3_roots=FakeS3Roots(),
+            clean=clean,
+        )
+        for clean in (True, False)
+    }
+    assert summaries[True].ready
+    assert not summaries[False].ready
+    blockers = summaries[False].report["blockers"]
+    assert isinstance(blockers, list)
+    assert "Cleanup is needed and --no-clean was given." in blockers
 
 
 def test_split_mistakes_stay_out_of_cvat_feedback(tmp_path: Path) -> None:
@@ -475,6 +625,49 @@ def test_split_mistakes_stay_out_of_cvat_feedback(tmp_path: Path) -> None:
     assert summary.report["unmapped_errors"] == 0
 
 
+def _three_rows_of_one_image(
+    tmp_path: Path, splits: tuple[str, str, str], *, bad_box: int | None = None
+) -> list[FeedbackFinding]:
+    """Prepare with three rows of ``0.png`` (distinct boxes) and return the recorded findings."""
+    config, transformed, source, metadata = _fixture(tmp_path)
+    _forget_assignments(source)
+    rows = pd.read_csv(transformed, keep_default_na=False, dtype=str)
+    image = rows[rows["image_name"].eq("0.png")]
+    extra = [image.assign(split=split, bbox_x_tl=str(1 + index)) for index, split in enumerate(splits)]
+    if bad_box is not None:
+        extra[bad_box] = extra[bad_box].assign(bbox_x_br="1")
+    pd.concat([rows[rows["image_name"].ne("0.png")], *extra], ignore_index=True).to_csv(transformed, index=False)
+    summary = prepare_managed(
+        config,
+        "demo",
+        transformed,
+        source,
+        tmp_path / "prepared",
+        metadata,
+        files=LocalManagedPreparationFiles(),
+        media=LocalMediaInspector(),
+        s3_roots=FakeS3Roots(),
+        clean=True,
+    )
+    assert not summary.ready
+    return LocalManagedPreparationFiles().load_prepared(summary.directory).record.findings
+
+
+@pytest.mark.parametrize("splits", [("train", "train", "val"), ("train", "train", "holdout")])
+def test_rows_quarantined_by_a_split_mistake_stay_out_of_cvat_feedback(
+    tmp_path: Path, splits: tuple[str, str, str]
+) -> None:
+    """The other rows of an image that only a split mistake rejects are not an annotator's error."""
+    assert _three_rows_of_one_image(tmp_path, splits) == []
+
+
+def test_rows_quarantined_by_an_annotation_error_still_reach_cvat_feedback(tmp_path: Path) -> None:
+    findings = _three_rows_of_one_image(tmp_path, ("train", "val", "val"), bad_box=1)
+    assert [(finding.task_id, finding.frame_id) for finding in findings] == [(11, 0)]
+    assert {"invalid_box_area", "image_quarantined"} <= set(findings[0].codes)
+    assert not {"invalid_split", "split_conflict"} & set(findings[0].codes)
+
+
 def test_published_assignments_come_only_from_a_managed_parent(tmp_path: Path) -> None:
     config, _transformed, _source, metadata = _fixture(tmp_path)
     assert published_assignments(None) == {}
@@ -495,39 +688,23 @@ def test_published_assignments_come_only_from_a_managed_parent(tmp_path: Path) -
 
 
 @pytest.mark.parametrize("edit", ["project-id", "ignored-id", "organization"])
-def test_source_edits_require_fetching_again(tmp_path: Path, edit: str) -> None:
+def test_source_edits_warn_and_prepare_from_the_fetched_sources(
+    tmp_path: Path, capture_logs: list[str], edit: str
+) -> None:
     config, transformed, source, metadata = _fixture(tmp_path)
-    with pytest.raises(ManagedError, match="Source definition changed; fetch the managed dataset again"):
-        _prepare_with(_edit(config, edit), tmp_path, transformed, source, metadata)
-    assert not (tmp_path / "prepared").exists()
+    summary = _prepare_with(_edit(config, edit), tmp_path, transformed, source, metadata)
+    assert summary.ready
+    if edit == "project-id":
+        assert (
+            "Источник отличается от выгруженного: main: project_id 7 → 8. Датасет собирается из выгруженных данных."
+            in capture_logs
+        )
 
 
-def test_preparation_records_policy_and_source_fingerprints(tmp_path: Path) -> None:
+def test_payload_carries_recomputed_informational_hashes(tmp_path: Path) -> None:
     summary, config, *_ = _prepare(tmp_path)
     loaded = LocalManagedPreparationFiles().load_prepared(summary.directory)
     definition = config.datasets["demo"]
-    assert loaded.record.snapshot.definition_hash == source_fingerprint(config, definition)
-    assert loaded.record.definition_hash == definition_fingerprint(config, definition)
     assert loaded.metadata is not None
     assert loaded.metadata.managed is not None
-    assert loaded.metadata.managed.definition_hash == loaded.record.definition_hash
-    assert loaded.tasks is not None
-    assert loaded.tasks.managed is not None
-    assert loaded.tasks.managed.definition_hash == loaded.record.snapshot.definition_hash
-
-
-def test_load_rejects_published_metadata_bound_to_another_definition(tmp_path: Path) -> None:
-    """dataset.yaml carries the definition fingerprint the record was prepared with."""
-    summary, *_ = _prepare(tmp_path)
-    metadata_path = summary.directory / "dataset.yaml"
-    record_path = summary.directory / "preparation.json"
-    metadata = yaml.safe_load(metadata_path.read_text())
-    metadata["managed"]["definition_hash"] = "0" * 64
-    metadata_path.write_text(yaml.safe_dump(metadata))
-    record = json.loads(record_path.read_text())
-    record["payload_hashes"]["dataset.yaml"] = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
-    record_path.write_text(json.dumps(record))
-    (summary.directory / "preparation.sha256").write_text(hashlib.sha256(record_path.read_bytes()).hexdigest())
-
-    with pytest.raises(ManagedError, match="metadata binding changed"):
-        LocalManagedPreparationFiles().load_prepared(summary.directory)
+    assert loaded.metadata.managed.definition_hash == definition_fingerprint(config, definition)

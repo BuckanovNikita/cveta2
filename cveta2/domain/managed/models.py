@@ -338,6 +338,8 @@ class ManagedSnapshot(StrictModel):
     definition_hash: str
     registry_hash: str
     registry: list[ApiClass] | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The CVAT server the tasks were fetched from; their IDs mean nothing on another one.
+    cvat: CvatIdentity | None = Field(default=None, exclude_if=lambda value: value is None)
     parent_id: str | None = None
     sources: list[SourceSnapshot]
     assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)

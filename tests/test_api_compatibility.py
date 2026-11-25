@@ -21,6 +21,26 @@ def test_workflow_exports_keep_one_identity(name: str) -> None:
     assert getattr(cveta2, name) is canonical
 
 
+@pytest.mark.parametrize("name", cveta2.__all__)
+def test_every_package_name_resolves(name: str) -> None:
+    assert getattr(cveta2, name) is not None
+
+
+@pytest.mark.parametrize(
+    ("function", "result"),
+    [
+        ("prepare_dataset", "PreparedDataset"),
+        ("upload_dataset", "Publication"),
+        ("prepare_managed_dataset", "PreparationSummary"),
+        ("report_dataset_errors", "FeedbackOutcome"),
+        ("publish_dataset", "Publication"),
+    ],
+)
+def test_dataset_functions_return_public_types(function: str, result: str) -> None:
+    assert result in cveta2.__all__
+    assert get_type_hints(getattr(cveta2, function))["return"] is getattr(cveta2, result)
+
+
 @pytest.mark.parametrize(
     "value",
     [

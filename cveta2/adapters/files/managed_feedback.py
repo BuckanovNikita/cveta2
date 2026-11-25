@@ -1,4 +1,4 @@
-"""Atomic local feedback receipts, separate from immutable prepared payloads."""
+"""Atomic local feedback receipts, kept apart from the prepared payload files."""
 
 import json
 import os

@@ -165,19 +165,19 @@ _Russian_: очищенный CSV (`clean.csv`)
 _Avoid_: fixed CSV, valid CSV
 
 **Cleanup acceptance**:
-The consent to drop broken rows and apply repairs: `--clean` for the CSV check and `dataset prepare`, the default in bundle preparation unless `--no-clean`; without it a result that needs cleanup is not ready.
+Consent to drop broken rows and apply repairs. Bundle preparation (`verify <directory>`) and managed preparation (`dataset prepare`) accept cleanup by default, and `--no-clean` opts out. The CSV check (`verify <file>`) keeps it opt-in with `--clean`. Without it, a result that needs cleanup is not ready.
 _Russian_: подтверждение очистки
 _Avoid_: auto-fix
 
 **Blocker**:
-A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`.
+A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`. In managed preparation, also: one image content in two splits.
 _Russian_: блокирующее условие
 _Avoid_: blocking error, fatal issue
 
 ### Classes
 
 **Class registry**:
-The list of classes served by the class API (`api_url`), each with a number, name and flags; its fingerprint is bound into preparations.
+The list of classes served by the class API (`api_url`), each with a number, name and flags.
 _Russian_: реестр классов
 _Avoid_: label map, class list, taxonomy
 
@@ -199,7 +199,7 @@ _Avoid_: empty label, negative class, background
 ### Preparation and publication
 
 **Prepared bundle**:
-A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation keeps its own state files (see Managed preparation).
+A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation also keeps `transformed.csv`, `source-snapshot.yaml` and `preparation.json`. `preparation.json` is plain state; no file carries a checksum; each command validates the current files.
 _Russian_: подготовленный датасет
 _Avoid_: prepared set, release candidate, package
 
@@ -214,7 +214,7 @@ _Russian_: управляемый датасет
 _Avoid_: configured dataset, named dataset
 
 **Managed preparation**:
-Preparation of a prepared bundle with `dataset prepare` from a user-transformed CSV and a managed fetch, bound to the managed definition and source snapshot.
+Preparation of a prepared bundle with `dataset prepare` from a user-transformed CSV and a managed fetch, using the managed definition and the source snapshot as they are when each command runs.
 _Russian_: управляемая подготовка
 _Avoid_: managed build
 
@@ -224,7 +224,7 @@ _Russian_: источник
 _Avoid_: input, origin, feed
 
 **Source snapshot**:
-The source evidence captured by a managed fetch (`source-snapshot.yaml`): per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched or reused. It is stored inside the published `tasks.yaml`.
+The source evidence captured by a managed fetch (`source-snapshot.yaml`): the CVAT server and organization it was fetched from; per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched or reused. It is stored inside the published `tasks.yaml`.
 _Russian_: снимок источников
 _Avoid_: source evidence (in prose), snapshot alone, state dump
 
@@ -234,7 +234,7 @@ _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
 **Stable split**:
-An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256), and `dataset prepare` writes the published split over the user's value in every later version. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and only when the image's other cells agree with the published split; `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
+An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256): `dataset prepare` writes the published split over the user's value in every later version, and `dataset publish` refuses a changed split of a published image unless `--force-resplit`, which records the new split for later versions. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and only when the image's other cells agree with the published split; `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
 _Russian_: стабильный split
 _Avoid_: random split, rebalancing, split policy
 

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ import yaml
 from PIL import Image
 
 from cveta2.adapters.class_api.http import HttpClassApi
+from cveta2.adapters.config.project import load_project_config
+from cveta2.adapters.files.managed_preparation import LocalManagedPreparationFiles
 from cveta2.adapters.files.managed_sources import LocalSourceFiles
 from cveta2.application.ports.dtos import (
     NewIssue,
@@ -24,7 +27,8 @@ from cveta2.application.ports.dtos import (
     RawJob,
     RawShape,
 )
-from cveta2.application.ports.managed_sources import S3Object
+from cveta2.application.ports.managed_preparation import ImageHashes
+from cveta2.application.ports.managed_sources import S3Object, S3ObjectIdentity
 from cveta2.composition import managed
 from cveta2.domain.bundle.models import (
     ApiClass,
@@ -34,8 +38,10 @@ from cveta2.domain.bundle.models import (
     ImageRoots,
     Publication,
 )
-from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
+from cveta2.domain.class_registry import registry_fingerprint
+from cveta2.domain.errors import CvatApiError, Cveta2Error
+from cveta2.domain.managed.evidence import labels_fingerprint
+from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, dataset_definition, source_fingerprint
 from cveta2.domain.models import LabelAttributeInfo, LabelInfo, TaskInfo
 from cveta2.interfaces import managed_datasets as api
 from cveta2.interfaces.cli import main
@@ -100,6 +106,8 @@ class FakeCvat:
         return self.labels[project_id]
 
     def get_task(self, task_id: int) -> TaskInfo:
+        if task_id not in self.tasks:
+            raise CvatApiError(f"Task {task_id} not found", status_code=404)
         return self.tasks[task_id]
 
     def get_task_jobs(self, task_id: int) -> list[RawJob]:
@@ -176,12 +184,17 @@ class FakeConnection:
 
 class FakeS3:
     def __init__(self, content: bytes) -> None:
-        """Capture an object whose bytes tests can replace."""
+        """Capture an object whose bytes and version tests can replace."""
         self.content = content
+        self.version = "v1"
+
+    def object_identity(self, uri: str) -> S3ObjectIdentity:
+        assert uri == "s3://annotations/imported.csv"
+        return S3ObjectIdentity(f'"{hashlib.sha256(self.content).hexdigest()[:32]}"', self.version)
 
     def read_object(self, uri: str) -> S3Object:
-        assert uri == "s3://annotations/imported.csv"
-        return S3Object(self.content, hashlib.sha256(self.content).hexdigest(), "opaque", "v1")
+        identity = self.object_identity(uri)
+        return S3Object(self.content, hashlib.sha256(self.content).hexdigest(), identity.etag, identity.version_id)
 
 
 class FakeClearML:
@@ -423,7 +436,6 @@ def _prepare(
         output,
         source=fetched,
         output_dir=prepared,
-        clean=bad,
         first=first,
         **workflow.options,
     )
@@ -547,20 +559,123 @@ def test_feedback_failure_blocks_remote_publication(workflow: Workflow, tmp_path
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
-@pytest.mark.parametrize("change", ["definition", "parent", "cvat", "label-attribute", "s3", "image"])
-def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path, change: str) -> None:
+def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path)
-    message = "fetch again|prepare again|validation"
-    if change == "definition":
-        _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[7]))
-        message = "Shared dataset policy changed; prepare again"
-    elif change == "parent":
-        workflow.clearml.root.mkdir()
-        target = workflow.clearml.root / "competing"
-        target.mkdir()
-        shutil.copy(prepared / "dataset.yaml", target / "dataset.yaml")
-        workflow.clearml.latest_id = "competing"
-    elif change == "cvat":
+    workflow.clearml.root.mkdir()
+    target = workflow.clearml.root / "competing"
+    target.mkdir()
+    shutil.copy(prepared / "dataset.yaml", target / "dataset.yaml")
+    workflow.clearml.latest_id = "competing"
+    with pytest.raises(ManagedError, match=r"fetch again|prepare again"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_replaced_valid_image_publishes(workflow: Workflow, tmp_path: Path) -> None:
+    """Publication validates the image files as they are now; no recorded image hash binds them."""
+    prepared = _prepare(workflow, tmp_path)
+    Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+
+def test_hand_edited_rows_that_pass_publish(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False, dtype=str)
+    removed = min(rows["image_name"])
+    rows[rows["image_name"].ne(removed)].to_csv(prepared / "dataset.csv", index=False)
+
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+    published = pd.read_csv(workflow.clearml.root / "version-1" / "dataset.csv", keep_default_na=False)
+    assert removed not in set(published["image_name"])
+    assert len(published) == len(rows) - int(rows["image_name"].eq(removed).sum())
+
+
+def test_hand_edited_rows_that_fail_validation_stop_publish(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False, dtype=str)
+    rows.loc[0, "bbox_x_br"] = "1"
+    rows.to_csv(prepared / "dataset.csv", index=False)
+
+    with pytest.raises(
+        ManagedError,
+        match=(
+            r"^Prepared dataset\.csv does not pass validation: 1 rejected rows, repairs needed: yes\n"
+            r"  row 0: Box width and height must each exceed 2 px[^\n]*$"
+        ),
+    ):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_publish_names_the_rows_of_a_class_marked_empty_while_its_rows_remain(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog")])
+    fetched, transformed = _fetch_and_transform(workflow, tmp_path)
+    rows = pd.read_csv(transformed, keep_default_na=False)
+    rows.loc[rows["image_name"].eq("external-0.png"), "instance_label"] = "dog"
+    rows.to_csv(transformed, index=False)
+    prepared = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "p", **workflow.options
+    ).directory
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["classes"]["dog"]["empty"] = True
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    dog = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)["instance_label"].eq("dog")
+    position = int(dog.to_numpy().nonzero()[0][0])
+
+    with pytest.raises(ManagedError, match=r"^Prepared dataset\.csv does not pass validation: ") as caught:
+        api.publish_dataset(prepared, **workflow.options)
+    assert f"row {position}: Class is marked empty: 'dog'" in str(caught.value)
+    assert workflow.clearml.publications == []
+
+
+def test_blocked_preparation_reports_its_findings_but_does_not_publish(workflow: Workflow, tmp_path: Path) -> None:
+    fetched, output = _transform(workflow, tmp_path, bad=True)
+    summary = api.prepare_managed_dataset(
+        "combined", output, source=fetched, output_dir=tmp_path / "prepared", clean=False, **workflow.options
+    )
+    assert not summary.ready
+    assert not (summary.directory / "dataset.csv").exists()
+
+    assert api.report_dataset_errors(summary.directory, **workflow.options).created == 1
+    assert len(workflow.cvat.issues[101]) == 1
+    with pytest.raises(
+        ManagedError, match=r"^Preparation was blocked and has no payload; see report\.json and prepare again$"
+    ):
+        api.publish_dataset(summary.directory, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+@pytest.mark.parametrize("command", ["publish", "report-errors"])
+def test_another_format_version_is_refused(workflow: Workflow, tmp_path: Path, command: str) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    record_path = prepared / "preparation.json"
+    record = json.loads(record_path.read_bytes())
+    record["format_version"] = 2
+    record_path.write_text(json.dumps(record))
+    run = api.publish_dataset if command == "publish" else api.report_dataset_errors
+    with pytest.raises(ManagedError, match="Cannot load managed preparation"):
+        run(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+    assert all(not issues for issues in workflow.cvat.issues.values())
+
+
+_SOURCE_WARNINGS = {
+    "cvat": "main: задача 101 изменена после fetch",
+    "label-attribute": "main: изменились метки проекта",
+    "s3": "imported: в S3 лежит другой объект (ETag или версия)",
+    "s3-version": "imported: в S3 лежит другой объект (ETag или версия)",
+}
+
+
+@pytest.mark.parametrize("change", _SOURCE_WARNINGS)
+def test_source_changes_after_fetch_warn_and_publish(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str], change: str
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    if change == "cvat":
         workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
     elif change == "label-attribute":
         label = workflow.cvat.labels[12][0]
@@ -570,10 +685,99 @@ def test_stale_prerequisites_prevent_publication(workflow: Workflow, tmp_path: P
     elif change == "s3":
         workflow.s3.content += b"\n"
     else:
-        Image.new("RGB", (32, 32), "white").save(workflow.images / "task101-0.png")
-    with pytest.raises(ManagedError, match=message):
+        workflow.s3.version = "v2"
+
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    assert f"{_SOURCE_WARNINGS[change]}. Датасет собирается из выгруженных данных." in capture_logs
+
+
+def test_task_completed_after_fetch_stops_publication(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    workflow.cvat.tasks[103] = workflow.cvat.tasks[101].model_copy(update={"id": 103, "updated_date": "new"})
+    workflow.cvat.issues[103] = []
+    with pytest.raises(
+        ManagedError, match="CVAT tasks completed after fetch: main/103; fetch the managed dataset again"
+    ):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+def test_findings_of_an_edited_task_are_skipped(workflow: Workflow, tmp_path: Path, capture_logs: list[str]) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+    assert (outcome.created, outcome.skipped) == (0, 1)
+    assert workflow.cvat.issues[101] == []
+    assert any("Замечаний не отправлено: 1" in line for line in capture_logs)
+
+
+def _api(number: int, name: str) -> ApiClass:
+    return ApiClass(
+        id=number + 80,
+        number=number,
+        name=name,
+        techClass=False,
+        isPeriodical=False,
+        isCritical=False,
+        threshold=0.5,
+    )
+
+
+def test_fetch_warns_about_missing_classes(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog"), _api(9, "cow")])
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[9]))
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)
+    assert (result["excluded_class_rows"], result["missing_classes"]) == (0, ["dog"])
+    assert any("dog" in line for line in capture_logs)
+
+
+def test_fetch_counts_rows_of_excluded_classes(workflow: Workflow, tmp_path: Path, capture_logs: list[str]) -> None:
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[7]))
+    assert api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)["excluded_class_rows"] == 30
+    assert "Строк с исключёнными классами: 30. dataset prepare отклонит их." in capture_logs
+
+
+def test_fetch_with_an_unknown_excluded_class_warns_once_and_succeeds(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[99]))
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)
+    assert (result["missing_classes"], result["excluded_class_rows"]) == (None, None)
+    assert sum("Не удалось проверить классы" in line for line in capture_logs) == 1
+
+
+def test_fetch_computes_coverage_without_reading_a_non_managed_latest_version(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    # The non-managed version has class "dog" (8), which the API lacks: reconciling against it would fail.
+    _non_managed_latest(workflow)
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "f", **workflow.options)
+    assert (result["excluded_class_rows"], result["missing_classes"]) == (0, [])
+    assert not any("Не удалось проверить классы" in line for line in capture_logs)
+
+
+def test_fetch_warns_once_when_the_api_swaps_two_class_names(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog")])
+    _edit_shared(workflow, lambda shared: shared["datasets"]["combined"].update(empty_classes=[8]))
+    api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "dog"), _api(8, "cat")])
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "again", **workflow.options)
+    assert (result["excluded_class_rows"], result["missing_classes"]) == (None, None)
+    assert sum("Не удалось проверить классы" in line for line in capture_logs) == 1
+
+
+def test_fetch_warns_once_when_the_managed_latest_version_conflicts_with_the_registry(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(8, "dog")])
+    result = api.fetch_dataset("combined", output_dir=tmp_path / "again", **workflow.options)
+    assert result["missing_classes"] is None
+    assert sum("Не удалось проверить классы" in line for line in capture_logs) == 1
 
 
 @pytest.mark.parametrize("metadata", [True, False], ids=["plain-metadata", "no-metadata"])
@@ -768,19 +972,38 @@ def test_failed_feedback_is_delivered_after_a_sibling_issue_moved_the_task(workf
     assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
-def test_unexplained_task_change_still_blocks_a_pending_delivery(workflow: Workflow, tmp_path: Path) -> None:
+def test_unexplained_task_change_skips_a_pending_delivery(workflow: Workflow, tmp_path: Path) -> None:
     prepared = _prepare(workflow, tmp_path, bad=True, bad_frames=("0", "1"))
     workflow.cvat.advance_issue_timestamp = True
     workflow.cvat.fail_frames = {0}
     api.report_dataset_errors(prepared, **workflow.options)
     workflow.cvat.fail_frames.clear()
     workflow.cvat.tasks[101] = workflow.cvat.tasks[101].model_copy(update={"updated_date": "edited"})
-    with pytest.raises(ManagedError):
-        api.report_dataset_errors(prepared, **workflow.options)
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+    # Both findings are on task 101, so both are skipped, the delivered one too.
+    assert (outcome.created, outcome.skipped, outcome.failed) == (0, 2, [])
     assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
-    with pytest.raises(ManagedError):
-        api.publish_dataset(prepared, **workflow.options)
-    assert workflow.clearml.publications == []
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    assert sorted(issue.frame for issue in workflow.cvat.issues[101]) == [1]
+
+
+def test_pending_receipt_of_a_deleted_task_does_not_stop_the_command(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.fail_issues = True
+    assert len(api.report_dataset_errors(prepared, **workflow.options).failed) == 1
+    del workflow.cvat.tasks[101]
+
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+
+    assert (outcome.created, outcome.skipped, outcome.failed) == (0, 1, [])
+    assert any(line.startswith("main: задача 101 недоступна в CVAT (") for line in capture_logs)
+    assert "main: задача 101 удалена. Датасет собирается из выгруженных данных." in capture_logs
+    (ledger,) = (workflow.personal.parent / "managed-feedback").iterdir()
+    receipts = json.loads(ledger.read_text())["receipts"]
+    assert [receipt["delivered"] for receipt in receipts.values()] == [False]
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
 def _fetch_and_transform(workflow: Workflow, tmp_path: Path) -> tuple[Path, Path]:
@@ -803,7 +1026,7 @@ def test_feedback_from_an_inspection_does_not_stale_a_sibling_preparation(
 ) -> None:
     fetched, transformed = _fetch_and_transform(workflow, tmp_path)
     inspection = api.prepare_managed_dataset(
-        "combined", transformed, source=fetched, output_dir=tmp_path / "inspection", **workflow.options
+        "combined", transformed, source=fetched, output_dir=tmp_path / "inspection", clean=False, **workflow.options
     )
     assert not inspection.ready
     workflow.cvat.advance_issue_timestamp = True
@@ -816,11 +1039,7 @@ def test_feedback_from_an_inspection_does_not_stale_a_sibling_preparation(
         label = workflow.cvat.labels[12][0]
         attribute = label.attributes[0].model_copy(update={"default_value": "poor"})
         workflow.cvat.labels[12][0] = label.model_copy(update={"attributes": [attribute]})
-        with pytest.raises(ManagedError, match="CVAT source changed"):
-            api.publish_dataset(prepared.directory, **workflow.options)
-        assert workflow.clearml.publications == []
-    else:
-        assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
+    assert api.publish_dataset(prepared.directory, **workflow.options).dataset_id == "version-1"
     assert len(workflow.cvat.issues[101]) == 1
 
 
@@ -854,36 +1073,31 @@ def test_preparation_with_a_ledger_from_before_sharing_still_publishes(
     assert local.read_bytes() == original_ledger
 
 
-@pytest.mark.parametrize("damage", ["missing-registry", "missing-labels", "changed-registry", "changed-labels"])
-def test_incomplete_or_corrupt_prepared_records_block_publication(
+_MISSING_RECORDS = {
+    "missing-registry": r"^Source snapshot lacks class-registry records; fetch and prepare again$",
+    "missing-labels": r"^Source snapshot lacks CVAT label definitions: main; fetch and prepare again$",
+}
+
+
+@pytest.mark.parametrize("damage", sorted(_MISSING_RECORDS))
+def test_prepared_records_without_registry_or_labels_block_publication(
     workflow: Workflow, tmp_path: Path, damage: str
 ) -> None:
     prepared = _prepare(workflow, tmp_path)
     source_path = prepared / "source-snapshot.yaml"
     tasks_path = prepared / "tasks.yaml"
-    record_path = prepared / "preparation.json"
     source = yaml.safe_load(source_path.read_text())
     tasks = yaml.safe_load(tasks_path.read_text())
-    record = json.loads(record_path.read_text())
-    # Keep byte bindings consistent, as in an old or corrupted exporter, so the
-    # publication check must inspect the records themselves rather than checksums.
-    for snapshot in (source, tasks["managed"], record["snapshot"]):
+    # The publication check inspects the records themselves.
+    for snapshot in (source, tasks["managed"]):
         if damage == "missing-registry":
             snapshot.pop("registry")
-        elif damage == "missing-labels":
-            snapshot["sources"][0].pop("labels")
-        elif damage == "changed-registry":
-            snapshot["registry"][0]["threshold"] = 0.75
         else:
-            snapshot["sources"][0]["labels"][0]["attributes"][0]["default_value"] = "poor"
+            snapshot["sources"][0].pop("labels")
     source_path.write_text(yaml.safe_dump(source))
     tasks_path.write_text(yaml.safe_dump(tasks))
-    record["source_hash"] = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    record["payload_hashes"]["tasks.yaml"] = hashlib.sha256(tasks_path.read_bytes()).hexdigest()
-    record_path.write_text(json.dumps(record))
-    (prepared / "preparation.sha256").write_text(hashlib.sha256(record_path.read_bytes()).hexdigest())
 
-    with pytest.raises(ManagedError, match=r"fetch|fingerprint|records|definitions"):
+    with pytest.raises(ManagedError, match=_MISSING_RECORDS[damage]):
         api.publish_dataset(prepared, **workflow.options)
 
     assert workflow.clearml.publications == []
@@ -947,22 +1161,50 @@ def test_overlap_decision_added_after_a_failed_prepare_uses_the_same_fetch(workf
 
 
 @pytest.mark.parametrize("split", ["absent", "empty"])
-def test_missing_splits_make_preparation_not_ready_and_create_no_cvat_issues(
-    workflow: Workflow, tmp_path: Path, split: str
-) -> None:
+def test_missing_splits_are_pending_and_create_no_cvat_issues(workflow: Workflow, tmp_path: Path, split: str) -> None:
     fetched = tmp_path / "fetched"
     api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
     transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
     transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    images = transformed["image_name"].nunique()
     transformed = transformed.drop(columns="split") if split == "absent" else transformed.assign(split="")
     output = tmp_path / "transformed.csv"
     transformed.to_csv(output, index=False)
-    prepared = api.prepare_managed_dataset(
-        "combined", output, source=fetched, output_dir=tmp_path / "prepared", clean=True, **workflow.options
-    )
-    assert not prepared.ready
+    directory = tmp_path / "prepared"
+    prepared = api.prepare_managed_dataset("combined", output, source=fetched, output_dir=directory, **workflow.options)
+    assert prepared.ready
+    assert prepared.report["pending"] == [f"заполните split у {images} изображений в {directory / 'dataset.csv'}"]
     assert api.report_dataset_errors(prepared.directory, **workflow.options).created == 0
     assert workflow.cvat.issues == {101: [], 102: []}
+
+
+def test_prepare_exits_zero_with_pending_split_from_the_cli(
+    workflow: Workflow, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fetched, output = _transform(workflow, tmp_path)
+    transformed = pd.read_csv(output, keep_default_na=False)
+    blank = min(transformed["image_name"])
+    transformed.loc[transformed["image_name"].eq(blank), "split"] = ""
+    transformed.to_csv(output, index=False)
+    main(
+        [
+            "dataset",
+            "prepare",
+            "combined",
+            str(output),
+            "--source",
+            str(fetched),
+            "--output-dir",
+            str(tmp_path / "prepared"),
+            "--config",
+            str(workflow.personal),
+            "--global-config",
+            str(workflow.shared),
+        ]
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["ready"]
+    assert result["report"]["pending"] == [f"заполните split у 1 изображений в {tmp_path / 'prepared' / 'dataset.csv'}"]
 
 
 def _ignore_bookkeeping(shared: dict[str, Any]) -> None:
@@ -1007,14 +1249,253 @@ def _ignore_task(shared: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize("edit", [_move_source, _ignore_task], ids=["source-uri", "ignored-id"])
-def test_source_edits_after_preparation_require_fetching_again(
-    workflow: Workflow, tmp_path: Path, edit: Callable[[dict[str, Any]], None]
+def test_source_edits_after_preparation_warn_and_publish(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str], edit: Callable[[dict[str, Any]], None]
 ) -> None:
     prepared = _prepare(workflow, tmp_path)
     _edit_shared(workflow, edit)
-    with pytest.raises(ManagedError, match="Source definition changed; fetch the managed dataset again"):
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    if edit is _move_source:
+        assert (
+            "Источник отличается от выгруженного: imported: uri s3://annotations/imported.csv → "
+            "s3://annotations/moved.csv. Датасет собирается из выгруженных данных."
+        ) in capture_logs
+
+
+def _repoint_main(shared: dict[str, Any]) -> None:
+    shared["projects"]["third"] = {"id": 40}
+    shared["datasets"]["combined"]["sources"][0]["project"] = "third"
+
+
+def _drop_main(shared: dict[str, Any]) -> None:
+    shared["datasets"]["combined"]["sources"].pop(0)
+
+
+def _renumber_main(shared: dict[str, Any]) -> None:
+    shared["projects"]["main"]["id"] = 13
+
+
+@pytest.mark.parametrize(
+    ("edit", "warnings"),
+    [
+        (_repoint_main, ["Источник отличается от выгруженного: main: project_id 12 → 40"]),
+        (_drop_main, ["Источник отличается от выгруженного: main: только в снимке"]),
+        (
+            _renumber_main,
+            [
+                "Источник отличается от выгруженного: main: project_id 12 → 13",
+                "main: проект 12 больше не описан в конфигурации, задачи не проверены",
+            ],
+        ),
+    ],
+    ids=["another-project", "dropped-source", "unconfigured-project"],
+)
+def test_findings_of_a_source_that_differs_from_the_definition_are_skipped(
+    workflow: Workflow,
+    tmp_path: Path,
+    capture_logs: list[str],
+    edit: Callable[[dict[str, Any]], None],
+    warnings: list[str],
+) -> None:
+    """The command goes on from the fetched sources and sends no finding of the changed source."""
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, edit)
+
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+
+    assert (outcome.created, outcome.skipped, outcome.failed) == (0, 1, [])
+    assert workflow.cvat.issues[101] == []
+    for line in warnings:
+        assert f"{line}. Датасет собирается из выгруженных данных." in capture_logs
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+    assert workflow.cvat.issues[101] == []
+
+
+def test_task_ignored_after_fetch_is_reported_as_ignored_and_its_findings_skipped(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str]
+) -> None:
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, lambda shared: shared["projects"]["main"].update(ignore=[{"id": 101}]))
+
+    outcome = api.report_dataset_errors(prepared, **workflow.options)
+
+    assert (outcome.created, outcome.skipped) == (0, 1)
+    assert "main: задача 101 теперь игнорируется. Датасет собирается из выгруженных данных." in capture_logs
+    assert not any("удалена" in line for line in capture_logs)
+    assert workflow.cvat.issues[101] == []
+
+
+def test_server_wide_access_error_still_stops_the_command(
+    workflow: Workflow, tmp_path: Path, capture_logs: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pending receipt's task is unavailable, but so is the whole project: freshness cannot be judged."""
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    workflow.cvat.fail_issues = True
+    assert len(api.report_dataset_errors(prepared, **workflow.options).failed) == 1
+    workflow.cvat.fail_issues = False
+
+    def forbidden(*_args: object) -> None:
+        raise CvatApiError("Forbidden", status_code=403)
+
+    for method in ("get_task", "get_project_tasks", "get_project_labels"):
+        monkeypatch.setattr(workflow.cvat, method, forbidden)
+
+    with pytest.raises(CvatApiError, match="Forbidden"):
+        api.report_dataset_errors(prepared, **workflow.options)
+    # The pending receipt's task was judged unavailable first; the project listing then stopped the command.
+    assert any(line.startswith("main: задача 101 недоступна в CVAT (") for line in capture_logs)
+    with pytest.raises(CvatApiError, match="Forbidden"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.cvat.issues[101] == []
+    assert workflow.clearml.publications == []
+
+
+def _prepare_s3_only(workflow: Workflow, tmp_path: Path) -> Path:
+    """Fetch and prepare a dataset whose only source is the S3 CSV: no CVAT task IDs."""
+    _edit_shared(
+        workflow,
+        lambda shared: shared["datasets"]["combined"].update(sources=[shared["datasets"]["combined"]["sources"][2]]),
+    )
+    fetched = tmp_path / "fetched"
+    assert api.fetch_dataset("combined", output_dir=fetched, **workflow.options)["rows"] == 6
+    transformed = pd.read_csv(fetched / "dataset.csv", keep_default_na=False)
+    transformed["image_path"] = transformed["image_name"].map(lambda name: str(workflow.images / name))
+    _hand_splits(transformed).to_csv(tmp_path / "transformed.csv", index=False)
+    summary = api.prepare_managed_dataset(
+        "combined", tmp_path / "transformed.csv", source=fetched, output_dir=tmp_path / "prepared", **workflow.options
+    )
+    assert summary.ready, summary.report
+    return summary.directory
+
+
+@pytest.mark.parametrize(
+    ("cvat", "s3_only", "message"),
+    [
+        (
+            {"host": "https://cvat.moved.example"},
+            False,
+            (
+                "CVAT server differs from the one fetched: fetched https://cvat.example (organization none), "
+                "configured https://cvat.moved.example (organization none); fetch the managed dataset again"
+            ),
+        ),
+        (
+            {"host": "https://cvat.example", "organization": "team"},
+            False,
+            (
+                "CVAT server differs from the one fetched: fetched https://cvat.example (organization none), "
+                "configured https://cvat.example (organization team); fetch the managed dataset again"
+            ),
+        ),
+        ({"host": "https://cvat.moved.example"}, True, None),
+    ],
+    ids=["host", "organization", "s3-only"],
+)
+def test_another_cvat_server_after_fetch_stops_feedback_and_publication(
+    workflow: Workflow, tmp_path: Path, cvat: dict[str, str], *, s3_only: bool, message: str | None
+) -> None:
+    """Only recorded CVAT task IDs tie a preparation to a server; an S3-only dataset has none."""
+    prepared = _prepare_s3_only(workflow, tmp_path) if s3_only else _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, lambda shared: shared.update(cvat=cvat))
+
+    if message is None:
+        assert api.report_dataset_errors(prepared, **workflow.options).failed == []
+        assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+        return
+    with pytest.raises(ManagedError, match=re.escape(message)):
+        api.report_dataset_errors(prepared, **workflow.options)
+    with pytest.raises(ManagedError, match=re.escape(message)):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.cvat.issues == {101: [], 102: []}
+    assert workflow.clearml.publications == []
+
+
+def test_same_cvat_server_written_differently_still_publishes(workflow: Workflow, tmp_path: Path) -> None:
+    """The comparison uses the normalised identity: a trailing slash and an empty organization change nothing."""
+    prepared = _prepare(workflow, tmp_path, bad=True)
+    _edit_shared(workflow, lambda shared: shared.update(cvat={"host": "https://cvat.example/", "organization": ""}))
+
+    assert api.report_dataset_errors(prepared, **workflow.options).created == 1
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
+
+
+def test_snapshot_without_a_cvat_server_cannot_be_prepared(workflow: Workflow, tmp_path: Path) -> None:
+    fetched, transformed = _transform(workflow, tmp_path)
+    snapshot_path = fetched / "source-snapshot.yaml"
+    snapshot = yaml.safe_load(snapshot_path.read_text())
+    assert snapshot.pop("cvat") == {"host": "https://cvat.example", "organization": None}
+    snapshot_path.write_text(yaml.safe_dump(snapshot, allow_unicode=True))
+
+    with pytest.raises(ManagedError, match="Source snapshot lacks the CVAT server identity; fetch and prepare again"):
+        api.prepare_managed_dataset(
+            "combined", transformed, source=fetched, output_dir=tmp_path / "prepared", **workflow.options
+        )
+    assert not (tmp_path / "prepared").exists()
+
+
+def _change_registry(monkeypatch: pytest.MonkeyPatch, *, name: str = "cat", threshold: float = 0.5) -> None:
+    """Serve the fixture's single class (number 7) with another name or threshold."""
+    changed = [
+        ApiClass(
+            id=90,
+            number=7,
+            name=name,
+            techClass=False,
+            isPeriodical=False,
+            isCritical=False,
+            threshold=threshold,
+        )
+    ]
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: changed)
+
+
+def test_registry_rename_after_preparation_stops_publication(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    _change_registry(monkeypatch, name="kitty")
+    assert api.report_dataset_errors(prepared, **workflow.options).failed == []
+    with pytest.raises(ManagedError, match="differ from the class registry: cat, kitty; prepare again"):
         api.publish_dataset(prepared, **workflow.options)
     assert workflow.clearml.publications == []
+
+
+@pytest.mark.parametrize("refusal", ["registry", "roots"])
+def test_publish_refuses_registry_and_roots_before_hashing_any_image(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refusal: str
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    if refusal == "registry":
+        _change_registry(monkeypatch, name="kitty")
+        expected = "differ from the class registry"
+    else:
+        outside = tmp_path / "outside" / "task101-0.png"
+        outside.parent.mkdir()
+        shutil.copyfile(workflow.images / "task101-0.png", outside)
+        rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+        rows.loc[rows["image_name"].eq("task101-0.png"), "image_path"] = str(outside)
+        rows.to_csv(prepared / "dataset.csv", index=False)
+        expected = "outside approved roots"
+    hashed: list[int] = []
+    original = LocalManagedPreparationFiles.image_hashes
+
+    def spy(self: LocalManagedPreparationFiles, frame: pd.DataFrame) -> ImageHashes:
+        hashed.append(len(frame))
+        return original(self, frame)
+
+    monkeypatch.setattr(LocalManagedPreparationFiles, "image_hashes", spy)
+    with pytest.raises(ManagedError, match=expected):
+        api.publish_dataset(prepared, **workflow.options)
+    assert hashed == []
+    assert workflow.clearml.publications == []
+
+
+def test_registry_threshold_change_after_preparation_publishes(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    _change_registry(monkeypatch, threshold=0.9)
+    assert api.publish_dataset(prepared, **workflow.options).dataset_id == "version-1"
 
 
 def _other_definition_hash(_shared: dict[str, Any], parent: Path) -> None:
@@ -1117,7 +1598,7 @@ def test_destination_with_another_parent_needs_a_new_fetch(workflow: Workflow, t
         lambda shared: shared["datasets"]["combined"].update(clearml={"project": "CV/moved", "dataset": "annotations"}),
     )
 
-    with pytest.raises(ManagedError, match="Shared dataset policy changed; prepare again"):
+    with pytest.raises(ManagedError, match="Latest ClearML parent changed"):
         api.publish_dataset(prepared, **workflow.options)
     with pytest.raises(ManagedError, match="Source parent changed; fetch the managed dataset again"):
         api.prepare_managed_dataset(
@@ -1128,3 +1609,229 @@ def test_destination_with_another_parent_needs_a_new_fetch(workflow: Workflow, t
             **workflow.options,
         )
     assert workflow.clearml.publications == ["version-1"]
+
+
+_PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
+
+
+def test_publish_refuses_a_moved_published_image_and_force_resplit_accepts_it(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    _publish_then_prepare_child(workflow, tmp_path)
+    prepared = tmp_path / "child" / "prepared"
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    moved = rows["image_name"].eq("task101-0.png")
+    new_split = "test" if rows.loc[moved, "split"].iloc[0] != "test" else "val"
+    published_split = rows.loc[moved, "split"].iloc[0]
+    rows.loc[moved, "split"] = new_split
+    rows.to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(
+        ManagedError,
+        match=(
+            rf"^Images published in the parent must keep their split: "
+            rf"task101-0\.png \({published_split} → {new_split}\); "
+            r"restore the split in dataset\.csv or pass --force-resplit$"
+        ),
+    ):
+        api.publish_dataset(prepared, **workflow.options)
+    published = api.publish_dataset(prepared, force_resplit=True, **workflow.options)
+    digest = hashlib.sha256((workflow.images / "task101-0.png").read_bytes()).hexdigest()
+    metadata = yaml.safe_load((workflow.clearml.root / published.dataset_id / "dataset.yaml").read_text())
+    assert metadata["managed"]["assignments"][digest] == new_split
+
+
+def test_publish_refuses_one_image_in_two_splits_even_with_force_resplit(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    first = rows.index[rows["image_name"].eq("task101-0.png")][0]
+    extra = rows.loc[[first]].assign(split="test" if rows.loc[first, "split"] != "test" else "val")
+    pd.concat([rows, extra]).to_csv(prepared / "dataset.csv", index=False)
+    for force in (False, True):
+        with pytest.raises(ManagedError, match=r"rows in several splits: task101-0\.png; one image may have one split"):
+            api.publish_dataset(prepared, force_resplit=force, **workflow.options)
+
+
+def test_publish_refuses_a_blank_split_cell(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    rows.loc[0, "split"] = ""
+    rows.to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(
+        ManagedError,
+        match=re.escape(f"not ready for publication: заполните split у 1 изображений в {prepared / 'dataset.csv'}"),
+    ):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_publish_refuses_a_split_without_images_in_pending_words(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    rows.assign(split="train").to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(ManagedError, match="not ready for publication: в val нет изображений"):
+        api.publish_dataset(prepared, **workflow.options)
+    assert workflow.clearml.publications == []
+
+
+def test_publish_refuses_an_active_class_without_bbox_until_marked_empty(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(HttpClassApi, "fetch", lambda _self, _url: [_api(7, "cat"), _api(8, "dog")])
+    fetched, transformed = _fetch_and_transform(workflow, tmp_path)
+    rows = pd.read_csv(transformed, keep_default_na=False)
+    rows.loc[rows["image_name"].eq("external-0.png"), "instance_label"] = "dog"
+    rows.to_csv(transformed, index=False)
+    prepared = api.prepare_managed_dataset(
+        "combined", transformed, source=fetched, output_dir=tmp_path / "p", **workflow.options
+    ).directory
+    rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+    rows[rows["instance_label"].ne("dog")].to_csv(prepared / "dataset.csv", index=False)
+    with pytest.raises(ManagedError, match="Active classes have no bbox: dog"):
+        api.publish_dataset(prepared, **workflow.options)
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["classes"]["dog"]["empty"] = True
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    published = api.publish_dataset(prepared, **workflow.options)
+    remote = yaml.safe_load((workflow.clearml.root / published.dataset_id / "dataset.yaml").read_text())
+    assert remote["classes"]["dog"]["empty"] is True
+
+
+def test_publish_rewrites_hand_edited_bookkeeping_and_keeps_rows_and_roots(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    csv_before = (prepared / "dataset.csv").read_bytes()
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["managed"]["assignments"] = {}
+    metadata["images"]["local_root"].append(str(tmp_path))
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    tasks = yaml.safe_load((prepared / "tasks.yaml").read_text())
+    tasks["included"] = []
+    (prepared / "tasks.yaml").write_text(yaml.safe_dump(tasks))
+    api.publish_dataset(prepared, **workflow.options)
+    assert (prepared / "dataset.csv").read_bytes() == csv_before
+    rewritten = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    assert len(rewritten["managed"]["assignments"]) == 30
+    assert str(tmp_path) in rewritten["images"]["local_root"]
+    assert yaml.safe_load((prepared / "tasks.yaml").read_text())["included"] == [101, 102]
+    for name in _PAYLOAD:
+        assert (workflow.clearml.root / "version-1" / name).read_bytes() == (prepared / name).read_bytes()
+
+
+def test_publish_keeps_assignments_of_removed_images(workflow: Workflow, tmp_path: Path) -> None:
+    api.publish_dataset(_prepare(workflow, tmp_path / "first"), **workflow.options)
+    digest = hashlib.sha256((workflow.images / "external-0.png").read_bytes()).hexdigest()
+    second = tmp_path / "second"
+    fetched = second / "fetched"
+    api.fetch_dataset("combined", output_dir=fetched, **workflow.options)
+    rows = _hand_splits(pd.read_csv(fetched / "dataset.csv", keep_default_na=False))
+    rows["image_path"] = rows["image_name"].map(lambda name: str(workflow.images / name))
+    rows[rows["image_name"].ne("external-0.png")].to_csv(second / "transformed.csv", index=False)
+    prepared = api.prepare_managed_dataset(
+        "combined", second / "transformed.csv", source=fetched, output_dir=second / "prepared", **workflow.options
+    ).directory
+    published = api.publish_dataset(prepared, **workflow.options)
+    remote = yaml.safe_load((workflow.clearml.root / published.dataset_id / "dataset.yaml").read_text())
+    assert digest in remote["managed"]["assignments"]
+
+
+def test_published_fingerprints_match_the_written_records(workflow: Workflow, tmp_path: Path) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    edited = yaml.safe_load((prepared / "tasks.yaml").read_text())
+    edited["managed"]["definition_hash"] = edited["managed"]["registry_hash"] = "0" * 64
+    for source in edited["managed"]["sources"]:
+        if source["type"] == "cvat":
+            source["labels_fingerprint"] = "0" * 64
+    (prepared / "tasks.yaml").write_text(yaml.safe_dump(edited))
+    published = api.publish_dataset(prepared, **workflow.options)
+    tasks = yaml.safe_load((workflow.clearml.root / published.dataset_id / "tasks.yaml").read_text())["managed"]
+    config = load_project_config(workflow.personal, workflow.shared)
+    assert tasks["definition_hash"] == source_fingerprint(config, dataset_definition(config, "combined"))
+    assert tasks["registry_hash"] == registry_fingerprint([ApiClass.model_validate(r) for r in tasks["registry"]])
+    for source in (s for s in tasks["sources"] if s["type"] == "cvat"):
+        labels = [LabelInfo.model_validate(label) for label in source["labels"]]
+        assert source["labels_fingerprint"] == labels_fingerprint(labels)
+
+
+def test_publish_passes_the_configured_output_uri(workflow: Workflow, tmp_path: Path) -> None:
+    _edit_shared(
+        workflow, lambda shared: shared["datasets"]["combined"]["clearml"].update(output_uri="s3://bucket/.clearml")
+    )
+    api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
+    assert workflow.clearml.published_calls == [(_PAYLOAD, "s3://bucket/.clearml")]
+
+
+def test_publish_records_a_split_filled_by_hand_after_prepare_for_the_next_version(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    fetched, output = _transform(workflow, tmp_path / "first")
+    transformed = pd.read_csv(output, keep_default_na=False)
+    pending = min(transformed["image_name"])
+    hand_split = transformed.loc[transformed["image_name"].eq(pending), "split"].iloc[0]
+    filled = "test" if hand_split != "test" else "val"
+    transformed.loc[transformed["image_name"].eq(pending), "split"] = ""
+    transformed.to_csv(output, index=False)
+    summary = api.prepare_managed_dataset(
+        "combined", output, source=fetched, output_dir=tmp_path / "first" / "prepared", **workflow.options
+    )
+    assert summary.ready
+    assert summary.report["pending"]
+    rows = pd.read_csv(summary.directory / "dataset.csv", keep_default_na=False)
+    rows.loc[rows["image_name"].eq(pending), "split"] = filled
+    rows.to_csv(summary.directory / "dataset.csv", index=False)
+    api.publish_dataset(summary.directory, **workflow.options)
+
+    child = _prepare(workflow, tmp_path / "child")
+
+    child_rows = pd.read_csv(child / "dataset.csv", keep_default_na=False)
+    assert set(child_rows.loc[child_rows["image_name"].eq(pending), "split"]) == {filled}
+
+
+def test_publish_uploads_the_files_it_validated(
+    workflow: Workflow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edit made after the checks, while feedback is delivered, is not published."""
+    prepared = _prepare(workflow, tmp_path)
+    validated = (prepared / "dataset.csv").read_bytes()
+    latest = workflow.clearml.latest
+    calls: list[str] = []
+
+    def edit_after_checks(project: str, name: str) -> DatasetParent | None:
+        calls.append(name)
+        if len(calls) == 2:
+            # The second lookup is the post-feedback recheck: every content check has run.
+            rows = pd.read_csv(prepared / "dataset.csv", keep_default_na=False)
+            rows.loc[0, "bbox_x_br"] = 1
+            rows.to_csv(prepared / "dataset.csv", index=False)
+        return latest(project, name)
+
+    monkeypatch.setattr(workflow.clearml, "latest", edit_after_checks)
+    published = api.publish_dataset(prepared, **workflow.options)
+    assert len(calls) == 2
+    assert (prepared / "dataset.csv").read_bytes() != validated
+    assert (workflow.clearml.root / published.dataset_id / "dataset.csv").read_bytes() == validated
+
+
+def test_parent_metadata_with_credentials_is_refused_at_publish_without_printing_them(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    prepared = _publish_then_prepare_child(workflow, tmp_path)
+    parent = workflow.clearml.root / "version-1" / "dataset.yaml"
+    metadata = yaml.safe_load(parent.read_text())
+    metadata["api_url"] = "https://key:se/cret@classes.example/api"
+    parent.write_text(yaml.safe_dump(metadata))
+    with pytest.raises(ManagedError, match=r"^Invalid dataset metadata .*dataset\.yaml: api_url") as caught:
+        api.publish_dataset(prepared, **workflow.options)
+    assert "se/cret" not in str(caught.value)
+    assert workflow.clearml.publications == ["version-1"]
+
+
+def test_prepared_metadata_with_credentials_is_refused_without_printing_them(
+    workflow: Workflow, tmp_path: Path
+) -> None:
+    prepared = _prepare(workflow, tmp_path)
+    metadata = yaml.safe_load((prepared / "dataset.yaml").read_text())
+    metadata["api_url"] = "https://key:se/cret@classes.example/api"
+    (prepared / "dataset.yaml").write_text(yaml.safe_dump(metadata))
+    with pytest.raises(ManagedError, match="api_url") as caught:
+        api.publish_dataset(prepared, **workflow.options)
+    assert "se/cret" not in str(caught.value)
+    assert workflow.clearml.publications == []

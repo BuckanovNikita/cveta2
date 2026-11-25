@@ -621,6 +621,16 @@ def test_strict_metadata_rejects_ambiguous_yaml(tmp_path: Path, text: str) -> No
         LocalBundleFiles().read_metadata(metadata)
 
 
+def test_yaml_syntax_error_names_the_place_but_not_the_line(tmp_path: Path) -> None:
+    """A hand-edited api_url may carry credentials; the parse error must not print the line."""
+    metadata = tmp_path / "dataset.yaml"
+    metadata.write_text("classes: {}\napi_url: https://user:s3cr3t-token@classes.example/api: y\n")
+    with pytest.raises(UploadError, match=r"line 2, column \d+\)$") as raised:
+        LocalBundleFiles().read_metadata(metadata)
+    assert "s3cr3t-token" not in str(raised.value)
+    assert "api_url" not in str(raised.value)
+
+
 def test_strict_metadata_checks_reused_aliases_once(tmp_path: Path) -> None:
     levels = 60
     lines = ["api_url: https://example.org/classes", "classes: {}", "x0: &a0 [x, x]"]

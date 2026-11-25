@@ -42,13 +42,15 @@ from cveta2.composition.runtime import configure_data_timeout, configure_network
 from cveta2.domain.bundle.classes import reconcile_classes
 from cveta2.domain.bundle.models import (
     ApiClass,
+    ClassInfo,
     DatasetMetadata,
     DatasetParent,
     ImageRoots,
     Publication,
     UploadError,
 )
-from cveta2.domain.class_registry import registry_fingerprint
+from cveta2.domain.bundle.validation import excluded_class_rows, missing_active_classes
+from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ProjectConfig, dataset_definition
 from cveta2.domain.managed.policies import compare_frames
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
@@ -90,6 +92,22 @@ def _first_parent(
     return parent, None
 
 
+def _classes(
+    definition: DatasetDefinition,
+    records: list[ApiClass],
+    previous: DatasetMetadata | None,
+) -> dict[str, ClassInfo]:
+    """Reconcile the class registry with the parent's and apply the shared exclusion policy."""
+    update = reconcile_classes(previous.classes if previous else {}, records)
+    known = {info.prod_id for info in update.classes.values()}
+    if set(definition.empty_classes) - known:
+        raise ManagedError("Shared exclusion policy contains unknown class identities")
+    return {
+        name: info.model_copy(update={"empty": info.prod_id in definition.empty_classes})
+        for name, info in update.classes.items()
+    }
+
+
 def _metadata(  # noqa: PLR0913, PLR0917 - resolved policy and selected storage.
     path: Path,
     config: ProjectConfig,
@@ -98,17 +116,9 @@ def _metadata(  # noqa: PLR0913, PLR0917 - resolved policy and selected storage.
     previous: DatasetMetadata | None,
     project_config: Path | None = None,
 ) -> DatasetMetadata:
-    update = reconcile_classes(previous.classes if previous else {}, records)
-    known = {info.prod_id for info in update.classes.values()}
-    if set(definition.empty_classes) - known:
-        raise ManagedError("Shared exclusion policy contains unknown class identities")
-    classes = {
-        name: info.model_copy(update={"empty": info.prod_id in definition.empty_classes})
-        for name, info in update.classes.items()
-    }
     return DatasetMetadata(
         api_url=definition.api_url,
-        classes=classes,
+        classes=_classes(definition, records, previous),
         images=_image_roots(path, config, definition, project_config),
     )
 
@@ -174,6 +184,33 @@ def dataset_versions(
     return ClearMLStore().versions(definition.clearml.project, definition.clearml.dataset)
 
 
+def _warn_coverage(
+    definition: DatasetDefinition,
+    records: list[ApiClass],
+    previous: DatasetMetadata | None,
+    frame: pd.DataFrame,
+) -> tuple[int | None, list[str] | None]:
+    """Warn about class coverage of the fetched rows; fetch never fails because of it.
+
+    Returns ``(None, None)`` when the classes cannot be built.
+    """
+    try:
+        metadata = DatasetMetadata(api_url=definition.api_url, classes=_classes(definition, records, previous))
+        excluded = excluded_class_rows(frame, metadata)
+        missing = list(missing_active_classes(frame, metadata))
+    except Cveta2Error as error:
+        logger.warning(f"Не удалось проверить классы: {error}")
+        return None, None
+    if excluded:
+        logger.warning(f"Строк с исключёнными классами: {excluded}. dataset prepare отклонит их.")
+    if missing:
+        logger.warning(
+            f"Нет ни одного bbox у классов: {', '.join(missing)}. "
+            "Добавьте данные с ними или исключите класс через empty_classes."
+        )
+    return excluded, missing
+
+
 def fetch_dataset(
     name: str,
     *,
@@ -216,10 +253,15 @@ def fetch_dataset(
             refresh=refresh,
         )
     files.export(output_dir, snapshot, frame)
+    # Only a managed latest version is read for classes, like for the lineage above.
+    managed_metadata = metadata if metadata is not None and metadata.managed is not None else None
+    excluded, missing = _warn_coverage(definition, records, managed_metadata, frame)
     return {
         "directory": str(output_dir),
         "rows": len(frame),
         "parent_id": snapshot.parent_id,
+        "excluded_class_rows": excluded,
+        "missing_classes": missing,
         "sources": [
             {
                 "name": source.name,
@@ -238,7 +280,7 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     *,
     source: Path,
     output_dir: Path,
-    clean: bool = False,
+    clean: bool = True,
     first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
@@ -261,7 +303,6 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
         source,
         output_dir,
         _metadata(path, config, definition, records, None if first else previous, project_config),
-        registry_hash=registry_fingerprint(records),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=S3Roots(),
@@ -311,12 +352,13 @@ def report_dataset_errors(
 def publish_dataset(
     prepared: Path,
     *,
+    force_resplit: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> Publication:
-    """Publish reviewed stable payload only after prerequisite checks."""
+    """Publish the preparation's current files once they pass every check."""
     with _prepared_effects(prepared, config_path, project_config) as (config, services):
-        return publish_prepared(config, prepared, services=services)
+        return publish_prepared(config, prepared, services=services, force_resplit=force_resplit)
 
 
 @contextmanager
@@ -329,8 +371,6 @@ def _prepared_effects(
     path, config = _selection(config_path, project_config)
     files = LocalManagedPreparationFiles()
     loaded = files.load_prepared(prepared)
-    definition = dataset_definition(config, loaded.record.name)
-    local_roots = _image_roots(path, config, definition, project_config).local_root
     with _client(path, project_config) as client:
         yield (
             config,
@@ -346,8 +386,7 @@ def _prepared_effects(
                 feedback=CvatFeedback(client.api),
                 ledger=LocalFeedbackLedger(
                     prepared,
-                    shared_ledger_path(path.parent / "managed-feedback", loaded.record.source_hash),
+                    shared_ledger_path(path.parent / "managed-feedback", loaded.ledger_key),
                 ),
-                local_roots=local_roots,
             ),
         )
