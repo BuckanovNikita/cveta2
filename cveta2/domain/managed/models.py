@@ -329,6 +329,9 @@ class SourceSnapshot(StrictModel):
     version_id: str | None = None
     fetched: list[int] = Field(default_factory=list)
     reused: list[int] = Field(default_factory=list)
+    # Tasks without uploaded data: not read, so absent from ``tasks``. Omitted
+    # when empty, so snapshots without such tasks serialize as before.
+    skipped: list[int] = Field(default_factory=list, exclude_if=lambda value: not value)
 
 
 class ManagedSnapshot(StrictModel):

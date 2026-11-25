@@ -7,6 +7,7 @@ login or translating exceptions raised inside a caller's connection block.
 """
 
 import functools
+import json
 import math
 import threading
 from collections.abc import Callable
@@ -25,7 +26,7 @@ from cveta2.adapters.cvat.diagnostics import (
     operation_context,
 )
 from cveta2.adapters.execution.retry import network_retry
-from cveta2.domain.errors import CvatApiError
+from cveta2.domain.errors import CvatApiError, TaskDataNotUploadedError
 
 
 def _parse_retry_after(exc: ApiException) -> float | None:
@@ -50,6 +51,28 @@ def _parse_retry_after(exc: ApiException) -> float | None:
     return delay if math.isfinite(delay) and delay >= 0 else None
 
 
+BAD_REQUEST: Final = 400
+_NO_TASK_DATA: Final = "Data is not uploaded for the task yet"
+
+
+def _reports_no_task_data(exc: ApiException) -> bool:
+    """Say whether a 400 body is exactly CVAT's "no data uploaded" answer.
+
+    The body is parsed, never searched: a validation error that merely
+    quotes the sentence among other text must still fail the run.
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="replace")
+    if not isinstance(body, str):
+        return False
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return False
+    return payload in (_NO_TASK_DATA, [_NO_TASK_DATA])
+
+
 def _translate_api_errors[**P, R](func: "Callable[P, R]") -> "Callable[P, R]":
     """Convert SDK ``OpenApiException`` errors into :class:`CvatApiError`.
 
@@ -66,6 +89,12 @@ def _translate_api_errors[**P, R](func: "Callable[P, R]") -> "Callable[P, R]":
             return func(*args, **kwargs)
         except ApiException as e:
             status = int(getattr(e, "status", 0) or 0)
+            if status == BAD_REQUEST and _reports_no_task_data(e):
+                raise TaskDataNotUploadedError(
+                    "В задаче CVAT ещё нет загруженных данных",
+                    status_code=status,
+                    diagnostics=exception_diagnostics(e),
+                ) from e
             raise CvatApiError(
                 describe_error(e),
                 status_code=status,

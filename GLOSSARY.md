@@ -71,6 +71,11 @@ The per-project list of task IDs that are excluded from fetch output, each with 
 _Russian_: список игнорируемых задач
 _Avoid_: blacklist, excluded tasks, skip list
 
+**Task without data**:
+A CVAT task to which no data has been uploaded yet; CVAT answers reads of its data with `400 Data is not uploaded for the task yet`. Every fetch skips it with a notice: it contributes no rows, is never cached, and is read normally once its data is uploaded.
+_Russian_: задача без данных
+_Avoid_: empty task (an empty task has data but no annotations)
+
 **What's-new baseline**:
 What a fetched `dataset.csv` already contains, as a cutoff task ID and a set of task IDs; `whats-new` lists completed tasks beyond it.
 _Russian_: точка отсчёта whats-new
@@ -224,7 +229,7 @@ _Russian_: источник
 _Avoid_: input, origin, feed
 
 **Source snapshot**:
-The source evidence captured by a managed fetch (`source-snapshot.yaml`): the CVAT server and organization it was fetched from; per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched or reused. It is stored inside the published `tasks.yaml`.
+The source evidence captured by a managed fetch (`source-snapshot.yaml`): the CVAT server and organization it was fetched from; per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched, reused or skipped as tasks without data. It is stored inside the published `tasks.yaml`.
 _Russian_: снимок источников
 _Avoid_: source evidence (in prose), snapshot alone, state dump
 

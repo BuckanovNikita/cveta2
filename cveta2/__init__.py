@@ -47,6 +47,7 @@ __all__ = [
     "Publication",
     "Split",
     "TaskAnnotations",
+    "TaskDataNotUploadedError",
     "TaskInfo",
     "TaskNotFoundError",
     "UploadResult",
@@ -150,6 +151,7 @@ _EXPORTS = {
     "MissingCredentialsError": ("cveta2.exceptions", "MissingCredentialsError"),
     "MissingHostError": ("cveta2.exceptions", "MissingHostError"),
     "ProjectNotFoundError": ("cveta2.exceptions", "ProjectNotFoundError"),
+    "TaskDataNotUploadedError": ("cveta2.exceptions", "TaskDataNotUploadedError"),
     "TaskNotFoundError": ("cveta2.exceptions", "TaskNotFoundError"),
     "CSV_COLUMNS": ("cveta2.models", "CSV_COLUMNS"),
     "JOB_STAGES": ("cveta2.models", "JOB_STAGES"),
@@ -244,6 +246,7 @@ if TYPE_CHECKING:
         MissingCredentialsError,
         MissingHostError,
         ProjectNotFoundError,
+        TaskDataNotUploadedError,
         TaskNotFoundError,
     )
     from cveta2.models import (

@@ -1,9 +1,11 @@
 """CVAT source metadata and full original task capture for managed datasets."""
 
 import pandas as pd
+from loguru import logger
 
 from cveta2.application.ports.cvat import CvatApiPort
 from cveta2.application.ports.managed_sources import ProjectState, TaskAssembler
+from cveta2.domain.errors import TaskDataNotUploadedError, no_data_skip_notice
 from cveta2.domain.managed.evidence import labels_fingerprint
 from cveta2.domain.managed.models import ManagedError, TaskSnapshot
 from cveta2.domain.models import CSV_COLUMNS, LabelInfo, TaskInfo
@@ -48,15 +50,22 @@ class CvatSources:
             labels=sorted(labels, key=lambda label: label.id),
         )
 
-    def read_task(self, project_id: int, task: TaskSnapshot) -> TaskSnapshot:
-        """Capture annotations, deletions, jobs and issues as complete task evidence."""
+    def read_task(self, project_id: int, task: TaskSnapshot) -> TaskSnapshot | None:
+        """Capture annotations, deletions, jobs and issues as complete task evidence.
+
+        Returns ``None``, after one notice, for a task without uploaded data.
+        """
         task_info = self._tasks.get((project_id, task.id))
         if task_info is None or project_id not in self._labels:
             raise ManagedError("Inspect the CVAT project before reading its tasks")
         labels = self._labels[project_id]
         label_names = {label.id: label.name for label in labels}
         attr_names = {attribute.id: attribute.name for label in labels for attribute in label.attributes}
-        data = self._api.get_task_data_meta(task.id)
+        try:
+            data = self._api.get_task_data_meta(task.id)
+        except TaskDataNotUploadedError:
+            logger.warning(no_data_skip_notice(task_info.id, task_info.name))
+            return None
         annotations = self._api.get_task_annotations(task.id)
         jobs = self._api.get_task_jobs(task.id)
         issues = self._api.get_task_issues(task.id)

@@ -26,7 +26,7 @@ from cveta2.adapters.cvat.transport import cvat_read, install_global_request_tim
 from cveta2.adapters.execution.retry import RetryPolicy, configure_retries
 from cveta2.application.client.fetch import _FetchMixin
 from cveta2.application.client.shared import FetchContext
-from cveta2.domain.errors import CvatApiError, CvatRequestDiagnostics, Cveta2Error
+from cveta2.domain.errors import CvatApiError, CvatRequestDiagnostics, Cveta2Error, TaskDataNotUploadedError
 from cveta2.exceptions import CvatRequestDiagnostics as PublicDiagnostics
 from tests.helpers import make_task
 
@@ -236,6 +236,65 @@ def test_controlled_task_failure_preserves_default_strict_and_429_policy(*, stri
                 assert caught.value.status_code == status
         else:
             assert _FetchMixin.fetch_one_task(adapter, task, context) is None
+
+
+_NO_DATA_BODY = ["Data is not uploaded for the task yet"]
+
+
+def _task_without_data(status: int, body: object) -> Route:
+    """Serve an empty jobs list and answer every task data read with *status* and *body*."""
+
+    def route(_method: str, path: str) -> Reply:
+        if path.startswith("/api/jobs"):
+            return _json_reply(200, {"count": 0, "next": None, "previous": None, "results": []})
+        return _json_reply(status, body)
+
+    return route
+
+
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("body", [_NO_DATA_BODY, "Data is not uploaded for the task yet"])
+def test_a_task_without_uploaded_data_is_skipped_with_a_notice(
+    *, strict: bool, body: object, capture_logs: list[str]
+) -> None:
+    with (
+        _server(_task_without_data(400, body)) as (host, _calls),
+        Client(host, check_server_version=False) as client,
+    ):
+        adapter = SdkCvatApiAdapter(client)
+        task = make_task(7, name="still uploading", status="annotation")
+        context = FetchContext([task], {}, {}, raise_on_failure=strict)
+
+        assert _FetchMixin.fetch_one_task(adapter, task, context) is None
+
+    notices = [message for message in capture_logs if "#7" in message]
+    assert len(notices) == 1
+    assert "'still uploading'" in notices[0]
+    assert "не загружены" in notices[0]
+    assert "HTTP" not in notices[0]
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (400, ["Some other validation error"]),
+        (400, {"detail": "Data is not uploaded for the task yet"}),
+        (400, ["Data is not uploaded for the task yet", "and something else"]),
+        (404, _NO_DATA_BODY),
+    ],
+)
+def test_only_the_exact_no_data_400_is_skipped(status: int, body: object) -> None:
+    with (
+        _server(_task_without_data(status, body)) as (host, _calls),
+        Client(host, check_server_version=False) as client,
+    ):
+        adapter = SdkCvatApiAdapter(client)
+        task = make_task(7, name="sample", status="annotation")
+        with pytest.raises(CvatApiError) as caught:
+            _FetchMixin.fetch_one_task(adapter, task, FetchContext([task], {}, {}))
+
+    assert caught.value.status_code == status
+    assert not isinstance(caught.value, TaskDataNotUploadedError)
 
 
 def test_redaction_bounds_response_and_allowlists_request_metadata() -> None:

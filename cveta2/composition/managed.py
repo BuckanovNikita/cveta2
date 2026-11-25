@@ -267,6 +267,7 @@ def fetch_dataset(
                 "name": source.name,
                 "fetched": source.fetched,
                 "reused": source.reused,
+                "skipped": source.skipped,
                 "content_hash": source.content_hash,
             }
             for source in snapshot.sources

@@ -10,6 +10,7 @@ from cveta2.domain.errors import (
     MissingCredentialsError,
     MissingHostError,
     ProjectNotFoundError,
+    TaskDataNotUploadedError,
     TaskNotFoundError,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
     "MissingCredentialsError",
     "MissingHostError",
     "ProjectNotFoundError",
+    "TaskDataNotUploadedError",
     "TaskNotFoundError",
 ]

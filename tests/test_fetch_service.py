@@ -40,7 +40,7 @@ from cveta2.application.use_cases.fetch import (
 )
 from cveta2.composition.client import CvatClient
 from cveta2.composition.workflows import fetch_dependencies, fetch_project, fetch_selected_tasks
-from cveta2.domain.errors import CvatApiError
+from cveta2.domain.errors import CvatApiError, Cveta2Error
 from cveta2.domain.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
@@ -1042,3 +1042,88 @@ def test_fetch_selected_tasks_writes_no_draft(normal_fake: LoadedFixtures, tmp_p
 
     assert (out / "dataset.csv").is_file()
     assert not (out / "dataset.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# A task whose data was never uploaded is skipped, not a failure
+# ---------------------------------------------------------------------------
+
+
+class TestTaskWithoutData:
+    """CVAT answers a task without uploaded data with a 400; fetch skips that task."""
+
+    @staticmethod
+    def _connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[cveta2.Connection, FakeCvatApi]:
+        """Two one-frame completed tasks; task 2 has no data yet. The task cache is on."""
+        monkeypatch.setenv("CVETA2_DISABLE_CACHE", "false")
+        api = FakeCvatApi(
+            LoadedFixtures(
+                project=ProjectInfo(id=1, name="audit-project"),
+                tasks=[make_task(1, name="ready"), make_task(2, name="still uploading")],
+                labels=[],
+                task_data={
+                    1: (RawDataMeta([RawFrame("a.jpg", 20, 20)]), RawAnnotations()),
+                    2: (RawDataMeta([RawFrame("b.jpg", 20, 20)]), RawAnnotations()),
+                },
+            ),
+            no_data_task_ids={2},
+        )
+        config = tmp_path / "config.yaml"
+        config.write_text(f"cache:\n  tasks_root: {tmp_path / 'cache'}\n", encoding="utf-8")
+        return cveta2.Connection(client=CvatClient(CvatConfig(), api=api), config_path=config), api
+
+    def test_fetch_skips_it_with_a_notice_and_counts_it_apart(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capture_info_logs: list[str],
+    ) -> None:
+        connection, _api = self._connection(tmp_path, monkeypatch)
+
+        result = cveta2.fetch("audit-project", tmp_path / "out", connection=connection, download_images=False)
+
+        assert set(result.dataset["task_id"]) == {1}
+        notices = [message for message in capture_info_logs if "#2 'still uploading'" in message]
+        assert len(notices) == 1
+        assert "не загружены данные" in notices[0]
+        summary = next(message for message in capture_info_logs if message.startswith("Обработка задач"))
+        assert "без данных: 1" in summary
+        assert "пропущено: 0" in summary
+        assert not any("выгрузка неполная" in message for message in capture_info_logs)
+
+    def test_it_is_fetched_normally_once_its_data_is_uploaded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing of the skipped task is cached, even with its update time unchanged."""
+        connection, api = self._connection(tmp_path, monkeypatch)
+        cveta2.fetch("audit-project", tmp_path / "first", connection=connection, download_images=False)
+
+        api.no_data_task_ids.clear()
+        result = cveta2.fetch("audit-project", tmp_path / "second", connection=connection, download_images=False)
+
+        assert set(result.dataset["task_id"]) == {1, 2}
+        assert set(result.dataset["image_name"]) == {"a.jpg", "b.jpg"}
+
+    def test_fetch_task_skips_it_beside_a_task_with_data(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        connection, _api = self._connection(tmp_path, monkeypatch)
+
+        rows = cveta2.fetch_task([1, 2], tmp_path / "out", project=1, connection=connection, download_images=False)
+
+        assert set(rows["task_id"]) == {1}
+        assert (tmp_path / "out" / "dataset.csv").is_file()
+
+    def test_fetch_task_of_only_tasks_without_data_explains_and_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        connection, _api = self._connection(tmp_path, monkeypatch)
+        out = tmp_path / "out"
+
+        with pytest.raises(Cveta2Error) as caught:
+            cveta2.fetch_task([2], out, project=1, connection=connection, download_images=False)
+
+        message = str(caught.value)
+        assert "#2" in message
+        assert "не загружены данные" in message
+        assert "HTTP" not in message
+        assert "still uploading" not in message  # ADR-0004: errors name tasks by id only
+        assert not (out / "dataset.csv").exists()

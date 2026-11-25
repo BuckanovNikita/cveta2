@@ -5,9 +5,12 @@ fetch mixin and the public ``client`` module can import them without a cycle.
 """
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from loguru import logger
+
+from cveta2.domain.errors import no_data_skip_notice
 
 if TYPE_CHECKING:
     from cveta2.domain.errors import CvatApiError
@@ -17,6 +20,15 @@ _HTTP_5XX_MIN = 500
 _HTTP_5XX_MAX = 600
 _HTTP_TOO_MANY_REQUESTS = 429
 _HTTP_NOT_FOUND = 404
+
+
+class TaskSkip(Enum):
+    """Why a fetch left a task out of its output instead of failing."""
+
+    SERVER_ERROR = "server_error"
+    """CVAT answered 5xx and strict mode is off."""
+    NO_DATA = "no_data"
+    """No data has been uploaded to the task yet; always skipped."""
 
 
 @dataclass(frozen=True)
@@ -80,3 +92,8 @@ def _log_task_5xx_skip(
         logger.info(
             f"Чтобы пропустить задачу при следующем запуске: cveta2 ignore --project <имя_проекта> --add {task.id}"
         )
+
+
+def _log_task_no_data_skip(task: "TaskInfo") -> None:
+    """Log one notice for a task that has no uploaded data yet."""
+    logger.warning(no_data_skip_notice(task.id, task.name))
