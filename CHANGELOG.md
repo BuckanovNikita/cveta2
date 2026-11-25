@@ -2,6 +2,321 @@
 
 <!-- version list -->
 
+## v0.16.0 (2026-11-25)
+
+### Bug Fixes
+
+- Accept an empty output bucket and keep one archive name constant
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Correct three user-facing texts of the bundle flow
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Drop the ignored class-answer fields from PrepareOptions
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Export the managed result types from the public package
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Hide URL credentials in verify option errors
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Keep split mistakes out of CVAT feedback and harden split tests
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Never print the line of a YAML syntax error
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Prefill a split only when the image's other cells agree with the parent
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Reconcile the configuration work with the Part 0 review fixes
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Refuse an unfilled split in upload-dataset with the same words as verify
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Refuse every credential-bearing api_url in dataset metadata
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Summarise the classes of a first preparation in one line
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Warn about a repeated upload before the parent check
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Close the final-review findings of the configuration and setup work
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Keep refusing unparsable URLs in the global file
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Let a user remove a local override of a project the global file no longer has
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Treat an empty overrides block as no override and tidy the merge error
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Write team values against the raw global file, never local overrides
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **doctor**: Never print ClearML credentials from request errors
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **doctor**: Report a non-HTTP answer from the ClearML server as unreachable
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **doctor**: Send the ClearML keys the way the SDK does
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **doctor**: Verify the ClearML configuration against the server
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **doctor**: Verify TLS with the same CA bundle as the ClearML SDK
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Compare the CVAT server only for datasets with CVAT sources
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Keep a pending receipt of a deleted task instead of stopping
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Keep every class-coverage error in fetch a warning
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Keep quarantines caused only by split mistakes out of CVAT feedback
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Let --first start a lineage over an unreadable latest version
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Name only split rows in split collisions
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Name rejected rows at publish and check roots before hashing
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Name the published and current split of each changed image
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Never echo a source URI from a validation error
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Read nothing from a non-managed latest version
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Stop when the CVAT server differs from the one fetched
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **setup**: Check every remaining override before removing one value
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **setup**: Check the remaining overrides when a whole local block is removed
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **setup**: Hide URL credentials in setup --list
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+### Features
+
+- Add class coverage, split carry-over and traceable-task rules for bundles
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Add the dataset draft model and preparation value resolution
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Build prepared-bundle sources as a deterministic tar.gz
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Bundle workflow — fetch, verify, upload and managed datasets without the hash lock (SIP-278)
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Configure once — global publication settings, local overrides and one setup command (SIP-279)
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Fetch, verify, edit, upload-dataset — the bundle flow (SIP-283)
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- List changed splits of published images under pending
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Make ClearML a required dependency ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Make ClearML required and remove the split policy (SIP-306)
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Managed dataset commands without the hash lock (SIP-280)
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Prepare bundles from the draft, flags and parent without class questions
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Publish the current bundle files without a hash lock
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Remove the split policy; dataset prepare propagates published splits
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Verify prepares a bundle from a directory with cleanup on by default
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Write a draft dataset.yaml and class coverage warnings on full fetch
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Add per-project publication settings and the local_overrides switch
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Read local overrides into the effective configuration
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Select the global configuration with --global-config and CVETA2_GLOBAL_CONFIG
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **config**: Write publication fields, the overrides switch, new definitions and local overrides
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **doctor**: Check the ClearML configuration
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Add split-rule, registry and source comparison helpers
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Dataset prepare cleans by default and reports pending items like verify
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Only a newly completed CVAT task stops a managed command
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Publish validates current files, keeps published splits and rebuilds bookkeeping
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Stop refusing on configuration and registry fingerprints
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Warn about class coverage in dataset fetch
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **managed**: Write format-3 preparations without checksums
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **setup**: List the effective configuration with value origins
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **setup**: Merge setup-cache into setup and add the global wizard
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **setup**: Set, unset and create configuration values with option flags
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+### Refactoring
+
+- Drop the legacy split-policy handling ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Drop the old global-configuration spellings and the setup-cache rejection
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Pass the published file list, output_uri and parent files through the ClearML store
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Start managed lineages explicitly with --first instead of adopting non-managed parents
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- **doctor**: Send the ClearML login check through requests
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+### Testing
+
+- Cover --first over a version without dataset.yaml and in an empty dataset
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Drop the tests that only assert the old spellings are gone
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+- Pin that upload-dataset never publishes a row without a valid split
+  ([#37](https://github.com/BuckanovNikita/cveta2/pull/37),
+  [`571a35a`](https://github.com/BuckanovNikita/cveta2/commit/571a35a9cfc53d43a378f7de33cfbd85da3c8e77))
+
+### Breaking Changes
+
+- A shared configuration that still has datasets.<name>.splits is rejected as an unknown key, and a
+  parent published by cveta2 0.15 with managed.definition.splits is no longer read as a managed
+  parent.
+
+
 ## v0.15.1 (2026-11-21)
 
 ### Bug Fixes
