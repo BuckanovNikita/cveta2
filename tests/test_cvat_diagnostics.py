@@ -274,6 +274,19 @@ def test_a_task_without_uploaded_data_is_skipped_with_a_notice(
     assert "HTTP" not in notices[0]
 
 
+def test_the_no_data_error_names_the_task_and_carries_no_http_dump() -> None:
+    with (
+        _server(_task_without_data(400, _NO_DATA_BODY)) as (host, _calls),
+        Client(host, check_server_version=False) as client,
+        pytest.raises(TaskDataNotUploadedError) as caught,
+    ):
+        SdkCvatApiAdapter(client).get_task_data_meta(7)
+
+    assert str(caught.value) == "В задаче CVAT #7 ещё нет загруженных данных"
+    assert caught.value.status_code == 400
+    assert caught.value.diagnostics is not None
+
+
 @pytest.mark.parametrize(
     ("status", "body"),
     [

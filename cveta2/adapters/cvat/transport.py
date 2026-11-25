@@ -26,7 +26,7 @@ from cveta2.adapters.cvat.diagnostics import (
     operation_context,
 )
 from cveta2.adapters.execution.retry import network_retry
-from cveta2.domain.errors import CvatApiError, TaskDataNotUploadedError
+from cveta2.domain.errors import CvatApiError, CvatRequestDiagnostics, TaskDataNotUploadedError
 
 
 def _parse_retry_after(exc: ApiException) -> float | None:
@@ -73,6 +73,13 @@ def _reports_no_task_data(exc: ApiException) -> bool:
     return payload in (_NO_TASK_DATA, [_NO_TASK_DATA])
 
 
+def _no_task_data_message(diagnostics: CvatRequestDiagnostics | None) -> str:
+    """Name the task by id when the request identifies it; never echo the body."""
+    task_ids = [value for key, value in (diagnostics.resource_ids if diagnostics else ()) if key == "task_id"]
+    task = f" #{task_ids[0]}" if task_ids else ""
+    return f"В задаче CVAT{task} ещё нет загруженных данных"
+
+
 def _translate_api_errors[**P, R](func: "Callable[P, R]") -> "Callable[P, R]":
     """Convert SDK ``OpenApiException`` errors into :class:`CvatApiError`.
 
@@ -90,10 +97,11 @@ def _translate_api_errors[**P, R](func: "Callable[P, R]") -> "Callable[P, R]":
         except ApiException as e:
             status = int(getattr(e, "status", 0) or 0)
             if status == BAD_REQUEST and _reports_no_task_data(e):
+                diagnostics = exception_diagnostics(e)
                 raise TaskDataNotUploadedError(
-                    "В задаче CVAT ещё нет загруженных данных",
+                    _no_task_data_message(diagnostics),
                     status_code=status,
-                    diagnostics=exception_diagnostics(e),
+                    diagnostics=diagnostics,
                 ) from e
             raise CvatApiError(
                 describe_error(e),

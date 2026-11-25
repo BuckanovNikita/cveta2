@@ -564,7 +564,7 @@ def test_s3_adapter_captures_opaque_etag_and_content_without_images() -> None:
     assert client.method_calls == client.get_object.call_args_list or len(client.method_calls) == 1
 
 
-def _assess(config: ProjectConfig, snapshot: ManagedSnapshot, reader: _Cvat, s3: _S3) -> SourceAssessment:
+def _assess(config: ProjectConfig, snapshot: ManagedSnapshot, reader: _Cvat | CvatSources, s3: _S3) -> SourceAssessment:
     services = ManagedPublicationServices(
         files=Mock(),
         media=Mock(),
@@ -727,6 +727,9 @@ def test_a_task_without_uploaded_data_is_recorded_as_skipped_and_read_once_uploa
     notices = [message for message in capture_logs if "#2 'still uploading'" in message]
     assert len(notices) == 1
     assert "не загружены данные" in notices[0]
+    assessment = _assess(config, first, reader, _S3())
+    assert assessment.warnings == ("main: задача 2 пропущена при fetch: в ней не было загруженных данных",)
+    assert assessment.stale_tasks == frozenset()
 
     api.no_data_task_ids.clear()
     second, _ = _fetch(config, definition, reader, previous=first, previous_cvat=config.cvat)
