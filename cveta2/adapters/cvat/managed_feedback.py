@@ -7,10 +7,15 @@ from dataclasses import asdict
 
 from cveta2.application.ports.cvat import CvatApiPort
 from cveta2.application.ports.dtos import NewIssue
-from cveta2.application.ports.managed_feedback import FeedbackTaskState
+from cveta2.application.ports.managed_feedback import FeedbackTaskState, FeedbackTaskUnavailable
+from cveta2.domain.errors import CvatApiError
 from cveta2.domain.managed.models import ManagedError
 from cveta2.domain.managed.preparation import FeedbackFinding
 from cveta2.domain.models import TaskInfo
+
+# Deleted (404) or no longer visible to this account (403); any other status
+# says nothing about the task itself.
+_GONE = frozenset({403, 404})
 
 
 def _marker(finding: FeedbackFinding) -> str:
@@ -29,9 +34,14 @@ class CvatFeedback:
 
     def _task(self, finding: FeedbackFinding) -> TaskInfo:
         _marker(finding)
-        task = self._api.get_task(finding.task_id)
+        try:
+            task = self._api.get_task(finding.task_id)
+        except CvatApiError as error:
+            if error.status_code in _GONE:
+                raise FeedbackTaskUnavailable(f"Feedback task {finding.task_id} is not available: {error}") from error
+            raise
         if task.project_id != finding.project_id or task.id != finding.task_id:
-            raise ManagedError("Feedback task no longer belongs to its source project")
+            raise FeedbackTaskUnavailable("Feedback task no longer belongs to its source project")
         if finding.frame_id < 0:
             raise ManagedError("Feedback frame must be nonnegative")
         return task

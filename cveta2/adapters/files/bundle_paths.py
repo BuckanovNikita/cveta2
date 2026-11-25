@@ -79,6 +79,22 @@ class LocalRoots:
                 uncovered[str(path)] = None
         return list(uncovered)
 
+    def missing_files(self, frame: pd.DataFrame) -> list[str]:
+        """List each distinct absolute ``image_path`` that is not a regular file, in row order.
+
+        Empty, relative or malformed values are left to ``absolute_image_path``,
+        which ``uncovered_paths`` applies to every row.
+        """
+        if "image_path" not in frame or not frame.columns.is_unique:
+            return []
+        missing: dict[str, None] = {}
+        for value in frame["image_path"]:
+            if not isinstance(value, str) or not value or "\x00" in value or not Path(value).is_absolute():
+                continue
+            if value not in missing and not Path(value).is_file():
+                missing[value] = None
+        return list(missing)
+
     def check_s3_paths(self, frame: pd.DataFrame, roots: ImageRoots) -> None:
         """Require each remote key to identify one approved bucket and prefix."""
         approved = [_s3_parts(root, root=True) for root in roots.s3_root]

@@ -7,6 +7,19 @@ from cveta2.composition import managed
 from cveta2.domain.bundle.models import Publication
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
 
+__all__ = [
+    "FeedbackOutcome",
+    "PreparationSummary",
+    "compare_datasets",
+    "dataset_versions",
+    "fetch_dataset",
+    "list_datasets",
+    "prepare_managed_dataset",
+    "publish_dataset",
+    "report_dataset_errors",
+    "show_dataset",
+]
+
 
 def list_datasets(*, config_path: Path | None = None, project_config: Path | None = None) -> list[dict[str, Any]]:
     """List locally configured dataset mappings without network access."""
@@ -49,17 +62,23 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     *,
     source: Path,
     output_dir: Path,
-    clean: bool = False,
+    clean: bool = True,
+    first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> PreparationSummary:
-    """Assign managed splits and verify arbitrary externally transformed rows."""
+    """Propagate published splits and verify arbitrary externally transformed rows.
+
+    Cleanup is accepted by default; with ``clean=False`` the preparation is blocked when it is
+    needed. *first* starts a managed lineage: the latest version must not be managed and is not used.
+    """
     return managed.prepare_managed_dataset(
         name,
         csv,
         source=source,
         output_dir=output_dir,
         clean=clean,
+        first=first,
         config_path=config_path,
         project_config=project_config,
     )
@@ -89,8 +108,14 @@ def report_dataset_errors(
 def publish_dataset(
     prepared: Path,
     *,
+    force_resplit: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> Publication:
-    """Recheck and publish accepted data after traceable feedback completes."""
-    return managed.publish_dataset(prepared, config_path=config_path, project_config=project_config)
+    """Check the preparation's current files, deliver feedback and publish them.
+
+    A published image keeps its split; *force_resplit* lets ``dataset.csv`` move it.
+    """
+    return managed.publish_dataset(
+        prepared, force_resplit=force_resplit, config_path=config_path, project_config=project_config
+    )

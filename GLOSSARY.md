@@ -31,6 +31,11 @@ The four CSV files a full fetch writes: `dataset.csv`, `obsolete.csv`, `in_progr
 _Russian_: файлы полной выгрузки
 _Avoid_: splits (that word is reserved for train/val/test)
 
+**Dataset draft**:
+The `dataset.yaml` a full fetch writes next to the partition outputs: the ClearML destination, output URI, class API, excluded class numbers and image roots known from the global configuration, each key optional; `verify` reads it instead of the configuration.
+_Russian_: черновик `dataset.yaml`
+_Avoid_: template, stub config
+
 **Dataset (partition)**:
 The rows of the latest completed task of each image that is neither deleted nor reopened; the file `dataset.csv`.
 _Russian_: датасет (`dataset.csv`)
@@ -74,19 +79,29 @@ _Avoid_: diff base, checkpoint
 ### Configuration
 
 **Personal configuration**:
-The user's own YAML file (default `~/.config/cveta2/config.yaml`, or `CVETA2_CONFIG`) holding CVAT credentials, local cache paths, network and upload settings, and a reference to the shared configuration.
+The user's own YAML file (default `~/.config/cveta2/config.yaml`, or `CVETA2_CONFIG`) holding CVAT credentials, local cache paths, network and upload settings, a reference to the global configuration and, when the team allows them, local overrides.
 _Russian_: личная конфигурация
 _Avoid_: user config, local config, settings file
 
-**Shared configuration**:
-The single authoritative YAML file of a team's CVAT server, projects and managed datasets; it is never merged with personal configuration and holds no credentials or local paths.
+**Local override**:
+A per-project option in the personal configuration (`overrides.projects.<key>`) that replaces the global value for that user; allowed only when the global configuration sets `local_overrides: true`. Overridable: publication settings only.
+_Russian_: локальное переопределение
+_Avoid_: personal override, shadow setting
+
+**Global configuration**:
+The single authoritative YAML file of a team's CVAT server, projects, publication settings and managed datasets, selected by `--global-config`, `CVETA2_GLOBAL_CONFIG` or `global_config`; it holds no credentials or local paths.
 _Russian_: общая конфигурация
-_Avoid_: project config (in prose), team config, global config
+_Avoid_: shared configuration (former name), project config (in prose), team config
 
 **Project definition**:
-A CVAT project's entry in the shared configuration: its ID, name, sync root, ignored prefix, task-cache location and ignore list.
+A CVAT project's entry in the global configuration: its ID, name, sync root, ignored prefix, task-cache location, ignore list and optional publication settings.
 _Russian_: описание проекта
 _Avoid_: project settings
+
+**Publication settings**:
+The optional `publication` block of a project definition: the ClearML destination (`clearml.project`, `clearml.dataset`, optional `clearml.output_uri`), the class API (`api_url`), excluded classes (`empty_classes`) and S3 image roots (`s3_roots`) used to publish that project's bundles.
+_Russian_: настройки публикации
+_Avoid_: release settings, ClearML config
 
 ### Images and caches
 
@@ -150,19 +165,19 @@ _Russian_: очищенный CSV (`clean.csv`)
 _Avoid_: fixed CSV, valid CSV
 
 **Cleanup acceptance**:
-The explicit consent (`--clean`) to drop broken rows and apply repairs; without it a result that needs cleanup is not ready.
+Consent to drop broken rows and apply repairs. Bundle preparation (`verify <directory>`) and managed preparation (`dataset prepare`) accept cleanup by default, and `--no-clean` opts out. The CSV check (`verify <file>`) keeps it opt-in with `--clean`. Without it, a result that needs cleanup is not ready.
 _Russian_: подтверждение очистки
 _Avoid_: auto-fix
 
 **Blocker**:
-A condition found while preparing a bundle that makes the preparation not ready (`ready: false`); it is listed under `blockers` in `report.json` and stops publication.
+A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`. In managed preparation, also: one image content in two splits.
 _Russian_: блокирующее условие
 _Avoid_: blocking error, fatal issue
 
 ### Classes
 
 **Class registry**:
-The list of classes served by the class API (`api_url`), each with a number, name and flags; its fingerprint is bound into preparations.
+The list of classes served by the class API (`api_url`), each with a number, name and flags.
 _Russian_: реестр классов
 _Avoid_: label map, class list, taxonomy
 
@@ -184,22 +199,22 @@ _Avoid_: empty label, negative class, background
 ### Preparation and publication
 
 **Prepared bundle**:
-A directory that preparation writes once: a copy of its source files, `broken-images.csv` and `report.json`, and, when the preparation is ready, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml` with `preparation.json` and `preparation.sha256`, which publication uploads to ClearML.
+A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation also keeps `transformed.csv`, `source-snapshot.yaml` and `preparation.json`. `preparation.json` is plain state; no file carries a checksum; each command validates the current files.
 _Russian_: подготовленный датасет
 _Avoid_: prepared set, release candidate, package
 
 **Bundle preparation**:
-Preparation of a prepared bundle from a full fetch directory with `verify --bundle`, with classes and image roots chosen by flags or prompts; published with `upload-dataset`.
-_Russian_: ручная подготовка
+Preparation of a prepared bundle from a full fetch directory with `verify <directory>`, taking the destination, class API, excluded classes and image roots from flags, the dataset draft and the parent dataset, with cleanup accepted by default; published with `upload-dataset`.
+_Russian_: подготовка каталога
 _Avoid_: standalone preparation, ad hoc preparation
 
 **Managed dataset**:
-A dataset whose sources, ClearML destination, class API, S3 roots, empty classes, split policy and overlap decisions are defined by name in the shared configuration and handled by the `dataset` commands.
+A dataset whose sources, ClearML destination, class API, S3 roots, empty classes and overlap decisions are defined by name in the global configuration and handled by the `dataset` commands.
 _Russian_: управляемый датасет
 _Avoid_: configured dataset, named dataset
 
 **Managed preparation**:
-Preparation of a prepared bundle with `dataset prepare` from a user-transformed CSV and a managed fetch, bound to the managed definition and source snapshot.
+Preparation of a prepared bundle with `dataset prepare` from a user-transformed CSV and a managed fetch, using the managed definition and the source snapshot as they are when each command runs.
 _Russian_: управляемая подготовка
 _Avoid_: managed build
 
@@ -209,7 +224,7 @@ _Russian_: источник
 _Avoid_: input, origin, feed
 
 **Source snapshot**:
-The source evidence captured by a managed fetch (`source-snapshot.yaml`): per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched or reused. It is stored inside the published `tasks.yaml`.
+The source evidence captured by a managed fetch (`source-snapshot.yaml`): the CVAT server and organization it was fetched from; per source the tasks with their update time and completion, the label fingerprint, the original tables or S3 object identity, and which tasks were fetched or reused. It is stored inside the published `tasks.yaml`.
 _Russian_: снимок источников
 _Avoid_: source evidence (in prose), snapshot alone, state dump
 
@@ -219,9 +234,9 @@ _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
 **Stable split**:
-A train/val/test assignment computed by hashing image content with the split policy's seed; once published, an image's assignment is never rebalanced.
+An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256): `dataset prepare` writes the published split over the user's value in every later version, and `dataset publish` refuses a changed split of a published image unless `--force-resplit`, which records the new split for later versions. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and only when the image's other cells agree with the published split; `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
 _Russian_: стабильный split
-_Avoid_: random split, rebalancing
+_Avoid_: random split, rebalancing, split policy
 
 **Overlap decision**:
 A reviewed choice, for content found in several sources, of which source owns it or that it is excluded.
@@ -229,12 +244,17 @@ _Russian_: решение о пересечении
 _Avoid_: dedup rule, conflict resolution
 
 **Parent dataset**:
-The latest finalized ClearML version under the same project and dataset name, which a new preparation builds on and which must not change before publication.
+The latest finalized ClearML version under the same project and dataset name, which a new preparation builds on and which must not change before publication. For a managed dataset it must be a managed version, unless the preparation starts a managed lineage.
 _Russian_: родительский датасет
 _Avoid_: base dataset, previous version (in prose)
 
+**Managed lineage**:
+The chain of managed versions of one managed dataset, each published with the previous one as its parent. It starts in a ClearML dataset with no versions, or with `dataset prepare --first`, which publishes a first version with no parent over versions without managed metadata.
+_Russian_: управляемая история
+_Avoid_: adoption, migration
+
 **Publication**:
-The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset, after rechecking the preparation.
+The upload of a prepared bundle as a new finalized ClearML dataset version that is a child of the parent dataset (the first version of a managed lineage has none), after validating the directory's current files; `upload-dataset` publishes four files, `dataset publish` three.
 _Russian_: публикация
 _Avoid_: release, push, upload (reserved for CVAT task creation)
 

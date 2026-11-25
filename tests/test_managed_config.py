@@ -1,6 +1,5 @@
 """Strict configuration ownership and user-reviewed migration regressions."""
 
-import argparse
 import json
 import multiprocessing
 import os
@@ -21,11 +20,13 @@ from cveta2.adapters.config.project import (
     SharedIdentityMismatchError,
     activate_migration,
     attach_project_config,
+    load_global_config,
     load_project_config,
     migration_proposal,
     project_config_path,
     read_config,
     recover_migration,
+    write_shared_project_fields,
 )
 from cveta2.adapters.config.settings import (
     CacheConfig,
@@ -44,9 +45,10 @@ from cveta2.domain.managed.models import (
     ProjectConfig,
     ProjectDefinition,
 )
+from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands import setup
 from cveta2.interfaces.commands.interactive import primitives, wizard
-from tests.helpers import write_config_yaml, write_split_config_yaml
+from tests.helpers import parse_cli_args, write_config_yaml, write_split_config_yaml
 
 
 def write(path: Path, data: dict[str, object]) -> Path:
@@ -84,7 +86,7 @@ def personal(path: Path, reference: Path) -> Path:
         path,
         {
             "schema_version": 1,
-            "project_config": str(reference),
+            "global_config": str(reference),
             "cvat": {"username": "alice", "password": "private"},
             "cache": {"images_root": "/local/images"},
         },
@@ -129,12 +131,12 @@ def test_selection_precedence_and_relative_saved_path(tmp_path: Path, monkeypatc
     env = shared(tmp_path / "env.yaml", "https://env.example")
     explicit = shared(tmp_path / "explicit.yaml", "https://explicit.example")
     cfg = personal(tmp_path / "personal.yaml", Path("saved.yaml"))
-    monkeypatch.delenv("CVETA2_PROJECT_CONFIG", raising=False)
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
     assert project_config_path(cfg) == saved
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(env))
+    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(env))
     assert load_project_config(cfg).cvat.host == "https://env.example"
     assert load_project_config(cfg, explicit).cvat.host == "https://explicit.example"
-    monkeypatch.setenv("CVETA2_PROJECT_CONFIG", str(tmp_path / "missing.yaml"))
+    monkeypatch.setenv("CVETA2_GLOBAL_CONFIG", str(tmp_path / "missing.yaml"))
     with pytest.raises(ManagedError, match="Cannot read"):
         load_project_config(cfg)
 
@@ -145,9 +147,9 @@ def test_attach_is_noninteractive_and_does_not_modify_shared(tmp_path: Path, mon
     cfg = write(tmp_path / "personal.yaml", {"network": {"s3_workers": 2}})
     before = target.read_bytes()
     monkeypatch.setenv("CVETA2_NO_INTERACTIVE", "true")
-    setup.run_setup(argparse.Namespace(config=str(cfg), project_config=target, migrate_config=False))
+    setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--global-config", str(target)))
     assert target.read_bytes() == before
-    assert read_config(cfg)["project_config"] == str(target)
+    assert read_config(cfg)["global_config"] == str(target)
     assert read_config(cfg)["network"] == {"s3_workers": 2}
 
 
@@ -164,7 +166,7 @@ def test_personal_cannot_override_shared(tmp_path: Path, fields: dict[str, objec
     target = shared(tmp_path / "shared.yaml")
     cfg = write(
         tmp_path / "personal.yaml",
-        {"schema_version": 1, "project_config": str(target), **fields},
+        {"schema_version": 1, "global_config": str(target), **fields},
     )
     with pytest.raises(ManagedError, match=r"Shared|shared"):
         CvatConfig.load(cfg)
@@ -265,7 +267,7 @@ def test_migration_cancel_and_stale_preview(tmp_path: Path, monkeypatch: pytest.
     cfg = legacy(tmp_path / "personal.yaml")
     original = cfg.read_bytes()
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: False)
-    setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None))
+    setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--migrate-config"))
     assert cfg.read_bytes() == original
     assert not (tmp_path / "project-config.yaml").exists()
     proposal = migration_proposal(cfg)
@@ -490,14 +492,14 @@ def test_explicit_shared_path_without_saved_reference(tmp_path: Path, monkeypatc
             "network": {"cvat_workers": 2},
         },
     )
-    monkeypatch.delenv("CVETA2_PROJECT_CONFIG", raising=False)
+    monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
     before = cfg.read_bytes()
     assert CvatConfig.load(cfg, project_path=target).host == "https://cvat.example"
     assert ImageCacheConfig.load(cfg, project_path=target).get_cache_dir("Main project") == Path("/local/images")
     assert CacheConfig.load(cfg, project_path=target).for_project("Main project").task_cache_s3 == "s3://bucket/cache"
     assert NetworkConfig.resolve(cfg, project_path=target).cvat_workers == 2
     assert cfg.read_bytes() == before
-    assert "CVETA2_PROJECT_CONFIG" not in os.environ
+    assert "CVETA2_GLOBAL_CONFIG" not in os.environ
 
 
 def test_concurrent_journal_is_not_overwritten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -746,7 +748,7 @@ def test_global_cache_save_still_rejects_ambiguous_shared_project_names(
         },
         datasets={},
     )
-    personal = write_config_yaml(tmp_path / "personal.yaml", schema_version=1, project_config=str(shared))
+    personal = write_config_yaml(tmp_path / "personal.yaml", schema_version=1, global_config=str(shared))
     personal_before, shared_before = personal.read_bytes(), shared.read_bytes()
     with pytest.raises(ManagedError, match="Collision"):
         CacheConfig(images_root=tmp_path / "local-images").save(personal)
@@ -854,7 +856,7 @@ def test_new_policy_save_requires_attached_shared_file(tmp_path: Path, section: 
     with pytest.raises(MigrationRequired) as error:
         config.save(path)
     if section in {"sync", "ignore"}:
-        assert {"setup", "--project-config"}.issubset(str(error.value).split())
+        assert {"setup", "--global-config"}.issubset(str(error.value).split())
     assert not path.exists()
 
 
@@ -997,7 +999,7 @@ def test_damaged_migration_journal_is_a_recoverable_typed_error(
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
 
     with pytest.raises(ManagedError) as caught:
-        setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=True, project_config=None))
+        setup.run_setup(parse_cli_args("setup", "--config", str(cfg), "--migrate-config"))
 
     assert str(journal) in str(caught.value)
     assert "setup --migrate-config" in str(caught.value)
@@ -1042,9 +1044,13 @@ def _run_wizard(monkeypatch: pytest.MonkeyPatch, cfg: Path, team: Path, organiza
     monkeypatch.setattr(wizard, "prompt_organization", lambda _existing: organization)
     monkeypatch.setattr(wizard, "prompt_username", lambda _default: "alice")
     monkeypatch.setattr(wizard, "prompt_password", lambda: "private")
-    monkeypatch.setattr(primitives, "path", lambda *_args, **_kwargs: team)
+    # Only the global-file prompt gets a path; the cache prompts that follow are skipped.
+    monkeypatch.setattr(
+        primitives, "path", lambda message, **_kwargs: team if message.startswith("Общий YAML") else None
+    )
     monkeypatch.setattr(primitives, "confirm", lambda *_args, **_kwargs: True)
-    setup.run_setup(argparse.Namespace(config=str(cfg), migrate_config=False, project_config=None))
+    monkeypatch.setattr(setup, "load_projects_cache", lambda _path: [ProjectInfo(id=12, name="Main")])
+    setup.run_setup(parse_cli_args("setup", "--config", str(cfg)))
 
 
 def test_wizard_attaches_an_existing_shared_file_with_the_same_identity(
@@ -1059,7 +1065,7 @@ def test_wizard_attaches_an_existing_shared_file_with_the_same_identity(
     assert team.read_bytes() == before
     saved = read_config(cfg)
     assert saved["schema_version"] == 1
-    assert saved["project_config"] == str(team.resolve())
+    assert saved["global_config"] == str(team.resolve())
     assert saved["cvat"] == {"username": "alice", "password": "private"}
     loaded = CvatConfig.load(cfg)
     assert (loaded.host, loaded.organization, loaded.password) == ("https://cvat.example", "team", "private")
@@ -1078,7 +1084,7 @@ def test_wizard_refuses_an_existing_shared_file_with_another_identity(
     assert str(team.resolve()) in str(caught.value)
     assert "other-team" not in str(caught.value)
     assert team.read_bytes() == before
-    assert "project_config" not in read_config(cfg)
+    assert "global_config" not in read_config(cfg)
 
 
 def test_migration_accepts_a_semantically_equal_hand_written_shared_file(tmp_path: Path) -> None:
@@ -1096,7 +1102,7 @@ def test_migration_accepts_a_semantically_equal_hand_written_shared_file(tmp_pat
     assert proposal.unresolved == ()
     activate_migration(proposal)
     assert team.read_bytes() == before
-    assert read_config(cfg)["project_config"] == str(team.resolve())
+    assert read_config(cfg)["global_config"] == str(team.resolve())
 
 
 # ---------------------------------------------------------------------------
@@ -1114,7 +1120,7 @@ def _two_writers(tmp_path: Path) -> tuple[Path, Path]:
     )
     bob = write(
         tmp_path / "bob.yaml",
-        {"schema_version": 1, "project_config": str(alice.with_name("alice-projects.yaml"))},
+        {"schema_version": 1, "global_config": str(alice.with_name("alice-projects.yaml"))},
     )
     return alice, bob
 
@@ -1191,7 +1197,7 @@ def test_overlapping_policy_saves_refuse_contention_then_preserve_both_edits(
     if aliased:
         alias = tmp_path / "team-alias.yaml"
         alias.symlink_to(alice.with_name("alice-projects.yaml"))
-        write(bob, {"schema_version": 1, "project_config": str(alias)})
+        write(bob, {"schema_version": 1, "global_config": str(alias)})
     alice_config = _SECTIONS[kind].load(alice)
     bob_config = _SECTIONS[kind].load(bob)
     _edit(kind, alice_config, "A", 100)
@@ -1361,3 +1367,104 @@ def test_migration_reports_an_unusable_legacy_root_for_review(tmp_path: Path) ->
     with pytest.raises(ManagedError, match="unresolved"):
         activate_migration(proposal)
     assert path.read_bytes() == original
+
+
+# Team writes use the raw global file as their baseline
+# ---------------------------------------------------------------------------
+
+_RETAIL_PUBLICATION: dict[str, object] = {
+    "clearml": {"project": "Retail/Datasets", "dataset": "retail-shelves"},
+    "api_url": "https://classes.example.com/api",
+}
+
+
+def _overridden(tmp_path: Path) -> tuple[Path, Path]:
+    """Write a global file that allows overrides and a personal file overriding one leaf."""
+    team = write(
+        tmp_path / "team.yaml",
+        {
+            "schema_version": 1,
+            "local_overrides": True,
+            "cvat": {"host": "https://cvat.example.com", "organization": "my-team"},
+            "projects": {
+                "retail": {
+                    "id": 123,
+                    "name": "Retail shelves",
+                    "sync_root": "s3://my-bucket/images",
+                    "publication": _RETAIL_PUBLICATION,
+                }
+            },
+            "datasets": {},
+        },
+    )
+    cfg = write(
+        tmp_path / "config.yaml",
+        {
+            "schema_version": 1,
+            "global_config": str(team),
+            "cvat": {"username": "alice", "password": "private"},
+            "overrides": {"projects": {"retail": {"publication": {"clearml": {"dataset": "retail-shelves-alice"}}}}},
+        },
+    )
+    return cfg, team
+
+
+def _dataset_name(path: Path) -> object:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["projects"]["retail"]["publication"]["clearml"]["dataset"]
+
+
+def test_team_write_never_copies_a_local_override_into_the_global_file(tmp_path: Path) -> None:
+    cfg, team = _overridden(tmp_path)
+
+    ignore = IgnoreConfig.load(cfg)
+    ignore.add_task("Retail shelves", 9, "t9")
+    ignore.save(cfg)
+
+    document = yaml.safe_load(team.read_text(encoding="utf-8"))
+    assert [entry["id"] for entry in document["projects"]["retail"]["ignore"]] == [9]
+    assert _dataset_name(team) == "retail-shelves"
+
+    before = team.read_bytes()
+    cache = CacheConfig.load(cfg)
+    cache.images_root = Path("/local/images")
+    cache.save(cfg)
+    assert team.read_bytes() == before
+
+    write_shared_project_fields(cfg, {"retail": {"sync_root": "s3://my-bucket/new"}})
+    assert load_global_config(cfg).projects["retail"].sync_root == "s3://my-bucket/new"
+    assert _dataset_name(team) == "retail-shelves"
+
+
+def test_override_does_not_trip_the_conflict_check(tmp_path: Path) -> None:
+    cfg, team = _overridden(tmp_path)
+    roots = SyncRootsConfig.load(cfg)
+
+    write_shared_project_fields(cfg, {"retail": {"ignore": [{"id": 5, "name": "five"}]}})
+    roots.projects["Retail shelves"] = "s3://my-bucket/moved"
+    roots.save(cfg)
+
+    document = yaml.safe_load(team.read_text(encoding="utf-8"))["projects"]["retail"]
+    assert document["sync_root"] == "s3://my-bucket/moved"
+    assert [entry["id"] for entry in document["ignore"]] == [5]
+    assert _dataset_name(team) == "retail-shelves"
+
+
+def test_team_write_adds_no_new_keys_to_an_untouched_file(tmp_path: Path) -> None:
+    target = shared(tmp_path / "shared.yaml")
+    cfg = personal(tmp_path / "personal.yaml", target)
+
+    ignore = IgnoreConfig.load(cfg)
+    ignore.add_task("Main project", 9, "t9")
+    ignore.save(cfg)
+
+    document = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert {"schema_version", "cvat", "projects", "datasets"} >= set(document)
+    assert all("publication" not in project for project in document["projects"].values())
+
+
+def test_migration_preview_of_a_versioned_file_shows_the_raw_global_file(tmp_path: Path) -> None:
+    cfg, _team = _overridden(tmp_path)
+
+    proposal = migration_proposal(cfg)
+
+    assert proposal.shared == load_global_config(cfg).model_dump()

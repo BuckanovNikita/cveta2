@@ -21,19 +21,13 @@ pip install git+ssh://git@<host>/<org>/cveta2@vX.Y.Z
 uv add git+ssh://git@<host>/<org>/cveta2@<хеш-коммита>
 ```
 
-Команды, которые работают с ClearML (`verify --bundle`, `upload-dataset`, `dataset`), требуют
-extra `clearml`:
-
-```bash
-uv add "cveta2[clearml] @ git+ssh://git@<host>/<org>/cveta2@vX.Y.Z"
-```
+ClearML SDK ставится вместе с пакетом, а его подключение к серверу ClearML настраивается отдельно. Оно нужно для `verify <каталог>`, `upload-dataset` и команд `cveta2 dataset`, которые читают или публикуют версии в ClearML. Настройте его файлом `~/clearml.conf` (или файлом из `CLEARML_CONFIG_FILE`) либо переменными `CLEARML_API_HOST`, `CLEARML_API_ACCESS_KEY` и `CLEARML_API_SECRET_KEY`; если адрес сервера API не вида `api.<домен>` и без порта 8008, задайте ещё `CLEARML_WEB_HOST` и `CLEARML_FILES_HOST`. Проверить настройку можно командой [`cveta2 doctor`](docs/commands/doctor.md).
 
 ## Быстрый старт
 
 ```bash
-cveta2 setup --project-config ~/team/project-config.yaml   # подключить общую конфигурацию команды
-cveta2 setup                                               # логин и пароль CVAT (в терминале)
-cveta2 setup-cache                                         # куда складывать изображения (в терминале)
+cveta2 setup --global-config ~/team/project-config.yaml   # подключить общую конфигурацию команды
+cveta2 setup                                               # логин, пароль CVAT и пути кэша (в терминале)
 cveta2 doctor                                              # проверить настройки
 cveta2 fetch -p "Retail shelves" -o output/                # выгрузить разметку в CSV, изображения — в кэш
 ```
@@ -46,8 +40,7 @@ cveta2 fetch -p "Retail shelves" -o output/                # выгрузить 
 
 | Команда | Что делает |
 | --- | --- |
-| [`setup`](docs/commands/setup.md) | Настроить подключение к CVAT |
-| [`setup-cache`](docs/commands/setup-cache.md) | Настроить каталоги кэша изображений |
+| [`setup`](docs/commands/setup.md) | Настроить подключение к CVAT, кэш и общую конфигурацию |
 | [`doctor`](docs/commands/doctor.md) | Проверить конфигурацию и кэш |
 | [`fetch`](docs/commands/fetch.md) | Выгрузить все аннотации проекта |
 | [`fetch-task`](docs/commands/fetch-task.md) | Выгрузить аннотации выбранных задач |
@@ -59,7 +52,7 @@ cveta2 fetch -p "Retail shelves" -o output/                # выгрузить 
 | [`labels`](docs/commands/labels.md) | Посмотреть и изменить метки (labels) проекта |
 | [`ignore`](docs/commands/ignore.md) | Вести список задач, которые `fetch` пропускает |
 | [`task`](docs/commands/task.md) | Изменить задачу: пометить кадры удалёнными, удалить аннотации метки или задачу, сменить stage и state |
-| [`verify`](docs/commands/verify.md) | Проверить CSV или подготовить датасет к публикации |
+| [`verify`](docs/commands/verify.md) | Проверить CSV или подготовить каталог выгрузки к публикации |
 | [`upload-dataset`](docs/commands/upload-dataset.md) | Опубликовать подготовленный датасет в ClearML |
 | [`dataset`](docs/commands/dataset.md) | Управлять именованными датасетами: выгрузка, подготовка, публикация |
 

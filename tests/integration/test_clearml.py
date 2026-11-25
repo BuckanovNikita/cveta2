@@ -1,9 +1,9 @@
 """Explicit reviewed bundle publication against this run's ClearML and MinIO.
 
 Registry HTTP and image/source fixtures are local. ClearML projects use the exact
-run tag and are removed by this module's fixture; the seeded MinIO bucket is read
-only. The session namespace, with everything in it, is deleted by the session
-fixture.
+run tag and are removed by this module's fixture. The seeded MinIO bucket is read,
+and one test stores published files under its ``.clearml`` prefix. The session
+namespace, with everything in it, is deleted by the session fixture.
 """
 
 import json
@@ -21,11 +21,12 @@ import pytest
 from loguru import logger
 from PIL import Image
 
+from cveta2.adapters.clearml.bundle import S3Roots
 from cveta2.application.ports.dataset_bundle import BundleServices
 from cveta2.application.use_cases.dataset_bundle import prepare_dataset, upload_dataset
 from cveta2.composition.dataset_bundle import bundle_services
 from cveta2.domain.bundle.models import UploadError
-from cveta2.domain.bundle.preparation import PAYLOAD_NAMES, SOURCE_NAMES, PrepareOptions
+from cveta2.domain.bundle.preparation import PUBLISHED_NAMES, SOURCE_NAMES, PrepareOptions
 from tests.integration.clearml_run import (
     RunError,
     RunSettings,
@@ -157,7 +158,6 @@ def scenario(
         api_url=class_api,
         local_roots=(str(images),),
         s3_roots=(f"s3://{bucket}",),
-        accept_default_classes=True,
     )
     return Scenario(source, options, bundle_services())
 
@@ -177,14 +177,14 @@ def test_publish_finalized_exact_payload_and_preserve_parent(
     original = _source_bytes(source)
     prepared = tmp_path / "prepared-first"
     assert prepare_dataset(source, prepared, options, services).ready
-    assert services.datasets.latest(options.project, options.dataset_name or "") is None
+    assert services.datasets.latest(options.project or "", options.dataset_name or "") is None
     first = upload_dataset(prepared, services)
     parent = Dataset.get(dataset_id=first.dataset_id)
     assert parent.is_final()
-    assert set(parent.list_files()) == set(PAYLOAD_NAMES)
+    assert set(parent.list_files()) == set(PUBLISHED_NAMES)
     parent_directory = Path(parent.get_local_copy(use_soft_links=False))
-    parent_bytes = {name: (parent_directory / name).read_bytes() for name in PAYLOAD_NAMES}
-    assert parent_bytes == {name: (prepared / name).read_bytes() for name in PAYLOAD_NAMES}
+    parent_bytes = {name: (parent_directory / name).read_bytes() for name in PUBLISHED_NAMES}
+    assert parent_bytes == {name: (prepared / name).read_bytes() for name in PUBLISHED_NAMES}
     assert _source_bytes(source) == original
 
     second_directory = tmp_path / "prepared-second"
@@ -194,24 +194,24 @@ def test_publish_finalized_exact_payload_and_preserve_parent(
     child = Dataset.get(dataset_id=second.dataset_id)
     assert child.is_final()
     assert child.get_dependency_graph()[child.id] == [parent.id]
-    assert set(child.list_files()) == set(PAYLOAD_NAMES)
+    assert set(child.list_files()) == set(PUBLISHED_NAMES)
     child_directory = Path(child.get_local_copy(use_soft_links=False))
-    assert {name: (child_directory / name).read_bytes() for name in PAYLOAD_NAMES} == {
-        name: (second_directory / name).read_bytes() for name in PAYLOAD_NAMES
+    assert {name: (child_directory / name).read_bytes() for name in PUBLISHED_NAMES} == {
+        name: (second_directory / name).read_bytes() for name in PUBLISHED_NAMES
     }
     refreshed_parent = Dataset.get(dataset_id=parent.id)
     assert refreshed_parent.is_final()
-    assert set(refreshed_parent.list_files()) == set(PAYLOAD_NAMES)
+    assert set(refreshed_parent.list_files()) == set(PUBLISHED_NAMES)
     refreshed_directory = Path(refreshed_parent.get_local_copy(use_soft_links=False))
-    assert {name: (refreshed_directory / name).read_bytes() for name in PAYLOAD_NAMES} == parent_bytes
+    assert {name: (refreshed_directory / name).read_bytes() for name in PUBLISHED_NAMES} == parent_bytes
     assert _source_bytes(source) == original
 
 
-def test_tampered_bundle_and_new_parent_create_no_remote_child(
+def test_newer_parent_after_verify_creates_no_child(
     scenario: Scenario,
     tmp_path: Path,
 ) -> None:
-    """Rejected review evidence must never create a remote child."""
+    """A version published after verify refuses the older bundle before any remote child exists."""
     from clearml import Dataset
 
     source, options, services = scenario.source, scenario.options, scenario.services
@@ -227,15 +227,6 @@ def test_tampered_bundle_and_new_parent_create_no_remote_child(
             )
         }
 
-    tampered = tmp_path / "tampered"
-    assert prepare_dataset(source, tampered, options, services).ready
-    before = remote_ids()
-    with (tampered / "tasks.yaml").open("a", encoding="utf-8") as stream:
-        stream.write("\n# changed after review\n")
-    with pytest.raises(UploadError, match=r"changed|hash|измен"):
-        upload_dataset(tampered, services)
-    assert remote_ids() == before
-
     reviewed = tmp_path / "reviewed"
     competing = tmp_path / "competing"
     assert prepare_dataset(source, reviewed, options, services).ready
@@ -243,6 +234,23 @@ def test_tampered_bundle_and_new_parent_create_no_remote_child(
     newer = upload_dataset(competing, services)
     before = remote_ids()
     assert newer.dataset_id in before
-    with pytest.raises(UploadError, match="parent"):
+    with pytest.raises(UploadError, match="verify"):
         upload_dataset(reviewed, services)
     assert remote_ids() == before
+
+
+def test_output_uri_on_run_bucket(scenario: Scenario, tmp_path: Path) -> None:
+    """``clearml.output_uri`` sends the published files to the run bucket."""
+    from clearml import Dataset
+
+    bucket = os.environ["MINIO_BUCKET"]
+    output_uri = f"s3://{bucket}/.clearml"
+    options = scenario.options.model_copy(update={"output_uri": output_uri})
+    prepared = tmp_path / "prepared"
+    assert prepare_dataset(scenario.source, prepared, options, scenario.services).ready
+    publication = upload_dataset(prepared, scenario.services)
+    child = Dataset.get(dataset_id=publication.dataset_id)
+    assert child.is_final()
+    assert set(child.list_files()) == set(PUBLISHED_NAMES)
+    # check_root lists the prefix and raises when it does not exist or is empty.
+    S3Roots().check_root(output_uri)

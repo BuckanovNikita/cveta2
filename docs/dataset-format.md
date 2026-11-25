@@ -91,9 +91,12 @@ Issues завершённой задачи берутся из кэша анно
 
 `split` — часть датасета для обучения: `train`, `val` или `test`. Другие значения не допускаются.
 
+Split — ваш: cveta2 никогда не назначает его сам. Он только сохраняет опубликованный split изображения, которое уже опубликовано в родительской версии (`dataset prepare`, `verify <каталог>` и `upload-dataset`).
+
 - fetch и fetch-task столбец не заполняют.
-- Для `convert` и для `verify --bundle` split заполняете вы. `convert` останавливается с ошибкой, если у изображения split пустой или недопустимый. `verify --bundle` требует хотя бы одно изображение `train` и одно `val`.
-- `dataset prepare` назначает стабильный split ([stable split](../GLOSSARY.md)): split зависит от хеша содержимого изображения, а split уже опубликованных изображений сохраняется. Ваши значения при этом перезаписываются. Число заменённых значений попадает в отчёт как `split_replacements`.
+- Для `convert` и для подготовки каталога (`verify <каталог>`) split заполняете вы. `convert` останавливается с ошибкой, если у изображения split пустой или недопустимый.
+- `verify <каталог>` заполняет пустые ячейки `split` у изображений, которые есть в родительском датасете (по `image_name`), их опубликованным split; ваши значения не меняются. Оставшийся пустой `split` разрешён и попадает в `pending` в `report.json`: его заполняете вы в подготовленном `dataset.csv`. Изображение родителя, которому вы сами вписали другой split, тоже попадает в `pending`. `upload-dataset` требует split у каждой строки, хотя бы одно изображение `train` и одно `val` и отказывается публиковать изображение родителя с другим split без `--force-resplit`.
+- `dataset prepare` переносит опубликованный split по содержимому изображения (SHA-256) и записывает его поверх вашего значения; число замен — `split_replacements`. Split нового изображения берётся из вашего CSV; пустой split подготовку не блокирует, а попадает в `pending`. Если одно изображение (по SHA-256 содержимого, под одним или разными именами) стоит в нескольких split, подготовка блокируется: `Image content has rows in several splits: <имена>`.
 - `convert --from-yolo` для датасета YOLO берёт split из раздела `train`, `val` или `test` его YAML. Для отдельных файлов предсказаний YOLO (без YAML) split остаётся пустым.
 
 ### Имя и пути изображения
@@ -106,15 +109,18 @@ Issues завершённой задачи берутся из кэша анно
 
 ## Файлы полной выгрузки
 
-Полная выгрузка ([full fetch](../GLOSSARY.md)) — команда `fetch` по всем задачам проекта. Она пишет в каталог вывода четыре файла с одинаковыми столбцами:
+Полная выгрузка ([full fetch](../GLOSSARY.md)) — команда `fetch` по всем задачам проекта. Она пишет в каталог вывода четыре файла с одинаковыми столбцами и черновик `dataset.yaml`:
 
 ```text
 output/
 ├── dataset.csv
 ├── obsolete.csv
 ├── in_progress.csv
-└── deleted.csv
+├── deleted.csv
+└── dataset.yaml
 ```
+
+`dataset.yaml` — черновик ([dataset draft](../GLOSSARY.md)) для подготовки набора командой `verify`: назначение ClearML, API классов, исключённые классы и корни изображений, известные из конфигурации. Его ключи и предупреждения описаны в [fetch](commands/fetch.md#черновик-datasetyaml).
 
 | Файл | Что в нём |
 |---|---|
@@ -177,33 +183,31 @@ output/
 
 ## Подготовленный датасет
 
-Подготовленный датасет ([prepared bundle](../GLOSSARY.md)) — каталог, который пишут `verify --bundle` (ручная подготовка, [bundle preparation](../GLOSSARY.md)) и `dataset prepare` (управляемая подготовка, [managed preparation](../GLOSSARY.md)). Каталог пишется один раз:
+Подготовленный датасет ([prepared bundle](../GLOSSARY.md)) — каталог, который пишут `verify <каталог>` (подготовка каталога, [bundle preparation](../GLOSSARY.md)) и `dataset prepare` (управляемая подготовка, [managed preparation](../GLOSSARY.md)). Каталог пишется один раз:
 
 - каталог не должен существовать заранее;
 - каталог не должен лежать внутри исходного каталога выгрузки;
-- `preparation.json` и `preparation.sha256` появляются последними, поэтому прерванная запись не оставляет каталог, готовый к публикации.
+- `verify <каталог>` собирает каталог во временном каталоге рядом и переносит его на место одним переименованием, поэтому прерванная запись не оставляет ничего;
+- у `dataset prepare` `preparation.json` появляется последним, поэтому прерванная запись не оставляет каталог, готовый к публикации.
 
-Готовность (`ready`) означает: нет блокирующих проблем, нет структурных ошибок, и либо очистка не нужна, либо вы дали подтверждение очистки ([cleanup acceptance](../GLOSSARY.md)) флагом `--clean`. `verify --bundle` также требует хотя бы одно изображение `train` и одно `val` и хотя бы один bbox в `train`.
+Готовность (`ready`) означает: нет блокирующих проблем, нет структурных ошибок, и либо очистка не нужна, либо дано подтверждение очистки ([cleanup acceptance](../GLOSSARY.md)): у `verify <каталог>` и `dataset prepare` оно есть по умолчанию, пока не задан `--no-clean`. Подготовка также не готова, если у неисключённого класса нет ни одного bbox, а `dataset prepare` — ещё и если одно изображение (по SHA-256 содержимого) стоит в нескольких split. Условия split (пустой `split`, пустые `train` или `val`, нет bbox в `train`, у `verify <каталог>` — ещё другой split у изображений, опубликованных в родителе) подготовку не блокируют, а попадают в `pending` и проверяются при публикации.
 
-### verify --bundle
+### verify <каталог>
 
 Источник — каталог полной выгрузки с четырьмя файлами.
 
 ```text
 prepared/
-├── sources/
-│   ├── dataset.csv
-│   ├── obsolete.csv
-│   ├── in_progress.csv
-│   └── deleted.csv
+├── sources.tar.gz
 ├── broken-images.csv
 ├── report.json
 ├── dataset.csv           только если ready
 ├── dataset.yaml          только если ready
 ├── tasks.yaml            только если ready
-├── preparation.json      только если ready
-└── preparation.sha256    только если ready
+└── publication.json      после upload-dataset
 ```
+
+`sources.tar.gz` — архив четырёх файлов выгрузки (`dataset.csv`, `obsolete.csv`, `in_progress.csv`, `deleted.csv`). Архив детерминированный: из одинаковых файлов всегда получаются одинаковые байты (фиксированные порядок, время и владелец). `preparation.json` этот вид подготовки не пишет. Контрольных сумм нет, и файлы `dataset.csv`, `dataset.yaml` и `tasks.yaml` можно править до публикации.
 
 ### dataset prepare
 
@@ -218,40 +222,46 @@ prepared/
 ├── dataset.csv           только если ready
 ├── dataset.yaml          только если ready
 ├── tasks.yaml            только если ready
-├── preparation.json
-└── preparation.sha256
+└── preparation.json
 ```
+
+Контрольных сумм у каталога нет. Файлы можно править после подготовки, например `dataset.csv` и `dataset.yaml`: `dataset report-errors` и `dataset publish` проверяют файлы такими, какие они сейчас. Каталог, у которого в `preparation.json` другой `format_version`, не читается: подготовьте датасет заново.
 
 ### Файлы каталога
 
 | Файл | Назначение | Публикуется в ClearML |
 |---|---|---|
-| `sources/*.csv` | Точная копия четырёх файлов выгрузки (только `verify --bundle`). | нет |
+| `sources.tar.gz` | Архив четырёх файлов выгрузки (только `verify <каталог>`). | да |
 | `transformed.csv` | Точная копия вашего CSV (только `dataset prepare`). | нет |
 | `source-snapshot.yaml` | Точная копия снимка источников ([source snapshot](../GLOSSARY.md)) (только `dataset prepare`). | нет |
 | `broken-images.csv` | Исходные строки всех изображений, у которых хотя бы одна строка отклонена. Если у изображения отклонён один bbox, отклоняется всё изображение. | нет |
 | `report.json` | отчёт проверки ([verification report](../GLOSSARY.md)) с итогом подготовки. | нет |
 | `dataset.csv` | Очищенные строки датасета. | да |
-| `dataset.yaml` | Классы, API классов и разрешённые корни изображений. | да |
+| `dataset.yaml` | Назначение в ClearML, классы, API классов и разрешённые корни изображений. | да |
 | `tasks.yaml` | список задач датасета ([task manifest](../GLOSSARY.md)). | да |
-| `preparation.json` | Запись о подготовке: параметры и хеши SHA-256 файлов. | нет |
-| `preparation.sha256` | Хеш SHA-256 файла `preparation.json`. | нет |
+| `preparation.json` | Запись подготовки: имя датасета, родительский датасет, замечания к кадрам, `ready`, `clean`. Контрольных сумм нет (только `dataset prepare`). | нет |
+| `publication.json` | Запись об успешной публикации (только `upload-dataset`). | нет |
 
-При публикации ([publication](../GLOSSARY.md)) в новую версию ClearML загружаются ровно три файла: `dataset.csv`, `dataset.yaml`, `tasks.yaml`. Перед публикацией cveta2 сверяет хеши из `preparation.json` с файлами. Если вы изменили любой из них, публикация останавливается, и нужно подготовить датасет заново.
+При публикации ([publication](../GLOSSARY.md)) `upload-dataset` загружает в новую версию ClearML ровно четыре файла: `dataset.csv`, `dataset.yaml`, `tasks.yaml`, `sources.tar.gz`. Он проверяет файлы каталога такими, какие они сейчас: правки разрешены, если результат проходит проверки (см. [upload-dataset](commands/upload-dataset.md#как-это-работает)). `dataset publish` загружает три файла: `dataset.csv`, `dataset.yaml`, `tasks.yaml`. Он тоже проверяет текущие файлы каталога: правки разрешены, если результат проходит проверки (см. [dataset publish](commands/dataset.md#publish)).
 
 Отличия двух видов подготовки:
 
-| | `verify --bundle` | `dataset prepare` |
+| | `verify <каталог>` | `dataset prepare` |
 |---|---|---|
-| Копия входа | `sources/` с четырьмя файлами | `transformed.csv` и `source-snapshot.yaml` |
-| `preparation.json` | только если ready, `format_version: 1` | всегда, `format_version: 2`, с полем `ready` |
-| split | ваш, из CSV | назначается заново (стабильный split) |
+| Копия входа | `sources.tar.gz` с четырьмя файлами | `transformed.csv` и `source-snapshot.yaml` |
+| `preparation.json` | нет | всегда, `format_version: 3`, с полем `ready` |
+| Правки перед публикацией | любые, если результат проходит проверки | любые, если результат проходит проверки |
+| split | ваш; пустые ячейки у опубликованных изображений `verify` заполняет опубликованным split, `upload-dataset` не даёт его изменить без `--force-resplit` ([stable split](../GLOSSARY.md)) | ваш, из CSV; у опубликованных изображений `dataset prepare` записывает опубликованный, `dataset publish` не даёт его изменить без `--force-resplit` ([stable split](../GLOSSARY.md)) |
 | Ключ `managed` в `dataset.yaml` и `tasks.yaml` | нет | есть |
-| Публикация | `upload-dataset` | `dataset publish` |
+| Публикация | `upload-dataset`, четыре файла | `dataset publish`, три файла |
 
 ### dataset.yaml
 
 ```yaml
+clearml:
+  project: Retail/Datasets
+  dataset: retail-shelves
+  output_uri: s3://my-bucket/.clearml
 api_url: https://classes.example.com/classes
 classes:
   bowl:
@@ -267,6 +277,8 @@ images:
 
 | Ключ | Значение |
 |---|---|
+| `clearml.project`, `clearml.dataset` | Проект и имя датасета ClearML, куда `upload-dataset` публикует версию. Без них `upload-dataset` отказывается публиковать. |
+| `clearml.output_uri` | Необязательно. Хранилище файлов версии, например `s3://my-bucket/.clearml`; без ключа ClearML берёт хранилище по умолчанию. |
 | `api_url` | Адрес API реестра классов ([class registry](../GLOSSARY.md)). Только HTTP(S), без логина и пароля. |
 | `classes` | Словарь: каноническое имя класса ([canonical class name](../GLOSSARY.md)) → описание. |
 | `classes.<имя>.prod_id` | номер класса ([class identity](../GLOSSARY.md)). |
@@ -274,7 +286,9 @@ images:
 | `classes.<имя>.alt_names` | Старые имена класса. Они переписываются на каноническое имя. |
 | `images.local_root` | Разрешённые локальные каталоги изображений. |
 | `images.s3_root` | Разрешённые префиксы S3 вида `s3://bucket/prefix`. |
-| `managed` | Только у управляемого датасета ([managed dataset](../GLOSSARY.md)): имя, хеш и копия описания датасета из общей конфигурации, адрес CVAT с организацией и назначенные split (`assignments`: хеш содержимого изображения → `train`/`val`/`test`). |
+| `managed` | Только у управляемого датасета ([managed dataset](../GLOSSARY.md)): имя, хеш и копия описания датасета из общей конфигурации, адрес CVAT с организацией и назначенные split (`assignments`: хеш содержимого изображения → `train`/`val`/`test`). `dataset publish` пересчитывает блок из текущего `dataset.csv` и перезаписывает его в каталоге. |
+
+Блок `clearml` пишет `verify <каталог>`.
 
 ### tasks.yaml
 
@@ -290,34 +304,53 @@ obsolete:
 
 | Ключ | Значение |
 |---|---|
-| `included` | ID задач, чьи строки остались в очищенном `dataset.csv`. |
+| `included` | ID задач, чьи строки остались в очищенном `dataset.csv`. У `verify <каталог>` — только задачи, с которыми строки связаны в `sources.tar.gz` (пара `task_id` и `image_name` есть в его `dataset.csv`); `upload-dataset` строит `tasks.yaml` заново из текущего `dataset.csv` и перезаписывает его в каталоге. |
 | `obsolete` | ID завершённых задач, которые полностью перекрыты: для каждого их изображения есть более новая завершённая задача или удаление. |
-| `managed` | Только у управляемого датасета: снимок источников, с задачами, их временем изменения и признаком завершённости. |
+| `managed` | Только у управляемого датасета: снимок источников, с задачами, их временем изменения и признаком завершённости. `managed.parent_id` — родительский датасет; у первой версии (`--first`) — `null`. `dataset publish` строит весь `tasks.yaml` заново из текущего `dataset.csv` и перезаписывает его в каталоге. |
+
+### report.json
+
+`report.json` подготовки `verify <каталог>` — отчёт проверки и итог подготовки:
+
+| Ключ | Значение |
+|---|---|
+| `blockers` | Блокирующие условия ([blocker](../GLOSSARY.md)). Пока список не пуст, `dataset.csv`, `dataset.yaml` и `tasks.yaml` не пишутся. |
+| `ready` | `true`, если блокирующих условий нет. |
+| `pending` | Условия split, которые нужно выполнить до публикации; правьте `split` в `dataset.csv`. |
+| `destination` | `{"project": …, "dataset": …}`: куда собирались публиковать при подготовке. |
+| `parent` | `{"id": …, "version": …}` родительского датасета ([parent dataset](../GLOSSARY.md)), который видел `verify`, или `null`, если его не было. `upload-dataset` сравнивает с ним последнюю версию. |
+| `class_changes` | Добавленные и переименованные классы относительно родителя; без родителя все классы — добавленные. |
+| `class_marks` | Классы, у которых отметка `empty` отличается от родителя: `[{"prod_id", "name", "empty"}]`. |
+| `dropped_local_roots` | Локальные корни родителя, которых нет на этой машине: в новый `dataset.yaml` они не попали. |
+| `broken_image_rows` | Число строк в `broken-images.csv`. |
+| `split_prefilled` | Сколько изображений получили split родителя в пустые ячейки `split`. Изображение, у которого в другой строке уже стоит другой `split`, не заполняется. |
+
+Остальные ключи — те же, что у отчёта проверки CSV ([verify](commands/verify.md)).
+
+`report.json` подготовки `dataset prepare` тоже содержит `blockers`, `ready` и `pending`, а также `missing_classes` (классы без bbox), `split_collisions` (имена изображений, у содержимого которых строки в нескольких split), `mapped_findings`, `unmapped_errors` и `split_replacements` (см. [prepare](commands/dataset.md#результат)).
+
+### publication.json
+
+`upload-dataset` пишет его в каталог после успешной публикации. Хешей в нём нет.
+
+| Ключ | Значение |
+|---|---|
+| `dataset_id`, `version` | ID и версия опубликованного датасета в ClearML. |
+| `project`, `dataset` | Куда опубликовано. |
+| `published_at` | Время публикации, UTC, ISO 8601. |
+
+Если в каталоге уже есть `publication.json`, повторный `upload-dataset` печатает предупреждение с ID прежней публикации и продолжает. Обычно его раньше останавливает проверка родителя: прежняя публикация стала последней версией.
 
 ### preparation.json
 
-Запись `verify --bundle`:
+Запись `dataset prepare`. Контрольных сумм в ней нет: она не привязывает каталог к содержимому файлов.
 
 | Ключ | Значение |
 |---|---|
-| `format_version` | `1`. |
-| `options` | Выбранные параметры: проект и имя датасета ClearML, `api_url`, корни изображений, решения по классам, `clean`. |
-| `parent_id`, `parent_version` | родительский датасет ([parent dataset](../GLOSSARY.md)) в ClearML или `null`, если родителя нет. |
-| `source_hashes` | SHA-256 четырёх файлов в `sources/`. |
-| `payload_hashes` | SHA-256 трёх публикуемых файлов. |
-
-Запись `dataset prepare`:
-
-| Ключ | Значение |
-|---|---|
-| `format_version` | `2`. |
+| `format_version` | `3`. Запись с другим значением не читается: подготовьте датасет заново. |
 | `name` | Имя управляемого датасета. |
-| `definition_hash`, `registry_hash` | Хеши описания датасета и реестра классов. |
-| `parent_id`, `parent_version` | Родительский датасет. |
-| `source_hash`, `input_hash` | SHA-256 `source-snapshot.yaml` и `transformed.csv`. |
-| `payload_hashes` | SHA-256 трёх публикуемых файлов. Пусто, если подготовка не готова. |
-| `image_hashes` | SHA-256 содержимого изображений по `image_path`. |
-| `snapshot` | Снимок источников с назначенными split. |
+| `parent_id`, `parent_version` | Последняя версия в ClearML при выгрузке: родительский датасет, а для первой версии с `--first` — версия, поверх которой начата управляемая история (родителем она не становится). `null`, если версий не было. |
 | `findings` | замечания к кадрам ([feedback finding](../GLOSSARY.md)). |
-| `ready` | Готова ли подготовка к публикации. |
-| `clean` | Было ли подтверждение очистки (`--clean`). |
+| `ready` | Записаны ли публикуемые файлы. Только для сведения: `dataset publish` смотрит на сами файлы `dataset.csv`, `dataset.yaml` и `tasks.yaml`. |
+| `clean` | Было ли подтверждение очистки: `true` по умолчанию, `false` с `--no-clean`. |
+| `first` | Подготовлена ли первая версия управляемой истории (`--first`): `publish` создаст её без родителя. |

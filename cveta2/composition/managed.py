@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from loguru import logger
 
 from cveta2.adapters.class_api.http import HttpClassApi
 from cveta2.adapters.clearml.bundle import ClearMLStore, S3Roots
@@ -29,7 +30,7 @@ from cveta2.adapters.files.media import LocalMediaInspector
 from cveta2.adapters.files.verification import read_csv, read_csv_bytes
 from cveta2.adapters.s3.managed_sources import S3CsvSources
 from cveta2.application.client.assembly import task_to_records
-from cveta2.application.use_cases.managed_preparation import prepare_managed
+from cveta2.application.use_cases.managed_preparation import check_parent, prepare_managed
 from cveta2.application.use_cases.managed_publication import (
     ManagedPublicationServices,
     publish_prepared,
@@ -41,12 +42,15 @@ from cveta2.composition.runtime import configure_data_timeout, configure_network
 from cveta2.domain.bundle.classes import reconcile_classes
 from cveta2.domain.bundle.models import (
     ApiClass,
+    ClassInfo,
     DatasetMetadata,
     DatasetParent,
     ImageRoots,
     Publication,
+    UploadError,
 )
-from cveta2.domain.class_registry import registry_fingerprint
+from cveta2.domain.bundle.validation import excluded_class_rows, missing_active_classes
+from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.managed.models import DatasetDefinition, ManagedError, ProjectConfig, dataset_definition
 from cveta2.domain.managed.policies import compare_frames
 from cveta2.domain.managed.preparation import FeedbackOutcome, PreparationSummary
@@ -60,9 +64,48 @@ def _selection(config_path: Path | None, project_config: Path | None) -> tuple[P
 def _parent(
     definition: DatasetDefinition,
 ) -> tuple[DatasetParent | None, DatasetMetadata | None]:
+    """Return the latest version and its metadata; an unreadable ``dataset.yaml`` raises."""
     parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
     metadata = LocalBundleFiles().read_metadata(parent.metadata_path) if parent and parent.metadata_path else None
     return parent, metadata
+
+
+def _first_parent(
+    definition: DatasetDefinition,
+) -> tuple[DatasetParent | None, DatasetMetadata | None]:
+    """Return the latest version for ``--first``, which only needs to know whether it is managed.
+
+    A missing, unreadable or invalid ``dataset.yaml`` makes the version count as not
+    managed, with one warning; only metadata that parses and carries ``managed`` is managed.
+    """
+    parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
+    if parent is None:
+        return None, None
+    if parent.metadata_path is None:
+        reason = "нет dataset.yaml"
+    else:
+        try:
+            return parent, LocalBundleFiles().read_metadata(parent.metadata_path)
+        except UploadError as error:
+            reason = f"dataset.yaml не читается: {error}"
+    logger.warning(f"dataset prepare --first: последняя версия {parent.dataset_id} считается неуправляемой ({reason})")
+    return parent, None
+
+
+def _classes(
+    definition: DatasetDefinition,
+    records: list[ApiClass],
+    previous: DatasetMetadata | None,
+) -> dict[str, ClassInfo]:
+    """Reconcile the class registry with the parent's and apply the shared exclusion policy."""
+    update = reconcile_classes(previous.classes if previous else {}, records)
+    known = {info.prod_id for info in update.classes.values()}
+    if set(definition.empty_classes) - known:
+        raise ManagedError("Shared exclusion policy contains unknown class identities")
+    return {
+        name: info.model_copy(update={"empty": info.prod_id in definition.empty_classes})
+        for name, info in update.classes.items()
+    }
 
 
 def _metadata(  # noqa: PLR0913, PLR0917 - resolved policy and selected storage.
@@ -73,17 +116,9 @@ def _metadata(  # noqa: PLR0913, PLR0917 - resolved policy and selected storage.
     previous: DatasetMetadata | None,
     project_config: Path | None = None,
 ) -> DatasetMetadata:
-    update = reconcile_classes(previous.classes if previous else {}, records)
-    known = {info.prod_id for info in update.classes.values()}
-    if set(definition.empty_classes) - known:
-        raise ManagedError("Shared exclusion policy contains unknown class identities")
-    classes = {
-        name: info.model_copy(update={"empty": info.prod_id in definition.empty_classes})
-        for name, info in update.classes.items()
-    }
     return DatasetMetadata(
         api_url=definition.api_url,
-        classes=classes,
+        classes=_classes(definition, records, previous),
         images=_image_roots(path, config, definition, project_config),
     )
 
@@ -131,7 +166,7 @@ def show_dataset(name: str, *, config_path: Path | None = None, project_config: 
     """Show exact configured mapping and finalized parent."""
     _, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
-    parent, _ = _parent(definition)
+    parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
     return {
         "name": name,
         "definition": definition.model_dump(mode="json"),
@@ -149,6 +184,33 @@ def dataset_versions(
     return ClearMLStore().versions(definition.clearml.project, definition.clearml.dataset)
 
 
+def _warn_coverage(
+    definition: DatasetDefinition,
+    records: list[ApiClass],
+    previous: DatasetMetadata | None,
+    frame: pd.DataFrame,
+) -> tuple[int | None, list[str] | None]:
+    """Warn about class coverage of the fetched rows; fetch never fails because of it.
+
+    Returns ``(None, None)`` when the classes cannot be built.
+    """
+    try:
+        metadata = DatasetMetadata(api_url=definition.api_url, classes=_classes(definition, records, previous))
+        excluded = excluded_class_rows(frame, metadata)
+        missing = list(missing_active_classes(frame, metadata))
+    except Cveta2Error as error:
+        logger.warning(f"Не удалось проверить классы: {error}")
+        return None, None
+    if excluded:
+        logger.warning(f"Строк с исключёнными классами: {excluded}. dataset prepare отклонит их.")
+    if missing:
+        logger.warning(
+            f"Нет ни одного bbox у классов: {', '.join(missing)}. "
+            "Добавьте данные с ними или исключите класс через empty_classes."
+        )
+    return excluded, missing
+
+
 def fetch_dataset(
     name: str,
     *,
@@ -161,9 +223,21 @@ def fetch_dataset(
     path, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
-    parent, metadata = _parent(definition)
-    previous = ClearMLSources().read_snapshot(parent.dataset_id) if parent else None
-    previous_cvat = metadata.managed.cvat if metadata is not None and metadata.managed is not None else None
+    parent = ClearMLStore().latest(definition.clearml.project, definition.clearml.dataset)
+    previous = None
+    previous_cvat = None
+    metadata = None
+    if parent is not None and parent.metadata_path is not None:
+        try:
+            metadata = LocalBundleFiles().read_metadata(parent.metadata_path)
+        except UploadError as error:
+            logger.warning(
+                f"dataset.yaml последней версии {parent.dataset_id} не читается, источники выгружаются заново: {error}"
+            )
+    # Only a managed version is a lineage to continue: nothing else of it, tasks.yaml included, is read or reused.
+    if parent is not None and metadata is not None and metadata.managed is not None:
+        previous = ClearMLSources().read_snapshot(parent.dataset_id)
+        previous_cvat = metadata.managed.cvat
     files = LocalSourceFiles()
     with _client(path, project_config) as client:
         snapshot, frame = fetch_sources(
@@ -179,10 +253,15 @@ def fetch_dataset(
             refresh=refresh,
         )
     files.export(output_dir, snapshot, frame)
+    # Only a managed latest version is read for classes, like for the lineage above.
+    managed_metadata = metadata if metadata is not None and metadata.managed is not None else None
+    excluded, missing = _warn_coverage(definition, records, managed_metadata, frame)
     return {
         "directory": str(output_dir),
         "rows": len(frame),
         "parent_id": snapshot.parent_id,
+        "excluded_class_rows": excluded,
+        "missing_classes": missing,
         "sources": [
             {
                 "name": source.name,
@@ -201,39 +280,37 @@ def prepare_managed_dataset(  # noqa: PLR0913 - explicit public workflow inputs.
     *,
     source: Path,
     output_dir: Path,
-    clean: bool = False,
+    clean: bool = True,
+    first: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> PreparationSummary:
-    """Prepare transformed input using supplied policy and constructed effects."""
+    """Prepare transformed input using supplied policy and constructed effects.
+
+    With *first* the latest version is only checked to be non-managed; its classes,
+    splits and rows are not used.
+    """
     path, config = _selection(config_path, project_config)
     definition = dataset_definition(config, name)
     records = HttpClassApi().fetch(definition.api_url)
-    parent, previous = _parent(definition)
-    if previous and previous.managed and previous.managed.definition.splits != definition.splits:
-        raise ManagedError("Split policy changed; select a new dataset lineage")
-    parent_rows = None
-    if parent is not None and previous is not None and previous.managed is None:
-        parent_rows = read_csv_bytes(
-            ClearMLSources().read_files(parent.dataset_id, ("dataset.csv",))["dataset.csv"],
-            source=f"{parent.dataset_id}/dataset.csv",
-        )
+    parent, previous = _first_parent(definition) if first else _parent(definition)
+    # Refuse the wrong mode before reconciling classes against a parent that will not be used.
+    check_parent(parent.dataset_id if parent else None, previous, first=first)
     return prepare_managed(
         config,
         name,
         csv,
         source,
         output_dir,
-        _metadata(path, config, definition, records, previous, project_config),
-        registry_hash=registry_fingerprint(records),
+        _metadata(path, config, definition, records, None if first else previous, project_config),
         files=LocalManagedPreparationFiles(),
         media=LocalMediaInspector(),
         s3_roots=S3Roots(),
         parent_id=parent.dataset_id if parent else None,
         parent_version=parent.version if parent else None,
         parent_metadata=previous,
-        parent_rows=parent_rows,
         clean=clean,
+        first=first,
     )
 
 
@@ -275,12 +352,13 @@ def report_dataset_errors(
 def publish_dataset(
     prepared: Path,
     *,
+    force_resplit: bool = False,
     config_path: Path | None = None,
     project_config: Path | None = None,
 ) -> Publication:
-    """Publish reviewed stable payload only after prerequisite checks."""
+    """Publish the preparation's current files once they pass every check."""
     with _prepared_effects(prepared, config_path, project_config) as (config, services):
-        return publish_prepared(config, prepared, services=services)
+        return publish_prepared(config, prepared, services=services, force_resplit=force_resplit)
 
 
 @contextmanager
@@ -293,8 +371,6 @@ def _prepared_effects(
     path, config = _selection(config_path, project_config)
     files = LocalManagedPreparationFiles()
     loaded = files.load_prepared(prepared)
-    definition = dataset_definition(config, loaded.record.name)
-    local_roots = _image_roots(path, config, definition, project_config).local_root
     with _client(path, project_config) as client:
         yield (
             config,
@@ -310,8 +386,7 @@ def _prepared_effects(
                 feedback=CvatFeedback(client.api),
                 ledger=LocalFeedbackLedger(
                     prepared,
-                    shared_ledger_path(path.parent / "managed-feedback", loaded.record.source_hash),
+                    shared_ledger_path(path.parent / "managed-feedback", loaded.ledger_key),
                 ),
-                local_roots=local_roots,
             ),
         )

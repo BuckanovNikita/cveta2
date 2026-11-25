@@ -527,7 +527,7 @@ def test_section_save_keeps_cyrillic_unescaped(tmp_path: Path) -> None:
 
     cfg.save(cfg_path)
 
-    reference = yaml.safe_load(cfg_path.read_bytes())["project_config"]
+    reference = yaml.safe_load(cfg_path.read_bytes())["global_config"]
     text = Path(reference).read_text(encoding="utf-8")
     assert "Партия 3" in text
     assert "Дубликаты" in text
@@ -595,7 +595,7 @@ def test_save_to_file_persists_every_optional_cvat_key(tmp_path: Path) -> None:
 def test_save_to_file_leaves_the_image_cache_section_alone(
     tmp_path: Path,
 ) -> None:
-    """``setup`` writes only ``cvat``; ``setup-cache`` owns ``image_cache``."""
+    """Saving the ``cvat`` section keeps ``image_cache``, which the cache questions of ``setup`` own."""
     cfg_path = write_config_yaml(
         tmp_path / "custom.yaml",
         cvat={"host": "http://localhost:8080"},

@@ -79,8 +79,44 @@ def _without_deletion_markers(frame: pd.DataFrame) -> pd.DataFrame:
     return frame[~marker]
 
 
+@dataclass(frozen=True)
+class TracedTasks:
+    """The task manifest of traceable rows and the count of rows it could not trace."""
+
+    manifest: TaskManifest
+    untraced_rows: int
+
+
+def _traced_pairs(frame: pd.DataFrame) -> list[tuple[int, str] | None]:
+    """Parse each row's ``(task_id, image_name)``; ``None`` for a missing or invalid one."""
+    if "task_id" not in frame or "image_name" not in frame:
+        return [None] * len(frame)
+    pairs: list[tuple[int, str] | None] = []
+    for task, image in zip(frame["task_id"].tolist(), frame["image_name"].tolist(), strict=True):
+        try:
+            task_id = _task_id(task)
+        except UploadError:
+            pairs.append(None)
+            continue
+        pairs.append((task_id, image) if isinstance(image, str) and image else None)
+    return pairs
+
+
 def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
+    """List tasks of ``clean``, raising when a row does not trace to ``dataset.csv``."""
+    traced = trace_tasks(tables, clean)
+    if traced.untraced_rows:
+        raise UploadError("Clean task/image pairs must originate in dataset.csv")
+    return traced.manifest
+
+
+def trace_tasks(tables: FetchTables, frame: pd.DataFrame) -> TracedTasks:
     """List retained tasks and fully superseded completed tasks.
+
+    A row of ``frame`` is traceable when its ``task_id`` is a valid ID and its
+    ``(task_id, image_name)`` pair is in the source ``dataset.csv``; other rows
+    are counted in ``untraced_rows``, never raised on. The fetch evidence
+    itself stays strict.
 
     Explicit completion describes every live job; absent completion falls back to
     legacy acceptance/completed rows. Any unfinished or unknown evidence excludes
@@ -108,14 +144,13 @@ def derive_tasks(tables: FetchTables, clean: pd.DataFrame) -> TaskManifest:
         represented.setdefault(row.task_id, set()).add(row.image)
         if row.deleted or row.task_id in completed:
             latest[row.image] = max(latest.get(row.image, -1), row.task_id)
-    clean_rows = _evidence(clean)
     source_pairs = {(row.task_id, row.image) for row in dataset}
-    if any((row.task_id, row.image) not in source_pairs for row in clean_rows):
-        raise UploadError("Clean task/image pairs must originate in dataset.csv")
-    included = sorted({row.task_id for row in clean_rows})
+    pairs = _traced_pairs(frame)
+    traced = [pair for pair in pairs if pair is not None and pair in source_pairs]
+    included = sorted({task_id for task_id, _image in traced})
     obsolete = sorted(
         task
         for task in completed
         if task not in included and all(latest.get(image, -1) > task for image in represented[task])
     )
-    return TaskManifest(included=included, obsolete=obsolete)
+    return TracedTasks(TaskManifest(included=included, obsolete=obsolete), len(pairs) - len(traced))

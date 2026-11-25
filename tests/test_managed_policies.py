@@ -1,16 +1,16 @@
 """Behavioral contracts for stable split, overlap and comparison policies."""
 
-from collections import Counter
-
 import pandas as pd
 import pytest
 
-from cveta2.domain.managed.models import ManagedError, OverlapDecision, SplitPolicy
+from cveta2.domain.managed.models import ManagedError, OverlapDecision
 from cveta2.domain.managed.policies import (
-    assign_splits,
     compare_frames,
-    parent_splits,
+    propagate_splits,
+    rebuild_assignments,
     resolve_overlaps,
+    split_collisions,
+    split_conflicts,
 )
 
 
@@ -26,46 +26,9 @@ def _frame() -> pd.DataFrame:
     )
 
 
-def test_split_defaults_replace_input_and_stay_stable_across_order_and_versions() -> None:
-    """Adding or removing other images cannot rebalance published assignments."""
-    frame = _frame()
-    original = frame.copy(deep=True)
-    hashes = dict(zip(frame["image_path"], ["aaa", "bbb", "ccc"], strict=True))
-    split, assignments = assign_splits(frame, SplitPolicy(), hashes)
-    reverse, reverse_assignments = assign_splits(frame.iloc[::-1], SplitPolicy(), hashes)
-    assert assignments == reverse_assignments
-    assert dict(zip(split["image_name"], split["split"], strict=True)) == dict(
-        zip(reverse["image_name"], reverse["split"], strict=True)
-    )
-    pd.testing.assert_frame_equal(frame, original)
-    preserved = dict(assignments, removed="test")
-    next_frame = frame.iloc[:1].copy()
-    changed_seed, next_assignments = assign_splits(next_frame, SplitPolicy(seed=100), hashes, preserved)
-    assert next_assignments == preserved
-    assert changed_seed["split"].iloc[0] == split["split"].iloc[0]
-
-
-def test_split_groups_identical_content_and_approximates_default_targets() -> None:
-    """Hash assignment acts per content rather than per source row or filename."""
-    frame = pd.DataFrame({"image_path": [f"/images/{n}.jpg" for n in range(10000)]})
-    hashes = {path: str(n) for n, path in enumerate(frame["image_path"])}
-    split, assignments = assign_splits(frame, SplitPolicy(), hashes)
-    counts = Counter(split["split"])
-    assert 0.57 < counts["train"] / len(frame) < 0.63
-    assert 0.17 < counts["val"] / len(frame) < 0.23
-    assert 0.17 < counts["test"] / len(frame) < 0.23
-    doubled = pd.DataFrame({"image_path": ["/a.jpg", "/b.jpg"]})
-    same, _ = assign_splits(doubled, SplitPolicy(), {"/a.jpg": "same", "/b.jpg": "same"})
-    assert len(set(same["split"])) == 1
-    assert len(assignments) == len(frame)
-
-
 @pytest.mark.parametrize(
-    ("frame", "hashes", "previous"),
+    ("frame", "hashes", "published"),
     [
-        (pd.DataFrame({"image_path": ["/a.jpg"]}), {}, {}),
-        (pd.DataFrame({"image_path": [""]}), {"": "a"}, {}),
-        (pd.DataFrame({"image_path": ["/a.jpg"]}), {"/a.jpg": ""}, {}),
         (pd.DataFrame({"image_path": ["/a.jpg"]}), {"/a.jpg": "a"}, {"a": "other"}),
         (
             pd.DataFrame([["/a.jpg", "/b.jpg"]], columns=["image_path", "image_path"]),
@@ -74,12 +37,50 @@ def test_split_groups_identical_content_and_approximates_default_targets() -> No
         ),
     ],
 )
-def test_split_rejects_ambiguous_or_missing_identity(
-    frame: pd.DataFrame, hashes: dict[str, str], previous: dict[str, str]
+def test_propagate_splits_rejects_duplicate_columns_and_invalid_published_splits(
+    frame: pd.DataFrame, hashes: dict[str, str], published: dict[str, str]
 ) -> None:
-    """No missing digest or invalid published split is silently assigned."""
+    """No ambiguous identity or invalid published split is silently propagated."""
     with pytest.raises(ManagedError):
-        assign_splits(frame, SplitPolicy(), hashes, previous)
+        propagate_splits(frame, hashes, published)
+
+
+FRAME = pd.DataFrame(
+    {
+        "image_name": ["a.png", "a.png", "b.png", "new.png"],
+        "image_path": ["/i/a", "/i/a", "/i/b", "/i/new"],
+        "split": ["val", "val", "", ""],
+    }
+)
+HASHES = {"/i/a": "ha", "/i/b": "hb", "/i/new": "hn"}
+
+
+def test_propagate_splits_writes_published_split_and_counts_rows() -> None:
+    result, replaced = propagate_splits(FRAME, HASHES, {"ha": "train", "hb": "test"})
+    assert result["split"].tolist() == ["train", "train", "test", ""]
+    assert replaced == 3
+    assert FRAME["split"].tolist() == ["val", "val", "", ""]  # input untouched
+
+
+def test_propagate_splits_leaves_a_row_without_a_hash_unchanged() -> None:
+    result, replaced = propagate_splits(FRAME, {"/i/b": "hb"}, {"ha": "train", "hb": "test"})
+    assert result["split"].tolist() == ["val", "val", "test", ""]
+    assert replaced == 1
+
+
+def test_propagate_splits_adds_an_empty_split_column() -> None:
+    result, replaced = propagate_splits(FRAME.drop(columns="split"), HASHES, {})
+    assert result["split"].tolist() == ["", "", "", ""]
+    assert replaced == 0
+
+
+def test_rebuild_assignments_keeps_removed_images_and_skips_empty_splits() -> None:
+    assert rebuild_assignments(FRAME, HASHES, {"ha": "train", "gone": "test"}) == {"gone": "test", "ha": "val"}
+
+
+def test_rebuild_assignments_rejects_an_unknown_split() -> None:
+    with pytest.raises(ManagedError, match=r"Invalid split for image: a\.png"):
+        rebuild_assignments(FRAME.assign(split="holdout"), HASHES, {})
 
 
 def _overlap() -> tuple[pd.DataFrame, dict[str, str]]:
@@ -195,16 +196,32 @@ def test_compare_normalizes_missing_cells_and_rejects_opaque_values() -> None:
         compare_frames(old, new)
 
 
-def test_parent_splits_carry_only_content_published_under_one_valid_split() -> None:
-    """Rows sharing content or an invalid split never decide an assignment."""
-    published = pd.DataFrame(
+def test_split_collisions_go_by_content() -> None:
+    frame = pd.DataFrame(
         {
-            "image_path": ["/a.jpg", "/a.jpg", "/b.jpg", "/copy-of-b.jpg", "/c.jpg", "/d.jpg", "/gone.jpg"],
-            "split": ["val", "val", "train", "test", "train", "holdout", "train"],
+            "image_name": ["a.png", "copy.png", "b.png", "b.png"],
+            "image_path": ["/i/a", "/i/copy", "/i/b", "/i/b"],
+            "split": ["train", "val", "train", ""],
         }
     )
-    hashes = {"/a.jpg": "A", "/b.jpg": "B", "/copy-of-b.jpg": "B", "/c.jpg": "C", "/d.jpg": "D"}
-    result = parent_splits(published, hashes)
-    assert result.assignments == {"A": "val", "C": "train"}
-    assert result.conflicts == 2
-    assert result.unresolved == 1
+    assert split_collisions(frame, {"/i/a": "h", "/i/copy": "h", "/i/b": "hb"}) == ("a.png", "copy.png")
+
+
+def test_split_collisions_fall_back_to_the_path_and_skip_unhashed_rows() -> None:
+    frame = pd.DataFrame({"image_path": ["/i/a", "/i/c", "/i/x"], "split": ["train", "val", "val"]})
+    assert split_collisions(frame, {"/i/a": "h", "/i/c": "h"}) == ("/i/a", "/i/c")
+
+
+def test_split_conflicts_name_each_moved_image_with_its_published_and_current_split() -> None:
+    assert split_conflicts(FRAME, HASHES, {"ha": "train", "hb": "test"}) == (("a.png", "train", "val"),)
+
+
+def test_split_collisions_do_not_name_pending_copies() -> None:
+    frame = pd.DataFrame(
+        {
+            "image_name": ["a.png", "b.png", "pending.png"],
+            "image_path": ["/i/a", "/i/b", "/i/p"],
+            "split": ["train", "val", ""],
+        }
+    )
+    assert split_collisions(frame, {"/i/a": "h", "/i/b": "h", "/i/p": "h"}) == ("a.png", "b.png")

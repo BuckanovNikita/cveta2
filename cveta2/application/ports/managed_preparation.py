@@ -1,6 +1,6 @@
 """Typed capture, serialization and media effects for managed preparation."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +16,6 @@ from cveta2.domain.bundle.models import (
     TaskManifest,
 )
 from cveta2.domain.managed.models import ManagedSnapshot
-from cveta2.domain.managed.policies import ParentSplits
 from cveta2.domain.managed.preparation import FeedbackFinding, ManagedRecord
 
 
@@ -43,21 +42,23 @@ class ImageHashes:
 
 @dataclass(frozen=True)
 class LoadedManagedPreparation:
-    """Checked immutable publication bytes and their local review binding."""
+    """A preparation directory as it is now: no checksum binds its files.
+
+    ``frame`` and ``metadata`` are ``None`` when prepare was blocked and wrote no payload.
+    ``ledger_key`` is the SHA-256 of ``source-snapshot.yaml``; it names the shared feedback ledger.
+    """
 
     directory: Path
     record: ManagedRecord
-    frame: pd.DataFrame
+    captured: CapturedManagedInput
+    frame: pd.DataFrame | None
     metadata: DatasetMetadata | None
-    tasks: TaskManifest | None
-    payload: dict[str, bytes]
-    input_content: bytes
-    source_content: bytes
     report: dict[str, JsonValue]
+    ledger_key: str
 
 
 class ManagedPreparationFiles(Protocol):
-    """Own local capture, source attestation, hashes and immutable persistence."""
+    """Own local capture, source attestation, image hashes and persistence."""
 
     def capture(self, transformed: Path, source: Path) -> CapturedManagedInput:
         """Capture transformed input and source snapshot, verifying source tables."""
@@ -65,10 +66,6 @@ class ManagedPreparationFiles(Protocol):
 
     def image_hashes(self, frame: pd.DataFrame) -> ImageHashes:
         """Hash readable local files and assign placeholders to unreadable paths."""
-        ...
-
-    def parent_image_hashes(self, frame: pd.DataFrame, metadata: DatasetMetadata) -> dict[str, str]:
-        """Hash a parent's regular image files that lie inside approved local roots."""
         ...
 
     def check_roots(self, frame: pd.DataFrame, metadata: DatasetMetadata) -> None:
@@ -79,7 +76,7 @@ class ManagedPreparationFiles(Protocol):
         """Serialize the exact three-file publication payload."""
         ...
 
-    def validation_report(  # noqa: PLR0913 - one diagnostics boundary.
+    def validation_report(  # noqa: PLR0913 - report boundary.
         self,
         validation: BundleValidation,
         *,
@@ -87,12 +84,14 @@ class ManagedPreparationFiles(Protocol):
         findings: list[FeedbackFinding],
         unmapped: int,
         split_replacements: int,
-        parent_splits: ParentSplits | None = None,
+        pending: Sequence[str] = (),
+        missing_classes: Sequence[str] = (),
+        collisions: Sequence[str] = (),
     ) -> dict[str, JsonValue]:
         """Return JSON-safe diagnostics without inventing successful checks."""
         ...
 
-    def persist(  # noqa: PLR0913, PLR0917 - immutable persistence boundary.
+    def persist(  # noqa: PLR0913, PLR0917 - persistence boundary.
         self,
         directory: Path,
         captured: CapturedManagedInput,
@@ -101,13 +100,25 @@ class ManagedPreparationFiles(Protocol):
         report: dict[str, JsonValue],
         broken_images: pd.DataFrame,
     ) -> None:
-        """Write a fresh local directory with completion marker last."""
+        """Write a fresh local directory with ``preparation.json`` last."""
         ...
 
     def load_prepared(self, directory: Path) -> LoadedManagedPreparation:
-        """Verify record/input/source/payload hashes and reject symlink inputs."""
+        """Read and strictly parse the current files; reject symlinks and an unsupported record."""
         ...
 
-    def stage_payload(self, payload: Mapping[str, bytes]) -> AbstractContextManager[Path]:
-        """Hold a stable private copy until the publication attempt completes."""
+    def stage_payload(self, directory: Path) -> AbstractContextManager[Path]:
+        """Copy the three payload files into a private temporary directory."""
+        ...
+
+    def read_metadata(self, path: Path) -> DatasetMetadata:
+        """Parse one ``dataset.yaml`` strictly; errors name fields, never their values."""
+        ...
+
+    def read_rows(self, path: Path) -> pd.DataFrame:
+        """Read one ``dataset.csv`` without lexical inference."""
+        ...
+
+    def write_bookkeeping(self, directory: Path, metadata: DatasetMetadata, tasks: TaskManifest) -> None:
+        """Replace only ``dataset.yaml`` and ``tasks.yaml`` of *directory*, each with one rename."""
         ...

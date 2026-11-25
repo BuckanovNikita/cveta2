@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 import yaml
+from botocore.exceptions import ClientError
 
 from cveta2.adapters.clearml.managed_sources import ClearMLSources
 from cveta2.adapters.cvat.managed_sources import CvatSources
@@ -18,14 +19,18 @@ from cveta2.adapters.files.verification import read_csv_bytes
 from cveta2.adapters.s3.managed_sources import S3CsvSources
 from cveta2.application.client.assembly import task_to_records
 from cveta2.application.ports.dtos import RawAnnotations, RawDataMeta, RawFrame, RawJob
-from cveta2.application.ports.managed_sources import ProjectState, S3Object
-from cveta2.application.use_cases.managed_publication import registry_fingerprint
+from cveta2.application.ports.managed_sources import ProjectState, S3Object, S3ObjectIdentity
+from cveta2.application.use_cases.managed_publication import (
+    ManagedPublicationServices,
+    _assess_sources,
+)
 from cveta2.application.use_cases.managed_sources import (
     fetch_sources,
 )
 from cveta2.domain.bundle.models import ApiClass
+from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.errors import Cveta2Error
-from cveta2.domain.managed.evidence import labels_fingerprint
+from cveta2.domain.managed.evidence import SourceAssessment, labels_fingerprint
 from cveta2.domain.managed.models import (
     ClearMLDestination,
     CvatIdentity,
@@ -111,6 +116,9 @@ class _S3:
     def read_object(self, _uri: str) -> S3Object:
         self.reads += 1
         return S3Object(self.content, hashlib.sha256(self.content).hexdigest(), "opaque-etag", "v1")
+
+    def object_identity(self, _uri: str) -> S3ObjectIdentity:
+        return S3ObjectIdentity("opaque-etag", "v1")
 
 
 def _config(*, supplemental: bool = False) -> tuple[ProjectConfig, DatasetDefinition]:
@@ -212,7 +220,6 @@ _EDITS: dict[str, Callable[[dict[str, Any]], object]] = {
     "overlap-decision": lambda raw: raw["datasets"]["combined"].update(
         overlaps={"digest": {"source": "main", "members": ["main", "extra"]}}
     ),
-    "splits": lambda raw: raw["datasets"]["combined"].update(splits={"train": 0.8, "val": 0.1, "test": 0.1, "seed": 7}),
     "source-uri": lambda raw: raw["datasets"]["combined"]["sources"][2].update(uri="s3://bucket/moved.csv"),
     "ignored-id": lambda raw: raw["projects"]["p"]["ignore"].append({"id": 3}),
     "added-source": _add_source,
@@ -243,7 +250,7 @@ def _supplemental_with_ignored_task() -> tuple[ProjectConfig, DatasetDefinition]
     return edited, edited.datasets["combined"]
 
 
-@pytest.mark.parametrize("edit", ["ignored-description", "source-order", "overlap-decision", "splits"])
+@pytest.mark.parametrize("edit", ["ignored-description", "source-order", "overlap-decision"])
 def test_edits_fetch_does_not_read_keep_task_reuse(edit: str) -> None:
     config, definition = _supplemental_with_ignored_task()
     reader = _Cvat({12: [_task(1)], 27: [_task(2)]})
@@ -485,7 +492,7 @@ def test_empty_records_are_present_evidence_and_can_be_reused() -> None:
 
 
 @pytest.mark.parametrize("damage", ["registry", "labels"])
-def test_corrupt_parent_record_hashes_fail_before_task_capture(damage: str) -> None:
+def test_corrupt_parent_records_refetch_every_task(damage: str) -> None:
     config, definition = _config()
     reader = _Cvat({12: [_task(1)]})
     first, _ = _fetch(config, definition, reader)
@@ -497,10 +504,9 @@ def test_corrupt_parent_record_hashes_fail_before_task_capture(damage: str) -> N
     corrupted = ManagedSnapshot.model_validate(stored)
     reader.downloads.clear()
 
-    with pytest.raises(ManagedError, match="fingerprint"):
-        _fetch(config, definition, reader, previous=corrupted)
+    _fetch(config, definition, reader, previous=corrupted)
 
-    assert reader.downloads == []
+    assert reader.downloads == [(12, 1)]
 
 
 def test_record_order_does_not_change_fingerprints_or_reuse() -> None:
@@ -553,6 +559,70 @@ def test_s3_adapter_captures_opaque_etag_and_content_without_images() -> None:
     assert captured.etag == '"multipart-2"'
     client.get_object.assert_called_once_with(Bucket="bucket", Key="data.csv")
     assert client.method_calls == client.get_object.call_args_list or len(client.method_calls) == 1
+
+
+def _assess(config: ProjectConfig, snapshot: ManagedSnapshot, reader: _Cvat, s3: _S3) -> SourceAssessment:
+    services = ManagedPublicationServices(
+        files=Mock(),
+        media=Mock(),
+        remote=Mock(),
+        registry=Mock(),
+        cvat=reader,
+        s3=s3,
+        roots=Mock(),
+        s3_roots=Mock(),
+        feedback=Mock(),
+        ledger=Mock(),
+    )
+    return _assess_sources(config, snapshot, services)
+
+
+def test_assess_sources_warns_about_an_unconfigured_project_and_stops_on_a_completed_task() -> None:
+    config, definition = _config(supplemental=True)
+    reader = _Cvat({12: [_task(1)], 27: [_task(2)]})
+    s3 = _S3()
+    snapshot, _ = _fetch(config, definition, reader, s3=s3)
+    unconfigured = config.model_copy(update={"projects": {"p": config.projects["p"]}})
+
+    assessment = _assess(unconfigured, snapshot, reader, s3)
+
+    assert assessment.warnings == ("other: проект 27 больше не описан в конфигурации, задачи не проверены",)
+    assert assessment.stale_tasks == {("other", 2)}
+    reader.projects[12].append(_task(3))
+    reader.projects[27].append(_task(4))
+    with pytest.raises(ManagedError, match=r"CVAT tasks completed after fetch: main/3, other/4; fetch the managed"):
+        _assess(config, snapshot, reader, s3)
+
+
+def test_s3_adapter_reads_identity_without_the_body() -> None:
+    client = Mock()
+    client.head_object.return_value = {"ETag": '"e1"', "VersionId": "v2"}
+
+    identity = S3CsvSources(client).object_identity("s3://bucket/data.csv")
+
+    assert identity == S3ObjectIdentity('"e1"', "v2")
+    client.head_object.assert_called_once_with(Bucket="bucket", Key="data.csv")
+    client.get_object.assert_not_called()
+
+
+def test_s3_adapter_identity_failure_names_the_source() -> None:
+    client = Mock()
+    client.head_object.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+
+    with pytest.raises(ManagedError, match=r"Cannot read required S3 CSV source: s3://bucket/data\.csv"):
+        S3CsvSources(client).object_identity("s3://bucket/data.csv")
+
+
+@pytest.mark.parametrize("operation", ["read_object", "object_identity"])
+def test_s3_adapter_never_echoes_an_invalid_source_uri(operation: str) -> None:
+    client = Mock()
+    with pytest.raises(ManagedError, match=r"^Invalid S3 CSV source uri: expected s3://bucket/key\.csv$") as caught:
+        getattr(S3CsvSources(client), operation)("s3://AKIAKEY:TOPSECRET@bucket/key.csv")
+    assert "TOPSECRET" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__
+    client.get_object.assert_not_called()
+    client.head_object.assert_not_called()
 
 
 def test_cvat_adapter_metadata_inspection_does_not_download_annotations() -> None:

@@ -40,6 +40,8 @@ from cveta2.interfaces.datasets import (
     verify_dataframe,
 )
 from cveta2.interfaces.managed_datasets import (
+    FeedbackOutcome,
+    PreparationSummary,
     compare_datasets,
     dataset_versions,
     fetch_dataset,
@@ -55,8 +57,10 @@ __all__ = [
     "Connection",
     "DatasetInputError",
     "DatasetWarning",
+    "FeedbackOutcome",
     "Issue",
     "MissingDecisions",
+    "PreparationSummary",
     "PrepareOptions",
     "PreparedDataset",
     "Profile",

@@ -25,7 +25,7 @@ from cveta2.composition.configuration import (
     get_config_path,
     is_cache_disabled,
 )
-from cveta2.composition.diagnostics import check_aws_credentials
+from cveta2.composition.diagnostics import check_aws_credentials, check_clearml_configuration
 from cveta2.composition.files import default_cache_base
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.output import PREVIEW_LIMIT
@@ -62,6 +62,12 @@ def run_doctor(args: "argparse.Namespace | None" = None) -> None:
             logger.warning("doctor: необязательная проверка AWS не пройдена")
     except (Cveta2Error, OSError) as error:
         logger.warning(f"doctor: необязательная проверка AWS недоступна: {error}")
+    logger.info("doctor: ClearML — необязательная проверка")
+    try:
+        if not check_clearml_configuration():
+            logger.warning("doctor: необязательная проверка ClearML не пройдена")
+    except (Cveta2Error, OSError) as error:
+        logger.warning(f"doctor: необязательная проверка ClearML недоступна: {error}")
     if is_cache_disabled() and not fix_cache:
         logger.info("doctor: проверка кэша отключена (CVETA2_DISABLE_CACHE=true)")
     else:

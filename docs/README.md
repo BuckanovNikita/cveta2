@@ -12,9 +12,8 @@
 
 Настройка:
 
-- [setup](commands/setup.md) — логин и пароль CVAT, подключение общей конфигурации ([shared configuration](../GLOSSARY.md)).
-- [setup-cache](commands/setup-cache.md) — каталоги кэша изображений ([image cache](../GLOSSARY.md)) и кэша аннотаций ([annotation cache](../GLOSSARY.md)).
-- [doctor](commands/doctor.md) — проверка конфигурации, ключей S3 и прав на кэш.
+- [setup](commands/setup.md) — логин и пароль CVAT, подключение общей конфигурации ([global configuration](../GLOSSARY.md)), кэш изображений и аннотаций ([image cache](../GLOSSARY.md), [annotation cache](../GLOSSARY.md)), настройки публикации.
+- [doctor](commands/doctor.md) — проверка конфигурации, ключей S3, подключения ClearML и прав на кэш.
 
 Выгрузка из CVAT:
 
@@ -37,8 +36,8 @@
 
 Проверка и публикация в ClearML:
 
-- [verify](commands/verify.md) — проверка CSV и сборка подготовленного датасета ([prepared bundle](../GLOSSARY.md)) через `--bundle`.
-- [upload-dataset](commands/upload-dataset.md) — публикация датасета после `verify --bundle`.
+- [verify](commands/verify.md) — проверка CSV и подготовка каталога выгрузки: подготовленный датасет ([prepared bundle](../GLOSSARY.md)).
+- [upload-dataset](commands/upload-dataset.md) — публикация датасета, подготовленного `verify <каталог>`.
 - [dataset](commands/dataset.md) — управляемые датасеты: выгрузка, подготовка, замечания, публикация, сравнение версий.
 
 ## Справочник

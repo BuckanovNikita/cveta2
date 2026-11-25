@@ -15,11 +15,12 @@ from cveta2.application.ports.dtos import (
     RawIssue,
     RawJob,
 )
-from cveta2.application.ports.managed_feedback import FeedbackTaskState
+from cveta2.application.ports.managed_feedback import FeedbackTaskState, FeedbackTaskUnavailable
 from cveta2.application.use_cases.managed_feedback import (
     reconcile_pending,
     report_findings,
 )
+from cveta2.domain.errors import CvatApiError
 from cveta2.domain.managed.models import (
     ManagedError,
     ManagedSnapshot,
@@ -69,8 +70,11 @@ class _Remote:
         self.fail_after: set[int] = set()
         self.edit_during: set[int] = set()
         self.bump_time = True
+        self.inspect_error: Exception | None = None
 
     def inspect(self, finding: FeedbackFinding) -> FeedbackTaskState:
+        if self.inspect_error is not None:
+            raise self.inspect_error
         return self.states[finding.task_id]
 
     def issue_exists(self, finding: FeedbackFinding) -> bool:
@@ -144,7 +148,7 @@ def test_uncertain_create_recovers_by_reads_before_freshness_validation(
     assert report_findings([finding], remote=remote, ledger=ledger).existing == 1
 
 
-def test_real_annotation_change_is_never_acknowledged(tmp_path: Path) -> None:
+def test_reconcile_pending_keeps_a_receipt_whose_annotations_changed(tmp_path: Path) -> None:
     ledger = LocalFeedbackLedger(tmp_path)
     remote = _Remote(ledger)
     remote.edit_during.add(1)
@@ -152,8 +156,58 @@ def test_real_annotation_change_is_never_acknowledged(tmp_path: Path) -> None:
     outcome = report_findings([finding], remote=remote, ledger=ledger)
     assert len(outcome.failed) == 1
     assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
-    with pytest.raises(ManagedError, match="annotations changed"):
+
+    reconcile_pending([finding], remote=remote, ledger=ledger)
+
+    receipt = ledger.get_receipt(finding.marker)
+    assert receipt is not None
+    assert not receipt.delivered
+    assert ledger.effective_snapshot(_snapshot()).sources[0].tasks["1"].updated_date == "0"
+
+
+def test_reconcile_pending_keeps_the_receipts_of_a_task_that_is_gone(tmp_path: Path, capture_logs: list[str]) -> None:
+    ledger = LocalFeedbackLedger(tmp_path)
+    remote = _Remote(ledger)
+    remote.fail_after.add(1)
+    findings = [_finding(frame=0), _finding(frame=1)]
+    assert len(report_findings(findings, remote=remote, ledger=ledger).failed) == 2
+    remote.inspect_error = FeedbackTaskUnavailable("Feedback task 1 is not available: 404")
+
+    unavailable = reconcile_pending(findings, remote=remote, ledger=ledger)
+
+    assert unavailable == {("main", 1)}
+    receipts = [ledger.get_receipt(finding.marker) for finding in findings]
+    assert all(receipt is not None and not receipt.delivered for receipt in receipts)
+    warning = (
+        "main: задача 1 недоступна в CVAT (Feedback task 1 is not available: 404); "
+        "незавершённая отправка замечания осталась незавершённой"
+    )
+    assert [line for line in capture_logs if "задача 1 недоступна в CVAT" in line] == [warning]
+
+
+def test_reconcile_pending_still_stops_when_cvat_cannot_be_read(tmp_path: Path) -> None:
+    ledger = LocalFeedbackLedger(tmp_path)
+    remote = _Remote(ledger)
+    remote.fail_after.add(1)
+    finding = _finding()
+    report_findings([finding], remote=remote, ledger=ledger)
+    remote.inspect_error = CvatApiError("Сетевая ошибка при обращении к CVAT: timeout")
+
+    with pytest.raises(CvatApiError, match="Сетевая ошибка"):
         reconcile_pending([finding], remote=remote, ledger=ledger)
+
+
+def test_report_findings_skips_stale_tasks(tmp_path: Path) -> None:
+    ledger = LocalFeedbackLedger(tmp_path)
+    remote = _Remote(ledger)
+    stale = _finding(task=101)
+
+    outcome = report_findings([stale, _finding(task=2)], remote=remote, ledger=ledger, skip=frozenset({("main", 101)}))
+
+    assert (outcome.created, outcome.existing, outcome.skipped, outcome.failed) == (1, 0, 1, [])
+    assert remote.creates == 1
+    assert stale.marker not in remote.issues
+    assert ledger.get_receipt(stale.marker) is None
 
 
 def test_partial_failure_is_explicit_and_other_findings_complete(
@@ -371,3 +425,32 @@ def test_cvat_adapter_rejects_ambiguous_jobs_and_wrong_frame_marker() -> None:
         )
     ]
     assert not remote.issue_exists(finding)
+
+
+@pytest.mark.parametrize("status", [403, 404])
+def test_cvat_adapter_reports_a_deleted_or_hidden_task_as_unavailable(status: int) -> None:
+    api = _api()
+    api.get_task.side_effect = CvatApiError("task not found", status_code=status)
+
+    with pytest.raises(FeedbackTaskUnavailable, match="Feedback task 1 is not available: task not found"):
+        CvatFeedback(api).inspect(_finding())
+
+
+def test_cvat_adapter_reports_a_moved_task_as_unavailable() -> None:
+    api = _api()
+    api.get_task.return_value = api.get_task.return_value.model_copy(update={"project_id": 99})
+
+    with pytest.raises(FeedbackTaskUnavailable, match="source project"):
+        CvatFeedback(api).inspect(_finding())
+
+
+@pytest.mark.parametrize("status", [0, 500, 503])
+def test_cvat_adapter_keeps_other_cvat_failures(status: int) -> None:
+    api = _api()
+    error = CvatApiError("CVAT unavailable", status_code=status)
+    api.get_task.side_effect = error
+
+    with pytest.raises(CvatApiError) as raised:
+        CvatFeedback(api).inspect(_finding())
+
+    assert raised.value is error

@@ -158,7 +158,7 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             yaml.safe_dump(
                 {
                     "schema_version": 1,
-                    "project_config": str(shared),
+                    "global_config": str(shared),
                     "cvat": {"username": cfg.username, "password": cfg.password},
                     "cache": {"images_root": str(images)},
                 }
@@ -205,6 +205,9 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
         bad_task = int(transformed.loc[bad_position, "source_task_id"])
         bad_frame = int(transformed.loc[bad_position, "source_frame_id"])
         transformed.loc[bad_position, "bbox_x_br"] = 1
+        # Splits are set by hand; the val image is not the broken one cleanup drops.
+        transformed["split"] = "train"
+        transformed.loc[transformed.index.drop(bad_position)[0], "split"] = "val"
         transformed_path = tmp_path / "transformed.csv"
         transformed.to_csv(transformed_path, index=False)
         prepared = tmp_path / "prepared"
@@ -217,7 +220,9 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             **options,
         )
         assert summary.ready, summary.report
-        assert json.loads((prepared / "preparation.json").read_bytes())["parent_id"] is None
+        written = json.loads((prepared / "preparation.json").read_bytes())
+        assert (written["parent_id"], written["format_version"]) == (None, 3)
+        assert not (prepared / "preparation.sha256").exists()
         record = ManagedRecord.model_validate_json((prepared / "preparation.json").read_bytes())
         finding = next(
             finding for finding in record.findings if finding.task_id == bad_task and finding.frame_id == bad_frame
@@ -254,11 +259,16 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             sdk.close()
         # A sibling prepared before the issue writes shares acknowledged feedback
         # history and must not mistake those writes for external annotation edits.
+        # Publication rebuilds the derived bookkeeping, so hand-blanked assignments come back.
+        sibling_metadata = yaml.safe_load((sibling / "dataset.yaml").read_text())
+        sibling_metadata["managed"]["assignments"] = {}
+        (sibling / "dataset.yaml").write_text(yaml.safe_dump(sibling_metadata))
         publication = api.publish_dataset(sibling, **options)
         remote = Dataset.get(dataset_id=publication.dataset_id)
         assert remote.is_final()
         assert set(remote.list_files()) == {"dataset.csv", "dataset.yaml", "tasks.yaml"}
         local = Path(remote.get_local_copy(use_soft_links=False))
+        assert yaml.safe_load((local / "dataset.yaml").read_text())["managed"]["assignments"]
         assert (local / "tasks.yaml").read_bytes() == (sibling / "tasks.yaml").read_bytes()
         published_snapshot = LocalSourceFiles().read_snapshot(local / "tasks.yaml")
         assert published_snapshot.registry == expected_registry

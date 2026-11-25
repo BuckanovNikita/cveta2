@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from typing import Literal, Self, cast
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from pydantic import (
     BaseModel,
@@ -20,8 +20,6 @@ from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import LabelInfo
 from cveta2.domain.paths import parse_sync_root
 
-_SPLIT_TOLERANCE = 1e-9
-
 
 class ManagedError(Cveta2Error):
     """A managed definition, source, preparation or feedback cannot proceed."""
@@ -35,6 +33,61 @@ class StrictModel(BaseModel):
     """Reject misspelled contract fields instead of silently losing policy."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+_HIDDEN_USERINFO = "***"
+
+
+def _url_parts(value: str) -> SplitResult | None:
+    """Split *value* as a URL, or return ``None`` when it cannot be parsed; the validators refuse it then."""
+    try:
+        return urlsplit(value)
+    except ValueError:
+        return None
+
+
+def has_url_userinfo(value: str) -> bool:
+    """Say whether a URL-typed value may carry a login or password before its host.
+
+    ``urlsplit`` ends the authority at the first ``/``, ``?`` or ``#``, so it
+    misses a secret that holds one of them unencoded (AWS secret keys often
+    hold ``/``). The rule here looks at the text after ``scheme://``, or at the
+    whole value when it has no scheme, and says yes when it has an ``@`` and:
+
+    - the ``@`` comes before the first ``/``, ``?`` or ``#`` (ordinary userinfo,
+      also before a malformed host such as ``[::1``); or
+    - the text before the last ``@`` contains ``:`` (a password that holds
+      ``/``, ``?`` or ``#``); or
+    - ``urlsplit`` finds a username or password, or cannot parse the value.
+
+    A value without ``@`` never has userinfo. An ``@`` only in the path or
+    query (``https://host/a@b``, ``?x=a@b``) is not userinfo. The rule
+    over-detects on purpose: ``https://host:8080/a@b`` is flagged, since a
+    secret that starts with digits looks like a port.
+    """
+    if "@" not in value:
+        return False
+    scheme = _URL_SCHEME.match(value)
+    rest = value[scheme.end() :] if scheme else value
+    authority_end = min((i for i in map(rest.find, "/?#") if i >= 0), default=len(rest))
+    if "@" in rest[:authority_end] or ":" in rest.rpartition("@")[0]:
+        return True
+    parts = _url_parts(value)
+    return parts is None or bool(parts.username or parts.password)
+
+
+def hide_url_userinfo(value: str) -> str:
+    """Return a URL-typed value with any userinfo (see :func:`has_url_userinfo`) replaced by ``***``.
+
+    Everything from after ``scheme://`` up to the last ``@`` is hidden; a value
+    that cannot be parsed and has no ``@`` is hidden whole.
+    """
+    if not has_url_userinfo(value):
+        return value if _url_parts(value) is not None else _HIDDEN_USERINFO
+    scheme = _URL_SCHEME.match(value)
+    prefix = scheme.group() if scheme else ""
+    return f"{prefix}{_HIDDEN_USERINFO}@{value.rpartition('@')[2]}"
 
 
 class CvatIdentity(StrictModel):
@@ -53,10 +106,51 @@ class CvatIdentity(StrictModel):
     @classmethod
     def public_host(cls, value: str) -> str:
         """Keep credentials out of the shared server identity."""
-        parts = urlsplit(value)
-        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
+        parts = _url_parts(value)
+        if parts is None or has_url_userinfo(value) or parts.scheme not in {"http", "https"} or not parts.hostname:
             raise ValueError("CVAT host must be HTTP(S) without credentials")
         return value.rstrip("/")
+
+
+def _public_http_url(value: str) -> str:
+    """Do not permit credential-bearing endpoints in portable policy."""
+    parts = _url_parts(value)
+    if parts is None or has_url_userinfo(value) or parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("Class API must be HTTP(S) without embedded credentials")
+    return value
+
+
+class ClearMLDestination(StrictModel):
+    """Exact project and dataset name; no recursive project matching."""
+
+    project: str = Field(min_length=1)
+    dataset: str = Field(min_length=1)
+    output_uri: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("output_uri")
+    @classmethod
+    def public_output_uri(cls, value: str | None) -> str | None:
+        """Accept any ClearML storage scheme, but keep credentials out of shared policy."""
+        if value is None:
+            return value
+        if not value or _url_parts(value) is None or has_url_userinfo(value):
+            raise ValueError("ClearML output URI must be nonempty and without embedded credentials")
+        return value
+
+
+class PublicationSettings(StrictModel):
+    """Where and how one project's bundles are published; `None` roots mean the derived default."""
+
+    clearml: ClearMLDestination
+    api_url: str
+    empty_classes: list[int] = Field(default_factory=list)
+    s3_roots: list[str] | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @field_validator("api_url")
+    @classmethod
+    def public_class_api(cls, value: str) -> str:
+        """Do not permit credential-bearing endpoints in portable policy."""
+        return _public_http_url(value)
 
 
 class ProjectDefinition(StrictModel):
@@ -68,6 +162,7 @@ class ProjectDefinition(StrictModel):
     ignored_prefix: str | None = None
     task_cache_s3: str | None = None
     ignore: list[dict[str, JsonValue]] = Field(default_factory=list)
+    publication: PublicationSettings | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("sync_root", "task_cache_s3")
     @classmethod
@@ -135,29 +230,6 @@ class SourceDefinition(StrictModel):
         return self
 
 
-class ClearMLDestination(StrictModel):
-    """Exact project and dataset name; no recursive project matching."""
-
-    project: str = Field(min_length=1)
-    dataset: str = Field(min_length=1)
-
-
-class SplitPolicy(StrictModel):
-    """Stable hash targets; published assignments are never rebalanced."""
-
-    train: float = Field(default=0.6, ge=0, le=1)
-    val: float = Field(default=0.2, ge=0, le=1)
-    test: float = Field(default=0.2, ge=0, le=1)
-    seed: int = 42
-
-    @model_validator(mode="after")
-    def total(self) -> Self:
-        """Require a complete probability distribution and usable train/val."""
-        if abs(self.train + self.val + self.test - 1) > _SPLIT_TOLERANCE or not self.train or not self.val:
-            raise ValueError("Splits must sum to one with positive train and val")
-        return self
-
-
 class OverlapDecision(StrictModel):
     """Choose one source or exclude content; bind to exact participating sources."""
 
@@ -173,17 +245,13 @@ class DatasetDefinition(StrictModel):
     api_url: str = Field(min_length=1)
     s3_roots: list[str] = Field(default_factory=list)
     empty_classes: list[int] = Field(default_factory=list)
-    splits: SplitPolicy = Field(default_factory=SplitPolicy)
     overlaps: dict[str, OverlapDecision] = Field(default_factory=dict)
 
     @field_validator("api_url")
     @classmethod
     def public_class_api(cls, value: str) -> str:
         """Do not permit credential-bearing endpoints in portable policy."""
-        parts = urlsplit(value)
-        if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.password:
-            raise ValueError("Class API must be HTTP(S) without embedded credentials")
-        return value
+        return _public_http_url(value)
 
     @model_validator(mode="after")
     def unique_sources(self) -> Self:
@@ -196,9 +264,15 @@ class DatasetDefinition(StrictModel):
 
 
 class ProjectConfig(StrictModel):
-    """Authoritative shared configuration, never merged with personal policy."""
+    """The global file: authoritative team policy without credentials or local paths.
+
+    Readers see it merged with the user's local overrides of publication
+    settings (see ``cveta2.domain.managed.overrides``) when ``local_overrides``
+    allows them; no other personal value is ever merged into it.
+    """
 
     schema_version: Literal[1] = 1
+    local_overrides: bool = Field(default=False, exclude_if=lambda value: not value)
     cvat: CvatIdentity
     projects: dict[str, ProjectDefinition] = Field(default_factory=dict)
     datasets: dict[str, DatasetDefinition] = Field(default_factory=dict)
@@ -207,8 +281,16 @@ class ProjectConfig(StrictModel):
     def references(self) -> Self:
         """Reject unknown project references and duplicate destination pairs."""
         destinations = [(d.clearml.project, d.clearml.dataset) for d in self.datasets.values()]
-        if len(destinations) != len(set(destinations)):
-            raise ValueError("ClearML destination pairs must be unique")
+        destinations += [
+            (p.publication.clearml.project, p.publication.clearml.dataset)
+            for p in self.projects.values()
+            if p.publication is not None
+        ]
+        seen: set[tuple[str, str]] = set()
+        for pair in destinations:
+            if pair in seen:
+                raise ValueError(f"ClearML destination pairs must be unique: {pair[0]}/{pair[1]}")
+            seen.add(pair)
         ids = [p.id for p in self.projects.values()]
         if len(ids) != len(set(ids)):
             raise ValueError("CVAT project identities must be unique")
@@ -256,6 +338,8 @@ class ManagedSnapshot(StrictModel):
     definition_hash: str
     registry_hash: str
     registry: list[ApiClass] | None = Field(default=None, exclude_if=lambda value: value is None)
+    # The CVAT server the tasks were fetched from; their IDs mean nothing on another one.
+    cvat: CvatIdentity | None = Field(default=None, exclude_if=lambda value: value is None)
     parent_id: str | None = None
     sources: list[SourceSnapshot]
     assignments: dict[str, Literal["train", "val", "test"]] = Field(default_factory=dict)
@@ -323,7 +407,6 @@ def definition_fingerprint(config: ProjectConfig, definition: DatasetDefinition)
         "api_url": definition.api_url,
         "s3_roots": sorted(set(definition.s3_roots)),
         "empty_classes": sorted(set(definition.empty_classes)),
-        "splits": definition.splits.model_dump(mode="json"),
         "overlaps": {
             digest: {"source": decision.source, "members": sorted(decision.members)}
             for digest, decision in definition.overlaps.items()

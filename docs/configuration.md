@@ -7,15 +7,15 @@ cveta2 читает настройки из двух YAML-файлов и из �
 | Файл | Для чего | Кто его ведёт |
 |---|---|---|
 | Личная конфигурация ([personal configuration](../GLOSSARY.md)) | Логин и пароль CVAT, локальные пути кэша, настройки сети и `upload`, ссылка на общий файл. | Вы сами, обычно через [`cveta2 setup`](commands/setup.md). |
-| Общая конфигурация ([shared configuration](../GLOSSARY.md)) | Сервер CVAT и организация, описания проектов ([project definition](../GLOSSARY.md)), управляемые датасеты ([managed dataset](../GLOSSARY.md)). Паролей и локальных путей в нём нет. | Команда. Вы получаете готовый файл. |
+| Общая конфигурация ([global configuration](../GLOSSARY.md)) | Сервер CVAT и организация, описания проектов ([project definition](../GLOSSARY.md)), управляемые датасеты ([managed dataset](../GLOSSARY.md)). Паролей и локальных путей в нём нет. | Команда. Вы получаете готовый файл. |
 
-Файлы никогда не сливаются. Ключ из общего файла нельзя переопределить в личном: cveta2 отклоняет такой личный файл с ошибкой.
+Файлы не сливаются. Единственное исключение — настройки публикации: личный файл может заменить их, если общий файл это разрешает, см. [локальные переопределения](#локальные-переопределения).
 
 ### Где cveta2 ищет личную конфигурацию
 
 Порядок, первое найденное значение побеждает:
 
-1. Флаг `--config PATH` (есть у `setup`, `setup-cache` и команд `dataset`).
+1. Флаг `--config PATH` (есть у `setup` и команд `dataset`).
 2. Переменная окружения `CVETA2_CONFIG`.
 3. `~/.config/cveta2/config.yaml`.
 
@@ -25,21 +25,42 @@ cveta2 читает настройки из двух YAML-файлов и из �
 
 ### Где cveta2 ищет общую конфигурацию
 
-cveta2 выбирает ровно один общий файл:
+cveta2 выбирает ровно один общий файл. Уровни проверяются по порядку, первый заданный побеждает:
 
-1. Флаг `--project-config PATH` (команды `dataset`; у `setup` этот флаг подключает файл, см. ниже).
-2. Переменная окружения `CVETA2_PROJECT_CONFIG`.
-3. Ключ `project_config` в личном файле. Относительный путь считается от каталога личного файла.
+1. Флаг `--global-config PATH` (команды `dataset`; у `setup` этот флаг подключает файл, см. ниже).
+2. Переменная окружения `CVETA2_GLOBAL_CONFIG`.
+3. Ключ `global_config` в личном файле. Относительный путь считается от каталога личного файла.
 
 Если не найдено ничего, общий файл не используется. Если путь выбран, а файла нет, команда завершается ошибкой `Cannot read configuration <путь>: FileNotFoundError`.
+
+Старые написания `--project-config`, `CVETA2_PROJECT_CONFIG` и `project_config` больше не поддерживаются. Флаг `--project-config` — неизвестный аргумент (код `2`), переменная `CVETA2_PROJECT_CONFIG` ничего не выбирает, а личный файл со `schema_version: 1` и ключом `project_config` отклоняется: `Personal configuration contains unsupported/shared sections: project_config`. Переименуйте ключ в `global_config`.
 
 ### Как подключить общий файл
 
 ```bash
-cveta2 setup --project-config ~/team/project-config.yaml
+cveta2 setup --global-config ~/team/project-config.yaml
 ```
 
-Команда проверяет общий файл и записывает в личный файл `schema_version: 1` и абсолютный путь в `project_config`. Сам общий файл она не меняет. Подробности — в [`cveta2 setup`](commands/setup.md).
+Команда проверяет общий файл и записывает в личный файл `schema_version: 1` и абсолютный путь в `global_config` Сам общий файл она не меняет. Подробности — в [`cveta2 setup`](commands/setup.md).
+
+Если общего файла ещё нет, его создаёт `--global` с адресом CVAT. Новый файл разрешает локальные переопределения (`local_overrides: true`) и сразу подключается:
+
+```bash
+cveta2 setup --global --global-config ~/team/project-config.yaml --host https://cvat.example.com --organization my-team
+```
+
+Ключи общего файла записываются командой `cveta2 setup --global` по одному флагу на ключ, без ручной правки YAML:
+
+| Ключ | Команда |
+|---|---|
+| `local_overrides` | `cveta2 setup --global --local-overrides on` (или `off`) |
+| `cvat.host`, `cvat.organization` | `cveta2 setup --global --host URL --organization SLUG` |
+| `projects.<ключ>.sync_root`, `.ignored_prefix`, `.task_cache_s3` | `cveta2 setup --global --project P --sync-root s3://bucket/prefix --ignored-prefix PREFIX --task-cache-s3 s3://bucket/cache` |
+| `projects.<ключ>.publication.clearml.project`, `.clearml.dataset`, `.clearml.output_uri` | `cveta2 setup --global --project P --clearml-project Retail/Datasets --dataset-name retail-shelves --output-uri s3://bucket/.clearml` |
+| `projects.<ключ>.publication.api_url` | `cveta2 setup --global --project P --api-url https://classes.example.com/api` |
+| `projects.<ключ>.publication.empty_classes`, `.s3_roots` | `cveta2 setup --global --project P --empty-class 12 --empty-class 13 --s3-root s3://bucket/images` |
+
+`--unset <флаг без -->` удаляет ключ, `--unset publication` — весь блок публикации. Проект без описания получает его при первой записи: ID и имя берутся из `projects.yaml` или из CVAT.
 
 ## Личная конфигурация
 
@@ -47,7 +68,7 @@ cveta2 setup --project-config ~/team/project-config.yaml
 
 ```yaml
 schema_version: 1                      # формат личного файла с подключённым общим файлом
-project_config: /home/alice/team/project-config.yaml
+global_config: /home/alice/team/project-config.yaml
 
 cvat:
   username: alice
@@ -81,8 +102,8 @@ upload:
 
 | Ключ | Тип | По умолчанию | Описание |
 |---|---|---|---|
-| `schema_version` | число | нет | `1` — формат с подключённым общим файлом. С `schema_version: 1` обязателен `project_config`, и в файле разрешены только ключи из этой таблицы. |
-| `project_config` | путь | нет | Путь к общему файлу. Непустая строка. |
+| `schema_version` | число | нет | `1` — формат с подключённым общим файлом. С `schema_version: 1` обязателен `global_config`, и в файле разрешены только ключи из этой таблицы. |
+| `global_config` | путь | нет | Путь к общему файлу. Непустая строка. |
 | `cvat.username` | строка | нет | Логин CVAT. |
 | `cvat.password` | строка | нет | Пароль CVAT. |
 | `cvat.request_timeout` | число ≥ 0 | нет | Таймаут чтения ответа в секундах для запросов к CVAT и для S3. Без значения или `0` таймаут чтения не задаётся. Таймаут соединения — 10 секунд: для S3 всегда, для CVAT только когда задан таймаут чтения. |
@@ -99,8 +120,9 @@ upload:
 | `network.retry_max_wait` | число > 0 | `30` | Максимальная пауза между попытками в секундах. |
 | `upload.images_per_job` | целое > 0 | `100` | Сколько кадров (frame) в одном job при создании задачи (task) командой `upload`. |
 | `upload.image_quality` | целое 1–100 | `100` | Качество сжатия кадров, которое `upload` передаёт в CVAT. |
+| `overrides.projects.<ключ>.publication` | словарь | нет | Личные значения настроек публикации проекта. Только с `schema_version: 1`; см. [локальные переопределения](#локальные-переопределения). |
 
-Пути в разделах `cache` и `image_cache` пишите абсолютными: при чтении файла cveta2 не раскрывает `~`. `cveta2 setup-cache` сам записывает абсолютные пути.
+Пути в разделах `cache` и `image_cache` пишите абсолютными: при чтении файла cveta2 не раскрывает `~`. Мастер [`cveta2 setup`](commands/setup.md#мастер-личной-настройки) сам записывает абсолютные пути.
 
 Подробно о каталогах кэша — на странице [Изображения и кэши](images-and-cache.md).
 
@@ -112,6 +134,7 @@ upload:
 
 ```yaml
 schema_version: 1
+local_overrides: true                   # разрешить личные переопределения; без ключа — false
 
 cvat:
   host: https://cvat.example.com        # только http(s), без логина и пароля в адресе
@@ -129,6 +152,14 @@ projects:
         name: "batch 7"
         description: "переразметка"
         silent: false
+    publication:                        # необязательный блок: настройки публикации
+      clearml:
+        project: Retail/Datasets        # обязателен в блоке
+        dataset: retail-shelves         # обязателен в блоке
+        output_uri: s3://my-bucket/.clearml   # необязателен
+      api_url: https://classes.example.com/api   # обязателен в блоке
+      empty_classes: [12]               # необязателен, по умолчанию []
+      s3_roots: [s3://my-bucket/images] # необязателен
 
 datasets:
   retail-shelves:                       # управляемый датасет, см. commands/dataset.md
@@ -147,6 +178,7 @@ datasets:
 | Ключ | Тип | По умолчанию | Описание |
 |---|---|---|---|
 | `schema_version` | число | `1` | Только `1`. |
+| `local_overrides` | булево | `false` | Разрешает личным файлам переопределять настройки публикации (см. [локальные переопределения](#локальные-переопределения)). Ключ не записывается, пока он `false`. |
 | `cvat.host` | строка | обязателен | Адрес CVAT, `http` или `https`, без логина и пароля. Завершающий `/` отбрасывается. |
 | `cvat.organization` | строка | нет | Slug организации. Пусто или `null` — личное пространство. |
 | `projects.<ключ>` | словарь | `{}` | Описание проекта. Ключ — латиница, цифры, `_` и `-`, начинается с буквы или цифры. |
@@ -156,13 +188,74 @@ datasets:
 | `projects.<ключ>.ignored_prefix` | строка | нет | Отбрасываемый префикс ([ignored prefix](../GLOSSARY.md)). |
 | `projects.<ключ>.task_cache_s3` | строка | нет | Место кэша аннотаций в S3: `s3://bucket/prefix` или непустой префикс. |
 | `projects.<ключ>.ignore` | список | `[]` | Список игнорируемых задач ([ignore list](../GLOSSARY.md)). Поля записи: `id` (целое ≥ 0, обязательно), `name`, `description` (строки), `silent` (`true`/`false`). Ведите его командой [`cveta2 ignore`](commands/ignore.md). |
+| `projects.<ключ>.publication` | словарь | нет | Настройки публикации проекта ([publication settings](../GLOSSARY.md)). Ключ не записывается, пока блок не задан. |
+| `projects.<ключ>.publication.clearml.project` | строка | обязателен в блоке | Проект ClearML, точное имя. |
+| `projects.<ключ>.publication.clearml.dataset` | строка | обязателен в блоке | Датасет ClearML, точное имя. |
+| `projects.<ключ>.publication.clearml.output_uri` | строка | нет | Хранилище файлов ClearML: любая схема (`s3://`, `gs://`, `azure://`, `http(s)://`, `file://`), без логина и пароля в адресе, даже если в пароле есть `/`, `?` или `#`. Пустая строка запрещена. Не записывается, пока не задан. |
+| `projects.<ключ>.publication.api_url` | строка | обязателен в блоке | Адрес API классов, `http` или `https`, без логина и пароля. |
+| `projects.<ключ>.publication.empty_classes` | список целых | `[]` | Исключённые классы. |
+| `projects.<ключ>.publication.s3_roots` | список строк | нет | Корни S3 изображений. Без значения берётся значение по умолчанию, выведенное из облачного хранилища проекта. Не записывается, пока не задан. |
 | `datasets.<ключ>` | словарь | `{}` | Управляемые датасеты. |
 
 Неизвестный ключ в общем файле — ошибка: cveta2 не пропускает опечатки молча. Повторяющиеся ключи YAML и ссылки на себя (рекурсивные алиасы) тоже отклоняются.
 
 ### Раздел `datasets`
 
-Каждая запись описывает управляемый датасет: источники ([source](../GLOSSARY.md)) — проекты CVAT или CSV в S3, назначение в ClearML (`clearml.project`, `clearml.dataset`), адрес API классов (`api_url`), корни S3 изображений (`s3_roots`), исключённые классы (`empty_classes`), доли и seed для split (`splits`) и решения о пересечении (`overlaps`). Источник типа `cvat` ссылается на ключ из `projects`. Все поля и правила описаны на странице [`cveta2 dataset`](commands/dataset.md).
+Каждая запись описывает управляемый датасет: источники ([source](../GLOSSARY.md)) — проекты CVAT или CSV в S3, назначение в ClearML (`clearml.project`, `clearml.dataset` и необязательный `clearml.output_uri`, по умолчанию его нет), адрес API классов (`api_url`), корни S3 изображений (`s3_roots`), исключённые классы (`empty_classes`) и решения о пересечении (`overlaps`). Источник типа `cvat` ссылается на ключ из `projects`. Все поля и правила описаны на странице [`cveta2 dataset`](commands/dataset.md).
+
+Пары назначения ClearML (`clearml.project` и `clearml.dataset`) уникальны среди всех `projects.<ключ>.publication` и всех `datasets.<ключ>`. Повтор отклоняется с ошибкой `ClearML destination pairs must be unique: <проект>/<датасет>`.
+
+## Локальные переопределения
+
+Локальное переопределение ([local override](../GLOSSARY.md)) — личное значение настройки проекта, которое заменяет значение из общего файла только для вас. Например, чтобы публиковать проект `retail` в свой датасет ClearML:
+
+```yaml
+# личный файл
+overrides:
+  projects:
+    retail:                           # тот же ключ, что в общем файле
+      publication:
+        clearml:
+          dataset: retail-shelves-alice
+```
+
+Переопределить можно любое значение внутри `projects.<ключ>.publication`: `clearml.project`, `clearml.dataset`, `clearml.output_uri`, `api_url`, `empty_classes` и `s3_roots`. Всё остальное берётся только из общего файла: `id`, `name`, `sync_root`, `ignored_prefix`, `task_cache_s3`, список `ignore`, раздел `cvat` и раздел `datasets`. Так все в команде скачивают одни и те же данные. Другой ключ в `overrides` — ошибка `Некорректный раздел overrides личной конфигурации; поля: <ключи>`; ключ проекта, которого нет в общем файле, тоже отклоняется.
+
+Переопределение записывает и удаляет `cveta2 setup` с `--project` и без `--global`:
+
+| Ключ в `overrides.projects.<ключ>.publication` | Команда |
+|---|---|
+| `clearml.project`, `clearml.dataset`, `clearml.output_uri` | `cveta2 setup --project retail --clearml-project Retail/Datasets --dataset-name retail-shelves-alice --output-uri s3://bucket/.clearml` |
+| `api_url` | `cveta2 setup --project retail --api-url https://classes.example.com/api` |
+| `empty_classes`, `s3_roots` | `cveta2 setup --project retail --empty-class 5 --s3-root s3://bucket/images` |
+| одно значение / весь блок | `cveta2 setup --project retail --unset dataset-name` / `cveta2 setup --project retail --unset publication` |
+
+Удаление работает и тогда, когда общий файл переопределения не разрешает. Удаление отклоняется, только если оставшиеся переопределения стали бы некорректными (неполный блок или совпадение назначения ClearML с переопределением другого проекта) и при этом до команды они были корректны (подробнее — в [`cveta2 setup`](commands/setup.md#запись-значений)). Значения `sync_root`, `ignored_prefix` и `task_cache_s3` локально не записываются: команда отвечает ошибкой и предлагает `cveta2 setup --global`.
+
+Значения сливаются по одному: заданное значение заменяет значение из общего файла, остальные остаются общими. В примере выше `clearml.project`, `api_url` и прочие настройки публикации берутся из общего файла. Список заменяется целиком: `empty_classes: [5]` в личном файле при `empty_classes: [12, 13]` в общем даёт `[5]`.
+
+Все команды читают итоговую конфигурацию: общий файл плюс переопределения. Команды, которые записывают общий файл, берут за основу сам общий файл и никогда не записывают туда ваши переопределения.
+
+### Когда переопределения разрешены
+
+Переопределения разрешает ключ `local_overrides: true` в общем файле. Без этого ключа или с `false` личный файл, где в `overrides` задано хотя бы одно значение, отклоняется. Пустые блоки без значений (например, `retail: {}` или `publication: {}`) ничего не переопределяют и не мешают ни при каком значении `local_overrides`. Сообщение об ошибке:
+
+```
+Личная конфигурация содержит локальные переопределения (overrides.projects.retail.publication.clearml.dataset), но общая конфигурация их не разрешает. Удалите их из раздела overrides личного файла или попросите команду выполнить: cveta2 setup --global --local-overrides on
+```
+
+Исправить можно двумя способами: удалить переопределения из личного файла или попросить того, кто ведёт общий файл, разрешить их командой `cveta2 setup --global --local-overrides on`.
+
+Раздел `overrides` допустим только в личном файле со `schema_version: 1` и подключённым общим файлом. В файле старого формата он отклоняется: `Локальные переопределения требуют личного файла со schema_version: 1 и подключённой общей конфигурацией`.
+
+### Проверка после слияния
+
+Правила общего файла проверяются на итоговой конфигурации. Если переопределение делает её некорректной, cveta2 останавливается с ошибкой. Так бывает в двух случаях:
+
+- пара назначения ClearML после слияния совпадает с другим назначением из `projects.<ключ>.publication` или `datasets.<ключ>`: `Локальные переопределения делают общую конфигурацию некорректной: Value error, ClearML destination pairs must be unique: <проект>/<датасет>`;
+- у проекта нет блока `publication` в общем файле, а переопределение задаёт не все обязательные значения (`clearml.project`, `clearml.dataset`, `api_url`): `Локальные переопределения делают общую конфигурацию некорректной; поля: <ключи>; <причина>`.
+
+Настройки публикации существуют только вместе с общим файлом. Без общего файла их негде хранить и нечего переопределять: значения передаются команде `verify` флагами.
 
 ## Значения по умолчанию из пакета
 
@@ -183,7 +276,7 @@ upload:
 | Переменная | Что задаёт | Что переопределяет |
 |---|---|---|
 | `CVETA2_CONFIG` | Путь к личному файлу. | Путь по умолчанию; флаг `--config` важнее. |
-| `CVETA2_PROJECT_CONFIG` | Путь к общему файлу. | Ключ `project_config`; флаг `--project-config` важнее. |
+| `CVETA2_GLOBAL_CONFIG` | Путь к общему файлу. | Ключ `global_config`; флаг `--global-config` важнее. |
 | `CVAT_HOST` | Адрес CVAT. | `cvat.host` из личного файла. |
 | `CVAT_ORGANIZATION` | Slug организации. | `cvat.organization` из личного файла. |
 | `CVAT_USERNAME` | Логин CVAT. | `cvat.username`. |
@@ -263,14 +356,16 @@ CVAT API: попытка cveta2 1/5 не удалась; повтор через
 
 ## Запись в общий файл и блокировка
 
-Некоторые команды меняют общий файл: например, [`cveta2 ignore`](commands/ignore.md) меняет список игнорируемых задач, а [`cveta2 setup-cache`](commands/setup-cache.md) — `ignored_prefix` и `task_cache_s3`. Чтобы два человека не затёрли изменения друг друга:
+Некоторые команды меняют общий файл: например, [`cveta2 ignore`](commands/ignore.md) меняет список игнорируемых задач, а [`cveta2 setup --global`](commands/setup.md#мастер-общей-настройки---global) — настройки проектов: `ignored_prefix`, `task_cache_s3`, `publication` и другие. Чтобы два человека не затёрли изменения друг друга:
 
 1. cveta2 берёт блокировку на файл `.<имя файла>.lock` рядом с общим файлом. Если блокировку держит другой процесс, команда сразу завершается ошибкой `Cannot lock shared configuration <путь>; another writer may be active. Retry the change.` Блокировка снимается, когда процесс завершается.
 2. Записываются только поля, которые изменила эта команда. Изменения других проектов от другого человека сохраняются.
 3. Если то же поле кто-то изменил после того, как команда прочитала файл, запись отклоняется: `Shared configuration <путь> changed since it was loaded: project '<имя>', field <поле>; reload and repeat the change`. Повторите команду.
-4. Файл заменяется атомарно, его права и группа сохраняются. Он записывается заново целиком: комментарии и оформление YAML (кавычки, порядок записи в одну строку) не сохраняются, а незаданные ключи проектов появляются со значением `null`. Если у файла нет прав на запись ни для кого, запись отклоняется: `Shared project configuration is read-only: <путь>`.
+4. Файл заменяется атомарно, его права и группа сохраняются. Он записывается заново целиком: комментарии и оформление YAML (кавычки, порядок записи в одну строку) не сохраняются, а незаданные ключи проектов появляются со значением `null` (`sync_root`, `ignored_prefix`, `task_cache_s3`). Ключи `local_overrides`, `publication` и `output_uri` пока не заданы, в файл не записываются. Если у файла нет прав на запись ни для кого, запись отклоняется: `Shared project configuration is read-only: <путь>`.
 
-Команда `setup --project-config` общий файл не меняет никогда.
+Запись в общий файл всегда строится от самого файла, а не от эффективной конфигурации: локальное переопределение никогда не попадает в общий файл. Переопределение также не считается чужим одновременным изменением: оно не вызывает `Shared configuration ... changed since it was loaded`.
+
+Команда `setup --global-config` общий файл не меняет никогда.
 
 ## Перенос старой конфигурации
 
@@ -283,7 +378,7 @@ Legacy mixed configuration requires verification: cveta2 setup --migrate-config
 Перенос выполняет `cveta2 setup --migrate-config` (только в терминале):
 
 1. cveta2 строит предложение: личный файл (логин, пароль, таймаут, локальные пути, `network`, `upload`) и общий файл (адрес, организация, проекты). Проект попадает в общий файл, только если его ID однозначно известен из `projects.yaml`.
-2. Предложение выводится как JSON, логин и пароль скрыты как `<redacted>`. Общий файл по умолчанию — `project-config.yaml` рядом с личным; другой путь задаёт `--project-config`.
+2. Предложение выводится как JSON, логин и пароль скрыты как `<redacted>`. Общий файл по умолчанию — `project-config.yaml` рядом с личным; другой путь задаёт `--global-config`.
 3. Если что-то не удалось разобрать однозначно, список проблем есть в поле `unresolved`, и команда завершается: `Сначала устраните неоднозначные настройки из отчёта миграции.`
 4. После подтверждения cveta2 сохраняет копию старого файла `<имя>.pre-v1-<хеш>.bak` и записывает оба файла. Существующий общий файл с другим содержимым не перезаписывается.
 
@@ -293,7 +388,6 @@ Legacy mixed configuration requires verification: cveta2 setup --migrate-config
 
 - [`cveta2 setup`](commands/setup.md)
 - [`cveta2 doctor`](commands/doctor.md)
-- [`cveta2 setup-cache`](commands/setup-cache.md)
 - [Изображения и кэши](images-and-cache.md)
 - [`cveta2 dataset`](commands/dataset.md)
 - [Python API](python-api.md)

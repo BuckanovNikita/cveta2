@@ -11,6 +11,8 @@ from pydantic import ValidationError
 
 from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces import managed_datasets
+from cveta2.interfaces.commands._helpers import global_config_from_args
+from cveta2.interfaces.commands._parsers import add_global_config_arg
 
 
 def configure_managed(parser: argparse.ArgumentParser) -> None:
@@ -28,7 +30,7 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
     ):
         command = commands.add_parser(operation)
         command.add_argument("--config", type=Path, help="Личный файл конфигурации.")
-        command.add_argument("--project-config", type=Path, help="Общий файл проектов и сопоставлений.")
+        add_global_config_arg(command)
         command.add_argument("--json", action="store_true", help="Вывести результат в JSON.")
         if operation in {"show", "versions", "fetch", "prepare"}:
             command.add_argument("name", help="Имя набора из общего файла.")
@@ -44,16 +46,39 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
                 required=True,
                 help="Каталог полного managed fetch.",
             )
-            command.add_argument(
+            cleanup = command.add_mutually_exclusive_group()
+            cleanup.add_argument(
                 "--clean",
                 action="store_true",
-                help="Принять исправления и удаление отклонённых строк.",
+                dest="clean",
+                default=True,
+                help="Оставлено для совместимости: очистка включена по умолчанию.",
+            )
+            cleanup.add_argument(
+                "--no-clean",
+                action="store_false",
+                dest="clean",
+                help="Не удалять отклонённые строки: подготовка остановится, если очистка нужна.",
+            )
+            command.add_argument(
+                "--first",
+                action="store_true",
+                help="Начать управляемую историю: последнюю версию без managed не использовать.",
             )
         if operation == "diff":
             command.add_argument("old", help="Каталог/CSV или ID версии ClearML.")
             command.add_argument("new", help="Каталог/CSV или ID версии ClearML.")
         if operation in {"report-errors", "publish"}:
             command.add_argument("prepared", type=Path, help="Каталог проверенной подготовки.")
+        if operation == "publish":
+            command.add_argument(
+                "--force-resplit",
+                action="store_true",
+                help=(
+                    "Разрешить split, отличный от опубликованного в родительской версии; "
+                    "опубликованные назначения заменятся значениями из dataset.csv."
+                ),
+            )
 
 
 def run_managed(args: argparse.Namespace) -> None:
@@ -67,7 +92,7 @@ def run_managed(args: argparse.Namespace) -> None:
 
 def _dispatch(args: argparse.Namespace) -> None:
     """Dispatch typed public operations; APIs never prompt."""
-    options = {"config_path": args.config, "project_config": args.project_config}
+    options = {"config_path": args.config, "project_config": global_config_from_args(args)}
     result: Any
     operation = args.dataset_operation
     if operation == "list":
@@ -85,6 +110,7 @@ def _dispatch(args: argparse.Namespace) -> None:
             source=args.source,
             output_dir=args.output_dir,
             clean=args.clean,
+            first=args.first,
             **options,
         )
         result = prepared.model_dump(mode="json")
@@ -101,6 +127,6 @@ def _dispatch(args: argparse.Namespace) -> None:
             raise SystemExit(2)
         return
     else:
-        result = managed_datasets.publish_dataset(args.prepared, **options)
+        result = managed_datasets.publish_dataset(args.prepared, force_resplit=args.force_resplit, **options)
         result = {"dataset_id": result.dataset_id, "version": result.version}
     sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
