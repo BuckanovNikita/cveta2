@@ -1097,6 +1097,9 @@ class TestTaskWithoutData:
         """Nothing of the skipped task is cached, even with its update time unchanged."""
         connection, api = self._connection(tmp_path, monkeypatch)
         cveta2.fetch("audit-project", tmp_path / "first", connection=connection, download_images=False)
+        cached = {path.parent.name for path in (tmp_path / "cache").rglob("*.json")}
+        assert "task_1" in cached  # the cache is live in this run
+        assert "task_2" not in cached
 
         api.no_data_task_ids.clear()
         result = cveta2.fetch("audit-project", tmp_path / "second", connection=connection, download_images=False)
