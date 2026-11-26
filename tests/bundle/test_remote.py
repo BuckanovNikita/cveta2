@@ -17,6 +17,8 @@ from cveta2.adapters.class_api.http import HttpClassApi
 from cveta2.adapters.clearml.bundle import ClearMLStore, S3Roots
 from cveta2.domain.bundle.models import DatasetParent, UploadCancelled, UploadError
 
+_SAMPLE = Path(__file__).parent.parent / "fixtures" / "class-api-sample.json"
+
 
 @pytest.fixture
 def http_api() -> Iterator[str]:
@@ -42,9 +44,15 @@ def http_api() -> Iterator[str]:
             }
             payload = {
                 "/classes": json.dumps([record]),
+                "/sample": _SAMPLE.read_text(encoding="utf-8"),
                 "/boolean-number": json.dumps([{**record, "number": True}]),
                 "/string-number": json.dumps([{**record, "number": "7"}]),
                 "/string-boolean": json.dumps([{**record, "techClass": "false"}]),
+                "/null-boolean": json.dumps([{**record, "isCritical": None}]),
+                "/string-threshold": json.dumps([{**record, "threshold": "0.5"}]),
+                "/bad-records": json.dumps(
+                    [record, {**record, "number": 8, "threshold": "leaked-value"}, {"id": 1, "number": 9}]
+                ),
                 "/bad-json": "not json",
                 "/bad-schema": '[{"id": 7}]',
                 "/wrong-shape": "{}",
@@ -72,11 +80,39 @@ def test_http_fetch_negotiates_json_uses_number_and_unauthenticated_real_get(htt
     assert [(record.id, record.number, record.name) for record in records] == [(999, 7, "cat")]
 
 
-@pytest.mark.parametrize("route", ["/boolean-number", "/string-number", "/string-boolean"])
+def test_http_fetch_parses_the_production_sample_whose_records_may_lack_flags(http_api: str) -> None:
+    records = HttpClassApi(timeout=2).fetch(http_api + "/sample")
+
+    assert len(records) == 98
+    names = {record.number: record.name for record in records}
+    assert names[-1] == "Нет дефектов"
+    assert names[1001] == "НК"
+    assert names[102] == "Непрорезанная кромка"
+    assert names[195] == "Проблема освещения"
+    flags = {record.number: (record.tech_class, record.is_periodical, record.is_critical) for record in records}
+    assert flags[102] == (False, False, False)
+    assert flags[195] == (True, False, False)
+    assert flags[-1] == (True, False, False)
+
+
+@pytest.mark.parametrize(
+    "route", ["/boolean-number", "/string-number", "/string-boolean", "/null-boolean", "/string-threshold"]
+)
 def test_http_fetch_rejects_coercible_invalid_class_fields(http_api: str, route: str) -> None:
     with pytest.raises(UploadError) as caught:
         HttpClassApi(timeout=2).fetch(http_api + route)
     assert isinstance(caught.value.__cause__, ValidationError)
+
+
+def test_http_fetch_error_names_record_and_field_but_not_value(http_api: str) -> None:
+    with pytest.raises(UploadError) as caught:
+        HttpClassApi(timeout=2).fetch(http_api + "/bad-records")
+
+    message = str(caught.value)
+    assert "record 1: threshold" in message
+    assert "record 2: name: Field required" in message
+    assert "record 2: threshold" in message
+    assert "leaked-value" not in message
 
 
 @pytest.mark.parametrize("route", ["/error", "/bad-json", "/bad-schema", "/wrong-shape", "/deep"])

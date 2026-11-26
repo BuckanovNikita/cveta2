@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from cveta2.domain.bundle.models import ApiClass, ClassInfo, DatasetMetadata, ImageRoots
+from cveta2.domain.class_registry import registry_fingerprint
 from cveta2.domain.managed.models import ClearMLDestination
 
 
@@ -27,6 +28,32 @@ def test_registry_aliases_preserve_external_records(enabled: str) -> None:
     assert parsed.model_dump() == record
     assert parsed.model_dump(mode="json") == record
     assert ApiClass.model_validate_json(parsed.model_dump_json()) == parsed
+
+
+def test_missing_registry_flags_read_as_false_and_hash_like_explicit_false() -> None:
+    explicit = {
+        "id": 626,
+        "number": 102,
+        "name": "Непрорезанная кромка",
+        "techClass": False,
+        "isPeriodical": False,
+        "isCritical": False,
+        "threshold": 1.0,
+    }
+    bare = {"id": 626, "number": 102, "name": "Непрорезанная кромка", "threshold": 1.0}
+
+    parsed = ApiClass.model_validate(bare)
+
+    assert (parsed.tech_class, parsed.is_periodical, parsed.is_critical) == (False, False, False)
+    assert parsed.model_dump(mode="json") == explicit
+    assert registry_fingerprint([parsed]) == registry_fingerprint([ApiClass.model_validate(explicit)])
+
+
+@pytest.mark.parametrize("flag", ["techClass", "isPeriodical", "isCritical"])
+@pytest.mark.parametrize("value", ["false", 0, None])
+def test_present_registry_flags_must_be_json_booleans(flag: str, value: object) -> None:
+    with pytest.raises(ValidationError):
+        ApiClass.model_validate({"id": 4, "number": 93, "name": "Царапина", "threshold": 1.0, flag: value})
 
 
 def test_api_uses_distinct_number_and_id_and_rejects_boolean_identity() -> None:
