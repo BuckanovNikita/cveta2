@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.16.2 (2026-11-27)
+
+### Bug Fixes
+
+- Name the task in the no-data error and explain skipped tasks in freshness checks (SIP-333)
+  ([`618e645`](https://github.com/BuckanovNikita/cveta2/commit/618e6452c330de150efdb988cf0a71c6d44941f4))
+
+- Skip CVAT tasks with no uploaded data instead of failing the fetch (SIP-333)
+  ([`515d129`](https://github.com/BuckanovNikita/cveta2/commit/515d129438378ce7d74de75ac781f4bddce609bb))
+
+### Testing
+
+- Prove the task cache is live when checking a no-data task is never cached (SIP-333)
+  ([`f0bbeba`](https://github.com/BuckanovNikita/cveta2/commit/f0bbeba2f14c8539b762cc8e3fa3ae80425aff8a))
+
+
 ## v0.16.1 (2026-11-27)
 
 ### Bug Fixes
