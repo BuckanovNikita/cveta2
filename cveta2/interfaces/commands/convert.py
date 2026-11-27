@@ -85,12 +85,8 @@ def configure_convert(parser: "argparse.ArgumentParser") -> None:
     parser.add_argument(
         "--read-all-sizes",
         action="store_true",
-        default=False,
-        help=(
-            "Read dimensions from every image individually "
-            "(for --from-yolo). By default, reads only the "
-            "first image and assumes all have the same size."
-        ),
+        default=True,
+        help="Read each image's dimensions from its header (the default for --from-yolo).",
     )
 
 

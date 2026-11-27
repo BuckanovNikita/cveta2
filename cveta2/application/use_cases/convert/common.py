@@ -51,12 +51,12 @@ class _BoxAdjustments:
 class _SizeCache:
     """Cache image dimensions, optionally reading only the first image.
 
-    When *read_all* is False (default), reads the first image to determine
+    When *read_all* is False, reads the first image to determine
     the size and reuses it for all subsequent images.  When *read_all* is
     True, every image is opened individually.
     """
 
-    def __init__(self, *, files: ConversionFiles, read_all: bool = False) -> None:
+    def __init__(self, *, files: ConversionFiles, read_all: bool) -> None:
         self._files = files
         self._read_all = read_all
         self._cached: tuple[int, int] | None = None

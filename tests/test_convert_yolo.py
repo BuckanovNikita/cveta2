@@ -888,7 +888,7 @@ class TestFromYoloDatasetRows:
 
     @pytest.mark.parametrize(
         ("read_all_sizes", "widths", "heights"),
-        [(None, [640, 640], [480, 480]), (True, [640, 320], [480, 240])],
+        [(None, [640, 320], [480, 240]), (False, [640, 640], [480, 480]), (True, [640, 320], [480, 240])],
     )
     def test_read_all_sizes_controls_size_measurement(
         self,
@@ -897,7 +897,7 @@ class TestFromYoloDatasetRows:
         widths: list[int],
         heights: list[int],
     ) -> None:
-        """By default every row reuses the first image's size; the flag measures all."""
+        """Each row uses its own dimensions unless the caller explicitly requests a uniform size."""
         root = tmp_path / "ds"
         self._two_differently_sized_images(root)
 
@@ -1359,11 +1359,8 @@ class TestFromYoloPredictions:
 
         assert pd.read_csv(out)["instance_label"].tolist() == ["cat", "dog"]
 
-    def test_read_all_sizes_measures_every_image(self, tmp_path: Path) -> None:
-        """``read_all_sizes=True`` reaches prediction mode too.
-
-        The flag has a second, separate call site here that no test used.
-        """
+    def test_predictions_measure_every_image_by_default(self, tmp_path: Path) -> None:
+        """Prediction import uses each image's dimensions."""
         pred_dir = tmp_path / "preds"
         make_image(pred_dir / "images" / "a.jpg", 640, 480)
         make_image(pred_dir / "images" / "b.jpg", 320, 240)
@@ -1375,7 +1372,6 @@ class TestFromYoloPredictions:
             pred_dir,
             out,
             names_file=self._names_file(tmp_path, {0: "cat"}),
-            read_all_sizes=True,
         )
 
         df = pd.read_csv(out)
