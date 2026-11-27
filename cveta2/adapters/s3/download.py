@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from cveta2.adapters.s3.types import S3Client
-    from cveta2.domain.models import ProjectAnnotations
+    from cveta2.domain.models import AnnotationRecord, DeletedImage, ProjectAnnotations
 
 
 class _ProgressLabels(NamedTuple):
@@ -62,6 +62,17 @@ _DIRECT_KEY_PROBE_LIMIT = 2000
 Small batches download their canonical key immediately; only a missing response
 pays for the whole-prefix listing and basename fallback.
 """
+
+
+def _resembles_sibling_key(frame: str, prefix: str) -> bool:
+    """Check whether a relative frame resembles a key in a similarly named sibling folder."""
+    return bool(prefix and "/" in frame and frame.startswith(prefix) and not frame.startswith(f"{prefix}/"))
+
+
+def _lookup_name(record: "AnnotationRecord | DeletedImage", prefix: str) -> str:
+    """Keep a suspected sibling distinct from a project frame sharing its basename."""
+    frame = record.frame_path
+    return frame if frame and _resembles_sibling_key(frame, prefix) else record.image_name
 
 
 def _download_pending(
@@ -110,7 +121,10 @@ class ImageDownloader:
         *project_cloud_storage* is None, all pending images are counted
         as failed.
         """
-        image_tasks = self._collect_unique_images(annotations)
+        prefix = project_cloud_storage.prefix.rstrip("/") if project_cloud_storage else ""
+        image_tasks: dict[str, str] = {}
+        for annotation in annotations.annotations:
+            image_tasks.setdefault(_lookup_name(annotation, prefix), annotation.frame_path or annotation.image_name)
         if not image_tasks:
             return DownloadStats(total=0)
 
@@ -123,29 +137,12 @@ class ImageDownloader:
         ensure_shared_dir(self._target_dir)
         resolved = self._download_all(pending, stats, project_cloud_storage)
         for record in (*annotations.annotations, *annotations.deleted_images):
-            key = resolved.get(record.image_name)
+            key = resolved.get(_lookup_name(record, prefix))
             if key is not None:
                 record.s3_image_path = key
 
         logger.info(f"Загрузка изображений: {stats.summary()}")
         return stats
-
-    @staticmethod
-    def _collect_unique_images(
-        annotations: "ProjectAnnotations",
-    ) -> "dict[str, str]":
-        """Return ``{image_name: frame_ref}`` for unique images.
-
-        *frame_ref* is the original (possibly nested) CVAT frame name
-        used for S3 key lookup; first occurrence wins.  Deleted images
-        are not included (they live in ``deleted_images``, not
-        ``annotations``).
-        """
-        result: dict[str, str] = {}
-        for record in annotations.annotations:
-            if record.image_name not in result:
-                result[record.image_name] = record.frame_path or record.image_name
-        return result
 
     def _dest_path(
         self,
@@ -277,13 +274,7 @@ class ImageDownloader:
             canonical = _canonical_frame_key(project_cloud_storage.prefix, frame_ref)
             relative = strip_key_prefix(canonical, project_cloud_storage.prefix)
             s3_key = name_to_key.get(relative)
-            if (
-                s3_key is None
-                and prefix
-                and "/" in frame_ref
-                and frame_ref.startswith(prefix)
-                and not frame_ref.startswith(f"{prefix}/")
-            ):
+            if s3_key is None and _resembles_sibling_key(frame_ref, prefix):
                 logger.warning(
                     f"Кадр CVAT {frame_ref!r} похож на путь за пределами префикса {prefix!r}. "
                     "Проверьте облачное хранилище задачи и выберите кадр внутри префикса проекта."
