@@ -20,12 +20,12 @@ if TYPE_CHECKING:
 
 
 @contextmanager
-def open_client(config_path: "Path | None" = None) -> "Iterator[CvatClient]":
+def open_client(config_path: "Path | None" = None, *, project_path: "Path | None" = None) -> "Iterator[CvatClient]":
     """Load config once, check host, set timeout, prompt, yield entered client."""
-    cfg = CvatConfig.load(config_path=config_path)
+    cfg = CvatConfig.load(config_path=config_path, project_path=project_path)
     require_host(cfg)
     configure_data_timeout(cfg.request_timeout)
-    configure_network(NetworkConfig.resolve(config_path))
+    configure_network(NetworkConfig.resolve(config_path, project_path=project_path))
     cfg = prompt_credentials(cfg)
     with CvatClient(cfg) as client:
         yield client

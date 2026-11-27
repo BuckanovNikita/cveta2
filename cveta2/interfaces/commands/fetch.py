@@ -141,7 +141,7 @@ def run_fetch(args: "argparse.Namespace") -> None:
     prompted = not args.project or output_dir != Path(args.output_dir)
     with open_client() as client:
         project_id, project_name, cs_info = resolve_project_and_cloud_storage(client, args.project)
-        options = _build_project_fetch_options(args, project_name)
+        options = _build_project_fetch_options(args, project_name, project_id)
         echo_if_prompted(
             "fetch",
             {
@@ -214,9 +214,10 @@ def _common_fetch_echo_args(args: "argparse.Namespace") -> dict[str, object]:
 def _build_project_fetch_options(
     args: "argparse.Namespace",
     project_name: str,
+    project_id: int,
 ) -> FetchOptions:
     """Map ``fetch`` CLI args onto FetchOptions (whole-project run)."""
-    ignore_set, silent_set = load_ignore_sets(project_name)
+    ignore_set, silent_set = load_ignore_sets(project_name, project_id=project_id)
     return FetchOptions(
         completed_only=args.completed_only,
         skip_validation=args.skip_validation,
@@ -225,7 +226,7 @@ def _build_project_fetch_options(
         use_cache=not args.no_cache,
         force=args.force,
         save_tasks=args.save_tasks,
-        images_dir=_resolve_images_dir(args, project_name),
+        images_dir=_resolve_images_dir(args, project_name, project_id),
         raw=args.raw,
     )
 
@@ -238,7 +239,7 @@ def _build_task_fetch_options(
     project_name: str,
 ) -> FetchOptions:
     """Resolve the task selector and map ``fetch-task`` CLI args onto FetchOptions."""
-    ignore_set, silent_set = load_ignore_sets(project_name)
+    ignore_set, silent_set = load_ignore_sets(project_name, project_id=project_id)
     return FetchOptions(
         completed_only=args.completed_only,
         task_selector=_resolve_task_selector(explicit_tasks, client, project_id, ignore_set),
@@ -247,7 +248,7 @@ def _build_task_fetch_options(
         use_cache=not args.no_cache,
         force=args.force,
         save_tasks=args.save_tasks,
-        images_dir=_resolve_images_dir(args, project_name),
+        images_dir=_resolve_images_dir(args, project_name, project_id),
     )
 
 
@@ -302,6 +303,7 @@ def _resolve_task_selector(
 def _resolve_images_dir(
     args: "argparse.Namespace",
     project_name: str,
+    project_id: int | None = None,
 ) -> Path | None:
     """Resolve image cache directory for the given project.
 
@@ -311,7 +313,7 @@ def _resolve_images_dir(
         return None
     if args.images_dir:
         return Path(args.images_dir).resolve()
-    configured = resolve_images_cache_dir(project_name)
+    configured = resolve_images_cache_dir(project_name, project_id=project_id)
     if configured is not None:
         return configured
 
@@ -333,6 +335,6 @@ def _resolve_images_dir(
         return None
 
     ic_cfg = ImageCacheConfig.load()
-    ic_cfg.set_cache_dir(project_name, new_path)
+    ic_cfg.set_cache_dir(ic_cfg.project_key(project_name, project_id), new_path)
     ic_cfg.save()
     return new_path

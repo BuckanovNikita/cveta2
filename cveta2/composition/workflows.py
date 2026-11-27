@@ -42,7 +42,7 @@ def fetch_dependencies(target: fetch.FetchTarget, options: fetch.FetchOptions) -
         runner=run_concurrent,
         clock=time.monotonic,
         lock_factory=threading.Lock,
-        cache_settings=CacheConfig.load(options.config_path).for_project(target.project_name),
+        cache_settings=CacheConfig.load(options.config_path).for_project(target.project_name, target.project_id),
         cache_enabled=not is_cache_disabled(),
         cvat_workers=Workers.cvat,
     )
@@ -75,13 +75,19 @@ def fetch_selected_tasks(
     return fetch.fetch_selected_tasks(client, target, options, deps=fetch_dependencies(target, options))
 
 
-def load_ignore_sets(project_name: str, config_path: Path | None = None) -> tuple[set[int] | None, set[int] | None]:
+def load_ignore_sets(
+    project_name: str, config_path: Path | None = None, *, project_id: int | None = None
+) -> tuple[set[int] | None, set[int] | None]:
     """Resolve ignored and silent task IDs from project configuration."""
     ignore_cfg = IgnoreConfig.load(config_path)
-    ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
+    keys = ignore_cfg.project_keys(project_name, project_id)
+    if not keys:
+        return None, None
+    key = keys[0]
+    ignored_ids = ignore_cfg.get_ignored_tasks(key)
     if not ignored_ids:
         return None, None
-    silent_ids = ignore_cfg.get_silent_task_ids(project_name)
+    silent_ids = ignore_cfg.get_silent_task_ids(key)
     return set(ignored_ids), silent_ids or None
 
 
@@ -101,7 +107,7 @@ def invalidate_local_entry(
     never raise: a broken mirror still drops the local entry.
     """
     try:
-        settings = CacheConfig.load(config_path).for_project(project_name)
+        settings = CacheConfig.load(config_path).for_project(project_name, project_id)
     except (Cveta2Error, OSError) as error:
         logger.warning(f"Кэш задачи {task_id} не очищен: не удалось прочитать настройки кэша ({error}).")
         return
@@ -150,6 +156,7 @@ def build_search_dirs(
     image_dirs: Sequence[str | Path] | str | Path | None,
     project_name: str,
     *,
+    project_id: int | None = None,
     config_path: Path | None = None,
 ) -> list[Path]:
     """Resolve explicit and configured local image search roots."""
@@ -159,7 +166,7 @@ def build_search_dirs(
     return upload.build_search_dirs(
         resolved,
         project_name,
-        cache_dir=resolve_images_cache_dir(project_name, config_path),
+        cache_dir=resolve_images_cache_dir(project_name, config_path, project_id),
     )
 
 
@@ -172,7 +179,8 @@ def project_cloud_storage(
     config_path: Path | None = None,
 ) -> CloudStorageInfo | None:
     """Resolve project storage and configured sync-root overrides."""
-    configured_root = None if root else SyncRootsConfig.load(config_path).get_root(project_name)
+    roots = SyncRootsConfig.load(config_path) if not root else None
+    configured_root = roots.get_root(project_name, project_id) if roots else None
     return resolve.project_cloud_storage(client, project_id, project_name, root, configured_root=configured_root)
 
 

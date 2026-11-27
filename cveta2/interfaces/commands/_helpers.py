@@ -101,8 +101,8 @@ def resolve_project_from_args(
     When *project_arg* is non-empty, returns ``(project_id, project_name)``
     with the name as CVAT spells it. An ``ORG/PROJECT`` spec switches the
     client's session organization first (``/PROJECT`` selects the
-    personal workspace). The local projects cache of that organization is
-    consulted before CVAT (see :func:`resolve_bare_project_spec`). Returns
+    personal workspace). CVAT supplies the current name. Its discovery cache
+    provides a fallback when disconnected (see :func:`resolve_bare_project_spec`). Returns
     ``None`` when *project_arg* is None or empty (caller should run
     interactive TUI).
 

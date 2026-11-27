@@ -134,14 +134,23 @@ def _image_roots(
     cache = CacheConfig.load(path, project_path=project_config)
     if cache.images_root:
         roots.append(str(cache.images_root))
-    for source in definition.sources:
-        if source.project is not None:
-            project = config.projects[source.project]
-            for key in dict.fromkeys((source.project, project.name)):
-                if local := images.get_cache_dir(key):
-                    roots.append(str(local))
-                if local := cache.for_project(key).images_root:
-                    roots.append(str(local))
+    # Earlier personal files keyed local paths by the CVAT display name.
+    # Only that layout needs a live lookup. Ordinary key-based preparation stays offline.
+    local_names = (
+        images.projects.keys() | {key for key, value in cache.projects.items() if value.images_root}
+    ) - config.projects.keys()
+    sources = [source.project for source in definition.sources if source.project is not None]
+    names: dict[int, str] = {}
+    if sources and local_names:
+        with _client(path, project_config) as client:
+            names = {project.id: project.name for project in client.list_projects() if project.name in local_names}
+    for key in sources:
+        project_id = config.projects[key].id
+        name = names.get(project_id, key)
+        if local := images.get_cache_dir(name, project_id):
+            roots.append(str(local))
+        if local := cache.for_project(name, project_id).images_root:
+            roots.append(str(local))
     return ImageRoots(local_root=list(dict.fromkeys(roots)), s3_root=definition.s3_roots)
 
 

@@ -148,13 +148,13 @@ class TestResolveProjectSpecWithOrg:
         assert resolve_project_spec(client, "ALPHA", cached=cached) == (1, "alpha")
         assert api.call_counts["list_projects"] == 1
 
-    def test_numeric_spec_is_named_from_the_cache_before_cvat(self) -> None:
-        """A cached entry with the matching id names the project without a request."""
+    def test_numeric_spec_uses_live_name_after_rename(self) -> None:
+        """The server supplies the current name even when the cache has an older spelling."""
         client, api = _fake_client(project_name="alpha")
         cached = [ProjectInfo(id=2, name="beta"), ProjectInfo(id=1, name="Alpha")]
 
-        assert resolve_project_spec(client, "1", cached=cached) == (1, "Alpha")
-        assert api.call_counts["get_project"] == 0
+        assert resolve_project_spec(client, "1", cached=cached) == (1, "alpha")
+        assert api.call_counts["get_project"] == 1
 
     def test_default_organization_property_stays(self) -> None:
         client, _api = _fake_client(organization="default-org")

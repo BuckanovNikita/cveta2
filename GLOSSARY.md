@@ -99,7 +99,7 @@ _Russian_: общая конфигурация
 _Avoid_: shared configuration (former name), project config (in prose), team config
 
 **Project definition**:
-A CVAT project's entry in the global configuration: its ID, name, sync root, ignored prefix, task-cache location, ignore list and optional publication settings.
+A CVAT project's entry in the global configuration: its CVAT ID, sync root, ignored prefix, task-cache location, ignore list and optional publication settings.
 _Russian_: описание проекта
 _Avoid_: project settings
 

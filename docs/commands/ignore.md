@@ -50,7 +50,6 @@ cveta2 ignore [-h] [--project PROJECT] [--add TASK [TASK ...] | --remove TASK [T
 projects:
   shelves:
     id: 123
-    name: Retail shelves
     ignore:
       - id: 456
         name: shelves-batch-07

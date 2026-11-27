@@ -41,7 +41,6 @@ cvat:
 projects:
   shelves:
     id: 123
-    name: Retail shelves
     ignore:
       - id: 456
         description: тестовая задача

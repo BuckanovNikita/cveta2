@@ -21,13 +21,13 @@ from cveta2.adapters.config.project import (
     write_shared_project_fields,
 )
 from cveta2.adapters.config.settings import CacheConfig, CvatConfig, ImageCacheConfig
-from cveta2.domain.errors import Cveta2Error, InteractiveModeRequiredError
+from cveta2.domain.errors import Cveta2Error, InteractiveModeRequiredError, ProjectNotFoundError
 from cveta2.domain.managed.overrides import LocalOverridesDisabledError
 from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands import setup as setup_cmd
 from cveta2.interfaces.commands.interactive import _questionary, primitives, wizard
 from cveta2.interfaces.commands.setup import run_setup
-from tests.helpers import parse_cli_args, write_config_yaml
+from tests.helpers import CFG, mock_client_ctx, parse_cli_args, patch_cli_client, write_config_yaml
 
 if TYPE_CHECKING:
     import argparse
@@ -319,7 +319,8 @@ def test_setup_wizard_project_limits_cache_prompts(tmp_path: Path, monkeypatch: 
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {})
     custom = tmp_path / "custom-beta"
-    prompts = run_wizard(monkeypatch, config_path, ["", "", str(custom), ""], "-p", "beta")
+    with patch_cli_client(mock_client_ctx(project_id=2), config=CFG):
+        prompts = run_wizard(monkeypatch, config_path, ["", "", str(custom), ""], "-p", "beta")
 
     saved = ImageCacheConfig.load(config_path)
     assert saved.get_cache_dir("beta") == custom
@@ -333,7 +334,9 @@ def test_setup_wizard_refuses_unknown_project(tmp_path: Path, monkeypatch: pytes
     config_path = tmp_path / "config.yaml"
     write_cache_config(config_path, {})
 
-    with pytest.raises(Cveta2Error, match="gamma"):
+    client = mock_client_ctx()
+    client.find_project_by_name.side_effect = ProjectNotFoundError("gamma")
+    with patch_cli_client(client, config=CFG), pytest.raises(Cveta2Error, match="gamma"):
         run_wizard(monkeypatch, config_path, [""], "-p", "gamma")
 
 
@@ -373,13 +376,12 @@ def test_global_wizard_writes_team_options(tmp_path: Path, monkeypatch: pytest.M
 def test_global_wizard_adds_a_new_project_definition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = tmp_path / "config.yaml"
     write_cache_config(cfg, {})
-    known = [ProjectInfo(id=1, name="alpha"), ProjectInfo(id=2, name="beta"), ProjectInfo(id=3, name="gamma")]
-    monkeypatch.setattr(setup_cmd, "load_projects_cache", lambda _path: known)
+    monkeypatch.setattr(setup_cmd, "resolve_setup_project", lambda *_args: (3, "gamma"))
 
     run_wizard(monkeypatch, cfg, _ALPHA_TEAM_ANSWERS, "--global", "-p", "3")
 
     gamma = load_global_config(cfg).projects["gamma"]
-    assert (gamma.id, gamma.name, gamma.ignored_prefix) == (3, "gamma", "data/alpha")
+    assert (gamma.id, gamma.ignored_prefix) == (3, "data/alpha")
     assert gamma.publication is not None
     assert gamma.publication.clearml.dataset == "alpha-ds"
     assert gamma.publication.empty_classes == [12, 13]

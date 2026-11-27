@@ -8,7 +8,6 @@ from cveta2.composition.client import CvatClient
 from cveta2.composition.configuration import (
     IgnoreConfig,
     IgnoredTask,
-    load_projects_cache,
 )
 from cveta2.interfaces.commands import interactive
 from cveta2.interfaces.commands._bootstrap import open_client
@@ -105,14 +104,15 @@ def run_ignore(args: "argparse.Namespace") -> None:
     ignore_cfg = IgnoreConfig.load()
 
     with open_client() as client:
-        project_id, project_name = _resolve_project(args, client, ignore_cfg)
+        project_id, project_name = _resolve_project(args, client)
+        key = ignore_cfg.project_key(project_name, project_id)
 
         if args.add:
             description = (args.description or "").strip()
             silent = args.silent
             resolved = _resolve_selectors(client, project_id, args.add)
             for task in resolved:
-                added = ignore_cfg.add_task(project_name, task.id, task.name, description, silent=silent)
+                added = ignore_cfg.add_task(key, task.id, task.name, description, silent=silent)
                 if added:
                     logger.info(
                         f"Задача {task.name!r} (id={task.id}) добавлена в ignore-список проекта {project_name!r}"
@@ -127,7 +127,7 @@ def run_ignore(args: "argparse.Namespace") -> None:
             return
 
         if args.remove:
-            stored = {entry.id: entry for entry in ignore_cfg.get_ignored_entries(project_name)}
+            stored = {entry.id: entry for entry in ignore_cfg.get_ignored_entries(key)}
             stored_ids = {int(selector) for selector in args.remove if selector.isdecimal()} & stored.keys()
             removal_entries: list[IgnoredTask | TaskInfo] = [stored[task_id] for task_id in sorted(stored_ids)]
             remaining = [
@@ -136,7 +136,7 @@ def run_ignore(args: "argparse.Namespace") -> None:
             if remaining:
                 removal_entries.extend(_resolve_selectors(client, project_id, remaining))
             for entry in removal_entries:
-                removed = ignore_cfg.remove_task(project_name, entry.id)
+                removed = ignore_cfg.remove_task(key, entry.id)
                 if removed:
                     logger.info(
                         f"Задача {entry.name!r} (id={entry.id}) удалена из ignore-списка проекта {project_name!r}"
@@ -148,20 +148,19 @@ def run_ignore(args: "argparse.Namespace") -> None:
             ignore_cfg.save()
             return
 
-        _interactive_loop(client, project_id, project_name, ignore_cfg)
+        _interactive_loop(client, project_id, project_name, ignore_cfg, key)
 
 
 def _resolve_project(
     args: "argparse.Namespace",
     client: CvatClient,
-    ignore_cfg: IgnoreConfig,
 ) -> tuple[int, str]:
     """Resolve project ID and name from CLI args or interactive TUI."""
     resolved = resolve_project_from_args(client, args.project)
     if resolved is not None:
         return resolved
-    cached = load_projects_cache()
-    known_names = sorted({p.name for p in cached} | set(ignore_cfg.projects))
+    cached = client.list_projects()
+    known_names = sorted({p.name for p in cached})
     project_name = interactive.select_project_name(known_names)
     project_id = client.resolve_project_id(project_name, cached=cached)
     return project_id, project_name
@@ -203,14 +202,15 @@ def _interactive_loop(
     project_id: int,
     project_name: str,
     ignore_cfg: IgnoreConfig,
+    key: str,
 ) -> None:
     """Run the interactive TUI loop for managing the ignore list."""
     changed = False
 
     while True:
-        _print_ignored_list(ignore_cfg, project_name)
+        _print_ignored_list(ignore_cfg, key)
 
-        ignored_ids = ignore_cfg.get_ignored_tasks(project_name)
+        ignored_ids = ignore_cfg.get_ignored_tasks(key)
         choices = [
             interactive.Choice(
                 title="Добавить задачи в ignore-список",
@@ -244,7 +244,7 @@ def _interactive_loop(
                 changed = True
 
         elif action == _ACTION_REMOVE:
-            removed = _interactive_remove(ignore_cfg, project_name)
+            removed = _interactive_remove(ignore_cfg, key)
             if removed:
                 changed = True
 
@@ -264,7 +264,8 @@ def _interactive_add(
     False instead of terminating the program, so the interactive loop can
     continue.
     """
-    ignored_ids = set(ignore_cfg.get_ignored_tasks(project_name))
+    key = ignore_cfg.project_key(project_name, project_id)
+    ignored_ids = set(ignore_cfg.get_ignored_tasks(key))
     tasks = client.list_project_tasks(project_id)
     if ignored_ids:
         tasks = [t for t in tasks if t.id not in ignored_ids]
@@ -291,7 +292,7 @@ def _interactive_add(
     )
 
     for task in selected:
-        ignore_cfg.add_task(project_name, task.id, task.name, description, silent=silent)
+        ignore_cfg.add_task(key, task.id, task.name, description, silent=silent)
         logger.info(f"Задача {task.name!r} (id={task.id}) добавлена")
     echo_cli_command(
         "ignore",

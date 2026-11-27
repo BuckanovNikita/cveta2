@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import warnings
 from typing import Literal, Self, cast
 from urllib.parse import SplitResult, urlsplit
 
@@ -157,7 +158,6 @@ class ProjectDefinition(StrictModel):
     """Shared project identity and source interpretation, without local paths."""
 
     id: int = Field(ge=0)
-    name: str = ""
     sync_root: str | None = None
     ignored_prefix: str | None = None
     task_cache_s3: str | None = None
@@ -165,6 +165,17 @@ class ProjectDefinition(StrictModel):
     publication: PublicationSettings | None = Field(default=None, exclude_if=lambda value: value is None)
 
     s3_root = field_validator("sync_root", "task_cache_s3")(staticmethod(validate_sync_root))
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_name(cls, value: object) -> object:
+        """Accept older global files and omit their cached name from future writes."""
+        if isinstance(value, dict) and "name" in value:
+            warnings.warn(
+                "projects.<key>.name is obsolete. The CVAT project ID selects its policy.", UserWarning, stacklevel=2
+            )
+            return {key: item for key, item in value.items() if key != "name"}
+        return value
 
     @field_validator("ignore")
     @classmethod
@@ -266,6 +277,10 @@ class ProjectConfig(StrictModel):
     cvat: CvatIdentity
     projects: dict[str, ProjectDefinition] = Field(default_factory=dict)
     datasets: dict[str, DatasetDefinition] = Field(default_factory=dict)
+
+    def key_for_id(self, project_id: int) -> str | None:
+        """Return the configuration key bound to a live CVAT identity."""
+        return next((key for key, project in self.projects.items() if project.id == project_id), None)
 
     @model_validator(mode="after")
     def references(self) -> Self:

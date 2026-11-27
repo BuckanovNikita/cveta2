@@ -62,7 +62,7 @@ def _resolve_fetch_target(
     """
     project_id, project_name = resolve_project_spec(client, project)
     cs_info = project_cloud_storage(client, project_id, project_name, config_path=config_path)
-    ignore_set, silent_set = load_ignore_sets(project_name, config_path)
+    ignore_set, silent_set = load_ignore_sets(project_name, config_path, project_id=project_id)
     target = FetchTarget(project_id, project_name, output_dir, cs_info)
     return target, ignore_set, silent_set
 
@@ -73,6 +73,7 @@ def _resolve_images_dir(
     config_path: Path | None,
     *,
     download_images: bool,
+    project_id: int | None = None,
 ) -> Path | None:
     """Resolve the image download directory without prompting."""
     if images_dir and not download_images:
@@ -81,7 +82,7 @@ def _resolve_images_dir(
         return None
     if images_dir:
         return Path(images_dir).resolve()
-    configured = resolve_images_cache_dir(project_name, config_path)
+    configured = resolve_images_cache_dir(project_name, config_path, project_id)
     if configured is not None:
         return configured
     raise Cveta2Error(
@@ -146,7 +147,11 @@ def fetch(  # noqa: PLR0913
             force=force,
             save_tasks=save_tasks,
             images_dir=_resolve_images_dir(
-                images_dir, resolved.project_name, config_path, download_images=download_images
+                images_dir,
+                resolved.project_name,
+                config_path,
+                download_images=download_images,
+                project_id=resolved.project_id,
             ),
             raw=raw,
             config_path=config_path,
@@ -194,7 +199,11 @@ def fetch_task(  # noqa: PLR0913
             force=force,
             save_tasks=save_tasks,
             images_dir=_resolve_images_dir(
-                images_dir, resolved.project_name, config_path, download_images=download_images
+                images_dir,
+                resolved.project_name,
+                config_path,
+                download_images=download_images,
+                project_id=resolved.project_id,
             ),
             config_path=config_path,
         )

@@ -72,7 +72,7 @@ def s3_sync(
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
         cs_info = project_cloud_storage(c, project_id, project_name, root, config_path=config_path)
-        ignored_prefix = CacheConfig.load(config_path).for_project(project_name).ignored_prefix
+        ignored_prefix = CacheConfig.load(config_path).for_project(project_name, project_id).ignored_prefix
         return c.sync_project_images(project_id, Path(target_dir), cs_info, ignored_prefix=ignored_prefix)
 
 
@@ -127,8 +127,11 @@ def ignore(  # noqa: PLR0913
     ignore_cfg = IgnoreConfig.load(config_path)
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
+        if not (add or remove) and not ignore_cfg.project_keys(project_name, project_id):
+            return []
+        key = ignore_cfg.project_key(project_name, project_id)
         if add or remove:
-            stored_ids = set(ignore_cfg.get_ignored_tasks(project_name))
+            stored_ids = set(ignore_cfg.get_ignored_tasks(key))
             local_removals = {
                 int(selector) for selector in remove or [] if str(selector).isdigit() and int(selector) in stored_ids
             }
@@ -139,11 +142,11 @@ def ignore(  # noqa: PLR0913
             ]
             tasks = c.list_project_tasks(project_id) if add or remote_removals else []
             for task in c.resolve_task_selectors(tasks, list(add or [])):
-                ignore_cfg.add_task(project_name, task.id, task.name, description, silent=silent)
+                ignore_cfg.add_task(key, task.id, task.name, description, silent=silent)
             resolved_removals = c.resolve_task_selectors(tasks, remote_removals)
             for task_id in local_removals:
-                ignore_cfg.remove_task(project_name, task_id)
+                ignore_cfg.remove_task(key, task_id)
             for task in resolved_removals:
-                ignore_cfg.remove_task(project_name, task.id)
+                ignore_cfg.remove_task(key, task.id)
             ignore_cfg.save(config_path)
-    return ignore_cfg.get_ignored_entries(project_name)
+    return ignore_cfg.get_ignored_entries(key)

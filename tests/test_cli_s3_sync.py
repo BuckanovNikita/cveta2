@@ -71,11 +71,10 @@ def test_s3_sync_falls_back_to_cache_images_root(
     )
 
     mock_client = _s3_sync_client()
-    mock_client.find_project_by_name.side_effect = [
-        ProjectInfo(id=1, name="project-a"),
-        ProjectInfo(id=2, name="project-b"),
-        ProjectInfo(id=3, name="project-c"),
-    ]
+    mock_client.resolve_project_id.side_effect = int
+    mock_client.get_project.side_effect = lambda project_id: ProjectInfo(
+        id=project_id, name={1: "project-a", 2: "project-b", 3: "project-c"}[project_id]
+    )
 
     with patch_cli_client(mock_client):
         CliApp().run(["s3-sync"])
@@ -119,14 +118,14 @@ def test_s3_sync_uses_canonical_project_settings(
 
     write_split_config_yaml(
         test_config,
-        project_ids={"Dataset": 1},
+        project_ids={"original-key": 1},
         cvat={"host": "http://localhost:8080", "username": "u", "password": "p"},
-        image_cache={"Dataset": str(tmp_path / "explicit")} if explicit_cache else {},
+        image_cache={"original-key": str(tmp_path / "explicit")} if explicit_cache else {},
         cache={
             "images_root": str(tmp_path / "global"),
-            "projects": {"Dataset": {"ignored_prefix": "raw"}},
+            "projects": {"original-key": {"ignored_prefix": "raw"}},
         },
-        sync_roots={"Dataset": "s3://override/raw/data"},
+        sync_roots={"original-key": "s3://override/raw/data"},
     )
     fake = FakeCvatApi.from_tasks([], project_name="Dataset")
     client = CvatClient(CvatConfig(), api=fake)
@@ -263,6 +262,10 @@ def test_s3_sync_of_all_projects_finishes_the_rest_then_reports_failures(
         image_cache={"project-a": str(tmp_path / "a"), "project-b": str(tmp_path / "b")},
     )
     mock_client = _s3_sync_client()
+    mock_client.find_project_by_name.side_effect = [
+        ProjectInfo(id=1, name="project-a"),
+        ProjectInfo(id=2, name="project-b"),
+    ]
     mock_client.detect_project_cloud_storage.side_effect = [
         make_cs_info(bucket="bucket-a", prefix="a"),
         make_cs_info(bucket="bucket-b", prefix="b"),
@@ -275,7 +278,7 @@ def test_s3_sync_of_all_projects_finishes_the_rest_then_reports_failures(
     with patch_cli_client(mock_client), pytest.raises(SystemExit) as exited:
         CliApp().run(["s3-sync"])
 
-    assert [c.args[0] for c in mock_client.sync_project_images.call_args_list] == [1, 1]
+    assert [c.args[0] for c in mock_client.sync_project_images.call_args_list] == [1, 2]
     message = exited.value.code
     assert isinstance(message, str)
     assert "s3://bucket-a/a" in message

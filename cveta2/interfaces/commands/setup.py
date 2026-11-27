@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from loguru import logger
 from pydantic import ValidationError
 
+from cveta2.application.use_cases.resolve import resolve_project_spec
 from cveta2.composition.configuration import (
     PERSONAL_WORKSPACE_TITLE,
     CacheConfig,
@@ -43,11 +44,11 @@ from cveta2.composition.configuration import (
 )
 from cveta2.domain.errors import Cveta2Error, ProjectNotFoundError
 from cveta2.domain.managed.models import CvatIdentity, ManagedError, ProjectDefinition
+from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands._bootstrap import open_client
 from cveta2.interfaces.commands._helpers import (
     config_path_from_args,
     global_config_from_args,
-    resolve_project_from_args,
 )
 from cveta2.interfaces.commands._parsers import add_config_arg, add_global_config_arg, add_list_arg, add_project_arg
 from cveta2.interfaces.commands.interactive import primitives, wizard
@@ -56,7 +57,6 @@ if TYPE_CHECKING:
     import argparse
 
     from cveta2.domain.managed.models import ProjectConfig
-    from cveta2.domain.models import ProjectInfo
 
 
 Scope = Literal["personal", "identity", "switch", "team", "publication"]
@@ -400,7 +400,13 @@ def run_setup(args: "argparse.Namespace") -> None:
 
 
 def _print_listing(config_path: Path, global_path: Path | None, project: str | None) -> None:
-    listed = list_configuration(config_path, global_path=global_path, project=project)
+    name = None
+    if project is not None:
+        shared = optional_global_config(config_path, global_path)
+        if shared is not None and find_project_key(shared, project) is None:
+            project_id, name = resolve_setup_project(config_path, project, global_path)
+            project = shared.key_for_id(project_id) or name
+    listed = list_configuration(config_path, global_path=global_path, project=project, live_name=name)
     selected = project_config_path(config_path, global_path)
     if selected is not None:
         sys.stdout.write(f"Общая конфигурация: {selected}\n")
@@ -422,12 +428,12 @@ def apply_setup_options(args: "argparse.Namespace", config_path: Path, global_pa
         return
     personal = [(option, value) for option, value in changes if option.scope != "publication"]
     password = _ask_password() if any(option.name == "password" and value for option, value in personal) else None
-    images_name = _image_cache_name(args, config_path, global_path, personal)
+    images_keys = _image_cache_keys(args, config_path, global_path, personal)
     local = [(option, value) for option, value in changes if option.scope == "publication"]
     if local:
         _write_local(args, config_path, global_path, local)
     if personal:
-        _write_personal(config_path, personal, password=password, images_name=images_name)
+        _write_personal(config_path, personal, password=password, images_keys=images_keys)
 
 
 def _ask_password() -> str:
@@ -472,44 +478,46 @@ def _global_project_key(
     args: "argparse.Namespace", config_path: Path, global_path: Path | None, fields: dict[str, object]
 ) -> tuple[str, dict[str, ProjectDefinition]]:
     """Return the project's key in the global file, with a new definition when it has none yet."""
-    spec: str = args.project
-    key = find_project_key(load_global_config(config_path, global_path), spec)
-    if key is not None:
+    config = load_global_config(config_path, global_path)
+    return _setup_project(
+        config_path, global_path, config, args.project, create=any(value is not None for value in fields.values())
+    )
+
+
+def _setup_project(
+    config_path: Path, global_path: Path | None, config: "ProjectConfig", spec: str, *, create: bool
+) -> tuple[str, dict[str, ProjectDefinition]]:
+    """Select a stored key/ID offline, or resolve the current CVAT name before applying policy."""
+    if (key := find_project_key(config, spec)) is not None:
         return key, {}
-    if all(value is None for value in fields.values()):
-        # Removing from a project that has no definition must not create one.
-        raise Cveta2Error(f"Нет описания проекта {spec} в общей конфигурации; удалять нечего.")
-    project_id, name = resolve_new_project(config_path, spec)
+    if not create and spec.isdecimal():
+        raise Cveta2Error(f"Нет описания проекта {spec} в общей конфигурации.")
+    project_id, name = resolve_setup_project(config_path, spec, global_path)
+    if (key := config.key_for_id(project_id)) is not None:
+        return key, {}
+    if not create:
+        raise Cveta2Error(
+            f"Нет описания проекта {spec} в общей конфигурации; добавьте его: "
+            f"cveta2 setup --global --project {shlex.quote(spec)}"
+        )
     key = project_key_for(name, project_id)
-    logger.info(f"Новое описание проекта {key}: id={project_id}, name={name}")
-    return key, {key: ProjectDefinition(id=project_id, name=name)}
+    logger.info(f"Новое описание проекта {key}: id={project_id}")
+    return key, {key: ProjectDefinition(id=project_id)}
 
 
-def resolve_new_project(config_path: Path, spec: str) -> tuple[int, str]:
-    """Resolve the CVAT ID and name of *spec* (decimal ID or name) for a new definition.
-
-    The local project list (``projects.yaml``) is asked first, then CVAT,
-    which needs credentials. A project without a name is refused: a
-    definition without one would never match the readers.
-    """
-    spec = spec.strip()
+def resolve_setup_project(config_path: Path, spec: str, global_path: Path | None = None) -> tuple[int, str]:
+    """Read a project's current identity from the selected CVAT server."""
     refusal = f"Не удалось определить имя проекта {spec}; проверьте ID или учётные данные CVAT."
-    by_id = spec.isascii() and spec.isdecimal()
-    cached = {
-        (project.id, project.name)
-        for project in load_projects_cache(get_projects_cache_path(config_path))
-        if (project.id == int(spec) if by_id else project.name == spec)
-    }
-    if len(cached) == 1:
-        ((project_id, name),) = cached
-        if name:
-            return project_id, name
     try:
-        with open_client(config_path) as client:
-            resolved = resolve_project_from_args(client, spec)
+        with open_client(config_path, project_path=global_path) as client:
+            if spec.strip().isdecimal():
+                project = client.get_project(int(spec))
+                resolved = (project.id, project.name)
+            else:
+                resolved = resolve_project_spec(client, spec)
     except ProjectNotFoundError as error:
         raise Cveta2Error(refusal) from error
-    if resolved is None or not resolved[1]:
+    if not resolved[1]:
         raise Cveta2Error(refusal)
     return resolved
 
@@ -581,10 +589,7 @@ def _write_local(
         # The team removed the project; the user may still clear their stale override.
         key = spec
     if key is None:
-        raise Cveta2Error(
-            f"Нет описания проекта {spec} в общей конфигурации; добавьте его: "
-            f"cveta2 setup --global --project {shlex.quote(spec)}"
-        )
+        key, _ = _setup_project(config_path, global_path, raw_global, spec, create=False)
     if removing:
         _check_remaining_override(raw_global, overrides, key, fields, spec)
     written = write_local_overrides(config_path, key, fields, global_path=global_path)
@@ -592,24 +597,26 @@ def _write_local(
     logger.info(f"{_written(list(fields.values()), shared=False)} {written}: {names}")
 
 
-def _image_cache_name(
+def _image_cache_keys(
     args: "argparse.Namespace", config_path: Path, global_path: Path | None, changes: list[_Change]
-) -> str | None:
-    """Return the project name ``image_cache`` is keyed by, resolved before anything is written."""
+) -> tuple[str, ...]:
+    """Select the preferred personal key and any older name binding for the same project."""
     if not any(option.key == "image_cache" for option, _ in changes):
-        return None
+        return ()
     spec: str = args.project
-    raw_global = optional_global_config(config_path, global_path)
-    key = find_project_key(raw_global, spec) if raw_global is not None else None
-    if raw_global is not None and key is not None:
-        return raw_global.projects[key].name or key
-    if spec in ImageCacheConfig.load(config_path).projects:
-        return spec
-    return resolve_new_project(config_path, spec)[1]
+    shared = optional_global_config(config_path, global_path)
+    images = ImageCacheConfig.load(config_path, project_path=global_path)
+    if shared is not None and (key := find_project_key(shared, spec)) is not None:
+        if not (images.projects.keys() - shared.projects.keys()):
+            return (key,)
+        spec = str(shared.projects[key].id)
+    project_id, name = resolve_setup_project(config_path, spec, global_path)
+    key = images.project_key(name, project_id)
+    return (key, name) if key != name and shared and name not in shared.projects else (key,)
 
 
 def _write_personal(
-    config_path: Path, changes: list[_Change], *, password: str | None, images_name: str | None
+    config_path: Path, changes: list[_Change], *, password: str | None, images_keys: tuple[str, ...]
 ) -> None:
     """One save per personal section: ``cvat``, ``cache`` and ``image_cache``."""
     names: list[str] = []
@@ -631,14 +638,14 @@ def _write_personal(
         section.save(config_path)
         names += [f"cache.{field}" for field in cache]
     images = [value for option, value in changes if option.key == "image_cache"]
-    if images and images_name is not None:
+    if images and images_keys:
         image_cache = ImageCacheConfig.load(config_path)
-        if images[0] is None:
-            image_cache.projects.pop(images_name, None)
-        else:
-            image_cache.set_cache_dir(images_name, cast("Path", images[0]))
+        for key in images_keys:
+            image_cache.projects.pop(key, None)
+        if images[0] is not None:
+            image_cache.set_cache_dir(images_keys[0], cast("Path", images[0]))
         image_cache.save(config_path)
-        names.append(f"image_cache.{images_name}")
+        names.append(f"image_cache.{images_keys[0]}")
     if names:
         values = [value for option, value in changes]
         logger.info(f"{_written(values, shared=False)} {config_path}: {', '.join(names)}")
@@ -663,15 +670,11 @@ def _run_personal_wizard(config_path: Path, *, project: str | None, reset: bool)
     *reset* re-derives every path from the cache root instead of keeping saved ones.
     """
     _ask_credentials(config_path)
-    projects = _ensure_projects_list(config_path)
-    if project is not None:
-        spec = project.strip()
-        projects = [info for info in projects if spec in (info.name, str(info.id))]
-        if not projects:
-            raise Cveta2Error(
-                f"Проекта {spec} нет в списке проектов CVAT; проверьте имя или ID проекта, "
-                f"либо удалите {get_projects_cache_path(config_path)}, чтобы загрузить список заново."
-            )
+    if project is None:
+        projects = _ensure_projects_list(config_path)
+    else:
+        project_id, name = resolve_setup_project(config_path, project)
+        projects = [ProjectInfo(id=project_id, name=name)]
     cache_root = wizard.prompt_cache_root()
     if not projects:
         logger.info("Нет доступных проектов; каталоги изображений по проектам не заданы.")
@@ -720,13 +723,8 @@ def _run_global_wizard(config_path: Path, global_path: Path | None, *, project: 
     new_projects: dict[str, ProjectDefinition] = {}
     if project is None:
         keys = list(raw.projects)
-    elif (key := find_project_key(raw, project)) is not None:
-        keys = [key]
     else:
-        project_id, name = resolve_new_project(config_path, project)
-        key = project_key_for(name, project_id)
-        logger.info(f"Новое описание проекта {key}: id={project_id}, name={name}")
-        new_projects[key] = ProjectDefinition(id=project_id, name=name)
+        key, new_projects = _setup_project(config_path, global_path, raw, project, create=True)
         keys = [key]
     changes: dict[str, dict[str, object]] = {}
     expected: dict[str, dict[str, object]] = {}
@@ -891,7 +889,10 @@ def _apply_root_to_all_projects(
 ) -> bool:
     """Show derived paths for all projects; assign them all on confirmation."""
     defaults = {
-        project.name: _default_cache_path(project, image_cache, cache_root, reset=reset) for project in projects
+        image_cache.project_key(project.name, project.id): _default_cache_path(
+            project, image_cache, cache_root, reset=reset
+        )
+        for project in projects
     }
     for name, path in defaults.items():
         logger.info(f"  {name} -> {path}")
@@ -911,8 +912,10 @@ def _default_cache_path(
     reset: bool,
 ) -> "Path | None":
     """Default path: existing config, or cache_root/project_name, or None."""
-    if not reset and image_cache.get_cache_dir(project.name) is not None:
-        return image_cache.get_cache_dir(project.name)
+    if not reset:
+        existing = image_cache.get_cache_dir(project.name, project.id)
+        if existing is not None:
+            return existing
     if cache_root is not None:
         return cache_dir_for_project(cache_root, project.name)
     return None
@@ -926,11 +929,11 @@ def _prompt_project_cache_dir(
     """Prompt for one project's cache dir; update config. Return True if changed."""
     resolved = wizard.prompt_project_cache_dir(f"  {project.name} (id={project.id})", default_path)
     if resolved is not None:
-        image_cache.set_cache_dir(project.name, resolved)
+        image_cache.set_cache_dir(image_cache.project_key(project.name, project.id), resolved)
         logger.info(f"    → {resolved}")
         return True
     if default_path is not None:
-        image_cache.set_cache_dir(project.name, default_path)
+        image_cache.set_cache_dir(image_cache.project_key(project.name, project.id), default_path)
         logger.info(f"    → {default_path}")
         return True
     return False

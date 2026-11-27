@@ -188,12 +188,12 @@ def test_writer_adds_a_new_project_definition(tmp_path: Path) -> None:
     )
     cfg = personal(tmp_path / "config.yaml", global_file)
 
-    write_shared_project_fields(cfg, {}, new_projects={"retail": ProjectDefinition(id=123, name="Retail shelves")})
-    assert load_global_config(cfg).projects["retail"] == ProjectDefinition(id=123, name="Retail shelves")
+    write_shared_project_fields(cfg, {}, new_projects={"retail": ProjectDefinition(id=123)})
+    assert load_global_config(cfg).projects["retail"] == ProjectDefinition(id=123)
 
     before = global_file.read_bytes()
     with pytest.raises(ManagedError, match="123"):
-        write_shared_project_fields(cfg, {}, new_projects={"other": ProjectDefinition(id=123, name="Other")})
+        write_shared_project_fields(cfg, {}, new_projects={"other": ProjectDefinition(id=123)})
     with pytest.raises(ManagedError, match="retail"):
         write_shared_project_fields(cfg, {}, new_projects={"retail": ProjectDefinition(id=124)})
     assert global_file.read_bytes() == before
@@ -205,11 +205,11 @@ def test_writer_changes_a_definition_it_adds_in_the_same_write(tmp_path: Path) -
     write_shared_project_fields(
         cfg,
         {"project-321": {"sync_root": "s3://b/n"}},
-        new_projects={"project-321": ProjectDefinition(id=321, name="New shelves")},
+        new_projects={"project-321": ProjectDefinition(id=321)},
     )
 
     added = load_global_config(cfg).projects["project-321"]
-    assert (added.id, added.name, added.sync_root) == (321, "New shelves", "s3://b/n")
+    assert (added.id, added.sync_root) == (321, "s3://b/n")
 
 
 def test_writer_writes_an_unattached_file_by_explicit_path(tmp_path: Path) -> None:
@@ -232,11 +232,15 @@ def test_find_project_key_by_key_name_or_id(tmp_path: Path) -> None:
     cfg, _ = _setup(tmp_path)
     config = load_global_config(cfg)
 
-    assert [find_project_key(config, spec) for spec in ("retail", "Retail shelves", "123")] == ["retail"] * 3
+    assert [find_project_key(config, spec) for spec in ("retail", "Retail shelves", "123")] == [
+        "retail",
+        None,
+        "retail",
+    ]
     assert find_project_key(config, "999") is None
 
 
-def test_find_project_key_refuses_an_ambiguous_name() -> None:
+def test_find_project_key_ignores_duplicate_legacy_names() -> None:
     config = ProjectConfig.model_validate(
         {
             "cvat": {"host": _HOST, "organization": _ORGANIZATION},
@@ -244,8 +248,8 @@ def test_find_project_key_refuses_an_ambiguous_name() -> None:
         }
     )
 
-    with pytest.raises(ManagedError, match="Ambiguous shared project name"):
-        find_project_key(config, "Shelves")
+    assert find_project_key(config, "Shelves") is None
+    assert config.key_for_id(2) == "b"
 
 
 def test_create_global_config_writes_switch_on_and_attaches(tmp_path: Path) -> None:

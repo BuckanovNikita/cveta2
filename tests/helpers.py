@@ -215,9 +215,9 @@ def write_split_config_yaml(
     for name, project_id in project_ids.items():
         fields = cache_projects.get(name, {})
         entries = ignored.get(name, [])
-        projects[f"project-{project_id}"] = {
+        key = name if name.isascii() and name.replace("-", "").isalnum() else f"project-{project_id}"
+        projects[key] = {
             "id": project_id,
-            "name": name,
             "sync_root": sync.get(name),
             "ignored_prefix": fields.pop("ignored_prefix", None),
             "task_cache_s3": fields.pop("task_cache_s3", None),

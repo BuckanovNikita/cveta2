@@ -70,7 +70,7 @@ def upload(  # noqa: PLR0913
     with _open(connection) as c:
         project_id, project_name = resolve_project_spec(c, project)
         options = UploadOptions(
-            search_dirs=build_search_dirs(image_dirs, project_name, config_path=config_path),
+            search_dirs=build_search_dirs(image_dirs, project_name, config_path=config_path, project_id=project_id),
             segment_size=upload_cfg.images_per_job,
             image_quality=upload_cfg.image_quality,
             mark_all_deleted=mark_all_deleted,
