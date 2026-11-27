@@ -492,9 +492,10 @@ split заполнен из родителя у 25 изображений
 ```text
 Ошибка проверки: Class API returned HTTP 404; check the public endpoint
 Ошибка проверки: Class API must return a JSON list of valid class definitions
+Ошибка проверки: Class API must return a JSON list of valid class definitions: record 2: name: Field required
 ```
 
-Проверьте адрес API классов. API должен отдавать JSON-список объектов с полями `id`, `number`, `name`, `techClass`, `isPeriodical`, `isCritical`, `threshold`.
+Проверьте адрес API классов. API должен отдавать JSON-список объектов с полями `id`, `number`, `name` и `threshold`. Флаги `techClass`, `isPeriodical` и `isCritical` необязательны: отсутствующий флаг читается как `false`, а указанный должен быть JSON-значением `true` или `false`. Если запись не подходит, ошибка называет её номер в списке (с нуля), поле и причину, но не значение.
 
 ## Интерактивный и неинтерактивный режим
 

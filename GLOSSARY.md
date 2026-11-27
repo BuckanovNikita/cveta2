@@ -177,7 +177,7 @@ _Avoid_: blocking error, fatal issue
 ### Classes
 
 **Class registry**:
-The list of classes served by the class API (`api_url`), each with a number, name and flags.
+The list of classes served by the class API (`api_url`), each with a number, name, threshold and optional flags (a missing flag reads as false).
 _Russian_: реестр классов
 _Avoid_: label map, class list, taxonomy
 

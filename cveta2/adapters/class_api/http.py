@@ -14,6 +14,9 @@ from cveta2.domain.bundle.models import (
     UploadError,
 )
 
+_INVALID = "Class API must return a JSON list of valid class definitions"
+_SHOWN_PLACES = 5
+
 
 def _public_http(url: str) -> None:
     try:
@@ -67,5 +70,28 @@ class HttpClassApi:
         try:
             value: object = json.loads(body)
             return TypeAdapter(list[ApiClass]).validate_python(value, strict=True)
-        except (ValueError, UnicodeError, ValidationError, RecursionError) as exc:
-            raise UploadError("Class API must return a JSON list of valid class definitions") from exc
+        except ValidationError as exc:
+            raise UploadError(_invalid_records(exc)) from exc
+        except (ValueError, UnicodeError, RecursionError) as exc:
+            raise UploadError(_INVALID) from exc
+
+
+def _invalid_records(error: ValidationError) -> str:
+    """Name each invalid record by its index, field and problem, never by its value (ADR 0004)."""
+    places = list(
+        dict.fromkeys(
+            _place(detail["loc"], detail["msg"])
+            for detail in error.errors(include_input=False, include_url=False)
+            if detail["loc"] and isinstance(detail["loc"][0], int)
+        )
+    )
+    if not places:
+        return _INVALID
+    shown = "; ".join(places[:_SHOWN_PLACES])
+    more = f"; and {len(places) - _SHOWN_PLACES} more" if len(places) > _SHOWN_PLACES else ""
+    return f"{_INVALID}: {shown}{more}"
+
+
+def _place(loc: tuple[int | str, ...], msg: str) -> str:
+    index, *field = loc
+    return f"record {index}: {'.'.join(map(str, field))}: {msg}" if field else f"record {index}: {msg}"

@@ -7,15 +7,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ApiClass(BaseModel):
-    """The class API identity uses number, independently of its internal id."""
+    """The class API identity uses number, independently of its internal id.
+
+    The class API may omit ``techClass``, ``isPeriodical`` and ``isCritical``;
+    a missing flag reads as false. A false default dumps like an explicit
+    false, so the fingerprint of a registry that sent every flag is unchanged.
+    """
 
     model_config = ConfigDict(strict=True, extra="ignore", frozen=True, serialize_by_alias=True)
     id: int
     number: int
     name: str = Field(min_length=1)
-    tech_class: bool = Field(alias="techClass")
-    is_periodical: bool = Field(alias="isPeriodical")
-    is_critical: bool = Field(alias="isCritical")
+    tech_class: bool = Field(default=False, alias="techClass")
+    is_periodical: bool = Field(default=False, alias="isPeriodical")
+    is_critical: bool = Field(default=False, alias="isCritical")
     threshold: float = Field(allow_inf_nan=False)
 
 
