@@ -272,10 +272,24 @@ class ImageDownloader:
             project_cloud_storage.bucket,
             project_cloud_storage.prefix,
         )
+        prefix = project_cloud_storage.prefix.rstrip("/")
         for image_name, frame_ref in pending.items():
             canonical = _canonical_frame_key(project_cloud_storage.prefix, frame_ref)
             relative = strip_key_prefix(canonical, project_cloud_storage.prefix)
-            s3_key = name_to_key.get(relative) or name_to_key.get(canonical) or name_to_key.get(image_name)
+            s3_key = name_to_key.get(relative)
+            if (
+                s3_key is None
+                and prefix
+                and "/" in frame_ref
+                and frame_ref.startswith(prefix)
+                and not frame_ref.startswith(f"{prefix}/")
+            ):
+                logger.warning(
+                    f"Кадр CVAT {frame_ref!r} похож на путь за пределами префикса {prefix!r}. "
+                    "Проверьте облачное хранилище задачи и выберите кадр внутри префикса проекта."
+                )
+                continue
+            s3_key = s3_key or name_to_key.get(canonical) or name_to_key.get(image_name)
             if s3_key is not None:
                 resolved[image_name] = s3_key
         return resolved
