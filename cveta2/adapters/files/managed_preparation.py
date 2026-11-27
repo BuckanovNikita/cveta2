@@ -5,7 +5,6 @@ import json
 import os
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -27,12 +26,12 @@ from cveta2.domain.bundle.models import (
     TaskManifest,
     UploadError,
 )
+from cveta2.domain.bundle.preparation import PAYLOAD_NAMES, SOURCE_NAMES
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot, SourceSnapshot
 from cveta2.domain.managed.preparation import FeedbackFinding, ManagedRecord
+from cveta2.domain.verification.cells import nonnegative_id
 from cveta2.domain.verification.models import DatasetInputError
 
-_PAYLOAD = ("dataset.csv", "dataset.yaml", "tasks.yaml")
-_TABLES = ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv")
 _REPORT = TypeAdapter(dict[str, JsonValue])
 
 
@@ -47,18 +46,12 @@ def _parse_snapshot(content: bytes) -> ManagedSnapshot:
 
 
 def _tables(source: SourceSnapshot) -> FetchTables:
-    if set(source.tables) != set(_TABLES):
+    if set(source.tables) != set(SOURCE_NAMES):
         raise ManagedError(f"Incomplete four-table snapshot for source: {source.name}")
-    frames = [read_csv_bytes(source.tables[name].encode("utf-8"), source=f"{source.name}/{name}") for name in _TABLES]
+    frames = [
+        read_csv_bytes(source.tables[name].encode("utf-8"), source=f"{source.name}/{name}") for name in SOURCE_NAMES
+    ]
     return FetchTables(*frames)
-
-
-def _integer(value: object) -> int | None:
-    try:
-        number = Decimal(str(value))
-        return int(number) if number.is_finite() and number >= 0 and number == number.to_integral_value() else None
-    except InvalidOperation:
-        return None
 
 
 def _origins(snapshot: ManagedSnapshot) -> frozenset[tuple[str, int, int, int]]:
@@ -67,14 +60,14 @@ def _origins(snapshot: ManagedSnapshot) -> frozenset[tuple[str, int, int, int]]:
         if source.type != "cvat" or source.project_id is None:
             continue
         for key, task in source.tasks.items():
-            if str(task.id) != key or set(task.tables) != set(_TABLES):
+            if str(task.id) != key or set(task.tables) != set(SOURCE_NAMES):
                 raise ManagedError(f"Invalid per-task evidence in source: {source.name}")
             for name, content in task.tables.items():
                 table = read_csv_bytes(content.encode("utf-8"), source=f"{source.name}/{key}/{name}")
                 for row in table.to_dict(orient="records"):
-                    if _integer(row.get("task_id")) != task.id:
+                    if nonnegative_id(row.get("task_id")) != task.id:
                         raise ManagedError(f"Source task identity mismatch: {source.name}/{key}")
-                    if (frame := _integer(row.get("frame_id"))) is not None:
+                    if (frame := nonnegative_id(row.get("frame_id"))) is not None:
                         origins.add((source.name, source.project_id, task.id, frame))
     return frozenset(origins)
 
@@ -172,7 +165,7 @@ class LocalManagedPreparationFiles:
                 )
                 broken_images.to_csv(staged / "broken-images.csv", index=False, lineterminator="\n")
                 for name, content in payload.items():
-                    if name not in _PAYLOAD:
+                    if name not in PAYLOAD_NAMES:
                         raise ManagedError(f"Unexpected managed payload file: {name}")
                     (staged / name).write_bytes(content)
                 (staged / "preparation.json").write_text(record.model_dump_json(indent=2) + "\n", encoding="utf-8")
@@ -182,7 +175,7 @@ class LocalManagedPreparationFiles:
                     "source-snapshot.yaml",
                     "report.json",
                     "broken-images.csv",
-                    *_PAYLOAD,
+                    *PAYLOAD_NAMES,
                     "preparation.json",
                 ):
                     if (staged / name).is_file():
@@ -217,7 +210,7 @@ class LocalManagedPreparationFiles:
     def stage_payload(self, directory: Path) -> Iterator[Path]:
         """Copy the payload once, so the checks and the upload see the same bytes whatever is edited meanwhile."""
         try:
-            payload = {name: _regular_bytes(directory / name) for name in _PAYLOAD}
+            payload = {name: _regular_bytes(directory / name) for name in PAYLOAD_NAMES}
         except OSError as error:
             raise ManagedError(f"Cannot load managed preparation: {directory}: {error}") from error
         with TemporaryDirectory(prefix="cveta2-managed-publish-") as temporary:
@@ -288,7 +281,7 @@ def _record(content: bytes, directory: Path) -> ManagedRecord:
 
 def _current_payload(directory: Path) -> tuple[pd.DataFrame | None, DatasetMetadata | None]:
     """Parse the three payload files, or return ``None`` for both when prepare was blocked and wrote none."""
-    paths = [directory / name for name in _PAYLOAD]
+    paths = [directory / name for name in PAYLOAD_NAMES]
     if not any(path.exists() or path.is_symlink() for path in paths):
         return None, None
     content = {path.name: _regular_bytes(path) for path in paths}

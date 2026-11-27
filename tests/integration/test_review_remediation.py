@@ -24,8 +24,6 @@ from tests.integration.test_upload import (
     _get_project_and_storage,
 )
 
-pytestmark = pytest.mark.integration
-
 
 def test_live_sync_collision_preflight_and_directory_accounting(tmp_path: Path) -> None:
     """Real MinIO keys reject aliases before writes; directories are failures."""

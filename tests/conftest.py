@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,7 +66,7 @@ settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "cveta2"))
 
 INTEGRATION_DIR = Path(__file__).resolve().parent / "integration"
 _COLLECTION_ORDER = pytest.StashKey[int]()
-_collected = 0
+_collection_order = count()
 
 
 def pytest_itemcollected(item: pytest.Item) -> None:
@@ -77,9 +78,7 @@ def pytest_itemcollected(item: pytest.Item) -> None:
     per item during collection, before xdist reads the groups. Exclude them
     with ``-m "not integration"``.
     """
-    global _collected  # noqa: PLW0603 - a per-process collection counter
-    item.stash[_COLLECTION_ORDER] = _collected
-    _collected += 1
+    item.stash[_COLLECTION_ORDER] = next(_collection_order)
     if item.path.resolve().is_relative_to(INTEGRATION_DIR):
         item.add_marker(pytest.mark.integration)
         item.add_marker(pytest.mark.xdist_group("live"))

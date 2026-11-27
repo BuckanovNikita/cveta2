@@ -45,7 +45,6 @@ from cveta2.domain.models import (
     CSV_COLUMNS,
     BBoxAnnotation,
     DeletedImage,
-    ProjectAnnotations,
     ProjectInfo,
     TaskInfo,
 )
@@ -85,17 +84,6 @@ _IMAGE_NAMES = [
     "000000000049.jpg",
     "000000000061.jpg",
 ]
-
-
-def _fetch_and_partition(
-    fake: LoadedFixtures,
-) -> tuple[ProjectAnnotations, PartitionResult]:
-    """Fetch annotations and partition them."""
-    result = fetch_all_annotations(make_fake_client(fake), fake.project.id)
-    rows = result.to_csv_rows()
-    df = pd.DataFrame(rows)
-    partition = partition_annotations_df(df, result.deleted_images)
-    return result, partition
 
 
 # ---------------------------------------------------------------------------

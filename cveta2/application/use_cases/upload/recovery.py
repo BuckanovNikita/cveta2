@@ -79,8 +79,8 @@ def _ensure_annotations(  # noqa: PLR0913
     task_id: int,
     staged: _StagedUpload,
     session: TaskWriteSession,
-    resuming: bool,  # noqa: FBT001
     *,
+    resuming: bool,
     manifest: UploadManifest,
     deps: UploadDependencies,
 ) -> int:

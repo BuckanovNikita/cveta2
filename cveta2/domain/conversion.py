@@ -3,7 +3,7 @@
 import json
 import math
 from pathlib import Path
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple
 
 import pandas as pd
 import yaml
@@ -413,16 +413,6 @@ def yolo_label_text(group: pd.DataFrame, label_map: dict[str, int], name_s: str)
     return YoloLabels(text, clipped, dropped)
 
 
-class _YamlDumpOptions(TypedDict):
-    """Serializer knobs for ``dataset.yaml``; ``yaml.safe_load`` ignores both."""
-
-    default_flow_style: bool
-    allow_unicode: bool
-
-
-_YAML_DUMP: _YamlDumpOptions = {"default_flow_style": False, "allow_unicode": False}
-
-
 def yolo_dataset_text(output_dir: Path, splits: list[str], label_map: dict[str, int]) -> str:
     """Format ultralytics metadata from a resolved output root and split values."""
     names_dict = {v: k for k, v in label_map.items()}
@@ -431,7 +421,7 @@ def yolo_dataset_text(output_dir: Path, splits: list[str], label_map: dict[str, 
         if split_name in splits:
             yaml_data[split_name] = f"images/{split_name}"
     yaml_data["names"] = names_dict
-    return yaml.dump(yaml_data, **_YAML_DUMP)
+    return yaml.dump(yaml_data, default_flow_style=False, allow_unicode=False)
 
 
 class CocoSplit(NamedTuple):
@@ -517,16 +507,6 @@ def coco_split_data(split_df: pd.DataFrame, label_map: dict[str, int]) -> CocoSp
     return CocoSplit(data, clipped, dropped)
 
 
-class _JsonDumpOptions(TypedDict):
-    """Serializer knobs for the COCO JSON; ``json.load`` ignores both."""
-
-    ensure_ascii: bool
-    indent: int
-
-
-_JSON_DUMP: _JsonDumpOptions = {"ensure_ascii": False, "indent": 2}
-
-
 def coco_metadata_text(data: dict[str, list[dict[str, object]]]) -> str:
     """Serialize COCO metadata with Unicode preserved and existing indentation."""
-    return json.dumps(data, **_JSON_DUMP)
+    return json.dumps(data, ensure_ascii=False, indent=2)

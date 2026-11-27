@@ -63,7 +63,6 @@ include = [
     "/cveta2",
     "/README.md",
     "/CHANGELOG.md",
-    "/DOCS.md",
     "/pyproject.toml",
 ]
 
@@ -160,11 +159,12 @@ fixable = ["ALL"]
 runtime-evaluated-base-classes = ["pydantic.BaseModel"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D101", "D102", "D103", "S311", "SLF001"]
+"tests/**" = ["S101", "S105", "S106", "ANN401", "PLR2004", "PLC0415", "D101", "D102", "D103", "SLF001"]
+"tests/fixtures/fake_cvat_project.py" = ["S311"]  # reproducible fixture data
 # Standalone operator scripts: `print` is their output and their helpers are
 # not an API surface. What only one script trips is suppressed at that site,
 # where RUF100 retires the suppression once the site is fixed.
-"scripts/*.py" = ["T201", "D103", "ANN401", "PLR2004"]
+"scripts/*.py" = ["T201", "D103"]
 
 [tool.mypy]
 # Analyze against the minimum supported package interpreter.
@@ -204,13 +204,10 @@ source_paths = ["cveta2"]
 # the global addopts `-n auto` would spawn a full xdist pool per mutant. These
 # args are appended last, so this `-n` wins.
 #
-# The --ignore list drops suites that check tooling, documents or source text
-# and never execute package functions: they cannot kill a mutant, but each
-# mutation run would pay for them twice (stats pass and clean run).
+# Live services and package architecture checks run outside the mutation suite.
 pytest_add_cli_args = [
     "-n", "0", "-p", "no:cacheprovider", "-p", "no:randomly", "--no-cov",
     "--ignore=tests/integration",
-    "--ignore=tests/test_integration_tool_boundaries.py",
     "--ignore=tests/test_architecture.py",
 ]
 pytest_add_cli_args_test_selection = ["tests/"]
@@ -256,7 +253,6 @@ do_not_mutate_patterns = [
 [tool.vulture]
 min_confidence = 80
 paths = ["cveta2", "main.py", "tests", "scripts"]
-exclude = ["cveta2/adapters/s3/types.py"]
 
 [tool.coverage.run]
 source = ["cveta2"]
@@ -279,6 +275,12 @@ exclude_lines = [
 root_packages = ["cveta2"]
 include_external_packages = true
 exclude_type_checking_imports = false
+
+[[tool.importlinter.contracts]]
+name = "Runtime modules cannot import development tooling"
+type = "forbidden"
+source_modules = ["cveta2"]
+forbidden_modules = ["tests", "scripts"]
 
 [[tool.importlinter.contracts]]
 name = "Every runtime module belongs to an inward layer"
@@ -363,5 +365,3 @@ venv = ".venv"
 # metadata; decide that separately.
 [tool.deptry.per_rule_ignores]
 DEP003 = ["botocore", "urllib3", "numpy", "prompt_toolkit"]
-# The ClearML adapter imports the SDK lazily through import_module.
-DEP002 = ["clearml"]

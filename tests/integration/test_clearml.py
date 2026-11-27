@@ -35,8 +35,6 @@ from tests.integration.clearml_run import (
     project_name,
 )
 
-pytestmark = pytest.mark.integration
-
 
 @pytest.fixture(scope="session")
 def clearml_run() -> Iterator[RunSettings]:

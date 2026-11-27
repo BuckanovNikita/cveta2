@@ -69,9 +69,10 @@ def _resolve_fetch_target(
 
 def _resolve_images_dir(
     images_dir: str | Path | None,
-    download_images: bool,  # noqa: FBT001
     project_name: str,
     config_path: Path | None,
+    *,
+    download_images: bool,
 ) -> Path | None:
     """Resolve the image download directory without prompting."""
     if images_dir and not download_images:
@@ -144,7 +145,9 @@ def fetch(  # noqa: PLR0913
             use_cache=use_cache,
             force=force,
             save_tasks=save_tasks,
-            images_dir=_resolve_images_dir(images_dir, download_images, resolved.project_name, config_path),
+            images_dir=_resolve_images_dir(
+                images_dir, resolved.project_name, config_path, download_images=download_images
+            ),
             raw=raw,
             config_path=config_path,
         )
@@ -190,7 +193,9 @@ def fetch_task(  # noqa: PLR0913
             use_cache=use_cache,
             force=force,
             save_tasks=save_tasks,
-            images_dir=_resolve_images_dir(images_dir, download_images, resolved.project_name, config_path),
+            images_dir=_resolve_images_dir(
+                images_dir, resolved.project_name, config_path, download_images=download_images
+            ),
             config_path=config_path,
         )
         result = fetch_selected_tasks(c, resolved, options)

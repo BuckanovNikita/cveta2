@@ -743,7 +743,7 @@ def test_published_snapshot_reads_exact_id_and_rejects_missing_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cveta2.adapters.clearml import managed_sources
+    import sys
 
     config, definition = _config()
     snapshot, _ = _fetch(config, definition, _Cvat({12: [_task(1)]}))
@@ -763,7 +763,7 @@ def test_published_snapshot_reads_exact_id_and_rejects_missing_files(
     dataset.get_local_copy.return_value = str(tmp_path)
     factory = Mock()
     factory.get.return_value = dataset
-    monkeypatch.setattr(managed_sources, "_factory", lambda: factory)
+    monkeypatch.setitem(sys.modules, "clearml", Mock(Dataset=factory))
     assert ClearMLSources().read_snapshot("pinned") == snapshot
     factory.get.assert_called_with(dataset_id="pinned", only_completed=True, auto_create=False)
     with pytest.raises(Cveta2Error, match="required payload"):
@@ -777,7 +777,7 @@ def test_published_legacy_absence_and_corrupt_yaml_are_distinct(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cveta2.adapters.clearml import managed_sources
+    import sys
 
     dataset = Mock()
     dataset.id = "legacy"
@@ -786,7 +786,7 @@ def test_published_legacy_absence_and_corrupt_yaml_are_distinct(
     dataset.get_local_copy.return_value = str(tmp_path)
     factory = Mock()
     factory.get.return_value = dataset
-    monkeypatch.setattr(managed_sources, "_factory", lambda: factory)
+    monkeypatch.setitem(sys.modules, "clearml", Mock(Dataset=factory))
     assert ClearMLSources().read_snapshot("legacy") is None
     dataset.get_local_copy.assert_not_called()
     factory.get.side_effect = ConnectionError("network unavailable")

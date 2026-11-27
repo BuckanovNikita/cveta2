@@ -26,8 +26,6 @@ from tests.integration.conftest import (
     make_integration_config,
 )
 
-pytestmark = pytest.mark.integration
-
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 COCO8_IMAGES_DIR = REPO_ROOT / "tests" / "fixtures" / "data" / "coco8" / "images"
 

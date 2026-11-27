@@ -1,7 +1,6 @@
 """Stable byte snapshots, strict YAML and local prepared-bundle persistence."""
 
 import json
-import os
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -326,7 +325,7 @@ class LocalBundleFiles:
             if directory.exists() or directory.is_symlink():
                 raise UploadError(f"Preparation directory already exists: {directory}")
             # One rename makes the whole bundle appear: an interrupted write leaves nothing.
-            os.rename(staged, directory)  # noqa: PTH104 - the single atomic step the interruption test patches.
+            staged.rename(directory)
         finally:
             shutil.rmtree(holder, ignore_errors=True)
 

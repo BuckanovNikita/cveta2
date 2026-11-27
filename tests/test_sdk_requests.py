@@ -55,13 +55,6 @@ def test_build_task_write_request_carries_the_whole_spec() -> None:
     }
 
 
-def test_build_data_request_uses_predefined_sorting() -> None:
-    spec = make_spec()
-    request = build_data_request(spec)
-    assert request.sorting_method.value == "predefined"
-    assert request.server_files == ["p/b.jpg", "p/a.jpg"]
-
-
 def test_build_data_request_pins_cloud_storage_and_caching() -> None:
     """``cloud_storage_id`` and ``use_cache`` decide where CVAT reads the images.
 

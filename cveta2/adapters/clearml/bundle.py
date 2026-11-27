@@ -2,9 +2,8 @@
 
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import Protocol, cast
 from urllib.parse import urlsplit
 
 from cveta2.domain.bundle.models import (
@@ -13,11 +12,6 @@ from cveta2.domain.bundle.models import (
     UploadCancelled,
     UploadError,
 )
-
-if TYPE_CHECKING:
-    # The SDK is imported lazily at run time through import_module; this static import keeps it
-    # visible to the import-linter contract that confines it to this adapter.
-    import clearml  # noqa: F401 - graph visibility for import-linter only
 
 
 class _Dataset(Protocol):
@@ -93,7 +87,9 @@ class _Sdk(Protocol):
 def _sdk() -> _Sdk:
     # The SDK is required. It is imported lazily so that inner imports stay offline,
     # and typed protocols keep its implementation types out of the application contracts.
-    return cast("_Sdk", import_module("clearml"))
+    import clearml  # noqa: PLC0415 - CLI startup must stay independent of the SDK
+
+    return cast("_Sdk", clearml)
 
 
 @contextmanager

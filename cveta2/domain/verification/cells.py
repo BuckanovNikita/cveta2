@@ -50,3 +50,14 @@ def integer(value: object) -> bool:
         return decimal.is_finite() and decimal == decimal.to_integral_value()
     parsed = number(value)
     return parsed is not None and parsed.is_integer()
+
+
+def nonnegative_id(value: object) -> int | None:
+    """Read a CSV identifier exactly, including integral decimal notation."""
+    try:
+        parsed = Decimal(str(value))
+    except InvalidOperation:
+        return None
+    if not parsed.is_finite() or parsed < 0 or parsed != parsed.to_integral_value():
+        return None
+    return int(parsed)

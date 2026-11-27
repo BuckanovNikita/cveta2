@@ -17,10 +17,8 @@ from cveta2.application.use_cases.fetch import FetchOptions, FetchTarget
 from cveta2.composition.client import CvatClient
 from cveta2.composition.workflows import fetch_selected_tasks
 from cveta2.domain.models import (
-    BBoxAnnotation,
     LabelInfo,
     ProjectInfo,
-    TaskAnnotations,
 )
 from cveta2.domain.storage import CloudStorageInfo
 from tests.fixtures.fake_cvat_api import FakeCvatApi
@@ -67,18 +65,6 @@ def _polygon_fixture() -> LoadedFixtures:
             )
         },
     )
-
-
-def _assert_polygon(payload: TaskAnnotations) -> None:
-    assert len(payload.annotations) == 1
-    box = payload.annotations[0]
-    assert isinstance(box, BBoxAnnotation)
-    assert (box.bbox_x_tl, box.bbox_y_tl, box.bbox_x_br, box.bbox_y_br) == _BOUNDS
-    assert box.instance_label == "car"
-    assert box.annotation_id == 42
-    assert box.rotation == 0.0
-    assert box.task_id == 100
-    assert box.frame_id == 0
 
 
 @pytest.mark.parametrize("old_layer", ["local", "s3"])

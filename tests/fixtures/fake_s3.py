@@ -8,20 +8,11 @@ Implements the subset of the boto3 S3 client used by cveta2
 
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from typing import Any, override
 
 from botocore.exceptions import ClientError
-
-
-class _FakeBody:
-    """Streaming-body stand-in returning fixed bytes."""
-
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-
-    def read(self) -> bytes:
-        return self._data
 
 
 class FakeS3Client:
@@ -60,7 +51,7 @@ class FakeS3Client:
                 {"Error": {"Code": "NoSuchKey", "Message": full_key}},
                 "GetObject",
             )
-        return {"Body": _FakeBody(self.objects[full_key])}
+        return {"Body": BytesIO(self.objects[full_key])}
 
     def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:  # noqa: N803
         full_key = self._store_key(Bucket, Key)

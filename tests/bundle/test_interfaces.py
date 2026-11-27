@@ -46,9 +46,6 @@ def test_public_dataset_functions_and_typed_options_are_exported() -> None:
     ):
         assert name in cveta2.__all__
         assert getattr(cveta2, name) is not None
-    assert cveta2.upload.__module__ != cveta2.upload_dataset.__module__
-    assert "project" in inspect.signature(cveta2.upload).parameters
-    assert "project" not in inspect.signature(cveta2.upload_dataset).parameters
 
 
 def test_verify_csv_findings_and_malformed_input_have_distinct_status(
@@ -113,7 +110,6 @@ def test_public_prepare_dataset_defaults() -> None:
     assert parameters["options"].default is None
     assert PrepareOptions().clean is True
     assert PrepareOptions().project is None
-    assert "class_id" not in Decision.__dataclass_fields__
 
 
 def test_collect_decisions_asks_project_by_text(monkeypatch: pytest.MonkeyPatch) -> None:

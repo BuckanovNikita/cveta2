@@ -252,8 +252,9 @@ def optional_project_config(
     return None if config is None else apply_local_overrides(config, _personal_overrides(personal_path))
 
 
-def _yaml_bytes(data: dict[str, object]) -> bytes:
-    return yaml.safe_dump(data, allow_unicode=True, sort_keys=False).encode("utf-8")
+def config_yaml_bytes(data: dict[str, object]) -> bytes:
+    """Encode hand-editable YAML in insertion order with literal Unicode."""
+    return yaml.safe_dump(data, encoding="utf-8", allow_unicode=True, sort_keys=False)
 
 
 def _stage_bytes(path: Path, content: bytes, purpose: str, *, private: bool = True) -> Path:
@@ -383,7 +384,7 @@ def _save_attachment(personal_path: Path, raw: dict[str, object], selected: Path
         raise MigrationRequired(
             "Legacy fields require reviewed separation before attachment: cveta2 setup --migrate-config"
         ) from error
-    _private_write(personal_path, _yaml_bytes(raw), replace=True)
+    _private_write(personal_path, config_yaml_bytes(raw), replace=True)
     return selected
 
 
@@ -665,7 +666,7 @@ def _write_shared_project_fields_locked(  # noqa: PLR0913 - the locked half of w
         raise SharedConfigConflictError(
             f"Shared configuration {path} changed during this save; reload and repeat the change"
         )
-    _private_write(path, _yaml_bytes(updated.model_dump()), replace=True, preserve_permissions=True)
+    _private_write(path, config_yaml_bytes(updated.model_dump()), replace=True, preserve_permissions=True)
     return path
 
 
@@ -682,7 +683,7 @@ def create_global_config(personal_path: Path, global_path: Path, identity: CvatI
     )
     if global_path.exists():
         raise ManagedError(refusal)
-    content = _yaml_bytes(ProjectConfig(local_overrides=True, cvat=identity).model_dump())
+    content = config_yaml_bytes(ProjectConfig(local_overrides=True, cvat=identity).model_dump())
     # The team file takes the umask-default mode; it holds no credentials.
     stage = _stage_bytes(global_path, content, "create", private=False)
     try:
@@ -735,7 +736,7 @@ def write_local_overrides(
     if sets_value:
         # Refuses a switched-off global file, collisions and incomplete blocks before anything is written.
         apply_local_overrides(raw_global, read_local_overrides(new_raw))
-    _private_write(personal_path, _yaml_bytes(new_raw), replace=True)
+    _private_write(personal_path, config_yaml_bytes(new_raw), replace=True)
     return personal_path
 
 
@@ -1055,8 +1056,8 @@ def activate_migration(proposal: MigrationProposal) -> Path:
     validate_personal(proposal.personal, attached=True)
     ProjectConfig.model_validate(proposal.shared)
     shared_bytes, personal_bytes = (
-        _yaml_bytes(proposal.shared),
-        _yaml_bytes(proposal.personal),
+        config_yaml_bytes(proposal.shared),
+        config_yaml_bytes(proposal.personal),
     )
     if proposal.shared_path.exists() and proposal.shared_path.read_bytes() != shared_bytes:
         # Compare semantics as a pre-existing human file may use other formatting.

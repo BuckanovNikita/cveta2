@@ -11,6 +11,7 @@ import json
 import threading
 import warnings
 from dataclasses import dataclass, field
+from http import HTTPStatus
 from pathlib import Path
 
 from loguru import logger
@@ -280,15 +281,15 @@ def _status_problem(settings: _Settings, status: int, body: bytes) -> str | None
     """Return the warning for a login answer, or ``None`` when the server issued a token."""
     unreachable = f"ClearML: сервер недоступен — {settings.host}"
     problem = None
-    if status in {401, 403}:
+    if status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
         what = "токен CLEARML_AUTH_TOKEN" if settings.uses_token else "ключ доступа и секретный ключ"
         problem = (
             f"ClearML: ключи отклонены — сервер API {settings.host} ответил HTTP {status}. "
             f"Проверьте {what} (источник: {settings.sources})."
         )
-    elif 300 <= status < 400:  # noqa: PLR2004 - the HTTP redirect range.
+    elif HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST:
         problem = f"{unreachable}: перенаправление HTTP {status} не выполняется, проверьте адрес сервера API."
-    elif status != 200:  # noqa: PLR2004 - the login success status.
+    elif status != HTTPStatus.OK:
         problem = f"{unreachable}: HTTP {status}."
     elif not _has_token(body):
         problem = f"{unreachable}: ответ не похож на ответ сервера API ClearML, проверьте адрес."

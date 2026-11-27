@@ -1,7 +1,7 @@
 """Public API upload contracts."""
 
 from importlib import import_module
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import pandas as pd
 import pytest
@@ -35,7 +35,7 @@ from tests.api_helpers import _scoped
 class _RecordingUploader:
     """``S3Uploader`` stand-in recording what the upload pipeline staged."""
 
-    calls: "list[dict[str, Path]]" = []  # noqa: RUF012
+    calls: ClassVar[list[dict[str, "Path"]]] = []
 
     def upload(
         self,

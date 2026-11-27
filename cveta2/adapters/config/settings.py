@@ -4,13 +4,14 @@ import importlib.resources
 import os
 import stat
 from pathlib import Path
-from typing import ClassVar, NamedTuple, Self, TypedDict, override
+from typing import ClassVar, NamedTuple, Self, override
 
 import yaml
 from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from cveta2.adapters.config.project import (
+    config_yaml_bytes,
     optional_global_config,
     optional_project_config,
     shared_projects_by_name,
@@ -119,27 +120,6 @@ def _load_raw_yaml(path: Path) -> dict[str, object]:
     return data
 
 
-class _YamlDumpOptions(TypedDict):
-    """Serializer knobs for the config file.
-
-    Bytes in, bytes out: like the organization-cache writer,
-    the file's encoding must not depend on the writer's locale.  Key order is
-    the insertion order the callers built, which is why ``sort_keys`` is off —
-    a config people hand-edit should stay in the order they left it.
-    """
-
-    sort_keys: bool
-    encoding: str
-    allow_unicode: bool
-
-
-_YAML_DUMP: "_YamlDumpOptions" = {
-    "sort_keys": False,
-    "encoding": "utf-8",
-    "allow_unicode": True,
-}
-
-
 def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
     """Atomically write *data* as owner-only UTF-8 YAML, creating the config directory.
 
@@ -147,7 +127,7 @@ def _write_raw_yaml(path: Path, data: dict[str, object]) -> None:
     world-readable, and a failed write keeps the previous file intact.
     """
     try:
-        write_personal_file(path, yaml.safe_dump(data, **_YAML_DUMP))
+        write_personal_file(path, config_yaml_bytes(data))
     except OSError as error:
         raise Cveta2Error(f"Не удалось записать конфигурацию {path}: {type(error).__name__}.") from error
 

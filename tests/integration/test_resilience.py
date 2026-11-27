@@ -38,7 +38,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-pytestmark = pytest.mark.integration
 
 _CVAT_WORKERS = 4
 
