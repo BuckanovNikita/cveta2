@@ -1,12 +1,11 @@
 """Validation, image quarantine and deterministic cleanup orchestration."""
 
 from collections import defaultdict
-from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, cast
 
 import pandas as pd
 
-from cveta2.domain.verification.cells import is_missing, number
+from cveta2.domain.verification.cells import is_missing, nonnegative_id, number
 from cveta2.domain.verification.geometry import find_class_conflicts, find_duplicates
 from cveta2.domain.verification.models import (
     DatasetInputError,
@@ -38,15 +37,7 @@ def _group_rows(frame: pd.DataFrame) -> tuple[list[tuple[int, ...]], list[Issue]
     for position, (name, task) in enumerate(zip(frame["image_name"], tasks, strict=True)):
         # Unidentifiable rows cannot be joined to a known image by guesswork.
         key = name if isinstance(name, str) and name else f"\x00unidentified:{position}"
-        task_id = None
-        if not is_missing(task) and number(task) is not None:
-            try:
-                parsed = Decimal(str(task))
-                if parsed.is_finite() and parsed >= 0 and parsed == parsed.to_integral_value():
-                    task_id = int(parsed)
-            except InvalidOperation:
-                # The schema reports malformed IDs; keep unscoped evidence separate.
-                pass
+        task_id = nonnegative_id(task) if number(task) is not None else None
         groups[key, task_id].append(position)
         scope_states[key].add(task_id is not None)
     mixed = sum(len(states) > 1 for states in scope_states.values())

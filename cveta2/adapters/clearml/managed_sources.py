@@ -1,44 +1,18 @@
 """Immutable ClearML source-snapshot retrieval without sibling adapter IO."""
 
-from importlib import import_module
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING
 
 import yaml
 from pydantic import ValidationError
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-from cveta2.adapters.clearml.bundle import _sdk_errors
+from cveta2.adapters.clearml.bundle import _sdk, _sdk_errors
+from cveta2.domain.bundle.preparation import PAYLOAD_NAMES
 from cveta2.domain.managed.models import ManagedError, ManagedSnapshot
 
-
-class _Dataset(Protocol):
-    @property
-    def id(self) -> str: ...
-    def is_final(self) -> bool: ...
-    def list_files(self) -> list[str]: ...
-    def get_local_copy(
-        self,
-        *,
-        files: list[str],
-        use_soft_links: bool,  # noqa: F841, RUF100 - external SDK keyword contract.
-        raise_on_error: bool,  # noqa: F841, RUF100 - external SDK keyword contract.
-    ) -> str: ...
-
-
-class _Factory(Protocol):
-    def get(
-        self,
-        *,
-        dataset_id: str,
-        only_completed: bool,  # noqa: F841, RUF100 - external SDK keyword contract.
-        auto_create: bool,  # noqa: F841, RUF100 - external SDK keyword contract.
-    ) -> _Dataset: ...
-
-
-def _factory() -> _Factory:
-    # The SDK is required. It is imported lazily so that inner imports stay offline.
-    return cast("_Factory", import_module("clearml").Dataset)
+if TYPE_CHECKING:
+    from cveta2.adapters.clearml.bundle import _Dataset
 
 
 def _check_yaml(node: Node, active: set[int]) -> None:
@@ -65,14 +39,14 @@ class ClearMLSources:
     """Retrieve only requested regular files from one finalized immutable id."""
 
     @staticmethod
-    def _dataset(dataset_id: str) -> _Dataset:
-        dataset = _factory().get(dataset_id=dataset_id, only_completed=True, auto_create=False)
+    def _dataset(dataset_id: str) -> "_Dataset":
+        dataset = _sdk().Dataset.get(dataset_id=dataset_id, only_completed=True, auto_create=False)
         if dataset.id != dataset_id or not dataset.is_final():
             raise ManagedError("ClearML returned a different or unfinished dataset")
         return dataset
 
     @staticmethod
-    def _read_files(dataset: _Dataset, names: tuple[str, ...]) -> dict[str, bytes]:
+    def _read_files(dataset: "_Dataset", names: tuple[str, ...]) -> dict[str, bytes]:
         if not set(names).issubset(dataset.list_files()):
             raise ManagedError("Published dataset lacks required payload files")
         directory = Path(dataset.get_local_copy(files=list(names), use_soft_links=False, raise_on_error=True))
@@ -86,7 +60,7 @@ class ClearMLSources:
 
     def read_files(self, dataset_id: str, names: tuple[str, ...]) -> dict[str, bytes]:
         """Require exact dataset identity and a complete requested inventory."""
-        if not names or any(name not in {"dataset.csv", "dataset.yaml", "tasks.yaml"} for name in names):
+        if not names or any(name not in PAYLOAD_NAMES for name in names):
             raise ManagedError("Only the three public payload files can be retrieved")
         with _sdk_errors("Cannot read published managed dataset"):
             return self._read_files(self._dataset(dataset_id), names)

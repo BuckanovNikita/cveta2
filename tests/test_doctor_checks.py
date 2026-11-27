@@ -82,17 +82,8 @@ def test_check_config_without_personal_file_uses_shared_identity(
 
 
 def test_check_aws_no_boto3() -> None:
-    import sys
-
-    real_boto3 = sys.modules.get("boto3")
-    sys.modules["boto3"] = None  # type: ignore[assignment]
-    try:
+    with patch.dict("sys.modules", {"boto3": None}):
         assert check_aws_credentials() is False
-    finally:
-        if real_boto3 is not None:
-            sys.modules["boto3"] = real_boto3
-        else:
-            sys.modules.pop("boto3", None)
 
 
 @pytest.mark.parametrize(

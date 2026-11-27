@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import re
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -14,6 +13,7 @@ from pydantic import ValidationError
 
 from cveta2.adapters.files.bundle import _yaml
 from cveta2.adapters.files.verification import read_csv_bytes
+from cveta2.domain.bundle.preparation import SOURCE_NAMES
 from cveta2.domain.managed.models import (
     ManagedError,
     ManagedSnapshot,
@@ -22,8 +22,8 @@ from cveta2.domain.managed.models import (
 )
 from cveta2.domain.models import CSV_COLUMNS, DeletedImage
 from cveta2.domain.partition import in_progress_table, partition_annotations_df
+from cveta2.domain.verification.cells import nonnegative_id
 
-TABLE_NAMES = ("dataset.csv", "obsolete.csv", "in_progress.csv", "deleted.csv")
 PROVENANCE_COLUMNS = (
     "source_id",
     "source_project_id",
@@ -51,13 +51,10 @@ def _table(text: str, source: str) -> pd.DataFrame:
 
 
 def _integer(value: object, column: str) -> int:
-    try:
-        parsed = Decimal(str(value))
-    except InvalidOperation as error:
-        raise ManagedError(f"Invalid {column} in CVAT source evidence: {value!r}") from error
-    if not parsed.is_finite() or parsed != parsed.to_integral_value() or parsed < 0:
+    parsed = nonnegative_id(value)
+    if parsed is None:
         raise ManagedError(f"Invalid {column} in CVAT source evidence: {value!r}")
-    return int(parsed)
+    return parsed
 
 
 def _typed_rows(frame: pd.DataFrame) -> pd.DataFrame:
@@ -90,9 +87,9 @@ class LocalSourceFiles:
         annotations: list[pd.DataFrame] = []
         deleted: list[DeletedImage] = []
         for task in tasks:
-            if set(task.tables) != set(TABLE_NAMES):
+            if set(task.tables) != set(SOURCE_NAMES):
                 raise ManagedError(f"Incomplete source tables for task {task.id}")
-            for name in TABLE_NAMES:
+            for name in SOURCE_NAMES:
                 table = _typed_rows(_table(task.tables[name], f"task {task.id}/{name}"))
                 required = {
                     "image_name",
@@ -145,7 +142,7 @@ class LocalSourceFiles:
 
     def source_frame(self, snapshot: SourceSnapshot) -> pd.DataFrame:
         """Attach provenance only from trusted source identity and captured rows."""
-        if set(snapshot.tables) != set(TABLE_NAMES):
+        if set(snapshot.tables) != set(SOURCE_NAMES):
             raise ManagedError(f"Incomplete tables in source {snapshot.name}")
         frame = _table(snapshot.tables["dataset.csv"], snapshot.name)
         if conflicts := set(PROVENANCE_COLUMNS).intersection(frame.columns):
@@ -187,7 +184,7 @@ class LocalSourceFiles:
         for source in snapshot.sources:
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", source.name):
                 raise ManagedError(f"Unsafe source name in snapshot: {source.name!r}")
-            if set(source.tables) != set(TABLE_NAMES):
+            if set(source.tables) != set(SOURCE_NAMES):
                 raise ManagedError(f"Incomplete source tables: {source.name}")
         try:
             directory.parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +194,7 @@ class LocalSourceFiles:
                 for source in snapshot.sources:
                     target = staged / "sources" / source.name
                     target.mkdir(parents=True)
-                    for name in TABLE_NAMES:
+                    for name in SOURCE_NAMES:
                         (target / name).write_text(source.tables[name], encoding="utf-8")
                 (staged / "source-snapshot.yaml").write_text(
                     yaml.safe_dump(
@@ -211,7 +208,7 @@ class LocalSourceFiles:
                 for source in snapshot.sources:
                     target = directory / "sources" / source.name
                     target.mkdir(parents=True)
-                    for name in TABLE_NAMES:
+                    for name in SOURCE_NAMES:
                         os.link(staged / "sources" / source.name / name, target / name)
                 os.link(staged / "dataset.csv", directory / "dataset.csv")
                 os.link(staged / "source-snapshot.yaml", directory / "source-snapshot.yaml")

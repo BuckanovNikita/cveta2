@@ -16,7 +16,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pandas as pd
-import pytest
 
 from cveta2.composition.client import CvatClient
 from cveta2.domain.partition import completed_task_ids
@@ -25,7 +24,6 @@ from tests.integration.test_upload import IMAGE_NAMES, _get_project_and_storage
 if TYPE_CHECKING:
     from cveta2.domain.models import TaskAnnotations
 
-pytestmark = pytest.mark.integration
 
 _IMAGES_PER_JOB = 2
 _TASK_IMAGES = 4

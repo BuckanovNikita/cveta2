@@ -15,8 +15,6 @@ from cveta2.domain.errors import Cveta2Error
 from tests.integration.conftest import _make_sdk_client
 from tests.integration.test_upload import IMAGE_NAMES, _get_project_and_storage
 
-pytestmark = pytest.mark.integration
-
 
 def _create_task(
     client: CvatClient,

@@ -29,7 +29,6 @@ from tests.integration.conftest import (
     make_integration_config,
 )
 
-pytestmark = pytest.mark.integration
 pytest_plugins = ("tests.integration.test_clearml",)
 
 

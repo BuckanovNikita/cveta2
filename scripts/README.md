@@ -5,9 +5,9 @@
 
 | Что | Где |
 |---|---|
-| Выпуск версий (semantic-release; версия пакета хранится в `cveta2/__init__.py`) | `.github/workflows/release.yml` и `[tool.semantic_release]` в `pyproject.toml`, см. `DOCS.md`, раздел «Release operations» |
+| Выпуск версий (semantic-release; версия пакета хранится в `cveta2/__init__.py`) | `.github/workflows/release.yml` и `[tool.semantic_release]` в [pyproject.toml](../pyproject.toml) |
 | Проверка владения эффектами (дополняет import-linter) | `tests/architecture_effects.py`, запускается из `tests/test_architecture.py` |
-| Жизненный цикл живого прогона (up / stop / env; в pytest — фикстура сессии) | `tests/integration/lifecycle.py`, см. `DOCS.md`, раздел «Live test infrastructure» |
+| Жизненный цикл живого прогона (up / stop / env; в pytest — фикстура сессии) | [tests/integration/lifecycle.py](../tests/integration/lifecycle.py) |
 | Клонирование CVAT-проекта в S3 cloud storage | `tests/integration/clone_project_to_s3.py` |
 | Отпечаток окружения testmon (`testmon_environment.py`): что, кроме кода тестов, сбрасывает историю testmon | `Taskfile.yml`, задачи `test` и `test-full` |
 

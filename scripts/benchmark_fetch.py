@@ -11,14 +11,12 @@ not predictions of production network throughput.
 
 import argparse
 import hashlib
-import io
 import json
 import statistics
 import tempfile
 import threading
 import time
 from collections import Counter
-from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, override
@@ -106,14 +104,6 @@ class _TimedCvat(FakeCvatApi):
         return _STORAGE
 
 
-class _Body(io.BytesIO):
-    """Support both all-at-once and chunked S3 streaming consumers."""
-
-    def iter_chunks(self, chunk_size: int = 1024) -> Iterator[bytes]:
-        while chunk := self.read(chunk_size):
-            yield chunk
-
-
 class _TimedS3(FakeS3Client):
     """Count S3 operations while returning real byte streams."""
 
@@ -124,8 +114,7 @@ class _TimedS3(FakeS3Client):
     @override
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         time.sleep(self._delay)
-        super().get_object(Bucket=Bucket, Key=Key)
-        return {"Body": _Body(self.objects[Key])}
+        return super().get_object(Bucket=Bucket, Key=Key)
 
     @override
     def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:

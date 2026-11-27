@@ -18,7 +18,7 @@ from pydantic import (
 from cveta2.domain.class_registry import ApiClass
 from cveta2.domain.errors import Cveta2Error
 from cveta2.domain.models import LabelInfo
-from cveta2.domain.paths import parse_sync_root
+from cveta2.domain.paths import validate_sync_root
 
 
 class ManagedError(Cveta2Error):
@@ -164,17 +164,7 @@ class ProjectDefinition(StrictModel):
     ignore: list[dict[str, JsonValue]] = Field(default_factory=list)
     publication: PublicationSettings | None = Field(default=None, exclude_if=lambda value: value is None)
 
-    @field_validator("sync_root", "task_cache_s3")
-    @classmethod
-    def s3_root(cls, value: str | None) -> str | None:
-        """Reject roots the S3 adapters cannot parse, before any command uses them."""
-        if value is not None:
-            try:
-                parse_sync_root(value)
-            except ValueError:
-                # The parser's own message repeats the value; diagnostics must not.
-                raise ValueError("Expected s3://bucket[/prefix] or a nonempty bare prefix") from None
-        return value
+    s3_root = field_validator("sync_root", "task_cache_s3")(staticmethod(validate_sync_root))
 
     @field_validator("ignore")
     @classmethod

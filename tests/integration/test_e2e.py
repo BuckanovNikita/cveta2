@@ -47,7 +47,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-pytestmark = pytest.mark.integration
 
 EXPECTED_TASK_COUNT = 7
 EXPECTED_LABEL_COUNT = 80

@@ -196,30 +196,31 @@ def valid_box_geometry(coordinates: tuple[float, float, float, float], profile: 
     )
 
 
-# Keep the complete schema-code dispatch explicit and non-coercing.
-def _row_masks(frame: pd.DataFrame, profile: Profile, code: str) -> "pd.Series[bool]":  # noqa: C901, PLR0912
-    """Produce boolean masks; leave missing-header checks to the schema."""
+def _valid_dimensions(frame: pd.DataFrame, profile: Profile) -> "pd.Series[bool]":
     valid: pd.Series[bool] = pd.Series(data=True, index=frame.index, dtype=bool)
-    if code == "invalid_dimension":
-        for column in ("image_width", "image_height", "width", "height"):
-            if column not in frame:
-                continue
-            shapes = (
-                frame["instance_shape"] if profile == "cveta2" and "instance_shape" in frame else [None] * len(frame)
+    for column in ("image_width", "image_height", "width", "height"):
+        if column not in frame:
+            continue
+        shapes = frame["instance_shape"] if profile == "cveta2" and "instance_shape" in frame else [None] * len(frame)
+        required = profile == "cveta2" and column in ("image_width", "image_height")
+        values = []
+        for value, shape in zip(frame[column], shapes, strict=True):
+            parsed = number(value)
+            deleted = isinstance(shape, str) and shape == "deleted" and profile == "cveta2"
+            values.append(
+                (not required and is_missing(value))
+                or (integer(value) and parsed is not None and (parsed >= 0 if deleted else parsed > 0))
             )
-            required = profile == "cveta2" and column in ("image_width", "image_height")
-            values = []
-            for value, shape in zip(frame[column], shapes, strict=True):
-                parsed = number(value)
-                deleted = isinstance(shape, str) and shape == "deleted" and profile == "cveta2"
-                values.append(
-                    (not required and is_missing(value))
-                    or (integer(value) and parsed is not None and (parsed >= 0 if deleted else parsed > 0))
-                )
-            valid &= pd.Series(values, index=frame.index, dtype=bool)
-        return valid
+        valid &= pd.Series(values, index=frame.index, dtype=bool)
+    return valid
+
+
+def _row_masks(frame: pd.DataFrame, profile: Profile, code: str) -> "pd.Series[bool]":
+    """Produce boolean masks; leave missing-header checks to the schema."""
+    if code == "invalid_dimension":
+        return _valid_dimensions(frame, profile)
     if "instance_label" not in frame or not set(BOX_COLUMNS).issubset(frame.columns):
-        return valid
+        return pd.Series(data=True, index=frame.index, dtype=bool)
     shapes = frame["instance_shape"] if profile == "cveta2" and "instance_shape" in frame else [None] * len(frame)
     annotations = frame[["instance_label", *BOX_COLUMNS]].itertuples(index=False, name=None)
     values = []

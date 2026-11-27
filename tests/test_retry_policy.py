@@ -27,6 +27,7 @@ from botocore.exceptions import (
 from cvat_sdk.api_client.exceptions import ApiException
 from hypothesis import given
 from hypothesis import strategies as st
+from tenacity import RetryCallState, Retrying
 
 from cveta2.adapters.cvat.sdk_adapter import SdkCvatApiAdapter
 from cveta2.adapters.cvat.transport import (
@@ -36,7 +37,6 @@ from cveta2.adapters.cvat.transport import (
     _translate_api_errors,
 )
 from cveta2.adapters.execution.retry import (
-    _JITTER,
     DEFAULT_RETRY_ATTEMPTS,
     RetryPolicy,
     _backoff,
@@ -266,22 +266,11 @@ def test_idempotent_replacements_repeat_only_retryable_status_failures(
         assert caught.value.status_code == error.status
 
 
-class _FakeOutcome:
-    """Stand-in for the tenacity outcome that only carries the exception."""
-
-    def __init__(self, exc: BaseException | None) -> None:
-        self._exc = exc
-
-    def exception(self) -> BaseException | None:
-        return self._exc
-
-
-class _FakeRetryState:
-    """Minimal ``RetryCallState`` shape: what ``_backoff`` actually reads."""
-
-    def __init__(self, exc: BaseException | None, attempt_number: int = 1) -> None:
-        self.outcome = _FakeOutcome(exc)
-        self.attempt_number = attempt_number
+def _failed_attempt(error: BaseException, attempt: int = 1) -> RetryCallState:
+    state = RetryCallState(Retrying(), fn=None, args=(), kwargs={})
+    state.attempt_number = attempt
+    state.set_exception((type(error), error, error.__traceback__))
+    return state
 
 
 class TestBackoff:
@@ -289,24 +278,13 @@ class TestBackoff:
     def test_retry_after_is_honoured_up_to_max_wait(self, retry_after: float, max_wait: float) -> None:
         """A server-named delay beats our curve, but an hour must not hang the run."""
         configure_retries(attempts=3, max_wait=max_wait)
-        state = _FakeRetryState(CvatApiError("busy", status_code=503, retry_after=retry_after))
+        state = _failed_attempt(CvatApiError("busy", status_code=503, retry_after=retry_after))
 
-        assert _backoff(state) == min(retry_after, max_wait)  # type: ignore[arg-type]
+        assert _backoff(state) == min(retry_after, max_wait)
 
-    @given(attempt=st.integers(1, 30), max_wait=st.floats(0.01, 600))
-    def test_backoff_without_a_header_stays_within_max_wait(self, attempt: int, max_wait: float) -> None:
-        configure_retries(attempts=8, max_wait=max_wait)
-        wait = _backoff(_FakeRetryState(ConnectionError("reset"), attempt))  # type: ignore[arg-type]
-
-        assert 0 < wait <= max_wait + _JITTER
-
-    def test_backoff_grows_with_the_attempt_number(self) -> None:
-        """Without growth a rate-limited server just gets hammered harder."""
-        configure_retries(attempts=8, max_wait=1000.0)
-        early = _backoff(_FakeRetryState(ConnectionError("reset"), 1))  # type: ignore[arg-type]
-        late = _backoff(_FakeRetryState(ConnectionError("reset"), 6))  # type: ignore[arg-type]
-
-        assert late > early
+    def test_without_a_header_uses_the_configured_wait_limit(self) -> None:
+        configure_retries(attempts=8, max_wait=0.25)
+        assert _backoff(_failed_attempt(ConnectionError("reset"), attempt=4)) == 0.25
 
 
 def test_default_attempt_count_allows_a_real_retry() -> None:

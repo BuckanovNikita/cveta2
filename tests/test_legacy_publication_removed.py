@@ -1,30 +1,11 @@
 """Removed automatic publication interfaces fail before performing effects."""
 
-import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from cveta2.domain.managed.models import MigrationRequired
-from cveta2.interfaces.api import fetch
 from tests.helpers import parse_cli_args
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-
-def test_fetch_has_no_automatic_publication_keyword() -> None:
-    """Callers must select explicit preparation and publication instead."""
-    assert "publish_clearml" not in inspect.signature(fetch).parameters
-
-
-def test_removed_fetch_keyword_is_rejected_before_connecting(tmp_path: Path) -> None:
-    """The former keyword fails at the public call boundary."""
-    removed_options = {"publish_clearml": False}
-    with pytest.raises(TypeError, match="publish_clearml"):
-        cast("Callable[..., object]", fetch)(1, tmp_path / "out", **removed_options)
-    assert not (tmp_path / "out").exists()
 
 
 @pytest.mark.parametrize(

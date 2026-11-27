@@ -5,7 +5,6 @@ import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Mapping
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
 
@@ -45,16 +44,8 @@ from cveta2.domain.managed.preparation import (
     ManagedRecord,
     PreparationSummary,
 )
+from cveta2.domain.verification.cells import nonnegative_id
 from cveta2.domain.verification.models import ValidationOptions, ValidationResult
-
-
-def _integer(value: object) -> int | None:
-    """Interpret explicit CSV identity without guessing invalid source values."""
-    try:
-        number = Decimal(str(value))
-        return int(number) if number.is_finite() and number >= 0 and number == number.to_integral_value() else None
-    except InvalidOperation:
-        return None
 
 
 def _origin(row: dict[str, object], captured: CapturedManagedInput) -> tuple[str, int, int, int] | None:
@@ -69,13 +60,13 @@ def _origin(row: dict[str, object], captured: CapturedManagedInput) -> tuple[str
     if source is None or source.type != "cvat" or source.project_id is None:
         return None
     task_id, frame_id = (
-        _integer(row.get("source_task_id")),
-        _integer(row.get("source_frame_id")),
+        nonnegative_id(row.get("source_task_id")),
+        nonnegative_id(row.get("source_frame_id")),
     )
     if task_id is None or frame_id is None:
         return None
     project = row.get("source_project_id")
-    if project not in (None, "") and _integer(project) != source.project_id:
+    if project not in (None, "") and nonnegative_id(project) != source.project_id:
         return None
     origin = (source_id, source.project_id, task_id, frame_id)
     return origin if origin in captured.origins else None

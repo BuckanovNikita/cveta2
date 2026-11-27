@@ -66,6 +66,16 @@ def parse_sync_root(root: str) -> tuple[str | None, str]:
     return (None, prefix)
 
 
+def validate_sync_root(value: str | None) -> str | None:
+    """Validate a configured root without echoing its value in errors."""
+    if value is not None:
+        try:
+            parse_sync_root(value)
+        except ValueError:
+            raise ValueError("Expected s3://bucket[/prefix] or a nonempty bare prefix") from None
+    return value
+
+
 def _key_prefix_dir(prefix: str) -> str:
     """Return *prefix* in the directory form every key comparison uses.
 

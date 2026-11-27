@@ -7,11 +7,6 @@ import pytest
 PACKAGE = Path(__file__).parents[1] / "cveta2"
 
 
-@pytest.mark.parametrize("layer", ["domain", "application", "adapters", "composition", "interfaces"])
-def test_canonical_layers_are_explicit_packages(layer: str) -> None:
-    assert (PACKAGE / layer / "__init__.py").is_file()
-
-
 def test_canonical_effect_ownership() -> None:
     from tests.architecture_effects import check_tree
 

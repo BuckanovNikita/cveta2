@@ -4,14 +4,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
-import pytest
 
 import cveta2
 from cveta2.adapters.config.settings import IgnoreConfig, IgnoredTask
 from cveta2.composition.client import CvatClient
 from tests.integration.test_upload import IMAGE_NAMES, _get_project_and_storage
-
-pytestmark = pytest.mark.integration
 
 
 def _positions(client: CvatClient, task_id: int) -> dict[int, tuple[str, str]]:

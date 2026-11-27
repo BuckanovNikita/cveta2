@@ -34,26 +34,15 @@ if TYPE_CHECKING:
 from tests.api_helpers import _scoped
 
 
-def _images_dir(
-    images_dir: "str | Path | None",
-    project_name: str,
-    config_path: "Path | None",
-    *,
-    download: bool,
-) -> "Path | None":
-    """Call ``_resolve_images_dir`` with its boolean passed by keyword."""
-    return _resolve_images_dir(images_dir, download, project_name, config_path)
-
-
 class TestImagesDirResolution:
     """The four-branch precedence chain of ``_resolve_images_dir``."""
 
     def test_download_disabled_returns_none(self) -> None:
-        assert _images_dir(None, "proj", None, download=False) is None
+        assert _resolve_images_dir(None, "proj", None, download_images=False) is None
 
     def test_conflicting_arguments_rejected(self, tmp_path: "Path") -> None:
         with pytest.raises(Cveta2Error, match="несовместимы"):
-            _images_dir(tmp_path, "proj", None, download=False)
+            _resolve_images_dir(tmp_path, "proj", None, download_images=False)
 
     def test_explicit_dir_wins_and_is_made_absolute(self, tmp_path: "Path", monkeypatch: pytest.MonkeyPatch) -> None:
         """Only a returned path shows that ``images_dir`` reached ``Path()``.
@@ -63,7 +52,7 @@ class TestImagesDirResolution:
         """
         monkeypatch.chdir(tmp_path)
 
-        resolved = _images_dir("imgs", "proj", None, download=True)
+        resolved = _resolve_images_dir("imgs", "proj", None, download_images=True)
 
         assert resolved == (tmp_path / "imgs").resolve()
 
@@ -77,13 +66,13 @@ class TestImagesDirResolution:
         cache_dir = tmp_path / "cached-images"
         config = write_config_yaml(tmp_path / "explicit.yaml", image_cache={"proj": str(cache_dir)})
 
-        assert _images_dir(None, "proj", config, download=True) == cache_dir
+        assert _resolve_images_dir(None, "proj", config, download_images=True) == cache_dir
 
     def test_project_without_image_cache_raises(self, tmp_path: "Path") -> None:
         config = write_config_yaml(tmp_path / "explicit.yaml", image_cache={"proj": str(tmp_path)})
 
         with pytest.raises(Cveta2Error, match="image_cache"):
-            _images_dir(None, "other", config, download=True)
+            _resolve_images_dir(None, "other", config, download_images=True)
 
 
 class TestFetchApi:

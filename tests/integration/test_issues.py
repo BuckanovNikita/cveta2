@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pandas as pd
-import pytest
 from cvat_sdk.api_client import models as cvat_models
 from cvat_sdk.core.helpers import get_paginated_collection
 
@@ -28,10 +27,11 @@ from tests.integration.test_upload import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pytest
+
     from cveta2.adapters.config.settings import CvatConfig
     from cveta2.domain.models import AnnotationRecord
 
-pytestmark = pytest.mark.integration
 
 _ISSUE_MESSAGE = "проблема с разметкой"
 

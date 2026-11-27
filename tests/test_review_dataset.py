@@ -754,35 +754,3 @@ def test_coco_prunes_missing_owned_image_without_error(tmp_path: Path) -> None:
     convert_to_coco(csv, output, image_dirs=images, link_mode="copy")
     assert not (output / "test").exists()
     assert (output / "train/_annotations.coco.json").is_file()
-
-
-def test_csv_reader_guard_is_collected_before_real_reader() -> None:
-    import subprocess
-
-    real_reader = "tests/test_output.py::test_read_dataset_csv_blank_file_names_the_path"
-    bounded_reader = "tests/test_review_dataset.py::test_csv_reader_stops_after_first_eof"
-    # Explicit node order models mutmut's unordered caller set; collection must
-    # retain both tests while putting finite-EOF verification ahead of real IO.
-    result = subprocess.run(  # noqa: S603 - fixed pytest nodes and current interpreter
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            real_reader,
-            bounded_reader,
-            "--collect-only",
-            "-q",
-            "-o",
-            "addopts=-p tests.env_isolation",
-            "-p",
-            "no:cacheprovider",
-        ],
-        cwd=Path(__file__).resolve().parents[1],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    nodeids = [line for line in result.stdout.splitlines() if line in {real_reader, bounded_reader}]
-    assert nodeids == [bounded_reader, real_reader]

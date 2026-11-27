@@ -51,7 +51,9 @@ def _push_to_cvat(
     task_id = _ensure_task(client, request, staged, manifest, deps=deps)
     session = client.open_task_session(task_id)
 
-    num_shapes = _ensure_annotations(client, task_id, staged, session, request.resume, manifest=manifest, deps=deps)
+    num_shapes = _ensure_annotations(
+        client, task_id, staged, session, resuming=request.resume, manifest=manifest, deps=deps
+    )
 
     num_issues = 0
     if "issue_state" in staged.annotations.columns:
