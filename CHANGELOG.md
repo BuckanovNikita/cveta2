@@ -2,6 +2,29 @@
 
 <!-- version list -->
 
+## v0.16.1 (2026-11-27)
+
+### Bug Fixes
+
+- **class-api**: Accept records without techClass, isPeriodical or isCritical (SIP-334)
+  ([#39](https://github.com/BuckanovNikita/cveta2/pull/39),
+  [`a1a6e87`](https://github.com/BuckanovNikita/cveta2/commit/a1a6e876dfa2d6bec1440f14a997f84ca65fe082))
+
+### Documentation
+
+- Record the bundle-workflow decisions and complete the 0.16.0 changelog (SIP-278)
+  ([#38](https://github.com/BuckanovNikita/cveta2/pull/38),
+  [`710b356`](https://github.com/BuckanovNikita/cveta2/commit/710b35648b156f81eb778880ccdbc340555ce2de))
+
+- **adr**: Record four decisions of the bundle-workflow redesign
+  ([#38](https://github.com/BuckanovNikita/cveta2/pull/38),
+  [`710b356`](https://github.com/BuckanovNikita/cveta2/commit/710b35648b156f81eb778880ccdbc340555ce2de))
+
+- **changelog**: List every breaking change of 0.16.0
+  ([#38](https://github.com/BuckanovNikita/cveta2/pull/38),
+  [`710b356`](https://github.com/BuckanovNikita/cveta2/commit/710b35648b156f81eb778880ccdbc340555ce2de))
+
+
 ## v0.16.0 (2026-11-25)
 
 ### Bug Fixes
