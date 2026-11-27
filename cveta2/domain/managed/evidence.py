@@ -77,7 +77,8 @@ def assess_cvat_source(
     """Compare a CVAT source recorded at fetch with its live tasks and labels.
 
     Only a task completed now that fetch did not record as completed stops a
-    command. A task that was deleted, ignored, reopened or edited since fetch,
+    command. A task fetch skipped for having no uploaded data gets its own
+    warning instead of being reported as new. A task that was deleted, ignored, reopened or edited since fetch,
     and every task of a source whose labels changed, is stale: its findings are
     skipped.
     """
@@ -94,6 +95,8 @@ def assess_cvat_source(
             stale.add((source.name, task_id))
         elif now.completed and (then is None or not then.completed):
             newly_completed.append(f"{source.name}/{task_id}")
+        elif then is None and task_id in source.skipped:
+            warnings.append(f"{source.name}: задача {task_id} пропущена при fetch: в ней не было загруженных данных")
         elif then is None:
             warnings.append(f"{source.name}: новая незавершённая задача {task_id}")
         elif then.completed and not now.completed:

@@ -173,7 +173,7 @@ list_projects() requires a context manager. Use: with CvatClient(cfg) as client:
 
 ### Выгрузка через клиент
 
-`prepare_fetch(project_id, *, completed_only=False, ignore_task_ids=None, silent_task_ids=None, task_selector=None, project_name="")` читает список задач и метки проекта, применяет фильтры и возвращает `FetchContext`. Затем `CvatClient.fetch_one_task(client.api, task, ctx)` выгружает одну задачу и возвращает `TaskAnnotations`, или `None`, если задача пропущена из-за ошибки CVAT 5xx. Это низкоуровневый путь: он не пишет CSV, не использует [кэш аннотаций](../GLOSSARY.md) (annotation cache) и не делит строки на файлы. Обычно удобнее `cveta2.fetch` и `cveta2.fetch_task`.
+`prepare_fetch(project_id, *, completed_only=False, ignore_task_ids=None, silent_task_ids=None, task_selector=None, project_name="")` читает список задач и метки проекта, применяет фильтры и возвращает `FetchContext`. Затем `CvatClient.fetch_one_task(client.api, task, ctx)` выгружает одну задачу и возвращает `TaskAnnotations`, или `None`, если задача пропущена: в ней ещё нет загруженных данных или CVAT ответил ошибкой 5xx. Это низкоуровневый путь: он не пишет CSV, не использует [кэш аннотаций](../GLOSSARY.md) (annotation cache) и не делит строки на файлы. Обычно удобнее `cveta2.fetch` и `cveta2.fetch_task`.
 
 | Поле `FetchContext` | Значение |
 |---|---|
@@ -222,6 +222,7 @@ list_projects() requires a context manager. Use: with CvatClient(cfg) as client:
 | `CvatApiError` | `Cveta2Error` | CVAT вернул ошибку, или запрос не удался после всех повторов. | `status_code`, `retry_after`, `diagnostics` (см. ниже). |
 | `ProjectNotFoundError` | `Cveta2Error` | Проекта с таким именем нет. Несуществующий числовой ID обычно даёт `CvatApiError` с кодом 404. | Текст сообщения. |
 | `TaskNotFoundError` | `Cveta2Error` | Задача не найдена по ID или имени. | Текст сообщения со списком доступных задач. |
+| `TaskDataNotUploadedError` | `CvatApiError` | В задаче CVAT ещё нет загруженных данных (CVAT ответил `400 Data is not uploaded for the task yet`); сообщение называет ID задачи. Выгрузки такую задачу пропускают; исключение возникает в операциях, которым нужны кадры задачи, например при пометке кадров удалёнными. `fetch_task`, в котором данных нет ни в одной задаче, бросает `Cveta2Error`. | `status_code` (400), `diagnostics`. |
 | `MissingCredentialsError` | `Cveta2Error` | Нет логина или пароля CVAT. | Текст с подсказкой, где их задать. |
 | `MissingHostError` | `Cveta2Error` | Адрес CVAT пустой после сбора настроек. Так как встроенные значения задают `http://localhost:8080`, при обычной установке это исключение не возникает. | Текст с подсказкой. |
 | `InteractiveModeRequiredError` | `Cveta2Error` | Только в CLI: нужен ответ пользователя, а интерактивный режим выключен. | Текст с подсказкой, какой флаг или переменную использовать. |
@@ -459,6 +460,7 @@ print(len(parts.dataset), len(parts.obsolete), len(parts.in_progress))
 | `Publication` | [upload-dataset](commands/upload-dataset.md#из-python), [dataset](commands/dataset.md) |
 | `Split` | [Значения job и split](#значения-job-и-split) |
 | `TaskAnnotations` | [Записи аннотаций](#записи-аннотаций) |
+| `TaskDataNotUploadedError` | [Исключения и предупреждения](#исключения-и-предупреждения) |
 | `TaskInfo` | [Проекты, задачи, метки](#проекты-задачи-метки) |
 | `TaskNotFoundError` | [Исключения и предупреждения](#исключения-и-предупреждения) |
 | `UploadResult` | [upload](commands/upload.md#из-python) |

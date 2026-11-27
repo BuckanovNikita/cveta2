@@ -16,7 +16,7 @@ from cveta2.adapters.files.task_output import LocalWorkflowFiles
 from cveta2.adapters.s3.task_cache import TaskAnnotationCache
 from cveta2.application.client import ApplicationClient
 from cveta2.application.client.job_cache import CachedAnnotations
-from cveta2.application.client.shared import FetchContext
+from cveta2.application.client.shared import FetchContext, TaskSkip
 from cveta2.application.ports.cache import AnnotationScope, CacheFactory, TaskCache
 from cveta2.application.ports.dtos import RawAnnotations, RawJob
 from cveta2.application.ports.workflow_files import WorkflowFiles
@@ -252,7 +252,9 @@ def test_task_summary_reports_skipped_and_incomplete_without_cache(
     complete = client.fetch_one_task(api, fake.tasks[0], context)
     assert complete is not None
     incomplete = complete.model_copy(update={"issues_complete": False})
-    monkeypatch.setattr(client, "fetch_task_through", Mock(side_effect=[(complete, False), None, (incomplete, False)]))
+    monkeypatch.setattr(
+        client, "fetch_task_through", Mock(side_effect=[(complete, False), TaskSkip.SERVER_ERROR, (incomplete, False)])
+    )
     target = FetchTarget(fake.project.id, fake.project.name, tmp_path)
     deps = fetch_dependencies(target, FetchOptions(use_cache=False))
     clock = Mock(side_effect=[100.0, 110.0, 112.0, 120.0, 124.0, 130.0, 135.0, 150.0])

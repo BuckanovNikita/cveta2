@@ -43,7 +43,10 @@ from cveta2.domain.managed.models import (
     TaskSnapshot,
     source_fingerprint,
 )
-from cveta2.domain.models import CSV_COLUMNS, LabelAttributeInfo, LabelInfo, TaskInfo
+from cveta2.domain.models import CSV_COLUMNS, LabelAttributeInfo, LabelInfo, ProjectInfo, TaskInfo
+from tests.fixtures.fake_cvat_api import FakeCvatApi
+from tests.fixtures.fake_cvat_project import LoadedFixtures
+from tests.helpers import make_task
 
 
 def _registry() -> list[ApiClass]:
@@ -145,7 +148,7 @@ def _config(*, supplemental: bool = False) -> tuple[ProjectConfig, DatasetDefini
 def _fetch(  # noqa: PLR0913
     config: ProjectConfig,
     definition: DatasetDefinition,
-    reader: _Cvat,
+    reader: _Cvat | CvatSources,
     *,
     previous: ManagedSnapshot | None = None,
     previous_cvat: CvatIdentity | None = None,
@@ -561,7 +564,7 @@ def test_s3_adapter_captures_opaque_etag_and_content_without_images() -> None:
     assert client.method_calls == client.get_object.call_args_list or len(client.method_calls) == 1
 
 
-def _assess(config: ProjectConfig, snapshot: ManagedSnapshot, reader: _Cvat, s3: _S3) -> SourceAssessment:
+def _assess(config: ProjectConfig, snapshot: ManagedSnapshot, reader: _Cvat | CvatSources, s3: _S3) -> SourceAssessment:
     services = ManagedPublicationServices(
         files=Mock(),
         media=Mock(),
@@ -681,6 +684,7 @@ def test_cvat_adapter_jobs_and_capture_completion_use_the_same_rule() -> None:
     inspected = adapter.inspect_project(12).tasks[0]
     assert not inspected.completed
     captured = adapter.read_task(12, inspected)
+    assert captured is not None
     assert not captured.completed
     assert LocalSourceFiles().project_tables([captured])["dataset.csv"].count("image.jpg") == 0
     api.get_task_jobs.return_value = [
@@ -694,6 +698,45 @@ def test_cvat_adapter_jobs_and_capture_completion_use_the_same_rule() -> None:
     ]
     with pytest.raises(ManagedError, match="completion changed"):
         adapter.read_task(12, inspected)
+
+
+def test_a_task_without_uploaded_data_is_recorded_as_skipped_and_read_once_uploaded(
+    capture_logs: list[str],
+) -> None:
+    config, definition = _config()
+    tasks = [make_task(1, name="ready"), make_task(2, name="still uploading")]
+    api = FakeCvatApi(
+        LoadedFixtures(
+            project=ProjectInfo(id=12, name="p"),
+            tasks=[task.model_copy(update={"project_id": 12}) for task in tasks],
+            labels=[LabelInfo(id=1, name="cat")],
+            task_data={
+                1: (RawDataMeta([RawFrame("a.jpg", 100, 100)]), RawAnnotations()),
+                2: (RawDataMeta([RawFrame("b.jpg", 100, 100)]), RawAnnotations()),
+            },
+        ),
+        no_data_task_ids={2},
+    )
+    reader = CvatSources(api, task_to_records)
+
+    first, _ = _fetch(config, definition, reader)
+
+    source = ManagedSnapshot.model_validate(first.model_dump(mode="json")).sources[0]
+    assert set(source.tasks) == {"1"}
+    assert (source.fetched, source.skipped) == ([1], [2])
+    notices = [message for message in capture_logs if "#2 'still uploading'" in message]
+    assert len(notices) == 1
+    assert "не загружены данные" in notices[0]
+    assessment = _assess(config, first, reader, _S3())
+    assert assessment.warnings == ("main: задача 2 пропущена при fetch: в ней не было загруженных данных",)
+    assert assessment.stale_tasks == frozenset()
+
+    api.no_data_task_ids.clear()
+    second, _ = _fetch(config, definition, reader, previous=first, previous_cvat=config.cvat)
+
+    assert set(second.sources[0].tasks) == {"1", "2"}
+    assert (second.sources[0].reused, second.sources[0].fetched, second.sources[0].skipped) == ([1], [2], [])
+    assert "skipped" not in second.sources[0].model_dump(mode="json")
 
 
 def test_published_snapshot_reads_exact_id_and_rejects_missing_files(

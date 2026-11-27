@@ -47,6 +47,7 @@ def _cvat_source(  # noqa: PLR0913
     tasks: dict[str, TaskSnapshot] = {}
     fetched: list[int] = []
     reused: list[int] = []
+    skipped: list[int] = []
     inventory = sorted(state.tasks, key=lambda task: task.id)
     if len({task.id for task in inventory}) != len(inventory):
         raise ManagedError(f"Duplicate task ids in source {source.name}")
@@ -64,9 +65,13 @@ def _cvat_source(  # noqa: PLR0913
             captured = old
             reused.append(live.id)
         else:
-            captured = reader.read_task(project.id, live)
-            if captured.id != live.id or captured.updated_date != live.updated_date:
+            read = reader.read_task(project.id, live)
+            if read is None:
+                skipped.append(live.id)
+                continue
+            if read.id != live.id or read.updated_date != live.updated_date:
                 raise ManagedError(f"Task changed during fetch: {source.name}/{live.id}")
+            captured = read
             fetched.append(live.id)
         tasks[str(live.id)] = captured
     return SourceSnapshot(
@@ -79,6 +84,7 @@ def _cvat_source(  # noqa: PLR0913
         tables=files.project_tables(list(tasks.values())),
         fetched=fetched,
         reused=reused,
+        skipped=skipped,
     )
 
 

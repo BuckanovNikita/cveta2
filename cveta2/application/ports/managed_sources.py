@@ -63,8 +63,12 @@ class CvatSourceReader(Protocol):
         """Return live task metadata and a stable label fingerprint."""
         ...
 
-    def read_task(self, project_id: int, task: TaskSnapshot) -> TaskSnapshot:
-        """Capture all task records/deletions and actual all-job completion."""
+    def read_task(self, project_id: int, task: TaskSnapshot) -> TaskSnapshot | None:
+        """Capture all task records/deletions and actual all-job completion.
+
+        Returns ``None`` for a task without uploaded data: there is nothing
+        to capture, and the caller records the task as skipped.
+        """
         ...
 
 

@@ -19,7 +19,7 @@ from cveta2.application.ports.dtos import (
     RawIssue,
     RawShape,
 )
-from cveta2.domain.errors import CvatApiError
+from cveta2.domain.errors import CvatApiError, TaskDataNotUploadedError
 from cveta2.domain.models import OrganizationInfo, ProjectInfo, TaskInfo
 from tests.fixtures.fake_cvat_project import LoadedFixtures
 
@@ -104,6 +104,11 @@ class FakeCvatApi:
     *cloud_storage* is what ``get_project_cloud_storage`` reports for the
     project; the default ``None`` keeps every fetch local-only.
 
+    Tasks in ``no_data_task_ids`` behave like CVAT tasks whose data was
+    never uploaded: no jobs, and data and annotation reads raise
+    :class:`TaskDataNotUploadedError`, which is what the SDK adapter turns
+    CVAT's 400 into. Removing an id "uploads" the task's fixture data.
+
     *flaky* makes any method fail its first N calls and then succeed, which
     is what a retry policy has to be tested against: ``call_counts`` then
     says how many attempts it actually took.  Mutations are guarded by a
@@ -121,8 +126,10 @@ class FakeCvatApi:
         flaky_status: int = 429,
         flaky_retry_after: float | None = None,
         cloud_storage: CloudStorageInfo | None = None,
+        no_data_task_ids: Collection[int] = frozenset(),
     ) -> None:
         """Unpack fixture data into internal stores (copies: writes stay local)."""
+        self.no_data_task_ids = set(no_data_task_ids)
         self._project = fixtures.project
         self._tasks = list(fixtures.tasks)
         self._labels = fixtures.labels
@@ -174,6 +181,8 @@ class FakeCvatApi:
     def _raise_if_failing(self, method: str, task_id: int) -> None:
         with self._lock:
             self.call_counts[method] += 1
+        if task_id in self.no_data_task_ids and method != "get_task_jobs":
+            raise TaskDataNotUploadedError("В задаче CVAT ещё нет загруженных данных", status_code=400)
         if task_id in self._fail_task_ids and method in self._fail_methods:
             raise CvatApiError("fake failure", status_code=self._fail_status)
 
@@ -283,6 +292,8 @@ class FakeCvatApi:
     def _jobs_of(self, task_id: int) -> list[RawJob]:
         from cveta2.application.ports.dtos import RawJob
 
+        if task_id in self.no_data_task_ids:
+            return []
         if task_id in self.jobs:
             return self.jobs[task_id]
         data_meta, _annotations = self._task_data[task_id]

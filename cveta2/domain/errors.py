@@ -75,6 +75,24 @@ class CvatApiError(Cveta2Error):
         self.diagnostics = diagnostics
 
 
+class TaskDataNotUploadedError(CvatApiError):
+    """CVAT has the task, but no data has been uploaded to it yet.
+
+    CVAT answers reads of such a task's data or annotations with HTTP 400
+    and the body ``["Data is not uploaded for the task yet"]``: the upload
+    is still running, it failed, or no data was ever attached. That is a
+    normal project state, so fetch skips the task instead of failing.
+    """
+
+
+def no_data_skip_notice(task_id: int, task_name: str) -> str:
+    """Return the one notice every fetch logs for a skipped task without data."""
+    return (
+        f"Задача #{task_id} {task_name!r} пропущена: в CVAT ещё не загружены данные. "
+        "Она попадёт в выгрузку, когда данные будут загружены."
+    )
+
+
 class ClearmlPublishError(Cveta2Error):
     """Raised when publishing a dataset to ClearML fails.
 

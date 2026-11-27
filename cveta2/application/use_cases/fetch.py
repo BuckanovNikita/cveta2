@@ -15,7 +15,7 @@ from loguru import logger
 
 from cveta2.application.client import ApplicationClient as CvatClient
 from cveta2.application.client.job_cache import CachedAnnotations
-from cveta2.application.client.shared import FetchContext
+from cveta2.application.client.shared import FetchContext, TaskSkip
 from cveta2.application.ports.cache import CacheFactory, TaskCache
 from cveta2.application.ports.execution import ConcurrentRunner
 from cveta2.application.ports.workflow_files import FetchFiles
@@ -96,7 +96,7 @@ def fetch_project(
         started = deps.clock()
         _promote_completed_annotations(client, target, options, deps=deps)
         logger.info(f"Принятие завершённой разметки: прошло {deps.clock() - started:.1f} с")
-    result = _fetch_core(client, target, options, prune_cache=True, deps=deps)
+    result = _fetch_core(client, target, options, prune_cache=True, require_data=False, deps=deps)
 
     if options.raw:
         started = deps.clock()
@@ -185,7 +185,7 @@ def fetch_selected_tasks(
 ) -> ProjectAnnotations:
     """Selected-tasks fetch: writes dataset.csv + deleted.csv, returns result."""
     fetch_started = deps.clock()
-    result = _fetch_core(client, target, options, prune_cache=False, deps=deps)
+    result = _fetch_core(client, target, options, prune_cache=False, require_data=True, deps=deps)
     started = deps.clock()
     deps.files.write_dataset_and_deleted(result, target.output_dir)
     logger.info(f"Запись CSV: прошло {deps.clock() - started:.1f} с")
@@ -193,15 +193,20 @@ def fetch_selected_tasks(
     return result
 
 
-def _fetch_core(
+def _fetch_core(  # noqa: PLR0913
     client: CvatClient,
     target: FetchTarget,
     options: FetchOptions,
     *,
     deps: FetchDependencies,
     prune_cache: bool,
+    require_data: bool,
 ) -> ProjectAnnotations:
-    """Shared fetch flow: prepare, cache loop, prune, download, path population."""
+    """Shared fetch flow: prepare, cache loop, prune, download, path population.
+
+    With *require_data*, a run whose every selected task has no uploaded data
+    fails instead of producing empty output: the user asked for those tasks.
+    """
     project_id, project_name = target.project_id, target.project_name
     started = deps.clock()
     ctx = client.prepare_fetch(
@@ -230,6 +235,7 @@ def _fetch_core(
         target.output_dir,
         source,
         save_tasks=options.save_tasks,
+        require_data=require_data,
         deps=deps,
     )
 
@@ -299,6 +305,7 @@ class _FetchStats:
     fetch_seconds: float = 0.0
     skipped_seconds: float = 0.0
     skipped_task_ids: list[int] = field(default_factory=list)
+    no_data_task_ids: list[int] = field(default_factory=list)
     degraded_task_ids: list[int] = field(default_factory=list)
 
     def record_hit(self, seconds: float) -> None:
@@ -319,6 +326,11 @@ class _FetchStats:
             self.skipped_task_ids.append(task_id)
             self.skipped_seconds += seconds
 
+    def record_no_data(self, task_id: int) -> None:
+        """Record a task without uploaded data apart from failure skips."""
+        with self.lock:
+            self.no_data_task_ids.append(task_id)
+
     def record_degraded(self, task_id: int) -> None:
         """Record incomplete issues without double-counting the fetched task."""
         with self.lock:
@@ -329,6 +341,7 @@ class _FetchStats:
         logger.info(
             f"Обработка задач: прошло {elapsed:.1f} с; "
             f"из кэша: {self.cache_hits}, загружено с CVAT: {self.fetched}, "
+            f"без данных: {len(self.no_data_task_ids)}, "
             f"пропущено: {len(self.skipped_task_ids)}, "
             f"неполные issues: {len(self.degraded_task_ids)}. "
             f"Суммы времени работников: кэш {self.hit_seconds:.1f} с, "
@@ -358,12 +371,16 @@ def _retrieve_task(  # noqa: PLR0913
     """Return a task's annotations, its shapes through *source* when caching, updating *stats*.
 
     A task counts as a cache hit when none of its shapes had to be
-    downloaded. Returns ``None`` when the fetch skipped the task (5xx).
-    Only raw shapes are cached, so shared S3 entries stay machine-independent.
+    downloaded. Returns ``None`` when the fetch skipped the task: it has no
+    uploaded data yet, or CVAT answered 5xx. Only raw shapes are cached, so
+    shared S3 entries stay machine-independent.
     """
     started = deps.clock()
     fetched = client.fetch_task_through(client.api, task, ctx, source)
-    if fetched is None:
+    if fetched is TaskSkip.NO_DATA:
+        stats.record_no_data(task.id)
+        return None
+    if fetched is TaskSkip.SERVER_ERROR:
         stats.record_skip(task.id, deps.clock() - started)
         return None
     result, from_cache = fetched
@@ -384,6 +401,7 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
     *,
     deps: FetchDependencies,
     save_tasks: bool,
+    require_data: bool = False,
 ) -> ProjectAnnotations:
     """Fetch tasks in parallel, optionally saving CSVs into ``output_dir/.tasks/``.
 
@@ -397,6 +415,7 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
     directory untouched, including files belonging to previous runs.
 
     Returns the merged :class:`ProjectAnnotations` from all fetched tasks.
+    With *require_data*, raises when no selected task had uploaded data.
     """
     started = deps.clock()
     stats = _FetchStats(lock=deps.lock_factory())
@@ -427,4 +446,10 @@ def _fetch_and_save_tasks(  # noqa: PLR0913
     task_results = [r for r in outcomes if isinstance(r, TaskAnnotations)]
     result = TaskAnnotations.merge(task_results)
     stats.log_summary(deps.clock() - started)
+    if require_data and stats.no_data_task_ids and len(stats.no_data_task_ids) == len(ctx.tasks):
+        task_ids = ", ".join(f"#{task_id}" for task_id in sorted(stats.no_data_task_ids))
+        raise Cveta2Error(
+            f"В выбранных задачах ({task_ids}) в CVAT ещё не загружены данные — выгружать нечего. "
+            "Повторите выгрузку, когда данные будут загружены."
+        )
     return result

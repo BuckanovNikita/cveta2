@@ -12,13 +12,15 @@ from cveta2.application.client.shared import (
     _HTTP_5XX_MIN,
     _HTTP_NOT_FOUND,
     FetchContext,
+    TaskSkip,
     _FetchAnnotationsOptions,
     _is_rate_limited,
     _log_task_5xx_skip,
+    _log_task_no_data_skip,
 )
 from cveta2.application.ports.cache import TaskMeta
 from cveta2.application.ports.execution import ConcurrentRunner
-from cveta2.domain.errors import CvatApiError, Cveta2Error, TaskNotFoundError
+from cveta2.domain.errors import CvatApiError, Cveta2Error, TaskDataNotUploadedError, TaskNotFoundError
 from cveta2.domain.models import TaskAnnotations, TaskInfo
 
 if TYPE_CHECKING:
@@ -251,11 +253,11 @@ class _FetchMixin(_ClientBase):
     ) -> TaskAnnotations | None:
         """Fetch annotations for a single task via the API port.
 
-        Returns ``None`` when the task was skipped (5xx with
-        ``ctx.raise_on_failure`` not set).
+        Returns ``None`` when the task was skipped: it has no uploaded data
+        yet, or CVAT answered 5xx and ``ctx.raise_on_failure`` is not set.
         """
         fetched = _FetchMixin.fetch_task_through(api, task, ctx, None)
-        return None if fetched is None else fetched[0]
+        return fetched[0] if isinstance(fetched, tuple) else None
 
     @staticmethod
     def fetch_task_through(
@@ -263,12 +265,14 @@ class _FetchMixin(_ClientBase):
         task: TaskInfo,
         ctx: FetchContext,
         annotations: "CachedAnnotations | None",
-    ) -> "tuple[TaskAnnotations, bool] | None":
+    ) -> "tuple[TaskAnnotations, bool] | TaskSkip":
         """Fetch a task, reading its shapes through *annotations* when given.
 
         Returns the result and whether nothing but the jobs list had to be
-        read, or ``None`` when the task was skipped (5xx with
-        ``ctx.raise_on_failure`` not set). The jobs are always read live:
+        read, or why the task was skipped: it has no uploaded data yet (even
+        in strict mode: that is a normal state, not a failure), or CVAT
+        answered 5xx with ``ctx.raise_on_failure`` not set. Nothing of a
+        skipped task is cached. The jobs are always read live:
         records, completion and job positions are rebuilt from them. Frame
         metadata and issues come from the cache while the task and all jobs
         are unchanged; an incomplete issue read is never cached.
@@ -286,6 +290,9 @@ class _FetchMixin(_ClientBase):
                 shapes, from_cache = api.get_task_annotations(task.id), False
             else:
                 shapes, from_cache = annotations.load(api, task, jobs)
+        except TaskDataNotUploadedError:
+            _log_task_no_data_skip(task)
+            return TaskSkip.NO_DATA
         except CvatApiError as e:
             if _is_rate_limited(e):
                 msg = (
@@ -299,7 +306,7 @@ class _FetchMixin(_ClientBase):
                 if ctx.raise_on_failure:
                     raise
                 _log_task_5xx_skip(task, ctx, e)
-                return None
+                return TaskSkip.SERVER_ERROR
             raise
 
         issues_complete = True
