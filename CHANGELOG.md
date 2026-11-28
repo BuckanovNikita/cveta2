@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v0.17.0 (2026-11-28)
+
+### Bug Fixes
+
+- **convert**: Read each image header by default (SIP-174)
+  ([`5765ed5`](https://github.com/BuckanovNikita/cveta2/commit/5765ed59455484723df08229bf3a2a3d3f1cad03))
+
+- **s3**: Distinguish sibling frames in the same fetch (SIP-329)
+  ([`60b7b60`](https://github.com/BuckanovNikita/cveta2/commit/60b7b6061530ed69c0c9b805781ac2a6ea90e53b))
+
+- **s3**: Prevent sibling frame basename substitution (SIP-329)
+  ([`8f93c50`](https://github.com/BuckanovNikita/cveta2/commit/8f93c50154a40ed291b1cdca736400ab70c0f52f))
+
+### Features
+
+- **config**: Bind project settings to CVAT IDs (SIP-330)
+  ([`9ac6c00`](https://github.com/BuckanovNikita/cveta2/commit/9ac6c00147db8d5c865ec3e86853dc1d0fb51022))
+
+### Refactoring
+
+- Deduplicate validation and remove redundant checks
+  ([`7d1e636`](https://github.com/BuckanovNikita/cveta2/commit/7d1e636f32d642216717b0c693881e03d510995c))
+
+
 ## v0.16.2 (2026-11-27)
 
 ### Bug Fixes
