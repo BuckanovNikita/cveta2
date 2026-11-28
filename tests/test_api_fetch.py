@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from botocore.exceptions import ClientError
 
 import cveta2
 from cveta2.domain.errors import (
@@ -15,6 +16,7 @@ from cveta2.domain.errors import (
 from cveta2.domain.managed.models import MigrationRequired
 from cveta2.domain.models import CSV_COLUMNS
 from cveta2.interfaces.api.fetch import _resolve_images_dir
+from tests.fixtures.fake_s3 import FakeS3Client
 from tests.helpers import (
     build_fake,
     fake_connection,
@@ -318,6 +320,18 @@ def _ignore_config(tmp_path: "Path", fake: "LoadedFixtures", ignored: "TaskInfo"
 @pytest.mark.parametrize("entry", _ENTRY_POINTS)
 class TestFetchEntryPoints:
     """Contracts ``fetch`` and ``fetch_task`` share, run through both."""
+
+    def test_denied_image_request_preserves_sdk_error(
+        self, normal_fake: "LoadedFixtures", tmp_path: "Path", entry: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, connection = _scoped(normal_fake, cloud_storage=make_cs_info(bucket="frames", prefix="raw"))
+        bucket = FakeS3Client()
+        monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: bucket)
+        denied = ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+        with patch.object(bucket, "get_object", side_effect=denied), pytest.raises(ClientError) as caught:
+            _run_entry(entry, normal_fake, tmp_path / "out", connection, images_dir=tmp_path / "images", cache="off")
+        assert caught.value is denied
+        assert any("s3://frames/raw" in note for note in denied.__notes__)
 
     def test_completed_only_filters_the_tasks(
         self, coco8_fixtures: "LoadedFixtures", tmp_path: "Path", entry: str

@@ -238,7 +238,7 @@ cveta2.upload(dataset, project, name, *, labels=None, include_unannotated=False,
 - `image_dirs` — список каталогов для поиска изображений; в отличие от CLI, их может быть несколько. Символ `~` в пути не раскрывается, указывайте полный или относительный путь.
 - `complete`, `mark_all_deleted`, `resume` — как одноимённые флаги.
 
-Функция ничего не спрашивает. Она возвращает `UploadResult` с полями `task_id`, `task_name`, `url`, `images`, `deleted`, `annotations`, `issues`. При ошибке поднимается `cveta2.Cveta2Error` или его подкласс (`cveta2.CvatApiError` для ошибок CVAT).
+Функция ничего не спрашивает. Она возвращает `UploadResult` с полями `task_id`, `task_name`, `url`, `images`, `deleted`, `annotations`, `issues`. Ошибки CVAT передаются как `cveta2.CvatApiError`. Если отдельные изображения не удалось записать в S3, функция поднимает `cveta2.Cveta2Error` до создания задачи. Ошибка доступа ко всему хранилищу, например отказ при получении списка ключей, выходит из функции как исходное исключение SDK (`botocore.exceptions.ClientError` при отказе S3).
 
 ```python
 import cveta2

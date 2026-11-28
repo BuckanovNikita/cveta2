@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from botocore.exceptions import ClientError
 
 import cveta2
 from cveta2.adapters.config.settings import IgnoreConfig, IgnoredTask
@@ -41,6 +42,27 @@ class TestS3SyncApi:
         s3 = FakeS3Client({"raw/a.jpg": b"A", "synced/sub/b.jpg": b"B"}, keyed_by_bucket=False)
         monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _endpoint=None: s3)
         return s3
+
+    def test_denied_listing_preserves_sdk_error_and_storage_context(
+        self, normal_fake: "LoadedFixtures", tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bucket = self._fake_bucket(monkeypatch)
+        _, connection = _scoped(normal_fake, cloud_storage=make_cs_info(bucket="bkt", prefix="raw"))
+        denied = ClientError({"Error": {"Code": "AccessDenied"}}, "ListObjectsV2")
+        with patch.object(bucket, "list_objects_v2", side_effect=denied), pytest.raises(ClientError) as caught:
+            cveta2.s3_sync(normal_fake.project.id, tmp_path, connection=connection)
+        assert caught.value is denied
+        assert any("s3://bkt/raw" in note for note in denied.__notes__)
+
+    def test_denied_object_download_counts_as_failed(
+        self, normal_fake: "LoadedFixtures", tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        bucket = self._fake_bucket(monkeypatch)
+        _, connection = _scoped(normal_fake, cloud_storage=make_cs_info(bucket="bkt", prefix="raw"))
+        denied = ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+        with patch.object(bucket, "get_object", side_effect=denied):
+            stats = cveta2.s3_sync(normal_fake.project.id, tmp_path, connection=connection)
+        assert (stats.total, stats.downloaded, stats.failed) == (1, 0, 1)
 
     def test_explicit_root_overrides_the_project_prefix(
         self,
