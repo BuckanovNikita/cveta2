@@ -1,16 +1,10 @@
-# Local overrides are opt-in and cover publication settings only
+# Limit personal overrides to publication settings
 
-The global configuration is the team's single source for its CVAT server, projects, publication settings and managed datasets. A user may override a project's values in the personal configuration (`overrides.projects.<key>`) only when the global file sets `local_overrides: true`. Without that switch, the key is absent and overrides are rejected, so existing and migrated configurations keep their strictness.
+The global configuration owns the team’s CVAT server, project identities, storage policy, ignore lists and managed dataset definitions. A personal configuration may override a project’s publication settings only when the global file opts in with `local_overrides: true`. Omitting that switch preserves the default for existing and migrated configurations.
 
-Even when allowed, an override can replace only publication settings:
+| Personal publication override | Values |
+| --- | --- |
+| ClearML destination | Project, dataset name, output URI |
+| Training inputs | Class API URL, excluded classes, S3 image roots |
 
-- the ClearML project;
-- the dataset name;
-- `output_uri`;
-- the class API URL;
-- excluded classes;
-- S3 roots.
-
-It cannot replace a project's identity, sync root, ignored prefix, task cache or ignore list. It cannot replace `datasets.<name>` entries, which define managed datasets and their lineage. Writes to the global configuration always start from the raw global file, never from a user's effective view, so one user's override never leaks into the team file.
-
-Why: publication targets legitimately differ per user, for example a personal ClearML project for a trial upload. Everything else either identifies shared data or decides what a published version contains. If those differed per user, two people could publish different datasets under one name.
+A user can publish a trial dataset to a personal destination. The shared identity and source rules keep two users working with the same team data. A write to the global configuration starts from the raw global file so a personal override cannot leak into it. [config overrides tests](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/tests/test_config_overrides.py)

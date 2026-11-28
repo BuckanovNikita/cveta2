@@ -1,8 +1,22 @@
-# cveta2
+# cveta2 product glossary
 
-cveta2 turns CVAT bounding-box annotation projects into versioned training datasets: it fetches and partitions annotations into CSV, keeps local and S3 copies of images, creates CVAT tasks from CSV, verifies and prepares datasets, and publishes them to ClearML.
+Use these English and Russian terms for CVAT annotation, dataset preparation and ClearML publication. For build, test and release terminology, see the [engineering glossary](docs/adr/engineering/glossary.md).
 
 ## Language
+
+### CVAT annotations
+
+**Job**:
+The unit of work in a CVAT task that has its own stage and state. A task can contain several jobs, so one completed job alone cannot establish task completion.
+_Russian_: задание CVAT (job)
+
+**Frame**:
+One image position in a CVAT task. A frame number is local to the task, so the same image can have a different frame number in another task.
+_Russian_: кадр
+
+**Project label**:
+A CVAT project's annotation category, with an ID and a name. Renaming the label preserves its ID and existing annotations.
+_Russian_: метка проекта
 
 ### Fetch and partition
 
@@ -17,7 +31,7 @@ _Russian_: полная выгрузка
 _Avoid_: project export, full export
 
 **Task fetch**:
-A `fetch-task` of selected tasks, which writes only `dataset.csv` and `deleted.csv`.
+A fetch of selected tasks by ID or name. Its main outputs are `dataset.csv` and `deleted.csv`, with optional per-task tables.
 _Russian_: выгрузка задач
 _Avoid_: partial fetch, single-task export
 
@@ -77,7 +91,7 @@ _Russian_: задача без данных
 _Avoid_: empty task (an empty task has data but no annotations)
 
 **What's-new baseline**:
-What a fetched `dataset.csv` already contains, as a cutoff task ID and a set of task IDs; `whats-new` lists completed tasks beyond it.
+The set of task IDs already accounted for by a fetched dataset and its available sibling tables, together with a cutoff ID for reporting. A task with CVAT status `completed` is new when its ID is absent from the set, even below the cutoff.
 _Russian_: точка отсчёта whats-new
 _Avoid_: diff base, checkpoint
 
@@ -147,12 +161,34 @@ The hash of everything that changes what an `upload` does (frames in order, dele
 _Russian_: отпечаток загрузки
 _Avoid_: upload ID, checksum
 
+### Merge and detection formats
+
+**Merge conflict**:
+An image name present in both input CSVs. All annotation rows for that image come from the winning input.
+_Russian_: конфликт при объединении
+
+**Negative image**:
+A retained training image with no annotated object. In a cveta2 detection CSV it can be represented by a row with `instance_shape=none`, and in a YOLO dataset by an empty label file.
+_Russian_: изображение без аннотаций
+
+**Class index**:
+The number assigned to a label in a detection export. YOLO and COCO export build the mapping from the input CSV's box labels across all splits. The class registry has its own numbering.
+_Russian_: индекс класса
+
+**Split**:
+An image's assignment to the training (`train`), validation (`val`) or test (`test`) subset of a dataset.
+_Russian_: выборка (split)
+
 ### Verification
 
 **Verification profile**:
 The rule set `verify` applies to a CSV: `cveta2` or `clearml-yolo`.
 _Russian_: профиль проверки
 _Avoid_: mode, schema, preset
+
+**Image quarantine**:
+Rejection of an entire image group when a malformed record makes its remaining rows unreliable. In the cveta2 profile the group is scoped by image name and task ID when available.
+_Russian_: отклонение всей группы строк изображения
 
 **Broken rows**:
 Input rows that verification rejects, kept unchanged with their reasons; written to `broken.csv`.
@@ -204,7 +240,7 @@ _Avoid_: empty label, negative class, background
 ### Preparation and publication
 
 **Prepared bundle**:
-A directory that preparation writes once: for a bundle preparation `sources.tar.gz` with the four fetch CSVs, `broken-images.csv` and `report.json`, and, unless blocked, the payload `dataset.csv`, `dataset.yaml` and `tasks.yaml`, which the user may edit before publication; a managed preparation also keeps `transformed.csv`, `source-snapshot.yaml` and `preparation.json`. `preparation.json` is plain state; no file carries a checksum; each command validates the current files.
+A preparation directory containing source evidence and diagnostics. When preparation succeeds it also contains the editable publication payload: `dataset.csv`, `dataset.yaml` and `tasks.yaml`. See the [dataset format](docs/dataset-format.md) for the files in each workflow.
 _Russian_: подготовленный датасет
 _Avoid_: prepared set, release candidate, package
 
@@ -217,6 +253,14 @@ _Avoid_: standalone preparation, ad hoc preparation
 A dataset whose sources, ClearML destination, class API, S3 roots, empty classes and overlap decisions are defined by name in the global configuration and handled by the `dataset` commands.
 _Russian_: управляемый датасет
 _Avoid_: configured dataset, named dataset
+
+**Managed fetch**:
+The collection of a named managed dataset's CVAT and S3 CSV sources. Its outputs include the source tables and the source snapshot used by managed preparation.
+_Russian_: выгрузка управляемого датасета
+
+**Transformed CSV**:
+The user's edited or combined annotation table passed to managed preparation together with its managed fetch.
+_Russian_: преобразованный CSV
 
 **Managed preparation**:
 Preparation of a prepared bundle with `dataset prepare` from a user-transformed CSV and a managed fetch, using the managed definition and the source snapshot as they are when each command runs.
@@ -238,8 +282,12 @@ The `tasks.yaml` of a prepared bundle: the task IDs included in the clean annota
 _Russian_: список задач датасета (`tasks.yaml`)
 _Avoid_: task list file
 
+**Pending split**:
+An image assignment that still needs a split before publication. Preparation can write a payload while the assignment is pending.
+_Russian_: незаполненный split
+
 **Stable split**:
-An image's train/val/test assignment once it is published. In a managed dataset the image is identified by its content (SHA-256): `dataset prepare` writes the published split over the user's value in every later version, and `dataset publish` refuses a changed split of a published image unless `--force-resplit`, which records the new split for later versions. In a bundle preparation the image is identified by its `image_name`: `verify` prefills the published split into empty `split` cells only, and only when the image's other cells agree with the published split; `upload-dataset` refuses a changed split of a published image unless `--force-resplit`. The split is the user's: cveta2 never assigns one; it only keeps the published split of an image already published in the parent.
+An image’s published split, carried into later versions unless the user explicitly resplits it. Bundle preparation identifies the image by name, and managed preparation identifies it by content.
 _Russian_: стабильный split
 _Avoid_: random split, rebalancing, split policy
 

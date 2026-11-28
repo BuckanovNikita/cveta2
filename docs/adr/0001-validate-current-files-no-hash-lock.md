@@ -1,19 +1,14 @@
-# Commands validate the current files; no hash lock
+# Validate the current files at publication
 
-Up to 0.15, `verify --bundle` and `dataset prepare` recorded SHA-256 checksums of their output, and the publishing commands refused any directory whose files, configuration or class registry had changed since then. A user could not fix a single row by hand. Since 0.16, no command compares a local file, the configuration or the registry with a recorded checksum. Every command validates what is in the directory now against every content rule, and publishes only when no row is rejected.
+In 0.15, editing a row after preparation invalidated the recorded checksums. Since 0.16, publication reads the files as they are and validates their contents. Users can correct annotations, classes, roots or splits in a prepared bundle.
 
-A command stops only for two reasons:
+## What stops publication
 
-- **wrong content**, for example a rejected row, a class without a bbox, or one image in two splits;
-- **stale remote state**: a ClearML version newer than the one recorded at preparation, a CVAT task completed after the fetch, or a CVAT server other than the one fetched.
+- **Invalid content.** Examples include rejected rows, an active class with no bounding box, and an image assigned to multiple splits.
+- **Stale remote state.** Check the ClearML parent again. For managed data, a different CVAT server or a task completed since fetch also requires a fresh preparation.
 
-Every other difference in the sources only warns. Findings from a task that carries such a warning are skipped and counted.
+Other source differences produce warnings. Feedback skips and counts findings associated with the affected tasks.
 
-## Considered options
+## Alternatives considered
 
-- **Limited edits:** only the split, dropping images, `empty` flags and roots may change. Rejected: it needs more code, and a row still cannot be fixed by hand.
-- **Re-seal:** edit freely, then run `verify` again to lock the bundle anew. Rejected: it adds one more command and keeps a lock that guards nothing the content rules don't already check.
-
-## Consequences
-
-The published dataset is whatever passes the rules at publication time, including edits made after preparation. To keep that safe, the rules themselves have to be complete: class coverage, one split per image and no rejected rows. A checksum would not catch a mistake the rules miss.
+An allowlist of editable fields would still prevent correcting individual rows. Requiring the user to run verification again to seal each edit would add a step while checking the same content rules. Both options were rejected. This decision makes the completeness of the publication checks essential. [upload tests](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/tests/bundle/test_upload.py)

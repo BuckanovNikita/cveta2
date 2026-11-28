@@ -1,15 +1,12 @@
-# The split belongs to the user; a published image keeps its split
+# Preserve the user’s published split for each image
 
-cveta2 never assigns a `split`. The 0.15 split policy (`datasets.<name>.splits` with proportions) is removed, not deprecated.
+The user assigns each new image to train, val or test. An empty split is pending during preparation and prevents publication. Version 0.16 removed the 0.15 proportional split policy.
 
-- A new image takes the split the user wrote in the CSV.
-- An empty split is pending, and publication refuses it.
-- An image already published keeps its published split. In the bundle flow, `verify` prefills an empty split from the parent when the image's other cells agree with the parent row. In managed datasets, `dataset prepare` carries the published split forward.
-- Changing a published split needs `--force-resplit` on `upload-dataset` or `dataset publish`.
-- In a managed dataset, one version never holds the same image content in two splits, even with `--force-resplit`.
+| Workflow | Image identity | Parent assignment during preparation |
+| --- | --- | --- |
+| Bundle | Image name | Fill empty split cells when the image’s other split cells agree with the parent. |
+| Managed dataset | SHA-256 of the image content | Carry the published split forward, including when a file is renamed. |
 
-Managed datasets identify an image by the SHA-256 of its content, not by its name. A renamed or re-fetched image therefore keeps its split, and two copies of one image cannot fall into train and test.
+Changing a published assignment requires `--force-resplit` on the publishing command. Within one managed version, identical content must occupy a single split even with that flag. A first managed lineage over non-managed history uses `dataset prepare --first` and takes its splits from the CSV.
 
-Why: moving an image between splits leaks evaluation data and silently breaks the comparison of model results across versions. Proportions are a property of how a team builds its dataset, not something a fetch tool can know. The flag makes a resplit deliberate and visible in the command line.
-
-Consequence: a new managed lineage over a dataset with non-managed versions must start with `dataset prepare --first`. That command reads no parent, and every split comes from the CSV.
+A published split makes evaluation comparable across versions. Moving copies of the same image between train and test risks evaluation leakage. The flag makes a deliberate resplit visible. [splits tests](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/tests/bundle/test_splits.py) [managed workflow tests](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/tests/test_managed_workflow.py)
