@@ -65,6 +65,11 @@ tasks:
           uv build --out-dir "$scratch"
         '
 
+  check-wheel:
+    desc: Check the installed wheel with lowest direct dependencies on Python 3.12 and 3.13
+    cmds:
+      - bash scripts/check_wheel.sh
+
   verify:
     desc: Development verification (checks, affected units)
     cmds:
