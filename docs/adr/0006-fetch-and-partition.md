@@ -15,3 +15,7 @@ The ignore list excludes task IDs. A silent entry suppresses its notice. `--comp
 ## What counts as new
 
 `whats-new` compares completed task IDs with the IDs represented in the fetched CSV and its eligible siblings. An unknown ID below the cutoff still qualifies. Project-wide label edits can change timestamps on every task, so update time cannot establish which tasks are new. [Known-task selection](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/cveta2/application/client/read.py#L67) · [What’s-new examples](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/tests/test_whats_new.py)
+
+## Partitioning an existing DataFrame
+
+A Python caller can pass an annotation DataFrame and a list of `DeletedImage` records to `cveta2.partition_annotations_df`. Its `PartitionResult` contains the dataset, obsolete and in-progress DataFrames and the deleted, pending-deletion and reopened-deletion lists. For example, a newer unfinished task holding a previously deleted image live moves its completed deletion into `reopened_deletions`. The caller receives these results in memory. [Partition function](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/cveta2/domain/partition.py#L299-L330) · [Reopening and row-membership examples](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/tests/test_partition.py#L279-L304)

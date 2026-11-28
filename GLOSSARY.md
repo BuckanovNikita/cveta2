@@ -211,7 +211,7 @@ _Russian_: подтверждение очистки
 _Avoid_: auto-fix
 
 **Blocker**:
-A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, or a non-excluded class without a bbox; split conditions that publication will enforce later are listed under `pending`. In managed preparation, also: one image content in two splits.
+A condition that stops a preparation from writing its payload (`ready: false`), listed under `blockers` in `report.json`. In bundle preparation: structural CSV errors, no valid image, needed cleanup with `--no-clean`, a non-excluded class without a bbox, or failure to derive the task manifest ([preparation logic](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/cveta2/application/use_cases/dataset_bundle.py#L208-L226)); split conditions that publication will enforce later are listed under `pending`. In managed preparation, also: one image content in two splits.
 _Russian_: блокирующее условие
 _Avoid_: blocking error, fatal issue
 
