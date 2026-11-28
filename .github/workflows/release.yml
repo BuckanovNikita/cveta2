@@ -23,12 +23,17 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # main is protected by a ruleset that requires pull requests. GITHUB_TOKEN
+          # cannot bypass it on a user-owned repository, so the release commit and
+          # tag are pushed over SSH with a write deploy key, which the ruleset
+          # lists as a bypass actor.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Install release tooling
         run: python -m pip install 'python-semantic-release==10.7.0'
       # semantic-release sets author, committer and tagger from commit_author in
-      # pyproject.toml; the push uses the credential actions/checkout stored.
+      # pyproject.toml; the push uses the deploy key actions/checkout stored.
       - name: Version, changelog and tag
         run: semantic-release version --no-vcs-release
