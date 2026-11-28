@@ -34,4 +34,4 @@ _Russian_: сессия интеграционных тестов
 A version of the cveta2 package identified by a Git tag. The release workflow derives the version and changelog from merged commits.
 _Russian_: выпуск версии cveta2
 
-For commands, enforcing rules and evidence at the recorded revision, see the [engineering index](index.md). For CVAT tasks, datasets and publication, see the [product glossary](../../../GLOSSARY.md).
+For CVAT tasks, datasets and publication, see the [product glossary](../../../GLOSSARY.md).
