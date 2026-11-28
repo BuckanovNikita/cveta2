@@ -360,7 +360,6 @@ Split — ваш: cveta2 никогда не назначает его сам. `
 |---|---|
 | структурная ошибка в CSV | `Input CSV has structural validation errors.` |
 | после отклонения не осталось изображений | `No valid images remain for upload.` |
-| ошибка при выводе списка задач (например, неверный `task_id` или пустое `image_name` в одном из четырёх файлов) | текст ошибки, например `Invalid task_id in fetch evidence: 'x'` |
 | нужна очистка, а задан `--no-clean` | `Нужна очистка: отклонено <N> строк; запустите verify без --no-clean или исправьте исходные данные.` |
 | у неисключённого класса нет ни одного bbox среди строк, оставшихся после очистки (в любом split) | `Нет ни одного bbox классов <имена>: исключите их (--empty-class N или empty_classes в dataset.yaml выгрузки) или выгрузите данные с ними.` |
 | ошибка построения списка задач по таблицам выгрузки и очищенным строкам | Текст ошибки, например `Clean task/image pairs must originate in dataset.csv`. [Подготовка и построение списка задач](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/cveta2/application/use_cases/dataset_bundle.py#L250-L284) |
