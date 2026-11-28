@@ -1,22 +1,12 @@
-# Domain Docs
+# Domain documentation
 
-How the engineering skills consume this repo's domain documentation when exploring the codebase. The repo is single-context.
+Before exploring cveta2, locate the terms and decisions for the work at hand.
 
-## Before exploring, read these
+| When working on | Vocabulary | Decisions and evidence |
+| --- | --- | --- |
+| CVAT annotations, images, datasets, publication, CLI or Python API behavior | [Product glossary](../../GLOSSARY.md) | [Product ADRs](../adr/) |
+| Architecture, test infrastructure, builds, releases or repository coordination | [Engineering glossary](../adr/engineering/glossary.md) | [Engineering ADRs](../adr/engineering/) |
 
-- **`GLOSSARY.md`** at the repo root.
-- **`docs/adr/`**: the ADRs that touch the area you're about to work in.
+Use the glossary’s English term in issues, code discussions and tests. Use its Russian equivalent in Russian documentation. If a concept has no entry, check how the project already names it before proposing a new term.
 
-If either doesn't exist, **proceed silently**. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
-
-## Use the glossary's vocabulary
-
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `GLOSSARY.md`, including where it picks one synonym over another.
-
-A concept missing from the glossary is a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
-
-## Flag ADR conflicts
-
-If your output contradicts an existing ADR, surface it explicitly:
-
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+Read the decision for the affected operation. The snapshot describes commit `8bf1e29`. When working on a later revision, check the current implementation before treating a snapshot example as current behavior. If a proposal changes a recorded decision, identify the ADR, the rule it would change and the reason to revisit it.

@@ -1,9 +1,11 @@
-# Error texts never echo input values, and URL credentials are refused fail-closed
+# Identify invalid input by location and refuse ambiguous URL credentials
 
-Configuration files, `dataset.yaml`, source snapshots and command-line flags can carry secrets, mostly as URL userinfo (`s3://key:secret@host/...`) or tokens. Users paste error output into chats and issues. So a cveta2 error names where the problem is, such as a path, a field name, a line and column, or a row number, and never repeats the offending value. Diagnostics name an exception by its class only. A YAML syntax error is reported without the source line.
+A configuration or dataset diagnostic may be pasted into a shared issue. Identify the field, path, line, column or row. A YAML syntax error should omit the source line, and diagnostics for an external exception should identify its class. A regression check must establish that the offending value is absent from the output.
 
-URL-typed values are refused when they may carry a login or password before the host (`has_url_userinfo`). The rule deliberately over-detects. It flags any `:` before the last `@`, because an AWS secret that contains `/` makes `urlsplit` end the authority early and miss the password. As a result, rare legitimate values such as `https://host:8080/a@b` are refused too.
+## URL credentials
 
-Why: a false refusal costs the user one rename, while a missed credential ends up in logs, published `dataset.yaml` files and ClearML.
+Configuration, command-line flags, source snapshots and dataset metadata can all carry URLs. A password can contain an unescaped slash, causing a conventional URL parser to stop reading the authority early. The credential check therefore also detects a colon before the last `@`. It can reject a legitimate URL such as `https://host:8080/a@b`. The cost of renaming such a path was accepted to keep credentials out of logs and published metadata. [review interfaces tests](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/tests/test_review_interfaces.py)
 
-Consequence: error messages are less specific than they could be, and tests assert that the value is absent from the error, not only that the error is raised.
+## Observed exception at the snapshot
+
+An invalid nonnumeric timeout supplied through `CVETA2_DATA_TIMEOUT` can still appear in a warning. [Timeout diagnostic discrepancy](https://linear.app/sip-ds-team/issue/SIP-342/reconcile-timeout-diagnostics-with-the-input-redaction-adr)
