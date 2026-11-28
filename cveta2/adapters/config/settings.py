@@ -400,9 +400,7 @@ def _parse_timeout_env(raw: str | None) -> float | None:
     try:
         return float(raw)
     except ValueError:
-        logger.warning(
-            f"Некорректное значение CVETA2_DATA_TIMEOUT={raw!r} — ожидается число секунд; таймаут не применяется."
-        )
+        logger.warning("Некорректное значение CVETA2_DATA_TIMEOUT — ожидается число секунд; таймаут не применяется.")
         return None
 
 

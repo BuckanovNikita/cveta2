@@ -3,6 +3,8 @@
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TypedDict
@@ -164,6 +166,16 @@ def test_live_mixed_sources_publish_exact_payload_and_reuse_completed_tasks(  # 
             )
         )
         options: ConfigPaths = {"config_path": personal, "project_config": shared}
+        # The cold-start SDK warning and the JSON result must survive real shell piping.
+        versions = subprocess.run(  # noqa: S603 - fixed CLI and run-owned files
+            [sys.executable, "-m", "cveta2", "dataset", "versions", "combined", "--config", str(personal), "--json"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        assert json.loads(versions.stdout) == []
+        assert "No projects were found" in versions.stderr
         shared_bytes = shared.read_bytes()
         fetched = tmp_path / "fetched"
         api.fetch_dataset("combined", output_dir=fetched, **options)

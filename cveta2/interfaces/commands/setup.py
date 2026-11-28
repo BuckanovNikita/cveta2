@@ -42,7 +42,7 @@ from cveta2.composition.configuration import (
     write_local_overrides,
     write_shared_project_fields,
 )
-from cveta2.domain.errors import Cveta2Error, ProjectNotFoundError
+from cveta2.domain.errors import Cveta2Error, InteractiveModeRequiredError, ProjectNotFoundError
 from cveta2.domain.managed.models import CvatIdentity, ManagedError, ProjectDefinition
 from cveta2.domain.models import ProjectInfo
 from cveta2.interfaces.commands._bootstrap import open_client
@@ -393,6 +393,8 @@ def run_setup(args: "argparse.Namespace") -> None:
         apply_setup_options(args, config_path, global_path)
     elif target is None and not attaching:
         require_interactive(wizard.SETUP_HINT)
+        if not sys.stdin.isatty():
+            raise InteractiveModeRequiredError(f"Standard input is not a terminal. {wizard.SETUP_HINT}")
         if args.global_scope:
             _run_global_wizard(config_path, global_path, project=args.project)
         else:

@@ -234,7 +234,7 @@ prepared/
 | `sources.tar.gz` | Архив четырёх файлов выгрузки (только `verify <каталог>`). | да |
 | `transformed.csv` | Точная копия вашего CSV (только `dataset prepare`). | нет |
 | `source-snapshot.yaml` | Точная копия снимка источников ([source snapshot](../GLOSSARY.md)) (только `dataset prepare`). | нет |
-| `broken-images.csv` | Исходные строки всех изображений, у которых хотя бы одна строка отклонена. Если у изображения отклонён один bbox, отклоняется всё изображение. | нет |
+| `broken-images.csv` | Все строки изображений с отклонённой строкой. У `verify <каталог>` они сохраняют значения после заполнения пустых split из родителя, у `dataset prepare` — после решений о пересечении и переноса split. [Подготовка и построение списка задач](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/cveta2/application/use_cases/dataset_bundle.py#L250-L284) Если у изображения отклонён один bbox, отклоняется всё изображение. | нет |
 | `report.json` | отчёт проверки ([verification report](../GLOSSARY.md)) с итогом подготовки. | нет |
 | `dataset.csv` | Очищенные строки датасета. | да |
 | `dataset.yaml` | Назначение в ClearML, классы, API классов и разрешённые корни изображений. | да |
@@ -325,7 +325,7 @@ obsolete:
 | `broken_image_rows` | Число строк в `broken-images.csv`. |
 | `split_prefilled` | Сколько изображений получили split родителя в пустые ячейки `split`. Изображение, у которого в другой строке уже стоит другой `split`, не заполняется. |
 
-Остальные ключи — те же, что у отчёта проверки CSV ([verify](commands/verify.md)).
+В отчёте проверки CSV поле `metadata_columns` сопоставляет диагностические поля с именами столбцов в `broken.csv`. Подготовка каталога удаляет это поле. [Ключи отчёта CSV](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/cveta2/adapters/files/verification.py#L51-L84) · [Отчёт подготовки](https://github.com/BuckanovNikita/cveta2/blob/8bf1e29ad4176e47419c87797b554315798051b3/cveta2/adapters/files/bundle.py#L204-L220)
 
 `report.json` подготовки `dataset prepare` тоже содержит `blockers`, `ready` и `pending`, а также `missing_classes` (классы без bbox), `split_collisions` (имена изображений, у содержимого которых строки в нескольких split), `mapped_findings`, `unmapped_errors` и `split_replacements` (см. [prepare](commands/dataset.md#результат)).
 

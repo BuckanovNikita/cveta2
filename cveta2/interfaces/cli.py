@@ -3,6 +3,7 @@
 import argparse
 import sys
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -209,6 +210,12 @@ class CliApp:
         parser = argparse.ArgumentParser(
             description="CVAT project utilities.",
         )
+        try:
+            installed_version = version("cveta2")
+        except PackageNotFoundError:
+            # A checkout can run with just the dependencies installed.
+            installed_version = "cveta2 (uninstalled source tree)"
+        parser.add_argument("--version", action="version", version=installed_version)
         subparsers = parser.add_subparsers(dest="command", required=True)
         for spec in _command_specs():
             _register(subparsers, spec)

@@ -2,13 +2,16 @@
 
 import argparse
 import json
+import os
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 from pydantic import ValidationError
 
+from cveta2.composition.runtime import cli_external_failures
 from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces import managed_datasets
 from cveta2.interfaces.commands._helpers import global_config_from_args
@@ -31,7 +34,7 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
         command = commands.add_parser(operation)
         command.add_argument("--config", type=Path, help="Личный файл конфигурации.")
         add_global_config_arg(command)
-        command.add_argument("--json", action="store_true", help="Вывести результат в JSON.")
+        command.add_argument("--json", action="store_true", help="Вывести только JSON в stdout, сообщения — в stderr.")
         if operation in {"show", "versions", "fetch", "prepare"}:
             command.add_argument("name", help="Имя набора из общего файла.")
         if operation in {"fetch", "prepare"}:
@@ -84,16 +87,38 @@ def configure_managed(parser: argparse.ArgumentParser) -> None:
 def run_managed(args: argparse.Namespace) -> None:
     """Report operational failures with exit code 2, distinct from an unready preparation."""
     try:
-        _dispatch(args)
+        # Translate SDK exceptions before assigning the managed operation's exit status.
+        sdk_output = _sdk_output_to_stderr() if args.json else nullcontext()
+        with sdk_output, cli_external_failures():
+            result, status = _dispatch(args)
+        sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     except (Cveta2Error, ValidationError, OSError) as error:
         logger.error(f"Ошибка операции с набором данных: {error}")
         raise SystemExit(2) from error
+    if status:
+        raise SystemExit(status)
 
 
-def _dispatch(args: argparse.Namespace) -> None:
+@contextmanager
+def _sdk_output_to_stderr() -> Iterator[None]:
+    """Route SDK progress, including handlers bound to fd 1 before dispatch."""
+    sys.stdout.flush()
+    with os.fdopen(os.dup(1), "wb") as original_stdout:
+        os.dup2(2, 1)
+        try:
+            with redirect_stdout(sys.stderr):
+                yield
+        finally:
+            try:
+                sys.stdout.flush()
+            finally:
+                os.dup2(original_stdout.fileno(), 1)
+
+
+def _dispatch(args: argparse.Namespace) -> tuple[object, int]:
     """Dispatch typed public operations; APIs never prompt."""
     options = {"config_path": args.config, "project_config": global_config_from_args(args)}
-    result: Any
+    result: object
     operation = args.dataset_operation
     if operation == "list":
         result = managed_datasets.list_datasets(**options)
@@ -113,20 +138,13 @@ def _dispatch(args: argparse.Namespace) -> None:
             first=args.first,
             **options,
         )
-        result = prepared.model_dump(mode="json")
-        sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
-        if not prepared.ready:
-            raise SystemExit(1)
-        return
+        return prepared.model_dump(mode="json"), 0 if prepared.ready else 1
     elif operation == "diff":
         result = managed_datasets.compare_datasets(args.old, args.new, **options)
     elif operation == "report-errors":
-        result = managed_datasets.report_dataset_errors(args.prepared, **options).model_dump(mode="json")
-        sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
-        if result["failed"]:
-            raise SystemExit(2)
-        return
+        report = managed_datasets.report_dataset_errors(args.prepared, **options)
+        return report.model_dump(mode="json"), 2 if report.failed else 0
     else:
-        result = managed_datasets.publish_dataset(args.prepared, force_resplit=args.force_resplit, **options)
-        result = {"dataset_id": result.dataset_id, "version": result.version}
-    sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+        publication = managed_datasets.publish_dataset(args.prepared, force_resplit=args.force_resplit, **options)
+        result = {"dataset_id": publication.dataset_id, "version": publication.version}
+    return result, 0
