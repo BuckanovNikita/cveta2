@@ -227,17 +227,18 @@ def test_personal_options_write_only_the_personal_file(tmp_path: Path) -> None:
     cfg, global_file = attached(tmp_path)
     before = global_file.read_bytes()
 
-    run(
-        cfg,
-        *("--username", "bob", "--images-root", "/data/img", "--tasks-root", "/data/t"),
-        *("--project", "Retail shelves", "--images-dir", "/data/r"),
-    )
+    with patch_cli_client(mock_client_ctx(project_id=123), config=CFG):
+        run(
+            cfg,
+            *("--username", "bob", "--images-root", "/data/img", "--tasks-root", "/data/t"),
+            *("--project", "Retail shelves", "--images-dir", "/data/r"),
+        )
 
     assert CvatConfig.from_file(cfg).username == "bob"
     assert CvatConfig.from_file(cfg).password == "private"
     assert CacheConfig.load(cfg).images_root == Path("/data/img")
     assert CacheConfig.load(cfg).tasks_root == Path("/data/t")
-    assert ImageCacheConfig.load(cfg).get_cache_dir("Retail shelves") == Path("/data/r")
+    assert ImageCacheConfig.load(cfg).get_cache_dir("retail") == Path("/data/r")
     assert global_file.read_bytes() == before
 
 
@@ -250,14 +251,17 @@ def test_unset_of_personal_options(tmp_path: Path) -> None:
     assert CvatConfig.from_file(cfg).username is None
     assert CvatConfig.from_file(cfg).password == "private"
     assert CacheConfig.load(cfg).images_root is None
-    assert ImageCacheConfig.load(cfg).get_cache_dir("Retail shelves") is None
+    assert ImageCacheConfig.load(cfg).get_cache_dir("retail") is None
 
 
-def test_images_dir_of_an_unattached_project_is_named_from_the_projects_cache(tmp_path: Path) -> None:
+def test_images_dir_of_an_unattached_project_is_named_from_cvat(tmp_path: Path) -> None:
     cfg = unattached(tmp_path)
     write_projects_cache(cfg, [{"id": 321, "name": "New shelves"}])
 
-    run(cfg, "-p", "321", "--images-dir", "/data/n")
+    client = mock_client_ctx(project_id=321)
+    client.get_project.return_value = ProjectInfo(id=321, name="New shelves")
+    with patch_cli_client(client, config=CFG):
+        run(cfg, "-p", "321", "--images-dir", "/data/n")
 
     assert ImageCacheConfig.load(cfg).get_cache_dir("New shelves") == Path("/data/n")
 
@@ -377,10 +381,12 @@ def test_repeated_empty_class_replaces_the_list(tmp_path: Path) -> None:
 
 
 def test_global_team_options_by_project_name(tmp_path: Path) -> None:
-    cfg, _ = attached(tmp_path)
+    cfg, global_file = attached(tmp_path)
 
-    run(cfg, "--global", "-p", "Retail shelves", "--ignored-prefix", "skip/", "--task-cache-s3", "s3://b/c")
+    with patch_cli_client(mock_client_ctx(project_id=123), config=CFG):
+        run(cfg, "--global", "-p", "Renamed shelves", "--ignored-prefix", "skip/", "--task-cache-s3", "s3://b/c")
 
+    assert "name" not in yaml.safe_load(global_file.read_bytes())["projects"]["retail"]
     retail = load_global_config(cfg).projects["retail"]
     assert (retail.ignored_prefix, retail.task_cache_s3) == ("skip/", "s3://b/c")
 
@@ -445,7 +451,10 @@ def test_local_override_of_a_project_without_definition_is_refused(tmp_path: Pat
     cfg, _ = attached(tmp_path, publication=_PUBLICATION)
     before = files(tmp_path)
 
-    with pytest.raises(Cveta2Error, match="cveta2 setup --global --project other"):
+    with (
+        patch_cli_client(mock_client_ctx(project_id=456), config=CFG),
+        pytest.raises(Cveta2Error, match="cveta2 setup --global --project other"),
+    ):
         run(cfg, "--project", "other", "--dataset-name", "mine")
 
     assert files(tmp_path) == before
@@ -615,17 +624,20 @@ def test_global_unset_of_an_unknown_project_adds_no_definition(tmp_path: Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_global_adds_a_definition_from_the_projects_cache(tmp_path: Path) -> None:
+def test_global_adds_definitions_by_live_id_and_name(tmp_path: Path) -> None:
     cfg, _ = attached(tmp_path)
-    write_projects_cache(cfg, [{"id": 321, "name": "New shelves"}, {"id": 322, "name": "shelves"}])
+    write_projects_cache(cfg, [{"id": 321, "name": "Stale name"}, {"id": 409, "name": "shelves"}])
 
-    run(cfg, "--global", "--project", "321", "--sync-root", "s3://b/n")
-    run(cfg, "--global", "--project", "shelves", "--sync-root", "s3://b/s")
+    client = mock_client_ctx(project_id=322)
+    client.get_project.return_value = ProjectInfo(id=321, name="New shelves")
+    with patch_cli_client(client, config=CFG):
+        run(cfg, "--global", "--project", "321", "--sync-root", "s3://b/n")
+        run(cfg, "--global", "--project", "shelves", "--sync-root", "s3://b/s")
 
     projects = load_global_config(cfg).projects
-    assert (projects["project-321"].id, projects["project-321"].name) == (321, "New shelves")
+    assert projects["project-321"].id == 321
     assert projects["project-321"].sync_root == "s3://b/n"
-    assert (projects["shelves"].id, projects["shelves"].name) == (322, "shelves")
+    assert projects["shelves"].id == 322
 
 
 def test_global_adds_a_definition_named_by_cvat(tmp_path: Path) -> None:
@@ -635,7 +647,7 @@ def test_global_adds_a_definition_named_by_cvat(tmp_path: Path) -> None:
         run(cfg, "--global", "--project", "Remote", "--ignored-prefix", "skip/")
 
     remote = load_global_config(cfg).projects["Remote"]
-    assert (remote.id, remote.name, remote.ignored_prefix) == (400, "Remote", "skip/")
+    assert (remote.id, remote.ignored_prefix) == (400, "skip/")
 
 
 @pytest.mark.parametrize("answer", ["missing", "unnamed"])
@@ -687,11 +699,12 @@ def test_global_creation_applies_the_remaining_options(tmp_path: Path) -> None:
     write_projects_cache(cfg, [{"id": 123, "name": "retail"}])
     target = tmp_path / "new.yaml"
 
-    run(
-        cfg,
-        *("--global", "--global-config", str(target), "--host", _HOST, "--organization", _ORGANIZATION),
-        *("-p", "retail", "--sync-root", "s3://b/r"),
-    )
+    with patch_cli_client(mock_client_ctx(project_id=123), config=CFG):
+        run(
+            cfg,
+            *("--global", "--global-config", str(target), "--host", _HOST, "--organization", _ORGANIZATION),
+            *("-p", "retail", "--sync-root", "s3://b/r"),
+        )
 
     created = load_global_config(cfg)
     assert created.cvat.host == _HOST
@@ -820,7 +833,7 @@ def test_the_suggested_command_creates_the_missing_global_file(tmp_path: Path) -
 def test_suggested_commands_quote_the_project(tmp_path: Path) -> None:
     cfg, _ = attached(tmp_path, publication=_PUBLICATION)
 
-    with pytest.raises(Cveta2Error) as caught:
+    with patch_cli_client(mock_client_ctx(project_id=456), config=CFG), pytest.raises(Cveta2Error) as caught:
         run(cfg, "--project", "Bakery shelves", "--dataset-name", "mine")
 
     assert "cveta2 setup --global --project 'Bakery shelves'" in str(caught.value)

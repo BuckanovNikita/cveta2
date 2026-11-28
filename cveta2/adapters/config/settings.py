@@ -14,7 +14,6 @@ from cveta2.adapters.config.project import (
     config_yaml_bytes,
     optional_global_config,
     optional_project_config,
-    shared_projects_by_name,
     write_personal_file,
     write_shared_project_fields,
 )
@@ -154,38 +153,24 @@ def _restrict_to_owner(path: Path) -> None:
     logger.warning(f"Права файла с паролем {path} ограничены до 0600.")
 
 
-def _project_alias(project_key: str, shared: ProjectConfig) -> str:
-    return shared.projects[project_key].name or project_key
-
-
 def _shared_section(section: str, personal: object, shared: ProjectConfig) -> object:
     """Supply policy exclusively from shared data while keeping local paths."""
-    aliases = shared_projects_by_name(shared)
-    if section == "image_cache" and isinstance(personal, dict):
-        return {aliases[name].name or name if name in aliases else name: value for name, value in personal.items()}
     if section == "sync_roots":
-        return {
-            _project_alias(key, shared): value.sync_root
-            for key, value in shared.projects.items()
-            if value.sync_root is not None
-        }
+        return {key: value.sync_root for key, value in shared.projects.items() if value.sync_root is not None}
     if section == "ignore":
-        return {_project_alias(key, shared): value.ignore for key, value in shared.projects.items() if value.ignore}
+        return {key: value.ignore for key, value in shared.projects.items() if value.ignore}
     if section == "cache":
         result = dict(personal) if isinstance(personal, dict) else {}
         projects = dict(result.get("projects", {}))
         for key, value in shared.projects.items():
-            name = _project_alias(key, shared)
-            local_value = projects.get(name, projects.get(key, {}))
+            local_value = projects.get(key, {})
             local = dict(local_value) if isinstance(local_value, dict) else {}
-            if key != name:
-                projects.pop(key, None)
             if value.ignored_prefix is not None:
                 local["ignored_prefix"] = value.ignored_prefix
             if value.task_cache_s3 is not None:
                 local["task_cache_s3"] = value.task_cache_s3
             if local:
-                projects[name] = local
+                projects[key] = local
         result["projects"] = projects
         return result
     return personal
@@ -204,13 +189,12 @@ def _split_cache_policy(
     projects = values.get("projects", {})
     loaded_projects = _dict_value(_dict_value(loaded).get("projects"))
     if isinstance(projects, dict):
-        aliases = shared_projects_by_name(shared)
         for name, fields in projects.items():
             if not isinstance(fields, dict):
                 continue
             policy = {key: fields.pop(key) for key in ("ignored_prefix", "task_cache_s3") if key in fields}
             if policy:
-                selected_project = aliases.get(name)
+                selected_project = shared.projects.get(name)
                 if selected_project is None:
                     raise ManagedError(f"Unknown shared project: {name}")
                 if loaded is None:
@@ -232,10 +216,9 @@ def _dict_value(value: object) -> dict[str, object]:
 
 def _snapshot_values(changes: dict[str, dict[str, object]], snapshot: ProjectConfig) -> dict[str, dict[str, object]]:
     """Shared values of the changed fields as they were when the section loaded."""
-    aliases = shared_projects_by_name(snapshot)
     expected: dict[str, dict[str, object]] = {}
     for name, fields in changes.items():
-        project = aliases.get(name)
+        project = snapshot.projects.get(name)
         expected[name] = {
             field: getattr(project, field)
             if project is not None
@@ -273,16 +256,14 @@ def _save_shared_section(
     if section in {"sync_roots", "ignore"}:
         field = "sync_root" if section == "sync_roots" else "ignore"
         default: object = None if field == "sync_root" else []
-        aliases = shared_projects_by_name(shared)
-        unknown = set(values) - set(aliases)
+        unknown = set(values) - set(shared.projects)
         if unknown:
             raise ManagedError(f"Unknown shared projects: {sorted(unknown)}")
         if snapshot is None:
             for key, project in shared.projects.items():
-                name = _project_alias(key, shared)
-                value = values.get(name, values.get(key, default))
+                value = values.get(key, default)
                 if value != getattr(project, field):
-                    changes[name] = {field: value}
+                    changes[key] = {field: value}
         else:
             before = _dict_value(loaded)
             for name in sorted(set(values) | set(before)):
@@ -345,6 +326,22 @@ class SectionConfig(BaseModel):
         if raw_global is not None:
             section._remember_shared(raw_global)  # noqa: SLF001 - this factory owns the snapshot
         return section
+
+    def project_keys(self, name: str, project_id: int | None) -> tuple[str, ...]:
+        """Prefer the stable configuration key. A legacy personal name must not belong to another ID."""
+        if self._shared_baseline is None or project_id is None:
+            return (name,)
+        shared = self._shared_baseline.snapshot
+        key = shared.key_for_id(project_id)
+        keys = (key,) if key is not None else ()
+        return keys if name in shared.projects else (*keys, name)
+
+    def project_key(self, name: str, project_id: int | None) -> str:
+        """Return the key for an explicit write, refusing another project's binding."""
+        keys = self.project_keys(name, project_id)
+        if not keys:
+            raise ManagedError(f"Configure a separate project key for CVAT ID {project_id} before saving its settings.")
+        return keys[0]
 
     def _remember_shared(self, raw: ProjectConfig) -> None:
         """Keep the raw global file as the baseline of later team writes."""
@@ -571,9 +568,11 @@ class ImageCacheConfig(_ProjectsSection):
 
     coerce_scalars = field_validator("projects", mode="before")(_coerce_mapping_scalars)
 
-    def get_cache_dir(self, project_name: str) -> Path | None:
+    def get_cache_dir(self, project_name: str, project_id: int | None = None) -> Path | None:
         """Return the cache directory for *project_name*, or None if not configured."""
-        return self.projects.get(project_name)
+        return next(
+            (self.projects[key] for key in self.project_keys(project_name, project_id) if key in self.projects), None
+        )
 
     def set_cache_dir(self, project_name: str, path: Path) -> None:
         """Add or update the cache directory for *project_name*."""
@@ -616,14 +615,15 @@ class CacheConfig(SectionConfig):
                 data.pop("projects")
         return data or None
 
-    def for_project(self, project_name: str) -> CacheProjectSettings:
+    def for_project(self, project_name: str, project_id: int | None = None) -> CacheProjectSettings:
         """Resolve effective settings for *project_name* (overrides win)."""
-        proj = self.projects.get(project_name) or CacheProjectSettings()
+        entries = [self.projects[key] for key in self.project_keys(project_name, project_id) if key in self.projects]
+        project = entries[0] if entries else CacheProjectSettings()
         return CacheProjectSettings(
-            images_root=proj.images_root or self.images_root,
-            tasks_root=proj.tasks_root or self.tasks_root,
-            ignored_prefix=proj.ignored_prefix,
-            task_cache_s3=proj.task_cache_s3,
+            images_root=next((entry.images_root for entry in entries if entry.images_root), self.images_root),
+            tasks_root=next((entry.tasks_root for entry in entries if entry.tasks_root), self.tasks_root),
+            ignored_prefix=project.ignored_prefix,
+            task_cache_s3=project.task_cache_s3,
         )
 
 
@@ -642,6 +642,7 @@ def images_cache_dir_from(
     image_cache: "ImageCacheConfig",
     project_settings: CacheProjectSettings,
     project_name: str,
+    project_id: int | None = None,
 ) -> Path | None:
     """Return the image-cache dir for a project from already-loaded config.
 
@@ -649,7 +650,7 @@ def images_cache_dir_from(
     effective ``images_root`` yields ``images_root/<sanitized_name>``;
     with neither configured the result is None.
     """
-    cached_dir = image_cache.get_cache_dir(project_name)
+    cached_dir = image_cache.get_cache_dir(project_name, project_id)
     if cached_dir is not None:
         return cached_dir
     if project_settings.images_root is not None:
@@ -660,12 +661,14 @@ def images_cache_dir_from(
 def resolve_images_cache_dir(
     project_name: str,
     config_path: Path | None = None,
+    project_id: int | None = None,
 ) -> Path | None:
     """Load the ``image_cache`` and ``cache`` sections and resolve the dir."""
     return images_cache_dir_from(
         ImageCacheConfig.load(config_path),
-        CacheConfig.load(config_path).for_project(project_name),
+        CacheConfig.load(config_path).for_project(project_name, project_id),
         project_name,
+        project_id,
     )
 
 
@@ -683,9 +686,11 @@ class SyncRootsConfig(_ProjectsSection):
 
     coerce_scalars = field_validator("projects", mode="before")(_coerce_mapping_scalars)
 
-    def get_root(self, project_name: str) -> str | None:
+    def get_root(self, project_name: str, project_id: int | None = None) -> str | None:
         """Return the sync root for *project_name*, or None if not configured."""
-        return self.projects.get(project_name)
+        return next(
+            (self.projects[key] for key in self.project_keys(project_name, project_id) if key in self.projects), None
+        )
 
 
 class IgnoreConfig(_ProjectsSection):

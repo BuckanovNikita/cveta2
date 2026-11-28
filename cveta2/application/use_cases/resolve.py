@@ -48,23 +48,13 @@ def _project_display_name(
     project_id: int,
     cached: list[ProjectInfo] | None = None,
 ) -> str:
-    """Return the project's name, falling back to the id when unreadable.
-
-    A matching entry in *cached* (the local projects cache) answers without
-    a request.  Otherwise an id nobody owns must still produce a usable
-    name: it ends up in log lines, in the task-cache directory and as the
-    ignore-list key, and an empty one would be shown to the user verbatim.
-    Reading the single project costs one request, where listing the whole
-    organization to find its name costs one per page.
-    """
-    for p in cached or ():
-        if p.id == project_id:
-            return p.name
-    try:
-        return client.get_project(project_id).name or str(project_id)
-    except CvatApiError as e:
-        logger.info(f"Не удалось прочитать проект {project_id} ({e}) — используем id как имя проекта")
-        return str(project_id)
+    """Prefer the live name and fall back to the discovery cache or ID when unreadable."""
+    if client.is_ready or not cached:
+        try:
+            return client.get_project(project_id).name or str(project_id)
+        except CvatApiError as e:
+            logger.info(f"Не удалось прочитать проект {project_id} ({e})")
+    return next((p.name for p in cached or () if p.id == project_id), str(project_id))
 
 
 def resolve_project_spec(

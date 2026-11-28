@@ -117,7 +117,7 @@ def test_list_hides_password_from_environment(tmp_path: Path, monkeypatch: pytes
 
 def test_list_with_project_prints_one_project(tmp_path: Path) -> None:
     cfg = personal(tmp_path)
-    listed = list_configuration(cfg, project="Retail shelves")
+    listed = list_configuration(cfg, project="123", live_name="Retail shelves")
     assert listed
     assert all(v.key.startswith("projects.retail.") or v.key == "image_cache.Retail shelves" for v in listed)
     assert ListedValue("image_cache.Retail shelves", "/data/retail", "personal") in listed

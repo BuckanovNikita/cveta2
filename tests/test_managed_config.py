@@ -185,9 +185,9 @@ def test_shared_identity_and_policy_readers(tmp_path: Path, monkeypatch: pytest.
         effective.username,
         effective.password,
     ) == ("https://cvat.example", "team", "alice", "private")
-    assert SyncRootsConfig.load(cfg).get_root("Main project") == "s3://bucket/images"
-    assert IgnoreConfig.load(cfg).get_ignored_tasks("Main project") == [4]
-    cache = CacheConfig.load(cfg).for_project("Main project")
+    assert SyncRootsConfig.load(cfg).get_root("main") == "s3://bucket/images"
+    assert IgnoreConfig.load(cfg).get_ignored_tasks("main") == [4]
+    cache = CacheConfig.load(cfg).for_project("main")
     assert cache.images_root == Path("/local/images")
     assert cache.task_cache_s3 == "s3://bucket/cache"
     monkeypatch.setenv("CVAT_HOST", "https://wrong.example")
@@ -202,7 +202,7 @@ def test_policy_writes_shared_and_local_cache_saves_stay_personal(
     target = shared(tmp_path / "shared.yaml")
     cfg = personal(tmp_path / "personal.yaml", target)
     roots = SyncRootsConfig.load(cfg)
-    roots.projects["Main project"] = "s3://bucket/new"
+    roots.projects["main"] = "s3://bucket/new"
     roots.save(cfg)
     assert load_project_config(cfg).projects["main"].sync_root == "s3://bucket/new"
     assert "sync_roots" not in read_config(cfg)
@@ -213,7 +213,7 @@ def test_policy_writes_shared_and_local_cache_saves_stay_personal(
     cache.save(cfg)
     assert target.read_bytes() == before
     assert "ignored_prefix" not in json.dumps(read_config(cfg))
-    roots.projects["Main project"] = "s3://bucket/blocked"
+    roots.projects["main"] = "s3://bucket/blocked"
     with pytest.raises(ManagedError, match="read-only"):
         roots.save(cfg)
 
@@ -236,6 +236,8 @@ def test_preview_has_no_writes_or_secrets_and_activation_preserves_backup(
     assert "host" not in cvat
     project = load_project_config(cfg).projects["project-7"]
     assert project.id == 7
+    assert read_config(cfg)["image_cache"] == {"project-7": "/local/images"}
+    assert "name" not in project.model_dump()
     assert project.sync_root == "s3://bucket/images"
     assert project.ignore == [{"id": 4, "name": ""}]
     assert "images_root" not in json.dumps(read_config(proposal.shared_path))
@@ -419,7 +421,7 @@ def test_shared_policy_edits_preserve_permissions(tmp_path: Path, mode: int) -> 
     target.chmod(mode)
     group = target.stat().st_gid
     roots = SyncRootsConfig.load(cfg)
-    roots.projects["Main project"] = "s3://bucket/revised"
+    roots.projects["main"] = "s3://bucket/revised"
     roots.save(cfg)
     assert target.stat().st_mode & 0o777 == mode
     assert target.stat().st_gid == group
@@ -437,7 +439,7 @@ def test_shared_policy_edit_preserves_a_different_team_group(tmp_path: Path) -> 
     target.chmod(0o660)
     cfg = personal(tmp_path / "personal.yaml", target)
     roots = SyncRootsConfig.load(cfg)
-    roots.projects["Main project"] = "s3://bucket/team"
+    roots.projects["main"] = "s3://bucket/team"
 
     roots.save(cfg)
 
@@ -454,7 +456,7 @@ def test_shared_policy_save_without_posix_ownership_capabilities(
     cfg = personal(tmp_path / "personal.yaml", target)
     mode = stat.S_IMODE(target.stat().st_mode)
     roots = SyncRootsConfig.load(cfg)
-    roots.projects["Main project"] = "s3://bucket/windows"
+    roots.projects["main"] = "s3://bucket/windows"
     windows_os = SimpleNamespace(
         name="nt",
         environ=os.environ,
@@ -495,8 +497,8 @@ def test_explicit_shared_path_without_saved_reference(tmp_path: Path, monkeypatc
     monkeypatch.delenv("CVETA2_GLOBAL_CONFIG", raising=False)
     before = cfg.read_bytes()
     assert CvatConfig.load(cfg, project_path=target).host == "https://cvat.example"
-    assert ImageCacheConfig.load(cfg, project_path=target).get_cache_dir("Main project") == Path("/local/images")
-    assert CacheConfig.load(cfg, project_path=target).for_project("Main project").task_cache_s3 == "s3://bucket/cache"
+    assert ImageCacheConfig.load(cfg, project_path=target).get_cache_dir("main") == Path("/local/images")
+    assert CacheConfig.load(cfg, project_path=target).for_project("Renamed", 7).task_cache_s3 == "s3://bucket/cache"
     assert NetworkConfig.resolve(cfg, project_path=target).cvat_workers == 2
     assert cfg.read_bytes() == before
     assert "CVETA2_GLOBAL_CONFIG" not in os.environ
@@ -681,8 +683,8 @@ def test_personal_cache_key_binding_survives_display_name_resolution(
         },
     )
     loaded = CacheConfig.load(personal)
-    assert set(loaded.projects) == {"Friendly project"}
-    effective = loaded.for_project("Friendly project")
+    assert set(loaded.projects) == {"project-7"}
+    effective = loaded.for_project("Renamed", 7)
     assert effective.images_root == images
     assert effective.tasks_root == tasks
 
@@ -699,9 +701,7 @@ def test_cache_writer_prunes_policy_only_bindings_from_personal_output(
         cache={"tasks_root": str(global_tasks)},
     )
     cache = CacheConfig.load(personal)
-    cache.projects["Friendly project"] = CacheProjectSettings(
-        ignored_prefix="raw/", task_cache_s3="s3://bucket/shared-cache"
-    )
+    cache.projects["project-7"] = CacheProjectSettings(ignored_prefix="raw/", task_cache_s3="s3://bucket/shared-cache")
     cache.projects["Other project"] = CacheProjectSettings(tasks_root=other_tasks)
     cache.save(personal)
 
@@ -720,24 +720,24 @@ def test_malformed_cache_entry_does_not_skip_a_later_valid_policy(
     """Defensive normalization must not discard later valid project changes."""
     shared = ProjectConfig(
         cvat=CvatIdentity(host="https://cvat.example"),
-        projects={"main": ProjectDefinition(id=7, name="Friendly project")},
+        projects={"main": ProjectDefinition(id=7)},
     )
     images = tmp_path / "images"
     values: dict[str, object] = {
         "projects": {
             "malformed": None,
-            "Friendly project": {"ignored_prefix": "raw/", "images_root": str(images)},
+            "main": {"ignored_prefix": "raw/", "images_root": str(images)},
         }
     }
     changes = _split_cache_policy(values, shared)
-    assert changes == {"Friendly project": {"ignored_prefix": "raw/"}}
-    assert values == {"projects": {"Friendly project": {"images_root": str(images)}}}
+    assert changes == {"main": {"ignored_prefix": "raw/"}}
+    assert values == {"projects": {"main": {"images_root": str(images)}}}
 
 
-def test_global_cache_save_still_rejects_ambiguous_shared_project_names(
+def test_global_cache_save_ignores_duplicate_legacy_project_names(
     tmp_path: Path,
 ) -> None:
-    """Even a global local-path save must not bless an ambiguous shared registry."""
+    """The project IDs distinguish definitions even when two cached names coincide."""
     shared = write_config_yaml(
         tmp_path / "shared.yaml",
         schema_version=1,
@@ -749,10 +749,10 @@ def test_global_cache_save_still_rejects_ambiguous_shared_project_names(
         datasets={},
     )
     personal = write_config_yaml(tmp_path / "personal.yaml", schema_version=1, global_config=str(shared))
-    personal_before, shared_before = personal.read_bytes(), shared.read_bytes()
-    with pytest.raises(ManagedError, match="Collision"):
+    shared_before = shared.read_bytes()
+    with pytest.warns(UserWarning, match="name is obsolete"):
         CacheConfig(images_root=tmp_path / "local-images").save(personal)
-    assert personal.read_bytes() == personal_before
+    assert CacheConfig.load(personal).images_root == tmp_path / "local-images"
     assert shared.read_bytes() == shared_before
 
 
@@ -1164,8 +1164,8 @@ def test_interleaved_policy_saves_keep_both_writers_changes(tmp_path: Path, kind
     alice_config.save(alice)
 
     shared = load_project_config(alice)
-    assert _policy(shared, kind, "project-1") == _WRITTEN[kind](100)
-    assert _policy(shared, kind, "project-2") == _WRITTEN[kind](200)
+    assert _policy(shared, kind, "A") == _WRITTEN[kind](100)
+    assert _policy(shared, kind, "B") == _WRITTEN[kind](200)
 
 
 @pytest.mark.parametrize("kind", ["sync_root", "task_cache_s3"])
@@ -1221,8 +1221,8 @@ def test_overlapping_policy_saves_refuse_contention_then_preserve_both_edits(
     bob_config.save(bob)
 
     shared_config = load_project_config(alice)
-    assert _policy(shared_config, kind, "project-1") == _WRITTEN[kind](100)
-    assert _policy(shared_config, kind, "project-2") == _WRITTEN[kind](200)
+    assert _policy(shared_config, kind, "A") == _WRITTEN[kind](100)
+    assert _policy(shared_config, kind, "B") == _WRITTEN[kind](200)
 
 
 def test_failed_policy_save_releases_the_hold_and_keeps_the_lock_inode(
@@ -1246,7 +1246,7 @@ def test_failed_policy_save_releases_the_hold_and_keeps_the_lock_inode(
     config.save(alice)
 
     assert lock_path.stat().st_ino == inode
-    assert load_project_config(alice).projects["project-1"].sync_root == "s3://bucket/100"
+    assert load_project_config(alice).projects["A"].sync_root == "s3://bucket/100"
 
 
 def _hold_shared_policy_save(personal: Path, ready: ProcessConnection) -> None:
@@ -1292,8 +1292,8 @@ def test_terminated_policy_writer_releases_its_lock(tmp_path: Path) -> None:
 
     config.save(bob)
     shared_config = load_project_config(bob)
-    assert shared_config.projects["project-1"].sync_root == "s3://bucket/1"
-    assert shared_config.projects["project-2"].sync_root == "s3://bucket/200"
+    assert shared_config.projects["A"].sync_root == "s3://bucket/1"
+    assert shared_config.projects["B"].sync_root == "s3://bucket/200"
 
 
 def test_policy_lock_preserves_shared_access_under_restrictive_umask(tmp_path: Path) -> None:
@@ -1417,7 +1417,7 @@ def test_team_write_never_copies_a_local_override_into_the_global_file(tmp_path:
     cfg, team = _overridden(tmp_path)
 
     ignore = IgnoreConfig.load(cfg)
-    ignore.add_task("Retail shelves", 9, "t9")
+    ignore.add_task("retail", 9, "t9")
     ignore.save(cfg)
 
     document = yaml.safe_load(team.read_text(encoding="utf-8"))
@@ -1440,7 +1440,7 @@ def test_override_does_not_trip_the_conflict_check(tmp_path: Path) -> None:
     roots = SyncRootsConfig.load(cfg)
 
     write_shared_project_fields(cfg, {"retail": {"ignore": [{"id": 5, "name": "five"}]}})
-    roots.projects["Retail shelves"] = "s3://my-bucket/moved"
+    roots.projects["retail"] = "s3://my-bucket/moved"
     roots.save(cfg)
 
     document = yaml.safe_load(team.read_text(encoding="utf-8"))["projects"]["retail"]
@@ -1454,7 +1454,7 @@ def test_team_write_adds_no_new_keys_to_an_untouched_file(tmp_path: Path) -> Non
     cfg = personal(tmp_path / "personal.yaml", target)
 
     ignore = IgnoreConfig.load(cfg)
-    ignore.add_task("Main project", 9, "t9")
+    ignore.add_task("main", 9, "t9")
     ignore.save(cfg)
 
     document = yaml.safe_load(target.read_text(encoding="utf-8"))

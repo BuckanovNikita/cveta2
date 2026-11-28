@@ -237,3 +237,32 @@ def test_listing_full_canonical_key_precedes_basename_fallback(
     assert stats.downloaded == 1
     assert annotations.annotations[0].s3_image_path == "images/images/nested/a.jpg"
     assert (tmp_path / "images/nested/a.jpg").read_bytes() == b"correct"
+
+
+def test_sibling_prefix_frame_cannot_claim_another_image_by_basename(
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch, capture_logs: list[str]
+) -> None:
+    client = FakeS3Client({"bucket/hk/a.jpg": b"other", "bucket/hk/hk-with-mem/b.jpg": b"nested"})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
+    annotations = ProjectAnnotations(
+        annotations=[make_bbox(image_name=name, frame_path=f"hk-with-mem/{name}") for name in ("a.jpg", "b.jpg")],
+        deleted_images=[],
+    )
+    stats = ImageDownloader(tmp_path).download(annotations, make_cs_info(bucket="bucket", prefix="hk/"))
+    assert (stats.downloaded, stats.failed) == (1, 1)
+    assert not (tmp_path / "a.jpg").exists()
+    assert (tmp_path / "hk-with-mem/b.jpg").read_bytes() == b"nested"
+    assert any("hk-with-mem/a.jpg" in line and "префикс" in line for line in capture_logs)
+
+
+def test_sibling_frame_keeps_its_identity_when_the_in_scope_frame_is_in_the_same_fetch(
+    tmp_path: "Path", monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = FakeS3Client({"bucket/hk/a.jpg": b"in-scope"})
+    monkeypatch.setattr("cveta2.adapters.s3.download.make_s3_client", lambda _: client)
+    annotations = ProjectAnnotations(
+        annotations=[make_bbox(image_name=frame) for frame in ("hk/a.jpg", "hk-with-mem/a.jpg")], deleted_images=[]
+    )
+    stats = ImageDownloader(tmp_path).download(annotations, make_cs_info(bucket="bucket", prefix="hk"))
+    assert (stats.downloaded, stats.failed) == (1, 1)
+    assert [frame.s3_image_path for frame in annotations.annotations] == ["hk/a.jpg", None]

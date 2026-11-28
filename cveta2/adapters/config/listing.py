@@ -18,7 +18,6 @@ from cveta2.adapters.config.project import (
     project_config_path,
     read_config,
     read_local_overrides,
-    shared_projects_by_name,
 )
 from cveta2.adapters.config.settings import (
     CacheConfig,
@@ -36,7 +35,7 @@ from cveta2.domain.managed.overrides import LocalOverrides, apply_local_override
 type ValueOrigin = Literal["default", "personal", "global", "override", "environment"]
 
 _HIDDEN = "***"
-_PROJECT_FIELDS = ("id", "name", "sync_root", "ignored_prefix", "task_cache_s3")
+_PROJECT_FIELDS = ("id", "sync_root", "ignored_prefix", "task_cache_s3")
 
 
 @dataclass(frozen=True)
@@ -183,15 +182,6 @@ def _sections(lister: _Lister, personal: dict[str, object], image_cache: dict[st
     lister.add(("upload", "image_quality"), upload.image_quality)
 
 
-def _image_cache(personal: dict[str, object], shared: ProjectConfig | None) -> dict[str, Path]:
-    """Return the personal ``image_cache`` keyed by project name, as the readers key it."""
-    entries = ImageCacheConfig.model_validate({"projects": personal.get("image_cache") or {}}).projects
-    if shared is None:
-        return dict(entries)
-    aliases = shared_projects_by_name(shared)
-    return {aliases[name].name or name if name in aliases else name: path for name, path in entries.items()}
-
-
 def _projects(
     lister: _Lister,
     effective: ProjectConfig,
@@ -205,7 +195,7 @@ def _projects(
     for key in keys:
         project = effective.projects[key]
         for field in _PROJECT_FIELDS:
-            lister.add(("projects", key, field), getattr(project, field) or None)
+            lister.add(("projects", key, field), getattr(project, field))
         if project.publication is not None:
             for path, value in _leaves(("projects", key, "publication"), project.publication.model_dump(mode="json")):
                 lister.add(path, value, override=".".join(path) in overridden)
@@ -214,7 +204,7 @@ def _projects(
 
 
 def list_configuration(
-    personal_path: Path, *, global_path: Path | None = None, project: str | None = None
+    personal_path: Path, *, global_path: Path | None = None, project: str | None = None, live_name: str | None = None
 ) -> list[ListedValue]:
     """List the effective configuration with the origin of each value.
 
@@ -230,7 +220,7 @@ def list_configuration(
     overrides = read_local_overrides(personal)
     applied = shared is None or shared.local_overrides or not override_leaves(overrides)
     effective = apply_local_overrides(shared, overrides) if shared is not None and applied else shared
-    image_cache = _image_cache(personal, shared)
+    image_cache = ImageCacheConfig.model_validate({"projects": personal.get("image_cache") or {}}).projects
     lister = _Lister(personal, raw_shared)
     if project is None:
         _cvat(lister, personal, shared)
@@ -240,7 +230,9 @@ def list_configuration(
             _projects(lister, effective, overrides, applied=applied, keys=list(effective.projects))
         return lister.values
     key = find_project_key(shared, project) if shared is not None else None
-    name = (shared.projects[key].name or key) if shared is not None and key is not None else project
+    name = key or project
+    if name not in image_cache and live_name is not None:
+        name = live_name
     if key is None and name not in image_cache:
         raise Cveta2Error(f"Проект {project} не найден ни в общей конфигурации, ни в разделе image_cache.")
     if name in image_cache:

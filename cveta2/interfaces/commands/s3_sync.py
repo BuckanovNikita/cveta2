@@ -8,6 +8,7 @@ from cveta2.composition.configuration import (
     CacheConfig,
     ImageCacheConfig,
     images_cache_dir_from,
+    optional_global_config,
 )
 from cveta2.domain.errors import Cveta2Error
 from cveta2.interfaces.commands._bootstrap import open_client
@@ -54,26 +55,12 @@ class SyncTarget(NamedTuple):
     ignored_prefix: str | None
 
 
-def _resolve_sync_dirs(project_filter: str | None) -> "dict[str, SyncTarget]":
-    """Map project name → local image dir from ``image_cache`` + ``cache``.
-
-    Both sections are loaded once here, so the per-project resolution and
-    ``ignored_prefix`` lookup do not re-parse the YAML once per project.
-    """
-    ic_cfg = ImageCacheConfig.load()
-    cache_cfg = CacheConfig.load()
-
-    names = set(ic_cfg.projects) | set(cache_cfg.projects)
-    if project_filter:
-        names = {project_filter}
-    resolved: dict[str, SyncTarget] = {}
-    for name in sorted(names):
-        project_cache = cache_cfg.for_project(name)
-        cache_dir = images_cache_dir_from(ic_cfg, project_cache, name)
-        if cache_dir is None:
-            continue
-        resolved[name] = SyncTarget(cache_dir, project_cache.ignored_prefix)
-    return resolved
+def _sync_target(
+    images: ImageCacheConfig, cache: CacheConfig, project_name: str, project_id: int | None = None
+) -> SyncTarget | None:
+    settings = cache.for_project(project_name, project_id)
+    directory = images_cache_dir_from(images, settings, project_name, project_id)
+    return SyncTarget(directory, settings.ignored_prefix) if directory is not None else None
 
 
 def run_s3_sync(args: "argparse.Namespace") -> None:
@@ -93,8 +80,8 @@ def _sync_one(project_filter: str, sync_root: "str | None") -> list[str]:
         project_id, project_name, cs_info = resolve_project_and_cloud_storage(
             client, project_filter, sync_root=sync_root
         )
-        targets = _resolve_sync_dirs(project_name)
-        if project_name not in targets:
+        target = _sync_target(ImageCacheConfig.load(), CacheConfig.load(), project_name, project_id)
+        if target is None:
             raise Cveta2Error(
                 f"Ошибка: для проекта {project_name!r} не настроен путь "
                 f"кэширования изображений.\n"
@@ -102,13 +89,17 @@ def _sync_one(project_filter: str, sync_root: "str | None") -> list[str]:
                 f"в конфигурацию (cveta2 setup --images-root PATH или "
                 f"cveta2 setup -p <проект> --images-dir PATH)."
             )
-        failure = _sync_project(client, project_id, project_name, cs_info, targets[project_name])
+        failure = _sync_project(client, project_id, project_name, cs_info, target)
     return [failure] if failure else []
 
 
 def _sync_all(sync_root: "str | None") -> list[str]:
     """Sync every configured project; return the failures of those that had any."""
-    projects_to_sync = _resolve_sync_dirs(None)
+    images = ImageCacheConfig.load()
+    cache = CacheConfig.load()
+    projects_to_sync = sorted(
+        name for name in images.projects.keys() | cache.projects.keys() if _sync_target(images, cache, name)
+    )
     if not projects_to_sync:
         raise Cveta2Error(
             "Ошибка: нет проектов для синхронизации — не настроены ни "
@@ -117,21 +108,32 @@ def _sync_all(sync_root: "str | None") -> list[str]:
             "cveta2 setup --images-root PATH или cveta2 setup -p <проект> --images-dir PATH"
         )
 
+    shared = optional_global_config()
+    synced: set[int] = set()
     skipped: list[str] = []
     failures: list[str] = []
     with open_client() as client:
-        for project_name, target in projects_to_sync.items():
+        for project_name in projects_to_sync:
             logger.info(f"--- Синхронизация проекта: {project_name} ---")
             try:
-                project_id, _name, cs_info = resolve_project_and_cloud_storage(
-                    client, project_name, sync_root=sync_root
+                definition = shared.projects.get(project_name) if shared else None
+                selector = str(definition.id) if definition else project_name
+                project_id, live_name, cs_info = resolve_project_and_cloud_storage(
+                    client, selector, sync_root=sync_root
                 )
             except Cveta2Error as e:
                 logger.error(f"Проект {project_name!r}: не удалось определить ID — {e}")
                 skipped.append(project_name)
                 continue
 
-            failure = _sync_project(client, project_id, project_name, cs_info, target)
+            if project_id in synced:
+                continue
+            target = _sync_target(images, cache, live_name, project_id)
+            if target is None:
+                skipped.append(live_name)
+                continue
+            synced.add(project_id)
+            failure = _sync_project(client, project_id, live_name, cs_info, target)
             if failure is None:
                 skipped.append(project_name)
             elif failure:

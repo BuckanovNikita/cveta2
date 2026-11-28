@@ -46,7 +46,7 @@ cveta2 convert [-h] (--to-yolo | --from-yolo | --to-coco)
 | `--link-mode` | `auto` | Как класть изображения в выходной каталог (`--to-yolo`, `--to-coco`): `reflink` — копия без занятия места (copy-on-write); если файловая система это не поддерживает, команда один раз предупреждает `reflink недоступен (...): используется копирование` и копирует файл; `hardlink` — жёсткая ссылка; `symlink` — символическая ссылка на исходный файл; `copy` — обычная копия; `auto` — reflink, а если нельзя, копия. |
 | `--image-dir` | нет | Один или несколько каталогов для поиска изображений: `--image-dir dir1 dir2`. |
 | `--names-file` | нет | YAML с именами классов для `--from-yolo` без `dataset.yaml`. Формат `{0: name, ...}` или `{names: {0: name, ...}}`; список `names: [a, b]` тоже подходит. |
-| `--read-all-sizes` | выкл. | Для `--from-yolo`: читать размер каждого изображения. Без флага размер читается только у первого изображения и считается одинаковым для всех. |
+| `--read-all-sizes` | вкл. | Для совместимости. В обоих режимах импорта размер читается из заголовка каждого изображения. |
 | `-h`, `--help` | | Показать справку. |
 
 ## Входной CSV для `--to-yolo` и `--to-coco`
@@ -258,7 +258,7 @@ input/
 
 Строка пропускается с предупреждением, если в ней меньше пяти чисел, есть не число, индекс класса не целый или отрицательный, центр вне [0, 1], ширина или высота вне (0, 1], уверенность вне [0, 1].
 
-> Без `--read-all-sizes` команда читает размер только первого изображения и применяет его ко всем. Если изображения разного размера, координаты и `image_width`/`image_height` остальных изображений будут неверными, и команда об этом не предупреждает. Для датасетов с разными размерами всегда указывайте `--read-all-sizes`.
+Размер берётся из заголовка каждого изображения без декодирования пикселей.
 
 ### Что пишется
 
@@ -267,7 +267,7 @@ input/
 | Столбец | Значение |
 |---|---|
 | `image_name` | имя файла изображения без каталогов |
-| `image_width`, `image_height` | размер изображения (см. предупреждение выше) |
+| `image_width`, `image_height` | размер изображения |
 | `instance_shape` | `box` или `none` |
 | `instance_label` | имя класса или `class_<индекс>` |
 | `bbox_x_tl` … `bbox_y_br` | пиксельные координаты |
@@ -360,7 +360,7 @@ CSV сохранён: output/predictions.csv (4 изображений, 15 ст�
 ```python
 cveta2.convert_to_yolo(dataset, output_dir, *, image_dirs=None, link_mode="auto") -> pathlib.Path
 cveta2.convert_to_coco(dataset, output_dir, *, image_dirs=None, link_mode="auto") -> pathlib.Path
-cveta2.convert_from_yolo(input_dir, output_csv, *, names_file=None, read_all_sizes=False, image_dirs=None) -> pathlib.Path
+cveta2.convert_from_yolo(input_dir, output_csv, *, names_file=None, read_all_sizes=True, image_dirs=None) -> pathlib.Path
 ```
 
 Параметры совпадают с флагами команды. `convert_to_yolo` и `convert_to_coco` возвращают выходной каталог, `convert_from_yolo` — путь к CSV. При ошибке входных данных поднимается `cveta2.Cveta2Error`. Подключение к CVAT не нужно.

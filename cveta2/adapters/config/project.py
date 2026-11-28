@@ -408,17 +408,6 @@ def _read_shared_bytes(path: Path) -> bytes:
         raise ManagedError(f"Cannot read configuration {path}: {type(error).__name__}") from error
 
 
-def shared_projects_by_name(config: ProjectConfig) -> dict[str, ProjectDefinition]:
-    """Resolve old name-based reader APIs without silently accepting ambiguity."""
-    result: dict[str, ProjectDefinition] = {}
-    for key, project in config.projects.items():
-        for name in {key, project.name} - {""}:
-            if name in result and result[name].id != project.id:
-                raise ManagedError(f"Ambiguous shared project name: {name}")
-            result[name] = project
-    return result
-
-
 def _check_shared_policy_lock(descriptor: int, lock_path: Path) -> None:
     """Reject links, special files and a lock name replaced while it was opened."""
     opened = os.fstat(descriptor)
@@ -497,17 +486,10 @@ def project_key_for(name: str, project_id: int) -> str:
 
 
 def find_project_key(config: ProjectConfig, spec: str) -> str | None:
-    """Find a project by its key, then its ``name``, then its decimal ``id``."""
+    """Find an offline configuration key or CVAT ID."""
     if spec in config.projects:
         return spec
-    named = [key for key, project in config.projects.items() if project.name == spec]
-    if len(named) > 1:
-        raise ManagedError(f"Ambiguous shared project name: {spec}")
-    if named:
-        return named[0]
-    if spec.isascii() and spec.isdecimal():
-        return next((key for key, project in config.projects.items() if project.id == int(spec)), None)
-    return None
+    return config.key_for_id(int(spec)) if spec.isascii() and spec.isdecimal() else None
 
 
 def _get_dotted(mapping: dict[str, object], path: tuple[str, ...]) -> object:
@@ -553,7 +535,7 @@ def write_shared_project_fields(  # noqa: PLR0913 - every write to the global fi
 ) -> Path:
     """Explicit policy writers update shared fields; no personal shadow copies.
 
-    *changes* maps a project (key, name or decimal ID) to dotted field paths
+    *changes* maps a project (configuration key or decimal ID) to dotted field paths
     inside its definition, such as ``publication.clearml.dataset``; ``None``
     removes a leaf so its default applies. *settings* sets top-level values
     (``local_overrides``, ``cvat.host``, ``cvat.organization``) and
@@ -837,7 +819,6 @@ def _migration_projects(
                     unresolved.append(f"Unclassified ignored-task record for {name!r}")
         projects[key] = {
             "id": project_id,
-            "name": name,
             # Legacy readers treat a blank value as "not configured".
             "sync_root": sync.get(name) or None,
             "ignore": ignore_rows,
@@ -860,6 +841,15 @@ def _unknown_legacy_fields(raw: dict[str, object]) -> list[str]:
             for key in set(_dict(fields)) - {"images_root", "tasks_root", "ignored_prefix", "task_cache_s3"}
         )
     return sorted(paths)
+
+
+def _migrate_cache_bindings[T](values: dict[str, T], keys: dict[str, str], unresolved: list[str]) -> dict[str, T]:
+    """Re-key known project paths without merging two local bindings."""
+    migrated = {keys.get(name, name): value for name, value in values.items()}
+    if len(migrated) != len(values):
+        unresolved.append("Colliding cache keys: review the local directory bindings before migration")
+        return values
+    return migrated
 
 
 def migration_proposal(personal_path: Path, project_path: Path | None = None) -> MigrationProposal:
@@ -886,7 +876,9 @@ def migration_proposal(personal_path: Path, project_path: Path | None = None) ->
         unresolved.append("CVAT host is missing")
         host = "http://unresolved.invalid"
     organization = cvat.get("organization")
-    projects = _migration_projects(raw, _cached_projects(personal_path, organization), unresolved)
+    cached = _cached_projects(personal_path, organization)
+    projects = _migration_projects(raw, cached, unresolved)
+    keys = {name: project_key_for(name, ids[0]) for name, ids in cached.items() if len(set(ids)) == 1}
     cache = _dict(raw.get("cache"))
     cache_projects = _dict(cache.get("projects"))
     known = {
@@ -903,13 +895,17 @@ def migration_proposal(personal_path: Path, project_path: Path | None = None) ->
     if unknown:
         unresolved.append("Unclassified legacy sections remain only in backup: " + ", ".join(sorted(unknown)))
     personal = {key: value for key, value in raw.items() if key in {"image_cache", "network", "upload"}}
+    if isinstance(personal.get("image_cache"), dict):
+        personal["image_cache"] = _migrate_cache_bindings(_dict(raw["image_cache"]), keys, unresolved)
     personal["cvat"] = {key: value for key, value in cvat.items() if key in {"username", "password", "request_timeout"}}
     local_cache = {key: value for key, value in cache.items() if key in {"images_root", "tasks_root"}}
     local_projects = {
         name: {key: value for key, value in _dict(fields).items() if key in {"images_root", "tasks_root"}}
         for name, fields in cache_projects.items()
     }
-    local_cache["projects"] = {name: fields for name, fields in local_projects.items() if fields}
+    local_cache["projects"] = _migrate_cache_bindings(
+        {name: fields for name, fields in local_projects.items() if fields}, keys, unresolved
+    )
     if local_cache:
         personal["cache"] = local_cache
     shared_path = (project_path or personal_path.with_name("project-config.yaml")).expanduser().resolve()

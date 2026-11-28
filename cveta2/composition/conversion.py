@@ -65,7 +65,7 @@ def convert_from_yolo(
     output_csv: str | Path,
     *,
     names_file: str | Path | None = None,
-    read_all_sizes: bool = False,
+    read_all_sizes: bool = True,
     image_dirs: Sequence[str | Path] | None = None,
 ) -> Path:
     """Compose production dependencies and import YOLO."""

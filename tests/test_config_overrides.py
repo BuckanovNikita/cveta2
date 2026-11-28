@@ -119,8 +119,8 @@ def test_override_list_replaces_the_global_list(tmp_path: Path) -> None:
 def test_section_readers_never_see_overrides_of_fetch_settings(tmp_path: Path) -> None:
     cfg = personal(tmp_path / "config.yaml", shared(tmp_path / "team.yaml"), _ALICE)
 
-    assert SyncRootsConfig.load(cfg).get_root("Retail shelves") == "s3://my-bucket/images"
-    assert CacheConfig.load(cfg).for_project("Retail shelves").ignored_prefix == "shelves/"
+    assert SyncRootsConfig.load(cfg).get_root("retail") == "s3://my-bucket/images"
+    assert CacheConfig.load(cfg).for_project("Renamed", 123).ignored_prefix == "shelves/"
 
 
 @pytest.mark.parametrize("local_overrides", [None, False], ids=["absent", "false"])
