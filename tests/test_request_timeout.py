@@ -41,7 +41,11 @@ def test_from_env_garbage_timeout_warns(
 ) -> None:
     monkeypatch.setenv("CVETA2_DATA_TIMEOUT", "not-a-number")
     assert CvatConfig.from_env().request_timeout is None
-    assert any("CVETA2_DATA_TIMEOUT" in msg for msg in capture_logs)
+    assert any(
+        "CVETA2_DATA_TIMEOUT" in msg and "число секунд" in msg and "таймаут не применяется" in msg
+        for msg in capture_logs
+    )
+    assert all("not-a-number" not in msg for msg in capture_logs)
 
 
 # ---------------------------------------------------------------------------

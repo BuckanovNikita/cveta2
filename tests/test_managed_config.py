@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import secrets
 import stat
+import sys
 from collections.abc import Callable
 from multiprocessing.connection import Connection as ProcessConnection
 from pathlib import Path
@@ -1040,6 +1041,7 @@ def _team_file(path: Path) -> Path:
 
 def _run_wizard(monkeypatch: pytest.MonkeyPatch, cfg: Path, team: Path, organization: str) -> None:
     monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(wizard, "prompt_host", lambda _default: "https://cvat.example")
     monkeypatch.setattr(wizard, "prompt_organization", lambda _existing: organization)
     monkeypatch.setattr(wizard, "prompt_username", lambda _default: "alice")

@@ -6,6 +6,8 @@ import os
 import resource
 import signal
 import stat
+import subprocess
+import sys
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -48,6 +50,7 @@ _CONFIRM_YES = {"y", "yes", "да"}
 def interactive_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Ensure interactive prompts are allowed regardless of outer env."""
     monkeypatch.delenv("CVETA2_NO_INTERACTIVE", raising=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
 
 def feed_inputs(monkeypatch: pytest.MonkeyPatch, answers: list[str]) -> list[str]:
@@ -88,6 +91,26 @@ def test_setup_commands_refuse_non_interactive_with_wizard_hint(
 
 def patch_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(primitives, "prompt_password", lambda _prompt: "secret")
+
+
+def test_unattended_setup_exits_while_input_pipe_is_still_open(tmp_path: Path) -> None:
+    config = write_config_yaml(tmp_path / "config.yaml", cvat={"username": "before"})
+    original = config.read_bytes()
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd) as reader, os.fdopen(write_fd, "w"):
+        result = subprocess.run(  # noqa: S603 - exercise the local module with a test-owned config.
+            [sys.executable, "-m", "cveta2", "setup", "--config", str(config)],
+            stdin=reader,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "cveta2 setup --help" in result.stderr
+    assert "Хост CVAT" not in result.stderr
+    assert config.read_bytes() == original
 
 
 def test_setup_wizard_reads_projects_beside_custom_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

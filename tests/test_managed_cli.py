@@ -1,5 +1,7 @@
 """Exit codes of the managed dataset CLI group."""
 
+import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -29,24 +31,34 @@ def test_missing_shared_config_exits_two_with_path(tmp_path: Path, capture_logs:
 
 @pytest.mark.parametrize(
     "error",
-    [ManagedError("источник недоступен"), PermissionError(13, "Permission denied", "out")],
-    ids=["managed-error", "os-error"],
+    [ManagedError("источник недоступен"), PermissionError(13, "Permission denied", "out"), NoCredentialsError()],
+    ids=["managed-error", "os-error", "sdk-error"],
 )
 def test_operational_errors_exit_two(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_logs: list[str], error: Exception
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    capture_logs: list[str],
+    error: Exception,
 ) -> None:
     def fail(*_args: object, **_kwargs: object) -> object:
+        sys.stdout.write("SDK progress\n")
         raise error
 
     monkeypatch.setattr(managed_datasets, "fetch_dataset", fail)
     with pytest.raises(SystemExit) as exited:
-        main(["dataset", "fetch", "combined", "--output-dir", str(tmp_path / "out")])
+        main(["dataset", "fetch", "combined", "--output-dir", str(tmp_path / "out"), "--json"])
     assert exited.value.code == 2
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    assert "SDK progress" in captured.err
     assert any(str(error) in line for line in capture_logs)
 
 
-def test_unready_preparation_still_exits_one(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    prepared = SimpleNamespace(ready=False, model_dump=lambda **_kwargs: {"ready": False})
+def test_unready_preparation_still_exits_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    prepared = managed_datasets.PreparationSummary(directory=tmp_path / "prepared", ready=False, report={})
     monkeypatch.setattr(managed_datasets, "prepare_managed_dataset", lambda *_args, **_kwargs: prepared)
     with pytest.raises(SystemExit) as exited:
         main(
@@ -59,9 +71,11 @@ def test_unready_preparation_still_exits_one(tmp_path: Path, monkeypatch: pytest
                 str(tmp_path),
                 "--output-dir",
                 str(tmp_path / "prepared"),
+                "--json",
             ]
         )
     assert exited.value.code == 1
+    assert json.loads(capsys.readouterr().out) == prepared.model_dump(mode="json")
 
 
 @pytest.mark.parametrize(("flags", "clean"), [((), True), (("--no-clean",), False), (("--clean",), True)])
@@ -113,12 +127,15 @@ def test_prepare_refuses_clean_together_with_no_clean(tmp_path: Path, monkeypatc
     assert calls == []
 
 
-def test_failed_feedback_report_still_exits_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    report = SimpleNamespace(model_dump=lambda **_kwargs: {"failed": 1})
+def test_failed_feedback_report_still_exits_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = managed_datasets.FeedbackOutcome(failed=["unreachable frame"])
     monkeypatch.setattr(managed_datasets, "report_dataset_errors", lambda *_args, **_kwargs: report)
     with pytest.raises(SystemExit) as exited:
-        main(["dataset", "report-errors", str(tmp_path)])
+        main(["dataset", "report-errors", str(tmp_path), "--json"])
     assert exited.value.code == 2
+    assert json.loads(capsys.readouterr().out) == report.model_dump(mode="json")
 
 
 @pytest.mark.parametrize(

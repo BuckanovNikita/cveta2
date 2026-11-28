@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import os
 import re
 import shutil
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -467,6 +469,23 @@ def test_setup_attach_and_cli_list_never_modify_shared_config(
 def test_managed_publish_passes_three_files_without_output_uri(workflow: Workflow, tmp_path: Path) -> None:
     api.publish_dataset(_prepare(workflow, tmp_path), **workflow.options)
     assert workflow.clearml.published_calls == [(("dataset.csv", "dataset.yaml", "tasks.yaml"), None)]
+
+
+def test_json_show_separates_sdk_progress_from_result(
+    workflow: Workflow, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def noisy_latest(_project: str, _name: str) -> None:
+        sys.stdout.write("SDK progress\n")
+        os.write(1, b"SDK warning\n")
+
+    monkeypatch.setattr(workflow.clearml, "latest", noisy_latest)
+    main(["dataset", "show", "combined", "--config", str(workflow.personal), "--json"])
+    captured = capfd.readouterr()
+    result = json.loads(captured.out)
+    assert result["name"] == "combined"
+    assert result["parent_id"] is None
+    assert "SDK progress" in captured.err
+    assert "SDK warning" in captured.err
 
 
 def test_public_pipeline_publishes_three_files_and_reuses_unchanged_tasks(workflow: Workflow, tmp_path: Path) -> None:

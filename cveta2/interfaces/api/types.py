@@ -1,6 +1,6 @@
 """Stable public connection settings and workflow result models."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -26,7 +26,7 @@ class Connection:
 
     host: str | None = None
     username: str | None = None
-    password: str | None = None
+    password: str | None = field(default=None, repr=False)
     organization: str | None = None
     config_path: Path | None = None
     client: CvatClient | None = None

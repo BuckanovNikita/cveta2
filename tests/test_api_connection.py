@@ -13,6 +13,12 @@ from cveta2.domain.errors import (
 from cveta2.interfaces.api.connection import _open
 
 
+def test_connection_repr_hides_password() -> None:
+    connection = cveta2.Connection(host="https://cvat.example", password="synthetic-secret")
+    assert "synthetic-secret" not in repr(connection)
+    assert "https://cvat.example" in repr(connection)
+
+
 class TestOpenConnection:
     def test_injected_client_used_as_is(self) -> None:
         injected = cveta2.CvatClient(cveta2.CvatConfig(), api=object())  # type: ignore[arg-type]
@@ -61,6 +67,7 @@ class TestOpenConnection:
             def __init__(self, cfg: cveta2.CvatConfig) -> None:
                 captured["host"] = cfg.host
                 captured["user"] = cfg.username or ""
+                captured["password"] = cfg.password or ""
 
             def __enter__(self) -> Self:
                 return self
@@ -74,6 +81,7 @@ class TestOpenConnection:
             pass
         assert captured["host"] == "http://explicit"
         assert captured["user"] == "user"
+        assert captured["password"] == "pass"
 
     def test_empty_organization_explicitly_selects_personal_workspace(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
